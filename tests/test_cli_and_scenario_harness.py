@@ -26,7 +26,6 @@ PLANNED_COMMANDS = (
     "create",
     "run",
     "goals",
-    "open",
     "preview",
     "rehearse",
     "eval",
@@ -92,11 +91,13 @@ def test_installed_help_version_and_goal_approved_commands_are_the_only_surface(
     assert "Commands:" in help_result.stdout
     assert "doctor" in help_result.stdout
     assert "init" in help_result.stdout
+    assert "open" in help_result.stdout
     assert "setup" in help_result.stdout
+    assert "workpad" in help_result.stdout
     for command in PLANNED_COMMANDS:
         assert command not in help_result.stdout
     assert version_result.stdout == f"gigai {version('gigai')}\n"
-    assert "Choose 'setup', 'doctor', or 'init'" in bare_result.stderr
+    assert "Choose 'setup', 'doctor', 'init', 'workpad', or 'open'" in bare_result.stderr
     assert "No such command 'create'" in planned_result.stderr
 
     for result in (help_result, version_result, bare_result, planned_result):

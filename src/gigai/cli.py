@@ -19,6 +19,7 @@ from .setup import (
     run_setup,
 )
 from .target_binding import TargetBindingError, initialize_target
+from .workpad import WorkpadError, open_locations, resolve_workpad
 
 
 @click.group(
@@ -26,7 +27,7 @@ from .target_binding import TargetBindingError, initialize_target
     context_settings={"help_option_names": ["--help"]},
     help=(
         "Configure, diagnose, and bind targets for this contract-first GigAI "
-        "installation. No Gig workpad commands are implemented yet."
+        "installation. Resolve and open only already-provisioned Gig workpads."
     ),
 )
 @click.version_option(
@@ -40,7 +41,8 @@ def cli(context: click.Context) -> None:
 
     if context.invoked_subcommand is None:
         raise click.UsageError(
-            "Choose 'setup', 'doctor', or 'init'; use --help for details."
+            "Choose 'setup', 'doctor', 'init', 'workpad', or 'open'; "
+            "use --help for details."
         )
 
 
@@ -280,6 +282,96 @@ def init_command(target: Path | None, home_value: Path | None, as_json: bool) ->
         )
         if result.reconciled:
             click.echo("Derived registry or exclude state was reconciled.")
+
+
+@cli.group("workpad")
+def workpad_group() -> None:
+    """Inspect an existing registered workpad."""
+
+
+@workpad_group.command("path")
+@click.argument("gig_id", required=False)
+@click.option(
+    "--target",
+    "target_value",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="Explicit target path; defaults to the current Git repository.",
+)
+@click.option(
+    "--home",
+    "home_value",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="GigAI machine-state directory (default: GIGAI_HOME or ~/.gigai).",
+)
+def workpad_path_command(
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+) -> None:
+    """Print the canonical path of one already-registered Gig workpad."""
+
+    _require_supported_platform()
+    try:
+        resolved = resolve_workpad(
+            home_root=(home_value or default_home_root()),
+            requested_target=target_value,
+            gig_id=gig_id,
+        )
+    except (WorkpadError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(os.fspath(resolved.path))
+
+
+@cli.command("open")
+@click.argument("gig_id", required=False)
+@click.option(
+    "--target",
+    "target_only",
+    is_flag=True,
+    help="Open only the bound target; no active Gig is required.",
+)
+@click.option(
+    "--with-target",
+    is_flag=True,
+    help="Open the resolved workpad and its bound target together.",
+)
+@click.option(
+    "--target-root",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="Explicit target path; defaults to the current Git repository.",
+)
+@click.option(
+    "--home",
+    "home_value",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="GigAI machine-state directory (default: GIGAI_HOME or ~/.gigai).",
+)
+def open_command(
+    gig_id: str | None,
+    target_only: bool,
+    with_target: bool,
+    target_root: Path | None,
+    home_value: Path | None,
+) -> None:
+    """Launch the structured editor for declared, existing locations."""
+
+    _require_supported_platform()
+    try:
+        result = open_locations(
+            home_root=(home_value or default_home_root()),
+            requested_target=target_root,
+            gig_id=gig_id,
+            target_only=target_only,
+            with_target=with_target,
+        )
+    except (WorkpadError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if result.opened_workpad and result.opened_target:
+        click.echo("Opened the registered workpad and bound target.")
+    elif result.opened_workpad:
+        click.echo("Opened the registered workpad.")
+    else:
+        click.echo("Opened the bound target.")
 
 
 def _parse_credential_reference(value: str) -> CredentialReference:

@@ -46,16 +46,28 @@ def main() -> None:
         raise SystemExit("gigai --version did not use installed distribution metadata")
     if "Commands:" not in help_result.stdout:
         raise SystemExit("gigai --help did not expose the approved command group")
-    for command in ("setup", "doctor", "init"):
+    for command in ("setup", "doctor", "init", "workpad", "open"):
         if command not in help_result.stdout:
             raise SystemExit(f"gigai --help omitted approved command {command!r}")
-    for command in ("create", "run", "open", "goals"):
+    for command in ("create", "run", "goals"):
         if command in help_result.stdout:
             raise SystemExit(f"gigai --help exposed undeclared command {command!r}")
     if bare_result.returncode == 0 or planned_result.returncode == 0:
         raise SystemExit("the minimal CLI exposed an undeclared operational success path")
 
-    print("verified installed GigAI CLI: help, version, setup, doctor, and init only")
+    workpad_help = run("workpad", "--help")
+    if workpad_help.returncode != 0 or "path" not in workpad_help.stdout:
+        raise SystemExit("gigai workpad did not expose the approved path operation")
+    for forbidden in ("provision", "create", "activate", "select"):
+        if forbidden in workpad_help.stdout:
+            raise SystemExit(
+                f"gigai workpad exposed forbidden lifecycle operation {forbidden!r}"
+            )
+
+    print(
+        "verified installed GigAI CLI: help, version, setup, doctor, init, "
+        "workpad path, and open only"
+    )
 
 
 if __name__ == "__main__":

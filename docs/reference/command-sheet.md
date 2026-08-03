@@ -7,6 +7,12 @@
 This is the short operational view of GigAI. The implementation plan remains
 authoritative where this sheet omits detail.
 
+> **Implementation status:** this sheet describes the approved V14 operator
+> contract, including planned commands. The current pre-alpha CLI implements
+> `setup`, `doctor`, `init`, `workpad path`, and `open`. No public command yet
+> creates or activates a Gig. Consequently, the no-ID `workpad path` and `open`
+> forms fail with `no_active_gig` until G08 supplies the creation lifecycle.
+
 ## Mental model
 
 ```text

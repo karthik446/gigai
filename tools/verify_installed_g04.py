@@ -13,7 +13,7 @@ import tomllib
 
 
 REGISTRY_APPLICATION_ID = 0x47494741
-REGISTRY_SCHEMA_VERSION = 1
+REGISTRY_SCHEMA_VERSION = 2
 
 
 def _run(
@@ -176,12 +176,20 @@ def main() -> None:
             rows = connection.execute(
                 "SELECT project_id, target_kind FROM projects ORDER BY project_id"
             ).fetchall()
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
         finally:
             connection.close()
         if application_id != (REGISTRY_APPLICATION_ID,):
             raise SystemExit("installed registry application identity is invalid")
         if user_version != (REGISTRY_SCHEMA_VERSION,):
             raise SystemExit("installed registry schema version is invalid")
+        if tables != {"projects", "workpads", "active_workpads"}:
+            raise SystemExit("installed registry does not expose the exact v2 table set")
         if sorted(kind for _, kind in rows) != ["git", "non-git"]:
             raise SystemExit("installed registry does not contain exactly two verified bindings")
         if (git_target / ".git" / "gigai-init.lock").exists():

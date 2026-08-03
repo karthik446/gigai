@@ -5,8 +5,9 @@ turning goals into reviewable, finite execution graphs.
 
 > **Status: pre-alpha contracts and executable research.** The installed
 > distribution implements local `setup`, offline `doctor`, and idempotent
-> target `init` alongside help and package-metadata version output. It does not
-> yet create Gig workpads, run a scheduler, or provide a production runtime.
+> target `init`, plus read/open operations for already-registered workpads,
+> alongside help and package-metadata version output. It does not yet expose a
+> Gig creation or activation command, run a scheduler, or provide a production runtime.
 > The package also exposes frozen serialized contracts and canonical identity
 > primitives.
 > Commands beyond the implemented surface remain planned interfaces, not
@@ -45,16 +46,26 @@ content is hashed as exact bytes rather than silently normalized.
   exclusion on the configured mount without network or token use.
 - A strict path-free `.gigai/project.toml` binding for Git targets, one
   idempotent `/.gigai/` local exclude entry, and a versioned private
-  `registry.sqlite` that owns canonical target locators. Explicit non-Git
-  targets are registry-only and receive no implicit target tree.
+  `registry.sqlite` that owns canonical target and workpad locators. The exact
+  v1 registry migrates transactionally to v2 after retaining a private,
+  validated v1 backup. Explicit non-Git targets are registry-only and receive
+  no implicit target tree.
+- An internal caller-ID-only workpad primitive that atomically publishes an
+  empty, unborn, local-only Git repository under the configured mount. It sets
+  repository-local identity and ownership markers, configures no remote, and
+  creates no Gig proposal, semantic file, commit, or active selection.
+- Installed `workpad path` and `open` commands for existing registered
+  workpads. Their no-ID forms fail with `no_active_gig` until a later lifecycle
+  goal creates and activates a Gig; no public provisioning shortcut exists.
 - A reusable black-box scenario harness for isolated homes, target and workpad
   manifests, Git state, subprocess recording, and fail-closed effect checks.
 - Exact-byte golden vectors that the production implementation must preserve.
 - Executable evidence for schema instances, graph semantics, canonicalization,
   concurrent journal sequencing, and bounded Phase 0 feasibility questions.
-- A source suite containing 163 tests: 59 G01 production tests, 19 G02 CLI and
+- A source suite containing 206 tests: 59 G01 production tests, 19 G02 CLI and
   harness tests, 19 G03 setup/diagnostic tests, 35 G04 binding tests, 14
-  contract tests, and 17 Phase 0 tests.
+  contract tests, 17 Phase 0 tests, and 43 G05 migration, workpad, and installed
+  scenario tests.
 - A wheel-level verifier that proves the exact eight schema resources and their
   SHA-256 identities survived packaging.
 
@@ -77,10 +88,10 @@ uv run pytest
 Expected result:
 
 ~~~text
-163 passed
+206 passed
 ~~~
 
-## Configure, diagnose, and bind a target
+## Configure, diagnose, bind, and inspect existing workpads
 
 GigAI v1 currently supports macOS and Linux. Interactive setup reviews the
 selected machine-state directory, authoritative workpad mount, and structured
@@ -116,7 +127,24 @@ explicit non-Git directory is supported without creating `.gigai` inside it:
 gigai init --target /path/to/non-git-directory
 ~~~
 
-`init` does not create a Gig, workpad, journal, or remote.
+`init` does not create a Gig, workpad, journal, or remote. G05 provides the
+internal substrate that a later lifecycle goal will call with an already
+allocated Gig ID; there is deliberately no public provision or activate
+command yet.
+
+For a workpad that is already registered by product code, the current read/open
+surface is:
+
+~~~bash
+gigai workpad path <gig-id>
+gigai open <gig-id>
+gigai open <gig-id> --with-target
+gigai open --target
+~~~
+
+Running `gigai workpad path` or `gigai open` without an ID currently returns
+the typed `no_active_gig` failure. G08 will own the first lifecycle that may
+allocate an ID, call the private provisioner, and activate that exact Gig.
 
 ## Canonical identity API
 
@@ -154,6 +182,7 @@ uv pip install --python .wheel-venv/bin/python \
 .wheel-venv/bin/python tools/verify_installed_cli.py
 .wheel-venv/bin/python tools/verify_installed_g03.py
 .wheel-venv/bin/python tools/verify_installed_g04.py
+.wheel-venv/bin/python tools/verify_installed_g05.py
 ~~~
 
 Expected result:
@@ -161,9 +190,10 @@ Expected result:
 ~~~text
 verified 8 installed GigAI schemas
 verified installed GigAI canonical identity API
-verified installed GigAI CLI: help, version, setup, doctor, and init only
+verified installed GigAI CLI: help, version, setup, doctor, init, workpad path, and open only
 verified installed GigAI G03 setup, idempotency, pack, and offline doctor
 verified installed GigAI G04 Git and non-Git target binding
+verified installed GigAI G05 private unborn workpad and read/open surface
 ~~~
 
 The lockfile is committed. CI and release verification use uv with
@@ -180,14 +210,15 @@ python -m pytest
 
 | Path | Purpose | Shipped |
 |---|---|---|
-| src/gigai/cli.py | Installed help, version, setup, doctor, and init surface | yes |
+| src/gigai/cli.py | Installed help, version, setup, doctor, init, workpad path, and open surface | yes |
 | src/gigai/canonical.py | Sole canonical byte, digest, ID, and version implementation | yes |
 | src/gigai/config.py | Strict versioned typed machine configuration | yes |
 | src/gigai/setup.py | Idempotent setup orchestration and mount preflight | yes |
 | src/gigai/diagnostics.py | Structured offline installation and mount checks | yes |
 | src/gigai/project_binding.py | Strict path-free Git target binding contract | yes |
-| src/gigai/registry.py | Versioned private project and target registry | yes |
+| src/gigai/registry.py | Strict v2 private project/workpad registry and v1 migration | yes |
 | src/gigai/target_binding.py | Git/non-Git identity, reconciliation, and init effects | yes |
+| src/gigai/workpad.py | Caller-ID-only private Git substrate, resolution, active authority, and editor boundary | yes |
 | src/gigai/adapters/ | Deterministic fixture-backed offline adapter | yes |
 | src/gigai/data/ | Immutable built-in standard-pack resources | yes |
 | src/gigai/schemas/ | Single canonical source for frozen serialized contracts | yes |

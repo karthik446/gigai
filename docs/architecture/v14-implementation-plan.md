@@ -330,6 +330,47 @@ must converge on one identity or fail before mutation. Missing configuration,
 unavailable or repointed aliases, corrupt registry state, and incompatible
 registry versions fail closed rather than selecting or creating a fallback.
 
+G05 owns the one-way registry upgrade from the exact G04 v1 schema to v2. The
+v1 `projects` table and all populated project rows remain unchanged; v2 adds
+only exact versioned `workpads` and `active_workpads` tables:
+
+```text
+workpads
+  gig_id             canonical Gig ID; primary key
+  project_id         existing project ID; foreign key
+  workpad_locator    canonical absolute private path; unique
+  unique(project_id, gig_id)
+
+active_workpads
+  project_id         primary key
+  gig_id             registered Gig ID
+  foreign key(project_id, gig_id) -> workpads(project_id, gig_id)
+```
+
+Before mutating any valid v1 registry, G05 serializes migration and atomically
+publishes a durable mode-0600 `registry.sqlite.v1.bak` that remains a valid
+openable v1 snapshot. It then creates both new tables and writes
+`PRAGMA user_version = 2` last in one SQLite transaction. Every schema version
+has an exact expected application ID, table-name set, `CREATE TABLE` text,
+column shape, key, foreign-key, and uniqueness contract. A crash exposes either
+complete v1 or complete v2, never a hybrid. A conflicting backup, unexpected
+schema object, partial schema, or version other than exact v1 or v2 fails
+closed. The migration provides no automatic downgrade; a G04-era binary
+correctly refuses the live v2 file.
+
+The implementation centralizes the coupled v2 constants: registry schema
+version, exact expected table-name set, workpad-table SQL, and active-workpad
+SQL. Migration and validation consume the same definitions. The existing
+project-table SQL remains unchanged rather than being reconstructed from rows,
+which preserves its `WITHOUT ROWID` and uniqueness contract.
+
+Absolute target and workpad locators remain private registry data. For Git
+targets, `project.toml` remains authoritative for project identity and its
+optional `active_gig_id`; corresponding registry state is derived and
+reconcilable. For explicit non-Git targets, the committed registry transaction
+is authoritative for both binding and active-Gig selection. Diagnostics and
+share-safe evidence never emit either absolute locator.
+
 ### 4.3 User-selected workpad mount
 
 Setup asks for a workpad root. The default is `~/.gigai/workpads`, but an
@@ -377,6 +418,19 @@ The workpad is the only authoritative location for the Gig. If its mount is
 unavailable, GigAI fails closed and prints the expected locator; it does not
 silently create a second home-directory copy.
 
+G05's provisioning primitive accepts canonical caller-supplied project and Gig
+IDs and never allocates, replaces, or infers either one. It atomically publishes
+only the empty private Git substrate, local repository identity, ownership
+markers, and approved ignore rules at the deterministic path, then registers
+that exact location. Each locator must resolve strictly beneath the configured
+workpad-root authority; mount changes, escapes, and symlink redirection fail
+closed. G05 exposes no public command that provisions or activates an empty
+Gig. Before G08, explicit-ID workpad resolution is real, but a no-ID `workpad
+path` or `open` returns `no_active_gig`. Only a G05 verification fixture may
+seed active state before G08 becomes the first production lifecycle caller.
+The initial `.gitignore` contains exactly `/objects/`, `/scratch/`, and
+`/state.sqlite`; G05 creates none of those paths and writes no semantic file.
+
 The Git-tracked journal contains the human contract, text handoffs, decisions,
 reviews, stable manifests, and durable evidence. Large or sensitive raw model,
 tool, and binary payloads live in content-addressed `objects/` and are referenced
@@ -419,6 +473,13 @@ conflicting next file, missing predecessor, invalid trailer, or uncommitted
 orphan stops with `journal_reconciliation_required`; only the explicit recovery
 path may scan and reconcile the directory.
 
+The empty G05 repository has no `HEAD`. G06 treats that unborn state as the one
+valid predecessor for a caller-supplied first semantic transition: under the
+same writer lock it allocates sequence 1, writes the first canonical handoff,
+and creates the first commit with the G05 infrastructure and required identity
+trailers. G06 never allocates a project or Gig ID, provisions another workpad,
+or selects an active Gig.
+
 Parallel Goal completion therefore has one strict committed journal order;
 parent handoff IDs, Goal IDs, Run IDs, timestamps, and invocation IDs preserve
 causality. `setup` and `doctor` prove two-process exclusion and atomic
@@ -460,8 +521,10 @@ gigai workpad path [<gig-id>]
 ```
 
 If no Gig is active, `open` presents local Gigs for that project and offers to
-start `create`. GigAI grants filesystem-capable adapters explicit access to
-the target and workpad as separate roots. It does not copy or symlink the
+start `create` once the G08 lifecycle exists. Before G08, the same condition is
+a typed `no_active_gig` result with no mutation; the G05 completion audit must
+not imply otherwise. GigAI grants filesystem-capable adapters explicit access
+to the target and workpad as separate roots. It does not copy or symlink the
 workpad into the target.
 
 ## 5. Setup, endpoints, model targets, and profiles
@@ -545,10 +608,22 @@ gigai create research-gigai
 gigai create security-review --spec security-review.md
 ```
 
-The first action creates a private proposal workpad and commits a
-`creation-started` handoff before any external model or research call. No Gig
-version exists yet. Creation then operates entirely inside that workpad and
-treats the target as context.
+The first action uses the sole G01 identity API to allocate one Gig ID after
+checking both the v2 registry and configured workpad. G08 passes that unchanged
+ID to G05, which provisions the empty private repository. G08 then asks G06 to
+write and commit `creation-started` as sequence 1 before any model, research,
+editor, or proposal effect. Only after that durable commit does G08 select the
+Gig active through G05: authoritative `project.toml` plus derived registry state
+for Git targets, or one authoritative registry transaction for explicit
+non-Git targets. No Gig version exists yet. Creation then operates entirely
+inside that workpad and treats the target as context.
+
+If creation is interrupted after provisioning but before the first commit, a
+retry resumes the sole exact managed unborn workpad and preserves its Gig ID.
+After the first commit but before active selection, recovery completes selection
+for that same ID. Ambiguous, foreign, or multiple unjournaled workpads fail
+closed; creation never guesses which one succeeded, silently deletes user
+state, or allocates a replacement ID to hide an incomplete transition.
 When invoked in an uninitialized repository, it offers the offline `init`
 operation and shows its exact effect before continuing.
 
@@ -1835,16 +1910,22 @@ Implement:
 2. idempotent setup with home, workpad mount, IDE, deterministic offline
    endpoints, model targets, profiles, and standard-pack materialization;
 3. idempotent target binding with `.git/info/exclude` proof;
-4. workpad resolver and mount-unavailable failure;
-5. per-Gig local Git initialization with no remote and repository-local identity;
-6. atomic handoff writer, exclusive interprocess writer lock, 12-digit per-Gig
-   sequence allocation, and semantic journal commits;
+4. exact populated-registry v1-to-v2 migration with a retained v1 backup,
+   workpad resolver, caller-ID-only empty substrate provisioning, and
+   mount-unavailable failure;
+5. per-Gig local Git initialization with no remote, repository-local identity,
+   and no semantic commit or ID allocation;
+6. atomic handoff writer, unborn-repository first commit, exclusive
+   interprocess writer lock, 12-digit per-Gig sequence allocation, and semantic
+   journal commits;
 7. Gig Proposal, Gig version, Goal Graph, Goal, Run Brief, sealed Run manifest,
    and completion-audit validators;
 8. `open`, `workpad path`, `gigs`, `proposals`, `status`, `show`, `history`,
    `plan`, `check`, and offline `doctor`;
-9. deterministic offline creation fixtures that propose, revise, approve, and
-   reject a Gig through the real persisted lifecycle;
+9. deterministic offline creation fixtures that allocate one Gig ID through
+   G01, provision it through G05, commit `creation-started` through G06, select
+   it active, and then propose, revise, approve, or reject through the real
+   persisted lifecycle;
 10. rebuildable SQLite index and journal reconciliation.
 
 Exit gate:

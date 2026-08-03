@@ -1,0 +1,26 @@
+{
+  "canonical_vector_sha256": "14461cff88552b9ec1a86b02f47619208d8a50c952a73e43e09407d2b074587f",
+  "date": "2026-08-03",
+  "frozen_schemas": {
+    "count": 8,
+    "result": "pass"
+  },
+  "goal": "G05",
+  "g05_tests": 43,
+  "installed_verifiers": 6,
+  "installed_wheel_scenarios": {
+    "passed": 30,
+    "result": "pass"
+  },
+  "migration_failpoints": 7,
+  "package_version": "0.0.0",
+  "registry_schema_version": 2,
+  "result": "pass",
+  "source_matrix": {
+    "3.11": 206,
+    "3.12": 206,
+    "3.13": 206
+  },
+  "subtests_per_source_run": 22,
+  "wheel_entries": 33
+}

@@ -132,6 +132,7 @@ class ScenarioRoots:
         ):
             root.mkdir()
         (roots.home / "tmp").mkdir()
+        (roots.artifacts / "tmp").mkdir()
         shutil.copy2(Path(__file__).with_name("sitecustomize.py"), roots.guard)
         return roots
 
@@ -373,7 +374,7 @@ class ScenarioHarness:
             ),
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPATH": os.fspath(self.roots.guard),
-            "TMPDIR": os.fspath(self.roots.home / "tmp"),
+            "TMPDIR": os.fspath(self.roots.artifacts / "tmp"),
             "GIGAI_HOME": os.fspath(self.roots.home),
             "GIGAI_TARGET_ROOT": os.fspath(self.roots.target),
             "GIGAI_WORKPAD_ROOT": os.fspath(self.roots.workpad),
