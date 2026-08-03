@@ -56,6 +56,12 @@ operations.
 - Two-process exclusion and atomic-replacement probe evidence.
 - Offline/network-denial evidence and a completion audit.
 
+## Completion evidence
+
+- [Completion audit](../../evidence/phase-1/G03/completion-audit.md)
+- [Terminal handoff](../../evidence/phase-1/G03/terminal-handoff.md)
+- [Verification summary](../../evidence/phase-1/G03/verification-summary.json)
+
 ## Stop boundary
 
 Stop after setup and base diagnostics are independently useful and verifiable.

@@ -1,0 +1,1 @@
+{"adapter":{"kind":"deterministic","name":"offline"},"name":"standard","responses":{"doctor-probe":"gigai-offline-ok"},"schema_version":"1.0","version":"1"}

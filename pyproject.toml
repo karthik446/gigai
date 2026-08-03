@@ -12,6 +12,8 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -38,6 +40,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "gigai.schemas" = ["*.schema.json", "README.md", "SHA256SUMS"]
+"gigai.data" = ["*.json"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers -p no:cacheprovider"

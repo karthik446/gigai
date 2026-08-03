@@ -1,0 +1,26 @@
+{
+  "artifact_schema_version": "1.0",
+  "frozen_contracts": {
+    "canonical_vector_sha256": "14461cff88552b9ec1a86b02f47619208d8a50c952a73e43e09407d2b074587f",
+    "schema_checks": 8,
+    "schemas_unchanged": true,
+    "vectors_unchanged": true
+  },
+  "goal": "G03",
+  "installed_wheel": {
+    "entries": 29,
+    "g03_verifier": "pass",
+    "research_present": false,
+    "scenario_cases": 10,
+    "scenario_result": "pass",
+    "tests_present": false
+  },
+  "source_matrix": {
+    "3.11": 128,
+    "3.12": 128,
+    "3.13": 128,
+    "subtests": 22
+  },
+  "standard_pack_sha256": "0bf66720f26cbda1b3134e3e6d2806a903e15d72efd39b362f2396d037c40b1f",
+  "status": "pass"
+}

@@ -24,7 +24,6 @@ from tests.scenarios import (
 
 PLANNED_COMMANDS = (
     "init",
-    "doctor",
     "create",
     "run",
     "goals",
@@ -70,7 +69,7 @@ def test_runtime_metadata_declares_click_and_console_script_is_installed(
     assert os.access(installed_gigai.command.executable, os.X_OK)
 
 
-def test_installed_help_and_version_are_the_only_successful_surface(
+def test_installed_help_version_and_goal_approved_commands_are_the_only_surface(
     tmp_path: Path,
     installed_gigai: InstalledGigAI,
 ) -> None:
@@ -88,15 +87,17 @@ def test_installed_help_and_version_are_the_only_successful_surface(
     )
 
     assert help_result.argv[0] == os.fspath(installed_gigai.command.executable)
-    assert "Usage: gigai [OPTIONS]" in help_result.stdout
+    assert "Usage: gigai [OPTIONS] [COMMAND] [ARGS]..." in help_result.stdout
     assert "--help" in help_result.stdout
     assert "--version" in help_result.stdout
-    assert "Commands:" not in help_result.stdout
+    assert "Commands:" in help_result.stdout
+    assert "doctor" in help_result.stdout
+    assert "setup" in help_result.stdout
     for command in PLANNED_COMMANDS:
         assert command not in help_result.stdout
     assert version_result.stdout == f"gigai {version('gigai')}\n"
-    assert "No operational command is implemented" in bare_result.stderr
-    assert "unexpected extra argument (init)" in planned_result.stderr
+    assert "Choose 'setup' or 'doctor'" in bare_result.stderr
+    assert "No such command 'init'" in planned_result.stderr
 
     for result in (help_result, version_result, bare_result, planned_result):
         assert result.target_before == result.target_after

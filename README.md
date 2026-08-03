@@ -4,12 +4,11 @@ GigAI is a contract-first exploration of a local, user-controlled runtime for
 turning goals into reviewable, finite execution graphs.
 
 > **Status: pre-alpha contracts and executable research.** The installed
-> distribution has a deliberately minimal `gigai` entry point that supports
-> only `--help` and `--version`; it does not yet contain operational commands,
-> a scheduler, journal, or production runtime. The package exposes frozen
-> serialized contracts plus canonical identity primitives for JSON, owned
-> text, imported bytes, entity IDs, and explicit version selection. Commands
-> described in the design documents remain planned interfaces, not implemented
+> distribution implements local `setup` and offline `doctor` alongside help
+> and package-metadata version output. It does not yet bind targets, create Gig
+> workpads, run a scheduler, or provide a production runtime. The package also
+> exposes frozen serialized contracts and canonical identity primitives.
+> Commands beyond the implemented surface remain planned interfaces, not
 > product behavior.
 
 ## Why this exists
@@ -33,21 +32,31 @@ content is hashed as exact bytes rather than silently normalized.
 - One production implementation of restricted canonical JSON, owned-text
   bytes, exact imported-byte digests, prefixed UUIDv4 IDs, and explicit version
   selection.
-- One installed `gigai` command exposing truthful package help and the version
-  from installed distribution metadata, with no operational command stubs.
+- One installed `gigai` command exposing truthful package help and version,
+  idempotent local setup, and structured offline diagnostics—with no later
+  command stubs.
+- A strict versioned `config.toml` containing structured editor argv,
+  credential references rather than values, one deterministic offline
+  endpoint and target, one default profile, and the authoritative workpad
+  mount.
+- An immutable content-addressed standard pack and fixture-backed offline
+  adapter. Setup and doctor prove atomic replacement and real two-process
+  exclusion on the configured mount without network or token use.
 - A reusable black-box scenario harness for isolated homes, target and workpad
   manifests, Git state, subprocess recording, and fail-closed effect checks.
 - Exact-byte golden vectors that the production implementation must preserve.
 - Executable evidence for schema instances, graph semantics, canonicalization,
   concurrent journal sequencing, and bounded Phase 0 feasibility questions.
-- A source suite containing 109 tests: 59 production G01 tests, 19 G02 CLI and
-  harness tests, 14 contract tests, and 17 Phase 0 tests.
+- A source suite containing 128 tests: 59 G01 production tests, 19 G02 CLI and
+  harness tests, 19 G03 setup/diagnostic tests, 14 contract tests, and 17 Phase
+  0 tests.
 - A wheel-level verifier that proves the exact eight schema resources and their
   SHA-256 identities survived packaging.
 
 The [V14 implementation plan](docs/architecture/v14-implementation-plan.md)
 defines the intended product. The [command sheet](docs/reference/command-sheet.md)
-is a design contract, not evidence of a working command.
+contains both the implemented surface and planned design; this README and
+installed help state what works today.
 
 ## Verify the source evidence
 
@@ -63,8 +72,27 @@ uv run pytest
 Expected result:
 
 ~~~text
-109 passed
+128 passed
 ~~~
+
+## Configure and diagnose this installation
+
+GigAI v1 currently supports macOS and Linux. Interactive setup reviews the
+selected machine-state directory, authoritative workpad mount, and structured
+editor command before applying anything:
+
+~~~bash
+gigai setup
+gigai doctor
+gigai doctor --json
+~~~
+
+For automation, `gigai setup --non-interactive` accepts explicit `--home`,
+`--workpad-root`, `--editor`, and repeated `--editor-arg` values. Credential
+configuration accepts references such as
+`--credential-ref provider=environment:PROVIDER_API_TOKEN`; it never accepts
+or copies the referenced value. Run `gigai setup --help` for the complete
+current contract.
 
 ## Canonical identity API
 
@@ -100,6 +128,7 @@ uv pip install --python .wheel-venv/bin/python \
 .wheel-venv/bin/python tools/verify_installed_schemas.py
 .wheel-venv/bin/python tools/verify_installed_canonical.py
 .wheel-venv/bin/python tools/verify_installed_cli.py
+.wheel-venv/bin/python tools/verify_installed_g03.py
 ~~~
 
 Expected result:
@@ -107,7 +136,8 @@ Expected result:
 ~~~text
 verified 8 installed GigAI schemas
 verified installed GigAI canonical identity API
-verified installed GigAI CLI: --help and --version only
+verified installed GigAI CLI: help, version, setup, and doctor only
+verified installed GigAI G03 setup, idempotency, pack, and offline doctor
 ~~~
 
 The lockfile is committed. CI and release verification use uv with
@@ -124,8 +154,13 @@ python -m pytest
 
 | Path | Purpose | Shipped |
 |---|---|---|
-| src/gigai/cli.py | Minimal installed help and metadata-version entry point | yes |
+| src/gigai/cli.py | Installed help, version, setup, and doctor surface | yes |
 | src/gigai/canonical.py | Sole canonical byte, digest, ID, and version implementation | yes |
+| src/gigai/config.py | Strict versioned typed machine configuration | yes |
+| src/gigai/setup.py | Idempotent setup orchestration and mount preflight | yes |
+| src/gigai/diagnostics.py | Structured offline installation and mount checks | yes |
+| src/gigai/adapters/ | Deterministic fixture-backed offline adapter | yes |
+| src/gigai/data/ | Immutable built-in standard-pack resources | yes |
 | src/gigai/schemas/ | Single canonical source for frozen serialized contracts | yes |
 | tests/scenarios/ | Installed-process isolation and observation harness | no |
 | research/contract_spike/ | Executable contract and concurrency proof | no |

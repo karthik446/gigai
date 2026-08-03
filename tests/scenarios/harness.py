@@ -200,6 +200,7 @@ class ScenarioSpec:
     expected_home_changes: frozenset[str] = frozenset()
     allowed_subprocesses: tuple[Path, ...] = ()
     extra_env: tuple[tuple[str, str], ...] = ()
+    stdin: str | None = None
     timeout_seconds: float = 10.0
 
     def __post_init__(self) -> None:
@@ -270,6 +271,7 @@ class ScenarioHarness:
                 env=environment,
                 capture_output=True,
                 text=True,
+                input=spec.stdin,
                 timeout=spec.timeout_seconds,
                 check=False,
                 shell=False,

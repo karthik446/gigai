@@ -1,4 +1,4 @@
-"""Verify G02 behavior against an installed wheel, not the source checkout."""
+"""Verify the current truthful CLI surface against an installed wheel."""
 
 from __future__ import annotations
 
@@ -44,12 +44,18 @@ def main() -> None:
         raise SystemExit(f"gigai --version failed: {version_result.stderr}")
     if version_result.stdout != f"gigai {version('gigai')}\n":
         raise SystemExit("gigai --version did not use installed distribution metadata")
-    if "Commands:" in help_result.stdout:
-        raise SystemExit("gigai --help exposed an undeclared command group")
+    if "Commands:" not in help_result.stdout:
+        raise SystemExit("gigai --help did not expose the approved command group")
+    for command in ("setup", "doctor"):
+        if command not in help_result.stdout:
+            raise SystemExit(f"gigai --help omitted approved command {command!r}")
+    for command in ("init", "create", "run", "open", "goals"):
+        if command in help_result.stdout:
+            raise SystemExit(f"gigai --help exposed undeclared command {command!r}")
     if bare_result.returncode == 0 or planned_result.returncode == 0:
         raise SystemExit("the minimal CLI exposed an undeclared operational success path")
 
-    print("verified installed GigAI CLI: --help and --version only")
+    print("verified installed GigAI CLI: help, version, setup, and doctor only")
 
 
 if __name__ == "__main__":
