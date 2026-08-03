@@ -66,10 +66,12 @@ wheels = [
 name = "gigai"
 version = "0.0.0"
 source = { editable = "." }
+dependencies = [
+    { name = "click" },
+]
 
 [package.optional-dependencies]
 test = [
-    { name = "click" },
     { name = "httpx" },
     { name = "jsonschema" },
     { name = "pydantic" },
@@ -79,7 +81,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", marker = "extra == 'test'", specifier = ">=8.1" },
+    { name = "click", specifier = ">=8.1" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
     { name = "jsonschema", marker = "extra == 'test'", specifier = ">=4.23" },
     { name = "pydantic", marker = "extra == 'test'", specifier = ">=2.10" },

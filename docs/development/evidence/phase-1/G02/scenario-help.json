@@ -1,0 +1,315 @@
+{
+  "argv": [
+    "$GIGAI_EXECUTABLE",
+    "--help"
+  ],
+  "artifact": "$ARTIFACTS/help.json",
+  "duration_ns": 29464709,
+  "environment": [
+    [
+      "GIGAI_FIXTURE_ROOT",
+      "$FIXTURES"
+    ],
+    [
+      "GIGAI_HARNESS_ALLOWED_EXECUTABLES",
+      "[]"
+    ],
+    [
+      "GIGAI_HARNESS_ALLOWED_READ_ROOTS",
+      "[\"$RUNTIME_1\", \"$RUNTIME_2\", \"$RUNTIME_3\", \"$RUNTIME_4\", \"$RUNTIME_5\", \"$TARGET\", \"$WORKPAD\", \"$HOME\", \"$FIXTURES\", \"$ARTIFACTS\", \"$GUARD\"]"
+    ],
+    [
+      "GIGAI_HARNESS_ALLOWED_WRITE_ROOTS",
+      "[\"$TARGET\", \"$WORKPAD\", \"$HOME\", \"$ARTIFACTS\"]"
+    ],
+    [
+      "GIGAI_HARNESS_FORBIDDEN_READ_ROOTS",
+      "[\"$REAL_HOME\"]"
+    ],
+    [
+      "GIGAI_HARNESS_GUARD_LOG",
+      "$ARTIFACTS/help-guard.jsonl"
+    ],
+    [
+      "GIGAI_HOME",
+      "$HOME"
+    ],
+    [
+      "GIGAI_TARGET_ROOT",
+      "$TARGET"
+    ],
+    [
+      "GIGAI_WORKPAD_ROOT",
+      "$WORKPAD"
+    ],
+    [
+      "GIT_CONFIG_GLOBAL",
+      "/dev/null"
+    ],
+    [
+      "GIT_CONFIG_NOSYSTEM",
+      "1"
+    ],
+    [
+      "GIT_OPTIONAL_LOCKS",
+      "0"
+    ],
+    [
+      "HOME",
+      "$HOME"
+    ],
+    [
+      "NO_PROXY",
+      "*"
+    ],
+    [
+      "PATH",
+      "$GIGAI_BIN:/usr/bin:/bin"
+    ],
+    [
+      "PYTHONDONTWRITEBYTECODE",
+      "1"
+    ],
+    [
+      "PYTHONPATH",
+      "$GUARD"
+    ],
+    [
+      "TMPDIR",
+      "$HOME/tmp"
+    ],
+    [
+      "no_proxy",
+      "*"
+    ]
+  ],
+  "exit_code": 0,
+  "fixtures_after": {
+    "files": [
+      {
+        "kind": "directory",
+        "mode": "0755",
+        "path": "non-python",
+        "sha256": null,
+        "size": null,
+        "target": null
+      },
+      {
+        "kind": "file",
+        "mode": "0644",
+        "path": "non-python/package.json",
+        "sha256": "6a139b39944412070b2df65096653fb9a4d52fc57af949735f037e864cf9ccbe",
+        "size": 84,
+        "target": null
+      },
+      {
+        "kind": "directory",
+        "mode": "0755",
+        "path": "non-python/src",
+        "sha256": null,
+        "size": null,
+        "target": null
+      },
+      {
+        "kind": "file",
+        "mode": "0644",
+        "path": "non-python/src/example.js",
+        "sha256": "aeeba5eef8aa64ea5836877aa0e28e4ea6cd237b4e193ca182214a4d11f44ef0",
+        "size": 61,
+        "target": null
+      }
+    ],
+    "git": {
+      "branch": null,
+      "head": null,
+      "present": false,
+      "staged_diff_sha256": null,
+      "status": [],
+      "working_diff_sha256": null
+    }
+  },
+  "fixtures_before": {
+    "files": [
+      {
+        "kind": "directory",
+        "mode": "0755",
+        "path": "non-python",
+        "sha256": null,
+        "size": null,
+        "target": null
+      },
+      {
+        "kind": "file",
+        "mode": "0644",
+        "path": "non-python/package.json",
+        "sha256": "6a139b39944412070b2df65096653fb9a4d52fc57af949735f037e864cf9ccbe",
+        "size": 84,
+        "target": null
+      },
+      {
+        "kind": "directory",
+        "mode": "0755",
+        "path": "non-python/src",
+        "sha256": null,
+        "size": null,
+        "target": null
+      },
+      {
+        "kind": "file",
+        "mode": "0644",
+        "path": "non-python/src/example.js",
+        "sha256": "aeeba5eef8aa64ea5836877aa0e28e4ea6cd237b4e193ca182214a4d11f44ef0",
+        "size": 61,
+        "target": null
+      }
+    ],
+    "git": {
+      "branch": null,
+      "head": null,
+      "present": false,
+      "staged_diff_sha256": null,
+      "status": [],
+      "working_diff_sha256": null
+    }
+  },
+  "guard_events": [],
+  "home_after": {
+    "files": [
+      {
+        "kind": "directory",
+        "mode": "0755",
+        "path": "tmp",
+        "sha256": null,
+        "size": null,
+        "target": null
+      }
+    ],
+    "git": {
+      "branch": null,
+      "head": null,
+      "present": false,
+      "staged_diff_sha256": null,
+      "status": [],
+      "working_diff_sha256": null
+    }
+  },
+  "home_before": {
+    "files": [
+      {
+        "kind": "directory",
+        "mode": "0755",
+        "path": "tmp",
+        "sha256": null,
+        "size": null,
+        "target": null
+      }
+    ],
+    "git": {
+      "branch": null,
+      "head": null,
+      "present": false,
+      "staged_diff_sha256": null,
+      "status": [],
+      "working_diff_sha256": null
+    }
+  },
+  "name": "help",
+  "stderr": "",
+  "stdout": "Usage: gigai [OPTIONS]\n\n  Inspect this contract-first GigAI installation. No operational commands are\n  implemented yet.\n\nOptions:\n  --version  Show the version and exit.\n  --help     Show this message and exit.\n",
+  "target_after": {
+    "files": [
+      {
+        "kind": "file",
+        "mode": "0644",
+        "path": "package.json",
+        "sha256": "6a139b39944412070b2df65096653fb9a4d52fc57af949735f037e864cf9ccbe",
+        "size": 84,
+        "target": null
+      },
+      {
+        "kind": "directory",
+        "mode": "0755",
+        "path": "src",
+        "sha256": null,
+        "size": null,
+        "target": null
+      },
+      {
+        "kind": "file",
+        "mode": "0644",
+        "path": "src/example.js",
+        "sha256": "aeeba5eef8aa64ea5836877aa0e28e4ea6cd237b4e193ca182214a4d11f44ef0",
+        "size": 61,
+        "target": null
+      }
+    ],
+    "git": {
+      "branch": "main",
+      "head": "c7ac5bfde309f7fcfb49817d23ce4ff8da3d864b",
+      "present": true,
+      "staged_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "status": [],
+      "working_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "target_before": {
+    "files": [
+      {
+        "kind": "file",
+        "mode": "0644",
+        "path": "package.json",
+        "sha256": "6a139b39944412070b2df65096653fb9a4d52fc57af949735f037e864cf9ccbe",
+        "size": 84,
+        "target": null
+      },
+      {
+        "kind": "directory",
+        "mode": "0755",
+        "path": "src",
+        "sha256": null,
+        "size": null,
+        "target": null
+      },
+      {
+        "kind": "file",
+        "mode": "0644",
+        "path": "src/example.js",
+        "sha256": "aeeba5eef8aa64ea5836877aa0e28e4ea6cd237b4e193ca182214a4d11f44ef0",
+        "size": 61,
+        "target": null
+      }
+    ],
+    "git": {
+      "branch": "main",
+      "head": "c7ac5bfde309f7fcfb49817d23ce4ff8da3d864b",
+      "present": true,
+      "staged_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "status": [],
+      "working_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "timed_out": false,
+  "violations": [],
+  "workpad_after": {
+    "files": [],
+    "git": {
+      "branch": null,
+      "head": null,
+      "present": false,
+      "staged_diff_sha256": null,
+      "status": [],
+      "working_diff_sha256": null
+    }
+  },
+  "workpad_before": {
+    "files": [],
+    "git": {
+      "branch": null,
+      "head": null,
+      "present": false,
+      "staged_diff_sha256": null,
+      "status": [],
+      "working_diff_sha256": null
+    }
+  }
+}

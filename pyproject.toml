@@ -17,11 +17,15 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
 ]
-dependencies = []
+dependencies = [
+  "click>=8.1",
+]
+
+[project.scripts]
+gigai = "gigai.cli:cli"
 
 [project.optional-dependencies]
 test = [
-  "click>=8.1",
   "httpx>=0.27",
   "jsonschema>=4.23",
   "pydantic>=2.10",

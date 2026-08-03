@@ -1,0 +1,38 @@
+G02 installed-wheel verification
+Date: 2026-08-03
+Host: macOS arm64
+Wheel interpreter: CPython 3.11.14
+Package: gigai 0.0.0
+
+$ uv build
+Successfully built dist/gigai-0.0.0.tar.gz
+Successfully built dist/gigai-0.0.0-py3-none-any.whl
+
+$ uv venv --python 3.11 .wheel-venv
+Creating virtual environment at: .wheel-venv
+
+$ uv pip install --python .wheel-venv/bin/python dist/gigai-0.0.0-py3-none-any.whl
+Resolved 2 packages
+Installed 2 packages
+ + click==8.4.2
+ + gigai==0.0.0
+
+$ .wheel-venv/bin/python tools/verify_installed_schemas.py
+verified 8 installed GigAI schemas
+
+$ .wheel-venv/bin/python tools/verify_installed_canonical.py
+verified installed GigAI canonical identity API
+
+$ .wheel-venv/bin/python tools/verify_installed_cli.py
+verified installed GigAI CLI: --help and --version only
+
+$ GIGAI_TEST_EXECUTABLE=.wheel-venv/bin/gigai uv run --locked --extra test pytest tests/test_cli_and_scenario_harness.py -k installed_help_and_version -q
+1 passed, 18 deselected
+
+Wheel inventory: 20 entries
+Wheel repository-only paths under tests/ or research/: none
+Source distribution repository-only paths under tests/: none
+
+Installed metadata:
+Requires-Dist: click>=8.1
+console_scripts: gigai = gigai.cli:cli

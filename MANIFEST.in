@@ -1,0 +1,4 @@
+# Repository tests depend on research evidence and scenario support that are
+# intentionally not part of the source distribution. Do not publish a partial,
+# non-runnable test tree.
+prune tests

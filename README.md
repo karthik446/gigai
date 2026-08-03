@@ -3,12 +3,14 @@
 GigAI is a contract-first exploration of a local, user-controlled runtime for
 turning goals into reviewable, finite execution graphs.
 
-> **Status: pre-alpha contracts and executable research.** This repository does
-> not yet contain a GigAI CLI, scheduler, journal, or production runtime. The
-> installable Python distribution currently exposes the frozen serialized
-> contracts plus canonical identity primitives for JSON, owned text, imported
-> bytes, entity IDs, and explicit version selection. Commands described in the
-> design documents are planned interfaces, not implemented product behavior.
+> **Status: pre-alpha contracts and executable research.** The installed
+> distribution has a deliberately minimal `gigai` entry point that supports
+> only `--help` and `--version`; it does not yet contain operational commands,
+> a scheduler, journal, or production runtime. The package exposes frozen
+> serialized contracts plus canonical identity primitives for JSON, owned
+> text, imported bytes, entity IDs, and explicit version selection. Commands
+> described in the design documents remain planned interfaces, not implemented
+> product behavior.
 
 ## Why this exists
 
@@ -31,11 +33,15 @@ content is hashed as exact bytes rather than silently normalized.
 - One production implementation of restricted canonical JSON, owned-text
   bytes, exact imported-byte digests, prefixed UUIDv4 IDs, and explicit version
   selection.
+- One installed `gigai` command exposing truthful package help and the version
+  from installed distribution metadata, with no operational command stubs.
+- A reusable black-box scenario harness for isolated homes, target and workpad
+  manifests, Git state, subprocess recording, and fail-closed effect checks.
 - Exact-byte golden vectors that the production implementation must preserve.
 - Executable evidence for schema instances, graph semantics, canonicalization,
   concurrent journal sequencing, and bounded Phase 0 feasibility questions.
-- A source suite containing 90 tests: 59 production G01 tests, 14 contract
-  tests, and 17 Phase 0 tests.
+- A source suite containing 109 tests: 59 production G01 tests, 19 G02 CLI and
+  harness tests, 14 contract tests, and 17 Phase 0 tests.
 - A wheel-level verifier that proves the exact eight schema resources and their
   SHA-256 identities survived packaging.
 
@@ -57,7 +63,7 @@ uv run pytest
 Expected result:
 
 ~~~text
-90 passed
+109 passed
 ~~~
 
 ## Canonical identity API
@@ -89,10 +95,11 @@ are not shipped in the wheel.
 ~~~bash
 uv build
 uv venv --python 3.11 .wheel-venv
-uv pip install --python .wheel-venv/bin/python --no-deps \
+uv pip install --python .wheel-venv/bin/python \
   dist/gigai-0.0.0-py3-none-any.whl
 .wheel-venv/bin/python tools/verify_installed_schemas.py
 .wheel-venv/bin/python tools/verify_installed_canonical.py
+.wheel-venv/bin/python tools/verify_installed_cli.py
 ~~~
 
 Expected result:
@@ -100,6 +107,7 @@ Expected result:
 ~~~text
 verified 8 installed GigAI schemas
 verified installed GigAI canonical identity API
+verified installed GigAI CLI: --help and --version only
 ~~~
 
 The lockfile is committed. CI and release verification use uv with
@@ -116,8 +124,10 @@ python -m pytest
 
 | Path | Purpose | Shipped |
 |---|---|---|
+| src/gigai/cli.py | Minimal installed help and metadata-version entry point | yes |
 | src/gigai/canonical.py | Sole canonical byte, digest, ID, and version implementation | yes |
 | src/gigai/schemas/ | Single canonical source for frozen serialized contracts | yes |
+| tests/scenarios/ | Installed-process isolation and observation harness | no |
 | research/contract_spike/ | Executable contract and concurrency proof | no |
 | research/phase0_spike/ | Bounded feasibility evidence | no |
 | research/experiments/ | Supporting experiments and sanitized fixtures | no |
@@ -145,8 +155,8 @@ Schema.
 The next product work follows the canonical [Phase 1 G00-G10 development goal
 graph](docs/development/goals/phase-1/README.md), derived from the V14 plan.
 Product modules enter src/gigai/ only through an explicit implementation goal
-and acceptance tests. A real CLI will be introduced when its behavior exists;
-this repository will not ship a placeholder command for appearances.
+and acceptance tests. The installed entry point exposes only behavior that
+exists; planned command names are not shipped as placeholders for appearances.
 
 ## Contributing and security
 

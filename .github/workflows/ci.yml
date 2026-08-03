@@ -40,6 +40,10 @@ jobs:
           enable-cache: true
       - run: uv build
       - run: uv venv --python 3.11 .wheel-venv
-      - run: uv pip install --python .wheel-venv/bin/python --no-deps dist/gigai-0.0.0-py3-none-any.whl
+      - run: uv pip install --python .wheel-venv/bin/python dist/gigai-0.0.0-py3-none-any.whl
       - run: .wheel-venv/bin/python tools/verify_installed_schemas.py
       - run: .wheel-venv/bin/python tools/verify_installed_canonical.py
+      - run: .wheel-venv/bin/python tools/verify_installed_cli.py
+      - run: uv run --locked --extra test pytest tests/test_cli_and_scenario_harness.py -k installed_help_and_version
+        env:
+          GIGAI_TEST_EXECUTABLE: ${{ github.workspace }}/.wheel-venv/bin/gigai
