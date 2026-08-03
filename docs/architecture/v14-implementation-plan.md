@@ -310,6 +310,26 @@ An explicit `--target <path>` supports non-Git directories and documentation or
 data-only work. Such targets use a user-local registry binding and never receive
 an implicit `.gigai` directory.
 
+Target identity is resolved filesystem identity, not raw path spelling. Git
+targets begin at `git rev-parse --show-toplevel`; every existing target is
+canonicalized with strict symlink resolution, and existing aliases are compared
+with filesystem identity. Thus `/tmp/x`, its macOS `/private/tmp/x` resolution,
+and an ordinary symlink alias converge on one binding. Canonical absolute target
+locators remain only in the private user-local registry and never enter
+`project.toml` or share-safe evidence. Durable records do not use device or inode
+numbers as target identity.
+
+G04 owns first-use creation of the minimal versioned `registry.sqlite` binding
+schema. Project IDs and canonical target locators are transactionally unique.
+For Git targets, a valid ignored `project.toml` is the authoritative project
+identity; registry and `.git/info/exclude` state are derived and idempotently
+reconciled after interruption without allocating a new project ID. For explicit
+non-Git targets, the committed registry transaction is authoritative because no
+target binding file is written. Concurrent initialization is serialized and
+must converge on one identity or fail before mutation. Missing configuration,
+unavailable or repointed aliases, corrupt registry state, and incompatible
+registry versions fail closed rather than selecting or creating a fallback.
+
 ### 4.3 User-selected workpad mount
 
 Setup asks for a workpad root. The default is `~/.gigai/workpads`, but an

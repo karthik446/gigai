@@ -18,14 +18,15 @@ from .setup import (
     resolve_editor_argv,
     run_setup,
 )
+from .target_binding import TargetBindingError, initialize_target
 
 
 @click.group(
     invoke_without_command=True,
     context_settings={"help_option_names": ["--help"]},
     help=(
-        "Configure and diagnose this contract-first GigAI installation. "
-        "No target or Gig workpad commands are implemented yet."
+        "Configure, diagnose, and bind targets for this contract-first GigAI "
+        "installation. No Gig workpad commands are implemented yet."
     ),
 )
 @click.version_option(
@@ -38,7 +39,9 @@ def cli(context: click.Context) -> None:
     """Expose only goal-approved, independently useful operations."""
 
     if context.invoked_subcommand is None:
-        raise click.UsageError("Choose 'setup' or 'doctor'; use --help for details.")
+        raise click.UsageError(
+            "Choose 'setup', 'doctor', or 'init'; use --help for details."
+        )
 
 
 @cli.command("setup")
@@ -230,6 +233,55 @@ def doctor_command(home_value: Path | None, as_json: bool) -> None:
         raise click.exceptions.Exit(1)
 
 
+@cli.command("init")
+@click.option(
+    "--target",
+    type=click.Path(path_type=Path, file_okay=False),
+    help=(
+        "Target directory. Defaults to the current Git repository; an explicit "
+        "path is required for non-Git targets."
+    ),
+)
+@click.option(
+    "--home",
+    "home_value",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="GigAI machine-state directory (default: GIGAI_HOME or ~/.gigai).",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit a path-free result summary.")
+def init_command(target: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Bind one target without creating a Gig, workpad, journal, or remote."""
+
+    _require_supported_platform()
+    try:
+        result = initialize_target(
+            home_root=(home_value or default_home_root()),
+            requested_target=target,
+        )
+    except (TargetBindingError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    payload = {
+        "binding_created": result.binding_created,
+        "exclude_changed": result.exclude_changed,
+        "project_id": result.project_id,
+        "reconciled": result.reconciled,
+        "registry_changed": result.registry_changed,
+        "target_kind": result.target_kind,
+        "workpad_locator": f"registry:{result.project_id}",
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        disposition = "created" if result.binding_created else "confirmed"
+        click.echo(
+            f"GigAI target binding {disposition}: {result.project_id} "
+            f"({result.target_kind})."
+        )
+        if result.reconciled:
+            click.echo("Derived registry or exclude state was reconciled.")
+
+
 def _parse_credential_reference(value: str) -> CredentialReference:
     try:
         name, locator = value.split("=", 1)
@@ -247,5 +299,5 @@ def _parse_credential_reference(value: str) -> CredentialReference:
 def _require_supported_platform() -> None:
     if sys.platform != "darwin" and not sys.platform.startswith("linux"):
         raise click.ClickException(
-            "unsupported_platform: GigAI v1 setup and doctor require macOS or Linux"
+            "unsupported_platform: GigAI v1 requires macOS or Linux"
         )

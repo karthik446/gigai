@@ -36,7 +36,7 @@ def main() -> None:
     help_result = run("--help")
     version_result = run("--version")
     bare_result = run()
-    planned_result = run("init")
+    planned_result = run("create")
 
     if help_result.returncode != 0:
         raise SystemExit(f"gigai --help failed: {help_result.stderr}")
@@ -46,16 +46,16 @@ def main() -> None:
         raise SystemExit("gigai --version did not use installed distribution metadata")
     if "Commands:" not in help_result.stdout:
         raise SystemExit("gigai --help did not expose the approved command group")
-    for command in ("setup", "doctor"):
+    for command in ("setup", "doctor", "init"):
         if command not in help_result.stdout:
             raise SystemExit(f"gigai --help omitted approved command {command!r}")
-    for command in ("init", "create", "run", "open", "goals"):
+    for command in ("create", "run", "open", "goals"):
         if command in help_result.stdout:
             raise SystemExit(f"gigai --help exposed undeclared command {command!r}")
     if bare_result.returncode == 0 or planned_result.returncode == 0:
         raise SystemExit("the minimal CLI exposed an undeclared operational success path")
 
-    print("verified installed GigAI CLI: help, version, setup, and doctor only")
+    print("verified installed GigAI CLI: help, version, setup, doctor, and init only")
 
 
 if __name__ == "__main__":

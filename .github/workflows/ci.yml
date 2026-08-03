@@ -45,10 +45,12 @@ jobs:
       - run: .wheel-venv/bin/python tools/verify_installed_canonical.py
       - run: .wheel-venv/bin/python tools/verify_installed_cli.py
       - run: .wheel-venv/bin/python tools/verify_installed_g03.py
+      - run: .wheel-venv/bin/python tools/verify_installed_g04.py
       - run: >-
           uv run --locked --extra test pytest
           tests/test_cli_and_scenario_harness.py
           tests/test_g03_installed_scenarios.py
+          tests/test_g04_installed_scenarios.py
           -k 'installed_help_version or installed_'
         env:
           GIGAI_TEST_EXECUTABLE: ${{ github.workspace }}/.wheel-venv/bin/gigai

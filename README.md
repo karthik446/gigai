@@ -4,10 +4,11 @@ GigAI is a contract-first exploration of a local, user-controlled runtime for
 turning goals into reviewable, finite execution graphs.
 
 > **Status: pre-alpha contracts and executable research.** The installed
-> distribution implements local `setup` and offline `doctor` alongside help
-> and package-metadata version output. It does not yet bind targets, create Gig
-> workpads, run a scheduler, or provide a production runtime. The package also
-> exposes frozen serialized contracts and canonical identity primitives.
+> distribution implements local `setup`, offline `doctor`, and idempotent
+> target `init` alongside help and package-metadata version output. It does not
+> yet create Gig workpads, run a scheduler, or provide a production runtime.
+> The package also exposes frozen serialized contracts and canonical identity
+> primitives.
 > Commands beyond the implemented surface remain planned interfaces, not
 > product behavior.
 
@@ -33,8 +34,8 @@ content is hashed as exact bytes rather than silently normalized.
   bytes, exact imported-byte digests, prefixed UUIDv4 IDs, and explicit version
   selection.
 - One installed `gigai` command exposing truthful package help and version,
-  idempotent local setup, and structured offline diagnostics—with no later
-  command stubs.
+  idempotent local setup, structured offline diagnostics, and target
+  binding—with no later command stubs.
 - A strict versioned `config.toml` containing structured editor argv,
   credential references rather than values, one deterministic offline
   endpoint and target, one default profile, and the authoritative workpad
@@ -42,14 +43,18 @@ content is hashed as exact bytes rather than silently normalized.
 - An immutable content-addressed standard pack and fixture-backed offline
   adapter. Setup and doctor prove atomic replacement and real two-process
   exclusion on the configured mount without network or token use.
+- A strict path-free `.gigai/project.toml` binding for Git targets, one
+  idempotent `/.gigai/` local exclude entry, and a versioned private
+  `registry.sqlite` that owns canonical target locators. Explicit non-Git
+  targets are registry-only and receive no implicit target tree.
 - A reusable black-box scenario harness for isolated homes, target and workpad
   manifests, Git state, subprocess recording, and fail-closed effect checks.
 - Exact-byte golden vectors that the production implementation must preserve.
 - Executable evidence for schema instances, graph semantics, canonicalization,
   concurrent journal sequencing, and bounded Phase 0 feasibility questions.
-- A source suite containing 128 tests: 59 G01 production tests, 19 G02 CLI and
-  harness tests, 19 G03 setup/diagnostic tests, 14 contract tests, and 17 Phase
-  0 tests.
+- A source suite containing 163 tests: 59 G01 production tests, 19 G02 CLI and
+  harness tests, 19 G03 setup/diagnostic tests, 35 G04 binding tests, 14
+  contract tests, and 17 Phase 0 tests.
 - A wheel-level verifier that proves the exact eight schema resources and their
   SHA-256 identities survived packaging.
 
@@ -72,10 +77,10 @@ uv run pytest
 Expected result:
 
 ~~~text
-128 passed
+163 passed
 ~~~
 
-## Configure and diagnose this installation
+## Configure, diagnose, and bind a target
 
 GigAI v1 currently supports macOS and Linux. Interactive setup reviews the
 selected machine-state directory, authoritative workpad mount, and structured
@@ -93,6 +98,25 @@ configuration accepts references such as
 `--credential-ref provider=environment:PROVIDER_API_TOKEN`; it never accepts
 or copies the referenced value. Run `gigai setup --help` for the complete
 current contract.
+
+After setup, bind the current Git repository without changing tracked content:
+
+~~~bash
+cd /path/to/repository
+gigai init
+gigai init --json
+~~~
+
+Git init writes only the ignored `.gigai/project.toml` binding and the
+user-local registry, while adding one `/.gigai/` entry to
+`.git/info/exclude`. Existing dirty status and file bytes are preserved. An
+explicit non-Git directory is supported without creating `.gigai` inside it:
+
+~~~bash
+gigai init --target /path/to/non-git-directory
+~~~
+
+`init` does not create a Gig, workpad, journal, or remote.
 
 ## Canonical identity API
 
@@ -129,6 +153,7 @@ uv pip install --python .wheel-venv/bin/python \
 .wheel-venv/bin/python tools/verify_installed_canonical.py
 .wheel-venv/bin/python tools/verify_installed_cli.py
 .wheel-venv/bin/python tools/verify_installed_g03.py
+.wheel-venv/bin/python tools/verify_installed_g04.py
 ~~~
 
 Expected result:
@@ -136,8 +161,9 @@ Expected result:
 ~~~text
 verified 8 installed GigAI schemas
 verified installed GigAI canonical identity API
-verified installed GigAI CLI: help, version, setup, and doctor only
+verified installed GigAI CLI: help, version, setup, doctor, and init only
 verified installed GigAI G03 setup, idempotency, pack, and offline doctor
+verified installed GigAI G04 Git and non-Git target binding
 ~~~
 
 The lockfile is committed. CI and release verification use uv with
@@ -154,11 +180,14 @@ python -m pytest
 
 | Path | Purpose | Shipped |
 |---|---|---|
-| src/gigai/cli.py | Installed help, version, setup, and doctor surface | yes |
+| src/gigai/cli.py | Installed help, version, setup, doctor, and init surface | yes |
 | src/gigai/canonical.py | Sole canonical byte, digest, ID, and version implementation | yes |
 | src/gigai/config.py | Strict versioned typed machine configuration | yes |
 | src/gigai/setup.py | Idempotent setup orchestration and mount preflight | yes |
 | src/gigai/diagnostics.py | Structured offline installation and mount checks | yes |
+| src/gigai/project_binding.py | Strict path-free Git target binding contract | yes |
+| src/gigai/registry.py | Versioned private project and target registry | yes |
+| src/gigai/target_binding.py | Git/non-Git identity, reconciliation, and init effects | yes |
 | src/gigai/adapters/ | Deterministic fixture-backed offline adapter | yes |
 | src/gigai/data/ | Immutable built-in standard-pack resources | yes |
 | src/gigai/schemas/ | Single canonical source for frozen serialized contracts | yes |
