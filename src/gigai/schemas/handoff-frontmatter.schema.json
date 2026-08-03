@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:handoff-frontmatter:1",
+  "title": "GigAI handoff JSON front matter",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "handoff_id",
+    "sequence",
+    "gig_id",
+    "gig_version",
+    "goal_id",
+    "goal_version",
+    "run_id",
+    "transition",
+    "timestamp",
+    "actor",
+    "parent_handoff_ids",
+    "previous_journal_commit",
+    "goal_graph_sha256",
+    "source_manifest_sha256",
+    "outcome",
+    "evidence",
+    "usage",
+    "body_sha256"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "handoff_id": {"$ref": "urn:gigai:schema:common:1#/$defs/handoff_id"},
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 999999999999
+    },
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "gig_version": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+        {"type": "null"}
+      ]
+    },
+    "goal_id": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"},
+        {"type": "null"}
+      ]
+    },
+    "goal_version": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+        {"type": "null"}
+      ]
+    },
+    "run_id": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/run_id"},
+        {"type": "null"}
+      ]
+    },
+    "transition": {
+      "type": "string",
+      "enum": [
+        "creation_started",
+        "gig_proposal_ready",
+        "gig_proposal_revised",
+        "gig_proposal_approved",
+        "gig_proposal_rejected",
+        "run_started",
+        "goal_started",
+        "goal_completed",
+        "goal_failed",
+        "goal_blocked",
+        "gate_waiting",
+        "gate_continued",
+        "recovery_followed",
+        "run_succeeded",
+        "run_failed",
+        "run_cancelled",
+        "run_interrupted",
+        "gig_accepted",
+        "gig_closed"
+      ]
+    },
+    "timestamp": {"type": "string", "format": "date-time"},
+    "actor": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+    "parent_handoff_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "urn:gigai:schema:common:1#/$defs/handoff_id"}
+    },
+    "previous_journal_commit": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40,64}$"},
+    "goal_graph_sha256": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        {"type": "null"}
+      ]
+    },
+    "source_manifest_sha256": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        {"type": "null"}
+      ]
+    },
+    "outcome": {"type": ["string", "null"], "maxLength": 255},
+    "evidence": {
+      "type": "array",
+      "items": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}
+    },
+    "usage": {"$ref": "urn:gigai:schema:common:1#/$defs/usage"},
+    "body_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}
+  }
+}

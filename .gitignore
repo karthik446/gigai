@@ -1,0 +1,21 @@
+# Local agent state
+.codex/
+
+# Python environments and generated files
+.venv/
+.wheel-venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Packaging output
+build/
+dist/
+*.egg-info/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/

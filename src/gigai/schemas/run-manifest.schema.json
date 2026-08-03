@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:run-manifest:1",
+  "title": "GigAI sealed Run manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "gig_id",
+    "gig_version",
+    "authority",
+    "status",
+    "sealed_at",
+    "invoked_by",
+    "invocation_argv",
+    "run_brief",
+    "goal_graph",
+    "goal_contracts",
+    "target_observation",
+    "profile",
+    "resolved_models",
+    "resolved_tools",
+    "sealed_sources",
+    "effects",
+    "aggregate_budget",
+    "input_canonical_sha256"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "run_id": {"$ref": "urn:gigai:schema:common:1#/$defs/run_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "gig_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "authority": {"type": "string", "const": "run_invocation"},
+    "status": {"type": "string", "const": "sealed"},
+    "sealed_at": {"type": "string", "format": "date-time"},
+    "invoked_by": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+    "invocation_argv": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"type": "string", "maxLength": 4096}
+    },
+    "run_brief": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "goal_graph": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "goal_contracts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/goal_contract"}
+    },
+    "target_observation": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "profile": {"type": "string", "minLength": 1, "maxLength": 255},
+    "resolved_models": {
+      "type": "array",
+      "items": {"$ref": "urn:gigai:schema:run-brief-frontmatter:1#/$defs/resolved_model"}
+    },
+    "resolved_tools": {
+      "type": "array",
+      "items": {"$ref": "urn:gigai:schema:run-brief-frontmatter:1#/$defs/resolved_tool"}
+    },
+    "sealed_sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}
+    },
+    "effects": {"$ref": "urn:gigai:schema:common:1#/$defs/effect_set"},
+    "aggregate_budget": {"$ref": "urn:gigai:schema:common:1#/$defs/budget"},
+    "input_canonical_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}
+  },
+  "$defs": {
+    "goal_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal_id", "goal_version", "contract"],
+      "properties": {
+        "goal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"},
+        "goal_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+        "contract": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}
+      }
+    }
+  }
+}

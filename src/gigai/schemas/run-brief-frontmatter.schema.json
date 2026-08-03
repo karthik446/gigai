@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:run-brief-frontmatter:1",
+  "title": "GigAI Run Brief JSON front matter",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "gig_id",
+    "gig_version",
+    "created_at",
+    "invoked_by",
+    "invocation_argv",
+    "goal_graph",
+    "target",
+    "profile",
+    "resolved_models",
+    "resolved_tools",
+    "effects",
+    "aggregate_budget",
+    "input_canonical_sha256",
+    "body_sha256",
+    "run_manifest_path"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "run_id": {"$ref": "urn:gigai:schema:common:1#/$defs/run_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "gig_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "invoked_by": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+    "invocation_argv": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"type": "string", "maxLength": 4096}
+    },
+    "goal_graph": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "target": {"$ref": "#/$defs/target"},
+    "profile": {"type": "string", "minLength": 1, "maxLength": 255},
+    "resolved_models": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/resolved_model"}
+    },
+    "resolved_tools": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/resolved_tool"}
+    },
+    "effects": {"$ref": "urn:gigai:schema:common:1#/$defs/effect_set"},
+    "aggregate_budget": {"$ref": "urn:gigai:schema:common:1#/$defs/budget"},
+    "input_canonical_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "body_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "run_manifest_path": {"$ref": "urn:gigai:schema:common:1#/$defs/relative_path"}
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "root", "git_head", "status_sha256", "observation_sha256"],
+      "properties": {
+        "kind": {"type": "string", "enum": ["git", "directory", "document_set", "database_reference", "other"]},
+        "root": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "git_head": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40,64}$"},
+        "status_sha256": {
+          "oneOf": [
+            {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        },
+        "observation_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}
+      }
+    },
+    "resolved_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "model_target", "endpoint", "configured_selector", "resolved_identity", "resolution_source", "compatibility_status"],
+      "properties": {
+        "role": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+        "model_target": {"type": "string", "minLength": 1, "maxLength": 255},
+        "endpoint": {"type": "string", "minLength": 1, "maxLength": 255},
+        "configured_selector": {"type": "string", "minLength": 1, "maxLength": 255},
+        "resolved_identity": {"type": ["string", "null"], "maxLength": 255},
+        "resolution_source": {"type": "string", "enum": ["pinned", "provider_reported", "adapter_observed", "provider_default", "unresolved"]},
+        "compatibility_status": {"type": "string", "enum": ["COMPATIBLE", "LIVE_VERIFIED"]}
+      }
+    },
+    "resolved_tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "source_sha256", "effects"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_.:/-]*$"},
+        "version": {"type": "string", "minLength": 1, "maxLength": 255},
+        "source_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "effects": {"$ref": "urn:gigai:schema:common:1#/$defs/effect_set"}
+      }
+    }
+  }
+}

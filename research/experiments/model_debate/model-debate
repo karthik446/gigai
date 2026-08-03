@@ -1,0 +1,500 @@
+#!/usr/bin/env python3
+"""Run a read-only Codex/Claude design debate and emit Markdown."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import os
+from pathlib import Path
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import textwrap
+import time
+
+
+DEFAULT_ROOT = Path.home() / "Developer"
+MAX_RESPONSE_CHARS = 60_000
+
+
+class DebateError(RuntimeError):
+    pass
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Have Codex propose and push back while Claude reviews, then emit "
+            "a final agreement-or-question verdict. Both CLIs run read-only."
+        )
+    )
+    parser.add_argument(
+        "question",
+        nargs="?",
+        help="Debate question. If omitted, read it from stdin.",
+    )
+    parser.add_argument(
+        "-w",
+        "--workspace",
+        type=Path,
+        default=Path.cwd(),
+        help="Workspace visible to both models (default: current directory).",
+    )
+    parser.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=DEFAULT_ROOT,
+        help="Allowed workspace root (default: ~/Developer).",
+    )
+    parser.add_argument(
+        "-f",
+        "--file",
+        action="append",
+        type=Path,
+        default=[],
+        help="Workspace-relative artifact to inspect; repeatable.",
+    )
+    parser.add_argument(
+        "-r",
+        "--rounds",
+        type=int,
+        default=2,
+        choices=range(1, 4),
+        metavar="{1,2,3}",
+        help="Claude-critique/Codex-response rounds (default: 2).",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        help="Write/update the Markdown transcript here; stdout is always used too.",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=1800,
+        help="Timeout in seconds for each model call (default: 1800).",
+    )
+    parser.add_argument(
+        "--heartbeat",
+        type=int,
+        default=15,
+        help="Log child-process progress every N seconds; 0 disables (default: 15).",
+    )
+    parser.add_argument(
+        "--codex-model",
+        help="Optional Codex model override.",
+    )
+    parser.add_argument(
+        "--claude-model",
+        help="Optional Claude model override.",
+    )
+    return parser.parse_args()
+
+
+def contained_path(path: Path, root: Path, label: str) -> Path:
+    resolved = path.expanduser().resolve(strict=True)
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise DebateError(f"{label} escapes allowed root {root}: {resolved}") from exc
+    return resolved
+
+
+def resolve_inputs(args: argparse.Namespace) -> tuple[Path, list[Path], str]:
+    root = args.workspace_root.expanduser().resolve(strict=True)
+    workspace = contained_path(args.workspace, root, "workspace")
+    if not workspace.is_dir():
+        raise DebateError(f"workspace is not a directory: {workspace}")
+
+    artifacts: list[Path] = []
+    for raw in args.file:
+        candidate = raw if raw.is_absolute() else workspace / raw
+        artifact = contained_path(candidate, workspace, "artifact")
+        if not artifact.is_file():
+            raise DebateError(f"artifact is not a file: {artifact}")
+        artifacts.append(artifact)
+
+    question = args.question
+    if question is None:
+        if sys.stdin.isatty():
+            raise DebateError("provide a question argument or pipe one on stdin")
+        question = sys.stdin.read()
+    question = question.strip()
+    if not question:
+        raise DebateError("question cannot be empty")
+    return workspace, artifacts, question
+
+
+def terminate_process_group(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=5)
+    except (ProcessLookupError, subprocess.TimeoutExpired):
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def run_process(
+    command: list[str],
+    prompt: str,
+    cwd: Path,
+    timeout: int,
+    heartbeat: int,
+    label: str,
+) -> tuple[str, str]:
+    started = time.monotonic()
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    progress(
+        f"{label} started pid={process.pid} timeout={timeout}s executable={command[0]}"
+    )
+    assert process.stdin is not None
+    process.stdin.write(prompt)
+    process.stdin.close()
+    process.stdin = None
+
+    try:
+        while True:
+            elapsed = time.monotonic() - started
+            remaining = timeout - elapsed
+            if remaining <= 0:
+                terminate_process_group(process)
+                raise DebateError(f"{label} timed out after {timeout}s")
+            wait_window = remaining if heartbeat <= 0 else min(heartbeat, remaining)
+            try:
+                stdout, stderr = process.communicate(timeout=wait_window)
+                break
+            except subprocess.TimeoutExpired:
+                progress(
+                    f"{label} running pid={process.pid} elapsed={time.monotonic() - started:.0f}s"
+                )
+    except KeyboardInterrupt:
+        terminate_process_group(process)
+        raise
+
+    if process.returncode != 0:
+        evidence = (stderr or stdout).strip()[-4_000:]
+        raise DebateError(
+            f"{command[0]} exited {process.returncode}\n"
+            f"{evidence or '(no diagnostic output)'}"
+        )
+    progress(
+        f"{label} completed pid={process.pid} elapsed={time.monotonic() - started:.0f}s "
+        f"stdout={len(stdout)}B stderr={len(stderr)}B"
+    )
+    return stdout, stderr
+
+
+def trim_response(value: str) -> str:
+    value = value.strip()
+    if not value:
+        raise DebateError("model returned an empty response")
+    if len(value) <= MAX_RESPONSE_CHARS:
+        return value
+    return value[:MAX_RESPONSE_CHARS] + "\n\n[response truncated by model-debate]"
+
+
+def run_codex(
+    prompt: str,
+    workspace: Path,
+    timeout: int,
+    heartbeat: int,
+    model: str | None,
+    label: str,
+) -> str:
+    with tempfile.TemporaryDirectory(prefix="model-debate-codex-") as temp_dir:
+        final_path = Path(temp_dir) / "final.md"
+        command = [
+            "codex",
+            "exec",
+            "--ignore-user-config",
+            "--sandbox",
+            "read-only",
+            "--color",
+            "never",
+            "--skip-git-repo-check",
+            "--cd",
+            str(workspace),
+            "--output-last-message",
+            str(final_path),
+        ]
+        if model:
+            command.extend(["--model", model])
+        command.append("-")
+        stdout, _ = run_process(
+            command, prompt, workspace, timeout, heartbeat, label
+        )
+        response = final_path.read_text(encoding="utf-8") if final_path.exists() else stdout
+        return trim_response(response)
+
+
+def run_claude(
+    prompt: str,
+    workspace: Path,
+    timeout: int,
+    heartbeat: int,
+    model: str | None,
+    label: str,
+) -> str:
+    command = [
+        "claude",
+        "--safe-mode",
+        "--print",
+        "--output-format",
+        "text",
+        "--permission-mode",
+        "plan",
+        "--tools",
+        "Read,Glob,Grep",
+    ]
+    if model:
+        command.extend(["--model", model])
+    stdout, _ = run_process(command, prompt, workspace, timeout, heartbeat, label)
+    return trim_response(stdout)
+
+
+def executable_version(executable: str, workspace: Path) -> str:
+    result = subprocess.run(
+        [executable, "--version"],
+        cwd=workspace,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return lines[-1] if result.returncode == 0 and lines else "version unavailable"
+
+
+def evidence_block(workspace: Path, artifacts: list[Path]) -> str:
+    if not artifacts:
+        return "No artifact paths were supplied. Inspect the workspace only when needed."
+    paths = "\n".join(f"- {path.relative_to(workspace)}" for path in artifacts)
+    return f"Inspect these workspace artifacts directly:\n{paths}"
+
+
+def transcript_context(entries: list[tuple[str, str]]) -> str:
+    return "\n\n".join(f"## {title}\n\n{body}" for title, body in entries)
+
+
+def base_rules(question: str, evidence: str) -> str:
+    return textwrap.dedent(
+        f"""
+        You are participating in a bounded engineering design debate.
+
+        User question:
+        {question}
+
+        Evidence:
+        {evidence}
+
+        Rules:
+        - This is read-only review. Do not edit files or run destructive commands.
+        - Inspect cited artifacts before making claims about them.
+        - Be concrete and technical; distinguish evidence from inference.
+        - Challenge weak assumptions rather than manufacturing agreement.
+        - Keep the response below 1,500 words.
+        """
+    ).strip()
+
+
+def render_document(
+    question: str,
+    workspace: Path,
+    artifacts: list[Path],
+    rounds: int,
+    entries: list[tuple[str, str]],
+    started_at: dt.datetime,
+    completed_at: dt.datetime | None = None,
+) -> str:
+    artifact_lines = (
+        "\n".join(f"- `{path.relative_to(workspace)}`" for path in artifacts)
+        if artifacts
+        else "- None supplied"
+    )
+    sections = "\n\n".join(f"## {title}\n\n{body}" for title, body in entries)
+    status = "complete" if completed_at else "running"
+    completed = completed_at.isoformat() if completed_at else "pending"
+    return (
+        "# Codex–Claude Engineering Debate\n\n"
+        f"- Status: {status}\n"
+        f"- Started: {started_at.isoformat()}\n"
+        f"- Completed: {completed}\n"
+        f"- Workspace: `{workspace}`\n"
+        f"- Challenge/response rounds: {rounds}\n\n"
+        "## User Question\n\n"
+        f"{question}\n\n"
+        "## Artifacts\n\n"
+        f"{artifact_lines}\n\n"
+        f"{sections}\n"
+    )
+
+
+def write_output(path: Path | None, content: str) -> None:
+    if path is None:
+        return
+    destination = path.expanduser().resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    temporary.write_text(content, encoding="utf-8")
+    os.replace(temporary, destination)
+
+
+def progress(message: str) -> None:
+    print(f"[model-debate] {message}", file=sys.stderr, flush=True)
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        workspace, artifacts, question = resolve_inputs(args)
+        for executable in ("codex", "claude"):
+            if shutil.which(executable) is None:
+                raise DebateError(f"required executable not found on PATH: {executable}")
+
+        codex_version = executable_version("codex", workspace)
+        claude_version = executable_version("claude", workspace)
+        planned_calls = 2 + (args.rounds * 2)
+        progress(
+            f"workspace={workspace} rounds={args.rounds} planned_calls={planned_calls} "
+            f"heartbeat={args.heartbeat}s"
+        )
+        progress(f"Codex: {codex_version}")
+        progress(f"Claude: {claude_version}")
+
+        started_at = dt.datetime.now(dt.timezone.utc)
+        started_clock = time.monotonic()
+        evidence = evidence_block(workspace, artifacts)
+        rules = base_rules(question, evidence)
+        entries: list[tuple[str, str]] = []
+
+        progress("Codex is forming the initial position")
+        initial = run_codex(
+            rules
+            + "\n\nAct as the proposing staff engineer. Produce an initial position, "
+            "recommended approach, major risks, and claims the reviewer should challenge.",
+            workspace,
+            args.timeout,
+            args.heartbeat,
+            args.codex_model,
+            "Codex initial position",
+        )
+        entries.append(("Codex — Initial Position", initial))
+        write_output(
+            args.output,
+            render_document(question, workspace, artifacts, args.rounds, entries, started_at),
+        )
+
+        for round_number in range(1, args.rounds + 1):
+            progress(f"Claude is reviewing round {round_number}")
+            claude_prompt = (
+                rules
+                + "\n\nDebate transcript so far:\n\n"
+                + transcript_context(entries)
+                + "\n\nAct as the independent reviewing staff engineer. Identify concrete "
+                "errors, unsupported assumptions, missed constraints, and unnecessary "
+                "complexity. State what you accept and what you challenge. Give Codex "
+                "specific review findings to answer."
+            )
+            critique = run_claude(
+                claude_prompt,
+                workspace,
+                args.timeout,
+                args.heartbeat,
+                args.claude_model,
+                f"Claude review round {round_number}",
+            )
+            entries.append((f"Claude — Review Round {round_number}", critique))
+            write_output(
+                args.output,
+                render_document(
+                    question, workspace, artifacts, args.rounds, entries, started_at
+                ),
+            )
+
+            progress(f"Codex is responding to round {round_number}")
+            codex_prompt = (
+                rules
+                + "\n\nDebate transcript so far:\n\n"
+                + transcript_context(entries)
+                + "\n\nRespond to every material Claude finding. Accept valid corrections "
+                "explicitly. Push back where the evidence supports it. Revise the proposed "
+                "approach and identify any point that genuinely requires a user decision."
+            )
+            response = run_codex(
+                codex_prompt,
+                workspace,
+                args.timeout,
+                args.heartbeat,
+                args.codex_model,
+                f"Codex response round {round_number}",
+            )
+            entries.append((f"Codex — Response Round {round_number}", response))
+            write_output(
+                args.output,
+                render_document(
+                    question, workspace, artifacts, args.rounds, entries, started_at
+                ),
+            )
+
+        progress("Claude is issuing the final verdict")
+        verdict_prompt = (
+            rules
+            + "\n\nComplete debate transcript:\n\n"
+            + transcript_context(entries)
+            + "\n\nIssue the final review verdict. Start with exactly one of these lines:\n"
+            + "VERDICT: AGREEMENT\n"
+            + "VERDICT: USER DECISION REQUIRED\n\n"
+            + "Then provide: Agreed Plan, Remaining Disagreements, and Questions for "
+            + "the User. Do not reopen resolved points. If there are no questions, write "
+            + "'None' under Questions for the User."
+        )
+        verdict = run_claude(
+            verdict_prompt,
+            workspace,
+            args.timeout,
+            args.heartbeat,
+            args.claude_model,
+            "Claude final verdict",
+        )
+        entries.append(("Claude — Final Verdict", verdict))
+        completed_at = dt.datetime.now(dt.timezone.utc)
+        document = render_document(
+            question,
+            workspace,
+            artifacts,
+            args.rounds,
+            entries,
+            started_at,
+            completed_at,
+        )
+        write_output(args.output, document)
+        print(document)
+        progress(f"complete in {time.monotonic() - started_clock:.0f}s")
+        return 0
+    except DebateError as exc:
+        print(f"model-debate: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("model-debate: cancelled", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

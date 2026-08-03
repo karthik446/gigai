@@ -1,0 +1,1682 @@
+#!/usr/bin/env python3
+"""Empirically verify native session capture/resume for Codex and Claude CLIs.
+
+Answers, with evidence rather than assumption:
+
+1. Can we capture a native session id from a non-interactive call?
+2. Does resuming that session carry prior context WITHOUT resending a transcript?
+3. Does a fresh (non-resumed) call fail to know the secret? (control arm)
+4. Does resume inherit the original execution mode (sandbox / permissions)?
+5. Does resume inherit the original working directory?
+6. What structured event/usage data is available for the run ledger?
+7. Does a prose handoff or a validated-findings handoff produce a better challenge?
+
+Every arm is read-only except the deliberate escalation probes, which try to
+write a file inside a throwaway workspace and report whether they were blocked.
+"""
+
+from __future__ import annotations
+
+import argparse
+from collections import Counter
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+
+CODEX_BASE = [
+    "codex",
+    "exec",
+    "--json",
+    "--ignore-user-config",
+    "--color",
+    "never",
+    "--skip-git-repo-check",
+]
+CLAUDE_BASE = [
+    "claude",
+    "--print",
+    "--output-format",
+    "json",
+    "--safe-mode",
+    "--permission-mode",
+    "plan",
+    "--tools",
+    "Read,Glob,Grep",
+]
+DEFAULT_CODEX_REVIEW_MODEL = "gpt-5.6-sol"
+DEFAULT_CLAUDE_REVIEW_MODEL = "claude-sonnet-5"
+
+FINDING_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "id",
+        "severity",
+        "claim",
+        "evidence",
+        "recommendation",
+        "confidence",
+    ],
+    "properties": {
+        "id": {"type": "string"},
+        "severity": {"enum": ["blocker", "major", "minor", "note"]},
+        "claim": {"type": "string"},
+        "evidence": {"type": "array", "items": {"type": "string"}},
+        "recommendation": {"type": "string"},
+        "confidence": {"type": "number"},
+    },
+}
+REVIEWER_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["reasoning_summary", "findings"],
+    "properties": {
+        "reasoning_summary": {"type": "string"},
+        "findings": {"type": "array", "items": FINDING_SCHEMA},
+    },
+}
+RECOMMENDATION_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "rank",
+        "finding_id",
+        "severity",
+        "recommendation",
+        "because",
+        "evidence",
+        "status",
+    ],
+    "properties": {
+        "rank": {"type": "integer"},
+        "finding_id": {"type": "string"},
+        "severity": {"enum": ["blocker", "major", "minor", "note"]},
+        "recommendation": {"type": "string"},
+        "because": {"type": "string"},
+        "evidence": {"type": "array", "items": {"type": "string"}},
+        "status": {"enum": ["uncontested", "confirmed", "needs_human"]},
+    },
+}
+CAPABILITY_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["ack", "write_status"],
+    "properties": {
+        "ack": {"type": "string", "const": "ACK"},
+        "write_status": {
+            "type": "string",
+            "enum": ["BLOCKED", "WROTE"],
+        },
+    },
+}
+CHALLENGE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "challenges",
+        "additional_findings",
+        "schema_omissions",
+        "recommendations",
+        "verdict",
+    ],
+    "properties": {
+        "challenges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "finding_id",
+                    "status",
+                    "evidence",
+                    "explanation",
+                    "confidence",
+                ],
+                "properties": {
+                    "finding_id": {"type": "string"},
+                    "status": {"enum": ["confirmed", "refuted", "needs_human"]},
+                    "evidence": {"type": "array", "items": {"type": "string"}},
+                    "explanation": {"type": "string"},
+                    "confidence": {"type": "number"},
+                },
+            },
+        },
+        "additional_findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["finding", "status"],
+                "properties": {
+                    "finding": FINDING_SCHEMA,
+                    "status": {"const": "needs_human"},
+                },
+            },
+        },
+        "schema_omissions": {"type": "array", "items": {"type": "string"}},
+        "recommendations": {
+            "type": "array",
+            "items": RECOMMENDATION_SCHEMA,
+        },
+        "verdict": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["recommendation_finding_ids", "summary"],
+            "properties": {
+                "recommendation_finding_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "summary": {"type": "string"},
+            },
+        },
+    },
+}
+S1_GROUND_TRUTH = [
+    {
+        "id": "D1",
+        "summary": (
+            "Application lookup is keyed only by user_uuid and the result is never "
+            "checked against academic_partner_uuid, allowing cross-partner updates."
+        ),
+        "location": "enrollment_reconciler.py:87-89",
+    },
+    {
+        "id": "D2",
+        "summary": (
+            "The event is marked processed before lookup, state update, and publish; "
+            "a failure or ignored lookup poisons every retry as a duplicate."
+        ),
+        "location": "enrollment_reconciler.py:83-86,116-124",
+    },
+    {
+        "id": "D3",
+        "summary": (
+            "The program cache is keyed only by program_code, so partners sharing a "
+            "code can reuse another partner's enrollment window."
+        ),
+        "location": "enrollment_reconciler.py:91-97",
+    },
+    {
+        "id": "D4",
+        "summary": (
+            "replace(tzinfo=UTC) reinterprets an offset-aware timestamp instead of "
+            "converting its instant to UTC."
+        ),
+        "location": "enrollment_reconciler.py:99-101",
+    },
+    {
+        "id": "D5",
+        "summary": (
+            "The logger records user_uuid and the complete raw event payload, crossing "
+            "the fixture's privacy boundary."
+        ),
+        "location": "enrollment_reconciler.py:108-114",
+    },
+    {
+        "id": "D6",
+        "summary": (
+            "Backlog termination uses the filtered eligible count rather than the "
+            "source page size, so a mixed full page stops pagination early."
+        ),
+        "location": "enrollment_reconciler.py:131-144",
+    },
+]
+
+
+class SpikeError(RuntimeError):
+    pass
+
+
+def progress(message: str) -> None:
+    print(f"[resume-spike] {message}", file=sys.stderr, flush=True)
+
+
+def terminate_process_group(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=5)
+    except (ProcessLookupError, subprocess.TimeoutExpired):
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def run(command: list[str], prompt: str, cwd: Path, timeout: int, label: str) -> dict:
+    """Run one provider call with an in-process timeout and group cancellation."""
+    started = time.monotonic()
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    assert process.stdin is not None
+    try:
+        stdout, stderr = process.communicate(input=prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        terminate_process_group(process)
+        stdout, stderr = "", f"timed out after {timeout}s"
+    except KeyboardInterrupt:
+        terminate_process_group(process)
+        raise
+    elapsed = time.monotonic() - started
+    progress(f"{label} exit={process.returncode} elapsed={elapsed:.0f}s")
+    return {
+        "label": label,
+        "argv": command,
+        "exit_code": process.returncode,
+        "elapsed_s": round(elapsed, 1),
+        "stdout": stdout,
+        "stderr": stderr[-2000:],
+    }
+
+
+# --- Codex ------------------------------------------------------------------
+
+
+def codex_parse(result: dict) -> dict:
+    """Extract thread id, final message, and usage from Codex JSONL."""
+    thread_id = None
+    final_text = []
+    usage = None
+    event_types = []
+    for line in result["stdout"].splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        event_types.append(event.get("type"))
+        if event.get("type") == "thread.started":
+            thread_id = event.get("thread_id")
+        elif event.get("type") == "turn.completed":
+            usage = event.get("usage")
+        elif event.get("type") == "item.completed":
+            item = event.get("item") or {}
+            if item.get("type") == "agent_message":
+                final_text.append(item.get("text") or "")
+    result["session_id"] = thread_id
+    result["agent_messages"] = [text for text in final_text if text]
+    result["final"] = (
+        result["agent_messages"][-1].strip() if result["agent_messages"] else ""
+    )
+    result["usage"] = usage
+    result["event_types"] = event_types
+    return result
+
+
+def codex_start(
+    prompt: str,
+    ws: Path,
+    timeout: int,
+    label: str,
+    *,
+    model: str | None = None,
+    output_schema: Path | None = None,
+) -> dict:
+    cmd = [*CODEX_BASE, "--sandbox", "read-only", "--cd", str(ws), "-"]
+    if model:
+        cmd[-1:-1] = ["--model", model]
+    if output_schema:
+        cmd[-1:-1] = ["--output-schema", str(output_schema)]
+    return codex_parse(run(cmd, prompt, ws, timeout, label))
+
+
+def codex_resume(
+    session_id: str,
+    prompt: str,
+    ws: Path,
+    timeout: int,
+    label: str,
+    extra: list[str] | None = None,
+) -> dict:
+    # NOTE (verified): `codex exec resume` rejects --cd, --sandbox, --add-dir,
+    # --color, --profile. Its only mode/cwd lever is `-c key=value`.
+    cmd = [
+        "codex",
+        "exec",
+        "resume",
+        session_id,
+        "--json",
+        "--ignore-user-config",
+        "--skip-git-repo-check",
+        *(extra or []),
+        "-",
+    ]
+    return codex_parse(run(cmd, prompt, ws, timeout, label))
+
+
+# --- Claude -----------------------------------------------------------------
+
+
+def claude_parse(result: dict) -> dict:
+    """Extract session id, final text, and usage from Claude's json envelope."""
+    payload = None
+    try:
+        payload = json.loads(result["stdout"])
+    except json.JSONDecodeError:
+        result["final"] = result["stdout"].strip()
+        result["session_id"] = None
+        result["usage"] = None
+        result["envelope_keys"] = []
+        return result
+    if isinstance(payload, list):
+        payload = payload[-1] if payload else {}
+    result["session_id"] = payload.get("session_id")
+    structured_output = payload.get("structured_output")
+    result["structured_output"] = structured_output
+    result["final"] = (
+        json.dumps(structured_output)
+        if structured_output is not None
+        else (payload.get("result") or "").strip()
+    )
+    result["usage"] = payload.get("usage")
+    result["total_cost_usd"] = payload.get("total_cost_usd")
+    result["model_usage"] = payload.get("modelUsage")
+    result["num_turns"] = payload.get("num_turns")
+    result["is_error"] = payload.get("is_error")
+    result["terminal_reason"] = payload.get("terminal_reason")
+    result["permission_denials"] = payload.get("permission_denials")
+    result["envelope_keys"] = sorted(payload.keys())
+    return result
+
+
+def claude_start(
+    prompt: str,
+    ws: Path,
+    timeout: int,
+    label: str,
+    session_id: str,
+    *,
+    model: str | None = None,
+    output_schema: dict | None = None,
+) -> dict:
+    cmd = [*CLAUDE_BASE]
+    if model:
+        cmd.extend(["--model", model])
+    if output_schema:
+        cmd.extend(["--json-schema", json.dumps(output_schema, separators=(",", ":"))])
+    cmd.extend(["--session-id", session_id])
+    return claude_parse(run(cmd, prompt, ws, timeout, label))
+
+
+def claude_resume(
+    session_id: str,
+    prompt: str,
+    ws: Path,
+    timeout: int,
+    label: str,
+    base: list[str] | None = None,
+) -> dict:
+    cmd = [*(base or CLAUDE_BASE), "--resume", session_id]
+    return claude_parse(run(cmd, prompt, ws, timeout, label))
+
+
+# --- Probes -----------------------------------------------------------------
+
+RECALL = (
+    "What secret token did I ask you to remember earlier in this conversation? "
+    "Reply with only the token, or the single word NONE if you were never given one. "
+    "Do not read any files."
+)
+WRITE_PROBE = (
+    "Attempt to create a file named escalation-probe.txt containing HELLO in your "
+    "current working directory. Then reply with exactly one word: WROTE if the file "
+    "was created, or BLOCKED if you could not create it."
+)
+CWD_PROBE = (
+    "Reply with only the absolute path of your current working directory. "
+    "No other text."
+)
+
+
+PROBE_FILE = "escalation-probe.txt"
+
+
+def clear_probe_file(ws: Path) -> None:
+    (ws / PROBE_FILE).unlink(missing_ok=True)
+
+
+def stamp_write_evidence(result: dict, ws: Path) -> dict:
+    """Record probe-file existence IMMEDIATELY, before any later arm can create it."""
+    path = ws / PROBE_FILE
+    result["probe_file_existed_after_arm"] = path.exists()
+    result["probe_file_bytes"] = path.stat().st_size if path.exists() else None
+    clear_probe_file(ws)
+    return result
+
+
+def verdict(found: bool, control_found: bool) -> str:
+    if found and not control_found:
+        return "RESUME_CARRIES_CONTEXT"
+    if found and control_found:
+        return "INCONCLUSIVE_control_also_knew"
+    return "RESUME_DOES_NOT_CARRY_CONTEXT"
+
+
+def parse_json_object(raw: str, label: str) -> dict:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            raise SpikeError(f"{label} did not return a JSON object")
+        try:
+            value = json.loads(text[start : end + 1])
+        except json.JSONDecodeError as exc:
+            raise SpikeError(f"{label} returned invalid JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise SpikeError(f"{label} returned {type(value).__name__}, expected object")
+    return value
+
+
+def validate_findings(value: object, label: str) -> list[dict]:
+    if not isinstance(value, list):
+        raise SpikeError(f"{label}.findings must be an array")
+    seen: set[str] = set()
+    for index, finding in enumerate(value):
+        where = f"{label}.findings[{index}]"
+        if not isinstance(finding, dict):
+            raise SpikeError(f"{where} must be an object")
+        required = set(FINDING_SCHEMA["required"])
+        if set(finding) != required:
+            raise SpikeError(
+                f"{where} fields must be exactly {sorted(required)}, got {sorted(finding)}"
+            )
+        finding_id = finding["id"]
+        if not isinstance(finding_id, str) or not finding_id:
+            raise SpikeError(f"{where}.id must be a non-empty string")
+        if finding_id in seen:
+            raise SpikeError(f"{where}.id duplicates {finding_id}")
+        seen.add(finding_id)
+        if finding["severity"] not in {"blocker", "major", "minor", "note"}:
+            raise SpikeError(f"{where}.severity is invalid")
+        for field in ("claim", "recommendation"):
+            if not isinstance(finding[field], str) or not finding[field]:
+                raise SpikeError(f"{where}.{field} must be a non-empty string")
+        evidence = finding["evidence"]
+        if not isinstance(evidence, list) or not all(
+            isinstance(item, str) and item for item in evidence
+        ):
+            raise SpikeError(f"{where}.evidence must be an array of non-empty strings")
+        confidence = finding["confidence"]
+        if (
+            isinstance(confidence, bool)
+            or not isinstance(confidence, (int, float))
+            or not 0 <= confidence <= 1
+        ):
+            raise SpikeError(f"{where}.confidence must be between 0 and 1")
+    return value
+
+
+def validate_reviewer_output(value: dict) -> dict:
+    if set(value) != {"reasoning_summary", "findings"}:
+        raise SpikeError(
+            "reviewer output fields must be exactly reasoning_summary and findings"
+        )
+    if (
+        not isinstance(value["reasoning_summary"], str)
+        or not value["reasoning_summary"]
+    ):
+        raise SpikeError("reviewer reasoning_summary must be a non-empty string")
+    validate_findings(value["findings"], "reviewer")
+    return value
+
+
+def validate_challenge_output(value: dict, expected_ids: set[str], label: str) -> dict:
+    required = {
+        "challenges",
+        "additional_findings",
+        "schema_omissions",
+        "recommendations",
+        "verdict",
+    }
+    if set(value) != required:
+        raise SpikeError(
+            f"{label} fields must be exactly {sorted(required)}, got {sorted(value)}"
+        )
+    challenges = value["challenges"]
+    if not isinstance(challenges, list):
+        raise SpikeError(f"{label}.challenges must be an array")
+    seen: set[str] = set()
+    challenge_fields = {
+        "finding_id",
+        "status",
+        "evidence",
+        "explanation",
+        "confidence",
+    }
+    for index, challenge in enumerate(challenges):
+        where = f"{label}.challenges[{index}]"
+        if not isinstance(challenge, dict) or set(challenge) != challenge_fields:
+            raise SpikeError(f"{where} has an invalid shape")
+        finding_id = challenge["finding_id"]
+        if not isinstance(finding_id, str) or not finding_id:
+            raise SpikeError(f"{where}.finding_id must be a non-empty string")
+        if finding_id in seen:
+            raise SpikeError(f"{where}.finding_id duplicates {finding_id}")
+        seen.add(finding_id)
+        if challenge["status"] not in {"confirmed", "refuted", "needs_human"}:
+            raise SpikeError(f"{where}.status is invalid")
+        if (
+            not isinstance(challenge["explanation"], str)
+            or not challenge["explanation"]
+        ):
+            raise SpikeError(f"{where}.explanation must be a non-empty string")
+        if not isinstance(challenge["evidence"], list) or not all(
+            isinstance(item, str) and item for item in challenge["evidence"]
+        ):
+            raise SpikeError(f"{where}.evidence must be an array of non-empty strings")
+        confidence = challenge["confidence"]
+        if (
+            isinstance(confidence, bool)
+            or not isinstance(confidence, (int, float))
+            or not 0 <= confidence <= 1
+        ):
+            raise SpikeError(f"{where}.confidence must be between 0 and 1")
+    if seen != expected_ids:
+        raise SpikeError(
+            f"{label} challenged ids {sorted(seen)}, expected {sorted(expected_ids)}"
+        )
+    additional_findings = value["additional_findings"]
+    if not isinstance(additional_findings, list):
+        raise SpikeError(f"{label}.additional_findings must be an array")
+    unwrapped_additional: list[dict] = []
+    for index, item in enumerate(additional_findings):
+        where = f"{label}.additional_findings[{index}]"
+        if not isinstance(item, dict) or set(item) != {"finding", "status"}:
+            raise SpikeError(f"{where} has an invalid shape")
+        if item["status"] != "needs_human":
+            raise SpikeError(f"{where}.status must be needs_human")
+        unwrapped_additional.append(item["finding"])
+    validate_findings(unwrapped_additional, f"{label}.additional")
+    additional_ids = {item["id"] for item in unwrapped_additional}
+    overlap = expected_ids & additional_ids
+    if overlap:
+        raise SpikeError(
+            f"{label}.additional_findings reuse reviewer ids {sorted(overlap)}"
+        )
+    if not isinstance(value["schema_omissions"], list) or not all(
+        isinstance(item, str) for item in value["schema_omissions"]
+    ):
+        raise SpikeError(f"{label}.schema_omissions must be an array of strings")
+    recommendations = value["recommendations"]
+    recommendation_fields = set(RECOMMENDATION_SCHEMA["required"])
+    if not isinstance(recommendations, list):
+        raise SpikeError(f"{label}.recommendations must be an array")
+    recommendation_ids: set[str] = set()
+    status_by_finding = {
+        challenge["finding_id"]: challenge["status"] for challenge in challenges
+    }
+    for index, recommendation in enumerate(recommendations):
+        where = f"{label}.recommendations[{index}]"
+        if not isinstance(recommendation, dict) or set(recommendation) != (
+            recommendation_fields
+        ):
+            raise SpikeError(f"{where} has an invalid shape")
+        if (
+            isinstance(recommendation["rank"], bool)
+            or not isinstance(recommendation["rank"], int)
+            or recommendation["rank"] < 1
+        ):
+            raise SpikeError(f"{where}.rank must be a positive integer")
+        for field in ("finding_id", "recommendation", "because"):
+            if not isinstance(recommendation[field], str) or not recommendation[field]:
+                raise SpikeError(f"{where}.{field} must be a non-empty string")
+        finding_id = recommendation["finding_id"]
+        if finding_id in recommendation_ids:
+            raise SpikeError(f"{where}.finding_id duplicates {finding_id}")
+        recommendation_ids.add(finding_id)
+        if finding_id not in expected_ids:
+            raise SpikeError(
+                f"{where}.finding_id must refer to an original reviewer finding"
+            )
+        if recommendation["severity"] not in {
+            "blocker",
+            "major",
+            "minor",
+            "note",
+        }:
+            raise SpikeError(f"{where}.severity is invalid")
+        if recommendation["status"] not in {"confirmed", "needs_human"}:
+            raise SpikeError(f"{where}.status is invalid")
+        if recommendation["status"] != status_by_finding[finding_id]:
+            raise SpikeError(
+                f"{where}.status must match the challenge disposition for {finding_id}"
+            )
+        if not isinstance(recommendation["evidence"], list) or not all(
+            isinstance(item, str) and item for item in recommendation["evidence"]
+        ):
+            raise SpikeError(f"{where}.evidence must be an array of non-empty strings")
+    verdict_value = value["verdict"]
+    if not isinstance(verdict_value, dict) or set(verdict_value) != {
+        "recommendation_finding_ids",
+        "summary",
+    }:
+        raise SpikeError(f"{label}.verdict has an invalid shape")
+    if not isinstance(verdict_value["recommendation_finding_ids"], list) or not all(
+        isinstance(item, str) for item in verdict_value["recommendation_finding_ids"]
+    ):
+        raise SpikeError(
+            f"{label}.verdict.recommendation_finding_ids must be an array of strings"
+        )
+    verdict_ids = verdict_value["recommendation_finding_ids"]
+    if len(verdict_ids) != len(set(verdict_ids)):
+        raise SpikeError(
+            f"{label}.verdict.recommendation_finding_ids must not contain duplicates"
+        )
+    if set(verdict_ids) != recommendation_ids:
+        raise SpikeError(
+            f"{label}.verdict.recommendation_finding_ids must match recommendations"
+        )
+    if not isinstance(verdict_value["summary"], str) or not verdict_value["summary"]:
+        raise SpikeError(f"{label}.verdict.summary must be a non-empty string")
+    return value
+
+
+def write_report(report: dict, output: Path | None) -> None:
+    if not output:
+        return
+    destination = output.expanduser().resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    progress(f"wrote {destination}")
+
+
+def run_phase0_capabilities(
+    args: argparse.Namespace,
+    report: dict,
+    workspace: Path,
+    nonce: str,
+) -> int:
+    """Minimal live proof for the provider capabilities GigAI plans to consume."""
+    schema_path = workspace / "capability-schema.json"
+    schema_path.write_text(
+        json.dumps(CAPABILITY_SCHEMA, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    prompt = (
+        f"Remember this secret token for the next turn: {nonce}. Attempt to create "
+        "capability-write-probe.txt in the current working directory. Then return "
+        'the required structured object with ack="ACK" and write_status="WROTE" '
+        'only if the file exists, otherwise write_status="BLOCKED". Do not read files.'
+    )
+    probe_path = workspace / "capability-write-probe.txt"
+    failures: list[str] = []
+
+    if args.provider in ("codex", "both"):
+        codex_result = codex_start(
+            prompt,
+            workspace,
+            args.timeout,
+            "codex.phase0.capabilities.start",
+            output_schema=schema_path,
+        )
+        codex_structured = None
+        try:
+            codex_structured = parse_json_object(
+                codex_result.get("final") or "",
+                "Codex capability probe",
+            )
+        except SpikeError as exc:
+            failures.append(str(exc))
+        codex_sid = codex_result.get("session_id")
+        codex_file_exists = probe_path.exists()
+        probe_path.unlink(missing_ok=True)
+        codex_resume_result = (
+            codex_resume(
+                codex_sid,
+                RECALL,
+                workspace,
+                args.timeout,
+                "codex.phase0.capabilities.resume",
+            )
+            if codex_sid
+            else None
+        )
+        codex_recalled = bool(
+            codex_resume_result and nonce in (codex_resume_result.get("final") or "")
+        )
+        if codex_result["exit_code"] != 0:
+            failures.append("Codex structured start exited nonzero")
+        if not codex_sid:
+            failures.append("Codex did not emit a session id")
+        if codex_file_exists:
+            failures.append("Codex wrote a file in read-only mode")
+        if not codex_recalled:
+            failures.append("Codex resume did not recall the nonce")
+        report["codex"]["phase0_capabilities"] = {
+            "start": codex_result,
+            "resume": codex_resume_result,
+        }
+        report["findings"]["codex_phase0_capabilities"] = {
+            "structured_output": codex_structured,
+            "structured_output_valid": codex_structured
+            in (
+                {"ack": "ACK", "write_status": "BLOCKED"},
+                {"write_status": "BLOCKED", "ack": "ACK"},
+            ),
+            "session_id_captured": bool(codex_sid),
+            "resume_recalled_nonce": codex_recalled,
+            "read_only_file_absent": not codex_file_exists,
+            "usage_keys": sorted((codex_result.get("usage") or {}).keys()),
+            "event_types": codex_result.get("event_types"),
+        }
+        if not report["findings"]["codex_phase0_capabilities"][
+            "structured_output_valid"
+        ]:
+            failures.append("Codex structured output did not match the schema")
+
+    if args.provider in ("claude", "both"):
+        claude_sid = str(uuid.uuid4())
+        claude_result = claude_start(
+            prompt,
+            workspace,
+            args.timeout,
+            "claude.phase0.capabilities.start",
+            claude_sid,
+            output_schema=CAPABILITY_SCHEMA,
+        )
+        claude_structured = None
+        try:
+            claude_structured = parse_json_object(
+                claude_result.get("final") or "",
+                "Claude capability probe",
+            )
+        except SpikeError as exc:
+            failures.append(str(exc))
+        claude_file_exists = probe_path.exists()
+        probe_path.unlink(missing_ok=True)
+        claude_resume_result = claude_resume(
+            claude_sid,
+            RECALL,
+            workspace,
+            args.timeout,
+            "claude.phase0.capabilities.resume",
+        )
+        claude_recalled = nonce in (claude_resume_result.get("final") or "")
+        if claude_result["exit_code"] != 0:
+            failures.append("Claude structured start exited nonzero")
+        if claude_result.get("session_id") != claude_sid:
+            failures.append("Claude did not echo the supplied session id")
+        if claude_file_exists:
+            failures.append("Claude wrote a file in read-only mode")
+        if not claude_recalled:
+            failures.append("Claude resume did not recall the nonce")
+        report["claude"]["phase0_capabilities"] = {
+            "start": claude_result,
+            "resume": claude_resume_result,
+        }
+        report["findings"]["claude_phase0_capabilities"] = {
+            "structured_output": claude_structured,
+            "structured_output_valid": claude_structured
+            in (
+                {"ack": "ACK", "write_status": "BLOCKED"},
+                {"write_status": "BLOCKED", "ack": "ACK"},
+            ),
+            "session_id_captured": claude_result.get("session_id") == claude_sid,
+            "resume_recalled_nonce": claude_recalled,
+            "read_only_file_absent": not claude_file_exists,
+            "usage_keys": sorted((claude_result.get("usage") or {}).keys()),
+            "model_usage_present": bool(claude_result.get("model_usage")),
+            "permission_denials_present": bool(
+                claude_result.get("permission_denials")
+            ),
+        }
+        if not report["findings"]["claude_phase0_capabilities"][
+            "structured_output_valid"
+        ]:
+            failures.append("Claude structured output did not match the schema")
+
+    report["findings"]["phase0_capability_failures"] = failures
+    write_report(report, args.output)
+    print("\n===== PHASE 0 PROVIDER CAPABILITIES =====")
+    print(json.dumps(report["findings"], indent=2))
+    return 1 if failures else 0
+
+
+def resolve_review_files(workspace: Path, raw_files: list[Path]) -> list[Path]:
+    if not raw_files:
+        raise SpikeError("--structured-handoff requires at least one --review-file")
+    resolved: list[Path] = []
+    for raw in raw_files:
+        candidate = raw if raw.is_absolute() else workspace / raw
+        path = candidate.resolve(strict=True)
+        try:
+            path.relative_to(workspace)
+        except ValueError as exc:
+            raise SpikeError(f"review file escapes workspace: {path}") from exc
+        if not path.is_file():
+            raise SpikeError(f"review target is not a file: {path}")
+        resolved.append(path)
+    return resolved
+
+
+def review_target_context(workspace: Path, files: list[Path], goal: str) -> str:
+    relative = [str(path.relative_to(workspace)) for path in files]
+    diff = subprocess.run(
+        ["git", "diff", "--no-ext-diff", "--unified=40", "--", *relative],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    diff_text = diff.stdout
+    if len(diff_text) > 60_000:
+        diff_text = diff_text[:60_000] + "\n[diff truncated by resume-spike]"
+    paths = "\n".join(f"- {path}" for path in relative)
+    return (
+        f"Goal:\n{goal}\n\n"
+        f"Files under review:\n{paths}\n\n"
+        "Current unstaged diff for those files:\n"
+        f"```diff\n{diff_text or '[no unstaged diff; inspect the files directly]'}\n```"
+    )
+
+
+def challenge_prompt(target: str, handoff_kind: str, handoff: str) -> str:
+    return (
+        "Act as an independent code-review challenger. This is read-only: do not edit "
+        "files. Inspect the named files and related source directly before deciding. "
+        "For every reviewer finding, return exactly one confirmed, refuted, or "
+        "needs_human result with your own file-and-line evidence. Report any material "
+        "facts the handoff schema omitted. Any new finding must have needs_human "
+        "status and must not appear in recommendations; only an original reviewer "
+        "finding that you confirm or mark needs_human may be recommended. Return only "
+        "JSON matching the supplied output schema.\n\n"
+        f"{target}\n\n"
+        f"Reviewer handoff form: {handoff_kind}\n\n"
+        f"{handoff}"
+    )
+
+
+def codex_token_totals(usage: dict | None) -> dict:
+    usage = usage or {}
+    input_tokens = int(usage.get("input_tokens") or 0)
+    output_tokens = int(usage.get("output_tokens") or 0)
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "all_tokens": input_tokens + output_tokens,
+    }
+
+
+def claude_token_totals(model_usage: dict | None, usage: dict | None) -> dict:
+    if model_usage:
+        input_tokens = sum(
+            int(values.get("inputTokens") or 0)
+            + int(values.get("cacheReadInputTokens") or 0)
+            + int(values.get("cacheCreationInputTokens") or 0)
+            for values in model_usage.values()
+        )
+        output_tokens = sum(
+            int(values.get("outputTokens") or 0) for values in model_usage.values()
+        )
+    else:
+        usage = usage or {}
+        input_tokens = (
+            int(usage.get("input_tokens") or 0)
+            + int(usage.get("cache_read_input_tokens") or 0)
+            + int(usage.get("cache_creation_input_tokens") or 0)
+        )
+        output_tokens = int(usage.get("output_tokens") or 0)
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "all_tokens": input_tokens + output_tokens,
+    }
+
+
+def combine_token_totals(*totals: dict) -> dict:
+    input_tokens = sum(value["input_tokens"] for value in totals)
+    output_tokens = sum(value["output_tokens"] for value in totals)
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "all_tokens": input_tokens + output_tokens,
+    }
+
+
+def arm_summary(value: dict, usage: dict | None, prompt: str) -> dict:
+    statuses = Counter(item["status"] for item in value["challenges"])
+    return {
+        "statuses": dict(sorted(statuses.items())),
+        "status_by_finding": {
+            item["finding_id"]: item["status"] for item in value["challenges"]
+        },
+        "challenge_evidence_items": sum(
+            len(item["evidence"]) for item in value["challenges"]
+        ),
+        "additional_findings": len(value["additional_findings"]),
+        "schema_omissions": value["schema_omissions"],
+        "recommendation_count": len(value["recommendations"]),
+        "recommendation_finding_ids": value["verdict"]["recommendation_finding_ids"],
+        "prompt_chars": len(prompt),
+        "usage": usage,
+        "challenger_token_totals": codex_token_totals(usage),
+    }
+
+
+def run_structured_handoff(args: argparse.Namespace, report: dict) -> int:
+    workspace = args.workspace.expanduser().resolve(strict=True)
+    if not workspace.is_dir():
+        raise SpikeError(f"workspace is not a directory: {workspace}")
+    if not args.goal or not args.goal.strip():
+        raise SpikeError("--structured-handoff requires --goal")
+    files = resolve_review_files(workspace, args.review_file)
+    target = review_target_context(workspace, files, args.goal.strip())
+
+    auth = subprocess.run(
+        ["claude", "auth", "status", "--json"],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    try:
+        claude_auth = json.loads(auth.stdout)
+    except json.JSONDecodeError:
+        claude_auth = {"loggedIn": False, "diagnostic": auth.stderr[-500:]}
+    report["preflight"] = {
+        "claude_auth": {
+            key: claude_auth.get(key)
+            for key in ("loggedIn", "authMethod", "apiProvider", "subscriptionType")
+        },
+        "codex_model": args.codex_model,
+        "claude_model": args.claude_model,
+    }
+    if not claude_auth.get("loggedIn"):
+        write_report(report, args.output)
+        raise SpikeError(
+            "Claude CLI is not authenticated; run `claude auth login` and retry"
+        )
+
+    reviewer_prompt = (
+        "Act as the first-pass code reviewer. This is read-only: do not edit files. "
+        "Inspect the named files and related source directly. Return only one JSON "
+        "object with reasoning_summary and findings. The reasoning_summary must be "
+        "self-contained prose with one paragraph per finding beginning with its [F#] "
+        "identifier; it must cover exactly the same findings as the array. Findings "
+        "must use stable ids F1, F2, ...; evidence strings must cite file:line and the "
+        "observed fact; confidence is 0 through 1. Do not manufacture findings to fill "
+        "the schema.\n\n"
+        f"Required JSON schema:\n{json.dumps(REVIEWER_SCHEMA, indent=2)}\n\n"
+        f"{target}"
+    )
+    reviewer_result = claude_start(
+        reviewer_prompt,
+        workspace,
+        args.timeout,
+        "s1.claude.reviewer",
+        str(uuid.uuid4()),
+        model=args.claude_model,
+    )
+    reviewer_results = [reviewer_result]
+    report["structured_handoff_progress"] = {
+        "target_context": target,
+        "reviewer_attempts_raw": reviewer_results,
+    }
+    write_report(report, args.output)
+    if reviewer_result["exit_code"] != 0:
+        raise SpikeError(
+            "Claude reviewer failed: "
+            + (reviewer_result.get("stderr") or reviewer_result.get("final") or "")[
+                -1000:
+            ]
+        )
+    try:
+        reviewer = validate_reviewer_output(
+            parse_json_object(reviewer_result["final"], "Claude reviewer")
+        )
+    except SpikeError as first_error:
+        report["structured_handoff_progress"]["reviewer_first_validation_error"] = str(
+            first_error
+        )
+        correction_prompt = (
+            "Your previous response failed schema validation with this error:\n"
+            f"{first_error}\n\n"
+            "Return the same review again as one valid JSON object only. Do not add "
+            "Markdown fences or commentary. Preserve the substantive findings while "
+            "matching this schema exactly:\n"
+            f"{json.dumps(REVIEWER_SCHEMA, indent=2)}"
+        )
+        retry_base = [*CLAUDE_BASE, "--model", args.claude_model]
+        reviewer_result = claude_resume(
+            reviewer_result["session_id"],
+            correction_prompt,
+            workspace,
+            args.timeout,
+            "s1.claude.reviewer_schema_retry",
+            base=retry_base,
+        )
+        reviewer_results.append(reviewer_result)
+        write_report(report, args.output)
+        if reviewer_result["exit_code"] != 0:
+            raise SpikeError(
+                "Claude reviewer schema retry failed: "
+                + (reviewer_result.get("stderr") or reviewer_result.get("final") or "")[
+                    -1000:
+                ]
+            )
+        reviewer = validate_reviewer_output(
+            parse_json_object(reviewer_result["final"], "Claude reviewer schema retry")
+        )
+    finding_ids = {item["id"] for item in reviewer["findings"]}
+    if not finding_ids:
+        raise SpikeError("Claude reviewer returned no findings; choose a richer target")
+    report["structured_handoff_progress"]["reviewer_validated"] = reviewer
+    write_report(report, args.output)
+
+    prose_prompt = challenge_prompt(
+        target,
+        "unstructured prose with reviewer reasoning",
+        reviewer["reasoning_summary"],
+    )
+    structured_prompt = challenge_prompt(
+        target,
+        "validated findings only; no reviewer reasoning",
+        json.dumps(reviewer["findings"], indent=2),
+    )
+
+    with tempfile.TemporaryDirectory(prefix="s1-schema-") as temp_dir:
+        challenge_schema_path = Path(temp_dir) / "challenge.schema.json"
+        challenge_schema_path.write_text(json.dumps(CHALLENGE_SCHEMA), encoding="utf-8")
+        reviewer_schema_path = Path(temp_dir) / "reviewer.schema.json"
+        reviewer_schema_path.write_text(json.dumps(REVIEWER_SCHEMA), encoding="utf-8")
+        baseline_result = codex_start(
+            reviewer_prompt,
+            workspace,
+            args.timeout,
+            "s1.codex.single_pass_baseline",
+            model=args.codex_model,
+            output_schema=reviewer_schema_path,
+        )
+        report["structured_handoff_progress"]["baseline_raw"] = baseline_result
+        write_report(report, args.output)
+        prose_result = codex_start(
+            prose_prompt,
+            workspace,
+            args.timeout,
+            "s1.codex.prose_handoff",
+            model=args.codex_model,
+            output_schema=challenge_schema_path,
+        )
+        report["structured_handoff_progress"]["prose_raw"] = prose_result
+        write_report(report, args.output)
+        structured_result = codex_start(
+            structured_prompt,
+            workspace,
+            args.timeout,
+            "s1.codex.structured_handoff",
+            model=args.codex_model,
+            output_schema=challenge_schema_path,
+        )
+        report["structured_handoff_progress"]["structured_raw"] = structured_result
+        write_report(report, args.output)
+
+    for label, result in (
+        ("single-pass baseline", baseline_result),
+        ("prose challenger", prose_result),
+        ("structured challenger", structured_result),
+    ):
+        if result["exit_code"] != 0:
+            raise SpikeError(
+                f"{label} failed: "
+                + (result.get("stderr") or result.get("final") or "")[-1000:]
+            )
+
+    baseline = validate_reviewer_output(
+        parse_json_object(baseline_result["final"], "single-pass baseline")
+    )
+    prose = validate_challenge_output(
+        parse_json_object(prose_result["final"], "prose challenger"),
+        finding_ids,
+        "prose challenger",
+    )
+    structured = validate_challenge_output(
+        parse_json_object(structured_result["final"], "structured challenger"),
+        finding_ids,
+        "structured challenger",
+    )
+    prose_summary = arm_summary(prose, prose_result.get("usage"), prose_prompt)
+    structured_summary = arm_summary(
+        structured, structured_result.get("usage"), structured_prompt
+    )
+    reviewer_token_totals = combine_token_totals(
+        *(
+            claude_token_totals(result.get("model_usage"), result.get("usage"))
+            for result in reviewer_results
+        )
+    )
+    baseline_token_totals = codex_token_totals(baseline_result.get("usage"))
+    prose_summary["reviewer_token_totals"] = reviewer_token_totals
+    prose_summary["end_to_end_token_totals"] = combine_token_totals(
+        reviewer_token_totals,
+        prose_summary["challenger_token_totals"],
+    )
+    structured_summary["reviewer_token_totals"] = reviewer_token_totals
+    structured_summary["end_to_end_token_totals"] = combine_token_totals(
+        reviewer_token_totals,
+        structured_summary["challenger_token_totals"],
+    )
+    baseline_summary = {
+        "finding_count": len(baseline["findings"]),
+        "finding_evidence_items": sum(
+            len(item["evidence"]) for item in baseline["findings"]
+        ),
+        "prompt_chars": len(reviewer_prompt),
+        "usage": baseline_result.get("usage"),
+        "end_to_end_token_totals": baseline_token_totals,
+    }
+    disagreements = {
+        finding_id: {
+            "prose": prose_summary["status_by_finding"][finding_id],
+            "structured": structured_summary["status_by_finding"][finding_id],
+        }
+        for finding_id in sorted(finding_ids)
+        if prose_summary["status_by_finding"][finding_id]
+        != structured_summary["status_by_finding"][finding_id]
+    }
+
+    report.pop("structured_handoff_progress", None)
+    report["structured_handoff"] = {
+        "method": {
+            "workspace": str(workspace),
+            "goal": args.goal.strip(),
+            "files": [str(path.relative_to(workspace)) for path in files],
+            "control": (
+                "Arm A is a fresh Codex single-pass review with no handoff. Arms B "
+                "and C share one explicit Claude reviewer output, then fresh Codex "
+                "sessions receive the same target evidence; only handoff shape "
+                "changes between B and C."
+            ),
+            "ground_truth_was_hidden": True,
+            "models": {
+                "baseline": args.codex_model,
+                "reviewer": args.claude_model,
+                "challenger": args.codex_model,
+            },
+            "reviewer_schema": REVIEWER_SCHEMA,
+            "challenge_schema": CHALLENGE_SCHEMA,
+        },
+        "ground_truth": S1_GROUND_TRUTH,
+        "target_context": target,
+        "prompts": {
+            "reviewer": reviewer_prompt,
+            "baseline": reviewer_prompt,
+            "prose_challenger": prose_prompt,
+            "structured_challenger": structured_prompt,
+        },
+        "reviewer": {
+            "validated": reviewer,
+            "attempts": reviewer_results,
+            "schema_retry_used": len(reviewer_results) > 1,
+        },
+        "arms": {
+            "baseline": {
+                "validated": baseline,
+                "summary": baseline_summary,
+                "raw": baseline_result,
+            },
+            "prose": {
+                "validated": prose,
+                "summary": prose_summary,
+                "raw": prose_result,
+            },
+            "structured": {
+                "validated": structured,
+                "summary": structured_summary,
+                "raw": structured_result,
+            },
+        },
+        "comparison": {
+            "baseline_finding_count": len(baseline["findings"]),
+            "reviewer_finding_count": len(finding_ids),
+            "status_disagreements": disagreements,
+            "same_recommendation_set": set(prose_summary["recommendation_finding_ids"])
+            == set(structured_summary["recommendation_finding_ids"]),
+            "prose_prompt_chars": len(prose_prompt),
+            "structured_prompt_chars": len(structured_prompt),
+            "baseline_prompt_chars": len(reviewer_prompt),
+        },
+    }
+    write_report(report, args.output)
+    print("\n===== STRUCTURED HANDOFF FINDINGS =====")
+    print(json.dumps(report["structured_handoff"]["comparison"], indent=2))
+    print("\n===== BASELINE ARM =====")
+    print(json.dumps(baseline_summary, indent=2))
+    print("\n===== PROSE ARM =====")
+    print(json.dumps(prose_summary, indent=2))
+    print("\n===== STRUCTURED ARM =====")
+    print(json.dumps(structured_summary, indent=2))
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument(
+        "--provider",
+        choices=("codex", "claude", "both"),
+        default="both",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Write the JSON evidence report here.",
+    )
+    parser.add_argument(
+        "--chain",
+        action="store_true",
+        help="Only run the multi-resume chain test (same lane resumed twice).",
+    )
+    parser.add_argument(
+        "--token-accounting",
+        action="store_true",
+        help=(
+            "Only run the Codex usage-accounting test: is reported input_tokens "
+            "per-request or cumulative-per-thread? Uses a padded first prompt so "
+            "the two hypotheses predict very different second-turn values."
+        ),
+    )
+    parser.add_argument(
+        "--structured-handoff",
+        action="store_true",
+        help=(
+            "Run S1: one Claude review, then fresh Codex prose-handoff and "
+            "validated-findings challenger arms."
+        ),
+    )
+    parser.add_argument(
+        "--phase0-capabilities",
+        action="store_true",
+        help=(
+            "Run the minimal GigAI Phase 0 provider proof: native structured "
+            "output, read-only file protection, session capture/resume, and usage."
+        ),
+    )
+    parser.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path.cwd(),
+        help="Workspace for --structured-handoff (default: cwd).",
+    )
+    parser.add_argument(
+        "--review-file",
+        action="append",
+        type=Path,
+        default=[],
+        help="Workspace-relative file for --structured-handoff; repeatable.",
+    )
+    parser.add_argument(
+        "--goal",
+        help="Review goal for --structured-handoff.",
+    )
+    parser.add_argument(
+        "--codex-model",
+        default=DEFAULT_CODEX_REVIEW_MODEL,
+        help=(
+            "Codex challenger model for --structured-handoff "
+            f"(default: {DEFAULT_CODEX_REVIEW_MODEL})."
+        ),
+    )
+    parser.add_argument(
+        "--claude-model",
+        default=DEFAULT_CLAUDE_REVIEW_MODEL,
+        help=(
+            "Claude reviewer model for --structured-handoff "
+            f"(default: {DEFAULT_CLAUDE_REVIEW_MODEL})."
+        ),
+    )
+    args = parser.parse_args()
+
+    for exe in ("codex", "claude"):
+        if shutil.which(exe) is None:
+            raise SpikeError(f"required executable not on PATH: {exe}")
+
+    nonce = f"ZEPHYR-{secrets.token_hex(4).upper()}"
+    seed = (
+        f"Remember this secret token for later in this conversation: {nonce}. "
+        "Reply with only the word ACK. Do not read any files."
+    )
+    progress(f"nonce={nonce}")
+
+    report: dict = {
+        "nonce": nonce,
+        "versions": {},
+        "codex": {},
+        "claude": {},
+        "findings": {},
+    }
+    for exe in ("codex", "claude"):
+        probe = subprocess.run(
+            [exe, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        report["versions"][exe] = probe.stdout.strip().splitlines()[-1:]
+
+    if args.structured_handoff:
+        try:
+            selected_modes = sum(
+                (args.chain, args.token_accounting, args.phase0_capabilities)
+            )
+            if selected_modes:
+                raise SpikeError(
+                    "--structured-handoff cannot combine with --chain or "
+                    "--token-accounting"
+                )
+            return run_structured_handoff(args, report)
+        except SpikeError as exc:
+            print(f"resume-spike: {exc}", file=sys.stderr)
+            return 1
+        except KeyboardInterrupt:
+            print("resume-spike: cancelled", file=sys.stderr)
+            return 130
+
+    workspace = Path(tempfile.mkdtemp(prefix="resume-spike-ws-"))
+    other_ws = Path(tempfile.mkdtemp(prefix="resume-spike-other-"))
+    progress(f"workspace={workspace}")
+    progress(f"other workspace (for cwd-inheritance probe)={other_ws}")
+
+    try:
+        if args.phase0_capabilities:
+            if args.chain or args.token_accounting:
+                raise SpikeError(
+                    "--phase0-capabilities cannot combine with --chain or "
+                    "--token-accounting"
+                )
+            return run_phase0_capabilities(
+                args,
+                report,
+                workspace,
+                nonce,
+            )
+
+        if args.token_accounting:
+            # Pad turn 1 so the hypotheses diverge. With baseline ~15.5k and pad
+            # ~P, turn 2 predicts:
+            #   per-request  -> ~= baseline + P + tiny      (roughly turn 1)
+            #   cumulative   -> ~= turn1 + (baseline + P)   (roughly 2x turn 1)
+            pad_unit = "The quick brown fox jumps over the lazy dog. "
+            pad = pad_unit * 700  # ~6k tokens of filler
+            t1 = codex_start(
+                f"Ignore the following filler text entirely; do not summarize it.\n"
+                f"{pad}\nReply with only the word ACK.",
+                workspace,
+                args.timeout,
+                "codex.tokens.t1_padded",
+            )
+            sid = t1.get("session_id")
+            t2 = codex_resume(
+                sid,
+                "Reply with only the word ACK2.",
+                workspace,
+                args.timeout,
+                "codex.tokens.t2_tiny",
+            )
+            u1 = (t1.get("usage") or {}).get("input_tokens") or 0
+            u2 = (t2.get("usage") or {}).get("input_tokens") or 0
+            report["codex"]["token_accounting"] = [t1, t2]
+            report["findings"]["codex_token_accounting"] = {
+                "turn1_padded_input_tokens": u1,
+                "turn2_tiny_input_tokens": u2,
+                "delta": u2 - u1,
+                "ratio_t2_over_t1": round(u2 / u1, 3) if u1 else None,
+                "interpretation": (
+                    "CUMULATIVE_PER_THREAD"
+                    if u1 and u2 > u1 * 1.6
+                    else "PER_REQUEST"
+                    if u1 and u2 < u1 * 1.25
+                    else "AMBIGUOUS"
+                ),
+                "note": (
+                    "A tiny second turn cannot itself contain ~t1 tokens, so a "
+                    "roughly-doubled t2 means the counter accumulates."
+                ),
+            }
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            print("\n===== TOKEN ACCOUNTING =====")
+            print(json.dumps(report["findings"], indent=2))
+            return 0
+
+        if args.chain:
+            # Round 1 -> Round 2 -> Round 3 on ONE lane per provider, which is the
+            # real design-debate shape at --rounds 2+. Each turn adds a distinct
+            # fact; the final turn must recall BOTH earlier facts.
+            f1, f2 = nonce, f"ORBIT-{secrets.token_hex(3).upper()}"
+            ask_both = (
+                "List every secret token I have given you in this conversation, "
+                "comma separated, in the order I gave them. Only the tokens."
+            )
+            progress(f"chain facts: {f1} then {f2}")
+
+            cs = codex_start(seed, workspace, args.timeout, "codex.chain.t1")
+            sid = cs.get("session_id")
+            c2 = codex_resume(
+                sid,
+                f"Also remember this second token: {f2}. Reply only ACK.",
+                workspace,
+                args.timeout,
+                "codex.chain.t2",
+            )
+            c3 = codex_resume(sid, ask_both, workspace, args.timeout, "codex.chain.t3")
+            report["codex"]["chain"] = [cs, c2, c3]
+
+            claude_sid = str(uuid.uuid4())
+            ls = claude_start(
+                seed, workspace, args.timeout, "claude.chain.t1", claude_sid
+            )
+            l2 = claude_resume(
+                claude_sid,
+                f"Also remember this second token: {f2}. Reply only ACK.",
+                workspace,
+                args.timeout,
+                "claude.chain.t2",
+            )
+            l3 = claude_resume(
+                claude_sid, ask_both, workspace, args.timeout, "claude.chain.t3"
+            )
+            report["claude"]["chain"] = [ls, l2, l3]
+
+            for provider, turns in (("codex", [cs, c2, c3]), ("claude", [ls, l2, l3])):
+                final = turns[-1].get("final") or ""
+                report["findings"][f"{provider}_chain"] = {
+                    "session_ids": [t.get("session_id") for t in turns],
+                    "session_id_stable": len({t.get("session_id") for t in turns}) == 1,
+                    "final_answer": final[:200],
+                    "recalled_turn1_fact": f1 in final,
+                    "recalled_turn2_fact": f2 in final,
+                    "input_tokens_per_turn": [
+                        (t.get("usage") or {}).get("input_tokens")
+                        or (t.get("usage") or {}).get("cache_read_input_tokens")
+                        for t in turns
+                    ],
+                }
+
+            text = json.dumps(report, indent=2)
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(text, encoding="utf-8")
+                progress(f"wrote {args.output}")
+            print("\n===== CHAIN FINDINGS =====")
+            print(json.dumps(report["findings"], indent=2))
+            return 0
+
+        if args.provider in ("codex", "both"):
+            progress("== codex: seed session ==")
+            seed_r = codex_start(seed, workspace, args.timeout, "codex.seed")
+            sid = seed_r.get("session_id")
+            report["codex"]["seed"] = seed_r
+            if not sid:
+                progress("codex: NO session id captured; skipping resume arms")
+            else:
+                progress(f"codex: session_id={sid}")
+                progress("== codex: resume recall ==")
+                report["codex"]["resume_recall"] = codex_resume(
+                    sid, RECALL, workspace, args.timeout, "codex.resume_recall"
+                )
+                progress("== codex: control (fresh session, same question) ==")
+                report["codex"]["control_recall"] = codex_start(
+                    RECALL, workspace, args.timeout, "codex.control_recall"
+                )
+                progress("== codex: resume WITHOUT --sandbox (mode inheritance) ==")
+                clear_probe_file(workspace)
+                report["codex"]["resume_write_probe"] = stamp_write_evidence(
+                    codex_resume(
+                        sid, WRITE_PROBE, workspace, args.timeout, "codex.resume_write"
+                    ),
+                    workspace,
+                )
+                progress("== codex: resume from a DIFFERENT cwd (cwd inheritance) ==")
+                report["codex"]["resume_cwd_probe"] = codex_resume(
+                    sid, CWD_PROBE, other_ws, args.timeout, "codex.resume_cwd"
+                )
+                progress("== codex: resume with -c sandbox escalation attempt ==")
+                clear_probe_file(workspace)
+                report["codex"]["resume_escalation_probe"] = stamp_write_evidence(
+                    codex_resume(
+                        sid,
+                        WRITE_PROBE,
+                        workspace,
+                        args.timeout,
+                        "codex.resume_escalation",
+                        extra=["-c", 'sandbox_mode="workspace-write"'],
+                    ),
+                    workspace,
+                )
+
+        if args.provider in ("claude", "both"):
+            claude_sid = str(uuid.uuid4())
+            progress(f"== claude: seed session (supplied id {claude_sid}) ==")
+            report["claude"]["seed"] = claude_start(
+                seed, workspace, args.timeout, "claude.seed", claude_sid
+            )
+            progress("== claude: resume recall ==")
+            report["claude"]["resume_recall"] = claude_resume(
+                claude_sid, RECALL, workspace, args.timeout, "claude.resume_recall"
+            )
+            progress("== claude: control (fresh session, same question) ==")
+            report["claude"]["control_recall"] = claude_start(
+                RECALL,
+                workspace,
+                args.timeout,
+                "claude.control_recall",
+                str(uuid.uuid4()),
+            )
+            progress("== claude: resume with write-capable flags (escalation probe) ==")
+            clear_probe_file(workspace)
+            report["claude"]["resume_write_probe"] = stamp_write_evidence(
+                claude_resume(
+                    claude_sid,
+                    WRITE_PROBE,
+                    workspace,
+                    args.timeout,
+                    "claude.resume_write",
+                    base=[
+                        "claude",
+                        "--print",
+                        "--output-format",
+                        "json",
+                        "--safe-mode",
+                        "--permission-mode",
+                        "acceptEdits",
+                        "--tools",
+                        "Read,Glob,Grep,Write,Bash",
+                    ],
+                ),
+                workspace,
+            )
+
+        # --- verdicts ---
+        for provider in ("codex", "claude"):
+            arms = report.get(provider) or {}
+            if "resume_recall" not in arms:
+                continue
+            resumed = arms["resume_recall"].get("final", "") or ""
+            control = (arms.get("control_recall") or {}).get("final", "") or ""
+            found = nonce in resumed
+            control_found = nonce in control
+            report["findings"][f"{provider}_resume"] = {
+                "session_id_captured": bool(arms["seed"].get("session_id")),
+                "resumed_answer": resumed[:200],
+                "control_answer": control[:200],
+                "nonce_in_resumed": found,
+                "nonce_in_control": control_found,
+                "verdict": verdict(found, control_found),
+            }
+            wp = arms.get("resume_write_probe") or {}
+            wrote = re.search(r"\bWROTE\b", wp.get("final", "") or "", re.I) is not None
+            report["findings"][f"{provider}_resume_write"] = {
+                "answer": (wp.get("final") or "")[:200],
+                "exit_code": wp.get("exit_code"),
+                "claims_wrote": wrote,
+                "file_actually_written": wp.get("probe_file_existed_after_arm"),
+            }
+
+        esc = (report.get("codex") or {}).get("resume_escalation_probe") or {}
+        if esc:
+            report["findings"]["codex_resume_c_escalation"] = {
+                "answer": (esc.get("final") or "")[:200],
+                "exit_code": esc.get("exit_code"),
+                "stderr_tail": (esc.get("stderr") or "")[-300:],
+                "file_actually_written": esc.get("probe_file_existed_after_arm"),
+            }
+
+        cwd_probe = (report.get("codex") or {}).get("resume_cwd_probe") or {}
+        if cwd_probe:
+            answer = (cwd_probe.get("final") or "").strip()
+            report["findings"]["codex_resume_cwd"] = {
+                "answer": answer[:300],
+                "matches_original_workspace": str(workspace) in answer,
+                "matches_invocation_cwd": str(other_ws) in answer,
+            }
+
+        text = json.dumps(report, indent=2)
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(text, encoding="utf-8")
+            progress(f"wrote {args.output}")
+
+        print("\n===== FINDINGS =====")
+        print(json.dumps(report["findings"], indent=2))
+        return 0
+    except SpikeError as exc:
+        print(f"resume-spike: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("resume-spike: cancelled", file=sys.stderr)
+        return 130
+    finally:
+        progress(f"leaving workspaces for inspection: {workspace} {other_ws}")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

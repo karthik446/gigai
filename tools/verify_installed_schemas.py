@@ -1,0 +1,52 @@
+"""Verify frozen schema resources from an installed GigAI distribution."""
+
+from __future__ import annotations
+
+import hashlib
+from importlib import resources
+import json
+
+
+EXPECTED_SHA256 = {
+    "active-gig-version.schema.json": "77a2f9df0928a8cfe60b496f63b981ab941268cdfc8c557902549f645e4a76f6",
+    "common.schema.json": "825a15da8f61348cc16afe315c2aca0e3218c78c0bf0f93394f74fe78cb7b53a",
+    "gig-proposal.schema.json": "515f16368059c7d8d4bf88cb47d8fc0df63afc50a51e13c8c75601c013f134b3",
+    "goal-graph.schema.json": "ae455b58bc6e2e31cc74c87add14bc3c115d863d5c32f4a6c00d24774bc543aa",
+    "handoff-frontmatter.schema.json": "16e9d77d7d014143ac83615b32ef706bd1a5f6bc976ea5b0326d44cd3edaff52",
+    "run-brief-frontmatter.schema.json": "481118d7c49f97d00c389f8f4d4216cc1baf6ff96e8c16c3343006ad019369e3",
+    "run-details.schema.json": "c2388d917e08cfcc0860ecd3a20b389be4f434aadde6b21ffa18ee4d6457111f",
+    "run-manifest.schema.json": "a14126ac4943e71980371eb215fbc191434cfb0fb2f2761259a0faabb36af24f",
+}
+
+
+def main() -> int:
+    schema_root = resources.files("gigai.schemas")
+    found = {
+        item.name
+        for item in schema_root.iterdir()
+        if item.name.endswith(".schema.json")
+    }
+    expected = set(EXPECTED_SHA256)
+    if found != expected:
+        missing = sorted(expected - found)
+        additional = sorted(found - expected)
+        raise SystemExit(
+            f"schema resource set mismatch: missing={missing}, additional={additional}"
+        )
+
+    for name, expected_digest in sorted(EXPECTED_SHA256.items()):
+        payload = schema_root.joinpath(name).read_bytes()
+        json.loads(payload)
+        actual_digest = hashlib.sha256(payload).hexdigest()
+        if actual_digest != expected_digest:
+            raise SystemExit(
+                f"schema digest mismatch for {name}: "
+                f"expected {expected_digest}, got {actual_digest}"
+            )
+
+    print("verified 8 installed GigAI schemas")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

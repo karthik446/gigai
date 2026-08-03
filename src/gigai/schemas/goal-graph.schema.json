@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:goal-graph:1",
+  "title": "GigAI Goal Graph",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "graph_id",
+    "gig_id",
+    "graph_version",
+    "created_at",
+    "aggregate_budget",
+    "failure_policy",
+    "goals",
+    "edges",
+    "entry_goal_ids",
+    "terminal_goal_ids"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "graph_id": {"$ref": "urn:gigai:schema:common:1#/$defs/graph_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "graph_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "aggregate_budget": {"$ref": "urn:gigai:schema:common:1#/$defs/budget"},
+    "failure_policy": {
+      "type": "string",
+      "enum": ["fail_gig", "block_dependents", "continue_independent", "follow_recovery"]
+    },
+    "goals": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/goal"}
+    },
+    "edges": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/edge"}
+    },
+    "entry_goal_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"}
+    },
+    "terminal_goal_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"}
+    }
+  },
+  "$defs": {
+    "goal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "goal_id",
+        "goal_version",
+        "display_ordinal",
+        "slug",
+        "title",
+        "required",
+        "activation",
+        "contract",
+        "executor",
+        "effects",
+        "write_surfaces",
+        "exclusive_resources",
+        "budget",
+        "verification",
+        "outcomes"
+      ],
+      "properties": {
+        "goal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"},
+        "goal_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+        "display_ordinal": {"type": "string", "pattern": "^G[0-9]{2,6}$"},
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "maxLength": 80
+        },
+        "title": {"type": "string", "minLength": 1, "maxLength": 240},
+        "required": {"type": "boolean"},
+        "activation": {"type": "string", "enum": ["automatic", "operator_gate"]},
+        "contract": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        "executor": {"$ref": "#/$defs/executor"},
+        "effects": {"$ref": "urn:gigai:schema:common:1#/$defs/effect_set"},
+        "write_surfaces": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+        },
+        "exclusive_resources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9_.:/-]*$"}
+        },
+        "budget": {"$ref": "urn:gigai:schema:common:1#/$defs/budget"},
+        "verification": {"$ref": "#/$defs/verification"},
+        "outcomes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"}
+        }
+      }
+    },
+    "executor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "capability", "role"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["codex_cli", "claude_cli", "fixed_role_api", "local_capability"]
+        },
+        "capability": {"type": "string", "pattern": "^[a-z][a-z0-9_.:/@-]*$"},
+        "role": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9_-]*$"}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verifier", "acceptance", "required_evidence"],
+      "properties": {
+        "verifier": {"type": "string", "pattern": "^[a-z][a-z0-9_.:/@-]*$"},
+        "acceptance": {"type": "string", "minLength": 1, "maxLength": 20000},
+        "required_evidence": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9_.:/-]*$"}
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edge_id",
+        "from_goal_id",
+        "to_goal_id",
+        "kind",
+        "on_outcomes",
+        "automatic"
+      ],
+      "properties": {
+        "edge_id": {"$ref": "urn:gigai:schema:common:1#/$defs/edge_id"},
+        "from_goal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"},
+        "to_goal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"},
+        "kind": {"type": "string", "enum": ["dependency", "recovery"]},
+        "on_outcomes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"}
+        },
+        "automatic": {"type": "boolean"}
+      }
+    }
+  }
+}

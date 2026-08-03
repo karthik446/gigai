@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-07-30",
+  "raw_reports": [
+    "/private/tmp/gigai-phase0-provider-capabilities.json",
+    "/private/tmp/gigai-phase0-codex-capabilities.json"
+  ],
+  "providers": {
+    "codex": {
+      "version": "codex-cli 0.146.0-alpha.2",
+      "native_structured_output": true,
+      "structured_output_flag": "--output-schema",
+      "session_id_captured": true,
+      "resume_recalled_nonce": true,
+      "read_only_file_absent": true,
+      "usage_keys": [
+        "cache_write_input_tokens",
+        "cached_input_tokens",
+        "input_tokens",
+        "output_tokens",
+        "reasoning_output_tokens"
+      ],
+      "schema_observation": "Properties using const or enum must also declare type."
+    },
+    "claude": {
+      "version": "2.1.220 (Claude Code)",
+      "native_structured_output": true,
+      "structured_output_flag": "--json-schema",
+      "session_id_captured": true,
+      "resume_recalled_nonce": true,
+      "read_only_file_absent": true,
+      "usage_keys": [
+        "cache_creation",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "inference_geo",
+        "input_tokens",
+        "iterations",
+        "output_tokens",
+        "server_tool_use",
+        "service_tier",
+        "speed"
+      ],
+      "two_call_cost_usd": 0.128916
+    }
+  },
+  "expected_structured_output": {
+    "ack": "ACK",
+    "write_status": "BLOCKED"
+  },
+  "committed_fixture_contains_nonce_or_session_id": false
+}

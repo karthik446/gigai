@@ -1,0 +1,419 @@
+from __future__ import annotations
+
+import copy
+from importlib import resources as importlib_resources
+import json
+import unittest
+from typing import Any
+
+from jsonschema import Draft202012Validator, FormatChecker
+from referencing import Registry, Resource
+
+from ..canonical import canonical_json_bytes, sha256_digest
+from ..graph_validation import GoalGraphError, validate_goal_graph
+
+
+EXPECTED_SCHEMA_NAMES = {
+    "active-gig-version.schema.json",
+    "common.schema.json",
+    "gig-proposal.schema.json",
+    "goal-graph.schema.json",
+    "handoff-frontmatter.schema.json",
+    "run-brief-frontmatter.schema.json",
+    "run-details.schema.json",
+    "run-manifest.schema.json",
+}
+
+PROJECT_ID = "project_11111111-1111-4111-8111-111111111111"
+GIG_ID = "gig_22222222-2222-4222-8222-222222222222"
+PROPOSAL_ID = "gp_33333333-3333-4333-8333-333333333333"
+GRAPH_ID = "graph_44444444-4444-4444-8444-444444444444"
+GOAL_A = "goal_55555555-5555-4555-8555-555555555555"
+GOAL_B = "goal_66666666-6666-4666-8666-666666666666"
+RUN_ID = "run_77777777-7777-4777-8777-777777777777"
+HANDOFF_ID = "handoff_88888888-8888-4888-8888-888888888888"
+ZERO_DIGEST = "sha256:" + "0" * 64
+ONE_DIGEST = "sha256:" + "1" * 64
+COMMIT = "a" * 40
+NOW = "2026-08-02T12:00:00Z"
+
+
+def artifact(path: str, digest: str = ZERO_DIGEST, media_type: str = "application/json") -> dict[str, Any]:
+    return {
+        "path": path,
+        "content_sha256": digest,
+        "canonical_sha256": digest,
+        "media_type": media_type,
+        "size_bytes": 123,
+    }
+
+
+def budget() -> dict[str, Any]:
+    return {
+        "max_model_calls": 8,
+        "max_tool_calls": 24,
+        "max_tokens": 100000,
+        "max_cost": "12.50",
+        "currency": "USD",
+        "max_wall_time_ms": 3600000,
+        "max_parallel_goals": 2,
+    }
+
+
+def usage() -> dict[str, Any]:
+    return {
+        "input_tokens": 100,
+        "output_tokens": 25,
+        "total_tokens": 125,
+        "cost": "0.25",
+        "currency": "USD",
+        "cost_status": "provider_reported",
+    }
+
+
+def goal(
+    goal_id: str,
+    ordinal: str,
+    slug: str,
+    outcomes: list[str],
+    activation: str = "automatic",
+) -> dict[str, Any]:
+    return {
+        "goal_id": goal_id,
+        "goal_version": 1,
+        "display_ordinal": ordinal,
+        "slug": slug,
+        "title": slug.replace("-", " ").title(),
+        "required": True,
+        "activation": activation,
+        "contract": artifact(f"goals/{ordinal}-{slug}.md", media_type="text/markdown"),
+        "executor": {
+            "kind": "fixed_role_api",
+            "capability": "research.execute@1",
+            "role": "researcher",
+        },
+        "effects": ["read_target", "write_workpad", "network_read"],
+        "write_surfaces": [],
+        "exclusive_resources": [],
+        "budget": budget(),
+        "verification": {
+            "verifier": "evidence.citation-check@1",
+            "acceptance": "Every material claim is supported by captured evidence.",
+            "required_evidence": ["source-ledger", "completion-audit"],
+        },
+        "outcomes": outcomes,
+    }
+
+
+def goal_graph() -> dict[str, Any]:
+    return {
+        "schema_version": "1.0",
+        "graph_id": GRAPH_ID,
+        "gig_id": GIG_ID,
+        "graph_version": 1,
+        "created_at": NOW,
+        "aggregate_budget": budget(),
+        "failure_policy": "follow_recovery",
+        "goals": [
+            goal(GOAL_A, "G00", "collect-evidence", ["COMPLETE", "FAILED"]),
+            goal(GOAL_B, "G01", "synthesize", ["COMPLETE"]),
+        ],
+        "edges": [
+            {
+                "edge_id": "edge_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "from_goal_id": GOAL_A,
+                "to_goal_id": GOAL_B,
+                "kind": "dependency",
+                "on_outcomes": ["COMPLETE"],
+                "automatic": True,
+            }
+        ],
+        "entry_goal_ids": [GOAL_A],
+        "terminal_goal_ids": [GOAL_B],
+    }
+
+
+def actor() -> dict[str, Any]:
+    return {"kind": "operator", "id": "local-user", "model_target": None}
+
+
+def valid_instances() -> dict[str, dict[str, Any]]:
+    graph_ref = artifact("manifests/goal-graph.json")
+    run_brief_ref = artifact("runs/run-777/run-brief.md", media_type="text/markdown")
+    target_ref = artifact("runs/run-777/target-before.json")
+    resolved_models = [
+        {
+            "role": "researcher",
+            "model_target": "openai-api",
+            "endpoint": "responses",
+            "configured_selector": "gpt-5",
+            "resolved_identity": "gpt-5-2026-07-01",
+            "resolution_source": "provider_reported",
+            "compatibility_status": "LIVE_VERIFIED",
+        }
+    ]
+    resolved_tools = [
+        {
+            "name": "web.search",
+            "version": "1.0.0",
+            "source_sha256": ONE_DIGEST,
+            "effects": ["network_read"],
+        }
+    ]
+    brief_body = b"Review this Run Brief before inspecting execution details.\n"
+    brief = {
+        "schema_version": "1.0",
+        "run_id": RUN_ID,
+        "gig_id": GIG_ID,
+        "gig_version": 1,
+        "created_at": NOW,
+        "invoked_by": actor(),
+        "invocation_argv": ["gigai", "run", GIG_ID],
+        "goal_graph": graph_ref,
+        "target": {
+            "kind": "git",
+            "root": "/workspace/project",
+            "git_head": COMMIT,
+            "status_sha256": ZERO_DIGEST,
+            "observation_sha256": ONE_DIGEST,
+        },
+        "profile": "default",
+        "resolved_models": resolved_models,
+        "resolved_tools": resolved_tools,
+        "effects": ["read_target", "write_workpad", "network_read"],
+        "aggregate_budget": budget(),
+        "input_canonical_sha256": ZERO_DIGEST,
+        "body_sha256": sha256_digest(brief_body),
+        "run_manifest_path": "runs/run-777/run-manifest.json",
+    }
+    proposal = {
+        "schema_version": "1.0",
+        "proposal_id": PROPOSAL_ID,
+        "gig_id": GIG_ID,
+        "project_id": PROJECT_ID,
+        "name": "research-gigai",
+        "status": "proposed",
+        "kind": "create",
+        "created_at": NOW,
+        "created_by": actor(),
+        "base_gig_version": None,
+        "parent_proposal_id": None,
+        "change_request": None,
+        "commission": "Research GigAI and produce an evidence-backed report.",
+        "gig_document": artifact("proposals/gp-333/gig.md", media_type="text/markdown"),
+        "goal_graph": graph_ref,
+        "creation_manifest": artifact("proposals/gp-333/creation-manifest.json"),
+    }
+    active = {
+        "schema_version": "1.0",
+        "gig_id": GIG_ID,
+        "active_version": 1,
+        "approved_proposal_id": PROPOSAL_ID,
+        "goal_graph": graph_ref,
+        "journal_commit": COMMIT,
+        "journal_tag": "gig-v000001",
+        "approved_at": NOW,
+        "approved_by": actor(),
+    }
+    manifest = {
+        "schema_version": "1.0",
+        "run_id": RUN_ID,
+        "gig_id": GIG_ID,
+        "gig_version": 1,
+        "authority": "run_invocation",
+        "status": "sealed",
+        "sealed_at": NOW,
+        "invoked_by": actor(),
+        "invocation_argv": ["gigai", "run", GIG_ID],
+        "run_brief": run_brief_ref,
+        "goal_graph": graph_ref,
+        "goal_contracts": [
+            {"goal_id": GOAL_A, "goal_version": 1, "contract": artifact("goals/G00-collect-evidence.md", media_type="text/markdown")},
+            {"goal_id": GOAL_B, "goal_version": 1, "contract": artifact("goals/G01-synthesize.md", media_type="text/markdown")},
+        ],
+        "target_observation": target_ref,
+        "profile": "default",
+        "resolved_models": resolved_models,
+        "resolved_tools": resolved_tools,
+        "sealed_sources": [graph_ref, target_ref],
+        "effects": ["read_target", "write_workpad", "network_read"],
+        "aggregate_budget": budget(),
+        "input_canonical_sha256": ZERO_DIGEST,
+    }
+    goal_sets = {
+        "pending": [],
+        "ready": [],
+        "active": [],
+        "complete": [GOAL_A, GOAL_B],
+        "failed": [],
+        "blocked": [],
+        "gated": [],
+        "cancelled": [],
+    }
+    goal_details = []
+    for goal_id in [GOAL_A, GOAL_B]:
+        goal_details.append(
+            {
+                "goal_id": goal_id,
+                "goal_version": 1,
+                "executor": "openai-api/gpt-5-2026-07-01",
+                "status": "complete",
+                "outcome": "COMPLETE",
+                "errors": [],
+                "evidence": [artifact(f"evidence/{goal_id}.json")],
+                "usage": usage(),
+                "started_at": NOW,
+                "finished_at": "2026-08-02T12:05:00Z",
+            }
+        )
+    details = {
+        "schema_version": "1.0",
+        "run_id": RUN_ID,
+        "gig_id": GIG_ID,
+        "gig_version": 1,
+        "goal_graph_sha256": ZERO_DIGEST,
+        "status": "succeeded",
+        "started_at": NOW,
+        "finished_at": "2026-08-02T12:10:00Z",
+        "goal_sets": goal_sets,
+        "goals": goal_details,
+        "critical_path": [GOAL_A, GOAL_B],
+        "realized_max_parallel_goals": 1,
+        "execution_summary": "Both required Goals completed and verified.",
+        "tool_errors": [],
+        "model_errors": [],
+        "aggregate_usage": usage(),
+        "remaining_budget": budget(),
+        "target_before": target_ref,
+        "target_after": target_ref,
+        "completion_audit": {"status": "valid", "path": "reviews/completion-audit.md"},
+        "terminal_handoff": artifact("handoffs/000000000006-run-succeeded.txt", media_type="text/plain"),
+        "workpad_commit": COMMIT,
+        "next_actions": ["Review the completion audit."],
+    }
+    handoff_body = b"Goal G01 completed with the required evidence.\n"
+    handoff = {
+        "schema_version": "1.0",
+        "handoff_id": HANDOFF_ID,
+        "sequence": 6,
+        "gig_id": GIG_ID,
+        "gig_version": 1,
+        "goal_id": GOAL_B,
+        "goal_version": 1,
+        "run_id": RUN_ID,
+        "transition": "goal_completed",
+        "timestamp": "2026-08-02T12:05:00Z",
+        "actor": {"kind": "gigai", "id": "worker-1", "model_target": None},
+        "parent_handoff_ids": [],
+        "previous_journal_commit": COMMIT,
+        "goal_graph_sha256": ZERO_DIGEST,
+        "source_manifest_sha256": ONE_DIGEST,
+        "outcome": "COMPLETE",
+        "evidence": [artifact("evidence/goal-b.json")],
+        "usage": usage(),
+        "body_sha256": sha256_digest(handoff_body),
+    }
+    return {
+        "urn:gigai:schema:gig-proposal:1": proposal,
+        "urn:gigai:schema:active-gig-version:1": active,
+        "urn:gigai:schema:goal-graph:1": goal_graph(),
+        "urn:gigai:schema:run-brief-frontmatter:1": brief,
+        "urn:gigai:schema:run-manifest:1": manifest,
+        "urn:gigai:schema:run-details:1": details,
+        "urn:gigai:schema:handoff-frontmatter:1": handoff,
+    }
+
+
+class SerializedContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        schema_root = importlib_resources.files("gigai.schemas")
+        schema_resources = {
+            item.name: item
+            for item in schema_root.iterdir()
+            if item.name.endswith(".schema.json")
+        }
+        if set(schema_resources) != EXPECTED_SCHEMA_NAMES:
+            missing = sorted(EXPECTED_SCHEMA_NAMES - set(schema_resources))
+            additional = sorted(set(schema_resources) - EXPECTED_SCHEMA_NAMES)
+            raise AssertionError(
+                f"schema resource set mismatch: missing={missing}, "
+                f"additional={additional}"
+            )
+        cls.schemas = {
+            schema["$id"]: schema
+            for schema in (
+                json.loads(schema_resources[name].read_text(encoding="utf-8"))
+                for name in sorted(schema_resources)
+            )
+        }
+        resources = [
+            (schema_id, Resource.from_contents(schema))
+            for schema_id, schema in cls.schemas.items()
+        ]
+        cls.registry = Registry().with_resources(resources)
+
+    def validator(self, schema_id: str) -> Draft202012Validator:
+        return Draft202012Validator(
+            self.schemas[schema_id],
+            registry=self.registry,
+            format_checker=FormatChecker(),
+        )
+
+    def test_all_schema_documents_are_valid_draft_2020_12(self) -> None:
+        self.assertEqual(len(self.schemas), 8)
+        for schema_id, schema in self.schemas.items():
+            with self.subTest(schema_id=schema_id):
+                Draft202012Validator.check_schema(schema)
+
+    def test_one_golden_instance_for_every_serialized_boundary(self) -> None:
+        instances = valid_instances()
+        self.assertEqual(set(instances), set(self.schemas) - {"urn:gigai:schema:common:1"})
+        for schema_id, instance in instances.items():
+            with self.subTest(schema_id=schema_id):
+                self.validator(schema_id).validate(instance)
+                canonical_json_bytes(instance)
+
+    def test_unknown_field_missing_required_field_and_malformed_id_fail(self) -> None:
+        instances = valid_instances()
+        proposal_id = "urn:gigai:schema:gig-proposal:1"
+
+        unknown = copy.deepcopy(instances[proposal_id])
+        unknown["surprise"] = True
+        self.assertTrue(list(self.validator(proposal_id).iter_errors(unknown)))
+
+        missing = copy.deepcopy(instances[proposal_id])
+        del missing["commission"]
+        self.assertTrue(list(self.validator(proposal_id).iter_errors(missing)))
+
+        malformed = copy.deepcopy(instances[proposal_id])
+        malformed["gig_id"] = "gig_01-not-a-real-id"
+        self.assertTrue(list(self.validator(proposal_id).iter_errors(malformed)))
+
+    def test_goal_graph_semantics_accept_valid_graph(self) -> None:
+        validate_goal_graph(goal_graph())
+
+    def test_goal_graph_semantics_reject_cycles(self) -> None:
+        graph = goal_graph()
+        graph["edges"].append(
+            {
+                "edge_id": "edge_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "from_goal_id": GOAL_B,
+                "to_goal_id": GOAL_A,
+                "kind": "recovery",
+                "on_outcomes": ["COMPLETE"],
+                "automatic": True,
+            }
+        )
+        with self.assertRaisesRegex(GoalGraphError, "cycle"):
+            validate_goal_graph(graph)
+
+    def test_goal_graph_semantics_reject_unreachable_required_goal(self) -> None:
+        graph = goal_graph()
+        graph["edges"] = []
+        with self.assertRaisesRegex(GoalGraphError, "unreachable"):
+            validate_goal_graph(graph)
+
+
+if __name__ == "__main__":
+    unittest.main()

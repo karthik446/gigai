@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:gig-proposal:1",
+  "title": "GigAI Gig Proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "proposal_id",
+    "gig_id",
+    "project_id",
+    "name",
+    "status",
+    "kind",
+    "created_at",
+    "created_by",
+    "base_gig_version",
+    "parent_proposal_id",
+    "change_request",
+    "commission",
+    "gig_document",
+    "goal_graph",
+    "creation_manifest"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "proposal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_proposal_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+      "maxLength": 80
+    },
+    "status": {
+      "type": "string",
+      "enum": ["drafting", "proposed", "approved", "rejected", "superseded"]
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["create", "improve", "amend"]
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "created_by": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+    "base_gig_version": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+        {"type": "null"}
+      ]
+    },
+    "parent_proposal_id": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/gig_proposal_id"},
+        {"type": "null"}
+      ]
+    },
+    "change_request": {"type": ["string", "null"], "maxLength": 20000},
+    "commission": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "gig_document": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "goal_graph": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "creation_manifest": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}
+  }
+}

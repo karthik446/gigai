@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:common:1",
+  "title": "GigAI common contract definitions",
+  "$defs": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "uuid_v4": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^project_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "gig_id": {
+      "type": "string",
+      "pattern": "^gig_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "gig_proposal_id": {
+      "type": "string",
+      "pattern": "^gp_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "graph_id": {
+      "type": "string",
+      "pattern": "^graph_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "goal_id": {
+      "type": "string",
+      "pattern": "^goal_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "edge_id": {
+      "type": "string",
+      "pattern": "^edge_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^run_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "handoff_id": {
+      "type": "string",
+      "pattern": "^handoff_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "invocation_id": {
+      "type": "string",
+      "pattern": "^inv_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "positive_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "safe_nonnegative_integer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "decimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(^|/)\\.\\.(/|$)).+$"
+    },
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content_sha256", "media_type", "size_bytes"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "content_sha256": {"$ref": "#/$defs/sha256"},
+        "canonical_sha256": {
+          "oneOf": [
+            {"$ref": "#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        },
+        "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
+        "size_bytes": {"$ref": "#/$defs/safe_nonnegative_integer"}
+      }
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["operator", "gigai", "model", "tool"]
+        },
+        "id": {"type": "string", "minLength": 1, "maxLength": 255},
+        "model_target": {"type": ["string", "null"], "maxLength": 255}
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_model_calls",
+        "max_tool_calls",
+        "max_tokens",
+        "max_cost",
+        "currency",
+        "max_wall_time_ms",
+        "max_parallel_goals"
+      ],
+      "properties": {
+        "max_model_calls": {"$ref": "#/$defs/safe_nonnegative_integer"},
+        "max_tool_calls": {"$ref": "#/$defs/safe_nonnegative_integer"},
+        "max_tokens": {"$ref": "#/$defs/safe_nonnegative_integer"},
+        "max_cost": {
+          "oneOf": [
+            {"$ref": "#/$defs/decimal"},
+            {"type": "null"}
+          ]
+        },
+        "currency": {
+          "oneOf": [
+            {"type": "string", "pattern": "^[A-Z]{3}$"},
+            {"type": "null"}
+          ]
+        },
+        "max_wall_time_ms": {"$ref": "#/$defs/safe_nonnegative_integer"},
+        "max_parallel_goals": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        }
+      }
+    },
+    "effect": {
+      "type": "string",
+      "enum": [
+        "read_target",
+        "write_workpad",
+        "write_target",
+        "network_read",
+        "external_write",
+        "credential_use"
+      ]
+    },
+    "effect_set": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/effect"},
+      "uniqueItems": true
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "cost",
+        "currency",
+        "cost_status"
+      ],
+      "properties": {
+        "input_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "output_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "total_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "cost": {
+          "oneOf": [
+            {"$ref": "#/$defs/decimal"},
+            {"type": "null"}
+          ]
+        },
+        "currency": {
+          "oneOf": [
+            {"type": "string", "pattern": "^[A-Z]{3}$"},
+            {"type": "null"}
+          ]
+        },
+        "cost_status": {
+          "type": "string",
+          "enum": ["provider_reported", "derived", "unavailable", "not_applicable"]
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable", "invocation_id"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "message": {"type": "string", "minLength": 1},
+        "retryable": {"type": "boolean"},
+        "invocation_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/invocation_id"},
+            {"type": "null"}
+          ]
+        }
+      }
+    }
+  }
+}

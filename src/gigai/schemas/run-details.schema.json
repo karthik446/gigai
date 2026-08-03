@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:run-details:1",
+  "title": "GigAI RunDetails",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "gig_id",
+    "gig_version",
+    "goal_graph_sha256",
+    "status",
+    "started_at",
+    "finished_at",
+    "goal_sets",
+    "goals",
+    "critical_path",
+    "realized_max_parallel_goals",
+    "execution_summary",
+    "tool_errors",
+    "model_errors",
+    "aggregate_usage",
+    "remaining_budget",
+    "target_before",
+    "target_after",
+    "completion_audit",
+    "terminal_handoff",
+    "workpad_commit",
+    "next_actions"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "run_id": {"$ref": "urn:gigai:schema:common:1#/$defs/run_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "gig_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "goal_graph_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "status": {
+      "type": "string",
+      "enum": [
+        "preparing",
+        "running",
+        "waiting_for_gate",
+        "verifying",
+        "succeeded",
+        "failed",
+        "blocked",
+        "cancelled",
+        "interrupted"
+      ]
+    },
+    "started_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": ["string", "null"], "format": "date-time"},
+    "goal_sets": {"$ref": "#/$defs/goal_sets"},
+    "goals": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/goal_details"}
+    },
+    "critical_path": {
+      "type": "array",
+      "items": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"}
+    },
+    "realized_max_parallel_goals": {"$ref": "urn:gigai:schema:common:1#/$defs/safe_nonnegative_integer"},
+    "execution_summary": {"type": "string", "maxLength": 20000},
+    "tool_errors": {
+      "type": "array",
+      "items": {"$ref": "urn:gigai:schema:common:1#/$defs/error"}
+    },
+    "model_errors": {
+      "type": "array",
+      "items": {"$ref": "urn:gigai:schema:common:1#/$defs/error"}
+    },
+    "aggregate_usage": {"$ref": "urn:gigai:schema:common:1#/$defs/usage"},
+    "remaining_budget": {"$ref": "urn:gigai:schema:common:1#/$defs/budget"},
+    "target_before": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "target_after": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        {"type": "null"}
+      ]
+    },
+    "completion_audit": {"$ref": "#/$defs/completion_audit"},
+    "terminal_handoff": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        {"type": "null"}
+      ]
+    },
+    "workpad_commit": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40,64}$"},
+    "next_actions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 500}
+    }
+  },
+  "$defs": {
+    "goal_sets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pending", "ready", "active", "complete", "failed", "blocked", "gated", "cancelled"],
+      "properties": {
+        "pending": {"$ref": "#/$defs/goal_id_set"},
+        "ready": {"$ref": "#/$defs/goal_id_set"},
+        "active": {"$ref": "#/$defs/goal_id_set"},
+        "complete": {"$ref": "#/$defs/goal_id_set"},
+        "failed": {"$ref": "#/$defs/goal_id_set"},
+        "blocked": {"$ref": "#/$defs/goal_id_set"},
+        "gated": {"$ref": "#/$defs/goal_id_set"},
+        "cancelled": {"$ref": "#/$defs/goal_id_set"}
+      }
+    },
+    "goal_id_set": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"}
+    },
+    "goal_details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "goal_id",
+        "goal_version",
+        "executor",
+        "status",
+        "outcome",
+        "errors",
+        "evidence",
+        "usage",
+        "started_at",
+        "finished_at"
+      ],
+      "properties": {
+        "goal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"},
+        "goal_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+        "executor": {"type": "string", "minLength": 1, "maxLength": 255},
+        "status": {
+          "type": "string",
+          "enum": ["pending", "ready", "running", "waiting_for_gate", "verifying", "complete", "failed", "blocked", "cancelled"]
+        },
+        "outcome": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]*$"},
+        "errors": {
+          "type": "array",
+          "items": {"$ref": "urn:gigai:schema:common:1#/$defs/error"}
+        },
+        "evidence": {
+          "type": "array",
+          "items": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}
+        },
+        "usage": {"$ref": "urn:gigai:schema:common:1#/$defs/usage"},
+        "started_at": {"type": ["string", "null"], "format": "date-time"},
+        "finished_at": {"type": ["string", "null"], "format": "date-time"}
+      }
+    },
+    "completion_audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "path"],
+      "properties": {
+        "status": {"type": "string", "enum": ["missing", "draft", "valid", "accepted", "rejected"]},
+        "path": {
+          "oneOf": [
+            {"$ref": "urn:gigai:schema:common:1#/$defs/relative_path"},
+            {"type": "null"}
+          ]
+        }
+      }
+    }
+  }
+}
