@@ -38,6 +38,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers -p no:cacheprovider"
 testpaths = [
+  "tests",
   "research/contract_spike/tests",
   "research/phase0_spike/tests",
 ]

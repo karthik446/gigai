@@ -52,6 +52,11 @@ compatibility checks without changing any frozen contract.
 - A source scan proving digest and canonical rendering ownership.
 - Before/after frozen-contract hashes and a completion audit.
 
+## Completion evidence
+
+- [Completion audit](../../evidence/phase-1/G01/completion-audit.md)
+- [Terminal handoff](../../evidence/phase-1/G01/terminal-handoff.md)
+
 ## Stop boundary
 
 Stop and raise a contract-change decision if implementation suggests a frozen

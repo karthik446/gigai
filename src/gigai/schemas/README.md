@@ -11,6 +11,23 @@ fixtures, and compatibility tests. Prose in the implementation plan explains
 intent; these files define field names, types, required values, cardinality,
 and enums.
 
+## Production identity API
+
+`gigai.canonical` is the sole shipped implementation of canonical JSON,
+SHA-256 identity, GigAI-owned text normalization, canonical JSON front matter,
+prefixed UUIDv4 IDs, and explicit version selection.
+
+The naming boundary is deliberate:
+
+- `canonical_json_bytes()` and `canonical_json_digest()` identify logical
+  GigAI JSON values;
+- `canonicalize_owned_text()` and `digest_owned_text()` apply the GigAI-owned
+  UTF-8/LF/final-newline contract; and
+- `digest_imported_bytes()` accepts bytes only and hashes them exactly as read,
+  without implicit decoding, encoding, or normalization.
+
+No other product module implements canonical rendering or SHA-256 identity.
+
 ## Files
 
 - `common.schema.json` contains shared identifiers, digests, artifact

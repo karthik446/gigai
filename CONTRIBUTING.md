@@ -11,7 +11,7 @@ uv sync --extra test
 uv run pytest
 ~~~
 
-The complete source suite must run from the repository root and report 31
+The complete source suite must run from the repository root and report 90
 passing tests.
 
 ## Repository boundaries

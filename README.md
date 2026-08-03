@@ -6,8 +6,9 @@ turning goals into reviewable, finite execution graphs.
 > **Status: pre-alpha contracts and executable research.** This repository does
 > not yet contain a GigAI CLI, scheduler, journal, or production runtime. The
 > installable Python distribution currently exposes the frozen serialized
-> contracts as package resources. Commands described in the design documents are
-> planned interfaces, not implemented product behavior.
+> contracts plus canonical identity primitives for JSON, owned text, imported
+> bytes, entity IDs, and explicit version selection. Commands described in the
+> design documents are planned interfaces, not implemented product behavior.
 
 ## Why this exists
 
@@ -27,10 +28,14 @@ content is hashed as exact bytes rather than silently normalized.
 ## What is implemented
 
 - Eight frozen JSON Schema Draft 2020-12 contracts.
-- Restricted canonical JSON and exact-byte golden vectors.
+- One production implementation of restricted canonical JSON, owned-text
+  bytes, exact imported-byte digests, prefixed UUIDv4 IDs, and explicit version
+  selection.
+- Exact-byte golden vectors that the production implementation must preserve.
 - Executable evidence for schema instances, graph semantics, canonicalization,
   concurrent journal sequencing, and bounded Phase 0 feasibility questions.
-- A source suite containing 31 tests: 14 contract tests and 17 Phase 0 tests.
+- A source suite containing 90 tests: 59 production G01 tests, 14 contract
+  tests, and 17 Phase 0 tests.
 - A wheel-level verifier that proves the exact eight schema resources and their
   SHA-256 identities survived packaging.
 
@@ -52,8 +57,29 @@ uv run pytest
 Expected result:
 
 ~~~text
-31 passed
+90 passed
 ~~~
+
+## Canonical identity API
+
+The shipped [gigai.canonical](src/gigai/canonical.py) module is the only product
+implementation of canonical rendering and SHA-256 identity. Its API keeps
+owned and imported bytes visibly separate:
+
+~~~python
+from gigai.canonical import (
+    canonical_json_bytes,
+    canonical_json_digest,
+    canonicalize_owned_text,
+    digest_imported_bytes,
+)
+~~~
+
+`canonicalize_owned_text()` applies GigAI's UTF-8/LF/final-newline contract.
+`digest_imported_bytes()` accepts bytes only and hashes them exactly as read;
+it never performs implicit decoding, encoding, or normalization. The same
+module owns canonical front matter, prefixed UUIDv4 IDs, and explicit active or
+requested Gig-version resolution.
 
 ## Verify the built artifact
 
@@ -66,12 +92,14 @@ uv venv --python 3.11 .wheel-venv
 uv pip install --python .wheel-venv/bin/python --no-deps \
   dist/gigai-0.0.0-py3-none-any.whl
 .wheel-venv/bin/python tools/verify_installed_schemas.py
+.wheel-venv/bin/python tools/verify_installed_canonical.py
 ~~~
 
 Expected result:
 
 ~~~text
 verified 8 installed GigAI schemas
+verified installed GigAI canonical identity API
 ~~~
 
 The lockfile is committed. CI and release verification use uv with
@@ -88,6 +116,7 @@ python -m pytest
 
 | Path | Purpose | Shipped |
 |---|---|---|
+| src/gigai/canonical.py | Sole canonical byte, digest, ID, and version implementation | yes |
 | src/gigai/schemas/ | Single canonical source for frozen serialized contracts | yes |
 | research/contract_spike/ | Executable contract and concurrency proof | no |
 | research/phase0_spike/ | Bounded feasibility evidence | no |

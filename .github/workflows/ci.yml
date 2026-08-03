@@ -42,3 +42,4 @@ jobs:
       - run: uv venv --python 3.11 .wheel-venv
       - run: uv pip install --python .wheel-venv/bin/python --no-deps dist/gigai-0.0.0-py3-none-any.whl
       - run: .wheel-venv/bin/python tools/verify_installed_schemas.py
+      - run: .wheel-venv/bin/python tools/verify_installed_canonical.py
