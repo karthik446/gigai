@@ -26,6 +26,9 @@ transport choices to GigAI domain code.
   than importing or constructing an adapter directly.
 - Migration of the deterministic fixture adapter through that factory, plus
   OpenAI API and OpenRouter API adapters sharing an internal HTTP base.
+- Forward evolution of the G03 diagnostic implementation only. G03's completed
+  contract and evidence remain historical evidence for the G03 commit; G11 owns
+  the replacement wiring and its proof.
 - Explicit local `doctor --live --model-target <name>` checks for configured
   OpenAI Platform API and OpenRouter targets, bounded by the selected target's
   configured budget policy.

@@ -11,6 +11,8 @@
   boundaries.
 - [Phase 1 development evidence](development/evidence/phase-1/) — durable
   completion audits and terminal handoffs produced as goals finish.
+- [Development plans](development/plans/) — approved point-in-time planning
+  records retained until their owning goal's evidence is complete.
 - [Research](research/) — dated evidence, negative findings, and maturity
   boundaries.
 - [Serialized contracts](../src/gigai/schemas/README.md) — the single canonical
