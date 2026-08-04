@@ -75,7 +75,7 @@ def main() -> None:
         binding = resolve_model_adapter(config, "cheap")
         request = binding.request(role="installed-verifier", prompt="offline-only")
         if (
-            binding.target.endpoint.adapter != "openai_api"
+            binding.current.endpoint.adapter != "openai_api"
             or request.max_output_tokens != 8
             or request.target_capabilities != frozenset({"text"})
         ):

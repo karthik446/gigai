@@ -131,8 +131,8 @@ def run_live_doctor(home_root: Path, model_target: str) -> DoctorReport:
     try:
         config = load_config(home_root)
         binding = resolve_model_adapter(config, model_target)
-        target = binding.target.target
-        endpoint = binding.target.endpoint
+        target = binding.current.target
+        endpoint = binding.current.endpoint
         if endpoint.adapter == "deterministic":
             raise AdapterFactoryError(
                 f"model target {model_target!r} is deterministic; --live requires a remote endpoint"

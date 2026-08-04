@@ -22,7 +22,7 @@ class AdapterFactoryError(ValueError):
 class ModelAdapterBinding:
     """A resolved target and its port, without exposing provider choice upstream."""
 
-    target: ResolvedModelTarget
+    current: ResolvedModelTarget
     port: ModelInvocationPort
 
     def request(
@@ -35,15 +35,15 @@ class ModelAdapterBinding:
         """Build a fully resolved request using this target's declared policy."""
 
         return InvocationRequest(
-            target_name=self.target.target.name,
-            endpoint_name=self.target.endpoint.name,
-            model=self.target.target.model,
+            target_name=self.current.target.name,
+            endpoint_name=self.current.endpoint.name,
+            model=self.current.target.model,
             role=role,
             prompt=prompt,
-            target_capabilities=frozenset(self.target.target.capabilities),
+            target_capabilities=frozenset(self.current.target.capabilities),
             required_capabilities=required_capabilities,
-            max_output_tokens=self.target.target.max_output_tokens,
-            reasoning_effort=self.target.target.reasoning_effort,
+            max_output_tokens=self.current.target.max_output_tokens,
+            reasoning_effort=self.current.target.reasoning_effort,
         )
 
 
@@ -53,11 +53,11 @@ def resolve_model_adapter(config: GigAIConfig, target_name: str) -> ModelAdapter
     target = resolve_model_target(config, target_name)
     endpoint = target.endpoint
     if endpoint.adapter == "deterministic":
-        return ModelAdapterBinding(target=target, port=DeterministicAdapter())
+        return ModelAdapterBinding(current=target, port=DeterministicAdapter())
     credential = _credential(config, endpoint.credential, endpoint.name)
     if endpoint.adapter == "openai_api":
         return ModelAdapterBinding(
-            target=target,
+            current=target,
             port=OpenAIAPIAdapter(
                 credential=credential,
                 base_url=endpoint.base_url,
@@ -65,7 +65,7 @@ def resolve_model_adapter(config: GigAIConfig, target_name: str) -> ModelAdapter
         )
     if endpoint.adapter == "openrouter_api":
         return ModelAdapterBinding(
-            target=target,
+            current=target,
             port=OpenRouterAPIAdapter(
                 credential=credential,
                 base_url=endpoint.base_url,

@@ -242,7 +242,7 @@ def test_factory_resolves_remote_target_and_target_policy_before_transport(
     binding = resolve_model_adapter(config, "small")
     request = binding.request(role="diagnostic", prompt="hello")
 
-    assert binding.target.endpoint.adapter == "openai_api"
+    assert binding.current.endpoint.adapter == "openai_api"
     assert request.endpoint_name == "openai"
     assert request.model == "gpt-test"
     assert request.target_capabilities == frozenset({"text"})
@@ -295,7 +295,7 @@ def test_live_doctor_is_opt_in_budgeted_and_redacts_the_runtime_secret(
 
     def fake_resolver(active_config: object, target_name: str) -> ModelAdapterBinding:
         binding = actual_resolver(active_config, target_name)  # type: ignore[arg-type]
-        return binding if target_name == "offline-default" else ModelAdapterBinding(binding.target, FakePort())
+        return binding if target_name == "offline-default" else ModelAdapterBinding(binding.current, FakePort())
 
     monkeypatch.setattr(diagnostics, "resolve_model_adapter", fake_resolver)
     report = run_live_doctor(home, "cheap")
