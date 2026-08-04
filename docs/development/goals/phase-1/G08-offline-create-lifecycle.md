@@ -96,6 +96,10 @@ and local-commit lifecycle.
    publishes the active-version pointer to Commit A with one distinct
    `gig_accepted` handoff and trailers; it is checked against the active-version
    schema, tag, and sealed Commit A before becoming the default.
+   `validate_proposal_workpad` is intentionally a pending-state validator and
+   returns `proposal_not_pending` for an approved envelope, so approval uses it
+   only before Commit A; post-transition validation checks the active-version
+   pointer and its sealed approval reference instead.
 10. Rejection records a terminal proposal outcome and creates no active Gig
     version. An active Gig ID and an approved active Gig version remain distinct
     states.
