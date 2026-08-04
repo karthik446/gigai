@@ -42,5 +42,6 @@ The goal commit uses:
 goal(G07): implement contract validators
 ```
 
-After hosted CI passes that exact commit, G07 is terminally complete and G08 is
-unblocked alongside G06 and G11.
+The original hosted confirmation was superseded by an evidence-correction
+follow-up. After CI passes that exact follow-up commit, G07 is terminally
+complete and G08 is unblocked alongside G06 and G11.

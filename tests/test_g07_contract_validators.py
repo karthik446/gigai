@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 
 from gigai.canonical import canonical_json_bytes, digest_imported_bytes
@@ -21,6 +22,10 @@ from research.contract_spike.tests.test_schemas import (
 
 
 GOAL_C = "goal_77777777-7777-4777-8777-777777777777"
+
+
+def _codes(graph: dict) -> set[str]:
+    return {finding.code for finding in validate_goal_graph(graph).findings}
 
 
 def _valid_graph() -> dict:
@@ -56,22 +61,85 @@ def test_goal_graph_validator_rejects_materializer_that_is_not_a_predecessor() -
     graph["goals"][0]["executor"].update(
         resolution="materialized", materialized_by=GOAL_B, blocking_reason=None
     )
-    codes = {finding.code for finding in validate_goal_graph(graph).findings}
-    assert "unknown_materializer" in codes
+    assert "unknown_materializer" in _codes(graph)
 
 
 def test_goal_graph_validator_rejects_write_effect_without_surface() -> None:
     graph = _valid_graph()
     graph["goals"][0]["effects"] = ["write_workpad"]
-    codes = {finding.code for finding in validate_goal_graph(graph).findings}
-    assert "missing_write_surface" in codes
+    assert "missing_write_surface" in _codes(graph)
 
 
 def test_goal_graph_validator_rejects_incomplete_terminal_evidence() -> None:
     graph = _valid_graph()
     graph["goals"][1]["verification"]["required_evidence"] = ["source-ledger"]
-    codes = {finding.code for finding in validate_goal_graph(graph).findings}
-    assert "incomplete_terminal_evidence" in codes
+    assert "incomplete_terminal_evidence" in _codes(graph)
+
+
+def test_goal_graph_validator_rejects_duplicate_and_noncanonical_goal_ids() -> None:
+    duplicate = _valid_graph()
+    duplicate["goals"].append(copy.deepcopy(duplicate["goals"][0]))
+    assert "duplicate_goal_id" in _codes(duplicate)
+
+    noncanonical = _valid_graph()
+    noncanonical["goals"][0]["goal_id"] = "goal_NOT-A-CANONICAL-UUID"
+    assert "noncanonical_goal_id" in _codes(noncanonical)
+
+
+def test_goal_graph_validator_rejects_an_invalid_internal_version() -> None:
+    graph = _valid_graph()
+    graph["goals"][0]["goal_version"] = 0
+    assert "invalid_goal_version" in _codes(graph)
+
+
+def test_goal_graph_validator_rejects_an_undeclared_source_outcome() -> None:
+    graph = _valid_graph()
+    graph["edges"][0]["on_outcomes"] = ["UNDECLARED"]
+    assert "undeclared_outcome" in _codes(graph)
+
+
+def test_goal_graph_validator_rejects_independent_overlapping_writers() -> None:
+    graph = _valid_graph()
+    graph["edges"] = []
+    graph["entry_goal_ids"] = [GOAL_A, GOAL_B]
+    graph["terminal_goal_ids"] = [GOAL_A, GOAL_B]
+    for goal in graph["goals"]:
+        goal["effects"] = ["write_workpad"]
+        goal["write_surfaces"] = ["manifests/goal-graph.json"]
+    assert "incompatible_parallel_surfaces" in _codes(graph)
+
+
+def test_goal_graph_validator_rejects_an_impossible_aggregate_budget() -> None:
+    graph = _valid_graph()
+    graph["aggregate_budget"]["max_tokens"] = 1
+    assert "impossible_budget" in _codes(graph)
+
+
+def test_goal_graph_validator_rejects_a_blocking_resolution_without_reason() -> None:
+    graph = _valid_graph()
+    graph["goals"][0]["executor"].update(
+        resolution="blocking", materialized_by=None, blocking_reason=None
+    )
+    assert "invalid_blocking_resolution" in _codes(graph)
+
+
+def test_goal_graph_validator_rejects_a_write_surface_on_a_read_only_goal() -> None:
+    graph = _valid_graph()
+    graph["goals"][0]["write_surfaces"] = ["manifests/goal-graph.json"]
+    assert "unexpected_write_surface" in _codes(graph)
+
+
+def test_goal_graph_validator_rejects_an_unreachable_required_goal() -> None:
+    graph = _valid_graph()
+    unreachable = copy.deepcopy(graph["goals"][1])
+    unreachable.update(
+        goal_id=GOAL_C,
+        display_ordinal="G02",
+        slug="unreachable",
+        title="Unreachable",
+    )
+    graph["goals"].append(unreachable)
+    assert "unreachable_required_goal" in _codes(graph)
 
 
 def test_goal_graph_validator_reports_missing_entry_without_suppressing_cycle() -> None:
@@ -87,22 +155,20 @@ def test_goal_graph_validator_reports_missing_entry_without_suppressing_cycle() 
             "automatic": True,
         }
     )
-    codes = {finding.code for finding in validate_goal_graph(graph).findings}
+    codes = _codes(graph)
     assert {"missing_entry_path", "graph_cycle"} <= codes
 
 
 def test_goal_graph_validator_reports_missing_terminal_path() -> None:
     graph = _valid_graph()
     graph["terminal_goal_ids"] = []
-    codes = {finding.code for finding in validate_goal_graph(graph).findings}
-    assert "missing_terminal_path" in codes
+    assert "missing_terminal_path" in _codes(graph)
 
 
 def test_goal_graph_validator_requires_a_typed_automatic_outcome() -> None:
     graph = _valid_graph()
     graph["edges"][0]["on_outcomes"] = []
-    codes = {finding.code for finding in validate_goal_graph(graph).findings}
-    assert "missing_automatic_outcome" in codes
+    assert "missing_automatic_outcome" in _codes(graph)
 
 
 def _joined_graph() -> dict:
@@ -146,8 +212,7 @@ def test_goal_graph_validator_accepts_a_multi_parent_join() -> None:
 def test_goal_graph_validator_rejects_duplicated_join_predecessor() -> None:
     graph = _joined_graph()
     graph["edges"][2]["from_goal_id"] = GOAL_A
-    codes = {finding.code for finding in validate_goal_graph(graph).findings}
-    assert "invalid_join_predecessors" in codes
+    assert "invalid_join_predecessors" in _codes(graph)
 
 
 def _write_valid_proposal(root: Path) -> None:
@@ -219,3 +284,40 @@ def test_workpad_validator_proves_digest_pinning_and_markdown_correspondence(
     (tmp_path / "goals/01-synthesize.md").write_text("# Changed\n", encoding="utf-8")
     codes = {finding.code for finding in validate_proposal_workpad(tmp_path).findings}
     assert "goal_contract_mismatch" in codes
+
+
+def _proposal_payload(root: Path) -> dict:
+    return json.loads((root / "manifests/gig-proposal.json").read_bytes())
+
+
+def _write_proposal_payload(root: Path, payload: dict) -> None:
+    (root / "manifests/gig-proposal.json").write_bytes(canonical_json_bytes(payload))
+
+
+def test_workpad_validator_rejects_approved_status_before_approval(
+    tmp_path: Path,
+) -> None:
+    _write_valid_proposal(tmp_path)
+    proposal = _proposal_payload(tmp_path)
+    proposal["status"] = "approved"
+    _write_proposal_payload(tmp_path, proposal)
+    codes = {finding.code for finding in validate_proposal_workpad(tmp_path).findings}
+    assert "proposal_not_pending" in codes
+
+
+def test_workpad_validator_rejects_a_stale_proposal_artifact_digest(
+    tmp_path: Path,
+) -> None:
+    _write_valid_proposal(tmp_path)
+    proposal = _proposal_payload(tmp_path)
+    proposal["gig_document"]["content_sha256"] = "sha256:" + "0" * 64
+    _write_proposal_payload(tmp_path, proposal)
+    codes = {finding.code for finding in validate_proposal_workpad(tmp_path).findings}
+    assert "artifact_digest_mismatch" in codes
+
+
+def test_workpad_validator_rejects_unreferenced_goal_markdown(tmp_path: Path) -> None:
+    _write_valid_proposal(tmp_path)
+    (tmp_path / "goals/99-orphan.md").write_text("# Orphan\n", encoding="utf-8")
+    codes = {finding.code for finding in validate_proposal_workpad(tmp_path).findings}
+    assert "unreferenced_goal_markdown" in codes

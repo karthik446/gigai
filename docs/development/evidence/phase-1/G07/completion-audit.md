@@ -66,6 +66,7 @@ recovery-edge/join interpretation and every Section 6.5 mapping.
 
 ## Completion decision
 
-G07 is locally complete. Hosted CI on the exact goal commit remains the
-publication confirmation gate. Once it passes, G08 has all declared Phase 1
-prerequisites: G06, G07, and G11.
+G07's original hosted confirmation was superseded when the evidence review
+found missing regression assertions. This audit is pending the follow-up
+evidence-correction commit and its exact hosted CI run. Once that run passes,
+G08 has all declared Phase 1 prerequisites: G06, G07, and G11.
