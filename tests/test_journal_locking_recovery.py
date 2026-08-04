@@ -165,6 +165,43 @@ def test_timeout_remote_and_identity_ownership_fail_closed(tmp_path: Path) -> No
         _write(workpad, 1)
 
 
+def test_writer_lock_retries_with_a_nonzero_backoff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from gigai import journal
+    from gigai.journal import InterprocessLockUnavailable
+
+    workpad = _workpad(tmp_path)
+    lock = workpad / ".git" / "gigai-writer.lock"
+    import fcntl
+
+    with lock.open("a+b") as stream:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        monotonic_values = iter((0.0, 0.0, 0.00099, 0.001))
+        sleeps: list[float] = []
+        monkeypatch.setattr(journal.time, "monotonic", lambda: next(monotonic_values))
+        monkeypatch.setattr(journal.time, "sleep", sleeps.append)
+        with pytest.raises(InterprocessLockUnavailable, match="writer lock timeout"):
+            with journal._writer_lock(lock, 0.001):
+                pass
+    assert sleeps == [0.001]
+
+
+def test_journal_trailers_use_only_the_final_paragraph_and_reject_duplicates() -> None:
+    from gigai.journal import JournalReconciliationRequired, _trailers
+
+    message = (
+        "journal: normal transition\n\n"
+        "A body line that happens to say GigAI-Handoff-Sequence: 999999999999.\n\n"
+        f"GigAI-Handoff-Sequence: 000000000001\nGigAI-Handoff: {_handoff(1)}\n"
+    )
+    assert _trailers(message) == {
+        "GigAI-Handoff-Sequence": "000000000001",
+        "GigAI-Handoff": _handoff(1),
+    }
+    duplicate = message + f"GigAI-Handoff: {_handoff(2)}\n"
+    with pytest.raises(JournalReconciliationRequired, match="duplicate GigAI-Handoff"):
+        _trailers(duplicate)
+
+
 def test_failed_mount_probe_blocks_before_handoff_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from gigai.diagnostics import DiagnosticCheck
     from gigai.journal import InterprocessLockUnavailable

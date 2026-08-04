@@ -52,10 +52,7 @@ jobs:
       - run: >-
           uv run --locked --extra test pytest
           tests/test_cli_and_scenario_harness.py
-          tests/test_g03_installed_scenarios.py
-          tests/test_g04_installed_scenarios.py
-          tests/test_g05_installed_scenarios.py
-          tests/test_g11_installed_scenarios.py
+          tests/test_g*_installed_scenarios.py
           -k 'installed_help_version or installed_'
         env:
           GIGAI_TEST_EXECUTABLE: ${{ github.workspace }}/.wheel-venv/bin/gigai

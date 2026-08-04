@@ -216,12 +216,14 @@ def migrate_config(home_root: Path) -> tuple[GigAIConfig, bool]:
         )
     try:
         migrated = _parse_config_v1(payload, source=path)
-        changed = write_config_atomic(migrated)
+        write_config_atomic(migrated)
     except (ConfigurationError, OSError, ValueError) as exc:
         raise ConfigurationMigrationError(
             f"configuration v1-to-v2 migration at {path} failed: {exc}"
         ) from exc
-    return migrated, changed
+    # A v1 input that reaches this point was explicitly migrated, even if a
+    # concurrent equivalent writer made the final atomic write a byte no-op.
+    return migrated, True
 
 
 def normalize_config(config: GigAIConfig) -> GigAIConfig:

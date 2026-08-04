@@ -13,6 +13,7 @@ from .port import ModelInvocationError
 
 
 CredentialResolver = Callable[[CredentialReference], str]
+DEFAULT_HTTP_TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
 
 
 class HttpModelAdapter:
@@ -43,11 +44,13 @@ class HttpModelAdapter:
         if extra_headers:
             headers.update(extra_headers)
         owns_client = self._client is None
-        client = self._client or httpx.Client(timeout=15.0)
+        client = self._client or httpx.Client(timeout=DEFAULT_HTTP_TIMEOUT)
         try:
             response = client.post(f"{self._base_url}{path}", json=dict(payload), headers=headers)
             response.raise_for_status()
             body = response.json()
+        except httpx.TimeoutException as exc:
+            raise ModelInvocationError("model HTTP invocation timed out") from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise ModelInvocationError(f"model HTTP invocation failed: {exc}") from exc
         finally:
@@ -58,4 +61,4 @@ class HttpModelAdapter:
         return body
 
 
-__all__ = ["CredentialResolver", "HttpModelAdapter"]
+__all__ = ["CredentialResolver", "DEFAULT_HTTP_TIMEOUT", "HttpModelAdapter"]

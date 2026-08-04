@@ -10,9 +10,10 @@ import pytest
 from click.testing import CliRunner
 
 from gigai.adapters.factory import ModelAdapterBinding, resolve_model_adapter
+from gigai.adapters.normalization import normalize_usage
 from gigai.adapters.openai_api import OpenAIAPIAdapter
 from gigai.adapters.openrouter_api import OpenRouterAPIAdapter
-from gigai.adapters.port import InvocationRequest, InvocationResult, NormalizedUsage
+from gigai.adapters.port import InvocationRequest, InvocationResult, ModelInvocationError, NormalizedUsage
 from gigai.config import (
     CONFIG_SCHEMA_VERSION,
     ConfigurationMigrationError,
@@ -218,6 +219,33 @@ def test_provider_adapters_share_port_and_preserve_raw_distinct_usage(
     assert "g11-secret-canary" not in repr(result)
     if adapter_type is OpenAIAPIAdapter:
         assert result.raw_usage["input_tokens_details"] == {"cached_tokens": 1}
+
+
+def test_usage_normalization_accepts_integral_float_counts_only() -> None:
+    normalized = normalize_usage(
+        {"input_tokens": 3.0, "output_tokens": 5.0, "total_tokens": 8.0}
+    )
+    assert (normalized.input_tokens, normalized.output_tokens, normalized.total_tokens) == (3, 5, 8)
+    rejected = normalize_usage(
+        {"input_tokens": True, "prompt_tokens": -1.0, "output_tokens": 5.5, "total_tokens": -8.0}
+    )
+    assert (rejected.input_tokens, rejected.output_tokens, rejected.total_tokens) == (None, None, None)
+
+
+def test_provider_timeout_is_distinct_and_never_includes_the_bearer_value() -> None:
+    request = httpx.Request("POST", "https://provider.invalid/v1/responses")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("provider was slow", request=request)
+
+    adapter = OpenAIAPIAdapter(
+        credential=CredentialReference("provider", "environment", "GIGAI_TEST_TOKEN"),
+        credential_resolver=lambda _: "timeout-secret-canary",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    with pytest.raises(ModelInvocationError, match="invocation timed out") as failure:
+        adapter.invoke(_request())
+    assert "timeout-secret-canary" not in str(failure.value)
 
 
 def test_factory_resolves_remote_target_and_target_policy_before_transport(

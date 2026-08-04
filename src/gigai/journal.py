@@ -99,6 +99,9 @@ def reconcile_journal(*, workpad: Path, project_id: str, gig_id: str, lock_timeo
         handoffs = root / "handoffs"
         if not handoffs.exists():
             return ReconciliationResult(False, None, _head_commit(root, required=False))
+        # G06 writers create matching temporary handoffs only while holding this
+        # same lock. Reconciliation therefore cannot unlink a live G06 writer's
+        # file; deliberately different temporary names remain untouched.
         for temporary in handoffs.glob(".gigai-handoff-*.tmp"):
             temporary.unlink()
         head = _read_head(root)
@@ -140,7 +143,8 @@ def _writer_lock(path: Path, timeout_seconds: float) -> Iterator[None]:
                         "interprocess_lock_unavailable: writer lock timeout "
                         f"owner={_lock_owner(path)}"
                     ) from None
-                time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+                # Do not turn a nearly expired contention wait into a busy spin.
+                time.sleep(min(0.01, max(0.001, deadline - time.monotonic())))
         try:
             stream.seek(0)
             stream.truncate()
@@ -239,12 +243,23 @@ def _next_sequence(root: Path, head: str | None) -> tuple[int, str | None, str |
 
 
 def _trailers(message: str) -> dict[str, str]:
+    """Read GigAI ownership trailers only from Git's final trailer paragraph."""
+
+    stripped = message.rstrip("\n")
+    if "\n\n" not in stripped:
+        return {}
+    paragraph = stripped.rsplit("\n\n", 1)[1]
     result: dict[str, str] = {}
-    for line in message.splitlines():
-        if ": " in line:
-            key, value = line.split(": ", 1)
-            if key in {SEQUENCE_TRAILER, HANDOFF_TRAILER}:
-                result[key] = value
+    for line in paragraph.splitlines():
+        if ": " not in line:
+            return {}
+        key, value = line.split(": ", 1)
+        if key in {SEQUENCE_TRAILER, HANDOFF_TRAILER}:
+            if key in result:
+                raise JournalReconciliationRequired(
+                    f"journal head has duplicate {key} trailers"
+                )
+            result[key] = value
     return result
 
 
