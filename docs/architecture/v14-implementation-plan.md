@@ -788,7 +788,9 @@ immutable authority for the new Gig version.
 
 Before review, graph validation proves:
 
-- stable Goal IDs and versions;
+- duplicate-free canonical Goal IDs and internally valid versions; cross-version
+  stability is checked during the later approval comparison against a prior
+  approved graph;
 - no dependency or recovery cycle;
 - at least one entry and one terminal path;
 - every required Goal is reachable;
@@ -799,6 +801,13 @@ Before review, graph validation proves:
 - every terminal path produces the required Gig completion evidence;
 - referenced tools and executors are installed, materialized by an earlier
   Goal, or explicitly blocking.
+
+Each Goal declares its executor and tools with one exact resolution:
+`installed`, `materialized`, or `blocking`. A materialized executor or tool
+names its producer Goal; a blocking one records why it cannot yet resolve. The
+graph separately declares its required Gig completion-evidence identifiers.
+Every terminal path must end at a Goal whose declared evidence includes every
+such identifier.
 
 ### 6.6 Review, feedback, and agreement
 
@@ -946,6 +955,14 @@ The scheduler will not overlap Goals when:
 - an executor or tool has exclusive ownership;
 - their combined maximum spend exceeds the remaining Gig budget;
 - the approved graph requires deterministic ordering.
+
+For v1 proposal validation, a Goal with `write_target`, `write_workpad`, or
+`external_write` declares one or more nonempty `write_surfaces`. Distinct
+surfaces are the declaration that otherwise-independent Goals are isolated. An
+overlap is invalid unless both Goals declare the same `exclusive_resources`
+entry: that entry is an explicit mutual-exclusion declaration, so the pair is
+valid but must be serialized rather than run concurrently. A Goal with no
+write effect declares no write surface.
 
 Initial failure policies are:
 
