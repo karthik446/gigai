@@ -17,8 +17,10 @@ canonical production APIs and installed black-box harness.
 - Rewrite the proven graph validator behind named production interfaces.
 - Validate the required Markdown proposal artifacts and their correspondence
   to the machine-readable manifests.
-- Prove stable Goal IDs and versions; acyclic dependencies and recovery; entry,
-  terminal, reachability, join, and typed-outcome rules.
+- Prove duplicate-free canonical Goal IDs and internally valid versions;
+  acyclic dependencies and recovery; entry, terminal, reachability, join, and
+  typed-outcome rules. G08 compares a proposal to a prior approved version for
+  cross-version ID and version stability.
 - Validate compatible parallel effects or declared isolation.
 - Validate satisfiable aggregate and per-Goal budgets.
 - Prove that every terminal path yields required Gig completion evidence.
@@ -32,16 +34,20 @@ canonical production APIs and installed black-box harness.
 - Generating a proposal or repairing an invalid graph automatically.
 - Approving user authority, executing a capability, or resolving live provider
   facts.
-- Changing schemas, vectors, graph semantics, or accepted defaults.
+- Changing schemas, vectors, graph semantics, or accepted defaults. The
+  pre-implementation V14 contract amendment defining tool resolution,
+  completion evidence, and write-surface isolation precedes this goal; G07
+  consumes that contract and introduces no further serialized-contract change.
 - Treating JSON Schema success alone as semantic Goal Graph validity.
 
 ## Acceptance criteria
 
 1. Every required artifact and cross-reference has one named production
    validator and corresponding positive and negative tests.
-2. Validation rejects duplicate or unstable IDs, dependency or recovery
-   cycles, missing entry or terminal paths, unreachable required Goals, and
-   invalid join predecessors.
+2. Validation rejects duplicate or noncanonical IDs, invalid internal versions,
+   dependency or recovery cycles, missing entry or terminal paths, unreachable
+   required Goals, and invalid join predecessors. G08 owns cross-version
+   stability checks against a prior approved graph.
 3. Validation rejects undeclared automatic outcomes, incompatible parallel
    effects, impossible budgets, incomplete terminal evidence, and unresolved
    non-blocking tools or executors.

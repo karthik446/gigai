@@ -91,7 +91,18 @@ def goal(
             "kind": "fixed_role_api",
             "capability": "research.execute@1",
             "role": "researcher",
+            "resolution": "installed",
+            "materialized_by": None,
+            "blocking_reason": None,
         },
+        "tools": [
+            {
+                "name": "web.search@1",
+                "resolution": "installed",
+                "materialized_by": None,
+                "blocking_reason": None,
+            }
+        ],
         "effects": ["read_target", "write_workpad", "network_read"],
         "write_surfaces": [],
         "exclusive_resources": [],
@@ -130,6 +141,7 @@ def goal_graph() -> dict[str, Any]:
         ],
         "entry_goal_ids": [GOAL_A],
         "terminal_goal_ids": [GOAL_B],
+        "required_completion_evidence": ["completion-audit"],
     }
 
 

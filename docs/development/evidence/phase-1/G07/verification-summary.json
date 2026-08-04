@@ -1,0 +1,24 @@
+{
+  "goal": "G07",
+  "date": "2026-08-04",
+  "package_version": "0.0.0",
+  "source_matrix": {
+    "3.11": "PASS",
+    "3.12": "PASS",
+    "3.13": "PASS"
+  },
+  "installed_verifiers": [
+    "schemas",
+    "canonical",
+    "cli",
+    "g03",
+    "g04",
+    "g05",
+    "g06",
+    "g07",
+    "g11"
+  ],
+  "installed_scenarios": {"passed": 33, "deselected": 18},
+  "schema_resources": 8,
+  "canonical_vector_sha256": "14461cff88552b9ec1a86b02f47619208d8a50c952a73e43e09407d2b074587f"
+}

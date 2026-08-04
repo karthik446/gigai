@@ -46,7 +46,7 @@ def main() -> None:
         raise SystemExit("gigai --version did not use installed distribution metadata")
     if "Commands:" not in help_result.stdout:
         raise SystemExit("gigai --help did not expose the approved command group")
-    for command in ("setup", "doctor", "init", "workpad", "open"):
+    for command in ("setup", "doctor", "init", "workpad", "check", "open"):
         if command not in help_result.stdout:
             raise SystemExit(f"gigai --help omitted approved command {command!r}")
     for command in ("create", "run", "goals"):
@@ -66,7 +66,7 @@ def main() -> None:
 
     print(
         "verified installed GigAI CLI: help, version, setup, doctor, init, "
-        "workpad path, and open only"
+        "workpad path, check, and open only"
     )
 
 
