@@ -63,6 +63,7 @@
       "enum": [
         "creation_started",
         "gig_proposal_ready",
+        "gig_proposal_feedback_recorded",
         "gig_proposal_revised",
         "gig_proposal_approved",
         "gig_proposal_rejected",
