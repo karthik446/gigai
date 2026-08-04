@@ -1,6 +1,6 @@
 # GigAI command sheet
 
-- **Date:** 2026-08-02
+- **Date:** 2026-08-03
 - **Status:** companion operator contract for the implementation plan
 - **Plan:** `docs/architecture/v14-implementation-plan.md`, revision 14
 
@@ -87,6 +87,17 @@ to infer order. Handoffs use a per-Gig sequence such as
 writer lock. Approved Gig versions are positive integers. Without `--version`,
 commands use `manifests/active-gig-version.json`; they never guess "latest".
 
+### Identifier resolution
+
+Every command ID input accepts either its full canonical ID or an unambiguous,
+type-qualified prefix. A prefix includes the entity kind and at least six UUID
+hexadecimal characters, for example `gp_a1b2c3`; bare UUID fragments are not
+accepted. Ambiguous prefixes fail closed and list candidates.
+
+Short forms are input convenience only. JSON output, journal records,
+manifests, and sealed bytes always contain full canonical IDs. Automation should
+retain the full ID returned by `--json` rather than persist a display prefix.
+
 ## First use
 
 ```bash
@@ -109,29 +120,27 @@ than backed by an untested lock implementation.
 ## Setup and model access
 
 ```bash
-gigai setup
-gigai models
-gigai profiles
+gigai setup --non-interactive --editor /usr/bin/true
 gigai doctor
+gigai doctor --live --model-target <configured-target>
 ```
 
-The setup wizard:
+The implemented setup surface:
 
-1. chooses the GigAI home, workpad mount, and default IDE;
-2. detects Codex and Claude CLIs and authentication presence without reading or
-   copying token values;
-3. offers OpenAI API, Anthropic API, OpenRouter API, Codex CLI, Claude CLI, or
-   any mix;
-4. stores API keys in the OS credential store or records only an environment or
-   secret-manager reference;
-5. optionally fetches provider catalogs as an explicit metadata network action;
-6. creates one or more named model targets per endpoint;
-7. creates a default role profile and optional named profiles;
-8. materializes immutable built-in packs and editable user capabilities;
-9. shows every filesystem, credential-store, and network effect before apply.
+1. records the GigAI home, authoritative workpad mount, and structured editor
+   argv;
+2. records environment or secret-manager credential references, never values;
+3. materializes the deterministic offline endpoint and default profile;
+4. optionally adds an OpenAI Platform API or OpenRouter endpoint with
+   `--endpoint NAME=ADAPTER:CREDENTIAL`;
+5. optionally adds a text target with
+   `--model-target NAME=ENDPOINT:MODEL` and its explicit live-call policy with
+   `--target-output-limit TARGET=MAX_OUTPUT_TOKENS` and optional
+   `--target-reasoning-effort TARGET=EFFORT`;
+6. materializes the immutable standard pack and checks the chosen mount.
 
-Raw keys are entered only through hidden input. They never belong in argv,
-`config.toml`, a target repository, a workpad, or Git.
+Raw keys are never accepted through GigAI argv, prompts, or `config.toml`.
+They never belong in a target repository, a workpad, or Git.
 
 The model configuration layers remain separate:
 
@@ -141,36 +150,25 @@ Model target   endpoint + model selector policy + inference settings
 Profile        default target + role-to-target mappings
 ```
 
-The equal first-class v1 adapters are:
+The currently implemented adapters are:
 
 ```text
+deterministic
 openai_api
-anthropic_api
 openrouter_api
-codex_cli
-claude_cli
 ```
 
-Inspect configuration without generation:
+Anthropic API, Codex CLI, and Claude CLI are intentionally deferred to separate
+adapter goals. `doctor` is offline by default. A provider call requires both
+`--live` and a named configured target; it uses that target's configured
+output-token limit and emits only share-safe evidence.
+
+Diagnostic output is available in a stable share-safe JSON projection:
 
 ```bash
-gigai models
-gigai models --endpoint openai-main
-gigai models --endpoint openai-main --search coding
-gigai models --endpoint openai-main --refresh
-gigai profiles
+gigai doctor --json
+gigai doctor --live --model-target openai-small --json
 ```
-
-Catalog state is not compatibility proof:
-
-```text
-DISCOVERED      selector appeared in provider or CLI metadata
-COMPATIBLE      versioned adapter evidence supports the required capability
-LIVE-VERIFIED   an explicit scoped live probe succeeded
-```
-
-Refresh is an explicit metadata request. Large catalogs are searched, filtered,
-or paginated rather than dumped. No provider or model fallback is silent.
 
 ## Initialize and open a target
 
@@ -223,8 +221,8 @@ Gig Proposal
   Graph: <workpad>/manifests/goal-graph.json
   Review: <workpad>/reviews/creation-review.md
   Open: gigai open
-  Feedback: gigai feedback gp_33333333-3333-4333-8333-333333333333
-  Approve: gigai approve gp_33333333-3333-4333-8333-333333333333
+  Feedback: gigai feedback gp_333333
+  Approve: gigai approve gp_333333
 ```
 
 Creation stops here. It never approves the proposal and never starts a Run.
@@ -331,6 +329,11 @@ gigai eval <gig-id> --goal <goal-id> [--suite <name>] [--version <version>]
 `check` answers whether the authored Gig is structurally valid. `doctor` answers
 whether this machine can support it. Higher-level commands perform the required
 checks automatically; users do not need to memorize command chains.
+
+`doctor --live` is an explicit local compatibility probe for a configured model
+target. It is excluded from CI and offline scenarios, is bounded by the target
+budget policy, and emits only redacted, share-safe evidence. It is not a claim
+that every configured provider has passed a live gate.
 
 `preview` cannot prove every arbitrary Python path. `rehearse` is authoritative
 only for its selected fixture case. Neither grants execution authority.

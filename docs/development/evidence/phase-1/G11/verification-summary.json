@@ -1,0 +1,17 @@
+{
+  "goal": "G11",
+  "date": "2026-08-03",
+  "package_version": "0.0.0",
+  "source_matrix": {
+    "3.11": {"passed": 216, "subtests_passed": 22},
+    "3.12": {"passed": 216, "subtests_passed": 22},
+    "3.13": {"passed": 216, "subtests_passed": 22}
+  },
+  "installed_verifiers": ["schemas", "canonical", "cli", "g03", "g04", "g05", "g11"],
+  "live_proofs": [
+    {"adapter": "openai_api", "target": "openai-luna", "model": "gpt-5.6-luna", "max_output_tokens": 4096, "reasoning_effort": "high", "cost_status": "unavailable", "status": "PASS"},
+    {"adapter": "openrouter_api", "target": "openrouter-kimi-k3", "model": "moonshotai/kimi-k3", "max_output_tokens": 4096, "reasoning_effort": "provider-default", "cost_status": "unavailable", "status": "PASS"}
+  ],
+  "schema_resources": 8,
+  "canonical_vector_sha256": "14461cff88552b9ec1a86b02f47619208d8a50c952a73e43e09407d2b074587f"
+}

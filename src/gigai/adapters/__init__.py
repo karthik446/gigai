@@ -1,5 +1,23 @@
-"""Model adapter boundaries."""
+"""Model adapter port and factory boundary."""
 
-from .deterministic import DeterministicAdapter, OfflineAdapterError
+from .factory import AdapterFactoryError, ModelAdapterBinding, resolve_model_adapter
+from .port import (
+    CapabilityMismatchError,
+    InvocationRequest,
+    InvocationResult,
+    ModelInvocationError,
+    ModelInvocationPort,
+    NormalizedUsage,
+)
 
-__all__ = ["DeterministicAdapter", "OfflineAdapterError"]
+__all__ = [
+    "AdapterFactoryError",
+    "CapabilityMismatchError",
+    "InvocationRequest",
+    "InvocationResult",
+    "ModelAdapterBinding",
+    "ModelInvocationError",
+    "ModelInvocationPort",
+    "NormalizedUsage",
+    "resolve_model_adapter",
+]

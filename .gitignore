@@ -1,5 +1,6 @@
 # Local agent state
 .codex/
+.env
 
 # Python environments and generated files
 .venv/

@@ -18,7 +18,7 @@ and make an explicit go/no-go decision for Phase 2.
   offline container.
 - Audit exact target deltas, private workpad locality, Git remotes, semantic
   handoffs, rebuildable index identity, and command effects.
-- Reconcile G00–G09 completion audits and unresolved findings.
+- Reconcile G00–G11 completion audits and unresolved findings.
 - Publish one Phase 1 completion audit and terminal handoff with explicit
   limitations and deferred work.
 
@@ -44,7 +44,9 @@ and make an explicit go/no-go decision for Phase 2.
 7. Every workpad has no remote.
 8. Deleting and rebuilding `state.sqlite` preserves the canonical
    `status --json` projection.
-9. No Phase 1 scenario uses network access or tokens.
+9. No Phase 1 scenario uses network access or tokens. G11's separately
+   evidenced, local-only, opt-in live checks are redacted operator verification
+   and are explicitly outside the audited scenario set.
 10. The full matrix passes on macOS, Ubuntu, and the Debian offline container,
     or the audit records a blocking failure and stops.
 11. Every Phase 1 plan requirement maps to a passing test, concrete artifact,

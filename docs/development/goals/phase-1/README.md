@@ -15,12 +15,14 @@ is resolved explicitly; implementation does not weaken the plan by inference.
 G00 -> G01, G02
 G01 + G02 -> G03, G07
 G03 -> G04 -> G05 -> G06
-G06 + G07 -> G08 -> G09 -> G10
+G03 -> G11
+G06 + G07 + G11 -> G08 -> G09 -> G10
 ```
 
-G01 and G02 may proceed in parallel after G00. G07 requires both. G08 is the
-join between the persistence path completed by G06 and the validation path
-completed by G07.
+G01 and G02 may proceed in parallel after G00. G07 requires both. G11 depends
+only on G03 and may proceed independently of G06 and G07. G08 is the join
+between the persistence path completed by G06, the validation path completed by
+G07, and the model-invocation foundation completed by G11.
 
 | Goal | Outcome | Depends on | Initial state |
 |---|---|---|---|
@@ -32,9 +34,10 @@ completed by G07.
 | [G05](G05-workpad-private-git.md) | Workpad resolution and private Git journal | G04 | Blocked |
 | [G06](G06-journal-locking-recovery.md) | Atomic journal ordering and recovery | G05 | Blocked |
 | [G07](G07-contract-validators.md) | Complete proposal and Goal Graph validators | G01, G02 | Blocked |
-| [G08](G08-offline-create-lifecycle.md) | Persisted offline proposal lifecycle | G06, G07 | Blocked |
+| [G08](G08-offline-create-lifecycle.md) | Persisted offline proposal lifecycle | G06, G07, G11 | Blocked |
 | [G09](G09-index-and-read-commands.md) | Rebuildable index and offline read surface | G08 | Blocked |
 | [G10](G10-phase-1-completion-audit.md) | Cross-platform Phase 1 completion audit | G09 | Blocked |
+| [G11](G11-model-invocation-foundation.md) | Model port, factory, and initial API adapters | G03 | Ready |
 
 “Ready” and “Blocked” describe the graph before implementation begins. They are
 not live status fields and should not be edited to simulate a tracker. Public
@@ -53,8 +56,10 @@ Every goal stops only after it has:
 - written a durable terminal handoff before downstream work begins.
 
 A dependency-ready goal may begin only from the committed completion evidence
-of every dependency. A later goal must not opportunistically alter a frozen
-schema, golden vector, or completed goal contract.
+of every dependency. A later goal must not opportunistically alter a serialized
+contract, golden vector, or completed goal contract. Before the first public
+release, serialized-contract changes follow the approved pre-release policy;
+afterward they follow ADR 0003's immutable/additive regime.
 
 ## Evidence layout
 
