@@ -23,7 +23,6 @@ from tests.scenarios import (
 
 
 PLANNED_COMMANDS = (
-    "create",
     "run",
     "goals",
     "preview",
@@ -58,9 +57,13 @@ def test_runtime_metadata_declares_click_and_console_script_is_installed(
 ) -> None:
     runtime_requirements = requires("gigai") or []
 
-    assert any(requirement.lower().startswith("click>=") for requirement in runtime_requirements)
+    assert any(
+        requirement.lower().startswith("click>=")
+        for requirement in runtime_requirements
+    )
     assert not any(
-        requirement.lower().startswith("click") and "extra == 'test'" in requirement.lower()
+        requirement.lower().startswith("click")
+        and "extra == 'test'" in requirement.lower()
         for requirement in runtime_requirements
     )
     assert installed_gigai.command.executable.is_file()
@@ -80,8 +83,12 @@ def test_installed_help_version_and_goal_approved_commands_are_the_only_surface(
     bare_result = harness.run(
         ScenarioSpec(name="bare", argv=(), expected_exit_codes=frozenset({2}))
     )
-    planned_result = harness.run(
-        ScenarioSpec(name="planned-command", argv=("create",), expected_exit_codes=frozenset({2}))
+    invalid_create_result = harness.run(
+        ScenarioSpec(
+            name="create-missing-name",
+            argv=("create",),
+            expected_exit_codes=frozenset({2}),
+        )
     )
 
     assert help_result.argv[0] == os.fspath(installed_gigai.command.executable)
@@ -94,14 +101,22 @@ def test_installed_help_version_and_goal_approved_commands_are_the_only_surface(
     assert "init" in help_result.stdout
     assert "open" in help_result.stdout
     assert "setup" in help_result.stdout
+    assert "create" in help_result.stdout
+    assert "feedback" in help_result.stdout
+    assert "revise" in help_result.stdout
+    assert "approve" in help_result.stdout
+    assert "reject" in help_result.stdout
     assert "workpad" in help_result.stdout
     for command in PLANNED_COMMANDS:
         assert command not in help_result.stdout
     assert version_result.stdout == f"gigai {version('gigai')}\n"
-    assert "Choose 'setup', 'doctor', 'init', 'workpad', 'check', or 'open'" in bare_result.stderr
-    assert "No such command 'create'" in planned_result.stderr
+    assert (
+        "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', 'approve', 'reject', 'workpad', 'check', or 'open'"
+        in bare_result.stderr
+    )
+    assert "Missing argument 'NAME'" in invalid_create_result.stderr
 
-    for result in (help_result, version_result, bare_result, planned_result):
+    for result in (help_result, version_result, bare_result, invalid_create_result):
         assert result.target_before == result.target_after
         assert result.workpad_before == result.workpad_after
         assert result.home_before == result.home_after
@@ -153,9 +168,13 @@ def test_manifest_detects_exact_content_and_git_changes(tmp_path: Path) -> None:
     assert before.git.working_diff_sha256 != after.git.working_diff_sha256
 
 
-def test_undeclared_target_write_fails_but_exact_allowlist_passes(tmp_path: Path) -> None:
+def test_undeclared_target_write_fails_but_exact_allowlist_passes(
+    tmp_path: Path,
+) -> None:
     roots = scenario_roots(tmp_path, "target-write-denied")
-    command = python_probe("from pathlib import Path; Path('touched.txt').write_text('exact\\n')")
+    command = python_probe(
+        "from pathlib import Path; Path('touched.txt').write_text('exact\\n')"
+    )
     harness = ScenarioHarness(command, roots)
 
     with pytest.raises(ScenarioViolation) as failure:
@@ -174,9 +193,9 @@ def test_undeclared_target_write_fails_but_exact_allowlist_passes(tmp_path: Path
             expected_target_changes=frozenset({"touched.txt"}),
         )
     )
-    assert allowed_result.target_before.changed_paths(allowed_result.target_after) == frozenset(
-        {"touched.txt"}
-    )
+    assert allowed_result.target_before.changed_paths(
+        allowed_result.target_after
+    ) == frozenset({"touched.txt"})
 
 
 def test_scenario_replaces_ambient_home_workpad_and_credentials(
@@ -186,7 +205,9 @@ def test_scenario_replaces_ambient_home_workpad_and_credentials(
     real_home = Path.home().resolve()
     monkeypatch.setenv("HOME", os.fspath(real_home))
     monkeypatch.setenv("GIGAI_HOME", os.fspath(real_home / ".gigai"))
-    monkeypatch.setenv("GIGAI_WORKPAD_ROOT", os.fspath(real_home / "configured-workpads"))
+    monkeypatch.setenv(
+        "GIGAI_WORKPAD_ROOT", os.fspath(real_home / "configured-workpads")
+    )
     monkeypatch.setenv("OPENAI_API_KEY", "ambient-secret")
     roots = scenario_roots(tmp_path, "ambient-isolation")
     command = python_probe(
@@ -208,7 +229,9 @@ def test_scenario_replaces_ambient_home_workpad_and_credentials(
     assert "ambient-secret" not in result.artifact.read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("key", ("HOME", "PYTHONPATH", "GIGAI_HARNESS_ALLOWED_WRITE_ROOTS"))
+@pytest.mark.parametrize(
+    "key", ("HOME", "PYTHONPATH", "GIGAI_HARNESS_ALLOWED_WRITE_ROOTS")
+)
 def test_scenario_cannot_override_harness_policy(tmp_path: Path, key: str) -> None:
     roots = scenario_roots(tmp_path, f"reserved-{key.lower().replace('_', '-')}")
     harness = ScenarioHarness(python_probe("pass"), roots)
@@ -261,7 +284,12 @@ def test_process_guard_fails_closed(
 ) -> None:
     roots = scenario_roots(tmp_path, name)
     resolved_env = tuple(
-        (key, os.fspath(roots.scenario / "forbidden") if value == "{forbidden}" else value)
+        (
+            key,
+            os.fspath(roots.scenario / "forbidden")
+            if value == "{forbidden}"
+            else value,
+        )
         for key, value in extra_env
     )
     harness = ScenarioHarness(python_probe(code), roots)

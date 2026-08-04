@@ -19,6 +19,14 @@ from .config import (
     migrate_config,
 )
 from .diagnostics import render_report_json, run_doctor, run_live_doctor
+from .lifecycle import (
+    LifecycleError,
+    approve_offline,
+    create_offline,
+    record_feedback,
+    reject_offline,
+    revise_offline,
+)
 from .setup import (
     build_config,
     default_home_root,
@@ -50,13 +58,16 @@ def cli(context: click.Context) -> None:
 
     if context.invoked_subcommand is None:
         raise click.UsageError(
-            "Choose 'setup', 'doctor', 'init', 'workpad', 'check', or 'open'; "
+            "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', "
+            "'approve', 'reject', 'workpad', 'check', or 'open'; "
             "use --help for details."
         )
 
 
 @cli.command("setup")
-@click.option("--non-interactive", is_flag=True, help="Refuse prompts and use explicit options.")
+@click.option(
+    "--non-interactive", is_flag=True, help="Refuse prompts and use explicit options."
+)
 @click.option(
     "--home",
     "home_value",
@@ -68,8 +79,14 @@ def cli(context: click.Context) -> None:
     type=click.Path(path_type=Path, file_okay=False),
     help="Authoritative workpad mount; never silently replaced by a default.",
 )
-@click.option("--editor", help="Editor executable; stored as argv, never a shell command.")
-@click.option("--editor-arg", multiple=True, help="One literal editor argv item; repeat as needed.")
+@click.option(
+    "--editor", help="Editor executable; stored as argv, never a shell command."
+)
+@click.option(
+    "--editor-arg",
+    multiple=True,
+    help="One literal editor argv item; repeat as needed.",
+)
 @click.option(
     "--open-with-target/--no-open-with-target",
     default=None,
@@ -114,7 +131,9 @@ def cli(context: click.Context) -> None:
     metavar="TARGET=none|low|medium|high|xhigh|max",
     help="Set a provider-supported reasoning effort for a model target.",
 )
-@click.option("--json", "as_json", is_flag=True, help="Emit a stable machine-readable summary.")
+@click.option(
+    "--json", "as_json", is_flag=True, help="Emit a stable machine-readable summary."
+)
 def setup_command(
     non_interactive: bool,
     home_value: Path | None,
@@ -133,7 +152,9 @@ def setup_command(
     """Create or update local config and the deterministic standard pack."""
 
     _require_supported_platform()
-    requested_home = (home_value or default_home_root()).expanduser().resolve(strict=False)
+    requested_home = (
+        (home_value or default_home_root()).expanduser().resolve(strict=False)
+    )
     existing = None
     if (requested_home / "config.toml").exists():
         try:
@@ -153,18 +174,28 @@ def setup_command(
             (
                 editor_arg
                 if editor is not None or editor_arg
-                else existing.editor_argv[1:] if existing else ()
+                else existing.editor_argv[1:]
+                if existing
+                else ()
             ),
         )
         resolved_open = (
             open_with_target
             if open_with_target is not None
-            else existing.open_with_target if existing else False
+            else existing.open_with_target
+            if existing
+            else False
         )
     else:
-        requested_home = Path(
-            click.prompt("GigAI home", default=os.fspath(requested_home), show_default=True)
-        ).expanduser().resolve(strict=False)
+        requested_home = (
+            Path(
+                click.prompt(
+                    "GigAI home", default=os.fspath(requested_home), show_default=True
+                )
+            )
+            .expanduser()
+            .resolve(strict=False)
+        )
         if existing is not None and existing.home_root != requested_home:
             existing = None
         if existing is None and (requested_home / "config.toml").exists():
@@ -178,25 +209,35 @@ def setup_command(
         default_workpad = workpad_root or (
             existing.workpad_root if existing else default_workpad_root(requested_home)
         )
-        resolved_workpad = Path(
-            click.prompt("Authoritative workpad root", default=os.fspath(default_workpad))
-        ).expanduser().resolve(strict=False)
+        resolved_workpad = (
+            Path(
+                click.prompt(
+                    "Authoritative workpad root", default=os.fspath(default_workpad)
+                )
+            )
+            .expanduser()
+            .resolve(strict=False)
+        )
         default_editor = editor or (existing.editor_argv[0] if existing else None)
         environment_editor_args: tuple[str, ...] = ()
         if default_editor is None:
-            configured_environment_editor = (
-                os.environ.get("VISUAL") or os.environ.get("EDITOR")
+            configured_environment_editor = os.environ.get("VISUAL") or os.environ.get(
+                "EDITOR"
             )
             if configured_environment_editor:
                 environment_editor = resolve_editor_argv(None)
                 default_editor = environment_editor[0]
                 environment_editor_args = environment_editor[1:]
         resolved_editor = resolve_editor_argv(
-            click.prompt("Editor executable", default=default_editor, show_default=True),
+            click.prompt(
+                "Editor executable", default=default_editor, show_default=True
+            ),
             (
                 editor_arg
                 if editor is not None or editor_arg
-                else existing.editor_argv[1:] if existing else environment_editor_args
+                else existing.editor_argv[1:]
+                if existing
+                else environment_editor_args
             ),
         )
         resolved_open = click.confirm(
@@ -204,21 +245,29 @@ def setup_command(
             default=(
                 open_with_target
                 if open_with_target is not None
-                else existing.open_with_target if existing else False
+                else existing.open_with_target
+                if existing
+                else False
             ),
         )
 
     try:
         if clear_credentials and credential_ref:
-            raise ValueError("--clear-credentials cannot be combined with --credential-ref")
-        credentials = tuple(_parse_credential_reference(value) for value in credential_ref)
+            raise ValueError(
+                "--clear-credentials cannot be combined with --credential-ref"
+            )
+        credentials = tuple(
+            _parse_credential_reference(value) for value in credential_ref
+        )
         if clear_credentials:
             credentials = ()
         elif existing and not credential_ref:
             credentials = existing.credentials
         endpoint_specs = tuple(_parse_endpoint_spec(value) for value in endpoint_spec)
         output_limits = _parse_target_output_limits(target_output_limit_spec)
-        reasoning_efforts = _parse_target_reasoning_efforts(target_reasoning_effort_spec)
+        reasoning_efforts = _parse_target_reasoning_efforts(
+            target_reasoning_effort_spec
+        )
         target_specs = tuple(
             _parse_model_target_spec(value, output_limits, reasoning_efforts)
             for value in model_target_spec
@@ -245,26 +294,31 @@ def setup_command(
         existing_target_names = {item.name for item in existing_targets}
         added_target_names = {item.name for item in target_specs}
         unknown_limits = set(output_limits) - existing_target_names - added_target_names
-        unknown_efforts = set(reasoning_efforts) - existing_target_names - added_target_names
+        unknown_efforts = (
+            set(reasoning_efforts) - existing_target_names - added_target_names
+        )
         if unknown_limits or unknown_efforts:
             raise ValueError(
                 "target output limits or reasoning efforts reference no configured or newly "
                 f"added target: {sorted(unknown_limits | unknown_efforts)}"
             )
-        targets = tuple(
-            replace(
-                target,
-                max_output_tokens=output_limits.get(
-                    target.name, target.max_output_tokens
-                ),
-                reasoning_effort=reasoning_efforts.get(
-                    target.name, target.reasoning_effort
-                ),
+        targets = (
+            tuple(
+                replace(
+                    target,
+                    max_output_tokens=output_limits.get(
+                        target.name, target.max_output_tokens
+                    ),
+                    reasoning_effort=reasoning_efforts.get(
+                        target.name, target.reasoning_effort
+                    ),
+                )
+                if target.name in output_limits or target.name in reasoning_efforts
+                else target
+                for target in existing_targets
             )
-            if target.name in output_limits or target.name in reasoning_efforts
-            else target
-            for target in existing_targets
-        ) + target_specs
+            + target_specs
+        )
         endpoints = (*existing_endpoints, *endpoint_specs)
         if not non_interactive:
             credential_summary = [
@@ -319,7 +373,9 @@ def setup_command(
     type=click.Path(path_type=Path, file_okay=False),
     help="GigAI machine-state directory (default: GIGAI_HOME or ~/.gigai).",
 )
-@click.option("--json", "as_json", is_flag=True, help="Emit stable structured diagnostics.")
+@click.option(
+    "--json", "as_json", is_flag=True, help="Emit stable structured diagnostics."
+)
 @click.option(
     "--live",
     is_flag=True,
@@ -368,7 +424,9 @@ def doctor_command(
     type=click.Path(path_type=Path, file_okay=False),
     help="GigAI machine-state directory (default: GIGAI_HOME or ~/.gigai).",
 )
-@click.option("--json", "as_json", is_flag=True, help="Emit a path-free result summary.")
+@click.option(
+    "--json", "as_json", is_flag=True, help="Emit a path-free result summary."
+)
 def init_command(target: Path | None, home_value: Path | None, as_json: bool) -> None:
     """Bind one target without creating a Gig, workpad, journal, or remote."""
 
@@ -400,6 +458,225 @@ def init_command(target: Path | None, home_value: Path | None, as_json: bool) ->
         )
         if result.reconciled:
             click.echo("Derived registry or exclude state was reconciled.")
+
+
+@cli.command("create")
+@click.argument("name")
+@click.option(
+    "--commission", help="Human-readable commission recorded in the proposal."
+)
+@click.option(
+    "--target",
+    "target_value",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="Explicit target path; defaults to the current Git repository.",
+)
+@click.option(
+    "--home",
+    "home_value",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="GigAI machine-state directory (default: GIGAI_HOME or ~/.gigai).",
+)
+@click.option(
+    "--model-target",
+    default="offline-default",
+    show_default=True,
+    help="Configured deterministic model target used only for offline fixture drafting.",
+)
+@click.option(
+    "--open/--no-open",
+    "open_editor",
+    default=True,
+    help="Open the proposal for review.",
+)
+@click.option(
+    "--json", "as_json", is_flag=True, help="Emit a stable path-safe result summary."
+)
+def create_command(
+    name: str,
+    commission: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    model_target: str,
+    open_editor: bool,
+    as_json: bool,
+) -> None:
+    """Create one offline, review-only Gig Proposal and stop for approval."""
+
+    _require_supported_platform()
+    try:
+        result = create_offline(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            name=name,
+            commission=commission,
+            model_target=model_target,
+            open_editor=open_editor,
+        )
+    except (LifecycleError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {
+        "gig_id": result.gig_id,
+        "project_id": result.project_id,
+        "proposal_id": result.proposal_id,
+        "resumed": result.resumed,
+        "status": "proposed",
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(
+            f"Gig proposal {result.proposal_id} is ready for operator review; "
+            "no Gig version or Run was created."
+        )
+
+
+@cli.command("feedback")
+@click.argument("proposal_id")
+@click.option(
+    "--text", required=True, help="Exact operator feedback to preserve in the journal."
+)
+@click.option(
+    "--target", "target_value", type=click.Path(path_type=Path, file_okay=False)
+)
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+def feedback_command(
+    proposal_id: str, text: str, target_value: Path | None, home_value: Path | None
+) -> None:
+    """Record verbatim operator feedback for one pending proposal."""
+
+    _require_supported_platform()
+    try:
+        entry = record_feedback(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            proposal_id=proposal_id,
+            feedback=text,
+        )
+    except (LifecycleError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"Recorded feedback in journal sequence {entry.sequence}.")
+
+
+@cli.command("revise")
+@click.argument("proposal_id")
+@click.option(
+    "--change",
+    "change_request",
+    required=True,
+    help="Explicit change request for the new proposal.",
+)
+@click.option(
+    "--target", "target_value", type=click.Path(path_type=Path, file_okay=False)
+)
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option(
+    "--json", "as_json", is_flag=True, help="Emit the new canonical proposal ID."
+)
+def revise_command(
+    proposal_id: str,
+    change_request: str,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Produce a new validated proposal linked to a prior pending proposal."""
+
+    _require_supported_platform()
+    try:
+        result = revise_offline(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            proposal_id=proposal_id,
+            change_request=change_request,
+        )
+    except (LifecycleError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    "gig_id": result.gig_id,
+                    "parent_proposal_id": result.parent_proposal_id,
+                    "proposal_id": result.proposal_id,
+                    "status": "proposed",
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+    else:
+        click.echo(
+            f"Proposal {result.proposal_id} supersedes {result.parent_proposal_id} for review."
+        )
+
+
+@cli.command("approve")
+@click.argument("proposal_id")
+@click.option(
+    "--target", "target_value", type=click.Path(path_type=Path, file_okay=False)
+)
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option(
+    "--json", "as_json", is_flag=True, help="Emit the sealed version and commit IDs."
+)
+def approve_command(
+    proposal_id: str, target_value: Path | None, home_value: Path | None, as_json: bool
+) -> None:
+    """Seal one pending proposal as an offline approved Gig version."""
+
+    _require_supported_platform()
+    try:
+        result = approve_offline(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            proposal_id=proposal_id,
+        )
+    except (LifecycleError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {
+        "gig_id": result.gig_id,
+        "proposal_id": result.proposal_id,
+        "sealed_commit": result.sealed_commit,
+        "status": "approved",
+        "tag": result.tag,
+        "version": result.version,
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(
+            f"Approved {result.proposal_id} as {result.tag}; no Run was started."
+        )
+
+
+@cli.command("reject")
+@click.argument("proposal_id")
+@click.option(
+    "--reason", required=True, help="Operator reason retained in the rejection handoff."
+)
+@click.option(
+    "--target", "target_value", type=click.Path(path_type=Path, file_okay=False)
+)
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+def reject_command(
+    proposal_id: str, reason: str, target_value: Path | None, home_value: Path | None
+) -> None:
+    """Reject one pending proposal without creating an executable Gig version."""
+
+    _require_supported_platform()
+    try:
+        entry = reject_offline(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            proposal_id=proposal_id,
+            reason=reason,
+        )
+    except (LifecycleError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(
+        f"Rejected proposal in journal sequence {entry.sequence}; no Gig version was created."
+    )
 
 
 @cli.group("workpad")
@@ -454,9 +731,14 @@ def workpad_path_command(
     type=click.Path(path_type=Path, file_okay=False),
     help="GigAI machine-state directory (default: GIGAI_HOME or ~/.gigai).",
 )
-@click.option("--json", "as_json", is_flag=True, help="Emit a stable path-safe validation report.")
+@click.option(
+    "--json", "as_json", is_flag=True, help="Emit a stable path-safe validation report."
+)
 def check_command(
-    gig_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
 ) -> None:
     """Validate one existing proposal workpad without creating or changing it."""
 
@@ -477,7 +759,9 @@ def check_command(
         click.echo("Gig proposal validation passed.")
     else:
         for finding in report.findings:
-            click.echo(f"{finding.code} {finding.location}: {finding.message}", err=True)
+            click.echo(
+                f"{finding.code} {finding.location}: {finding.message}", err=True
+            )
     if not report.valid:
         raise click.exceptions.Exit(1)
 
@@ -523,6 +807,7 @@ def open_command(
             gig_id=gig_id,
             target_only=target_only,
             with_target=with_target,
+            allow_semantic_state=True,
         )
     except (WorkpadError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
