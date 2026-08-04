@@ -1,6 +1,6 @@
 # GigAI command sheet
 
-- **Date:** 2026-08-02
+- **Date:** 2026-08-03
 - **Status:** companion operator contract for the implementation plan
 - **Plan:** `docs/architecture/v14-implementation-plan.md`, revision 14
 
@@ -86,6 +86,17 @@ to infer order. Handoffs use a per-Gig sequence such as
 `000000000004-run-started.txt`, allocated under the exclusive interprocess
 writer lock. Approved Gig versions are positive integers. Without `--version`,
 commands use `manifests/active-gig-version.json`; they never guess "latest".
+
+### Identifier resolution
+
+Every command ID input accepts either its full canonical ID or an unambiguous,
+type-qualified prefix. A prefix includes the entity kind and at least six UUID
+hexadecimal characters, for example `gp_a1b2c3`; bare UUID fragments are not
+accepted. Ambiguous prefixes fail closed and list candidates.
+
+Short forms are input convenience only. JSON output, journal records,
+manifests, and sealed bytes always contain full canonical IDs. Automation should
+retain the full ID returned by `--json` rather than persist a display prefix.
 
 ## First use
 
@@ -223,8 +234,8 @@ Gig Proposal
   Graph: <workpad>/manifests/goal-graph.json
   Review: <workpad>/reviews/creation-review.md
   Open: gigai open
-  Feedback: gigai feedback gp_33333333-3333-4333-8333-333333333333
-  Approve: gigai approve gp_33333333-3333-4333-8333-333333333333
+  Feedback: gigai feedback gp_333333
+  Approve: gigai approve gp_333333
 ```
 
 Creation stops here. It never approves the proposal and never starts a Run.
@@ -331,6 +342,11 @@ gigai eval <gig-id> --goal <goal-id> [--suite <name>] [--version <version>]
 `check` answers whether the authored Gig is structurally valid. `doctor` answers
 whether this machine can support it. Higher-level commands perform the required
 checks automatically; users do not need to memorize command chains.
+
+`doctor --live` is an explicit local compatibility probe for a configured model
+target. It is excluded from CI and offline scenarios, is bounded by the target
+budget policy, and emits only redacted, share-safe evidence. It is not a claim
+that every configured provider has passed a live gate.
 
 `preview` cannot prove every arbitrary Python path. `rehearse` is authoritative
 only for its selected fixture case. Neither grants execution authority.

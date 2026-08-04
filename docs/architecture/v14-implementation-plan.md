@@ -2066,9 +2066,10 @@ architecture-level dependency summary.
 | [G05 — Workpad and private Git](../development/goals/phase-1/G05-workpad-private-git.md) | G04 |
 | [G06 — Journal locking and recovery](../development/goals/phase-1/G06-journal-locking-recovery.md) | G05 |
 | [G07 — Contract validators](../development/goals/phase-1/G07-contract-validators.md) | G01, G02 |
-| [G08 — Offline create lifecycle](../development/goals/phase-1/G08-offline-create-lifecycle.md) | G06, G07 |
+| [G08 — Offline create lifecycle](../development/goals/phase-1/G08-offline-create-lifecycle.md) | G06, G07, G11 |
 | [G09 — Rebuildable index and read commands](../development/goals/phase-1/G09-index-and-read-commands.md) | G08 |
 | [G10 — Phase 1 completion audit](../development/goals/phase-1/G10-phase-1-completion-audit.md) | G09 |
+| [G11 — Model invocation foundation](../development/goals/phase-1/G11-model-invocation-foundation.md) | G03 |
 
 G01 and G02 may proceed in parallel after G00. G07 may proceed once the
 canonical contracts and scenario harness exist; it need not wait for setup or
@@ -2093,6 +2094,35 @@ delta; the workpad has no remote; and deleting `state.sqlite` then rebuilding
 it produces the same canonical `status --json` projection. Human presentation
 output is not used as the rebuild identity contract.
 
+### 17.1A Approved model-port pivot
+
+G11 adds one transport-neutral model-invocation port. Domain code resolves
+`configuration -> model target -> endpoint -> factory -> port`; only factory
+wiring selects a concrete adapter. Capability differences are declared data,
+not transport-specific method signatures. The port carries structured
+invocation input and normalized result/status, resolved identity, and raw plus
+normalized usage.
+
+G11 migrates the deterministic fixture adapter behind the factory and adds
+OpenAI API and OpenRouter API adapters over an internal HTTP base. Anthropic
+API, Codex CLI, and Claude CLI remain planned v1 adapters, but each requires a
+separate future evidence goal before any compatibility or live-verification
+claim. A native-process base is introduced with the first CLI adapter, not as
+an unused abstraction.
+
+Live OpenAI Platform API and OpenRouter checks are explicit local
+`doctor --live --model-target <name>` actions. They use configured credential
+references and target budget policy, are excluded from CI and offline scenarios,
+and produce only redacted share-safe evidence. They are limited adapter-local
+proofs, not completion of the five-adapter matrix.
+
+G11 extends strict TOML configuration through an explicit v1-to-v2 migration;
+it adds no packaged schema or canonical vector. G08 additionally depends on
+G11 and uses only the factory-resolved deterministic path. G09's complete
+offline doctor uses that same deterministic path; it does not invoke live
+checks. G10 audits all Phase 1 goals including G11 and distinguishes its
+network-denied scenario suite from G11's separate operator live evidence.
+
 ### 17.2 Port and rewrite boundary
 
 The Phase 0 spike code is evidence, not an undifferentiated production source
@@ -2115,12 +2145,14 @@ tree:
   6.5 while retaining its proven reference, outcome, cycle, and reachability
   cases.
 
-After revision-14 approval, `src/gigai/schemas/` and
-`fixtures/canonical-vectors.json` are frozen contracts. Generated models may
-add convenience methods but must not reinterpret field identity, defaults,
-ordering, canonical bytes, or digest semantics. If a schema or vector appears
-wrong, implementation stops and raises a contract change for operator review;
-an implementation Goal never edits it opportunistically.
+Until GigAI deliberately declares its first public release,
+`src/gigai/schemas/` and `fixtures/canonical-vectors.json` are editable
+pre-release source contracts. A reviewed change updates affected bytes, tests,
+and `SHA256SUMS` together while retaining versioned identifiers, exact-version
+readers, closed schemas, and installed verification. At that release, ADR 0003
+activates the immutable/additive regime: generated models may add convenience
+methods but must not reinterpret published field identity, defaults, ordering,
+canonical bytes, or digest semantics.
 
 ### 17.3 End-to-end first implementation slice
 

@@ -46,7 +46,7 @@ canonical production APIs and installed black-box harness.
    effects, impossible budgets, incomplete terminal evidence, and unresolved
    non-blocking tools or executors.
 4. Markdown and manifest disagreement fails before approval.
-5. Schema enumeration asserts exactly the eight frozen resource names and
+5. Schema enumeration asserts exactly the eight packaged resource names and
    cannot pass vacuously.
 6. Findings are deterministic across supported Python versions and contain no
    personal absolute paths.
@@ -58,7 +58,7 @@ canonical production APIs and installed black-box harness.
 - A requirement-to-test matrix for every Section 6.5 validation rule.
 - Valid multi-node, parallel, join, recovery, and blocking graph fixtures.
 - One explicit invalid fixture per semantic rejection class.
-- Installed `check` black-box evidence, frozen-contract hashes, and completion
+- Installed `check` black-box evidence, schema-resource hashes, and completion
   audit.
 
 ## Stop boundary

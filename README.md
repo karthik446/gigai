@@ -8,8 +8,9 @@ turning goals into reviewable, finite execution graphs.
 > target `init`, plus read/open operations for already-registered workpads,
 > alongside help and package-metadata version output. It does not yet expose a
 > Gig creation or activation command, run a scheduler, or provide a production runtime.
-> The package also exposes frozen serialized contracts and canonical identity
-> primitives.
+> The package also exposes versioned pre-release serialized contracts and
+> canonical identity primitives. Their immutable release regime begins at
+> GigAI's deliberately declared first public release.
 > Commands beyond the implemented surface remain planned interfaces, not
 > product behavior.
 
@@ -30,7 +31,7 @@ content is hashed as exact bytes rather than silently normalized.
 
 ## What is implemented
 
-- Eight frozen JSON Schema Draft 2020-12 contracts.
+- Eight versioned JSON Schema Draft 2020-12 contracts.
 - One production implementation of restricted canonical JSON, owned-text
   bytes, exact imported-byte digests, prefixed UUIDv4 IDs, and explicit version
   selection.
@@ -221,7 +222,7 @@ python -m pytest
 | src/gigai/workpad.py | Caller-ID-only private Git substrate, resolution, active authority, and editor boundary | yes |
 | src/gigai/adapters/ | Deterministic fixture-backed offline adapter | yes |
 | src/gigai/data/ | Immutable built-in standard-pack resources | yes |
-| src/gigai/schemas/ | Single canonical source for frozen serialized contracts | yes |
+| src/gigai/schemas/ | Single canonical source for versioned serialized contracts | yes |
 | tests/scenarios/ | Installed-process isolation and observation harness | no |
 | research/contract_spike/ | Executable contract and concurrency proof | no |
 | research/phase0_spike/ | Bounded feasibility evidence | no |
@@ -247,7 +248,7 @@ Schema.
 
 ## Roadmap
 
-The next product work follows the canonical [Phase 1 G00-G10 development goal
+The next product work follows the canonical [Phase 1 G00-G11 development goal
 graph](docs/development/goals/phase-1/README.md), derived from the V14 plan.
 Product modules enter src/gigai/ only through an explicit implementation goal
 and acceptance tests. The installed entry point exposes only behavior that

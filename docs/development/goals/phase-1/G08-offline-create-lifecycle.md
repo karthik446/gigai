@@ -1,7 +1,7 @@
 # G08 — Offline Create Lifecycle
 
-- Status: Approved; blocked by G06 and G07
-- Depends on: G06, G07
+- Status: Approved; blocked by G06, G07, and G11
+- Depends on: G06, G07, G11
 - Unblocks: G09
 
 ## Outcome
@@ -12,8 +12,8 @@ and local-commit lifecycle.
 
 ## In scope
 
-- Deterministic offline creation fixtures and adapters; no live model or
-  network dependency.
+- Deterministic offline creation fixtures through G11 factory resolution; no
+  live model or network dependency.
 - Allocate the Gig ID through the sole G01 identity API, checking both the v2
   registry and configured workpad before persistence. G08 is the first product
   lifecycle goal allowed to generate a Gig ID.
@@ -44,6 +44,7 @@ and local-commit lifecycle.
 ## Out of scope
 
 - Live planner, critic, adjudicator, research, or provider adapters.
+- Invoking or extending G11's local `doctor --live` evidence path.
 - Starting a Run, executing a Goal, or materializing generated executable code.
 - Self-approval by a model, wrapper, fixture, or `create` command.
 - A second parallel proposal format or a second approval transition.

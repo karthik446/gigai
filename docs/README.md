@@ -6,7 +6,7 @@
   command contract.
 - [Architecture decisions](adr/) — standalone-repository decisions that
   supersede a specific part of the V14 snapshot.
-- [Phase 1 development goals](development/goals/phase-1/) — canonical G00-G10
+- [Phase 1 development goals](development/goals/phase-1/) — canonical G00-G11
   implementation contracts, dependency graph, evidence gates, and commit
   boundaries.
 - [Phase 1 development evidence](development/evidence/phase-1/) — durable

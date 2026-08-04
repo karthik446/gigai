@@ -27,28 +27,32 @@ passing tests.
 ## Development goals and commits
 
 Phase 1 implementation is governed by the canonical
-[G00-G10 development goal graph](docs/development/goals/phase-1/README.md).
+[G00-G11 development goal graph](docs/development/goals/phase-1/README.md).
 Do not begin a goal before every dependency has committed completion evidence.
 
 Keep each goal in its own reviewable change set. A commit must not mix work
-from different goals, and a goal may not opportunistically change a frozen
-contract or weaken an earlier goal. If a goal is too large to review as one
-change set, revise and split its contract before implementation.
+from different goals, and a goal may not opportunistically change a serialized
+or completed contract or weaken an earlier goal. If a goal is too large to
+review as one change set, revise and split its contract before implementation.
 
-## Frozen contracts
+## Pre-release serialized contracts
 
-The eight files ending in .schema.json under src/gigai/schemas/ and the
-canonical vectors under research/contract_spike/fixtures/ are frozen.
+Until GigAI deliberately declares its first public release, the eight schema
+files under `src/gigai/schemas/` and the canonical vectors under
+`research/contract_spike/fixtures/` are editable pre-release source contracts.
+Changes update affected bytes, tests, and `SHA256SUMS` together.
 
-Do not reinterpret or opportunistically edit their field identity, defaults,
-ordering, canonical bytes, or digest semantics. A proposed contract change must:
+Versioned schema identifiers, exact-version readers, closed schemas, package
+resource delivery, and installed verification remain required. Canonical-byte
+identity, immutable approved Gig versions, and journal authority are unchanged.
 
-1. state why the existing contract is wrong;
-2. include an explicit decision record;
-3. update compatibility and golden-vector evidence deliberately; and
-4. receive maintainer approval before implementation.
+At the deliberately declared first public release, the immutable/additive
+versioning regime in [ADR 0003](docs/adr/0003-schema-distribution-versioning-and-extension.md)
+becomes mandatory. Then a contract change requires an explicit decision,
+compatibility evidence, and a new published version rather than an in-place
+edit.
 
-Pure relocation must preserve the exact filename set and SHA-256 mapping.
+Pure relocation always preserves the exact filename set and SHA-256 mapping.
 
 ## Pull-request checklist
 

@@ -27,7 +27,8 @@ private journal.
 ## Out of scope
 
 - Making SQLite authoritative or storing unrecoverable state only in it.
-- `run`, execution scheduling, live providers, or target mutation.
+- `run`, execution scheduling, adding or invoking live-provider checks, or
+  target mutation.
 - Using formatted terminal output as the rebuild identity contract.
 - Background sync, telemetry, or hosted history.
 
@@ -42,7 +43,8 @@ private journal.
 5. `check` invokes the named contract validators without mutation.
 6. `open` preserves the G05 structured path and editor behavior.
 7. Complete offline `doctor` covers configuration, mount, lock, atomic replace,
-   journal, remote, index, editor, and offline-adapter health.
+   journal, remote, index, editor, and deterministic offline-adapter health
+   through the G11 factory. G11 owns the separate opt-in `doctor --live` path.
 8. Read commands use no network or credentials and produce no target delta.
 9. Corrupt index state is rebuilt or reported; corrupt authoritative journal
    state is never concealed by the index.
