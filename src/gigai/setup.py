@@ -17,8 +17,10 @@ from .config import (
     Profile,
     ReadOnlyConfigurationError,
     StandardPack,
+    UnsupportedConfigurationVersionError,
     config_path,
     load_config,
+    migrate_config,
     normalize_config,
     write_config_atomic,
 )
@@ -81,10 +83,35 @@ def build_config(
     editor_argv: tuple[str, ...],
     open_with_target: bool,
     credentials: tuple[CredentialReference, ...] = (),
+    endpoints: tuple[Endpoint, ...] | None = None,
+    model_targets: tuple[ModelTarget, ...] | None = None,
+    profiles: tuple[Profile, ...] | None = None,
 ) -> GigAIConfig:
     for reference in credentials:
         validate_reference(reference)
     offline_target = "offline-default"
+    if endpoints is None:
+        endpoints = (Endpoint(name="offline", adapter="deterministic"),)
+    if model_targets is None:
+        model_targets = (
+            ModelTarget(
+                name=offline_target,
+                endpoint="offline",
+                model="fixture-v1",
+                capabilities=("text",),
+                max_output_tokens=64,
+                reasoning_effort=None,
+            ),
+        )
+    if profiles is None:
+        profiles = (
+            Profile(
+                name="default",
+                planner=offline_target,
+                critic=offline_target,
+                adjudicator=offline_target,
+            ),
+        )
     return normalize_config(
         GigAIConfig(
             schema_version=CONFIG_SCHEMA_VERSION,
@@ -93,18 +120,9 @@ def build_config(
             editor_argv=editor_argv,
             open_with_target=open_with_target,
             credentials=credentials,
-            endpoints=(Endpoint(name="offline", adapter="deterministic"),),
-            model_targets=(
-                ModelTarget(name=offline_target, endpoint="offline", model="fixture-v1"),
-            ),
-            profiles=(
-                Profile(
-                    name="default",
-                    planner=offline_target,
-                    critic=offline_target,
-                    adjudicator=offline_target,
-                ),
-            ),
+            endpoints=endpoints,
+            model_targets=model_targets,
+            profiles=profiles,
             standard_pack=StandardPack(
                 name=PACK_NAME,
                 version=PACK_VERSION,
@@ -120,7 +138,10 @@ def run_setup(config: GigAIConfig) -> SetupResult:
     config = normalize_config(config)
     path = config_path(config.home_root)
     if path.exists():
-        existing = load_config(config.home_root)
+        try:
+            existing = load_config(config.home_root)
+        except UnsupportedConfigurationVersionError:
+            existing, _ = migrate_config(config.home_root)
         if path.stat().st_mode & 0o222 == 0:
             raise ReadOnlyConfigurationError(
                 f"configuration at {path} is read-only; no changes were made"

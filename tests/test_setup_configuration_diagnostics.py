@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from gigai.adapters import DeterministicAdapter, OfflineAdapterError
+from gigai.adapters import resolve_model_adapter
 from gigai.config import (
     CredentialReference,
     MalformedConfigurationError,
@@ -66,6 +66,10 @@ def test_config_rejects_unknown_duplicate_and_unsupported_contracts(tmp_path: Pa
         parse_config(payload)
 
     payload["schema_version"] = "1.0"
+    with pytest.raises(UnsupportedConfigurationVersionError, match="no migration"):
+        parse_config(payload)
+
+    payload["schema_version"] = "2.0"
     payload["endpoints"].append(dict(payload["endpoints"][0]))
     with pytest.raises(MalformedConfigurationError, match="duplicate names"):
         parse_config(payload)
@@ -183,11 +187,16 @@ def test_editor_and_credential_boundaries_reject_shell_and_raw_secret_shapes(
     )
 
 
-def test_deterministic_adapter_has_one_fixture_backed_success_path() -> None:
-    adapter = DeterministicAdapter()
-    assert adapter.invoke("doctor-probe") == "gigai-offline-ok"
-    with pytest.raises(OfflineAdapterError, match="no deterministic response"):
-        adapter.invoke("unregistered")
+def test_deterministic_adapter_has_one_fixture_backed_success_path(tmp_path: Path) -> None:
+    binding = resolve_model_adapter(configured(tmp_path), "offline-default")
+    assert (
+        binding.port.invoke(
+            binding.request(role="test", prompt="doctor-probe")
+        ).output_text
+        == "gigai-offline-ok"
+    )
+    with pytest.raises(ValueError, match="no deterministic response"):
+        binding.port.invoke(binding.request(role="test", prompt="unregistered"))
     assert pack_digest().startswith("sha256:")
 
 

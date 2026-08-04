@@ -17,6 +17,10 @@ class CredentialReferenceError(ValueError):
     code = "credential_reference_invalid"
 
 
+class CredentialUnavailableError(CredentialReferenceError):
+    code = "credential_unavailable"
+
+
 def validate_reference(reference: CredentialReference) -> None:
     if not LOGICAL_NAME.fullmatch(reference.name):
         raise CredentialReferenceError(
@@ -48,8 +52,31 @@ def reference_is_available(reference: CredentialReference) -> bool | None:
     return None
 
 
+def resolve_reference_value(reference: CredentialReference) -> str:
+    """Resolve one credential only at the runtime adapter boundary.
+
+    The value must remain transient and must never be returned to a domain,
+    configuration, diagnostic, or serialization caller.
+    """
+
+    validate_reference(reference)
+    if reference.kind != "environment":
+        raise CredentialUnavailableError(
+            f"credential {reference.name!r} uses {reference.kind!r}, which is not "
+            "available to the local G11 runtime resolver"
+        )
+    value = os.environ.get(reference.reference)
+    if not value:
+        raise CredentialUnavailableError(
+            f"credential {reference.name!r} is not available in its configured environment reference"
+        )
+    return value
+
+
 __all__ = [
     "CredentialReferenceError",
+    "CredentialUnavailableError",
     "reference_is_available",
+    "resolve_reference_value",
     "validate_reference",
 ]

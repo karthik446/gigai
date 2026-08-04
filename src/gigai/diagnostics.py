@@ -18,9 +18,10 @@ try:
 except ImportError:  # pragma: no cover - v1 rejects non-POSIX before mutation
     fcntl = None  # type: ignore[assignment]
 
-from .adapters import DeterministicAdapter
+from .adapters import AdapterFactoryError, ModelInvocationError, resolve_model_adapter
 from .config import ConfigurationError, GigAIConfig, load_config
 from .credentials import CredentialReferenceError, reference_is_available
+from .model_targets import ModelTargetResolutionError
 from .standard_pack import PACK_NAME, PACK_VERSION, pack_digest, verify_standard_pack
 
 
@@ -102,6 +103,88 @@ def run_doctor(home_root: Path) -> DoctorReport:
     checks.append(_offline_adapter_check(config))
     checks.extend(run_mount_probes(config.workpad_root))
     return _report(checks)
+
+
+def run_live_doctor(home_root: Path, model_target: str) -> DoctorReport:
+    """Run one explicit, local-only provider probe for a configured target.
+
+    This path is deliberately separate from ``run_doctor`` so offline checks,
+    CI, and scenario processes cannot invoke a provider by accident.
+    """
+
+    report = run_doctor(home_root)
+    checks = list(report.checks)
+    started = time.monotonic_ns()
+    if any(check.status == "FAIL" for check in checks):
+        checks.append(
+            _check(
+                "adapter.live",
+                "configured live model target",
+                "FAIL",
+                "live model check was not attempted because offline diagnostics failed",
+                ("live_call_attempted=false",),
+                "Repair failed offline diagnostics before requesting a live check.",
+                started,
+            )
+        )
+        return _report(checks, scope="live")
+    try:
+        config = load_config(home_root)
+        binding = resolve_model_adapter(config, model_target)
+        target = binding.target.target
+        endpoint = binding.target.endpoint
+        if endpoint.adapter == "deterministic":
+            raise AdapterFactoryError(
+                f"model target {model_target!r} is deterministic; --live requires a remote endpoint"
+            )
+        result = binding.port.invoke(
+            binding.request(
+                role="live-diagnostic",
+                prompt="Return a short confirmation that this GigAI live diagnostic reached the configured model.",
+            )
+        )
+        if result.status != "success" or not result.output_text:
+            raise ModelInvocationError("live model diagnostic returned no successful text output")
+        checks.append(
+            _check(
+                "adapter.live",
+                "configured live model target",
+                "PASS",
+                "configured model target returned a successful diagnostic response",
+                (
+                    f"target={target.name}",
+                    f"endpoint_adapter={endpoint.adapter}",
+                    f"configured_model={target.model}",
+                    f"resolved_model={result.resolved_model}",
+                    f"max_output_tokens={target.max_output_tokens}",
+                    f"reasoning_effort={target.reasoning_effort or 'provider-default'}",
+                    "credential_reference_resolved_at_runtime=true",
+                    f"cost_status={result.cost_status}",
+                ),
+                None,
+                started,
+            )
+        )
+    except (
+        AdapterFactoryError,
+        ConfigurationError,
+        CredentialReferenceError,
+        ModelInvocationError,
+        ModelTargetResolutionError,
+        ValueError,
+    ) as exc:
+        checks.append(
+            _check(
+                "adapter.live",
+                "configured live model target",
+                "FAIL",
+                str(exc),
+                ("live_call_succeeded=false",),
+                "Confirm the target, capability policy, output limit, and credential reference before retrying.",
+                started,
+            )
+        )
+    return _report(checks, scope="live")
 
 
 def run_mount_probes(workpad_root: Path) -> tuple[DiagnosticCheck, DiagnosticCheck]:
@@ -238,16 +321,33 @@ def _offline_adapter_check(config: GigAIConfig) -> DiagnosticCheck:
     started = time.monotonic_ns()
     try:
         pack_valid, summary = verify_standard_pack(config.home_root)
-        configured = any(
-            endpoint.name == "offline" and endpoint.adapter == "deterministic"
-            for endpoint in config.endpoints
+        offline_target = next(
+            (
+                target.name
+                for target in config.model_targets
+                if any(
+                    endpoint.name == target.endpoint
+                    and endpoint.adapter == "deterministic"
+                    for endpoint in config.endpoints
+                )
+            ),
+            None,
         )
+        configured = offline_target is not None
         configured = configured and (
             config.standard_pack.name == PACK_NAME
             and config.standard_pack.version == PACK_VERSION
             and config.standard_pack.content_digest == pack_digest()
         )
-        response_valid = DeterministicAdapter().invoke("doctor-probe") == "gigai-offline-ok"
+        if offline_target is None:
+            raise AdapterFactoryError("no deterministic model target is configured")
+        binding = resolve_model_adapter(config, offline_target)
+        response_valid = (
+            binding.port.invoke(
+                binding.request(role="offline-diagnostic", prompt="doctor-probe")
+            ).output_text
+            == "gigai-offline-ok"
+        )
     except Exception as exc:  # the check converts package corruption to a diagnostic
         pack_valid = False
         configured = False
@@ -440,14 +540,14 @@ def _check(
     )
 
 
-def _report(checks: list[DiagnosticCheck]) -> DoctorReport:
+def _report(checks: list[DiagnosticCheck], *, scope: str = "installation") -> DoctorReport:
     statuses = {check.status for check in checks}
     overall = "FAIL" if "FAIL" in statuses else "WARN" if "WARN" in statuses else "PASS"
     return DoctorReport(
         schema_version=DIAGNOSTIC_SCHEMA_VERSION,
         command="doctor",
         gigai_version=version("gigai"),
-        scope="installation",
+        scope=scope,
         overall_status=overall,
         checks=tuple(checks),
     )
@@ -465,5 +565,6 @@ __all__ = [
     "DoctorReport",
     "render_report_json",
     "run_doctor",
+    "run_live_doctor",
     "run_mount_probes",
 ]

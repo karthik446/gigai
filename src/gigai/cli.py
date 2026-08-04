@@ -6,11 +6,19 @@ import json
 import os
 from pathlib import Path
 import sys
+from dataclasses import replace
 
 import click
 
-from .config import ConfigurationError, CredentialReference, load_config
-from .diagnostics import render_report_json, run_doctor
+from .config import (
+    ConfigurationError,
+    CredentialReference,
+    Endpoint,
+    ModelTarget,
+    load_config,
+    migrate_config,
+)
+from .diagnostics import render_report_json, run_doctor, run_live_doctor
 from .setup import (
     build_config,
     default_home_root,
@@ -77,6 +85,34 @@ def cli(context: click.Context) -> None:
     is_flag=True,
     help="Explicitly remove all credential references; values are never accessed.",
 )
+@click.option(
+    "--endpoint",
+    "endpoint_spec",
+    multiple=True,
+    metavar="NAME=ADAPTER:CREDENTIAL[:HTTPS_BASE_URL]",
+    help="Add a remote endpoint by credential reference name, never a credential value.",
+)
+@click.option(
+    "--model-target",
+    "model_target_spec",
+    multiple=True,
+    metavar="NAME=ENDPOINT:MODEL",
+    help="Add a text model target resolved through a configured endpoint.",
+)
+@click.option(
+    "--target-output-limit",
+    "target_output_limit_spec",
+    multiple=True,
+    metavar="TARGET=MAX_OUTPUT_TOKENS",
+    help="Set the explicit maximum output length for a model target.",
+)
+@click.option(
+    "--target-reasoning-effort",
+    "target_reasoning_effort_spec",
+    multiple=True,
+    metavar="TARGET=none|low|medium|high|xhigh|max",
+    help="Set a provider-supported reasoning effort for a model target.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Emit a stable machine-readable summary.")
 def setup_command(
     non_interactive: bool,
@@ -87,6 +123,10 @@ def setup_command(
     open_with_target: bool | None,
     credential_ref: tuple[str, ...],
     clear_credentials: bool,
+    endpoint_spec: tuple[str, ...],
+    model_target_spec: tuple[str, ...],
+    target_output_limit_spec: tuple[str, ...],
+    target_reasoning_effort_spec: tuple[str, ...],
     as_json: bool,
 ) -> None:
     """Create or update local config and the deterministic standard pack."""
@@ -98,7 +138,10 @@ def setup_command(
         try:
             existing = load_config(requested_home)
         except ConfigurationError as exc:
-            raise click.ClickException(str(exc)) from exc
+            try:
+                existing, _ = migrate_config(requested_home)
+            except ConfigurationError:
+                raise click.ClickException(str(exc)) from exc
 
     if non_interactive:
         resolved_workpad = workpad_root or (
@@ -127,7 +170,10 @@ def setup_command(
             try:
                 existing = load_config(requested_home)
             except ConfigurationError as exc:
-                raise click.ClickException(str(exc)) from exc
+                try:
+                    existing, _ = migrate_config(requested_home)
+                except ConfigurationError:
+                    raise click.ClickException(str(exc)) from exc
         default_workpad = workpad_root or (
             existing.workpad_root if existing else default_workpad_root(requested_home)
         )
@@ -169,6 +215,56 @@ def setup_command(
             credentials = ()
         elif existing and not credential_ref:
             credentials = existing.credentials
+        endpoint_specs = tuple(_parse_endpoint_spec(value) for value in endpoint_spec)
+        output_limits = _parse_target_output_limits(target_output_limit_spec)
+        reasoning_efforts = _parse_target_reasoning_efforts(target_reasoning_effort_spec)
+        target_specs = tuple(
+            _parse_model_target_spec(value, output_limits, reasoning_efforts)
+            for value in model_target_spec
+        )
+        existing_endpoints = (
+            existing.endpoints
+            if existing is not None
+            else (Endpoint(name="offline", adapter="deterministic"),)
+        )
+        existing_targets = (
+            existing.model_targets
+            if existing is not None
+            else (
+                ModelTarget(
+                    name="offline-default",
+                    endpoint="offline",
+                    model="fixture-v1",
+                    capabilities=("text",),
+                    max_output_tokens=64,
+                    reasoning_effort=None,
+                ),
+            )
+        )
+        existing_target_names = {item.name for item in existing_targets}
+        added_target_names = {item.name for item in target_specs}
+        unknown_limits = set(output_limits) - existing_target_names - added_target_names
+        unknown_efforts = set(reasoning_efforts) - existing_target_names - added_target_names
+        if unknown_limits or unknown_efforts:
+            raise ValueError(
+                "target output limits or reasoning efforts reference no configured or newly "
+                f"added target: {sorted(unknown_limits | unknown_efforts)}"
+            )
+        targets = tuple(
+            replace(
+                target,
+                max_output_tokens=output_limits.get(
+                    target.name, target.max_output_tokens
+                ),
+                reasoning_effort=reasoning_efforts.get(
+                    target.name, target.reasoning_effort
+                ),
+            )
+            if target.name in output_limits or target.name in reasoning_efforts
+            else target
+            for target in existing_targets
+        ) + target_specs
+        endpoints = (*existing_endpoints, *endpoint_specs)
         if not non_interactive:
             credential_summary = [
                 {"name": item.name, "kind": item.kind} for item in credentials
@@ -189,6 +285,9 @@ def setup_command(
             editor_argv=resolved_editor,
             open_with_target=resolved_open,
             credentials=credentials,
+            endpoints=endpoints,
+            model_targets=targets,
+            profiles=existing.profiles if existing is not None else None,
         )
         result = run_setup(config)
     except (ConfigurationError, OSError, ValueError) as exc:
@@ -220,11 +319,29 @@ def setup_command(
     help="GigAI machine-state directory (default: GIGAI_HOME or ~/.gigai).",
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit stable structured diagnostics.")
-def doctor_command(home_value: Path | None, as_json: bool) -> None:
+@click.option(
+    "--live",
+    is_flag=True,
+    help="Explicitly make one budget-bounded local provider diagnostic call.",
+)
+@click.option(
+    "--model-target",
+    help="Configured remote model target required with --live.",
+)
+def doctor_command(
+    home_value: Path | None, as_json: bool, live: bool, model_target: str | None
+) -> None:
     """Run offline, zero-token installation and configured-mount checks."""
 
     _require_supported_platform()
-    report = run_doctor((home_value or default_home_root()).expanduser().resolve(strict=False))
+    if live != (model_target is not None):
+        raise click.UsageError("--live and --model-target must be supplied together")
+    home_root = (home_value or default_home_root()).expanduser().resolve(strict=False)
+    report = (
+        run_live_doctor(home_root, model_target)
+        if live and model_target is not None
+        else run_doctor(home_root)
+    )
     if as_json:
         click.echo(render_report_json(report), nl=False)
     else:
@@ -386,6 +503,82 @@ def _parse_credential_reference(value: str) -> CredentialReference:
     if not name or not kind or not reference:
         raise click.BadParameter("credential reference components must not be empty")
     return CredentialReference(name=name, kind=kind, reference=reference)
+
+
+def _parse_endpoint_spec(value: str) -> Endpoint:
+    try:
+        name, remainder = value.split("=", 1)
+        adapter, credential, *base_url = remainder.split(":", 2)
+    except ValueError as exc:
+        raise click.BadParameter(
+            "endpoints use NAME=openai_api:CREDENTIAL or "
+            "NAME=openrouter_api:CREDENTIAL[:HTTPS_BASE_URL]"
+        ) from exc
+    if not name or not adapter or not credential or len(base_url) > 1:
+        raise click.BadParameter("endpoint components must not be empty")
+    if adapter not in {"openai_api", "openrouter_api"}:
+        raise click.BadParameter("G11 endpoints use openai_api or openrouter_api")
+    return Endpoint(
+        name=name,
+        adapter=adapter,
+        credential=credential,
+        base_url=base_url[0] if base_url else None,
+    )
+
+
+def _parse_target_output_limits(values: tuple[str, ...]) -> dict[str, int]:
+    limits: dict[str, int] = {}
+    for value in values:
+        try:
+            name, maximum = value.split("=", 1)
+            parsed_maximum = int(maximum)
+        except ValueError as exc:
+            raise click.BadParameter(
+                "target output limits use TARGET=MAX_OUTPUT_TOKENS"
+            ) from exc
+        if not name or parsed_maximum <= 0 or name in limits:
+            raise click.BadParameter(
+                "target output limits must be unique, non-empty, and positive"
+            )
+        limits[name] = parsed_maximum
+    return limits
+
+
+def _parse_target_reasoning_efforts(values: tuple[str, ...]) -> dict[str, str]:
+    efforts: dict[str, str] = {}
+    allowed = {"none", "low", "medium", "high", "xhigh", "max"}
+    for value in values:
+        try:
+            name, effort = value.split("=", 1)
+        except ValueError as exc:
+            raise click.BadParameter("reasoning efforts use TARGET=EFFORT") from exc
+        if not name or effort not in allowed or name in efforts:
+            raise click.BadParameter(
+                "reasoning efforts must be unique and one of none, low, medium, high, xhigh, max"
+            )
+        efforts[name] = effort
+    return efforts
+
+
+def _parse_model_target_spec(
+    value: str, output_limits: dict[str, int], reasoning_efforts: dict[str, str]
+) -> ModelTarget:
+    try:
+        name, remainder = value.split("=", 1)
+        endpoint, model = remainder.split(":", 1)
+    except ValueError as exc:
+        raise click.BadParameter("model targets use NAME=ENDPOINT:MODEL") from exc
+    if not name or not endpoint or not model:
+        raise click.BadParameter("model target components must not be empty")
+    maximum = output_limits.get(name, 4096)
+    return ModelTarget(
+        name=name,
+        endpoint=endpoint,
+        model=model,
+        capabilities=("text",),
+        max_output_tokens=maximum,
+        reasoning_effort=reasoning_efforts.get(name),
+    )
 
 
 def _require_supported_platform() -> None:

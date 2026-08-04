@@ -57,7 +57,8 @@ matrix claim.
 
 OpenAI Platform API and OpenRouter live checks run only through an explicit
 local command such as `gigai doctor --live --model-target <name>`. They require
-an operator-selected small/cheap target and a configured budget ceiling.
+an operator-selected target and an explicit maximum output-token limit; this
+experimental evaluation policy has no GigAI-enforced USD ceiling.
 
 They are excluded from CI, installed offline scenarios, G03 diagnostics, and
 G08's offline lifecycle. Each result records only redacted, share-safe identity,

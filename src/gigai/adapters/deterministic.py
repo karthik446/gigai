@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .capabilities import require_capabilities
+from .port import InvocationRequest, InvocationResult, NormalizedUsage
 from ..standard_pack import pack_bytes
 
 
@@ -25,15 +27,22 @@ class DeterministicAdapter:
             raise OfflineAdapterError("installed standard pack has invalid responses")
         self._responses = responses
 
-    def invoke(self, prompt: str) -> str:
-        if not isinstance(prompt, str):
-            raise TypeError("deterministic adapter prompt must be a string")
+    def invoke(self, request: InvocationRequest) -> InvocationResult:
+        require_capabilities(("text",), request.required_capabilities, target_name=request.target_name)
         try:
-            return self._responses[prompt]
+            output = self._responses[request.prompt]
         except KeyError as exc:
             raise OfflineAdapterError(
-                f"no deterministic response is registered for {prompt!r}"
+                f"no deterministic response is registered for {request.prompt!r}"
             ) from exc
+        return InvocationResult(
+            status="success",
+            output_text=output,
+            resolved_model=request.model,
+            raw_usage={},
+            normalized_usage=NormalizedUsage(None, None, None),
+            cost_status="unavailable",
+        )
 
 
 __all__ = ["DeterministicAdapter", "OfflineAdapterError"]
