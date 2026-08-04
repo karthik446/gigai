@@ -48,6 +48,7 @@ jobs:
       - run: .wheel-venv/bin/python tools/verify_installed_g04.py
       - run: .wheel-venv/bin/python tools/verify_installed_g05.py
       - run: .wheel-venv/bin/python tools/verify_installed_g06.py
+      - run: .wheel-venv/bin/python tools/verify_installed_g07.py
       - run: .wheel-venv/bin/python tools/verify_installed_g11.py
       - run: >-
           uv run --locked --extra test pytest

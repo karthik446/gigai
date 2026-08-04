@@ -27,6 +27,7 @@ from .setup import (
     run_setup,
 )
 from .target_binding import TargetBindingError, initialize_target
+from .validators import validate_proposal_workpad
 from .workpad import WorkpadError, open_locations, resolve_workpad
 
 
@@ -49,7 +50,7 @@ def cli(context: click.Context) -> None:
 
     if context.invoked_subcommand is None:
         raise click.UsageError(
-            "Choose 'setup', 'doctor', 'init', 'workpad', or 'open'; "
+            "Choose 'setup', 'doctor', 'init', 'workpad', 'check', or 'open'; "
             "use --help for details."
         )
 
@@ -437,6 +438,48 @@ def workpad_path_command(
     except (WorkpadError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(os.fspath(resolved.path))
+
+
+@cli.command("check")
+@click.argument("gig_id", required=False)
+@click.option(
+    "--target",
+    "target_value",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="Explicit target path; defaults to the current Git repository.",
+)
+@click.option(
+    "--home",
+    "home_value",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="GigAI machine-state directory (default: GIGAI_HOME or ~/.gigai).",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit a stable path-safe validation report.")
+def check_command(
+    gig_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool
+) -> None:
+    """Validate one existing proposal workpad without creating or changing it."""
+
+    _require_supported_platform()
+    try:
+        resolved = resolve_workpad(
+            home_root=(home_value or default_home_root()),
+            requested_target=target_value,
+            gig_id=gig_id,
+            allow_semantic_state=True,
+        )
+    except (WorkpadError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    report = validate_proposal_workpad(resolved.path)
+    if as_json:
+        click.echo(json.dumps(report.as_dict(), sort_keys=True, separators=(",", ":")))
+    elif report.valid:
+        click.echo("Gig proposal validation passed.")
+    else:
+        for finding in report.findings:
+            click.echo(f"{finding.code} {finding.location}: {finding.message}", err=True)
+    if not report.valid:
+        raise click.exceptions.Exit(1)
 
 
 @cli.command("open")

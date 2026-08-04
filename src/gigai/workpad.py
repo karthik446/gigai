@@ -210,6 +210,7 @@ def resolve_workpad(
     requested_target: Path | None,
     gig_id: str | None,
     cwd: Path | None = None,
+    allow_semantic_state: bool = False,
 ) -> ResolvedWorkpad:
     home, config = _load_owned_config(home_root)
     bound = _resolve_bound_project(home, requested_target, cwd=cwd)
@@ -244,7 +245,9 @@ def resolve_workpad(
         selected = active.gig_id
 
     assert selected is not None
-    return _resolve_registered(config, home, bound, selected)
+    return _resolve_registered(
+        config, home, bound, selected, allow_semantic_state=allow_semantic_state
+    )
 
 
 def open_locations(
@@ -413,12 +416,21 @@ def _initialize_workpad_repository(root: Path, project_id: str, gig_id: str) -> 
 
 
 def _validate_workpad_repository(
-    root: Path, project_id: str, gig_id: str, *, allow_journal: bool = False
+    root: Path,
+    project_id: str,
+    gig_id: str,
+    *,
+    allow_journal: bool = False,
+    allow_semantic_state: bool = False,
 ) -> None:
     if root.is_symlink() or not root.is_dir():
         raise WorkpadConflictError("workpad path is missing, redirected, or not a directory")
     entries = {path.name for path in root.iterdir()}
-    allowed = {".git", ".gitignore", "handoffs"} if allow_journal else {".git", ".gitignore"}
+    allowed = {".git", ".gitignore"}
+    if allow_journal:
+        allowed.add("handoffs")
+    if allow_semantic_state:
+        allowed.update({"gig.md", "goals", "reviews", "decisions", "manifests"})
     if not {".git", ".gitignore"}.issubset(entries) or not entries <= allowed:
         raise WorkpadConflictError(
             "workpad contains semantic or unexpected top-level state"
@@ -517,6 +529,8 @@ def _resolve_registered(
     home: Path,
     bound: BoundProject,
     gig_id: str,
+    *,
+    allow_semantic_state: bool = False,
 ) -> ResolvedWorkpad:
     root = _workpad_authority(config)
     expected = _expected_workpad(root, bound.project_id, gig_id)
@@ -537,7 +551,13 @@ def _resolve_registered(
         raise WorkpadUnavailableError("registered workpad is unavailable") from exc
     if resolved != expected or not resolved.is_relative_to(root):
         raise WorkpadConflictError("registered workpad is redirected outside its authority")
-    _validate_workpad_repository(expected, bound.project_id, gig_id, allow_journal=True)
+    _validate_workpad_repository(
+        expected,
+        bound.project_id,
+        gig_id,
+        allow_journal=True,
+        allow_semantic_state=allow_semantic_state,
+    )
     return ResolvedWorkpad(
         project_id=bound.project_id,
         gig_id=gig_id,
