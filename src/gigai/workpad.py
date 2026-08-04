@@ -412,13 +412,20 @@ def _initialize_workpad_repository(root: Path, project_id: str, gig_id: str) -> 
     _validate_workpad_repository(root, project_id, gig_id)
 
 
-def _validate_workpad_repository(root: Path, project_id: str, gig_id: str) -> None:
+def _validate_workpad_repository(
+    root: Path, project_id: str, gig_id: str, *, allow_journal: bool = False
+) -> None:
     if root.is_symlink() or not root.is_dir():
         raise WorkpadConflictError("workpad path is missing, redirected, or not a directory")
-    if {path.name for path in root.iterdir()} != {".git", ".gitignore"}:
+    entries = {path.name for path in root.iterdir()}
+    allowed = {".git", ".gitignore", "handoffs"} if allow_journal else {".git", ".gitignore"}
+    if not {".git", ".gitignore"}.issubset(entries) or not entries <= allowed:
         raise WorkpadConflictError(
             "workpad contains semantic or unexpected top-level state"
         )
+    handoffs = root / "handoffs"
+    if handoffs.exists() and (handoffs.is_symlink() or not handoffs.is_dir()):
+        raise WorkpadConflictError("workpad handoff directory is redirected or invalid")
     ignore = root / ".gitignore"
     if ignore.is_symlink() or ignore.read_bytes() != WORKPAD_GITIGNORE:
         raise WorkpadConflictError("workpad ignore rules differ from the G05 contract")
@@ -440,7 +447,7 @@ def _validate_workpad_repository(root: Path, project_id: str, gig_id: str) -> No
             raise WorkpadConflictError(f"workpad Git ownership marker {key} mismatches")
     if _git(root, "remote").stdout.strip():
         raise WorkpadConflictError("workpad must not configure a Git remote")
-    if _git(root, "rev-parse", "--verify", "HEAD", check=False).returncode == 0:
+    if not allow_journal and _git(root, "rev-parse", "--verify", "HEAD", check=False).returncode == 0:
         raise WorkpadConflictError("G05 workpad must remain unborn without a commit")
 
 
@@ -530,7 +537,7 @@ def _resolve_registered(
         raise WorkpadUnavailableError("registered workpad is unavailable") from exc
     if resolved != expected or not resolved.is_relative_to(root):
         raise WorkpadConflictError("registered workpad is redirected outside its authority")
-    _validate_workpad_repository(expected, bound.project_id, gig_id)
+    _validate_workpad_repository(expected, bound.project_id, gig_id, allow_journal=True)
     return ResolvedWorkpad(
         project_id=bound.project_id,
         gig_id=gig_id,
