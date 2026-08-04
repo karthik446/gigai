@@ -402,6 +402,9 @@ first-class choice.
         goal-00/
           completion-audit.md
       manifests/
+        gig-proposal.json           proposed digest-pinning envelope
+        creation-manifest.json      inputs and creation evidence
+        goal-graph.json             machine projection of the Markdown Goals
         active-gig-version.json    explicit approved version used by default
       runs/
         <run-id>/
@@ -738,6 +741,7 @@ goals/README.md
 goals/NN-<name>.md
 reviews/creation-review.md
 decisions/creation-decisions.md
+manifests/gig-proposal.json
 manifests/creation-manifest.json
 manifests/goal-graph.json
 handoffs/000000000002-proposal-ready.txt
@@ -759,6 +763,21 @@ handoffs/000000000002-proposal-ready.txt
 
 The creation manifest pins every source, prompt, model target, tool, context
 artifact, review, and cost record used to produce the proposal.
+
+`manifests/gig-proposal.json` is the schema-defined `GigProposal` envelope. It
+does not duplicate the proposal contents: its `gig_document`, `goal_graph`, and
+`creation_manifest` artifact references name `gig.md`,
+`manifests/goal-graph.json`, and `manifests/creation-manifest.json` respectively
+and pin each file's exact `content_sha256`. Before approval its status is
+`drafting` or `proposed`; an `approved` status belongs only to the later
+approval transition.
+
+The Markdown correspondence is mechanical. Each graph Goal has exactly one
+Markdown contract at `goals/NN-<name>.md`: `NN` is the zero-padded decimal part
+of its `GNN` display ordinal and `<name>` is its exact graph `slug`. The
+proposal also contains `gig.md` and `goals/README.md`. The required creation
+review and decision Markdown files must exist, but the v1 `GigProposal` schema
+does not digest or otherwise reference them.
 
 The user does not have to design graph syntax. `create` derives the graph
 from the interview, target inspection, domain research, candidate tools, and
