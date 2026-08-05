@@ -204,6 +204,18 @@ def select_active_workpad(
     return resolved
 
 
+def resolve_bound_project(
+    *,
+    home_root: Path,
+    requested_target: Path | None,
+    cwd: Path | None = None,
+) -> BoundProject:
+    """Resolve one existing target binding without selecting a Gig."""
+
+    home, _config = _load_owned_config(home_root)
+    return _resolve_bound_project(home, requested_target, cwd=cwd)
+
+
 def resolve_workpad(
     *,
     home_root: Path,
@@ -258,6 +270,7 @@ def open_locations(
     target_only: bool,
     with_target: bool,
     cwd: Path | None = None,
+    allow_semantic_state: bool = False,
 ) -> OpenResult:
     if target_only and with_target:
         raise WorkpadConflictError("--target and --with-target are mutually exclusive")
@@ -275,6 +288,7 @@ def open_locations(
             requested_target=bound.target_root,
             gig_id=gig_id,
             cwd=cwd,
+            allow_semantic_state=allow_semantic_state,
         )
         opened_target = with_target or config.open_with_target
         locations = (
@@ -430,7 +444,7 @@ def _validate_workpad_repository(
     if allow_journal:
         allowed.add("handoffs")
     if allow_semantic_state:
-        allowed.update({"gig.md", "goals", "reviews", "decisions", "manifests"})
+        allowed.update({"gig.md", "goals", "reviews", "decisions", "manifests", "scratch"})
     if not {".git", ".gitignore"}.issubset(entries) or not entries <= allowed:
         raise WorkpadConflictError(
             "workpad contains semantic or unexpected top-level state"
@@ -622,6 +636,7 @@ __all__ = [
     "open_locations",
     "provision_workpad",
     "register_existing_workpad",
+    "resolve_bound_project",
     "resolve_workpad",
     "select_active_workpad",
 ]

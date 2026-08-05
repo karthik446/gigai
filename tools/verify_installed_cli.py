@@ -36,7 +36,7 @@ def main() -> None:
     help_result = run("--help")
     version_result = run("--version")
     bare_result = run()
-    planned_result = run("create")
+    incomplete_create_result = run("create")
 
     if help_result.returncode != 0:
         raise SystemExit(f"gigai --help failed: {help_result.stderr}")
@@ -46,14 +46,26 @@ def main() -> None:
         raise SystemExit("gigai --version did not use installed distribution metadata")
     if "Commands:" not in help_result.stdout:
         raise SystemExit("gigai --help did not expose the approved command group")
-    for command in ("setup", "doctor", "init", "workpad", "check", "open"):
+    for command in (
+        "setup",
+        "doctor",
+        "init",
+        "create",
+        "feedback",
+        "revise",
+        "approve",
+        "reject",
+        "workpad",
+        "check",
+        "open",
+    ):
         if command not in help_result.stdout:
             raise SystemExit(f"gigai --help omitted approved command {command!r}")
-    for command in ("create", "run", "goals"):
+    for command in ("run", "goals"):
         if command in help_result.stdout:
             raise SystemExit(f"gigai --help exposed undeclared command {command!r}")
-    if bare_result.returncode == 0 or planned_result.returncode == 0:
-        raise SystemExit("the minimal CLI exposed an undeclared operational success path")
+    if bare_result.returncode == 0 or incomplete_create_result.returncode == 0:
+        raise SystemExit("the CLI exposed an undeclared operational success path")
 
     workpad_help = run("workpad", "--help")
     if workpad_help.returncode != 0 or "path" not in workpad_help.stdout:
@@ -65,8 +77,8 @@ def main() -> None:
             )
 
     print(
-        "verified installed GigAI CLI: help, version, setup, doctor, init, "
-        "workpad path, check, and open only"
+        "verified installed GigAI CLI: help, version, setup, doctor, init, create, "
+        "feedback, revise, approve, reject, workpad path, check, and open only"
     )
 
 
