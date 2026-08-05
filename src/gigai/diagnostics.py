@@ -21,6 +21,7 @@ except ImportError:  # pragma: no cover - v1 rejects non-POSIX before mutation
 from .adapters import AdapterFactoryError, ModelInvocationError, resolve_model_adapter
 from .config import ConfigurationError, GigAIConfig, load_config
 from .credentials import CredentialReferenceError, reference_is_available
+from .index import IndexError, read_index
 from .model_targets import ModelTargetResolutionError
 from .standard_pack import PACK_NAME, PACK_VERSION, pack_digest, verify_standard_pack
 
@@ -102,6 +103,7 @@ def run_doctor(home_root: Path) -> DoctorReport:
     checks.append(_editor_check(config))
     checks.append(_offline_adapter_check(config))
     checks.extend(run_mount_probes(config.workpad_root))
+    checks.extend(_journal_index_checks(config))
     return _report(checks)
 
 
@@ -144,7 +146,9 @@ def run_live_doctor(home_root: Path, model_target: str) -> DoctorReport:
             )
         )
         if result.status != "success" or not result.output_text:
-            raise ModelInvocationError("live model diagnostic returned no successful text output")
+            raise ModelInvocationError(
+                "live model diagnostic returned no successful text output"
+            )
         checks.append(
             _check(
                 "adapter.live",
@@ -188,7 +192,81 @@ def run_live_doctor(home_root: Path, model_target: str) -> DoctorReport:
 
 
 def run_mount_probes(workpad_root: Path) -> tuple[DiagnosticCheck, DiagnosticCheck]:
-    return (_atomic_replacement_check(workpad_root), _interprocess_lock_check(workpad_root))
+    return (
+        _atomic_replacement_check(workpad_root),
+        _interprocess_lock_check(workpad_root),
+    )
+
+
+def _journal_index_checks(config: GigAIConfig) -> tuple[DiagnosticCheck, ...]:
+    """Check managed journals by reconstructing only their disposable index."""
+
+    started = time.monotonic_ns()
+    workpads = tuple(sorted(config.workpad_root.glob("projects/*/gigs/*")))
+    if not workpads:
+        return (
+            _check(
+                "journal.index",
+                "managed private journals",
+                "PASS",
+                "no managed workpads require journal indexing",
+                ("managed_workpads=0",),
+                None,
+                started,
+            ),
+        )
+    checked = 0
+    try:
+        for workpad in workpads:
+            if workpad.is_symlink() or not workpad.is_dir():
+                raise IndexError("managed workpad is unavailable or redirected")
+            project = _git_config(workpad, "gigai.project-id")
+            gig = _git_config(workpad, "gigai.gig-id")
+            if project is None or gig is None:
+                raise IndexError("managed workpad lacks Git ownership markers")
+            read_index(workpad=workpad, project_id=project, gig_id=gig)
+            checked += 1
+    except (IndexError, OSError) as exc:
+        return (
+            _check(
+                "journal.index",
+                "managed private journals",
+                "FAIL",
+                str(exc),
+                (f"indexed_workpads={checked}",),
+                "Repair the authoritative journal; do not trust or edit state.sqlite as a substitute.",
+                started,
+            ),
+        )
+    return (
+        _check(
+            "journal.index",
+            "managed private journals",
+            "PASS",
+            "all managed journals have a matching rebuildable index",
+            (f"managed_workpads={checked}",),
+            None,
+            started,
+        ),
+    )
+
+
+def _git_config(workpad: Path, key: str) -> str | None:
+    result = subprocess.run(
+        ["git", "-C", os.fspath(workpad), "config", "--local", "--get", key],
+        capture_output=True,
+        text=True,
+        check=False,
+        shell=False,
+        env={
+            **os.environ,
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_NOSYSTEM": "1",
+        },
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.rstrip("\n")
 
 
 def render_report_json(report: DoctorReport) -> str:
@@ -358,7 +436,9 @@ def _offline_adapter_check(config: GigAIConfig) -> DiagnosticCheck:
             "adapter.offline",
             "deterministic offline adapter",
             "FAIL",
-            summary if not pack_valid or not response_valid else "offline endpoint is not configured",
+            summary
+            if not pack_valid or not response_valid
+            else "offline endpoint is not configured",
             ("network_used=false", "credential_used=false"),
             "Rerun setup to restore the immutable standard pack and offline endpoint.",
             started,
@@ -377,17 +457,23 @@ def _offline_adapter_check(config: GigAIConfig) -> DiagnosticCheck:
 def _atomic_replacement_check(root: Path) -> DiagnosticCheck:
     started = time.monotonic_ns()
     if not root.is_dir():
-        return _mount_unavailable("mount.atomic_replace", "atomic replacement", root, started)
+        return _mount_unavailable(
+            "mount.atomic_replace", "atomic replacement", root, started
+        )
     probe: Path | None = None
     replacement: Path | None = None
     try:
-        probe_descriptor, probe_name = tempfile.mkstemp(prefix=".gigai-atomic-probe-", dir=root)
+        probe_descriptor, probe_name = tempfile.mkstemp(
+            prefix=".gigai-atomic-probe-", dir=root
+        )
         probe = Path(probe_name)
         with os.fdopen(probe_descriptor, "wb") as stream:
             stream.write(b"before\n")
             stream.flush()
             os.fsync(stream.fileno())
-        replacement_descriptor, name = tempfile.mkstemp(prefix=".gigai-replace-", dir=root)
+        replacement_descriptor, name = tempfile.mkstemp(
+            prefix=".gigai-replace-", dir=root
+        )
         replacement = Path(name)
         with os.fdopen(replacement_descriptor, "wb") as stream:
             stream.write(b"after\n")
@@ -440,7 +526,9 @@ def _interprocess_lock_check(root: Path) -> DiagnosticCheck:
             started,
         )
     if not root.is_dir():
-        return _mount_unavailable("mount.interprocess_lock", "interprocess exclusion", root, started)
+        return _mount_unavailable(
+            "mount.interprocess_lock", "interprocess exclusion", root, started
+        )
     lock_path: Path | None = None
     try:
         descriptor, name = tempfile.mkstemp(prefix=".gigai-lock-probe-", dir=root)
@@ -540,7 +628,9 @@ def _check(
     )
 
 
-def _report(checks: list[DiagnosticCheck], *, scope: str = "installation") -> DoctorReport:
+def _report(
+    checks: list[DiagnosticCheck], *, scope: str = "installation"
+) -> DoctorReport:
     statuses = {check.status for check in checks}
     overall = "FAIL" if "FAIL" in statuses else "WARN" if "WARN" in statuses else "PASS"
     return DoctorReport(

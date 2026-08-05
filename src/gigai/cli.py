@@ -19,6 +19,7 @@ from .config import (
     migrate_config,
 )
 from .diagnostics import render_report_json, run_doctor, run_live_doctor
+from .index import IndexError, JournalProjection, read_index
 from .lifecycle import (
     LifecycleError,
     approve_offline,
@@ -34,9 +35,10 @@ from .setup import (
     resolve_editor_argv,
     run_setup,
 )
+from .registry import open_project_registry
 from .target_binding import TargetBindingError, initialize_target
 from .validators import validate_proposal_workpad
-from .workpad import WorkpadError, open_locations, resolve_workpad
+from .workpad import ResolvedWorkpad, WorkpadError, open_locations, resolve_workpad
 
 
 @click.group(
@@ -59,7 +61,8 @@ def cli(context: click.Context) -> None:
     if context.invoked_subcommand is None:
         raise click.UsageError(
             "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', "
-            "'approve', 'reject', 'workpad', 'check', or 'open'; "
+            "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
+            "'plan', 'workpad', 'check', or 'open'; "
             "use --help for details."
         )
 
@@ -677,6 +680,204 @@ def reject_command(
     click.echo(
         f"Rejected proposal in journal sequence {entry.sequence}; no Gig version was created."
     )
+
+
+def _read_projection(
+    *, home_value: Path | None, target_value: Path | None, gig_id: str | None
+) -> tuple[ResolvedWorkpad, JournalProjection]:
+    resolved = resolve_workpad(
+        home_root=home_value or default_home_root(),
+        requested_target=target_value,
+        gig_id=gig_id,
+        allow_semantic_state=True,
+    )
+    return resolved, read_index(
+        workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id
+    )
+
+
+def _projection_options(command):
+    command = click.argument("gig_id", required=False)(command)
+    command = click.option(
+        "--target", "target_value", type=click.Path(path_type=Path, file_okay=False)
+    )(command)
+    command = click.option(
+        "--home", "home_value", type=click.Path(path_type=Path, file_okay=False)
+    )(command)
+    return click.option("--json", "as_json", is_flag=True)(command)
+
+
+@cli.command("gigs")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def gigs_command(home_value: Path | None, as_json: bool) -> None:
+    """List registered Gig identities without reading credentials or the network."""
+
+    _require_supported_platform()
+    try:
+        registry, _ = open_project_registry(
+            (home_value or default_home_root()).expanduser().resolve(strict=False),
+            create=False,
+        )
+        payload = [
+            {"gig_id": item.gig_id, "project_id": item.project_id}
+            for item in registry.workpad_records()
+        ]
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    elif payload:
+        for item in payload:
+            click.echo(f"{item['gig_id']} {item['project_id']}")
+    else:
+        click.echo("No registered Gigs.")
+
+
+@cli.command("proposals")
+@_projection_options
+def proposals_command(
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Show the proposal envelope currently committed for one Gig."""
+
+    _require_supported_platform()
+    try:
+        _resolved, projection = _read_projection(
+            home_value=home_value, target_value=target_value, gig_id=gig_id
+        )
+    except (IndexError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = projection.proposal
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    elif payload is None:
+        click.echo("No committed proposal.")
+    else:
+        click.echo(f"{payload['proposal_id']} {payload['status']} {payload['name']}")
+
+
+@cli.command("status")
+@_projection_options
+def status_command(
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Report the explicit proposal and active-version state for one Gig."""
+
+    _require_supported_platform()
+    try:
+        resolved, projection = _read_projection(
+            home_value=home_value, target_value=target_value, gig_id=gig_id
+        )
+    except (IndexError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    proposal = projection.proposal or {}
+    active = projection.active_version or {}
+    payload = {
+        "active_version": active.get("active_version"),
+        "gig_id": resolved.gig_id,
+        "journal_head": projection.head,
+        "proposal_id": proposal.get("proposal_id"),
+        "proposal_status": proposal.get("status"),
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(
+            f"{payload['gig_id']}: proposal={payload['proposal_status']} "
+            f"active_version={payload['active_version']}"
+        )
+
+
+@cli.command("show")
+@_projection_options
+def show_command(
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Show the canonical projection for one explicit or active Gig."""
+
+    _require_supported_platform()
+    try:
+        _resolved, projection = _read_projection(
+            home_value=home_value, target_value=target_value, gig_id=gig_id
+        )
+    except (IndexError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(
+            json.dumps(projection.as_dict(), sort_keys=True, separators=(",", ":"))
+        )
+    else:
+        proposal = projection.proposal or {}
+        click.echo(f"Gig {projection.gig_id}")
+        click.echo(f"Proposal: {proposal.get('proposal_id', 'none')}")
+        click.echo(f"State: {proposal.get('status', 'none')}")
+
+
+@cli.command("history")
+@_projection_options
+def history_command(
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """List committed journal transitions for one Gig in sequence order."""
+
+    _require_supported_platform()
+    try:
+        _resolved, projection = _read_projection(
+            home_value=home_value, target_value=target_value, gig_id=gig_id
+        )
+    except (IndexError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(
+            json.dumps(list(projection.entries), sort_keys=True, separators=(",", ":"))
+        )
+    else:
+        for item in projection.entries:
+            click.echo(
+                f"{item['sequence']:012d} {item['transition']} {item['handoff_id']}"
+            )
+
+
+@cli.command("plan")
+@_projection_options
+def plan_command(
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Render the proposed or approved Goal Graph without starting work."""
+
+    _require_supported_platform()
+    try:
+        _resolved, projection = _read_projection(
+            home_value=home_value, target_value=target_value, gig_id=gig_id
+        )
+    except (IndexError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    proposal = projection.proposal
+    if proposal is None:
+        raise click.ClickException("no committed proposal supplies a Goal Graph")
+    authority = "approved" if projection.active_version is not None else "proposed"
+    payload = {"authority": authority, "goal_graph": proposal["goal_graph"]}
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"{authority.title()} authority")
+        click.echo(f"Goal graph: {proposal['goal_graph']['path']}")
 
 
 @cli.group("workpad")

@@ -106,12 +106,18 @@ def test_installed_help_version_and_goal_approved_commands_are_the_only_surface(
     assert "revise" in help_result.stdout
     assert "approve" in help_result.stdout
     assert "reject" in help_result.stdout
+    assert "gigs" in help_result.stdout
+    assert "proposals" in help_result.stdout
+    assert "status" in help_result.stdout
+    assert "show" in help_result.stdout
+    assert "history" in help_result.stdout
+    assert "plan" in help_result.stdout
     assert "workpad" in help_result.stdout
     for command in PLANNED_COMMANDS:
         assert command not in help_result.stdout
     assert version_result.stdout == f"gigai {version('gigai')}\n"
     assert (
-        "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', 'approve', 'reject', 'workpad', 'check', or 'open'"
+            "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', 'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', 'plan', 'workpad', 'check', or 'open'"
         in bare_result.stderr
     )
     assert "Missing argument 'NAME'" in invalid_create_result.stderr

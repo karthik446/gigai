@@ -131,9 +131,7 @@ def provision_workpad(
             reconciled = True
             published = True
         else:
-            staged = Path(
-                tempfile.mkdtemp(prefix=f".{gig_id}.provision-", dir=parent)
-            )
+            staged = Path(tempfile.mkdtemp(prefix=f".{gig_id}.provision-", dir=parent))
             try:
                 _initialize_workpad_repository(staged, project_id, gig_id)
                 observer("after_staging")
@@ -292,9 +290,7 @@ def open_locations(
         )
         opened_target = with_target or config.open_with_target
         locations = (
-            (resolved.path, bound.target_root)
-            if opened_target
-            else (resolved.path,)
+            (resolved.path, bound.target_root) if opened_target else (resolved.path,)
         )
     completed = subprocess.run(
         [*config.editor_argv, *(os.fspath(path) for path in locations)],
@@ -378,9 +374,7 @@ def _ensure_private_topology(root: Path, parent: Path) -> None:
         raise WorkpadUnavailableError("workpad topology cannot be revalidated") from exc
 
 
-def _find_staged_workpad(
-    parent: Path, gig_id: str, project_id: str
-) -> Path | None:
+def _find_staged_workpad(parent: Path, gig_id: str, project_id: str) -> Path | None:
     candidates = sorted(parent.glob(f".{gig_id}.provision-*"))
     if not candidates:
         return None
@@ -438,13 +432,25 @@ def _validate_workpad_repository(
     allow_semantic_state: bool = False,
 ) -> None:
     if root.is_symlink() or not root.is_dir():
-        raise WorkpadConflictError("workpad path is missing, redirected, or not a directory")
+        raise WorkpadConflictError(
+            "workpad path is missing, redirected, or not a directory"
+        )
     entries = {path.name for path in root.iterdir()}
     allowed = {".git", ".gitignore"}
     if allow_journal:
         allowed.add("handoffs")
     if allow_semantic_state:
-        allowed.update({"gig.md", "goals", "reviews", "decisions", "manifests", "scratch"})
+        allowed.update(
+            {
+                "gig.md",
+                "goals",
+                "reviews",
+                "decisions",
+                "manifests",
+                "scratch",
+                "state.sqlite",
+            }
+        )
     if not {".git", ".gitignore"}.issubset(entries) or not entries <= allowed:
         raise WorkpadConflictError(
             "workpad contains semantic or unexpected top-level state"
@@ -473,7 +479,10 @@ def _validate_workpad_repository(
             raise WorkpadConflictError(f"workpad Git ownership marker {key} mismatches")
     if _git(root, "remote").stdout.strip():
         raise WorkpadConflictError("workpad must not configure a Git remote")
-    if not allow_journal and _git(root, "rev-parse", "--verify", "HEAD", check=False).returncode == 0:
+    if (
+        not allow_journal
+        and _git(root, "rev-parse", "--verify", "HEAD", check=False).returncode == 0
+    ):
         raise WorkpadConflictError("G05 workpad must remain unborn without a commit")
 
 
@@ -564,7 +573,9 @@ def _resolve_registered(
     except (OSError, RuntimeError) as exc:
         raise WorkpadUnavailableError("registered workpad is unavailable") from exc
     if resolved != expected or not resolved.is_relative_to(root):
-        raise WorkpadConflictError("registered workpad is redirected outside its authority")
+        raise WorkpadConflictError(
+            "registered workpad is redirected outside its authority"
+        )
     _validate_workpad_repository(
         expected,
         bound.project_id,
