@@ -1,0 +1,12 @@
+.git
+.codex
+.env
+.venv
+.wheel-venv
+__pycache__
+*.py[cod]
+.pytest_cache
+build
+dist
+*.egg-info
+.DS_Store

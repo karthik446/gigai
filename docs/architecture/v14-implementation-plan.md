@@ -1853,7 +1853,9 @@ Rules:
 
 ### 15.1 Supported platforms
 
-The initial package declares `requires-python = ">=3.11,<3.12"`. V1 supports
+Per [ADR 0001](../adr/0001-python-version-range.md), the package declares
+`requires-python = ">=3.11"` and CI establishes the evidence-backed upper
+compatibility range. V1 supports
 macOS and Linux where the configured workpad filesystem passes GigAI's
 interprocess-lock, atomic-replacement, durability, and permission probes.
 
