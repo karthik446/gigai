@@ -6,11 +6,11 @@
 
 ## Outcome
 
-Deliberately publish GigAI `0.1.0` as the first public pre-alpha release: an
+Deliberately publish GigAI `0.1.1` as the first public pre-alpha release: an
 installable PyPI distribution and matching GitHub Release that a user can
 install on a clean machine without cloning this repository.
 
-The package metadata, annotated Git tag `v0.1.0`, PyPI release, GitHub Release,
+The package metadata, annotated Git tag `v0.1.1`, PyPI release, GitHub Release,
 and `gigai --version` must all identify the same version. This explicitly
 declares the first public release and activates ADR 0003's immutable/additive
 schema-versioning regime.
@@ -43,7 +43,7 @@ schema-versioning regime.
   `SHA256SUMS`, and verifiable provenance attestations.
 - Clean-machine operator evidence on one supported macOS machine and one
   supported Linux machine. Each installs the exact PyPI version with
-  `uv tool install "gigai==0.1.0"`, then proves `gigai --version`,
+  `uv tool install "gigai==0.1.1"`, then proves `gigai --version`,
   `gigai --help`, and an offline setup/doctor path without a repository clone
   or provider credential.
 - Public installation and upgrade documentation that uses the published,
@@ -70,12 +70,12 @@ schema-versioning regime.
 
 ## Acceptance criteria
 
-1. Before creating the release commit or annotated `v0.1.0` tag, GigAI's
+1. Before creating the release commit or annotated `v0.1.1` tag, GigAI's
    publisher confirms that the `gigai` PyPI project name is available or
    already owned by it. A name-ownership failure stops the release.
 2. The release commit sets the static `pyproject.toml [project].version` to
-   `0.1.0` and regenerates `uv.lock` with `uv lock`. At the exact annotated
-   `v0.1.0` tag commit, the lockfile project entry, built-artifact metadata,
+   `0.1.1` and regenerates `uv.lock` with `uv lock`. At the exact annotated
+   `v0.1.1` tag commit, the lockfile project entry, built-artifact metadata,
    and `gigai --version` output all match that version. The release evidence
    records the `uv lock` refresh and a subsequent `uv lock --locked` check; a
    dirty checkout or any version disagreement fails the release gate.
@@ -99,7 +99,7 @@ schema-versioning regime.
    on the exact artifact digests, and the published provenance attestation is
    independently verified.
 8. Sanitized clean-machine macOS and Linux proofs install the exact PyPI
-   version with `uv tool install "gigai==0.1.0"` and pass the stated offline
+   version with `uv tool install "gigai==0.1.1"` and pass the stated offline
    command checks. They do not clone this repository, rely on a local wheel,
    or use provider credentials.
 9. The README and cheat sheet show the supported no-clone installation command,

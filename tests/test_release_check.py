@@ -11,6 +11,18 @@ import pytest
 from tools import release_check
 
 
+def test_pypi_publish_jobs_receive_only_distributions() -> None:
+    workflow_path = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
+    if not workflow_path.is_file():
+        pytest.skip("release workflow is excluded from the offline container build context")
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert workflow.count("name: Prepare package-only publisher input") == 2
+    assert workflow.count("cp dist/*.whl dist/*.tar.gz publish/") == 2
+    assert workflow.count("packages-dir: publish/") == 2
+    assert "packages-dir: dist/" not in workflow
+
+
 def _write_project(path: Path, version: str = "0.1.0") -> Path:
     project = path / "pyproject.toml"
     project.write_text(

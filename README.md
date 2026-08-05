@@ -81,12 +81,12 @@ current installation and local workflow.
 
 ## Install the published release
 
-GigAI's first public pre-alpha release is `0.1.0`. Once it is published, install
+GigAI's first public pre-alpha release is `0.1.1`. Once it is published, install
 the exact reviewed release on a clean macOS or Linux machine without cloning
 this repository:
 
 ~~~bash
-uv tool install "gigai==0.1.0"
+uv tool install "gigai==0.1.1"
 gigai --version
 gigai --help
 ~~~
@@ -95,7 +95,7 @@ Choose every update deliberately by replacing the pinned version after reading
 its release notes; GigAI does not self-update:
 
 ~~~bash
-uv tool install --reinstall "gigai==0.1.0"
+uv tool install --reinstall "gigai==0.1.1"
 ~~~
 
 ## Verify the source evidence
