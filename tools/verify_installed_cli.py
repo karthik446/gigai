@@ -55,6 +55,12 @@ def main() -> None:
         "revise",
         "approve",
         "reject",
+        "gigs",
+        "proposals",
+        "status",
+        "show",
+        "history",
+        "plan",
         "workpad",
         "check",
         "open",
@@ -78,7 +84,8 @@ def main() -> None:
 
     print(
         "verified installed GigAI CLI: help, version, setup, doctor, init, create, "
-        "feedback, revise, approve, reject, workpad path, check, and open only"
+        "feedback, revise, approve, reject, gigs, proposals, status, show, history, "
+        "plan, workpad path, check, and open only"
     )
 
 
