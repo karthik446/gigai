@@ -79,6 +79,25 @@ installed help state what works today. The
 [cheat sheet](docs/reference/cheat-sheet.md) is the copy-paste guide for the
 current installation and local workflow.
 
+## Install the published release
+
+GigAI's first public pre-alpha release is `0.1.0`. Once it is published, install
+the exact reviewed release on a clean macOS or Linux machine without cloning
+this repository:
+
+~~~bash
+uv tool install "gigai==0.1.0"
+gigai --version
+gigai --help
+~~~
+
+Choose every update deliberately by replacing the pinned version after reading
+its release notes; GigAI does not self-update:
+
+~~~bash
+uv tool install --reinstall "gigai==0.1.0"
+~~~
+
 ## Verify the source evidence
 
 Python 3.11 or newer is required. Compatibility is continuously tested rather
@@ -189,6 +208,7 @@ The wheel verifier is deliberately separate from the source test suite. Tests
 are not shipped in the wheel.
 
 ~~~bash
+rm -rf dist
 uv build
 uv venv --python 3.11 .wheel-venv
 version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"

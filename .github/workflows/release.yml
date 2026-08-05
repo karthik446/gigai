@@ -1,0 +1,257 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Release preflight
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.metadata.outputs.commit }}
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+      - id: metadata
+        run: |
+          test "${GITHUB_REF_TYPE}" = tag
+          test "$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")" = tag
+          python tools/release_check.py verify-tag --tag "${GITHUB_REF_NAME}"
+          python tools/release_check.py verify-lockfile
+          echo "commit=$(git rev-parse "${GITHUB_REF_NAME}^{}")" >> "${GITHUB_OUTPUT}"
+          echo "version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "${GITHUB_OUTPUT}"
+      - name: Require protected publication environments
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for environment in testpypi pypi; do
+            reviewers="$(gh api "repos/${GITHUB_REPOSITORY}/environments/${environment}" --jq '[.protection_rules[] | select(.type == "required_reviewers")] | length')"
+            if [ "${reviewers}" -lt 1 ]; then
+              echo "${environment} must exist with at least one required reviewer" >&2
+              exit 1
+            fi
+          done
+
+  ci:
+    name: Exact-tag CI
+    needs: preflight
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build and attest release artifacts
+    needs: [preflight, ci]
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      artifact-metadata: write
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: rm -rf dist
+      - run: uv build --no-sources
+      - run: python tools/release_check.py verify-artifacts
+      - run: python tools/release_check.py write-checksums
+      - run: python tools/release_check.py verify-checksums
+      - name: Attest wheel and source distribution provenance
+        uses: actions/attest@v4
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          if-no-files-found: error
+          path: dist/
+
+  smoke-artifacts:
+    name: Fresh wheel and source-distribution smoke test
+    needs: [preflight, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist
+      - env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          for artifact in dist/*.whl dist/*.tar.gz; do
+            root="$(mktemp -d)"
+            uv venv --python 3.11 "${root}/venv"
+            uv pip install --python "${root}/venv/bin/python" "${artifact}"
+            "${root}/venv/bin/gigai" --version | grep -Fx "gigai ${VERSION}"
+            "${root}/venv/bin/gigai" --help >/dev/null
+            "${root}/venv/bin/gigai" setup --non-interactive --home "${root}/home" --workpad-root "${root}/workpad" --editor /usr/bin/true --json >/dev/null
+            "${root}/venv/bin/gigai" doctor --home "${root}/home" --json >/dev/null
+          done
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: [preflight, smoke-artifacts]
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          repository-url: https://test.pypi.org/legacy/
+
+  verify-testpypi:
+    name: TestPyPI clean install on ${{ matrix.os }}
+    needs: [preflight, publish-testpypi]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          root="$(mktemp -d)"
+          export HOME="${root}/home"
+          export XDG_BIN_HOME="${root}/bin"
+          export XDG_DATA_HOME="${root}/data"
+          export PATH="${XDG_BIN_HOME}:${PATH}"
+          uv tool install --index https://test.pypi.org/simple --index https://pypi.org/simple "gigai==${VERSION}"
+          gigai --version | grep -Fx "gigai ${VERSION}"
+          gigai --help >/dev/null
+          gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true --json >/dev/null
+          gigai doctor --home "${root}/gigai-home" --json >/dev/null
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [preflight, verify-testpypi]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  verify-pypi:
+    name: PyPI clean install on ${{ matrix.os }}
+    needs: [preflight, publish-pypi]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          root="$(mktemp -d)"
+          export HOME="${root}/home"
+          export XDG_BIN_HOME="${root}/bin"
+          export XDG_DATA_HOME="${root}/data"
+          export PATH="${XDG_BIN_HOME}:${PATH}"
+          uv tool install "gigai==${VERSION}"
+          gigai --version | grep -Fx "gigai ${VERSION}"
+          gigai --help >/dev/null
+          gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true --json >/dev/null
+          gigai doctor --home "${root}/gigai-home" --json >/dev/null
+
+  github-release:
+    name: Verify provenance and create GitHub Release
+    needs: [preflight, build, verify-pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify dist/*.whl --repo "${GITHUB_REPOSITORY}"
+          gh attestation verify dist/*.tar.gz --repo "${GITHUB_REPOSITORY}"
+      - env:
+          COMMIT: ${{ needs.preflight.outputs.commit }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          dist = Path("dist")
+          artifacts = sorted(
+              path for path in dist.iterdir() if path.name != "release-manifest.json"
+          )
+          manifest = {
+              "schema_version": "1.0",
+              "package": "gigai",
+              "version": os.environ["VERSION"],
+              "tag": os.environ["TAG"],
+              "commit": os.environ["COMMIT"],
+              "pypi_url": f"https://pypi.org/project/gigai/{os.environ['VERSION']}/",
+              "github_release_url": f"https://github.com/{os.environ['REPOSITORY']}/releases/tag/{os.environ['TAG']}",
+              "artifacts": [
+                  {
+                      "name": path.name,
+                      "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                      "size_bytes": path.stat().st_size,
+                  }
+                  for path in artifacts
+              ],
+          }
+          (dist / "release-manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.whl dist/*.tar.gz dist/SHA256SUMS dist/release-manifest.json --title "GigAI ${VERSION}" --generate-notes

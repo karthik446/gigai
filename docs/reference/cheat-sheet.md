@@ -13,28 +13,29 @@ not current product behavior.
 ## Install
 
 GigAI requires Python 3.11 or newer and [uv](https://docs.astral.sh/uv/).
-Until a release distribution is published, install from a local checkout:
+Install the exact published release without cloning this repository:
 
 ```bash
-git clone https://github.com/karthik446/gigai.git
-cd gigai
-uv tool install --editable .
+uv tool install "gigai==0.1.0"
 gigai --version
 gigai --help
 ```
 
-To work on the repository itself rather than install a global tool:
+Updates are deliberate: replace the version only after reviewing its release
+notes. GigAI has no self-update mechanism.
 
 ```bash
-uv sync --extra test
-uv run gigai --help
+uv tool install --reinstall "gigai==0.1.0"
 ```
 
-To update a checkout-based tool installation:
+To develop the repository rather than install a published tool, clone it and
+use its test environment:
 
 ```bash
-git pull --ff-only
-uv tool install --reinstall --editable .
+git clone https://github.com/karthik446/gigai.git
+cd gigai
+uv sync --extra test
+uv run gigai --help
 ```
 
 ## First local workflow
