@@ -119,9 +119,13 @@ jobs:
         with:
           name: release-dist
           path: dist
+      - name: Prepare package-only publisher input
+        run: |
+          mkdir publish
+          cp dist/*.whl dist/*.tar.gz publish/
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: dist/
+          packages-dir: publish/
           repository-url: https://test.pypi.org/legacy/
 
   verify-testpypi:
@@ -162,9 +166,13 @@ jobs:
         with:
           name: release-dist
           path: dist
+      - name: Prepare package-only publisher input
+        run: |
+          mkdir publish
+          cp dist/*.whl dist/*.tar.gz publish/
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: dist/
+          packages-dir: publish/
 
   verify-pypi:
     name: PyPI clean install on ${{ matrix.os }}

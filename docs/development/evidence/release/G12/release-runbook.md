@@ -21,11 +21,11 @@ It is not evidence that a release has occurred.
 ## Release sequence
 
 1. Start from a clean checkout and confirm PyPI name availability.
-2. Set `pyproject.toml [project].version` to `0.1.0`, run `uv lock`, and verify
+2. Set `pyproject.toml [project].version` to `0.1.1`, run `uv lock`, and verify
    `uv lock --locked`.
 3. Update user-facing installation documentation for `uv tool install
-   "gigai==0.1.0"`; do not alter historical Phase 1 evidence.
-4. Commit the release change, create an annotated `v0.1.0` tag, and push the
+   "gigai==0.1.1"`; do not alter historical Phase 1 evidence.
+4. Commit the release change, create an annotated `v0.1.1` tag, and push the
    commit and tag.
 5. The tag-triggered workflow runs reusable exact-tag CI, builds and attests
    the wheel and source distribution, publishes to TestPyPI, verifies clean
@@ -37,7 +37,7 @@ It is not evidence that a release has occurred.
 ## Consumer verification
 
 ```bash
-uv tool install "gigai==0.1.0"
+uv tool install "gigai==0.1.1"
 gigai --version
 gh attestation verify <downloaded-wheel> --repo karthik446/gigai
 ```
