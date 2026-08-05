@@ -2,7 +2,7 @@
 
 - Goal: [G10 — Phase 1 Completion Audit](../../../goals/phase-1/G10-phase-1-completion-audit.md)
 - Date: 2026-08-05
-- Outcome: Locally complete; hosted cross-platform confirmation pending
+- Outcome: Complete; hosted cross-platform confirmation passed
 
 ## Delivered audit surface
 
@@ -18,9 +18,14 @@
 
 ## Final gate
 
-G10 may make the Phase 2 go decision only after hosted CI on its exact commit
-passes the macOS and Ubuntu Python matrix, built-wheel resources, and Debian
-offline-container lane. The local Docker daemon was unavailable during this
+G10's Phase 2 gate is satisfied. Hosted
+[push CI run 31031739148](https://github.com/karthik446/gigai/actions/runs/31031739148)
+and [pull-request CI run 31031999965](https://github.com/karthik446/gigai/actions/runs/31031999965)
+each passed the macOS and Ubuntu Python matrix, built-wheel resources, and the
+Debian offline-container lane for source commit
+`b9a0e2e09c76652a80af9ba6aaef2095846b67e8`. The two runs confirm the same
+source commit through different event paths; they are not distinct
+merge-candidate commits. The local Docker daemon was unavailable during this
 audit, so the hosted Debian result is required rather than inferred.
 
 ## Deferred work
