@@ -16,7 +16,7 @@ GigAI requires Python 3.11 or newer and [uv](https://docs.astral.sh/uv/).
 Install the exact published release without cloning this repository:
 
 ```bash
-uv tool install "gigai==0.1.1"
+uv tool install "gigai==0.1.2"
 gigai --version
 gigai --help
 ```
@@ -25,7 +25,7 @@ Updates are deliberate: replace the version only after reviewing its release
 notes. GigAI has no self-update mechanism.
 
 ```bash
-uv tool install --reinstall "gigai==0.1.1"
+uv tool install --reinstall "gigai==0.1.2"
 ```
 
 To develop the repository rather than install a published tool, clone it and

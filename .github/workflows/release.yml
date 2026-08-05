@@ -148,7 +148,7 @@ jobs:
           export XDG_BIN_HOME="${root}/bin"
           export XDG_DATA_HOME="${root}/data"
           export PATH="${XDG_BIN_HOME}:${PATH}"
-          uv tool install --index https://test.pypi.org/simple --index https://pypi.org/simple "gigai==${VERSION}"
+          uv tool install --index https://pypi.org/simple --index https://test.pypi.org/simple "gigai==${VERSION}"
           gigai --version | grep -Fx "gigai ${VERSION}"
           gigai --help >/dev/null
           gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true --json >/dev/null
