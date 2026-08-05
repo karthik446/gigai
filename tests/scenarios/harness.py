@@ -24,6 +24,8 @@ from typing import Mapping, Sequence
 
 _SECRET_NAME = re.compile(r"(?:credential|password|secret|token|api_?key)", re.I)
 _SUBSTITUTE_NAME = re.compile(r"[a-z][a-z0-9_-]*\Z")
+_MANIFEST_CAPTURE_ATTEMPTS = 3
+_MANIFEST_CAPTURE_RETRY_SECONDS = 0.01
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,19 @@ class TreeManifest:
     @classmethod
     def capture(cls, root: Path) -> TreeManifest:
         root = root.resolve(strict=True)
+        failure: FileNotFoundError | None = None
+        for attempt in range(_MANIFEST_CAPTURE_ATTEMPTS):
+            try:
+                return cls._capture_once(root)
+            except FileNotFoundError as exc:
+                failure = exc
+                if attempt + 1 < _MANIFEST_CAPTURE_ATTEMPTS:
+                    time.sleep(_MANIFEST_CAPTURE_RETRY_SECONDS)
+        assert failure is not None
+        raise failure
+
+    @classmethod
+    def _capture_once(cls, root: Path) -> TreeManifest:
         files: list[FileState] = []
         paths: list[Path] = []
         for directory, child_directories, child_files in os.walk(root, followlinks=False):
