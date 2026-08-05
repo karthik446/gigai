@@ -174,6 +174,31 @@ def test_manifest_detects_exact_content_and_git_changes(tmp_path: Path) -> None:
     assert before.git.working_diff_sha256 != after.git.working_diff_sha256
 
 
+def test_manifest_retries_a_transient_disappearing_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "tree"
+    root.mkdir()
+    payload = root / "payload.txt"
+    payload.write_text("stable\n", encoding="utf-8")
+    original_lstat = Path.lstat
+    calls = 0
+
+    def intermittent_lstat(path: Path) -> os.stat_result:
+        nonlocal calls
+        if path == payload and calls == 0:
+            calls += 1
+            raise FileNotFoundError("simulated concurrent replacement")
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", intermittent_lstat)
+
+    manifest = TreeManifest.capture(root)
+
+    assert calls == 1
+    assert [item.path for item in manifest.files] == ["payload.txt"]
+
+
 def test_undeclared_target_write_fails_but_exact_allowlist_passes(
     tmp_path: Path,
 ) -> None:

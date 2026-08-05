@@ -5,6 +5,7 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -271,6 +272,86 @@ def test_two_concurrent_migrators_converge(tmp_path: Path) -> None:
     assert _read_version(path) == REGISTRY_SCHEMA_VERSION
     assert _project_rows(path) == PROJECT_ROWS
     assert not tuple(home.glob("*migrat*"))
+
+
+def test_second_migrator_waits_before_backup_until_first_transition_completes(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    _materialize_v1(home)
+    first_ready = tmp_path / "first-ready"
+    release_first = tmp_path / "release-first"
+    second_reached_backup = tmp_path / "second-reached-backup"
+    first_script = """
+from pathlib import Path
+import sys
+import time
+from gigai.registry import open_project_registry
+
+home = Path(sys.argv[1])
+ready = Path(sys.argv[2])
+release = Path(sys.argv[3])
+
+def observer(step: str) -> None:
+    if step == "before_backup_publish":
+        ready.touch()
+        while not release.exists():
+            time.sleep(0.01)
+
+open_project_registry(home, create=False, migration_observer=observer)
+"""
+    second_script = """
+from pathlib import Path
+import sys
+from gigai.registry import open_project_registry
+
+home = Path(sys.argv[1])
+reached_backup = Path(sys.argv[2])
+
+def observer(step: str) -> None:
+    if step == "before_backup_publish":
+        reached_backup.touch()
+
+open_project_registry(home, create=False, migration_observer=observer)
+"""
+    first = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            first_script,
+            os.fspath(home),
+            os.fspath(first_ready),
+            os.fspath(release_first),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    deadline = time.monotonic() + 10
+    while not first_ready.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert first_ready.exists(), first.communicate(timeout=10)
+
+    second = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            second_script,
+            os.fspath(home),
+            os.fspath(second_reached_backup),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    time.sleep(0.1)
+    assert not second_reached_backup.exists()
+
+    release_first.touch()
+    first_result = first.communicate(timeout=10)
+    second_result = second.communicate(timeout=10)
+    assert first.returncode == 0, first_result
+    assert second.returncode == 0, second_result
+    assert _read_version(registry_path(home)) == REGISTRY_SCHEMA_VERSION
+    assert not second_reached_backup.exists()
 
 
 def test_conflicting_backup_is_never_overwritten(tmp_path: Path) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+import fcntl
 import os
 from pathlib import Path
 import sqlite3
@@ -278,12 +279,15 @@ def open_project_registry(
         created = True
     version = _validate_registry(path)
     if version == REGISTRY_V1_SCHEMA_VERSION:
-        _migrate_registry_v1_to_v2(
-            path,
-            registry_backup_path(home_root),
-            migration_observer=migration_observer,
-        )
-        _validate_registry(path)
+        with _migration_lock(path):
+            version = _validate_registry(path)
+            if version == REGISTRY_V1_SCHEMA_VERSION:
+                _migrate_registry_v1_to_v2(
+                    path,
+                    registry_backup_path(home_root),
+                    migration_observer=migration_observer,
+                )
+                _validate_registry(path)
     return ProjectRegistry(path), created
 
 
@@ -583,6 +587,35 @@ def _migrate_registry_v1_to_v2(
             raise
     finally:
         connection.close()
+
+
+@contextmanager
+def _migration_lock(path: Path) -> Iterator[None]:
+    """Serialize the v1 backup and schema transition across local processes."""
+
+    lock_path = path.with_name(f".{path.name}.lock")
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+        with os.fdopen(descriptor, "r+b", closefd=True) as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600:
+                raise RegistryPermissionError(
+                    "registry migration lock must be a private regular file"
+                )
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+    except RegistryError:
+        raise
+    except OSError as exc:
+        raise RegistryPermissionError(
+            f"registry migration lock is unavailable: {exc}"
+        ) from exc
 
 
 def _publish_v1_backup(path: Path, backup: Path) -> None:
