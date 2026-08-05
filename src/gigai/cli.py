@@ -19,7 +19,7 @@ from .config import (
     migrate_config,
 )
 from .diagnostics import render_report_json, run_doctor, run_live_doctor
-from .index import IndexError, JournalProjection, read_index
+from .index import JournalIndexError, JournalProjection, read_index
 from .lifecycle import (
     LifecycleError,
     approve_offline,
@@ -749,7 +749,7 @@ def proposals_command(
         _resolved, projection = _read_projection(
             home_value=home_value, target_value=target_value, gig_id=gig_id
         )
-    except (IndexError, WorkpadError, OSError, ValueError) as exc:
+    except (JournalIndexError, WorkpadError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     payload = projection.proposal
     if as_json:
@@ -775,7 +775,7 @@ def status_command(
         resolved, projection = _read_projection(
             home_value=home_value, target_value=target_value, gig_id=gig_id
         )
-    except (IndexError, WorkpadError, OSError, ValueError) as exc:
+    except (JournalIndexError, WorkpadError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     proposal = projection.proposal or {}
     active = projection.active_version or {}
@@ -810,7 +810,7 @@ def show_command(
         _resolved, projection = _read_projection(
             home_value=home_value, target_value=target_value, gig_id=gig_id
         )
-    except (IndexError, WorkpadError, OSError, ValueError) as exc:
+    except (JournalIndexError, WorkpadError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     if as_json:
         click.echo(
@@ -838,7 +838,7 @@ def history_command(
         _resolved, projection = _read_projection(
             home_value=home_value, target_value=target_value, gig_id=gig_id
         )
-    except (IndexError, WorkpadError, OSError, ValueError) as exc:
+    except (JournalIndexError, WorkpadError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     if as_json:
         click.echo(
@@ -866,7 +866,7 @@ def plan_command(
         _resolved, projection = _read_projection(
             home_value=home_value, target_value=target_value, gig_id=gig_id
         )
-    except (IndexError, WorkpadError, OSError, ValueError) as exc:
+    except (JournalIndexError, WorkpadError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     proposal = projection.proposal
     if proposal is None:

@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sqlite3
 import uuid
 
 import pytest
 from click.testing import CliRunner
 
 from gigai.cli import cli
-from gigai.index import IndexError, read_index, rebuild_index
+from gigai.canonical import canonical_json_bytes, parse_json_bytes
+from gigai.index import JournalIndexError, read_index, rebuild_index
 from gigai.diagnostics import run_doctor
 from gigai.lifecycle import create_offline
 from gigai.setup import build_config, run_setup
@@ -86,12 +88,96 @@ def test_index_never_conceals_authoritative_workpad_divergence(tmp_path: Path) -
         workpad=created.workpad, project_id=created.project_id, gig_id=created.gig_id
     )
     (created.workpad / "gig.md").write_text("tampered\n", encoding="utf-8")
-    with pytest.raises(IndexError, match="divergence"):
+    with pytest.raises(JournalIndexError, match="divergence"):
         read_index(
             workpad=created.workpad,
             project_id=created.project_id,
             gig_id=created.gig_id,
         )
+
+
+def test_semantic_index_tampering_is_reconciled_before_reads_and_doctor(
+    tmp_path: Path,
+) -> None:
+    home, target = _configured(tmp_path)
+    created = create_offline(
+        home_root=home,
+        requested_target=target,
+        name="semantic-tamper-proof",
+        open_editor=False,
+        uuid_factory=_uuids(),
+    )
+    expected = rebuild_index(
+        workpad=created.workpad, project_id=created.project_id, gig_id=created.gig_id
+    )
+    index_path = created.workpad / "state.sqlite"
+
+    def tamper_index() -> None:
+        connection = sqlite3.connect(index_path)
+        try:
+            payload = parse_json_bytes(
+                connection.execute("SELECT payload FROM projection").fetchone()[0]
+            )
+            assert isinstance(payload, dict)
+            payload["entries"] = []
+            proposal = payload["proposal"]
+            assert isinstance(proposal, dict)
+            proposal["status"] = "approved"
+            connection.execute(
+                "UPDATE projection SET payload = ?", (canonical_json_bytes(payload),)
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    tamper_index()
+    repaired = read_index(
+        workpad=created.workpad, project_id=created.project_id, gig_id=created.gig_id
+    )
+    assert repaired.as_dict() == expected.as_dict()
+    tamper_index()
+    report = run_doctor(home)
+    checks = {check.id: check for check in report.checks}
+    assert checks["journal.index"].status == "PASS"
+
+    runner = CliRunner()
+    history = runner.invoke(
+        cli,
+        [
+            "history",
+            created.gig_id,
+            "--target",
+            str(target),
+            "--home",
+            str(home),
+            "--json",
+        ],
+    )
+    status = runner.invoke(
+        cli,
+        [
+            "status",
+            created.gig_id,
+            "--target",
+            str(target),
+            "--home",
+            str(home),
+            "--json",
+        ],
+    )
+    assert history.exit_code == 0, history.output
+    assert status.exit_code == 0, status.output
+    assert json.loads(history.output) == list(expected.entries)
+    assert json.loads(status.output)["proposal_status"] == "proposed"
+
+    connection = sqlite3.connect(index_path)
+    try:
+        repaired_payload = parse_json_bytes(
+            connection.execute("SELECT payload FROM projection").fetchone()[0]
+        )
+    finally:
+        connection.close()
+    assert repaired_payload == expected.as_dict()
 
 
 def test_offline_doctor_reports_authoritative_journal_and_index_health(

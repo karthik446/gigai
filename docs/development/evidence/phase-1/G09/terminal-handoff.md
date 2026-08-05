@@ -2,13 +2,16 @@
 
 - Goal: [G09 — Rebuildable Index and Read Commands](../../../goals/phase-1/G09-index-and-read-commands.md)
 - Date: 2026-08-05
-- Outcome: Complete locally pending hosted confirmation
+- Outcome: Correction complete locally pending hosted confirmation
 
 ## Delivered surface
 
 - Disposable authoritative-journal projection in ignored `state.sqlite`.
 - Offline `gigs`, `proposals`, `status`, `show`, `history`, and `plan` commands with stable JSON forms.
 - Journal/index health in offline doctor.
+- Semantic index-tamper reconciliation: the committed journal is replayed before
+  reads or doctor results are returned, and divergent `state.sqlite` content is
+  replaced from that authority.
 - Fresh-wheel verifier and CI coverage for the installed read surface.
 
 ## Next transition

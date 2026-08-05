@@ -21,7 +21,7 @@ except ImportError:  # pragma: no cover - v1 rejects non-POSIX before mutation
 from .adapters import AdapterFactoryError, ModelInvocationError, resolve_model_adapter
 from .config import ConfigurationError, GigAIConfig, load_config
 from .credentials import CredentialReferenceError, reference_is_available
-from .index import IndexError, read_index
+from .index import JournalIndexError, read_index
 from .model_targets import ModelTargetResolutionError
 from .standard_pack import PACK_NAME, PACK_VERSION, pack_digest, verify_standard_pack
 
@@ -219,14 +219,14 @@ def _journal_index_checks(config: GigAIConfig) -> tuple[DiagnosticCheck, ...]:
     try:
         for workpad in workpads:
             if workpad.is_symlink() or not workpad.is_dir():
-                raise IndexError("managed workpad is unavailable or redirected")
+                raise JournalIndexError("managed workpad is unavailable or redirected")
             project = _git_config(workpad, "gigai.project-id")
             gig = _git_config(workpad, "gigai.gig-id")
             if project is None or gig is None:
-                raise IndexError("managed workpad lacks Git ownership markers")
+                raise JournalIndexError("managed workpad lacks Git ownership markers")
             read_index(workpad=workpad, project_id=project, gig_id=gig)
             checked += 1
-    except (IndexError, OSError) as exc:
+    except (JournalIndexError, OSError) as exc:
         return (
             _check(
                 "journal.index",
