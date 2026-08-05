@@ -2,7 +2,7 @@
 
 - Goal: [G10 — Phase 1 Completion Audit](../../../goals/phase-1/G10-phase-1-completion-audit.md)
 - Date: 2026-08-05
-- Local result: Go pending hosted confirmation
+- Completion result: Go — hosted confirmation passed
 - Baseline: `a1f5af49c690b90440f556591cf32fc203bd097c` (merged G09)
 
 ## Scope and decision rule
@@ -13,9 +13,13 @@ the documented `init` binding, or the deferred adapter matrix. G11's two local,
 opt-in live checks are redacted operator evidence and are excluded from the
 offline scenario set and this gate.
 
-The local source, artifact, and audit checks below pass. The final Phase 2
-decision remains **no-go until the exact G10 commit passes every hosted macOS,
-Ubuntu, built-wheel, and Debian offline-container lane**.
+The local source, artifact, and audit checks below pass. Hosted
+[push CI run 31031739148](https://github.com/karthik446/gigai/actions/runs/31031739148)
+and [pull-request CI run 31031999965](https://github.com/karthik446/gigai/actions/runs/31031999965)
+each passed every macOS, Ubuntu, built-wheel, and Debian offline-container job
+for G10 source commit `b9a0e2e09c76652a80af9ba6aaef2095846b67e8`. These are
+two event-path confirmations of the same source commit, not distinct
+merge-candidate commits.
 
 ## Acceptance reconciliation
 
@@ -59,18 +63,18 @@ Ubuntu, built-wheel, and Debian offline-container lane**.
    from ordinary doctor and installed deterministic-adapter scenarios. The G10
    Debian lane adds OS-level `--network none` and rejects passed credential
    environment names before tests start.
-10. **Platform matrix — Pending hosted confirmation.**
+10. **Platform matrix — Pass.**
     The locked source matrix passes locally on macOS with Python 3.11, 3.12,
     and 3.13. CI already supplies Ubuntu for the same matrix. This change adds
     the missing Debian 12 Python 3.11 container lane, run non-root with a
     read-only root filesystem, separate writable home/target/workpad tmpfs
-    mounts, and `--network none`. The local Docker daemon is unavailable, so
-    the hosted lane is the authoritative Debian proof.
-11. **Requirement reconciliation — Pass locally.**
+    mounts, and `--network none`. The local Docker daemon was unavailable, so
+    the hosted lane is the authoritative Debian proof; both hosted runs passed
+    all eight jobs.
+11. **Requirement reconciliation — Pass.**
     [The requirement-to-evidence matrix](requirement-to-evidence-matrix.md)
     maps each V14 Phase 1 delivery item and exit gate to a passing test,
-    durable artifact, explicit non-applicability rationale, or the pending
-    hosted G10 gate.
+    durable artifact, or explicit non-applicability rationale.
 
 ## Local verification
 
@@ -107,6 +111,6 @@ change before adding Ruff as a required repository-wide gate.
 
 ## Completion decision
 
-Phase 1 is locally ready for the final hosted confirmation gate. Do not begin
-Phase 2 or claim cross-platform completion until the G10 commit is pushed and
-the complete CI matrix succeeds.
+Phase 1's completion gate is satisfied. The G10 source commit passed all eight
+hosted jobs across macOS, Ubuntu, fresh-wheel, and Debian offline-container
+verification before this audit was merged as `247f58f`.
