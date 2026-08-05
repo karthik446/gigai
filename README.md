@@ -75,7 +75,9 @@ content is hashed as exact bytes rather than silently normalized.
 The [V14 implementation plan](docs/architecture/v14-implementation-plan.md)
 defines the intended product. The [command sheet](docs/reference/command-sheet.md)
 contains both the implemented surface and planned design; this README and
-installed help state what works today.
+installed help state what works today. The
+[cheat sheet](docs/reference/cheat-sheet.md) is the copy-paste guide for the
+current installation and local workflow.
 
 ## Verify the source evidence
 
@@ -189,8 +191,13 @@ are not shipped in the wheel.
 ~~~bash
 uv build
 uv venv --python 3.11 .wheel-venv
-uv pip install --python .wheel-venv/bin/python \
-  dist/gigai-0.0.0-py3-none-any.whl
+version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+set -- "dist/gigai-${version}-"*.whl
+if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+  echo "expected exactly one built GigAI wheel for version ${version}" >&2
+  exit 1
+fi
+uv pip install --python .wheel-venv/bin/python "$1"
 .wheel-venv/bin/python tools/verify_installed_schemas.py
 .wheel-venv/bin/python tools/verify_installed_canonical.py
 .wheel-venv/bin/python tools/verify_installed_cli.py
