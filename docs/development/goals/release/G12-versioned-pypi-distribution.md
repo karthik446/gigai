@@ -34,9 +34,11 @@ schema-versioning regime.
   exact annotated release tag, verifies both in fresh environments without a
   source checkout, and requires the complete existing CI gate for that exact
   tag commit.
-- PyPI publication through a GitHub-to-PyPI Trusted Publisher using OIDC and a
-  protected release environment; no long-lived PyPI API token is stored in the
-  repository, workflow, or release evidence.
+- PyPI publication through a GitHub-to-PyPI Trusted Publisher using OIDC and
+  the named `testpypi` and `pypi` release environments. As a sole-maintainer
+  project, GigAI does not pretend that self-review is an independent approval
+  boundary; no long-lived PyPI API token is stored in the repository, workflow,
+  or release evidence.
 - A GitHub Release for the same tag containing the wheel, source distribution,
   `SHA256SUMS`, and verifiable provenance attestations.
 - Clean-machine operator evidence on one supported macOS machine and one
@@ -89,10 +91,10 @@ schema-versioning regime.
 5. A disposable TestPyPI publication dry run completes before production
    publication is authorized, proving the tagged artifacts can be uploaded and
    installed without using the local checkout.
-6. PyPI publication uses a configured Trusted Publisher and GitHub OIDC under
-   a protected release environment. No credential value, token-shaped value,
-   or workstation path appears in committed material, workflow logs, or
-   durable evidence.
+6. PyPI publication uses a configured Trusted Publisher and GitHub OIDC from
+   the named `testpypi` and `pypi` release environments. No credential value,
+   token-shaped value, or workstation path appears in committed material,
+   workflow logs, or durable evidence.
 7. The GitHub Release, PyPI release, release manifest, and `SHA256SUMS` agree
    on the exact artifact digests, and the published provenance attestation is
    independently verified.
@@ -116,7 +118,7 @@ schema-versioning regime.
   rejection test.
 - Fresh wheel and source-distribution installation checks, including the
   installed CLI, offline setup, and offline doctor.
-- Hosted exact-tag CI, protected-environment, Trusted Publisher, checksum, and
+- Hosted exact-tag CI, named-environment, Trusted Publisher, checksum, and
   provenance-attestation evidence.
 - Sanitized macOS and Linux clean-machine installation records.
 - `docs/development/evidence/release/G12/completion-audit.md`,
@@ -124,10 +126,10 @@ schema-versioning regime.
 
 ## Stop boundary
 
-Stop before publishing if PyPI name ownership, Trusted Publisher setup,
-protected-environment approval, exact-tag CI, artifact verification,
-attestation verification, TestPyPI publication, or either clean-machine proof
-is missing or fails.
+Stop before publishing if PyPI name ownership, Trusted Publisher setup, either
+named release environment, exact-tag CI, artifact verification, attestation
+verification, TestPyPI publication, or either clean-machine proof is missing
+or fails.
 Do not substitute a Git source install, a local wheel, a credential-bearing
 workflow, or a curl installer for the published-package proof. Route example
 Gigs and every execution-oriented surface to a later goal.

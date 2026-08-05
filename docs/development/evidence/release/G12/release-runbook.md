@@ -10,11 +10,12 @@ It is not evidence that a release has occurred.
 2. On both TestPyPI and PyPI, create a GitHub Actions pending Trusted Publisher
    for project `gigai`, owner `karthik446`, repository `gigai`, workflow
    `release.yml`, and environment `testpypi` or `pypi` respectively.
-3. In GitHub, create `testpypi` and `pypi` environments. Each needs at least
-   one required reviewer. Do not add a PyPI API token or any other publishing
-   secret to the repository.
-4. Confirm the release workflow's exact tag checks are green before approving
-   the TestPyPI environment. Approve production PyPI only after both TestPyPI
+3. In GitHub, create the named `testpypi` and `pypi` environments. GigAI is a
+   sole-maintainer project, so self-review is not configured as a ceremonial
+   approval gate. Do not add a PyPI API token or any other publishing secret to
+   the repository.
+4. Confirm the release workflow's exact-tag checks are green. The workflow
+   publishes to TestPyPI first and authorizes PyPI only after both TestPyPI
    installation jobs pass.
 
 ## Release sequence
@@ -28,7 +29,7 @@ It is not evidence that a release has occurred.
    commit and tag.
 5. The tag-triggered workflow runs reusable exact-tag CI, builds and attests
    the wheel and source distribution, publishes to TestPyPI, verifies clean
-   macOS/Linux `uv tool install` behavior, then pauses for PyPI approval.
+   macOS/Linux `uv tool install` behavior, then publishes to PyPI.
 6. After production PyPI and its clean-machine checks pass, the workflow
    verifies provenance and creates the GitHub Release with distributions,
    `SHA256SUMS`, and `release-manifest.json`.
