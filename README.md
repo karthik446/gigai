@@ -4,10 +4,10 @@ GigAI is a contract-first exploration of a local, user-controlled runtime for
 turning goals into reviewable, finite execution graphs.
 
 > **Status: pre-alpha contracts and executable research.** The installed
-> distribution implements local `setup`, offline `doctor`, and idempotent
-> target `init`, plus read/open operations for already-registered workpads,
-> alongside help and package-metadata version output. It does not yet expose a
-> Gig creation or activation command, run a scheduler, or provide a production runtime.
+> distribution implements local `setup`, offline `doctor`, idempotent target
+> `init`, the offline proposal lifecycle (`create`, `feedback`, `revise`,
+> `approve`, and `reject`), and read/open operations over private workpads.
+> It does not run a scheduler or provide a production execution runtime.
 > The package also exposes versioned pre-release serialized contracts and
 > canonical identity primitives. Their immutable release regime begins at
 > GigAI's deliberately declared first public release.
@@ -36,8 +36,8 @@ content is hashed as exact bytes rather than silently normalized.
   bytes, exact imported-byte digests, prefixed UUIDv4 IDs, and explicit version
   selection.
 - One installed `gigai` command exposing truthful package help and version,
-  idempotent local setup, structured offline diagnostics, and target
-  binding—with no later command stubs.
+  idempotent local setup, structured offline diagnostics, target binding, the
+  non-executable proposal lifecycle, and offline read/open operations.
 - A strict versioned `config.toml` containing structured editor argv,
   credential references rather than values, one deterministic offline
   endpoint and target, one default profile, and the authoritative workpad
@@ -55,18 +55,20 @@ content is hashed as exact bytes rather than silently normalized.
   empty, unborn, local-only Git repository under the configured mount. It sets
   repository-local identity and ownership markers, configures no remote, and
   creates no Gig proposal, semantic file, commit, or active selection.
-- Installed `workpad path` and `open` commands for existing registered
-  workpads. Their no-ID forms fail with `no_active_gig` until a later lifecycle
-  goal creates and activates a Gig; no public provisioning shortcut exists.
+- One offline proposal lifecycle that allocates a Gig, provisions its private
+  workpad, records semantic local-Git handoffs, and may approve an immutable
+  version without starting a Run.
+- Installed `gigs`, `proposals`, `status`, `show`, `history`, `plan`, `workpad
+  path`, and `open` commands over explicit or active registered workpads.
+  `state.sqlite` is rebuilt from committed journal authority when needed.
 - A reusable black-box scenario harness for isolated homes, target and workpad
   manifests, Git state, subprocess recording, and fail-closed effect checks.
 - Exact-byte golden vectors that the production implementation must preserve.
 - Executable evidence for schema instances, graph semantics, canonicalization,
   concurrent journal sequencing, and bounded Phase 0 feasibility questions.
-- A source suite containing 206 tests: 59 G01 production tests, 19 G02 CLI and
-  harness tests, 19 G03 setup/diagnostic tests, 35 G04 binding tests, 14
-  contract tests, 17 Phase 0 tests, and 43 G05 migration, workpad, and installed
-  scenario tests.
+- A source suite covering canonical bytes, CLI/process isolation, setup,
+  binding, workpads, journal recovery, proposal lifecycle, contract validators,
+  model-port boundaries, and rebuildable index semantics.
 - A wheel-level verifier that proves the exact eight schema resources and their
   SHA-256 identities survived packaging.
 
@@ -86,11 +88,7 @@ uv sync --extra test
 uv run pytest
 ~~~
 
-Expected result:
-
-~~~text
-206 passed
-~~~
+All configured source tests must pass.
 
 ## Configure, diagnose, bind, and inspect existing workpads
 
@@ -128,24 +126,39 @@ explicit non-Git directory is supported without creating `.gigai` inside it:
 gigai init --target /path/to/non-git-directory
 ~~~
 
-`init` does not create a Gig, workpad, journal, or remote. G05 provides the
-internal substrate that a later lifecycle goal will call with an already
-allocated Gig ID; there is deliberately no public provision or activate
-command yet.
+`init` does not create a Gig, workpad, journal, or remote. The offline
+`create` lifecycle owns Gig-ID allocation and invokes G05's private substrate;
+there is deliberately no standalone public provision or activate command.
 
-For a workpad that is already registered by product code, the current read/open
-surface is:
+Create and review a non-executable proposal locally:
+
+~~~bash
+gigai create research-gigai
+gigai feedback <proposal-id> --text "clarify the verification"
+gigai revise <proposal-id> --change "clarify the verification"
+gigai approve <proposal-id>
+~~~
+
+Creation, feedback, revision, approval, and rejection write only the private
+workpad journal. Approval starts no Run and no target mutation.
+
+The current offline read/open surface is:
 
 ~~~bash
 gigai workpad path <gig-id>
 gigai open <gig-id>
 gigai open <gig-id> --with-target
 gigai open --target
+gigai gigs --json
+gigai proposals <gig-id> --json
+gigai status <gig-id> --json
+gigai history <gig-id> --json
+gigai plan <gig-id> --json
 ~~~
 
-Running `gigai workpad path` or `gigai open` without an ID currently returns
-the typed `no_active_gig` failure. G08 will own the first lifecycle that may
-allocate an ID, call the private provisioner, and activate that exact Gig.
+Without an explicit Gig ID, `workpad path` and `open` resolve the active private
+workpad. They return typed `no_active_gig` only when the bound target has no
+active Gig.
 
 ## Canonical identity API
 
@@ -184,6 +197,11 @@ uv pip install --python .wheel-venv/bin/python \
 .wheel-venv/bin/python tools/verify_installed_g03.py
 .wheel-venv/bin/python tools/verify_installed_g04.py
 .wheel-venv/bin/python tools/verify_installed_g05.py
+.wheel-venv/bin/python tools/verify_installed_g06.py
+.wheel-venv/bin/python tools/verify_installed_g07.py
+.wheel-venv/bin/python tools/verify_installed_g08.py
+.wheel-venv/bin/python tools/verify_installed_g09.py
+.wheel-venv/bin/python tools/verify_installed_g11.py
 ~~~
 
 Expected result:
@@ -191,10 +209,15 @@ Expected result:
 ~~~text
 verified 8 installed GigAI schemas
 verified installed GigAI canonical identity API
-verified installed GigAI CLI: help, version, setup, doctor, init, workpad path, and open only
+verified installed GigAI CLI: help, version, setup, doctor, init, create, feedback, revise, approve, reject, gigs, proposals, status, show, history, plan, workpad path, check, and open only
 verified installed GigAI G03 setup, idempotency, pack, and offline doctor
 verified installed GigAI G04 Git and non-Git target binding
 verified installed GigAI G05 private unborn workpad and read/open surface
+verified installed GigAI G06 journal locking and recovery
+verified installed GigAI G07 contract validators
+verified installed GigAI G08 offline proposal lifecycle
+verified installed GigAI G09 rebuildable index and read commands
+verified installed GigAI G11 model invocation foundation
 ~~~
 
 The lockfile is committed. CI and release verification use uv with
@@ -211,7 +234,7 @@ python -m pytest
 
 | Path | Purpose | Shipped |
 |---|---|---|
-| src/gigai/cli.py | Installed help, version, setup, doctor, init, workpad path, and open surface | yes |
+| src/gigai/cli.py | Installed setup, diagnostics, binding, offline lifecycle, read, and open surface | yes |
 | src/gigai/canonical.py | Sole canonical byte, digest, ID, and version implementation | yes |
 | src/gigai/config.py | Strict versioned typed machine configuration | yes |
 | src/gigai/setup.py | Idempotent setup orchestration and mount preflight | yes |

@@ -1,6 +1,6 @@
 # GigAI command sheet
 
-- **Date:** 2026-08-03
+- **Date:** 2026-08-05
 - **Status:** companion operator contract for the implementation plan
 - **Plan:** `docs/architecture/v14-implementation-plan.md`, revision 14
 
@@ -9,9 +9,11 @@ authoritative where this sheet omits detail.
 
 > **Implementation status:** this sheet describes the approved V14 operator
 > contract, including planned commands. The current pre-alpha CLI implements
-> `setup`, `doctor`, `init`, `workpad path`, and `open`. No public command yet
-> creates or activates a Gig. Consequently, the no-ID `workpad path` and `open`
-> forms fail with `no_active_gig` until G08 supplies the creation lifecycle.
+> `setup`, offline `doctor`, `init`, `create`, `feedback`, `revise`, `approve`,
+> `reject`, `gigs`, `proposals`, `status`, `show`, `history`, `plan`, `workpad
+> path`, `check`, and `open`. The lifecycle is offline and non-executable:
+> approval seals a Gig version but starts no Run. `improve`, `run`, `continue`,
+> and the remaining planned commands are not implemented.
 
 ## Mental model
 
@@ -112,7 +114,7 @@ gigai create research-gigai
 `setup` configures the machine. `init` binds one target. `create` begins one
 finite Gig and stops after producing a Gig Proposal for review.
 
-V1 supports Python 3.11 on macOS and Linux when the selected workpad mount
+V1 supports Python 3.11 or newer on macOS and Linux when the selected workpad mount
 passes the lock and atomic-replacement probes. Ubuntu and Debian are the
 continuous Linux baselines. Windows is explicitly unsupported in v1 rather
 than backed by an untested lock implementation.

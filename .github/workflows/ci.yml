@@ -56,6 +56,28 @@ jobs:
           uv run --locked --extra test pytest
           tests/test_cli_and_scenario_harness.py
           tests/test_g*_installed_scenarios.py
+          tests/test_g10_phase1_audit.py
           -k 'installed_help_version or installed_'
         env:
           GIGAI_TEST_EXECUTABLE: ${{ github.workspace }}/.wheel-venv/bin/gigai
+
+  debian-offline:
+    name: Debian 12 offline container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag gigai-debian-offline:${{ github.sha }} --file containers/debian-offline/Dockerfile .
+      - run: >-
+          docker run --rm
+          --network none
+          --read-only
+          --user 10001:10001
+          --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777
+          --tmpfs /audit/home:rw,nosuid,nodev,uid=10001,gid=10001,mode=0700
+          --tmpfs /audit/target:rw,nosuid,nodev,uid=10001,gid=10001,mode=0700
+          --tmpfs /audit/workpad:rw,nosuid,nodev,uid=10001,gid=10001,mode=0700
+          --env HOME=/audit/home
+          --env GIGAI_AUDIT_HOME=/audit/home
+          --env GIGAI_AUDIT_TARGET=/audit/target
+          --env GIGAI_AUDIT_WORKPAD=/audit/workpad
+          gigai-debian-offline:${{ github.sha }}

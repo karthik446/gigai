@@ -55,10 +55,18 @@ class TreeManifest:
     def capture(cls, root: Path) -> TreeManifest:
         root = root.resolve(strict=True)
         files: list[FileState] = []
-        for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        paths: list[Path] = []
+        for directory, child_directories, child_files in os.walk(root, followlinks=False):
+            directory_path = Path(directory)
+            if directory_path == root:
+                child_directories[:] = [
+                    name for name in child_directories if name != ".git"
+                ]
+            paths.extend(directory_path / name for name in child_directories)
+            paths.extend(directory_path / name for name in child_files)
+
+        for path in sorted(paths, key=lambda item: item.relative_to(root).as_posix()):
             relative = path.relative_to(root)
-            if relative.parts and relative.parts[0] == ".git":
-                continue
             info = path.lstat()
             mode = f"{stat.S_IMODE(info.st_mode):04o}"
             if path.is_symlink():
