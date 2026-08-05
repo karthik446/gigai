@@ -4,6 +4,8 @@
   product, authority, storage, and implementation design.
 - [Command reference](reference/command-sheet.md) — planned operator-facing
   command contract.
+- [Cheat sheet](reference/cheat-sheet.md) — current installation, offline
+  lifecycle, inspection, and opt-in live-diagnostic commands.
 - [Architecture decisions](adr/) — standalone-repository decisions that
   supersede a specific part of the V14 snapshot.
 - [Phase 1 development goals](development/goals/phase-1/) — canonical G00-G11
@@ -11,6 +13,10 @@
   boundaries.
 - [Phase 1 development evidence](development/evidence/phase-1/) — durable
   completion audits and terminal handoffs produced as goals finish.
+- [Phase 3 development goals](development/goals/phase-3/) — bounded,
+  workpad-only execution contracts for approved Gig versions.
+- [Release goals](development/goals/release/) — versioned distribution and
+  installation contracts outside the V14 product-phase graph.
 - [Development plans](development/plans/) — approved point-in-time planning
   records retained until their owning goal's evidence is complete.
 - [Research](research/) — dated evidence, negative findings, and maturity

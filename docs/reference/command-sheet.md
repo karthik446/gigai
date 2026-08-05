@@ -103,7 +103,9 @@ retain the full ID returned by `--json` rather than persist a display prefix.
 ## First use
 
 ```bash
-uv tool install gigai
+git clone https://github.com/karthik446/gigai.git
+cd gigai
+uv tool install --editable .
 gigai setup
 
 cd /path/to/any/repository

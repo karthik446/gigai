@@ -75,7 +75,28 @@ content is hashed as exact bytes rather than silently normalized.
 The [V14 implementation plan](docs/architecture/v14-implementation-plan.md)
 defines the intended product. The [command sheet](docs/reference/command-sheet.md)
 contains both the implemented surface and planned design; this README and
-installed help state what works today.
+installed help state what works today. The
+[cheat sheet](docs/reference/cheat-sheet.md) is the copy-paste guide for the
+current installation and local workflow.
+
+## Install the published release
+
+GigAI's first public pre-alpha release is `0.1.0`. Once it is published, install
+the exact reviewed release on a clean macOS or Linux machine without cloning
+this repository:
+
+~~~bash
+uv tool install "gigai==0.1.0"
+gigai --version
+gigai --help
+~~~
+
+Choose every update deliberately by replacing the pinned version after reading
+its release notes; GigAI does not self-update:
+
+~~~bash
+uv tool install --reinstall "gigai==0.1.0"
+~~~
 
 ## Verify the source evidence
 
@@ -187,10 +208,16 @@ The wheel verifier is deliberately separate from the source test suite. Tests
 are not shipped in the wheel.
 
 ~~~bash
+rm -rf dist
 uv build
 uv venv --python 3.11 .wheel-venv
-uv pip install --python .wheel-venv/bin/python \
-  dist/gigai-0.0.0-py3-none-any.whl
+version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+set -- "dist/gigai-${version}-"*.whl
+if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+  echo "expected exactly one built GigAI wheel for version ${version}" >&2
+  exit 1
+fi
+uv pip install --python .wheel-venv/bin/python "$1"
 .wheel-venv/bin/python tools/verify_installed_schemas.py
 .wheel-venv/bin/python tools/verify_installed_canonical.py
 .wheel-venv/bin/python tools/verify_installed_cli.py
