@@ -61,13 +61,15 @@ def main() -> None:
         "show",
         "history",
         "plan",
+        "run",
+        "run-details",
         "workpad",
         "check",
         "open",
     ):
         if command not in help_result.stdout:
             raise SystemExit(f"gigai --help omitted approved command {command!r}")
-    for command in ("run", "goals"):
+    for command in ("goals",):
         if command in help_result.stdout:
             raise SystemExit(f"gigai --help exposed undeclared command {command!r}")
     if bare_result.returncode == 0 or incomplete_create_result.returncode == 0:
@@ -85,7 +87,7 @@ def main() -> None:
     print(
         "verified installed GigAI CLI: help, version, setup, doctor, init, create, "
         "feedback, revise, approve, reject, gigs, proposals, status, show, history, "
-        "plan, workpad path, check, and open only"
+        "plan, run, run-details, workpad path, check, and open only"
     )
 
 

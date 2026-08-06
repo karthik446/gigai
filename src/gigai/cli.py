@@ -36,6 +36,7 @@ from .setup import (
     run_setup,
 )
 from .registry import open_project_registry
+from .run import RunError, launch_run, read_run_details
 from .target_binding import TargetBindingError, initialize_target
 from .validators import validate_proposal_workpad
 from .workpad import ResolvedWorkpad, WorkpadError, open_locations, resolve_workpad
@@ -62,7 +63,7 @@ def cli(context: click.Context) -> None:
         raise click.UsageError(
             "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', "
             "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
-            "'plan', 'workpad', 'check', or 'open'; "
+            "'plan', 'run', 'run-details', 'workpad', 'check', or 'open'; "
             "use --help for details."
         )
 
@@ -680,6 +681,82 @@ def reject_command(
     click.echo(
         f"Rejected proposal in journal sequence {entry.sequence}; no Gig version was created."
     )
+
+
+@cli.command("run")
+@click.argument("gig_id", required=False)
+@click.option("--version", type=click.IntRange(min=1))
+@click.option("--wait", is_flag=True)
+@click.option(
+    "--target", "target_value", type=click.Path(path_type=Path, file_okay=False)
+)
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def run_command(
+    gig_id: str | None,
+    version: int | None,
+    wait: bool,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Run one approved Gig through its deterministic local capability."""
+
+    _require_supported_platform()
+    try:
+        result = launch_run(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            gig_id=gig_id,
+            version=version,
+            wait=wait,
+            invocation_argv=tuple(sys.argv),
+        )
+    except (RunError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {
+        "gig_id": result.gig_id,
+        "gig_version": result.gig_version,
+        "run_id": result.run_id,
+        "status": result.status,
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Run {result.run_id} {result.status} for {result.gig_id}.")
+
+
+@cli.command("run-details")
+@click.argument("run_id")
+@click.option("--gig-id")
+@click.option(
+    "--target", "target_value", type=click.Path(path_type=Path, file_okay=False)
+)
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def run_details_command(
+    run_id: str,
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Read durable state for one Run without starting work."""
+
+    _require_supported_platform()
+    try:
+        payload = read_run_details(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            run_id=run_id,
+            gig_id=gig_id,
+        )
+    except (RunError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"{payload['run_id']}: {payload['status']}")
 
 
 def _read_projection(

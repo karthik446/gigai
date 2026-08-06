@@ -23,7 +23,6 @@ from tests.scenarios import (
 
 
 PLANNED_COMMANDS = (
-    "run",
     "goals",
     "preview",
     "rehearse",
@@ -117,7 +116,7 @@ def test_installed_help_version_and_goal_approved_commands_are_the_only_surface(
         assert command not in help_result.stdout
     assert version_result.stdout == f"gigai {version('gigai')}\n"
     assert (
-            "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', 'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', 'plan', 'workpad', 'check', or 'open'"
+            "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', 'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', 'plan', 'run', 'run-details', 'workpad', 'check', or 'open'"
         in bare_result.stderr
     )
     assert "Missing argument 'NAME'" in invalid_create_result.stderr
