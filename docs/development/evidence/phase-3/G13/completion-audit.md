@@ -1,6 +1,7 @@
 # G13 completion audit — sealed deterministic Run launch
 
-Status: implementation evidence prepared on the G13 branch.
+Status: implementation evidence prepared on the G13 branch; hosted CI confirmation
+is pending because GitHub has not created a run for the PR head yet.
 
 ## Scope decision
 
