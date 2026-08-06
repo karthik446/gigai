@@ -14,7 +14,6 @@ from gigai.registry import (
     EXPECTED_REGISTRY_TABLES,
     MIGRATION_FAILPOINTS,
     PROJECT_TABLE_SQL,
-    REGISTRY_APPLICATION_ID,
     REGISTRY_SCHEMA_VERSION,
     REGISTRY_V1_SCHEMA_VERSION,
     WORKPAD_TABLE_SQL,
@@ -352,6 +351,82 @@ open_project_registry(home, create=False, migration_observer=observer)
     assert second.returncode == 0, second_result
     assert _read_version(registry_path(home)) == REGISTRY_SCHEMA_VERSION
     assert not second_reached_backup.exists()
+
+
+def test_second_opener_waits_for_committed_v2_transition_to_release_lock(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    _materialize_v1(home)
+    first_ready = tmp_path / "first-ready"
+    release_first = tmp_path / "release-first"
+    second_completed = tmp_path / "second-completed"
+    first_script = """
+from pathlib import Path
+import sys
+import time
+from gigai.registry import open_project_registry
+
+home = Path(sys.argv[1])
+ready = Path(sys.argv[2])
+release = Path(sys.argv[3])
+
+def observer(step: str) -> None:
+    if step == "after_commit":
+        ready.touch()
+        while not release.exists():
+            time.sleep(0.01)
+
+open_project_registry(home, create=False, migration_observer=observer)
+"""
+    second_script = """
+from pathlib import Path
+import sys
+from gigai.registry import open_project_registry
+
+home = Path(sys.argv[1])
+completed = Path(sys.argv[2])
+open_project_registry(home, create=False)
+completed.touch()
+"""
+    first = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            first_script,
+            os.fspath(home),
+            os.fspath(first_ready),
+            os.fspath(release_first),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    deadline = time.monotonic() + 10
+    while not first_ready.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert first_ready.exists(), first.communicate(timeout=10)
+
+    second = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            second_script,
+            os.fspath(home),
+            os.fspath(second_completed),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    time.sleep(0.1)
+    assert not second_completed.exists()
+
+    release_first.touch()
+    first_result = first.communicate(timeout=10)
+    second_result = second.communicate(timeout=10)
+    assert first.returncode == 0, first_result
+    assert second.returncode == 0, second_result
+    assert second_completed.exists()
+    assert _read_version(registry_path(home)) == REGISTRY_SCHEMA_VERSION
 
 
 def test_conflicting_backup_is_never_overwritten(tmp_path: Path) -> None:

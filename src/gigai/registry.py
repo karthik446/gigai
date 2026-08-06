@@ -277,17 +277,19 @@ def open_project_registry(
             raise RegistryCorruptError(f"registry is missing at {path}")
         _create_registry_atomic(path)
         created = True
-    version = _validate_registry(path)
-    if version == REGISTRY_V1_SCHEMA_VERSION:
-        with _migration_lock(path):
-            version = _validate_registry(path)
-            if version == REGISTRY_V1_SCHEMA_VERSION:
-                _migrate_registry_v1_to_v2(
-                    path,
-                    registry_backup_path(home_root),
-                    migration_observer=migration_observer,
-                )
-                _validate_registry(path)
+    # A reader must not inspect the schema while another process has committed
+    # the v2 transition but still owns the migration boundary.  Serialize the
+    # initial validation as well as the migration itself, rather than locking
+    # only after an opener has already observed v1.
+    with _migration_lock(path):
+        version = _validate_registry(path)
+        if version == REGISTRY_V1_SCHEMA_VERSION:
+            _migrate_registry_v1_to_v2(
+                path,
+                registry_backup_path(home_root),
+                migration_observer=migration_observer,
+            )
+            _validate_registry(path)
     return ProjectRegistry(path), created
 
 
@@ -591,25 +593,26 @@ def _migrate_registry_v1_to_v2(
 
 @contextmanager
 def _migration_lock(path: Path) -> Iterator[None]:
-    """Serialize the v1 backup and schema transition across local processes."""
+    """Serialize registry inspection and schema transitions without new files."""
 
-    lock_path = path.with_name(f".{path.name}.lock")
-    flags = os.O_CREAT | os.O_RDWR
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
     try:
-        descriptor = os.open(lock_path, flags, 0o600)
-        with os.fdopen(descriptor, "r+b", closefd=True) as stream:
-            info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600:
+        descriptor = os.open(path.parent, flags)
+        try:
+            info = os.fstat(descriptor)
+            if not stat.S_ISDIR(info.st_mode):
                 raise RegistryPermissionError(
-                    "registry migration lock must be a private regular file"
+                    "registry parent must be a directory for coordination"
                 )
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
             try:
                 yield
             finally:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
     except RegistryError:
         raise
     except OSError as exc:
