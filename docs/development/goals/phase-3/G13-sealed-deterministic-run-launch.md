@@ -132,7 +132,8 @@ general scheduler, model-runner, target mutator, or autonomous agent.
 - Failpoint tests at every preparation boundary and a worker-observation test
   proving the journal commit precedes execution.
 - A deterministic sequential fixture Run, failed-proof case, interrupted-worker
-  recovery case, repeated explicit Run case with two linked handoffs and
+  recovery case (including a detached `wait=False` worker failure), repeated
+  explicit Run case with two linked handoffs and
   disjoint directories, terminal target-before/after equality, explicit
   zero-usage/not-applicable-cost and elapsed-wall-time accounting, and
   adversarial network/target/subprocess/write-surface attempts.

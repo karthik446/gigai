@@ -449,6 +449,7 @@ def _validate_workpad_repository(
                 "manifests",
                 "scratch",
                 "state.sqlite",
+                "runs",
             }
         )
     if not {".git", ".gitignore"}.issubset(entries) or not entries <= allowed:

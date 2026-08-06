@@ -108,6 +108,7 @@ class JournalTransition:
     transition: str
     body: str
     artifacts: tuple[JournalArtifact, ...] = ()
+    front_matter: dict[str, object] | None = None
 
 
 def record_transition(
@@ -119,12 +120,13 @@ def record_transition(
     transition: str,
     body: str,
     artifacts: tuple[JournalArtifact, ...] = (),
+    front_matter: dict[str, object] | None = None,
     lock_timeout_seconds: float = LOCK_TIMEOUT_SECONDS,
     observer: JournalObserver | None = None,
 ) -> JournalEntry:
     """Durably record one caller-owned semantic transition under the writer lock."""
 
-    entry = JournalTransition(handoff_id, transition, body, artifacts)
+    entry = JournalTransition(handoff_id, transition, body, artifacts, front_matter)
     return _record_chain(
         workpad=workpad,
         project_id=project_id,
@@ -183,6 +185,7 @@ def _record_chain(
         first.transition,
         first.body,
         _validate_artifacts(first.artifacts),
+        first.front_matter,
     )
     root = _validate_workpad(workpad, project_id, gig_id)
     _require_mount_probes(root)
@@ -204,6 +207,7 @@ def _record_chain(
             second.transition,
             second.body,
             _validate_artifacts(second.artifacts),
+            second.front_matter,
         )
         second_entry = _record_transition_locked(
             root, project_id, gig_id, second, observer
@@ -235,6 +239,7 @@ def _record_transition_locked(
         entry.transition,
         entry.body,
         previous_commit,
+        front_matter=entry.front_matter,
     )
     transaction = _write_transaction_manifest(
         root, sequence, entry.handoff_id, entry.transition, document, entry.artifacts
@@ -498,6 +503,8 @@ def _render_handoff(
     transition: str,
     body: str,
     previous_commit: str | None,
+    *,
+    front_matter: dict[str, object] | None = None,
 ) -> bytes:
     normalized_body = body.rstrip("\n") + "\n"
     metadata: dict[str, object] = {
@@ -528,6 +535,9 @@ def _render_handoff(
         },
         "body_sha256": digest_owned_text(normalized_body),
     }
+    if front_matter is not None:
+        metadata.update(front_matter)
+        metadata["body_sha256"] = digest_owned_text(normalized_body)
     return render_json_front_matter(metadata, normalized_body)
 
 
