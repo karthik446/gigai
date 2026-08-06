@@ -134,7 +134,7 @@ def launch_run(
             observer=observer,
         )
         observer("after_run_started_commit")
-        process = multiprocessing.get_context("fork").Process(
+        process = multiprocessing.get_context("spawn").Process(
             target=_worker_entry,
             args=(
                 resolved,
@@ -142,8 +142,6 @@ def launch_run(
                 authority["version"],
                 graph,
                 target_before,
-                invocation_argv,
-                uuid_factory,
             ),
             daemon=False,
         )
@@ -161,9 +159,7 @@ def launch_run(
             )
         process.join()
         if process.exitcode != 0:
-            terminal = _mark_interrupted(
-                resolved, run_id, authority["version"], graph, started
-            )
+            terminal = _mark_interrupted(resolved, run_id, authority["version"], graph)
             return RunResult(
                 run_id,
                 resolved.gig_id,
@@ -471,8 +467,6 @@ def _execute_deterministic(
     gig_version: int,
     graph: dict[str, object],
     target_before: dict[str, object],
-    invocation_argv: tuple[str, ...],
-    uuid_factory: Callable[[], uuid.UUID],
 ) -> JournalEntry:
     run_dir = resolved.path / "runs" / run_id
     evidence = canonicalize_evidence("gigai-offline-ok\n")
@@ -533,7 +527,7 @@ def _execute_deterministic(
         workpad=resolved.path,
         project_id=resolved.project_id,
         gig_id=resolved.gig_id,
-        handoff_id=_new_id(EntityPrefix.HANDOFF, uuid_factory),
+        handoff_id=_new_id(EntityPrefix.HANDOFF, uuid.uuid4),
         transition="run_succeeded",
         body=f"Run {run_id} completed deterministic capability {goal_id}.",
         artifacts=terminal_artifacts,
@@ -557,18 +551,26 @@ def _worker_entry(
     gig_version: int,
     graph: dict[str, object],
     target_before: dict[str, object],
-    invocation_argv: tuple[str, ...],
-    uuid_factory: Callable[[], uuid.UUID],
 ) -> None:
-    _execute_deterministic(
-        resolved=resolved,
-        run_id=run_id,
-        gig_version=gig_version,
-        graph=graph,
-        target_before=target_before,
-        invocation_argv=invocation_argv,
-        uuid_factory=uuid_factory,
-    )
+    try:
+        _execute_deterministic(
+            resolved=resolved,
+            run_id=run_id,
+            gig_version=gig_version,
+            graph=graph,
+            target_before=target_before,
+        )
+    except BaseException:
+        # Detached launches have no parent waiting on the worker. Make every
+        # ordinary worker failure terminal in the child before propagating the
+        # failure so wait=False cannot strand a Run at preparing.
+        try:
+            _mark_interrupted(resolved, run_id, gig_version, graph)
+        except BaseException:
+            # Preserve the original non-zero worker exit. The parent-side
+            # waiter can still reconcile the durable state when it is present.
+            pass
+        raise
 
 
 def _mark_interrupted(
@@ -576,12 +578,16 @@ def _mark_interrupted(
     run_id: str,
     gig_version: int,
     graph: dict[str, object],
-    started: JournalEntry,
 ) -> JournalEntry:
     details_path = resolved.path / "runs" / run_id / "run-details.json"
     details = parse_json_bytes(details_path.read_bytes())
     if not isinstance(details, dict):
         raise RunError("interrupted Run details are unavailable")
+    if details.get("status") == "interrupted":
+        existing = _existing_interruption_entry(resolved, run_id)
+        if existing is not None:
+            return existing
+        raise RunError("interrupted Run handoff is unavailable")
     details["status"] = "interrupted"
     details["finished_at"] = _now()
     details["execution_summary"] = (
@@ -630,6 +636,25 @@ def _mark_interrupted(
             "outcome": "INTERRUPTED",
         },
     )
+
+
+def _existing_interruption_entry(
+    resolved: ResolvedWorkpad, run_id: str
+) -> JournalEntry | None:
+    for path in sorted((resolved.path / "handoffs").glob("*-run-interrupted.txt")):
+        try:
+            metadata, _body = parse_json_front_matter(path.read_bytes())
+            sequence = int(path.name[:12])
+        except (OSError, ValueError, TypeError):
+            continue
+        if (
+            metadata.get("transition") == "run_interrupted"
+            and metadata.get("run_id") == run_id
+            and isinstance(metadata.get("handoff_id"), str)
+        ):
+            commit = _git(resolved.path, "rev-parse", "HEAD").stdout.strip()
+            return JournalEntry(sequence, metadata["handoff_id"], path, commit)
+    return None
 
 
 def _details(

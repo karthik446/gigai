@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import time
 import uuid
 
 from gigai.lifecycle import approve_offline, create_offline
@@ -11,10 +13,33 @@ from gigai.target_binding import initialize_target
 from gigai.validators import validate_serialized_contract
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, Path, str]:
+def _fixture(tmp_path: Path, *, git_target: bool = False) -> tuple[Path, Path, str]:
     home = tmp_path / "home"
     target = tmp_path / "target"
     target.mkdir()
+    if git_target:
+        subprocess.run(
+            ["git", "init", "--quiet", "--initial-branch=main", target], check=True
+        )
+        subprocess.run(
+            ["git", "-C", str(target), "config", "user.name", "G13 Test"], check=True
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(target),
+                "config",
+                "user.email",
+                "g13-test@gigai.invalid",
+            ],
+            check=True,
+        )
+        (target / "README.md").write_text("fixture\n")
+        subprocess.run(["git", "-C", str(target), "add", "README.md"], check=True)
+        subprocess.run(
+            ["git", "-C", str(target), "commit", "--quiet", "-m", "fixture"], check=True
+        )
     run_setup(
         build_config(
             home_root=home,
@@ -101,6 +126,65 @@ def test_repeated_runs_have_disjoint_directories(tmp_path: Path) -> None:
     assert first.run_id != second.run_id
     assert first.run_path != second.run_path
     assert first.run_path.is_dir() and second.run_path.is_dir()
+
+
+def test_detached_worker_failure_terminalizes_run(tmp_path: Path) -> None:
+    home, target, gig_id = _fixture(tmp_path, git_target=True)
+
+    def mutate_target(step: str) -> None:
+        if step == "after_run_started_commit":
+            (target / "README.md").write_text("changed after seal\n")
+
+    result = launch_run(
+        home_root=home,
+        requested_target=target,
+        gig_id=gig_id,
+        wait=False,
+        observer=mutate_target,
+        uuid_factory=lambda: uuid.UUID("00000000-0000-4000-8000-000000000030"),
+    )
+    assert result.status == "running"
+
+    deadline = time.monotonic() + 10
+    details = read_run_details(
+        home_root=home,
+        requested_target=target,
+        gig_id=gig_id,
+        run_id=result.run_id,
+    )
+    while details["status"] == "preparing" and time.monotonic() < deadline:
+        time.sleep(0.05)
+        details = read_run_details(
+            home_root=home,
+            requested_target=target,
+            gig_id=gig_id,
+            run_id=result.run_id,
+        )
+
+    assert details["status"] == "interrupted"
+    assert len(list((result.workpad / "handoffs").glob("*-run-interrupted.txt"))) == 1
+
+
+def test_worker_interruption_is_idempotent_after_parent_reconciliation(
+    tmp_path: Path,
+) -> None:
+    home, target, gig_id = _fixture(tmp_path, git_target=True)
+
+    def mutate_target(step: str) -> None:
+        if step == "after_run_started_commit":
+            (target / "README.md").write_text("changed after seal\n")
+
+    result = launch_run(
+        home_root=home,
+        requested_target=target,
+        gig_id=gig_id,
+        wait=True,
+        observer=mutate_target,
+        uuid_factory=lambda: uuid.UUID("00000000-0000-4000-8000-000000000030"),
+    )
+    assert result.status == "interrupted"
+    assert result.terminal is not None
+    assert len(list((result.workpad / "handoffs").glob("*-run-interrupted.txt"))) == 1
 
 
 def test_preparation_failpoints_leave_no_uncommitted_run(tmp_path: Path) -> None:
