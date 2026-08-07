@@ -15,6 +15,8 @@ from gigai.diagnostics import run_doctor
 from gigai.lifecycle import create_offline
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
+from gigai.workpad import resolve_workpad
+import gigai.index as index_module
 
 
 def _configured(tmp_path: Path) -> tuple[Path, Path]:
@@ -73,6 +75,46 @@ def test_index_rebuild_is_disposable_deterministic_and_idempotent(
         workpad=created.workpad, project_id=created.project_id, gig_id=created.gig_id
     )
     assert repaired.as_dict() == first.as_dict()
+
+
+def test_index_repair_temp_stays_inside_allowed_scratch_surface(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, target = _configured(tmp_path)
+    created = create_offline(
+        home_root=home,
+        requested_target=target,
+        name="index-repair-race-proof",
+        open_editor=False,
+        uuid_factory=_uuids(),
+    )
+    rebuild_index(
+        workpad=created.workpad, project_id=created.project_id, gig_id=created.gig_id
+    )
+    (created.workpad / "state.sqlite").unlink()
+    original_replace = index_module.os.replace
+
+    def replace_with_validation(
+        source: str | bytes | Path, destination: str | bytes | Path
+    ) -> None:
+        source_path = Path(source)
+        assert source_path.parent == created.workpad / "scratch"
+        resolved = resolve_workpad(
+            home_root=home,
+            requested_target=target,
+            gig_id=created.gig_id,
+            allow_semantic_state=True,
+        )
+        assert resolved.path == created.workpad
+        original_replace(source, destination)
+
+    monkeypatch.setattr(index_module.os, "replace", replace_with_validation)
+    repaired = read_index(
+        workpad=created.workpad, project_id=created.project_id, gig_id=created.gig_id
+    )
+    assert repaired.project_id == created.project_id
+    assert not list((created.workpad / "scratch").iterdir())
+    assert not (created.workpad / ".state.sqlite.tmp").exists()
 
 
 def test_index_never_conceals_authoritative_workpad_divergence(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import tempfile
 
 from .canonical import canonical_json_bytes, parse_json_bytes, parse_json_front_matter
 
@@ -122,20 +123,30 @@ def read_index(*, workpad: Path, project_id: str, gig_id: str) -> JournalProject
 
 
 def _write_projection(path: Path, projection: JournalProjection) -> None:
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.unlink(missing_ok=True)
-    connection = sqlite3.connect(temporary)
+    scratch = path.parent / "scratch"
+    if scratch.is_symlink() or (scratch.exists() and not scratch.is_dir()):
+        raise JournalIndexError("index scratch surface is unavailable")
+    scratch.mkdir(mode=0o700, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=scratch
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
     try:
-        connection.execute("PRAGMA journal_mode=DELETE")
-        connection.execute("CREATE TABLE projection (payload BLOB NOT NULL)")
-        connection.execute(
-            "INSERT INTO projection(payload) VALUES (?)",
-            (canonical_json_bytes(projection.as_dict()),),
-        )
-        connection.commit()
+        connection = sqlite3.connect(temporary)
+        try:
+            connection.execute("PRAGMA journal_mode=DELETE")
+            connection.execute("CREATE TABLE projection (payload BLOB NOT NULL)")
+            connection.execute(
+                "INSERT INTO projection(payload) VALUES (?)",
+                (canonical_json_bytes(projection.as_dict()),),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        os.replace(temporary, path)
     finally:
-        connection.close()
-    os.replace(temporary, path)
+        temporary.unlink(missing_ok=True)
 
 
 def _read_projection(path: Path) -> JournalProjection:

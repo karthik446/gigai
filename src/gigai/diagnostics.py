@@ -198,6 +198,25 @@ def run_mount_probes(workpad_root: Path) -> tuple[DiagnosticCheck, DiagnosticChe
     )
 
 
+def _probe_directory(root: Path) -> tuple[Path, bool]:
+    """Keep probe files inside the workpad's allowed disposable surface."""
+
+    scratch = root / "scratch"
+    if scratch.is_symlink() or (scratch.exists() and not scratch.is_dir()):
+        raise OSError("configured workpad scratch surface is unavailable")
+    existed = scratch.exists()
+    scratch.mkdir(mode=0o700, exist_ok=True)
+    return scratch, not existed
+
+
+def _cleanup_probe_directory(directory: Path | None, created: bool) -> None:
+    if directory is not None and created:
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
+
+
 def _journal_index_checks(config: GigAIConfig) -> tuple[DiagnosticCheck, ...]:
     """Check managed journals by reconstructing only their disposable index."""
 
@@ -462,9 +481,12 @@ def _atomic_replacement_check(root: Path) -> DiagnosticCheck:
         )
     probe: Path | None = None
     replacement: Path | None = None
+    probe_directory: Path | None = None
+    probe_directory_created = False
     try:
+        probe_directory, probe_directory_created = _probe_directory(root)
         probe_descriptor, probe_name = tempfile.mkstemp(
-            prefix=".gigai-atomic-probe-", dir=root
+            prefix=".gigai-atomic-probe-", dir=probe_directory
         )
         probe = Path(probe_name)
         with os.fdopen(probe_descriptor, "wb") as stream:
@@ -472,7 +494,7 @@ def _atomic_replacement_check(root: Path) -> DiagnosticCheck:
             stream.flush()
             os.fsync(stream.fileno())
         replacement_descriptor, name = tempfile.mkstemp(
-            prefix=".gigai-replace-", dir=root
+            prefix=".gigai-replace-", dir=probe_directory
         )
         replacement = Path(name)
         with os.fdopen(replacement_descriptor, "wb") as stream:
@@ -511,6 +533,7 @@ def _atomic_replacement_check(root: Path) -> DiagnosticCheck:
             probe.unlink(missing_ok=True)
         if replacement is not None:
             replacement.unlink(missing_ok=True)
+        _cleanup_probe_directory(probe_directory, probe_directory_created)
 
 
 def _interprocess_lock_check(root: Path) -> DiagnosticCheck:
@@ -530,8 +553,13 @@ def _interprocess_lock_check(root: Path) -> DiagnosticCheck:
             "mount.interprocess_lock", "interprocess exclusion", root, started
         )
     lock_path: Path | None = None
+    probe_directory: Path | None = None
+    probe_directory_created = False
     try:
-        descriptor, name = tempfile.mkstemp(prefix=".gigai-lock-probe-", dir=root)
+        probe_directory, probe_directory_created = _probe_directory(root)
+        descriptor, name = tempfile.mkstemp(
+            prefix=".gigai-lock-probe-", dir=probe_directory
+        )
         os.close(descriptor)
         lock_path = Path(name)
         with lock_path.open("a+b") as stream:
@@ -578,6 +606,7 @@ def _interprocess_lock_check(root: Path) -> DiagnosticCheck:
     finally:
         if lock_path is not None:
             lock_path.unlink(missing_ok=True)
+        _cleanup_probe_directory(probe_directory, probe_directory_created)
 
 
 def _contend_lock(path: Path) -> int:
