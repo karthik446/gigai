@@ -17,3 +17,7 @@ The installed verifier is wired into the built-wheel CI job. Hosted CI run
 `31210493133` passed all eight jobs on exact commit
 `5fe589fd3f75e4ad7f6729ea6f325ac226ff9832`, including the built-wheel and
 Debian offline lanes.
+
+Post-review hardening commit `45c1930` corrected disagreement detection,
+resolved-path symlink containment, and documented the report digest convention.
+Its hosted CI run `31218611107` also passed all eight jobs on the exact commit.

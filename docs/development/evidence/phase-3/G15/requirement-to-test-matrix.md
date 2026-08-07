@@ -10,7 +10,7 @@ execution is intentionally materialized but not executed here.
 | Contract criteria and deterministic evaluator plan | `test_review_contract_validates_and_rejects_model_stage`, `test_review_contract_rejects_unknown_evaluator` |
 | Findings cite real Bundle bytes | `test_findings_require_real_bundle_evidence_and_merge_provenance` |
 | Finding lifecycle and terminal states | `test_finding_lifecycle_is_explicit_and_terminal_states_are_closed` |
-| Duplicate/disagreement merge and stable identity | `test_findings_require_real_bundle_evidence_and_merge_provenance` |
+| Duplicate/disagreement merge and stable identity | `test_findings_require_real_bundle_evidence_and_merge_provenance` (agreement and conflicting-evaluator cases) |
 | Feedback, Adjudication, and Trace boundaries | `test_feedback_adjudication_and_trace_boundaries_are_validated` |
 | Redacted, replayable reports | `test_report_replay_redacts_explicit_sentinels`, `test_report_generation_is_byte_stable` |
 | Installed wheel replay | `tools/verify_installed_g15.py` |
