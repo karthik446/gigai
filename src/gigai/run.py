@@ -551,13 +551,7 @@ def _execute_deterministic(
                         )
                     continue
                 raise _PreScheduleFailure("sealed Goal Graph has no schedulable Goal")
-            terminal_status = (
-                "blocked"
-                if any(item["status"] == "blocked" for item in goal_details.values())
-                else "failed"
-                if any(item["status"] == "failed" for item in goal_details.values())
-                else "succeeded"
-            )
+            terminal_status = _terminal_status(goal_details)
             return _finish_run(
                 resolved,
                 run_id,
@@ -642,9 +636,17 @@ def _execute_deterministic(
                     previous_handoff, "FAILED"
                 ),
             )
-            _finish_run(resolved, run_id, gig_version, graph, details, "failed", failed.handoff_id, previous_handoff)
-            return failed
-    return _finish_run(resolved, run_id, gig_version, graph, details, "succeeded", previous_handoff, previous_handoff)
+            terminal = _finish_run(
+                resolved,
+                run_id,
+                gig_version,
+                graph,
+                details,
+                "failed",
+                failed.handoff_id,
+                previous_handoff,
+            )
+            return terminal
 
 
 def _validate_scheduler_policy(graph: dict[str, object]) -> None:
@@ -672,15 +674,26 @@ def _validate_scheduler_policy(graph: dict[str, object]) -> None:
 
 def _ready_goals(graph: dict[str, object], details: dict[str, dict[str, object]]) -> list[str]:
     edges = [edge for edge in graph.get("edges", []) if edge.get("kind") == "dependency"]
+    entries = set(graph.get("entry_goal_ids", []))
     ready = []
     for goal in graph.get("goals", []):
         goal_id = goal["goal_id"]
         if details[goal_id]["status"] != "pending" and details[goal_id]["status"] != "ready":
             continue
         incoming = [edge for edge in edges if edge.get("to_goal_id") == goal_id]
+        if goal_id not in entries and not incoming:
+            continue
         if all(details[edge["from_goal_id"]]["status"] == "complete" and details[edge["from_goal_id"]].get("outcome") in edge.get("on_outcomes", []) for edge in incoming):
             ready.append(goal_id)
     return sorted(ready)
+
+
+def _terminal_status(details: dict[str, dict[str, object]]) -> str:
+    if any(item["status"] == "failed" for item in details.values()):
+        return "failed"
+    if any(item["status"] == "blocked" for item in details.values()):
+        return "blocked"
+    return "succeeded"
 
 
 def _critical_path(graph: dict[str, object]) -> list[str]:
