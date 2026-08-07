@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:finding:1",
+  "title": "GigAI Finding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "finding_id", "finding_version", "criterion_id", "status", "severity", "title", "description", "evidence", "evaluator", "source_evaluators", "trace_id", "confidence", "disagreement", "created_at"],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "finding_id": {"$ref": "#/$defs/finding_id"},
+    "finding_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "criterion_id": {"type": "string", "pattern": "^criterion_[a-z][a-z0-9_-]*$", "maxLength": 120},
+    "status": {"type": "string", "enum": ["open", "accepted", "rejected", "deferred", "resolved", "unanswerable"]},
+    "severity": {"type": "string", "enum": ["info", "low", "medium", "high", "critical"]},
+    "title": {"type": "string", "minLength": 1, "maxLength": 500},
+    "description": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence_ref"}},
+    "evaluator": {"$ref": "#/$defs/evaluator"},
+    "source_evaluators": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evaluator"}},
+    "trace_id": {"$ref": "#/$defs/trace_id"},
+    "confidence": {"type": "string", "pattern": "^(0|1|0\\.[0-9]+|1\\.0)$"},
+    "disagreement": {"$ref": "#/$defs/disagreement"},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "finding_id": {"type": "string", "pattern": "^finding_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "trace_id": {"type": "string", "pattern": "^trace_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "reference_id": {"type": "string", "pattern": "^ref_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "evidence_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference_id", "content_sha256", "locator"],
+      "properties": {
+        "reference_id": {"$ref": "#/$defs/reference_id"},
+        "content_sha256": {"$ref": "#/$defs/sha256"},
+        "locator": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "quote": {"type": ["string", "null"], "maxLength": 2000}
+      }
+    },
+    "evaluator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evaluator_id", "evaluator_version", "stage"],
+      "properties": {
+        "evaluator_id": {"type": "string", "pattern": "^evaluator_[a-z][a-z0-9_-]*$", "maxLength": 120},
+        "evaluator_version": {"type": "string", "minLength": 1, "maxLength": 120},
+        "stage": {"type": "string", "enum": ["schema", "deterministic", "model"]}
+      }
+    },
+    "disagreement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present", "peer_finding_ids"],
+      "properties": {
+        "present": {"type": "boolean"},
+        "peer_finding_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/finding_id"}},
+        "summary": {"type": ["string", "null"], "maxLength": 2000}
+      }
+    }
+  }
+}

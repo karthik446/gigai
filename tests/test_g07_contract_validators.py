@@ -45,7 +45,17 @@ def _valid_graph() -> dict:
 
 
 def test_schema_validator_enumerates_the_packaged_contract_set() -> None:
-    assert len(SCHEMA_NAMES) == 8
+    original_phase_one = {
+        "active-gig-version.schema.json",
+        "common.schema.json",
+        "gig-proposal.schema.json",
+        "goal-graph.schema.json",
+        "handoff-frontmatter.schema.json",
+        "run-brief-frontmatter.schema.json",
+        "run-details.schema.json",
+        "run-manifest.schema.json",
+    }
+    assert original_phase_one.issubset(SCHEMA_NAMES)
     report = validate_serialized_contract(
         "goal-graph.schema.json", canonical_json_bytes(_valid_graph())
     )

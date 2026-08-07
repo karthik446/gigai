@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:report:1",
+  "title": "GigAI Evaluation Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "report_id", "report_version", "created_at", "bundle_id", "contract_id", "trace_ids", "finding_ids", "feedback_ids", "adjudication_ids", "status", "machine_report_sha256", "human_report"],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "report_id": {"$ref": "#/$defs/report_id"},
+    "report_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "bundle_id": {"type": "string", "pattern": "^bundle_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "contract_id": {"type": "string", "pattern": "^contract_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "trace_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/trace_id"}},
+    "finding_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/finding_id"}},
+    "feedback_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/feedback_id"}},
+    "adjudication_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/adjudication_id"}},
+    "status": {"type": "string", "enum": ["complete", "blocked", "requires_operator", "incomplete"]},
+    "machine_report_sha256": {"$ref": "#/$defs/sha256"},
+    "human_report": {"$ref": "#/$defs/artifact_ref"}
+  },
+  "$defs": {
+    "report_id": {"type": "string", "pattern": "^report_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "trace_id": {"type": "string", "pattern": "^trace_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "finding_id": {"type": "string", "pattern": "^finding_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "feedback_id": {"type": "string", "pattern": "^feedback_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "adjudication_id": {"type": "string", "pattern": "^adjudication_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content_sha256", "media_type", "size_bytes"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*\\\\)(?!.*(^|/)\\.\\.(/|$)).+$"},
+        "content_sha256": {"$ref": "#/$defs/sha256"},
+        "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+      }
+    }
+  }
+}

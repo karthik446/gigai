@@ -14,14 +14,21 @@ from ..graph_validation import GoalGraphError, validate_goal_graph
 
 
 EXPECTED_SCHEMA_NAMES = {
+    "adjudication.schema.json",
     "active-gig-version.schema.json",
     "common.schema.json",
+    "feedback.schema.json",
+    "finding.schema.json",
     "gig-proposal.schema.json",
     "goal-graph.schema.json",
     "handoff-frontmatter.schema.json",
+    "report.schema.json",
+    "review-bundle.schema.json",
+    "review-contract.schema.json",
     "run-brief-frontmatter.schema.json",
     "run-details.schema.json",
     "run-manifest.schema.json",
+    "trace.schema.json",
 }
 
 PROJECT_ID = "project_11111111-1111-4111-8111-111111111111"
@@ -38,7 +45,9 @@ COMMIT = "a" * 40
 NOW = "2026-08-02T12:00:00Z"
 
 
-def artifact(path: str, digest: str = ZERO_DIGEST, media_type: str = "application/json") -> dict[str, Any]:
+def artifact(
+    path: str, digest: str = ZERO_DIGEST, media_type: str = "application/json"
+) -> dict[str, Any]:
     return {
         "path": path,
         "content_sha256": digest,
@@ -240,8 +249,20 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "run_brief": run_brief_ref,
         "goal_graph": graph_ref,
         "goal_contracts": [
-            {"goal_id": GOAL_A, "goal_version": 1, "contract": artifact("goals/G00-collect-evidence.md", media_type="text/markdown")},
-            {"goal_id": GOAL_B, "goal_version": 1, "contract": artifact("goals/G01-synthesize.md", media_type="text/markdown")},
+            {
+                "goal_id": GOAL_A,
+                "goal_version": 1,
+                "contract": artifact(
+                    "goals/G00-collect-evidence.md", media_type="text/markdown"
+                ),
+            },
+            {
+                "goal_id": GOAL_B,
+                "goal_version": 1,
+                "contract": artifact(
+                    "goals/G01-synthesize.md", media_type="text/markdown"
+                ),
+            },
         ],
         "target_observation": target_ref,
         "profile": "default",
@@ -299,7 +320,9 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "target_before": target_ref,
         "target_after": target_ref,
         "completion_audit": {"status": "valid", "path": "reviews/completion-audit.md"},
-        "terminal_handoff": artifact("handoffs/000000000006-run-succeeded.txt", media_type="text/plain"),
+        "terminal_handoff": artifact(
+            "handoffs/000000000006-run-succeeded.txt", media_type="text/plain"
+        ),
         "workpad_commit": COMMIT,
         "next_actions": ["Review the completion audit."],
     }
@@ -325,6 +348,189 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "usage": usage(),
         "body_sha256": sha256_digest(handoff_body),
     }
+    bundle_id = "bundle_99999999-9999-4999-8999-999999999999"
+    reference_id = "ref_99999999-9999-4999-8999-999999999999"
+    contract_id = "contract_99999999-9999-4999-8999-999999999999"
+    evaluator_id = "evaluator_fixture"
+    trace_id = "trace_99999999-9999-4999-8999-999999999999"
+    finding_id = "finding_99999999-9999-4999-8999-999999999999"
+    bundle = {
+        "schema_version": "1.0",
+        "bundle_id": bundle_id,
+        "bundle_version": 1,
+        "created_at": NOW,
+        "created_by": actor(),
+        "name": "research-fixture",
+        "question": "What does the evidence support?",
+        "references": [
+            {
+                "reference_id": reference_id,
+                "role": "source",
+                "kind": "article",
+                "path": "references/source.txt",
+                "media_type": "text/plain",
+                "content_sha256": ZERO_DIGEST,
+                "size_bytes": 1,
+                "provenance": {
+                    "source_kind": "generated",
+                    "locator": "fixture://source",
+                    "acquired_at": NOW,
+                    "acquisition_method": "fixture",
+                    "source_revision": None,
+                },
+                "sensitivity": "public",
+                "redaction_status": "not_required",
+            }
+        ],
+        "tool_requirements": None,
+        "redaction_policy": {
+            "mode": "local_only",
+            "allowed_reference_ids": [reference_id],
+            "policy_version": "fixture-1",
+            "detector_version": None,
+        },
+    }
+    contract = {
+        "schema_version": "1.0",
+        "contract_id": contract_id,
+        "contract_version": 1,
+        "created_at": NOW,
+        "created_by": actor(),
+        "name": "research-review",
+        "question": "What does the evidence support?",
+        "reference_roles": ["source"],
+        "criteria": [
+            {
+                "criterion_id": "criterion_support",
+                "description": "Claims cite evidence.",
+                "severity": "high",
+                "required_evidence": ["citation"],
+                "citation_requirement": "required",
+                "evaluator_ids": [evaluator_id],
+            }
+        ],
+        "severity_model": {
+            "levels": ["info", "low", "medium", "high", "critical"],
+            "ordering": ["info", "low", "medium", "high", "critical"],
+        },
+        "evidence_requirements": ["citation"],
+        "output_shape": {
+            "machine_media_type": "application/json",
+            "human_media_type": "text/markdown",
+            "required_sections": ["findings"],
+        },
+        "clarification_policy": "block_run",
+        "cycle_cap": 1,
+        "escalation_policy": "operator",
+        "allowed_effects": ["write_workpad"],
+        "evaluator_plan": [
+            {
+                "evaluator_id": evaluator_id,
+                "evaluator_version": "fixture-1",
+                "stage": "deterministic",
+            }
+        ],
+        "redaction_policy": {
+            "mode": "local_only",
+            "policy_version": "fixture-1",
+            "detector_version": None,
+        },
+    }
+    evaluator = {
+        "evaluator_id": evaluator_id,
+        "evaluator_version": "fixture-1",
+        "stage": "deterministic",
+    }
+    finding = {
+        "schema_version": "1.0",
+        "finding_id": finding_id,
+        "finding_version": 1,
+        "criterion_id": "criterion_support",
+        "status": "open",
+        "severity": "high",
+        "title": "Missing support",
+        "description": "The claim lacks a citation.",
+        "evidence": [
+            {
+                "reference_id": reference_id,
+                "content_sha256": ZERO_DIGEST,
+                "locator": "bytes:0-1",
+                "quote": "source",
+            }
+        ],
+        "evaluator": evaluator,
+        "source_evaluators": [evaluator],
+        "trace_id": trace_id,
+        "confidence": "0.90",
+        "disagreement": {"present": False, "peer_finding_ids": [], "summary": None},
+        "created_at": NOW,
+    }
+    feedback = {
+        "schema_version": "1.0",
+        "feedback_id": "feedback_99999999-9999-4999-8999-999999999999",
+        "feedback_version": 1,
+        "created_at": NOW,
+        "actor": actor(),
+        "finding_ids": [finding_id],
+        "decision": "deferred",
+        "text": "Need more evidence.",
+        "rationale": None,
+    }
+    adjudication = {
+        "schema_version": "1.0",
+        "adjudication_id": "adjudication_99999999-9999-4999-8999-999999999999",
+        "adjudication_version": 1,
+        "created_at": NOW,
+        "actor": actor(),
+        "decisions": [
+            {
+                "finding_id": finding_id,
+                "decision": "deferred",
+                "rationale": "Need more evidence.",
+            }
+        ],
+    }
+    trace = {
+        "schema_version": "1.0",
+        "trace_id": trace_id,
+        "trace_version": 1,
+        "created_at": NOW,
+        "bundle_id": bundle_id,
+        "contract_id": contract_id,
+        "run_id": None,
+        "goal_id": None,
+        "invocation_id": None,
+        "events": [
+            {
+                "sequence": 1,
+                "kind": "deterministic_check",
+                "payload_sha256": ZERO_DIGEST,
+                "evaluator_id": evaluator_id,
+            }
+        ],
+        "redaction_policy": "fixture-1",
+        "variable_fields": ["created_at"],
+    }
+    report = {
+        "schema_version": "1.0",
+        "report_id": "report_99999999-9999-4999-8999-999999999999",
+        "report_version": 1,
+        "created_at": NOW,
+        "bundle_id": bundle_id,
+        "contract_id": contract_id,
+        "trace_ids": [trace_id],
+        "finding_ids": [finding_id],
+        "feedback_ids": [feedback["feedback_id"]],
+        "adjudication_ids": [adjudication["adjudication_id"]],
+        "status": "blocked",
+        "machine_report_sha256": ZERO_DIGEST,
+        "human_report": {
+            "path": "reports/report.md",
+            "content_sha256": ZERO_DIGEST,
+            "media_type": "text/markdown",
+            "size_bytes": 123,
+        },
+    }
     return {
         "urn:gigai:schema:gig-proposal:1": proposal,
         "urn:gigai:schema:active-gig-version:1": active,
@@ -333,6 +539,13 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "urn:gigai:schema:run-manifest:1": manifest,
         "urn:gigai:schema:run-details:1": details,
         "urn:gigai:schema:handoff-frontmatter:1": handoff,
+        "urn:gigai:schema:review-bundle:1": bundle,
+        "urn:gigai:schema:review-contract:1": contract,
+        "urn:gigai:schema:finding:1": finding,
+        "urn:gigai:schema:feedback:1": feedback,
+        "urn:gigai:schema:adjudication:1": adjudication,
+        "urn:gigai:schema:trace:1": trace,
+        "urn:gigai:schema:report:1": report,
     }
 
 
@@ -373,14 +586,16 @@ class SerializedContractTests(unittest.TestCase):
         )
 
     def test_all_schema_documents_are_valid_draft_2020_12(self) -> None:
-        self.assertEqual(len(self.schemas), 8)
+        self.assertEqual(len(self.schemas), 15)
         for schema_id, schema in self.schemas.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)
 
     def test_one_golden_instance_for_every_serialized_boundary(self) -> None:
         instances = valid_instances()
-        self.assertEqual(set(instances), set(self.schemas) - {"urn:gigai:schema:common:1"})
+        self.assertEqual(
+            set(instances), set(self.schemas) - {"urn:gigai:schema:common:1"}
+        )
         for schema_id, instance in instances.items():
             with self.subTest(schema_id=schema_id):
                 self.validator(schema_id).validate(instance)
