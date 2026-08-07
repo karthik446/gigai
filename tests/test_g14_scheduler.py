@@ -117,16 +117,18 @@ def test_repeated_runs_preserve_canonical_goal_order(tmp_path: Path) -> None:
         uuid_factory=uuid.uuid4,
     )
 
-    def started_order(run_id: str) -> list[str]:
+    def started_order(workpad: Path, run_id: str) -> list[str]:
         order: list[str] = []
-        for path in sorted((first.workpad / "handoffs").glob("*-goal-started.txt")):
+        for path in sorted((workpad / "handoffs").glob("*-goal-started.txt")):
             front_matter, _body = parse_json_front_matter(path.read_bytes())
             if front_matter["run_id"] == run_id:
                 order.append(front_matter["goal_id"])
         return order
 
     assert first.status == second.status == "succeeded"
-    assert started_order(first.run_id) == started_order(second.run_id)
+    assert started_order(first.workpad, first.run_id) == started_order(
+        second.workpad, second.run_id
+    )
 
 
 def _goal(goal_id: str) -> dict[str, object]:
