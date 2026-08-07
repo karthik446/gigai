@@ -173,6 +173,23 @@ def test_manifest_detects_exact_content_and_git_changes(tmp_path: Path) -> None:
     assert before.git.working_diff_sha256 != after.git.working_diff_sha256
 
 
+def test_manifest_ignores_nested_private_git_internals(tmp_path: Path) -> None:
+    root = tmp_path / "workpad"
+    nested = root / "projects" / "project" / "gigs" / "gig"
+    (nested / ".git").mkdir(parents=True)
+    (nested / "visible.txt").write_text("stable\n", encoding="utf-8")
+    before = TreeManifest.capture(root)
+
+    (nested / ".git" / "objects").mkdir()
+    (nested / ".git" / "objects" / "maintenance.tmp").write_text(
+        "internal\n", encoding="utf-8"
+    )
+    after = TreeManifest.capture(root)
+
+    assert before.changed_paths(after) == frozenset()
+    assert all("/.git/" not in entry.path for entry in after.files)
+
+
 def test_manifest_retries_a_transient_disappearing_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

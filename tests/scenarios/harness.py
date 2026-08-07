@@ -73,10 +73,12 @@ class TreeManifest:
         paths: list[Path] = []
         for directory, child_directories, child_files in os.walk(root, followlinks=False):
             directory_path = Path(directory)
-            if directory_path == root:
-                child_directories[:] = [
-                    name for name in child_directories if name != ".git"
-                ]
+            # Git internals are implementation state, not scenario-visible
+            # workpad content. A workpad contains nested private repositories,
+            # so prune every .git directory rather than only one at the root.
+            child_directories[:] = [
+                name for name in child_directories if name != ".git"
+            ]
             paths.extend(directory_path / name for name in child_directories)
             paths.extend(directory_path / name for name in child_files)
 
