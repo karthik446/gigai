@@ -1,6 +1,6 @@
 # G14 completion audit
 
-Status: complete pending hosted confirmation.
+Status: complete.
 
 The sequential scheduler consumes the sealed G13 Run and executes the approved
 G08 two-Goal graph one Goal at a time. It revalidates the sealed graph and
@@ -19,7 +19,10 @@ Evidence:
   CLI against a fresh workpad, asserting every Goal completes and realized
   parallelism remains one.
 - Local verification: 302 tests passed, 22 subtests passed; installed G14
-  verifier passed. Hosted CI is required before the goal is merged.
+  verifier passed.
+- Hosted CI run `31153245702` passed all source, wheel, and Debian lanes on
+  the exact goal commit. The pull-request event run required one rerun of the
+  pre-existing G04 concurrent-init scenario; rerun job `92788128818` passed.
 
 No packaged schema, canonical vector, active Gig artifact, or target file was
 changed by G14.
