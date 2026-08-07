@@ -20,6 +20,11 @@ Graph that authorized it. This goal does not make GigAI a general agent
 runtime; it proves scheduling state and ordering before adding providers,
 operator gates, recovery, parallelism, or target effects.
 
+If the sealed Graph is rejected before scheduling, the Run itself is
+terminalized as failed after `run_started`; no Goal is marked failed or
+blocked, because no Goal has entered scheduling yet. Goal-scoped failure and
+blocked handoffs begin only after a Goal has been selected for execution.
+
 ## In scope
 
 - Extend the existing sealed `gigai run` path after G13 preparation; do not add
