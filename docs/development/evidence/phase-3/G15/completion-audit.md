@@ -1,6 +1,6 @@
 # G15 completion audit
 
-Status: implementation complete pending hosted confirmation.
+Status: complete.
 
 G15 adds seven additive schema resources (15 packaged resources total) and a
 local-only Review Bundle/Contract substrate. The original eight resources and
@@ -13,5 +13,7 @@ not implemented.
 
 Local evidence: 320 tests pass; the focused G15 suite passes; the fresh Python
 3.11 wheel verifier passes; schema JSON and touched-file Ruff checks pass.
-The installed verifier is wired into the built-wheel CI job. Hosted status is
-left pending until that exact branch commit is confirmed.
+The installed verifier is wired into the built-wheel CI job. Hosted CI run
+`31210493133` passed all eight jobs on exact commit
+`5fe589fd3f75e4ad7f6729ea6f325ac226ff9832`, including the built-wheel and
+Debian offline lanes.

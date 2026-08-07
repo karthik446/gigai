@@ -9,7 +9,7 @@ silently stand in for it.
 |---|---|---|---|
 | [G13](G13-sealed-deterministic-run-launch.md) | Sealed, deterministic Run launch | G10 | Complete |
 | [G14](G14-sequential-goal-graph-scheduler.md) | Sequential Goal Graph scheduler | G13 | Complete |
-| [G15](G15-reference-bundles-and-evaluator-substrate.md) | Reference bundles and evaluator substrate | G14 | Proposed for review |
+| [G15](G15-reference-bundles-and-evaluator-substrate.md) | Reference bundles and evaluator substrate | G14 | Complete |
 
 “Ready” records the initial dependency state; it is not a live tracker. A
 completed Phase 3 goal writes durable evidence under
