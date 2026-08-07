@@ -19,10 +19,10 @@ Evidence:
 - `tools/verify_installed_g14.py` exercises the installed wheel and the real
   CLI against a fresh workpad, asserting every Goal completes and realized
   parallelism remains one.
-- Local verification: 308 tests passed, 22 subtests passed; installed G14
+- Local verification: 309 tests passed, 22 subtests passed; installed G14
   verifier passed.
-- Hosted push run `31191483440` and pull-request run `31191486659` both passed
-  every source, wheel, and Debian lane on exact commit `7d207ff`.
+- Hosted push run `31196683483` and pull-request run `31196683861` both passed
+  every source, wheel, and Debian lane on exact commit `30d080a`.
 - The follow-up regression set covers non-entry orphan readiness, failed-versus-
   blocked terminal precedence, operator-gate/recovery rejection, sealed Graph
   tampering, and a three-Goal multi-entry join executed through the scheduler.

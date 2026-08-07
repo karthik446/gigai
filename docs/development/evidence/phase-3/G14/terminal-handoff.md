@@ -7,5 +7,5 @@ the installed-wheel verifier, and CI wiring. The graph remains immutable;
 unsupported parallel capacity, non-fail-gig policies, operator gates, manual
 edges, and recovery edges fail at Run scope before any Goal executor starts.
 
-Hosted push run `31191483440` and pull-request run `31191486659` both passed
-every source, wheel, and Debian lane on exact commit `7d207ff`.
+Hosted push run `31196683483` and pull-request run `31196683861` both passed
+every source, wheel, and Debian lane on exact commit `30d080a`.
