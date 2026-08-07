@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:adjudication:1",
+  "title": "GigAI Finding Adjudication",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "adjudication_id", "adjudication_version", "created_at", "actor", "decisions"],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "adjudication_id": {"$ref": "#/$defs/adjudication_id"},
+    "adjudication_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "actor": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+    "decisions": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/decision"}}
+  },
+  "$defs": {
+    "adjudication_id": {"type": "string", "pattern": "^adjudication_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "finding_id": {"type": "string", "pattern": "^finding_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_id", "decision", "rationale"],
+      "properties": {
+        "finding_id": {"$ref": "#/$defs/finding_id"},
+        "decision": {"type": "string", "enum": ["accepted", "rejected", "deferred", "unanswerable"]},
+        "rationale": {"type": "string", "minLength": 1, "maxLength": 20000}
+      }
+    }
+  }
+}

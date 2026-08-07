@@ -24,14 +24,21 @@ from .canonical import (
 
 
 SCHEMA_NAMES = (
+    "adjudication.schema.json",
     "active-gig-version.schema.json",
     "common.schema.json",
+    "feedback.schema.json",
+    "finding.schema.json",
     "gig-proposal.schema.json",
     "goal-graph.schema.json",
     "handoff-frontmatter.schema.json",
+    "report.schema.json",
+    "review-bundle.schema.json",
+    "review-contract.schema.json",
     "run-brief-frontmatter.schema.json",
     "run-details.schema.json",
     "run-manifest.schema.json",
+    "trace.schema.json",
 )
 _WRITING_EFFECTS = frozenset({"write_target", "write_workpad", "external_write"})
 _PROPOSAL_PATHS = {
