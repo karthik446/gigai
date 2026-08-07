@@ -453,8 +453,10 @@ def _validate_workpad_repository(
             }
         )
     if not {".git", ".gitignore"}.issubset(entries) or not entries <= allowed:
+        unexpected = sorted(entries - allowed)
+        detail = f": {', '.join(unexpected)}" if unexpected else ""
         raise WorkpadConflictError(
-            "workpad contains semantic or unexpected top-level state"
+            "workpad contains semantic or unexpected top-level state" + detail
         )
     handoffs = root / "handoffs"
     if handoffs.exists() and (handoffs.is_symlink() or not handoffs.is_dir()):
