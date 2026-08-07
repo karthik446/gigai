@@ -6,9 +6,9 @@
 > superseded by [ADR 0001](../adr/0001-python-version-range.md).
 
 **Date:** 2026-07-30
-**Updated:** 2026-08-02
+**Updated:** 2026-08-06
 **Revision:** 14
-**Status:** approved implementation contract; Phase 0 complete
+**Status:** approved implementation contract; Phase 0 and Phase 1 complete; V15 is the forward roadmap
 **Implementation target:** the standalone `gigai` repository
 **Project target:** any initialized source repository or explicit non-repository target
 
@@ -45,6 +45,35 @@ local-only contracts and corrects the execution model:
 
 The Forge goal package informed the goal, evidence, activation, and stop-boundary
 shape. It is a design reference, not product-specific runtime content.
+
+## Current status and V15 transition addendum — 2026-08-06
+
+V14 remains the approved source for the Phase 0 and Phase 1 contracts, including
+the packaged schemas, canonical bytes, authority model, private workpads,
+journal rules, model port, and sealed deterministic Run boundary. It is not
+obsolete and its completed contracts are not being rewritten by this addendum.
+
+The V14 Phase 1 implementation graph through G10 is complete according to the
+Phase 1 completion audit; G11 is separately evidenced. The first bounded Phase
+3 Run slice (G13) is also complete, and the versioned distribution lane has
+published the pre-alpha `gigai` package at v0.1.2; a v0.1.3 candidate is
+prepared but not yet released. Those facts establish the implementation
+baseline; they do not claim that the full V14 execution, mutation, provider,
+or improvement phases are complete.
+
+The product direction now moves from proving the local spine to making a Gig
+useful for real, user-owned work. The [V15 forward roadmap](v15-roadmap.md)
+adds an artifact-neutral Review Loop and an evaluation framework as the first
+dogfood surface. It also lays out sequential execution, proposal-time
+capability inspection, provider-neutral handoffs, controlled target mutation,
+local improvement, and recurring Gigs as staged work. V15 is a roadmap and
+decision record, not a replacement for the V14 contracts and not an
+authorization to implement unmaterialized goals.
+
+The [review-loop foundation spike](../research/review-loop-foundation-spike.md)
+is the research input for this pivot. It is intentionally not a goal contract:
+the first implementation goals must settle its open decisions, schemas, and
+evidence requirements before coding begins.
 
 ---
 

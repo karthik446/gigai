@@ -73,7 +73,9 @@ content is hashed as exact bytes rather than silently normalized.
   SHA-256 identities survived packaging.
 
 The [V14 implementation plan](docs/architecture/v14-implementation-plan.md)
-defines the intended product. The [command sheet](docs/reference/command-sheet.md)
+defines the implemented contract baseline. The [V15 forward roadmap](docs/architecture/v15-roadmap.md)
+defines the next product direction: reusable Gigs, review/evaluation loops,
+proposal-time capability inspection, and staged execution. The [command sheet](docs/reference/command-sheet.md)
 contains both the implemented surface and planned design; this README and
 installed help state what works today. The
 [cheat sheet](docs/reference/cheat-sheet.md) is the copy-paste guide for the
@@ -298,8 +300,10 @@ Schema.
 
 ## Roadmap
 
-The next product work follows the canonical [Phase 1 G00-G11 development goal
-graph](docs/development/goals/phase-1/README.md), derived from the V14 plan.
+The completed Phase 1 graph and bounded G13 Run are recorded in the
+[development evidence](docs/development/evidence/). The next product work
+follows the candidate graph in the [V15 forward roadmap](docs/architecture/v15-roadmap.md);
+its goals will be materialized only after their contracts are reviewed.
 Product modules enter src/gigai/ only through an explicit implementation goal
 and acceptance tests. The installed entry point exposes only behavior that
 exists; planned command names are not shipped as placeholders for appearances.

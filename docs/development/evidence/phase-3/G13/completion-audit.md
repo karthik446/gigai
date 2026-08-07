@@ -1,7 +1,7 @@
 # G13 completion audit — sealed deterministic Run launch
 
-Status: implementation evidence prepared on the G13 branch; hosted CI confirmation
-is pending because GitHub has not created a run for the PR head yet.
+Status: complete; implementation merged into `main` at `2e9a28a`; hosted CI and
+installed-wheel confirmation passed.
 
 ## Scope decision
 
@@ -30,11 +30,13 @@ Completion audits remain owned by a later goal.
 
 ## Verification
 
-- Full suite: 294 passed, 22 subtests.
+- Full suite: 296 passed, 22 subtests.
 - G13 focused suite: 4 passed.
 - Ruff check and formatting: passed for touched implementation, verifier, and tests.
 - Fresh wheel: `uv build --no-sources`, installed into a clean Python 3.11 environment.
 - Installed verifiers: schemas, CLI, and G13 deterministic Run all passed.
+- Hosted CI: the merged `main` commit `2e9a28a` passed the required matrix and
+  built-wheel verification.
 
 ## Stop boundary
 
