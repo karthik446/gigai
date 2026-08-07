@@ -6,6 +6,7 @@
 | Entry/dependency ordering and ordered handoffs | same test; journal handoff filenames |
 | Join waits for all exact predecessors and stable critical path | `test_join_waits_for_all_exact_predecessors_and_critical_path_is_stable` |
 | Three-Goal multi-entry join executes in canonical order | `test_scheduler_executes_three_goal_join_in_canonical_order` |
+| Repeated Runs preserve canonical Goal order | `test_repeated_runs_preserve_canonical_goal_order` |
 | Unsupported parallel policy fails before scheduling | `test_unsupported_parallel_policy_fails_before_scheduling` |
 | Unlisted terminal outcome blocks dependent | `test_terminal_unlisted_outcome_blocks_dependent` |
 | Non-entry orphan is not vacuously ready | `test_non_entry_orphan_never_becomes_ready` |

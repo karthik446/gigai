@@ -2,8 +2,9 @@
 
 Status: complete.
 
-The sequential scheduler consumes the sealed G13 Run and executes the approved
-G08 two-Goal graph one Goal at a time. It revalidates the sealed graph and
+The sequential scheduler consumes the sealed G13 Run and executes approved
+Goal Graphs one Goal at a time, including the shipped G08 two-Goal graph and
+the three-Goal join fixture. It revalidates the sealed graph and
 manifest digests, persists ordered `goal_started`/`goal_completed` handoffs,
 keeps the aggregate active set singular, and terminalizes unsupported policy,
 failure, interruption, and blocked-dependency paths without provider or target
@@ -18,7 +19,7 @@ Evidence:
 - `tools/verify_installed_g14.py` exercises the installed wheel and the real
   CLI against a fresh workpad, asserting every Goal completes and realized
   parallelism remains one.
-- Local verification: 307 tests passed, 22 subtests passed; installed G14
+- Local verification: 308 tests passed, 22 subtests passed; installed G14
   verifier passed.
 - Hosted push run `31191483440` and pull-request run `31191486659` both passed
   every source, wheel, and Debian lane on exact commit `7d207ff`.

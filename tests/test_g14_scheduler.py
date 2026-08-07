@@ -100,6 +100,35 @@ def test_sequential_scheduler_completes_every_goal_in_dependency_order(
     assert details["realized_max_parallel_goals"] == 1
 
 
+def test_repeated_runs_preserve_canonical_goal_order(tmp_path: Path) -> None:
+    home, target, gig_id = _fixture(tmp_path)
+    first = launch_run(
+        home_root=home,
+        requested_target=target,
+        gig_id=gig_id,
+        wait=True,
+        uuid_factory=uuid.uuid4,
+    )
+    second = launch_run(
+        home_root=home,
+        requested_target=target,
+        gig_id=gig_id,
+        wait=True,
+        uuid_factory=uuid.uuid4,
+    )
+
+    def started_order(run_id: str) -> list[str]:
+        order: list[str] = []
+        for path in sorted((first.workpad / "handoffs").glob("*-goal-started.txt")):
+            front_matter, _body = parse_json_front_matter(path.read_bytes())
+            if front_matter["run_id"] == run_id:
+                order.append(front_matter["goal_id"])
+        return order
+
+    assert first.status == second.status == "succeeded"
+    assert started_order(first.run_id) == started_order(second.run_id)
+
+
 def _goal(goal_id: str) -> dict[str, object]:
     return {"goal_id": goal_id, "activation": "automatic", "executor": {"kind": "local_capability", "capability": "gigai.offline"}, "effects": ["write_workpad"]}
 
