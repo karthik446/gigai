@@ -17,7 +17,8 @@ from gigai.config import (
     render_config,
 )
 from gigai.credentials import CredentialReferenceError, validate_reference
-from gigai.diagnostics import render_report_json, run_doctor
+import gigai.diagnostics as diagnostics_module
+from gigai.diagnostics import render_report_json, run_doctor, run_mount_probes
 from gigai.setup import build_config, resolve_editor_argv, run_setup
 from gigai.standard_pack import pack_digest, pack_path
 
@@ -36,7 +37,9 @@ def configured(tmp_path: Path, **overrides: object):
     return build_config(**values)  # type: ignore[arg-type]
 
 
-def test_config_round_trip_is_typed_canonical_and_reference_only(tmp_path: Path) -> None:
+def test_config_round_trip_is_typed_canonical_and_reference_only(
+    tmp_path: Path,
+) -> None:
     config = configured(tmp_path)
     rendered = render_config(config)
     payload = __import__("tomllib").loads(rendered.decode("utf-8"))
@@ -53,7 +56,9 @@ def test_config_round_trip_is_typed_canonical_and_reference_only(tmp_path: Path)
     ]
 
 
-def test_config_rejects_unknown_duplicate_and_unsupported_contracts(tmp_path: Path) -> None:
+def test_config_rejects_unknown_duplicate_and_unsupported_contracts(
+    tmp_path: Path,
+) -> None:
     config = configured(tmp_path)
     payload = __import__("tomllib").loads(render_config(config).decode("utf-8"))
     payload["surprise"] = True
@@ -75,7 +80,9 @@ def test_config_rejects_unknown_duplicate_and_unsupported_contracts(tmp_path: Pa
         parse_config(payload)
 
 
-def test_setup_is_byte_idempotent_and_materializes_one_immutable_pack(tmp_path: Path) -> None:
+def test_setup_is_byte_idempotent_and_materializes_one_immutable_pack(
+    tmp_path: Path,
+) -> None:
     config = configured(tmp_path)
     first = run_setup(config)
     before = (config.home_root / "config.toml").read_bytes()
@@ -90,6 +97,27 @@ def test_setup_is_byte_idempotent_and_materializes_one_immutable_pack(tmp_path: 
     assert pack_path(config.home_root).is_dir()
     assert len(tuple((config.home_root / "packs").rglob("standard-pack.json"))) == 1
     assert all(check.status == "PASS" for check in first.mount_checks)
+
+
+def test_mount_probes_keep_temporary_files_inside_scratch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "workpads"
+    root.mkdir()
+    observed_directories: list[Path] = []
+    original_mkstemp = diagnostics_module.tempfile.mkstemp
+
+    def record_mkstemp(*args: object, **kwargs: object) -> tuple[int, str]:
+        observed_directories.append(Path(kwargs["dir"]))
+        return original_mkstemp(*args, **kwargs)
+
+    monkeypatch.setattr(diagnostics_module.tempfile, "mkstemp", record_mkstemp)
+    checks = run_mount_probes(root)
+
+    assert all(check.status == "PASS" for check in checks)
+    assert observed_directories
+    assert set(observed_directories) == {root / "scratch"}
+    assert not tuple(root.iterdir())
 
 
 def test_setup_rejects_read_only_config_before_materializing_missing_pack(
@@ -107,7 +135,9 @@ def test_setup_rejects_read_only_config_before_materializing_missing_pack(
     assert not (config.home_root / "packs").exists()
 
 
-def test_setup_preserves_alternate_mount_and_refuses_pack_corruption(tmp_path: Path) -> None:
+def test_setup_preserves_alternate_mount_and_refuses_pack_corruption(
+    tmp_path: Path,
+) -> None:
     config = configured(tmp_path)
     run_setup(config)
     installed_pack = pack_path(config.home_root) / "standard-pack.json"
@@ -148,7 +178,9 @@ def test_doctor_is_offline_structured_and_warns_without_reading_secret(
     assert "provider-secret-canary" not in render_report_json(report)
 
 
-def test_doctor_fails_closed_on_missing_config_and_unavailable_mount(tmp_path: Path) -> None:
+def test_doctor_fails_closed_on_missing_config_and_unavailable_mount(
+    tmp_path: Path,
+) -> None:
     missing = run_doctor(tmp_path / "not-configured")
     assert missing.overall_status == "FAIL"
     assert missing.checks[0].id == "config.valid"
@@ -181,13 +213,17 @@ def test_editor_and_credential_boundaries_reject_shell_and_raw_secret_shapes(
         "$(touch nope)",
     )
     with pytest.raises(CredentialReferenceError):
-        validate_reference(CredentialReference("provider", "secret-manager", "sk-raw-secret"))
+        validate_reference(
+            CredentialReference("provider", "secret-manager", "sk-raw-secret")
+        )
     validate_reference(
         CredentialReference("provider", "secret-manager", "op://vault/provider/token")
     )
 
 
-def test_deterministic_adapter_has_one_fixture_backed_success_path(tmp_path: Path) -> None:
+def test_deterministic_adapter_has_one_fixture_backed_success_path(
+    tmp_path: Path,
+) -> None:
     binding = resolve_model_adapter(configured(tmp_path), "offline-default")
     assert (
         binding.port.invoke(
@@ -206,7 +242,9 @@ def test_product_subprocesses_are_literal_argv_with_shell_disabled() -> None:
     for path in product_root.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            if not isinstance(node, ast.Call) or not isinstance(
+                node.func, ast.Attribute
+            ):
                 continue
             if (
                 isinstance(node.func.value, ast.Name)
@@ -218,5 +256,7 @@ def test_product_subprocesses_are_literal_argv_with_shell_disabled() -> None:
     assert calls, "at least one real product subprocess boundary must be exercised"
     for path, call in calls:
         assert call.args and isinstance(call.args[0], ast.List), path
-        shell = next((item.value for item in call.keywords if item.arg == "shell"), None)
+        shell = next(
+            (item.value for item in call.keywords if item.arg == "shell"), None
+        )
         assert isinstance(shell, ast.Constant) and shell.value is False, path

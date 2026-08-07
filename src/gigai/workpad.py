@@ -439,6 +439,7 @@ def _validate_workpad_repository(
     allowed = {".git", ".gitignore"}
     if allow_journal:
         allowed.add("handoffs")
+        allowed.add("scratch")
     if allow_semantic_state:
         allowed.update(
             {
