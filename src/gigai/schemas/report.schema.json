@@ -17,7 +17,7 @@
     "feedback_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/feedback_id"}},
     "adjudication_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/adjudication_id"}},
     "status": {"type": "string", "enum": ["complete", "blocked", "requires_operator", "incomplete"]},
-    "machine_report_sha256": {"$ref": "#/$defs/sha256"},
+    "machine_report_sha256": {"$ref": "#/$defs/sha256", "description": "SHA-256 of the canonical machine report object with this field omitted."},
     "human_report": {"$ref": "#/$defs/artifact_ref"}
   },
   "$defs": {

@@ -195,7 +195,7 @@ def test_bundle_rejects_symlinked_reference_bytes(tmp_path: Path) -> None:
         tmp_path,
         (tmp_path / "manifests/review-bundle.json").read_bytes(),
     )
-    assert "missing_reference_bytes" in {item.code for item in report.findings}
+    assert "unsafe_reference_path" in {item.code for item in report.findings}
 
 
 def test_review_contract_validates_and_rejects_model_stage() -> None:
@@ -277,9 +277,23 @@ def test_findings_require_real_bundle_evidence_and_merge_provenance(
 
     merged = merge_findings([first, second])
     assert len(merged) == 1
-    assert merged[0]["disagreement"]["present"] is True
+    assert merged[0]["disagreement"]["present"] is False
     assert len(merged[0]["source_evaluators"]) == 2
     assert merge_findings([second, first])[0]["finding_id"] == merged[0]["finding_id"]
+
+    conflict = copy.deepcopy(first)
+    conflict["finding_id"] = "finding_00000000-0000-4000-8000-000000000009"
+    conflict["description"] = "The conclusion is supported by the cited source."
+    conflict["evaluator"] = {
+        "evaluator_id": "evaluator_conflict",
+        "evaluator_version": "fixture-1",
+        "stage": "deterministic",
+    }
+    conflict["source_evaluators"] = [conflict["evaluator"]]
+    conflicting = merge_findings([first, conflict])
+    assert len(conflicting) == 2
+    assert all(item["disagreement"]["present"] for item in conflicting)
+    assert all(item["disagreement"]["peer_finding_ids"] for item in conflicting)
 
     invalid = copy.deepcopy(first)
     invalid["evidence"][0]["content_sha256"] = "sha256:" + "0" * 64

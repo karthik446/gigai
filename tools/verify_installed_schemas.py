@@ -16,7 +16,7 @@ EXPECTED_SHA256 = {
     "gig-proposal.schema.json": "515f16368059c7d8d4bf88cb47d8fc0df63afc50a51e13c8c75601c013f134b3",
     "goal-graph.schema.json": "669115492bfed52f4738cb9cbbac626a10f80f6965da3d1f70eb20e4c2e264cf",
     "handoff-frontmatter.schema.json": "de27d69529ae7cce07063fb67dcecc48aff79012ef72c66f3ed077367b9bd09e",
-    "report.schema.json": "e6c42cdf1787df06bb2ddd0169bf44ca62b9279b7f3c3bcfde97ddabe5b764d4",
+    "report.schema.json": "dc012ee13f66d45e3bdaab857c82a152a66be46cf98a8d50ffd21a4e581cac8c",
     "review-bundle.schema.json": "ab60331eaf6095aa2c70690592f1b66769012aa6973a03e6cb4a1d36f904b531",
     "review-contract.schema.json": "d7cc23e267ce07e071138e62c65accba9fc0b64ff967880fa05bf5cc5a4626f1",
     "run-brief-frontmatter.schema.json": "481118d7c49f97d00c389f8f4d4216cc1baf6ff96e8c16c3343006ad019369e3",

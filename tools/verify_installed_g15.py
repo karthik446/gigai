@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 import tempfile
 
@@ -179,8 +180,22 @@ def main() -> None:
         if not validate_finding(canonical_json_bytes(first), bundle).valid:
             raise SystemExit("installed G15 Finding validation failed")
         merged = merge_findings([first, second])
-        if len(merged) != 1 or not merged[0]["disagreement"]["present"]:
+        if len(merged) != 1 or merged[0]["disagreement"]["present"]:
             raise SystemExit("installed G15 deterministic finding merge failed")
+        conflict = copy.deepcopy(first)
+        conflict["finding_id"] = "finding_00000000-0000-4000-8000-000000000009"
+        conflict["description"] = "The conclusion is supported by the cited source."
+        conflict["evaluator"] = {
+            "evaluator_id": "evaluator_conflict",
+            "evaluator_version": "fixture-1",
+            "stage": "deterministic",
+        }
+        conflict["source_evaluators"] = [conflict["evaluator"]]
+        disagreements = merge_findings([first, conflict])
+        if len(disagreements) != 2 or not all(
+            finding["disagreement"]["present"] for finding in disagreements
+        ):
+            raise SystemExit("installed G15 disagreement detection failed")
         feedback = {
             "schema_version": "1.0",
             "feedback_id": "feedback_00000000-0000-4000-8000-000000000009",

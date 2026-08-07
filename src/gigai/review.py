@@ -37,7 +37,7 @@ class ReviewContractError(ValueError):
     """A Review Contract cannot be used by the deterministic substrate."""
 
 
-_SAFE_RELATIVE = re.compile(r"^(?!/)(?!.*\\\\)(?!.*(^|/)\.\.(/|$)).+$")
+_SAFE_RELATIVE = re.compile(r"^(?!/)(?!.*\\)(?!.*(^|/)\.\.(/|$)).+$")
 _G15_SCHEMA_NAMES = {
     "review-bundle.schema.json",
     "review-contract.schema.json",
@@ -67,7 +67,7 @@ def _safe_path(root: Path, relative: object) -> Path | None:
         return None
     candidate = root / relative
     try:
-        candidate.relative_to(root)
+        candidate.resolve(strict=False).relative_to(root.resolve(strict=False))
     except ValueError:
         return None
     return candidate
@@ -444,8 +444,7 @@ def validate_finding_transition(
 def merge_findings(findings: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Merge duplicate Findings while retaining evaluator provenance."""
 
-    groups: dict[tuple[Any, ...], list[Mapping[str, Any]]] = {}
-    for finding in findings:
+    def merge_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
         evidence_key = tuple(
             sorted(
                 (
@@ -461,15 +460,19 @@ def merge_findings(findings: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
             " ",
             f"{finding.get('title', '').strip()}\n{finding.get('description', '').strip()}",
         )
-        key = (
+        return (
             finding.get("criterion_id"),
             finding.get("severity"),
             evidence_key,
             normalized_text,
         )
+
+    groups: dict[tuple[Any, ...], list[Mapping[str, Any]]] = {}
+    for finding in findings:
+        key = merge_key(finding)
         groups.setdefault(key, []).append(finding)
 
-    merged: list[dict[str, Any]] = []
+    merged: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
     for key, group in sorted(groups.items(), key=lambda item: repr(item[0])):
         base = copy.deepcopy(min(group, key=lambda item: str(item.get("finding_id"))))
         if len(group) > 1:
@@ -482,16 +485,20 @@ def merge_findings(findings: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
             base["source_evaluators"] = [
                 copy.deepcopy(item) for _, item in sorted(provenance.items())
             ]
-            peer_ids = sorted(
-                str(item.get("finding_id"))
-                for item in group
-                if item.get("finding_id") != base.get("finding_id")
-            )
-            base["disagreement"] = {
-                "present": True,
-                "peer_finding_ids": peer_ids,
-                "summary": "independent evaluators produced the same finding",
+            evidence = {
+                canonical_json_bytes(item): item
+                for finding in group
+                for item in finding.get("evidence", [])
+                if isinstance(item, Mapping)
             }
+            base["evidence"] = [
+                copy.deepcopy(item) for _, item in sorted(evidence.items())
+            ]
+        base["disagreement"] = {
+            "present": False,
+            "peer_finding_ids": [],
+            "summary": None,
+        }
         stable_key = {
             "criterion_id": key[0],
             "severity": key[1],
@@ -500,8 +507,26 @@ def merge_findings(findings: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
             "source_evaluators": base.get("source_evaluators", []),
         }
         base["finding_id"] = _stable_prefixed_id("finding", stable_key)
-        merged.append(base)
-    return merged
+        merged.append((key, base))
+
+    disagreement_groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for key, finding in merged:
+        disagreement_key = (key[0], key[2])
+        disagreement_groups.setdefault(disagreement_key, []).append(finding)
+    for group in disagreement_groups.values():
+        if len(group) < 2:
+            continue
+        for finding in group:
+            finding["disagreement"] = {
+                "present": True,
+                "peer_finding_ids": sorted(
+                    peer["finding_id"]
+                    for peer in group
+                    if peer["finding_id"] != finding["finding_id"]
+                ),
+                "summary": "independent evaluators disagree on finding text or severity",
+            }
+    return [finding for _key, finding in merged]
 
 
 def validate_feedback(feedback_bytes: bytes) -> ValidationReport:

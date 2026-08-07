@@ -131,10 +131,13 @@ two cannot begin until Stage one's schemas and replay fixtures pass.
 5. Duplicate findings merge deterministically using the canonical key
    `(criterion_id, severity, sorted evidence-reference digests, normalized
    finding text)`. The merged record unions sorted evaluator, trace, and
-   evidence provenance, retains disagreement metadata, and derives its stable
-   ID from the canonical merged bytes. Independent disagreement remains
-   visible, and an Adjudication records the operator decision and rationale
-   without rewriting either original finding.
+   evidence provenance and derives its stable ID from the canonical merged
+   bytes. Disagreement is a separate second grouping by
+   `(criterion_id, sorted evidence-reference digests)`: distinct merge keys in
+   that group are mutually marked with peer IDs and disagreement metadata,
+   while identical merge-key duplicates are recorded as agreement. An
+   Adjudication records the operator decision and rationale without rewriting
+   either original finding.
 6. Verbatim Feedback records preserve the supplied text, actor, timestamp,
    finding IDs, and decision (`accepted`, `rejected`, `deferred`, or
    `clarification_requested`). Feedback cannot be misclassified as a review,
