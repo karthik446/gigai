@@ -1,6 +1,6 @@
 # G14 completion audit
 
-Status: complete pending hosted confirmation of the review-fix commit.
+Status: complete.
 
 The sequential scheduler consumes the sealed G13 Run and executes the approved
 G08 two-Goal graph one Goal at a time. It revalidates the sealed graph and
@@ -20,8 +20,8 @@ Evidence:
   parallelism remains one.
 - Local verification: 307 tests passed, 22 subtests passed; installed G14
   verifier passed.
-- The prior implementation commit passed all hosted source, wheel, and Debian
-  lanes; this review-fix commit requires a fresh exact-head confirmation.
+- Hosted push run `31191483440` and pull-request run `31191486659` both passed
+  every source, wheel, and Debian lane on exact commit `7d207ff`.
 - The follow-up regression set covers non-entry orphan readiness, failed-versus-
   blocked terminal precedence, operator-gate/recovery rejection, sealed Graph
   tampering, and a three-Goal multi-entry join executed through the scheduler.
