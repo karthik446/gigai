@@ -2,6 +2,8 @@
 
 - [Architecture](architecture/v14-implementation-plan.md) — approved V14
   product, authority, storage, and implementation design.
+- [V15 forward roadmap](architecture/v15-roadmap.md) — post-Phase 1 pivot toward
+  reusable Gigs, review/evaluation loops, tools, and staged execution.
 - [Command reference](reference/command-sheet.md) — planned operator-facing
   command contract.
 - [Cheat sheet](reference/cheat-sheet.md) — current installation, offline
