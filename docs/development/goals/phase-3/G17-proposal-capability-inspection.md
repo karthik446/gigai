@@ -52,6 +52,14 @@ later work.
   may read local package metadata, executable paths, file metadata, and pinned
   local artifact bytes; it must not execute a capability, contact a provider,
   resolve a remote package, read credential values, or mutate a target.
+- Define the installation outcome states as `pending`, `installed`,
+  `already_available`, `refused`, `failed`, and `rolled_back`. The only legal
+  transitions are `pending` to one terminal outcome: `installed` records a
+  newly materialized tool, `already_available` records a verified no-write
+  match, `refused` records an operator or policy refusal, `failed` records a
+  pre-write failure that leaves the tool root unchanged, and `rolled_back`
+  records a mutation attempt that restored the exact before manifest. Terminal
+  outcomes never transition or get overwritten by a later attempt.
 - Define explicit proposal options with stable labels and deterministic order:
   use an available capability, install a pinned local artifact, choose a
   declared alternative, or continue without the capability. Every option has a
@@ -63,6 +71,15 @@ later work.
   resulting artifact without executing it. The v1 fixture backend may copy or
   unpack a local artifact; remote download, package-manager invocation, and
   arbitrary installer commands are not part of this goal.
+- Make installation interruption-safe: capture and persist the before
+  manifest, materialize into a sibling temporary root inside `tools/` (for
+  example, `tools/.staging-<capability-id>/`), and expose the new tool root
+  only through an atomic rename. A prepared record is reconciled before a later
+  inspection can report an outcome; interruption before exposure removes the
+  temporary root, while interruption after exposure restores the exact before
+  manifest. The terminal installation record is committed before the caller
+  reports completion or failure. The destination never pre-exists, so the
+  atomic directory rename cannot replace a non-empty existing tool root.
 - Record an installation review containing the approving actor, selected option,
   source and version pins, requested effects and permissions, security checks,
   before/after manifests, outcome, and rollback/refusal reason. Installation is
@@ -72,6 +89,17 @@ later work.
   must not become a global default or appear as a resolved Run tool for another
   Gig without a new explicit selection and evidence record. G17 does not alter
   the existing `run-manifest` resolved-tool schema.
+- Define `security_rejected` deterministically for installation-time checks:
+  v1 rejects an install when the installer would need anything outside the
+  allowlist of reading local metadata, reading pinned local bytes, and writing
+  only the isolated per-Gig tool root, or when the source/path violates the
+  symlink-free containment rule. A capability's declared runtime effects—such
+  as network or credential requirements—are recorded and surfaced in proposal
+  options for S18/G18; they are not security rejections merely because they
+  are declared, and a v1 install may proceed only because it never executes
+  the capability. When multiple inspection states apply, precedence is
+  `security_rejected`, then `incompatible`, then `credential_missing`, then
+  `available`, `installable`, and `missing`.
 - Enforce the boundary with deterministic fixtures for installed, missing,
   installable, incompatible, credential-missing, security-rejected, source
   digest drift, approval refusal, installer failure, and rollback cases.
