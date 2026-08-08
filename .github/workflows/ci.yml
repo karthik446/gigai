@@ -64,6 +64,7 @@ jobs:
       - run: .wheel-venv/bin/python tools/verify_installed_g13.py
       - run: .wheel-venv/bin/python tools/verify_installed_g14.py
       - run: .wheel-venv/bin/python tools/verify_installed_g15.py
+      - run: .wheel-venv/bin/python tools/verify_installed_g16.py
       - run: >-
           uv run --locked --extra test pytest
           tests/test_cli_and_scenario_harness.py

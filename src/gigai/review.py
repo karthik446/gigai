@@ -255,6 +255,8 @@ def materialize_review_bundle(
     root: Path,
     manifest: Mapping[str, Any],
     objects: Mapping[str, bytes],
+    *,
+    manifest_relative_path: str = "manifests/review-bundle.json",
 ) -> bytes:
     """Atomically validate then write a Bundle manifest and its object bytes."""
 
@@ -273,7 +275,9 @@ def materialize_review_bundle(
         if path is None:
             raise ReviewBundleError("object path must be workpad-relative")
         writes.append((path, payload))
-    manifest_path = root / "manifests" / "review-bundle.json"
+    manifest_path = _safe_path(root, manifest_relative_path)
+    if manifest_path is None:
+        raise ReviewBundleError("Bundle manifest path must be workpad-relative")
     writes.append((manifest_path, manifest_bytes))
     for path, payload in writes:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -564,6 +568,82 @@ def validate_trace(trace_bytes: bytes) -> ValidationReport:
     return _merge_findings(report, ValidationReport(tuple(findings)))
 
 
+_LOOP_TRANSITIONS = {
+    "reviewing": frozenset({"verifying", "blocked"}),
+    "verifying": frozenset({"feedback_pending", "blocked"}),
+    "feedback_pending": frozenset({"addressing", "blocked"}),
+    "addressing": frozenset({"closing", "blocked"}),
+    "closing": frozenset({"complete", "blocked", "unanswerable"}),
+    "complete": frozenset(),
+    "blocked": frozenset(),
+    "unanswerable": frozenset(),
+}
+
+
+def validate_review_loop(loop_bytes: bytes) -> ValidationReport:
+    """Validate a durable loop record and its ordered state transitions."""
+
+    report = _schema_report("review-loop.schema.json", loop_bytes)
+    try:
+        loop = parse_json_bytes(loop_bytes)
+    except CanonicalizationError:
+        return report
+    if not isinstance(loop, Mapping):
+        return report
+    findings: list[ValidationFinding] = []
+    stages = loop.get("stage_sequence", [])
+    states = [item.get("state") for item in stages if isinstance(item, Mapping)]
+    if states and states[0] != "reviewing":
+        findings.append(_path_error("stage_sequence/0/state", "invalid_loop_start", "loop must start in reviewing"))
+    for index, (previous, current) in enumerate(zip(states, states[1:])):
+        if current not in _LOOP_TRANSITIONS.get(previous, frozenset()):
+            findings.append(_path_error(f"stage_sequence/{index + 1}/state", "invalid_loop_transition", f"loop state cannot transition from {previous!r} to {current!r}"))
+    state = loop.get("state")
+    if states and state != states[-1]:
+        findings.append(_path_error("state", "loop_state_mismatch", "state must equal the final stage_sequence state"))
+    if state in {"complete", "blocked", "unanswerable"} and loop.get("terminal_decision") is None:
+        findings.append(_path_error("terminal_decision", "missing_terminal_decision", "terminal loops require a terminal decision"))
+    if loop.get("cycle_count", 0) > loop.get("cycle_cap", 0):
+        findings.append(_path_error("cycle_count", "cycle_cap_exceeded", "cycle_count cannot exceed cycle_cap"))
+    return _merge_findings(report, ValidationReport(tuple(findings)))
+
+
+def validate_addressed_artifact(artifact_bytes: bytes) -> ValidationReport:
+    """Validate an addressed artifact envelope."""
+
+    return _schema_report("addressed-artifact.schema.json", artifact_bytes)
+
+
+def validate_review_loop_artifacts(root: Path, loop_bytes: bytes) -> ValidationReport:
+    """Validate loop state and the parentage of its addressed artifacts."""
+
+    report = validate_review_loop(loop_bytes)
+    try:
+        loop = parse_json_bytes(loop_bytes)
+    except CanonicalizationError:
+        return report
+    if not isinstance(loop, Mapping):
+        return report
+    findings: list[ValidationFinding] = []
+    for index, artifact_id in enumerate(loop.get("addressed_artifact_ids", [])):
+        path = root / "addressed" / f"{artifact_id}.json"
+        if path.is_symlink() or not path.is_file():
+            findings.append(_path_error(f"addressed_artifact_ids/{index}", "missing_addressed_artifact", "loop references a missing addressed artifact"))
+            continue
+        artifact_bytes = path.read_bytes()
+        artifact_report = validate_addressed_artifact(artifact_bytes)
+        findings.extend(artifact_report.findings)
+        try:
+            artifact = parse_json_bytes(artifact_bytes)
+        except CanonicalizationError:
+            continue
+        if isinstance(artifact, Mapping):
+            for field in ("loop_id", "bundle_id", "contract_id"):
+                if artifact.get(field) != loop.get(field):
+                    findings.append(_path_error(f"addressed/{artifact_id}/{field}", "addressed_parent_mismatch", f"addressed artifact {field} does not match loop"))
+    return _merge_findings(report, ValidationReport(tuple(findings)))
+
+
 def redact_text(text: str, secrets: tuple[str, ...]) -> str:
     """Apply an explicit local redaction list without guessing at identities."""
 
@@ -642,6 +722,9 @@ __all__ = [
     "redact_text",
     "render_report",
     "validate_adjudication",
+    "validate_addressed_artifact",
+    "validate_review_loop_artifacts",
+    "validate_review_loop",
     "validate_review_bundle",
     "validate_review_contract",
     "validate_feedback",
