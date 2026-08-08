@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:capability-manifest:1",
+  "title": "GigAI capability requirement and inspection manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_id",
+    "manifest_version",
+    "gig_id",
+    "created_at",
+    "created_by",
+    "capabilities"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "manifest_id": {"$ref": "#/$defs/manifest_id"},
+    "manifest_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "created_by": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+    "capabilities": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/capability"}}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "manifest_id": {"type": "string", "pattern": "^capmanifest_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "capability_id": {"type": "string", "pattern": "^cap_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "goal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"},
+    "sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$", "maxLength": 120},
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability_id", "goal_ids", "kind", "name", "requested_version",
+        "source_constraints", "declared_effects", "permissions",
+        "credential_requirements", "network_requirement", "availability_state",
+        "compatibility", "security_review", "alternatives", "options"
+      ],
+      "properties": {
+        "capability_id": {"$ref": "#/$defs/capability_id"},
+        "goal_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/goal_id"}},
+        "kind": {"type": "string", "enum": ["tool", "provider", "local_capability", "executable", "library", "other"]},
+        "name": {"$ref": "#/$defs/name"},
+        "requested_version": {"type": ["string", "null"], "maxLength": 255},
+        "source_constraints": {"$ref": "#/$defs/source_constraints"},
+        "declared_effects": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 80}},
+        "permissions": {"$ref": "#/$defs/permissions"},
+        "credential_requirements": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 120}},
+        "network_requirement": {"type": "string", "enum": ["none", "read", "write"]},
+        "availability_state": {"type": "string", "enum": ["available", "missing", "installable", "incompatible", "credential_missing", "security_rejected"]},
+        "compatibility": {"$ref": "#/$defs/compatibility"},
+        "security_review": {"$ref": "#/$defs/security_review"},
+        "alternatives": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/alternative"}},
+        "options": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/option"}}
+      }
+    },
+    "source_constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_source_kinds", "required_digest", "required_identity"],
+      "properties": {
+        "allowed_source_kinds": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["local_artifact", "installed", "system_path", "remote"]}},
+        "required_digest": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "required_identity": {"type": ["string", "null"], "maxLength": 255}
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filesystem", "network", "credentials"],
+      "properties": {
+        "filesystem": {"type": "string", "enum": ["none", "read_local", "write_isolated"]},
+        "network": {"type": "string", "enum": ["none", "read", "write"]},
+        "credentials": {"type": "string", "enum": ["none", "metadata_only", "value_required"]}
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason"],
+      "properties": {
+        "status": {"type": "string", "enum": ["compatible", "incompatible", "unknown"]},
+        "reason": {"type": ["string", "null"], "maxLength": 2000}
+      }
+    },
+    "security_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "checks", "reason"],
+      "properties": {
+        "status": {"type": "string", "enum": ["pending", "passed", "rejected"]},
+        "checks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 120}},
+        "reason": {"type": ["string", "null"], "maxLength": 2000}
+      }
+    },
+    "alternative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["option_id", "label", "capability_id"],
+      "properties": {
+        "option_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*$", "maxLength": 20},
+        "label": {"type": "string", "minLength": 1, "maxLength": 255},
+        "capability_id": {"oneOf": [{"$ref": "#/$defs/capability_id"}, {"type": "null"}]}
+      }
+    },
+    "option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["option_id", "kind", "label", "ordinal", "decision"],
+      "properties": {
+        "option_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*$", "maxLength": 20},
+        "kind": {"type": "string", "enum": ["use_available", "install_local", "choose_alternative", "continue_without"]},
+        "label": {"type": "string", "minLength": 1, "maxLength": 255},
+        "ordinal": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "decision": {"type": "string", "enum": ["pending", "approved", "refused"]}
+      }
+    }
+  }
+}
