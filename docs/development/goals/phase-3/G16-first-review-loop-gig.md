@@ -49,8 +49,8 @@ produced it.
 
   | Loop state | Allowed next state | Guard |
   | --- | --- | --- |
-  | `reviewing` | `verifying` | Report and Trace validate with Bundle evidence |
-  | `verifying` | `feedback_pending` | deterministic verification completes |
+  | `reviewing` | `verifying` or `blocked` | Report and Trace validate with Bundle evidence, or a reference/digest/validation failure is durably recorded |
+  | `verifying` | `feedback_pending` or `blocked` | deterministic verification completes, or verification evidence fails or is unavailable |
   | `feedback_pending` | `addressing` or `blocked` | accepted decisions plus required Adjudication, or clarification/unresolved disagreement |
   | `addressing` | `closing` or `blocked` | one address pass succeeds, or partial/cycle-limited address fails |
   | `closing` | `complete`, `blocked`, or `unanswerable` | all accepted Findings resolve; deferred/unresolved items block; only open/deferred items explicitly made unanswerable may produce `unanswerable` |
