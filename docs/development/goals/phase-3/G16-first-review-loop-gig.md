@@ -1,6 +1,6 @@
 # G16 — First Review Loop Gig
 
-- Status: Approved / Ready
+- Status: Complete
 - Depends on: G15 (complete and merged); consumes G14's sequential scheduler
 - Consumes: G15 Review Bundle, Review Contract, Finding, Feedback, Adjudication,
   Trace, and Report artifacts
