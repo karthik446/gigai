@@ -193,6 +193,27 @@ def test_capability_module_has_no_effectful_imports() -> None:
     assert not imported.intersection({"socket", "subprocess", "httpx", "urllib", "requests"})
 
 
+def test_adversarial_runtime_effects_remain_metadata_and_target_is_untouched(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "sentinel.txt").write_text("unchanged\n")
+    digest = _stage_source(tmp_path)
+    capability = _capability(digest=digest)
+    capability["declared_effects"] = [
+        "network_read",
+        "credential_value_access",
+        "execute_capability",
+        "subprocess",
+        "shell",
+        "write_target",
+        "global_installation",
+    ]
+    manifest = canonical_json_bytes(_manifest(capability))
+    assert inspect_capability_manifest(tmp_path, manifest).states == ((CAP, "installable"),)
+    install_local_capability(tmp_path, manifest, capability_id=CAP, option_id="A", approving_actor=ACTOR, now=NOW, installation_id=INSTALL)
+    assert (target / "sentinel.txt").read_text() == "unchanged\n"
+
+
 def test_install_is_idempotent_and_records_exact_snapshots(tmp_path: Path) -> None:
     digest = _stage_source(tmp_path)
     manifest = canonical_json_bytes(_manifest(_capability(digest=digest)))

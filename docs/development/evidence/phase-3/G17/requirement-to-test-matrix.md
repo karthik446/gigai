@@ -11,7 +11,7 @@
 | 7. Failure/interruption outcomes | `test_refusal_and_interruption_rollback_are_durable`; option-and-installation-state-table |
 | 8. Per-Gig provenance | `test_per_gig_provenance_does_not_leak_between_roots`; provenance mutation |
 | 9. Negative rejection classes | malformed, duplicate, invented alternative, incompatible, credential, security, digest, symlink, refusal, failure, interruption, rollback fixtures |
-| 10. Adversarial effect boundary | `test_capability_module_has_no_effectful_imports`; target/effect sanitized manifest; no subprocess/network imports |
+| 10. Adversarial effect boundary | `test_adversarial_runtime_effects_remain_metadata_and_target_is_untouched`; `test_capability_module_has_no_effectful_imports`; target/effect sanitized manifest |
 | 11. Mutation coverage | `mutation-report.md`; `tools/run_g17_mutation.py` catches six guards |
 | 12. Fresh installed wheel | `tools/verify_installed_g17.py` and `tools/verify_installed_schemas.py` pass in a disposable Python 3.11 wheel environment |
 | 13. Completion evidence | This matrix, corpus manifest, state table, mutation report, sanitized manifest, refusal/rollback records, audit, and handoff |

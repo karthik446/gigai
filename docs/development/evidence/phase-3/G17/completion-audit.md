@@ -18,7 +18,7 @@ permission mismatch, and cross-Gig provenance are covered by named tests.
 Local verification:
 
 - Full suite: 353 passed, 44 subtests.
-- Focused G17 suite: 11 passed.
+- Focused G17 suite: 12 passed.
 - Mutation harness: all six named mutations caught.
 - Fresh wheel: `gigai-0.1.3-py3-none-any.whl` installed into disposable Python
   3.11 environment; the nineteen-resource verifier and G17 installed verifier
