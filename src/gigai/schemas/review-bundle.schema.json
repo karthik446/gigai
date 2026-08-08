@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:review-bundle:1",
+  "title": "GigAI Review Bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "bundle_id",
+    "bundle_version",
+    "created_at",
+    "created_by",
+    "name",
+    "references",
+    "tool_requirements",
+    "redaction_policy"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "bundle_id": {"$ref": "#/$defs/bundle_id"},
+    "bundle_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "created_by": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", "maxLength": 80},
+    "question": {"type": ["string", "null"], "maxLength": 20000},
+    "references": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/reference"}},
+    "tool_requirements": {
+      "oneOf": [
+        {"$ref": "#/$defs/artifact_ref"},
+        {"type": "null"}
+      ]
+    },
+    "redaction_policy": {"$ref": "#/$defs/redaction_policy"}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "bundle_id": {"type": "string", "pattern": "^bundle_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "reference_id": {"type": "string", "pattern": "^ref_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "relative_path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*\\\\)(?!.*(^|/)\\.\\.(/|$)).+$"},
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content_sha256", "media_type", "size_bytes"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "content_sha256": {"$ref": "#/$defs/sha256"},
+        "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_kind", "locator", "acquired_at", "acquisition_method"],
+      "properties": {
+        "source_kind": {"type": "string", "enum": ["local_file", "git_snapshot", "pull_request", "url_snapshot", "generated", "prior_run"]},
+        "locator": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "acquired_at": {"type": "string", "format": "date-time"},
+        "acquisition_method": {"type": "string", "minLength": 1, "maxLength": 255},
+        "source_revision": {"type": ["string", "null"], "maxLength": 255}
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference_id", "role", "kind", "path", "media_type", "content_sha256", "size_bytes", "provenance", "sensitivity", "redaction_status"],
+      "properties": {
+        "reference_id": {"$ref": "#/$defs/reference_id"},
+        "role": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 80},
+        "kind": {"type": "string", "enum": ["article", "repository_snapshot", "pull_request_diff", "source_file", "test_file", "schema", "configuration", "deployment_file", "csv", "spreadsheet", "resume", "prior_output", "url_snapshot", "other"]},
+        "path": {"$ref": "#/$defs/relative_path"},
+        "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
+        "content_sha256": {"$ref": "#/$defs/sha256"},
+        "canonical_sha256": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "provenance": {"$ref": "#/$defs/provenance"},
+        "sensitivity": {"type": "string", "enum": ["public", "private", "sensitive", "restricted"]},
+        "redaction_status": {"type": "string", "enum": ["not_required", "pending", "redacted", "approved_local_only"]}
+      }
+    },
+    "redaction_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "allowed_reference_ids", "policy_version"],
+      "properties": {
+        "mode": {"type": "string", "enum": ["local_only", "explicit_projection"]},
+        "allowed_reference_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/reference_id"}},
+        "policy_version": {"type": "string", "minLength": 1, "maxLength": 80},
+        "detector_version": {"type": ["string", "null"], "maxLength": 80}
+      }
+    }
+  }
+}

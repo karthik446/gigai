@@ -11,6 +11,11 @@ fixtures, and compatibility tests. Prose in the implementation plan explains
 intent; these files define field names, types, required values, cardinality,
 and enums.
 
+The original eight Phase 0/1 resources remain byte-identical. The additive G15
+resources define review bundles, contracts, findings, feedback, adjudications,
+traces, and machine reports; their hashes are pinned separately in
+`SHA256SUMS` and verified as a fifteen-resource set.
+
 ## Production identity API
 
 `gigai.canonical` is the sole shipped implementation of canonical JSON,
@@ -45,6 +50,14 @@ No other product module implements canonical rendering or SHA-256 identity.
   record.
 - `handoff-frontmatter.schema.json` defines the JSON front matter embedded in
   every text handoff.
+- `review-bundle.schema.json` defines exact-byte review references and the
+  redaction/tool-requirement envelope.
+- `review-contract.schema.json` defines criteria, evidence, evaluator plans,
+  and bounded review policy.
+- `finding.schema.json`, `feedback.schema.json`, and
+  `adjudication.schema.json` define evaluator findings and operator decisions.
+- `trace.schema.json` and `report.schema.json` define replay identity and the
+  machine report projection.
 
 All top-level objects reject unknown fields. `schema_version` names one exact
 contract version. An additive optional field creates a new minor schema version;

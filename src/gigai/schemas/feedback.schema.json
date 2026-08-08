@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:feedback:1",
+  "title": "GigAI Feedback Decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feedback_id", "feedback_version", "created_at", "actor", "finding_ids", "decision", "text"],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "feedback_id": {"$ref": "#/$defs/feedback_id"},
+    "feedback_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "actor": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+    "finding_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/finding_id"}},
+    "decision": {"type": "string", "enum": ["accepted", "rejected", "deferred", "clarification_requested"]},
+    "text": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "rationale": {"type": ["string", "null"], "maxLength": 20000}
+  },
+  "$defs": {
+    "feedback_id": {"type": "string", "pattern": "^feedback_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "finding_id": {"type": "string", "pattern": "^finding_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}
+  }
+}

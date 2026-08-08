@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:review-contract:1",
+  "title": "GigAI Review Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_id", "contract_version", "created_at", "created_by", "name", "question", "reference_roles", "criteria", "severity_model", "evidence_requirements", "output_shape", "clarification_policy", "cycle_cap", "escalation_policy", "allowed_effects", "evaluator_plan", "redaction_policy"],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "contract_id": {"$ref": "#/$defs/contract_id"},
+    "contract_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "created_by": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", "maxLength": 80},
+    "question": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "reference_roles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 80}},
+    "criteria": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/criterion"}},
+    "severity_model": {"$ref": "#/$defs/severity_model"},
+    "evidence_requirements": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "maxLength": 255}},
+    "output_shape": {"$ref": "#/$defs/output_shape"},
+    "clarification_policy": {"type": "string", "enum": ["block_run", "collect_then_block", "mark_unanswerable"]},
+    "cycle_cap": {"type": "integer", "minimum": 1, "maximum": 16},
+    "escalation_policy": {"type": "string", "enum": ["operator", "adjudication", "fail_run"]},
+    "allowed_effects": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:gigai:schema:common:1#/$defs/effect"}},
+    "evaluator_plan": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evaluator_plan_item"}},
+    "redaction_policy": {"$ref": "#/$defs/redaction_policy"}
+  },
+  "$defs": {
+    "contract_id": {"type": "string", "pattern": "^contract_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "criterion_id": {"type": "string", "pattern": "^criterion_[a-z][a-z0-9_-]*$", "maxLength": 120},
+    "evaluator_id": {"type": "string", "pattern": "^evaluator_[a-z][a-z0-9_-]*$", "maxLength": 120},
+    "severity": {"type": "string", "enum": ["info", "low", "medium", "high", "critical"]},
+    "criterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criterion_id", "description", "severity", "required_evidence", "citation_requirement", "evaluator_ids"],
+      "properties": {
+        "criterion_id": {"$ref": "#/$defs/criterion_id"},
+        "description": {"type": "string", "minLength": 1, "maxLength": 20000},
+        "severity": {"$ref": "#/$defs/severity"},
+        "required_evidence": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "maxLength": 255}},
+        "citation_requirement": {"type": "string", "enum": ["required", "preferred", "not_applicable"]},
+        "evaluator_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/evaluator_id"}}
+      }
+    },
+    "severity_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["levels", "ordering"],
+      "properties": {
+        "levels": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/severity"}},
+        "ordering": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/severity"}}
+      }
+    },
+    "output_shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["machine_media_type", "human_media_type", "required_sections"],
+      "properties": {
+        "machine_media_type": {"type": "string", "const": "application/json"},
+        "human_media_type": {"type": "string", "const": "text/markdown"},
+        "required_sections": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 120}}
+      }
+    },
+    "evaluator_plan_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evaluator_id", "evaluator_version", "stage"],
+      "properties": {
+        "evaluator_id": {"$ref": "#/$defs/evaluator_id"},
+        "evaluator_version": {"type": "string", "minLength": 1, "maxLength": 120},
+        "stage": {"type": "string", "enum": ["schema", "deterministic", "model"]}
+      }
+    },
+    "redaction_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "policy_version"],
+      "properties": {
+        "mode": {"type": "string", "enum": ["local_only", "explicit_projection"]},
+        "policy_version": {"type": "string", "minLength": 1, "maxLength": 80},
+        "detector_version": {"type": ["string", "null"], "maxLength": 80}
+      }
+    }
+  }
+}

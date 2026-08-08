@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "corpus_id": "g15-deterministic-review-substrate-1",
+  "domains": ["article", "repository_snapshot", "csv"],
+  "executed_cases": [
+    "bundle_exact_bytes",
+    "contract_deterministic_only",
+    "finding_real_citation",
+    "duplicate_finding_disagreement",
+    "feedback_decision_distinction",
+    "trace_contiguous_sequence",
+    "report_redaction_and_replay"
+  ],
+  "materialized_for_g16": ["partial_address", "cycle_limit"],
+  "negative_cases": [
+    "missing_reference_bytes",
+    "symlinked_reference_bytes",
+    "stale_reference_size",
+    "reference_digest_mismatch",
+    "evidence_digest_mismatch",
+    "unsupported_model_evaluator",
+    "unknown_evaluator_id",
+    "noncontiguous_trace",
+    "invalid_finding_transition"
+  ],
+  "provider_access": "forbidden",
+  "target_effects": "forbidden",
+  "credential_access": "forbidden"
+}
