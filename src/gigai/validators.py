@@ -24,6 +24,7 @@ from .canonical import (
 
 
 SCHEMA_NAMES = (
+    "addressed-artifact.schema.json",
     "adjudication.schema.json",
     "active-gig-version.schema.json",
     "common.schema.json",
@@ -38,6 +39,7 @@ SCHEMA_NAMES = (
     "run-brief-frontmatter.schema.json",
     "run-details.schema.json",
     "run-manifest.schema.json",
+    "review-loop.schema.json",
     "trace.schema.json",
 )
 _WRITING_EFFECTS = frozenset({"write_target", "write_workpad", "external_write"})

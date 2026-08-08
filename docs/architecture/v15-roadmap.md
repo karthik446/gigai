@@ -247,8 +247,9 @@ The initial provider path is intentionally narrow:
 
 - OpenAI API and OpenRouter API are the first external adapters;
 - local deterministic fixtures remain the offline baseline;
-- Codex CLI, Claude CLI, Anthropic API, and additional local models require
-  separate adapter evidence before compatibility claims;
+- Codex CLI, Claude CLI, Anthropic API, and additional local models remain
+  investigation targets until the G18 prerequisite spikes establish separate
+  adapter evidence;
 - model-to-model handoff is a declared Goal edge with explicit input/output
   artifacts, not an implicit provider fallback;
 - automatic fallback, background network activity, and unbounded retries remain
@@ -316,6 +317,8 @@ is proposed.
 The following phases refine the unfinished V14 work without changing the
 completed V14 contracts. Goal documents will be created only after each
 candidate has a settled outcome, scope, acceptance evidence, and stop boundary.
+The graph also names prerequisite research spikes explicitly; an `S18-*` node
+is not an implementation Goal and does not advertise a supported adapter.
 
 V14 Phase 2, deliberative `create`, remains a required product capability. V15
 does not skip it or replace it with a Run. The review contract, reference bundle,
@@ -327,20 +330,30 @@ define the evidence needed to turn that design into user-facing creation work.
 ```text
 G13 -> G14 -> G15 -> G16
            G15 -> G17
-           G16 + G17 -> G18
+           G16 + G17 -> S18-01
+           G16 + G17 -> S18-02
+           G16 + G17 -> S18-03
+           G16 + G17 -> S18-04
+           G16 + G17 -> S18-05
+           S18-01 + S18-02 + S18-03 + S18-04 + S18-05 -> G18
            G16 + G18 -> G19 -> G20 -> G21
 ```
 
 The graph is intentionally provisional. The arrows express planning
 dependencies, not live status fields or authorization to begin.
 
-| Candidate | Planning outcome | Depends on |
+| Node | Planning outcome | Depends on |
 |---|---|---|
 | G14 | Sequential Goal Graph scheduler | G13 |
 | G15 | Reference bundles and evaluator substrate | G14 |
 | G16 | First Review Loop Gig | G15 |
 | G17 | Proposal-time capability inspection and installation review | G15 |
-| G18 | Provider comparison and model handoff | G16, G17 |
+| S18-01 | Common provider-port and evidence contract spike | G16, G17 |
+| S18-02 | Codex CLI and Claude CLI adapter feasibility spike | G16, G17 |
+| S18-03 | Anthropic API and local-model adapter feasibility spike | G16, G17 |
+| S18-04 | Handoff, comparison, cancellation, and unavailable-provider spike | G16, G17 |
+| S18-05 | Provider-input redaction, credential, and network-boundary spike | G16, G17 |
+| G18 | Provider comparison and model handoff implementation | S18-01, S18-02, S18-03, S18-04, S18-05 |
 | G19 | Approved target mutation | G16, G18 |
 | G20 | Local `improve` and evaluator learning | G19 |
 | G21 | Recurring and comparative Gigs | G20 |
@@ -386,7 +399,7 @@ Exit evidence: each seeded challenge is found or marked unanswerable, accepted
 findings are individually closed, partial address fails, cycle limits stop the
 loop, and the complete evidence bundle is inspectable offline.
 
-### Phase 3C — Capability proposals and safe tools
+### Phase 3C — Capability proposals, provider design, and safe tools
 
 #### G17 — Proposal-time capability inspection and installation review
 
@@ -400,12 +413,78 @@ Exit evidence: installed, unavailable, incompatible, credential-missing, and
 security-rejected fixtures; no proposal-time side effect; and a per-Gig tool
 provenance record.
 
+#### G18 prerequisite spike tranche
+
+These are explicit research and contract-design spikes, not implementation
+Goals and not compatibility claims. They may use disposable provider fixtures,
+fake CLIs, and local recordings, but must not add runtime provider behavior to
+GigAI. Each spike produces a checked-in decision record, a minimal executable
+probe or fixture where useful, and a recommendation that G18 can adopt or
+reject. G18 cannot begin until all five have an accepted outcome.
+
+##### S18-01 — Common provider-port and evidence contract
+
+Map the existing transport-neutral model port onto OpenAI API, OpenRouter API,
+Codex CLI, Claude CLI, Anthropic API, and a representative local-model
+runtime. Define the smallest common request/response, model identity,
+streaming, finish state, error, cancellation, usage, and cost-status shape.
+Identify provider-specific fields that must remain in a typed extension rather
+than being discarded. Decide which artifacts a provider Goal must seal for
+replay and which values are intentionally variable.
+
+##### S18-02 — Codex CLI and Claude CLI adapter feasibility
+
+Probe process discovery, argument construction, stdin/stdout/stderr capture,
+structured-output support, exit-code mapping, timeout and cancellation
+behavior, working-directory isolation, and credential inheritance. Test both
+available and missing executables with fake CLIs; no real user repository may
+be mutated. Decide whether these adapters can share one process boundary and
+whether each deserves a separate implementation Goal after G18.
+
+##### S18-03 — Anthropic API and local-model adapter feasibility
+
+Probe Anthropic content blocks, tool/model identifiers, streaming and usage
+fields, rate/error semantics, and cancellation. Separately probe one local
+model runtime for installation/discovery, offline operation, resource limits,
+model identity, and reproducible request/response capture. Do not assume that
+local models are interchangeable with hosted APIs; recommend a supported
+minimum or explicitly defer local-model compatibility.
+
+##### S18-04 — Handoff, comparison, cancellation, and unavailable-provider
+spike
+
+Design the explicit Goal-edge handoff between independent reviewers/solvers.
+Define input and output artifact parentage, bounded handoff count, disagreement
+preservation, adjudication inputs, cancellation, provider-unavailable failure,
+and normalized usage/cost evidence. Prove that no automatic fallback,
+background activity, or unbounded retry is hidden in the design. Recommend
+whether comparison and handoff remain one G18 implementation or split later.
+
+##### S18-05 — Provider-input redaction, credential, and network boundary
+spike
+
+Determine the pre-invocation boundary for reference selection, secret and PII
+redaction, credential lookup, network permission, and audit evidence. Test that
+unselected references and redaction failures never reach a provider, that
+credentials are represented by references rather than persisted values, and
+that provider calls are impossible in offline fixtures. Distinguish what can
+be enforced deterministically from what requires an explicit user review or a
+later privacy-specific Goal.
+
+Spike tranche exit evidence: five decision records, fixture/probe results for
+each named adapter family, a common-port compatibility matrix, an explicit
+G18-versus-follow-up-goal recommendation, and a documented list of rejected
+assumptions. No provider is called by the proposal path, and no adapter is
+advertised as supported solely because a spike succeeded.
+
 #### G18 — Provider comparison and model handoff
 
-Run independent reviewer or solver Goals through the existing model port using
-OpenAI and OpenRouter first, then add separately evidenced CLI and Anthropic
-adapters. Model-to-model handoff is explicit, bounded, redacted, and
-replayable. No automatic provider fallback or hidden background activity.
+After the prerequisite spikes, run independent reviewer or solver Goals through
+the existing model port using the explicitly supported adapter set. Start with
+OpenAI and OpenRouter; add Codex CLI, Claude CLI, Anthropic, or a local model
+only when its spike outcome and implementation evidence support it. Model-to-
+model handoff is explicit, bounded, redacted, and replayable. No automatic
+provider fallback or hidden background activity.
 
 Exit evidence: one review case with independent provider passes, preserved
 disagreement, normalized usage/cost status, cancellation, redaction, and a
@@ -496,6 +575,8 @@ during implementation:
    contract justified?
 8. Which fields are intentionally variable between replayed Runs, especially
    timestamps, usage, cost, and provider responses?
+9. Which provider families graduate from the S18 spikes into G18, and which
+   require separate adapter Goals with their own contract and evidence?
 
 ## 13. Stop boundary
 

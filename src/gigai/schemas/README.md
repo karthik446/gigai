@@ -14,7 +14,8 @@ and enums.
 The original eight Phase 0/1 resources remain byte-identical. The additive G15
 resources define review bundles, contracts, findings, feedback, adjudications,
 traces, and machine reports; their hashes are pinned separately in
-`SHA256SUMS` and verified as a fifteen-resource set.
+`SHA256SUMS` and verified as a seventeen-resource set. The two additive G16
+resources are `review-loop.schema.json` and `addressed-artifact.schema.json`.
 
 ## Production identity API
 

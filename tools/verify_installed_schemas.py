@@ -8,6 +8,7 @@ import json
 
 
 EXPECTED_SHA256 = {
+    "addressed-artifact.schema.json": "93a3a991de2fec812beb42c9b25760504ab5a6229bb13edbdda30998c141bc90",
     "adjudication.schema.json": "9b6d3f489dcff15b510e4c041be5bcef0afcd10d6e9d584a21ef79c9842f49fe",
     "active-gig-version.schema.json": "77a2f9df0928a8cfe60b496f63b981ab941268cdfc8c557902549f645e4a76f6",
     "common.schema.json": "825a15da8f61348cc16afe315c2aca0e3218c78c0bf0f93394f74fe78cb7b53a",
@@ -22,6 +23,7 @@ EXPECTED_SHA256 = {
     "run-brief-frontmatter.schema.json": "481118d7c49f97d00c389f8f4d4216cc1baf6ff96e8c16c3343006ad019369e3",
     "run-details.schema.json": "c2388d917e08cfcc0860ecd3a20b389be4f434aadde6b21ffa18ee4d6457111f",
     "run-manifest.schema.json": "a14126ac4943e71980371eb215fbc191434cfb0fb2f2761259a0faabb36af24f",
+    "review-loop.schema.json": "e7fc84e0bcca32a97e3a0aca1367af512384ef40b747a2aa13558baf20fd2a2b",
     "trace.schema.json": "d1b5a8970e26b753fbbb8275cd30321a3fe0bc2bb56c4443c6d6306b42ca29ef",
 }
 
@@ -51,7 +53,7 @@ def main() -> int:
                 f"expected {expected_digest}, got {actual_digest}"
             )
 
-    print("verified 15 installed GigAI schemas")
+    print("verified 17 installed GigAI schemas")
     return 0
 
 

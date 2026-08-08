@@ -14,6 +14,7 @@ from ..graph_validation import GoalGraphError, validate_goal_graph
 
 
 EXPECTED_SCHEMA_NAMES = {
+    "addressed-artifact.schema.json",
     "adjudication.schema.json",
     "active-gig-version.schema.json",
     "common.schema.json",
@@ -28,6 +29,7 @@ EXPECTED_SCHEMA_NAMES = {
     "run-brief-frontmatter.schema.json",
     "run-details.schema.json",
     "run-manifest.schema.json",
+    "review-loop.schema.json",
     "trace.schema.json",
 }
 
@@ -531,6 +533,51 @@ def valid_instances() -> dict[str, dict[str, Any]]:
             "size_bytes": 123,
         },
     }
+    loop = {
+        "schema_version": "1.0",
+        "loop_id": "loop_99999999-9999-4999-8999-999999999999",
+        "loop_version": 1,
+        "run_id": RUN_ID,
+        "gig_id": GIG_ID,
+        "bundle_id": bundle_id,
+        "contract_id": contract_id,
+        "state": "complete",
+        "cycle_cap": 1,
+        "cycle_count": 0,
+        "stage_sequence": [
+            {"state": "reviewing", "sequence": 1},
+            {"state": "verifying", "sequence": 2},
+            {"state": "feedback_pending", "sequence": 3},
+            {"state": "addressing", "sequence": 4},
+            {"state": "closing", "sequence": 5},
+            {"state": "complete", "sequence": 6},
+        ],
+        "finding_ids": [finding_id],
+        "report_ids": [report["report_id"]],
+        "feedback_ids": [feedback["feedback_id"]],
+        "adjudication_ids": [adjudication["adjudication_id"]],
+        "trace_ids": [trace_id],
+        "addressed_artifact_ids": ["addressed_99999999-9999-4999-8999-999999999999"],
+        "terminal_decision": {"state": "complete", "reason": "all accepted Findings resolved", "next_action": None},
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    addressed = {
+        "schema_version": "1.0",
+        "artifact_id": "addressed_99999999-9999-4999-8999-999999999999",
+        "artifact_version": 1,
+        "loop_id": loop["loop_id"],
+        "bundle_id": bundle_id,
+        "contract_id": contract_id,
+        "report_id": report["report_id"],
+        "source_artifact": artifact("references/source.txt", media_type="text/plain"),
+        "content_sha256": ZERO_DIGEST,
+        "media_type": "text/plain",
+        "size_bytes": 123,
+        "accepted_finding_ids": [finding_id],
+        "status": "addressed",
+        "created_at": NOW,
+    }
     return {
         "urn:gigai:schema:gig-proposal:1": proposal,
         "urn:gigai:schema:active-gig-version:1": active,
@@ -546,6 +593,8 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "urn:gigai:schema:adjudication:1": adjudication,
         "urn:gigai:schema:trace:1": trace,
         "urn:gigai:schema:report:1": report,
+        "urn:gigai:schema:review-loop:1": loop,
+        "urn:gigai:schema:addressed-artifact:1": addressed,
     }
 
 
@@ -586,7 +635,7 @@ class SerializedContractTests(unittest.TestCase):
         )
 
     def test_all_schema_documents_are_valid_draft_2020_12(self) -> None:
-        self.assertEqual(len(self.schemas), 15)
+        self.assertEqual(len(self.schemas), 17)
         for schema_id, schema in self.schemas.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)

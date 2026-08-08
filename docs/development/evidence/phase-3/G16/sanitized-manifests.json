@@ -1,0 +1,7 @@
+{
+  "schema_version": "1.0",
+  "goal": "G16",
+  "target": {"before": "captured by test_loop_preserves_target_bytes", "after": "byte-identical", "absolute_paths": "omitted"},
+  "workpad": {"before": "sealed G14 Run plus approved proposal", "after": "journaled G16 artifacts and stage handoffs", "absolute_paths": "omitted"},
+  "effects": {"target_write": false, "network": false, "credential_access": false, "subprocess": false, "tool_installation": false}
+}

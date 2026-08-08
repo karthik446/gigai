@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "goal": "G16",
+  "profiles": [
+    {"name": "research", "kind": "article", "source_bytes": "generated:g16:research", "seeded_defects": ["criterion_digest"]},
+    {"name": "climate", "kind": "article", "source_bytes": "generated:g16:climate", "seeded_defects": ["criterion_digest"]},
+    {"name": "pull-request", "kind": "pull_request_diff", "source_bytes": "generated:g16:pull-request", "seeded_defects": ["criterion_digest"]},
+    {"name": "repository", "kind": "repository_snapshot", "source_bytes": "generated:g16:repository", "seeded_defects": ["criterion_digest"]},
+    {"name": "spreadsheet", "kind": "csv", "source_bytes": "generated:g16:spreadsheet", "seeded_defects": ["criterion_digest"]}
+  ],
+  "normalization": {
+    "fixed": ["source bytes", "citation ordering", "defect IDs", "path and line normalization"],
+    "variable": ["run_id", "created_at", "updated_at", "journal commit IDs"]
+  }
+}

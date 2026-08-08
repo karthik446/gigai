@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:addressed-artifact:1",
+  "title": "GigAI Addressed Artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_id", "artifact_version", "loop_id", "bundle_id", "contract_id", "report_id", "source_artifact", "content_sha256", "media_type", "size_bytes", "accepted_finding_ids", "status", "created_at"],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "artifact_id": {"$ref": "#/$defs/artifact_id"},
+    "artifact_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "loop_id": {"$ref": "#/$defs/loop_id"},
+    "bundle_id": {"$ref": "#/$defs/bundle_id"},
+    "contract_id": {"$ref": "#/$defs/contract_id"},
+    "report_id": {"$ref": "#/$defs/report_id"},
+    "source_artifact": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "content_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
+    "size_bytes": {"$ref": "urn:gigai:schema:common:1#/$defs/safe_nonnegative_integer"},
+    "accepted_finding_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/finding_id"}},
+    "status": {"type": "string", "enum": ["addressed", "partial"]},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "artifact_id": {"type": "string", "pattern": "^addressed_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "loop_id": {"type": "string", "pattern": "^loop_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "bundle_id": {"type": "string", "pattern": "^bundle_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "contract_id": {"type": "string", "pattern": "^contract_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "report_id": {"type": "string", "pattern": "^report_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "finding_id": {"type": "string", "pattern": "^finding_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}
+  }
+}

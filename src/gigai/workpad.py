@@ -446,11 +446,17 @@ def _validate_workpad_repository(
                 "gig.md",
                 "goals",
                 "reviews",
+                "reports",
                 "decisions",
                 "manifests",
                 "scratch",
                 "state.sqlite",
                 "runs",
+                "addressed",
+                "feedback",
+                "findings",
+                "review",
+                "traces",
             }
         )
     if not {".git", ".gitignore"}.issubset(entries) or not entries <= allowed:
