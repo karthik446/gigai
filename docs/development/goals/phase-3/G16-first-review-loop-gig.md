@@ -32,13 +32,29 @@ produced it.
   additive schema resources:
   `review-loop.schema.json` for durable loop state and terminal decisions, and
   `addressed-artifact.schema.json` for the addressed output and its parentage.
-  The packaged inventory rises from fifteen to seventeen resources; all
-  existing fifteen hashes and vectors must remain unchanged.
+  The packaged inventory rises from fifteen to seventeen resources. The
+  authoritative pre-amendment digest is `src/gigai/schemas/SHA256SUMS`; copies
+  under build or wheel-verification directories are derived. All existing
+  fifteen hashes and vectors must remain unchanged.
 - Define the loop state machine explicitly. A loop advances through
   `reviewing`, `verifying`, `feedback_pending`, `addressing`, `closing`, and a
   terminal state of `complete`, `blocked`, or `unanswerable`. A clarification,
   unresolved disagreement, unavailable reference, failed address, or cycle
-  limit is terminally non-successful and cannot be reported as complete.
+  limit is terminally non-successful and cannot be reported as complete. Loop
+  state is a distinct dimension from G14 Goal status: stage Goals remain
+  `running` in the aggregate `active` set while their loop stage is
+  nonterminal; loop `verifying` does not use the Goal status named
+  `verifying`.
+- Record this transition table as part of the contract and evidence:
+
+  | Loop state | Allowed next state | Guard |
+  | --- | --- | --- |
+  | `reviewing` | `verifying` | Report and Trace validate with Bundle evidence |
+  | `verifying` | `feedback_pending` | deterministic verification completes |
+  | `feedback_pending` | `addressing` or `blocked` | accepted decisions plus required Adjudication, or clarification/unresolved disagreement |
+  | `addressing` | `closing` or `blocked` | one address pass succeeds, or partial/cycle-limited address fails |
+  | `closing` | `complete`, `blocked`, or `unanswerable` | all accepted Findings resolve; deferred/unresolved items block; only open/deferred items explicitly made unanswerable may produce `unanswerable` |
+  | terminal state | none | terminal records are immutable |
 - Materialize one approved fixture Gig whose Goal Graph is executed by G14's
   sequential scheduler. Each stage persists ordered Goal handoffs and the
   loop record references the sealed Run, Bundle, Contract, Reports, Findings,
@@ -58,9 +74,11 @@ produced it.
   It never writes the user target, invokes a provider, installs a tool, or
   runs an arbitrary subprocess.
 - Define closure verification. Every accepted Finding must be individually
-  `resolved` or explicitly `unanswerable`; rejected Findings remain rejected;
-  deferred Findings prevent successful closure. Closure revalidates Bundle and
-  Report digests, addressed-artifact parentage, and the final loop decision.
+  `resolved`; a finding that cannot be answered must transition from `open` or
+  `deferred` to `unanswerable` before it can affect terminalization. Rejected
+  Findings remain rejected; deferred Findings prevent successful closure.
+  Closure revalidates Bundle and Report digests, addressed-artifact parentage,
+  and the final loop decision.
 - Use `cycle_cap: 1` for the first Gig: one address pass is allowed. A case
   requiring a second pass terminalizes as `blocked` with a durable cycle-limit
   finding and no false success report.
@@ -109,7 +127,10 @@ produced it.
 4. Each of the five domain profiles produces a schema-valid Report and Trace
    with real Bundle evidence. Every seeded deterministic defect is found or
    explicitly marked `unanswerable`; an aggregate score without per-Finding
-   evidence cannot pass.
+   evidence cannot pass. The corpus manifest fixes source bytes, citation
+   ordering, defect IDs, and path/line normalization per profile; only the
+   declared Run ID, timestamps, and other listed variable fields may differ
+   between replays.
 5. Feedback is recorded verbatim with actor, decision, and Finding IDs.
    `clarification_requested` terminalizes as blocked with a durable next action;
    rejected, deferred, and accepted decisions are not conflated.
@@ -119,8 +140,13 @@ produced it.
    IDs, and parent loop identity.
 7. Closure independently replays the source Bundle and Report, verifies the
    addressed artifact, and checks every accepted Finding. Complete is emitted
-   only when all accepted Findings are resolved; partial address, deferred
-   Findings, unresolved disagreement, or missing evidence cannot complete.
+   only when all accepted Findings are resolved; an accepted Finding may not
+   transition directly to `unanswerable`. Findings that cannot be answered
+   must be marked `unanswerable` while `open` or `deferred`, before acceptance;
+   if no accepted Finding remains and all unresolved items are explicitly
+   unanswerable, the loop may terminalize as `unanswerable`. Partial address,
+   deferred Findings, unresolved disagreement, or missing evidence cannot
+   complete.
 8. The cycle-limit fixture consumes the one allowed address pass and then
    terminalizes as blocked without a second address artifact or a successful
    terminal decision. Re-running the same deterministic fixture is stable apart
@@ -135,8 +161,11 @@ produced it.
     assertion and a deterministic finding code.
 11. An adversarial fixture attempts network access, credential access, target
     writes, Graph mutation, undeclared subprocess execution, and tool
-    installation from the evaluator/addresser path. Every attempt is refused
-    or recorded as blocked, with no effect outside the workpad.
+    installation from the evaluator/addresser path. The existing offline
+    process harness enforces network denial, credential-shaped environment
+    denial, and target/workpad manifests; static import-graph checks enforce
+    the no-subprocess/no-installer boundary. Every attempt is refused or
+    recorded as blocked, with no effect outside the workpad.
 12. A fresh installed wheel replays all five profiles and the cycle-limit case
     from local bytes without a source checkout, credentials, provider, network,
     or target repository. The supported matrix, seventeen-resource verifier,
