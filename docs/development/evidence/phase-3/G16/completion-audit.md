@@ -14,8 +14,9 @@ closing, complete, blocked, and unanswerable states. Clarification requests and
 cycle exhaustion block before success. Target, provider, network, credential,
 tool, and subprocess effects are outside the implementation boundary.
 
-Local evidence: 337 tests pass with 40 subtests. The focused G16 suite passes;
-the fresh wheel contains both new schemas and `tools/verify_installed_g16.py`
-passes all five profiles plus the cycle-limit case. The installed schema
-verifier passes with 17 resources. Hosted CI confirmation remains required for
-the final audit.
+Local evidence: 342 tests pass with 40 subtests. The focused G16 suite passes
+22 tests; its mutation harness catches both the loop-transition and sealed-Run
+precondition mutations. The fresh wheel contains both new schemas and
+`tools/verify_installed_g16.py` passes all five profiles plus the cycle-limit
+case. The installed schema verifier passes with 17 resources. Hosted CI
+confirmation remains required for the final audit.

@@ -10,7 +10,12 @@ import pytest
 
 from gigai.canonical import canonical_json_bytes, parse_json_bytes
 from gigai.lifecycle import approve_offline, create_offline
-from gigai.review import validate_review_loop, validate_review_loop_artifacts
+from gigai.review import (
+    validate_finding,
+    validate_review_bundle,
+    validate_review_loop,
+    validate_review_loop_artifacts,
+)
 from gigai.review_loop import ReviewLoopError, run_review_loop
 from gigai.run import launch_run
 from gigai.setup import build_config, run_setup
@@ -79,6 +84,16 @@ def test_all_profiles_materialize_replayable_complete_loop(tmp_path: Path, profi
     assert loop["stage_sequence"][-1]["state"] == "complete"
     assert validate_review_loop((resolved.path / "manifests/review-loop.json").read_bytes()).valid
     assert result.addressed_artifact_id is not None
+    assert (
+        resolved.path
+        / "findings"
+        / result.finding_ids[0]
+        / "v3-resolved.json"
+    ).is_file()
+    report = parse_json_bytes(
+        (resolved.path / "reports" / f"{result.report_id}.json").read_bytes()
+    )
+    assert report["status"] == "complete"
     assert len(result.journal_entries) == 10
 
 
@@ -90,6 +105,10 @@ def test_cycle_limit_blocks_without_successful_address(tmp_path: Path) -> None:
     loop = parse_json_bytes((resolved.path / "manifests/review-loop.json").read_bytes())
     assert result.state == loop["state"] == "blocked"
     assert loop["terminal_decision"]["reason"] == "cycle limit exhausted"
+    report = parse_json_bytes(
+        (resolved.path / "reports" / f"{result.report_id}.json").read_bytes()
+    )
+    assert report["status"] == "blocked"
     assert not list((resolved.path / "addressed").glob("*.json"))
 
 
@@ -112,6 +131,29 @@ def test_unresolved_disagreement_blocks_before_addressing(tmp_path: Path) -> Non
     loop = parse_json_bytes((resolved.path / "manifests/review-loop.json").read_bytes())
     assert result.state == loop["state"] == "blocked"
     assert loop["terminal_decision"]["reason"] == "unresolved evaluator disagreement"
+    assert len(loop["adjudication_ids"]) == 1
+    adjudication = resolved.path / "review" / "adjudications" / f"{loop['adjudication_ids'][0]}.json"
+    assert adjudication.is_file()
+
+
+def test_deferred_feedback_is_distinct_and_blocks_addressing(tmp_path: Path) -> None:
+    home, target, gig_id = _fixture(tmp_path)
+    resolved = _workpad(home, target, gig_id)
+    run_id = _sealed_run(home, target, gig_id, 213)
+    result = run_review_loop(
+        workpad=resolved.path,
+        project_id=resolved.project_id,
+        gig_id=gig_id,
+        run_id=run_id,
+        feedback_decision="deferred",
+    )
+    assert result.state == "blocked"
+    assert (resolved.path / "findings" / result.finding_ids[0] / "v2-deferred.json").is_file()
+    feedback = parse_json_bytes(
+        next((resolved.path / "feedback").glob("*.json")).read_bytes()
+    )
+    assert feedback["decision"] == "deferred"
+    assert not list((resolved.path / "addressed").glob("*.json"))
 
 
 def test_partial_address_blocks_closure(tmp_path: Path) -> None:
@@ -129,10 +171,17 @@ def test_loop_preserves_target_bytes(tmp_path: Path) -> None:
     home, target, gig_id = _fixture(tmp_path)
     resolved = _workpad(home, target, gig_id)
     run_id = _sealed_run(home, target, gig_id, 215)
+    run_details = parse_json_bytes(
+        (resolved.path / "runs" / run_id / "run-details.json").read_bytes()
+    )
+    graph_path = resolved.path / "manifests" / "goal-graph.json"
+    graph_before = graph_path.read_bytes()
+    assert run_details["goal_graph_sha256"]
     before = {path.relative_to(target).as_posix(): path.read_bytes() for path in target.rglob("*") if path.is_file() and ".git" not in path.parts}
     run_review_loop(workpad=resolved.path, project_id=resolved.project_id, gig_id=gig_id, run_id=run_id)
     after = {path.relative_to(target).as_posix(): path.read_bytes() for path in target.rglob("*") if path.is_file() and ".git" not in path.parts}
     assert before == after
+    assert graph_path.read_bytes() == graph_before
 
 
 def test_addressed_artifact_parent_mismatch_fails_closed(tmp_path: Path) -> None:
@@ -147,6 +196,80 @@ def test_addressed_artifact_parent_mismatch_fails_closed(tmp_path: Path) -> None
     report = validate_review_loop_artifacts(resolved.path, (resolved.path / "manifests/review-loop.json").read_bytes())
     assert not report.valid
     assert any(item.code == "addressed_parent_mismatch" for item in report.findings)
+
+
+def test_report_tampering_fails_before_a_repeated_loop_starts(tmp_path: Path) -> None:
+    home, target, gig_id = _fixture(tmp_path)
+    resolved = _workpad(home, target, gig_id)
+    run_id = _sealed_run(home, target, gig_id, 217)
+    result = run_review_loop(
+        workpad=resolved.path,
+        project_id=resolved.project_id,
+        gig_id=gig_id,
+        run_id=run_id,
+    )
+    report_path = resolved.path / "reports" / f"{result.report_id}.json"
+    report = parse_json_bytes(report_path.read_bytes())
+    report["status"] = "blocked"
+    report_path.write_bytes(canonical_json_bytes(report))
+    with pytest.raises(ReviewLoopError):
+        run_review_loop(
+            workpad=resolved.path,
+            project_id=resolved.project_id,
+            gig_id=gig_id,
+            run_id=run_id,
+        )
+
+
+def test_addressed_artifact_tampering_fails_before_a_repeated_loop_starts(
+    tmp_path: Path,
+) -> None:
+    home, target, gig_id = _fixture(tmp_path)
+    resolved = _workpad(home, target, gig_id)
+    run_id = _sealed_run(home, target, gig_id, 219)
+    result = run_review_loop(
+        workpad=resolved.path,
+        project_id=resolved.project_id,
+        gig_id=gig_id,
+        run_id=run_id,
+    )
+    artifact_path = resolved.path / "addressed" / f"{result.addressed_artifact_id}.json"
+    artifact = parse_json_bytes(artifact_path.read_bytes())
+    artifact["status"] = "partial"
+    artifact_path.write_bytes(canonical_json_bytes(artifact))
+    with pytest.raises(ReviewLoopError):
+        run_review_loop(
+            workpad=resolved.path,
+            project_id=resolved.project_id,
+            gig_id=gig_id,
+            run_id=run_id,
+        )
+
+
+def test_missing_reference_and_invented_citation_fail_closed(tmp_path: Path) -> None:
+    home, target, gig_id = _fixture(tmp_path)
+    resolved = _workpad(home, target, gig_id)
+    run_id = _sealed_run(home, target, gig_id, 218)
+    result = run_review_loop(
+        workpad=resolved.path,
+        project_id=resolved.project_id,
+        gig_id=gig_id,
+        run_id=run_id,
+    )
+    bundle_path = resolved.path / "manifests" / "review-bundles" / "research.json"
+    bundle = parse_json_bytes(bundle_path.read_bytes())
+    bundle["references"][0]["content_sha256"] = "sha256:" + "0" * 64
+    bundle_path.write_bytes(canonical_json_bytes(bundle))
+    report = validate_review_bundle(resolved.path, bundle_path.read_bytes())
+    assert not report.valid
+    assert any(item.code == "reference_digest_mismatch" for item in report.findings)
+
+    finding_path = resolved.path / "findings" / result.finding_ids[0] / "v2-accepted.json"
+    finding = parse_json_bytes(finding_path.read_bytes())
+    finding["evidence"][0]["reference_id"] = "ref_99999999-9999-4999-8999-999999999999"
+    finding_report = validate_finding(canonical_json_bytes(finding), bundle)
+    assert not finding_report.valid
+    assert any(item.code == "unknown_reference" for item in finding_report.findings)
 
 
 def test_divergent_bundle_fails_closed_before_loop(tmp_path: Path) -> None:
@@ -214,3 +337,8 @@ def test_review_loop_rejects_skipped_state_transition() -> None:
     report = validate_review_loop(canonical_json_bytes(payload))
     assert not report.valid
     assert any(item.code == "invalid_loop_transition" for item in report.findings)
+
+
+def test_malformed_loop_state_fails_closed() -> None:
+    report = validate_review_loop(b"{not-json")
+    assert not report.valid

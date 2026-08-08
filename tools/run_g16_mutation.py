@@ -24,7 +24,12 @@ MUTANTS = (
         run_details = parse_json_bytes(run_details_path.read_bytes())
     except Exception as exc:
         raise ReviewLoopError(\"G16 RunDetails are malformed\") from exc
-    if not isinstance(run_details, Mapping) or run_details.get(\"status\") != \"succeeded\":
+    if (
+        not isinstance(run_details, Mapping)
+        or run_details.get(\"status\") != \"succeeded\"
+        or run_details.get(\"run_id\") != run_id
+        or run_details.get(\"gig_id\") != gig_id
+    ):
         raise ReviewLoopError(\"G16 requires a successfully sealed deterministic Run\")""",
         "    run_details = {\"status\": \"succeeded\"}",
         "tests/test_g16_review_loop.py::test_loop_requires_a_sealed_run",

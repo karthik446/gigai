@@ -614,6 +614,68 @@ def validate_addressed_artifact(artifact_bytes: bytes) -> ValidationReport:
     return _schema_report("addressed-artifact.schema.json", artifact_bytes)
 
 
+def validate_report_artifact(root: Path, report_bytes: bytes) -> ValidationReport:
+    """Validate a Report envelope, its self-digest, and human artifact bytes."""
+
+    report = _schema_report("report.schema.json", report_bytes)
+    try:
+        payload = parse_json_bytes(report_bytes)
+    except CanonicalizationError:
+        return report
+    if not isinstance(payload, Mapping):
+        return report
+    findings: list[ValidationFinding] = []
+    if report_bytes != canonical_json_bytes(payload):
+        findings.append(
+            _path_error(
+                "$",
+                "noncanonical_report",
+                "Report must be canonical JSON",
+            )
+        )
+    expected_machine = payload.get("machine_report_sha256")
+    without_digest = dict(payload)
+    without_digest.pop("machine_report_sha256", None)
+    if expected_machine != digest_imported_bytes(canonical_json_bytes(without_digest)):
+        findings.append(
+            _path_error(
+                "machine_report_sha256",
+                "machine_report_digest_mismatch",
+                "Report machine digest does not match its canonical payload",
+            )
+        )
+    human = payload.get("human_report")
+    if isinstance(human, Mapping):
+        path = _safe_path(root, human.get("path"))
+        if path is None or path.is_symlink() or not path.is_file():
+            findings.append(
+                _path_error(
+                    "human_report/path",
+                    "missing_human_report",
+                    "Report human artifact is missing or unsafe",
+                )
+            )
+        else:
+            content = path.read_bytes()
+            if digest_imported_bytes(content) != human.get("content_sha256"):
+                findings.append(
+                    _path_error(
+                        "human_report/content_sha256",
+                        "human_report_digest_mismatch",
+                        "Report human artifact digest does not match",
+                    )
+                )
+            if len(content) != human.get("size_bytes"):
+                findings.append(
+                    _path_error(
+                        "human_report/size_bytes",
+                        "human_report_size_mismatch",
+                        "Report human artifact size does not match",
+                    )
+                )
+    return _merge_findings(report, ValidationReport(tuple(findings)))
+
+
 def validate_review_loop_artifacts(root: Path, loop_bytes: bytes) -> ValidationReport:
     """Validate loop state and the parentage of its addressed artifacts."""
 
@@ -723,6 +785,7 @@ __all__ = [
     "render_report",
     "validate_adjudication",
     "validate_addressed_artifact",
+    "validate_report_artifact",
     "validate_review_loop_artifacts",
     "validate_review_loop",
     "validate_review_bundle",
