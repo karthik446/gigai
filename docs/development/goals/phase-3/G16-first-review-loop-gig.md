@@ -1,6 +1,6 @@
 # G16 — First Review Loop Gig
 
-- Status: Proposed for review
+- Status: Approved / Ready
 - Depends on: G15 (complete and merged); consumes G14's sequential scheduler
 - Consumes: G15 Review Bundle, Review Contract, Finding, Feedback, Adjudication,
   Trace, and Report artifacts
@@ -178,6 +178,11 @@ produced it.
 
 ## Verification and evidence
 
+- Pre-implementation criterion-1 baseline: at commit `c670e3a`, the
+  authoritative `src/gigai/schemas/SHA256SUMS` contains exactly fifteen
+  resources; `tools/verify_installed_schemas.py` passes; and the canonical
+  contract vectors pass (7 tests plus 7 subtests). This baseline verifies what
+  must be preserved; it is not completion of the seventeen-resource amendment.
 - Schema tests prove the two-resource amendment, exact inventory, preserved
   fifteen hashes, and valid positive/negative loop and addressed-artifact
   instances.
