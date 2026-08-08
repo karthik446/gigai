@@ -183,6 +183,12 @@ produced it.
   resources; `tools/verify_installed_schemas.py` passes; and the canonical
   contract vectors pass (7 tests plus 7 subtests). This baseline verifies what
   must be preserved; it is not completion of the seventeen-resource amendment.
+- Criterion 1 verification: amendment commit `0c4893b` contains exactly the
+  two additive resources (`review-loop.schema.json` and
+  `addressed-artifact.schema.json`), raising the inventory to seventeen;
+  `tools/verify_installed_schemas.py` passes; the seven canonical vector tests
+  and seven subtests pass; and a direct comparison with the `c670e3a` baseline
+  confirms all fifteen prior SHA256SUMS entries are byte-identical.
 - Schema tests prove the two-resource amendment, exact inventory, preserved
   fifteen hashes, and valid positive/negative loop and addressed-artifact
   instances.
