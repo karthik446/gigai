@@ -457,6 +457,7 @@ def _validate_workpad_repository(
                 "findings",
                 "review",
                 "traces",
+                "tools",
             }
         )
     if not {".git", ".gitignore"}.issubset(entries) or not entries <= allowed:
@@ -465,6 +466,9 @@ def _validate_workpad_repository(
         raise WorkpadConflictError(
             "workpad contains semantic or unexpected top-level state" + detail
         )
+    tools = root / "tools"
+    if tools.exists() and (tools.is_symlink() or not tools.is_dir()):
+        raise WorkpadConflictError("workpad tools root is redirected or invalid")
     handoffs = root / "handoffs"
     if handoffs.exists() and (handoffs.is_symlink() or not handoffs.is_dir()):
         raise WorkpadConflictError("workpad handoff directory is redirected or invalid")

@@ -1,0 +1,9 @@
+{
+  "records": [
+    {"outcome": "refused", "tool_root_changed": false, "reason": "operator_refused"},
+    {"outcome": "failed", "tool_root_changed": false, "reason": "injected_before_rename"},
+    {"outcome": "rolled_back", "tool_root_changed": false, "before_restored": true, "reason": "injected_after_rename"},
+    {"outcome": "already_available", "tool_root_changed": false, "reason": "exact_bytes_already_present"}
+  ],
+  "record_identity": "each installation attempt uses a distinct capinstall_* installation_id"
+}

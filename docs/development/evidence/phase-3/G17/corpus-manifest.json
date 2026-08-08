@@ -1,0 +1,26 @@
+{
+  "goal": "G17",
+  "profiles": [
+    "available",
+    "missing",
+    "installable",
+    "incompatible",
+    "credential_missing",
+    "security_rejected"
+  ],
+  "installation_outcomes": [
+    "installed",
+    "already_available",
+    "refused",
+    "failed",
+    "rolled_back"
+  ],
+  "source": "tests/test_g17_capabilities.py",
+  "source_kind": "checked-in-local-artifact",
+  "variable_fields": [],
+  "redaction": {
+    "absolute_paths": "excluded",
+    "credential_values": "never_read",
+    "network": "not_used"
+  }
+}
