@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-import hashlib
 import html
 import http.server
 import json
@@ -14,7 +13,7 @@ import threading
 from typing import Callable, Mapping
 import uuid
 
-from .canonical import canonical_json_bytes, digest_imported_bytes
+from .canonical import canonical_json_bytes, canonical_json_digest, digest_imported_bytes
 
 
 STATES = frozenset(
@@ -35,7 +34,7 @@ def _now() -> str:
 
 
 def _sha256(value: object) -> str:
-    return "sha256:" + hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+    return canonical_json_digest(value)
 
 
 def _id(value: str, prefix: str) -> str:
