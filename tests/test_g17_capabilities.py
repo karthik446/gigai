@@ -71,7 +71,7 @@ def _stage_source(root: Path, payload: bytes = b"fixture bytes\n") -> str:
 
 
 def test_g17_additive_schema_inventory_and_baseline_hashes() -> None:
-    assert len(SCHEMA_NAMES) == 21
+    assert len(SCHEMA_NAMES) == 22
     root = Path(__file__).parents[1] / "src/gigai/schemas"
     manifest = root / "capability-manifest.schema.json"
     installation = root / "capability-installation.schema.json"

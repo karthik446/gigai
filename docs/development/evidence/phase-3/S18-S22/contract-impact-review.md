@@ -188,3 +188,14 @@ amendment is accepted and its installed verifier/canonical evidence passes may
 the G18 implementation Goal begin. Its acceptance criteria must then cite this
 record, S16-EVAL's fixed bar, the S18-05 boundary attestation, and S18-04's
 no-fallback/disagreement rules.
+
+### Follow-up state for G22
+
+The interview amendment was intentionally deferred by this G18 review. That
+follow-up is now resolved separately in
+`S22-01/proposal-interview-contract-amendment.md`: the additive
+`proposal-interview.schema.json` resource is accepted as resource 22, all
+prior 21 resources and hashes are preserved, and the installed verifier reports
+22 resources. This follow-up does not retroactively change the G18 amendment or
+authorize G22 runtime work by itself; G22 still requires its own accepted goal
+and completion evidence.

@@ -1,9 +1,11 @@
 # G22 — Deliberative Create and User-Facing Proposal Interview
 
 - Status: Proposed for review
-- Depends on: accepted S22-01 decision record and completed G18 provider
-  comparison/model-handoff boundary; consumes G15 workpad/reference authority,
-  G16 review-loop contracts, and G17 proposal-time capability decisions
+- Depends on: accepted S22-01 decision record, accepted additive
+  `proposal-interview.schema.json` amendment, and completed G18
+  provider comparison/model-handoff boundary; consumes G15 workpad/reference
+  authority, G16 review-loop contracts, and G17 proposal-time capability
+  decisions
 - Unblocks: G19 approved target mutation
 
 ## Outcome
@@ -21,15 +23,16 @@ model response as approval.
 
 ## Contract gate
 
-Before runtime implementation, verify the accepted S22-01 decision record and
-G18 completion evidence are present and citable. Re-read the 21-resource
+Before runtime implementation, verify the accepted S22-01 decision record, the
+accepted `proposal-interview.schema.json` amendment, and G18 completion
+evidence are present and citable. Re-read the 22-resource
 contract baseline and the existing G08 proposal lifecycle. Prefer existing
 `gig-proposal`, Goal Graph, journal, workpad, reference-bundle, and capability
 artifacts over new persistence.
 
 If durable question/answer/revision records, new terminal states, or a new
 authority boundary cannot be represented by the accepted resources and
-existing journal/workpad rules, stop and write a separate additive contract
+existing journal/workpad rules, stop and write a further additive contract
 amendment. Do not add fields or reinterpret an existing state by inference.
 
 S16-EVAL is not a blanket G22 dependency. S22-01 owns proposal-question
@@ -135,7 +138,8 @@ The following rules are mandatory:
 
 ## Acceptance criteria
 
-1. The implementation starts only from accepted S22-01 and G18 evidence. The
+1. The implementation starts only from accepted S22-01, the accepted
+   proposal-interview schema amendment, and G18 evidence. The
    goal's completion audit cites the exact adopted state machine, answer types,
    effect choices, reference-selection rule, G18 provider boundary, and any
    approved contract amendment; no fixture-only behavior is described as

@@ -143,7 +143,7 @@ def _contract() -> dict[str, object]:
 
 
 def test_g15_additive_schema_inventory_is_exact() -> None:
-    assert len(SCHEMA_NAMES) == 21
+    assert len(SCHEMA_NAMES) == 22
     assert {
         "review-bundle.schema.json",
         "review-contract.schema.json",

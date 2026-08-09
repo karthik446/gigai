@@ -84,3 +84,12 @@ G18 may start implementation only when all of the following are true:
 Until then, G18 is not startable. A future provider probe still requires
 explicit operator authorization, synthetic or separately authorized
 credentials, and the adopted redaction/network boundary.
+
+## Follow-up state for G22
+
+The handoff's separate G22 interview-amendment item is now resolved by
+`../S22-01/proposal-interview-contract-amendment.md`. The additive
+`proposal-interview.schema.json` resource is accepted as resource 22, the
+previous 21 resources and hashes remain unchanged, and the installed verifier
+reports 22 resources. This does not implement `gigai create`; G22 remains a
+separate implementation Goal with its own acceptance criteria and evidence.
