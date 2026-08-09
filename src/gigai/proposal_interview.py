@@ -265,6 +265,35 @@ def request_clarification(
     return _event(clarified, "clarification_requested", actor={"kind": "model", "id": "g22-questioner"}, now=timestamp)
 
 
+def add_questions(
+    session: InterviewSession,
+    questions: tuple[Question, ...],
+    *,
+    now: str | None = None,
+) -> InterviewSession:
+    """Add model-authored questions without granting them approval authority."""
+
+    if session.state not in {"questions_pending", "clarification_required", "proposal_ready"}:
+        raise ProposalInterviewError("cannot add questions to a terminal session")
+    known = {item.question_id for item in session.questions}
+    if not questions or any(item.question_id in known for item in questions):
+        raise ProposalInterviewError("model question IDs must be new and non-empty")
+    if any(set(item.depends_on) - known for item in questions):
+        raise ProposalInterviewError("model question dependency is unknown")
+    timestamp = now or _now()
+    updated = replace(
+        session,
+        questions=session.questions + questions,
+        state="questions_pending",
+        approval=None,
+        terminal_reason=None,
+        revision=session.revision + 1,
+        parent_revision=session.revision,
+        updated_at=timestamp,
+    )
+    return _event(updated, "question_presented", actor={"kind": "model", "id": "g22-questioner"}, now=timestamp)
+
+
 def approve_session(
     session: InterviewSession,
     *,
@@ -477,6 +506,7 @@ class InterviewHTTPServer:
         connection: sqlite3.Connection | None = None,
         host: str = "127.0.0.1",
         on_session: Callable[[InterviewSession], None] | None = None,
+        on_questions: Callable[[InterviewSession], InterviewSession] | None = None,
         on_approval: Callable[[InterviewSession], InterviewSession] | None = None,
         lifetime_seconds: float = 600.0,
     ) -> None:
@@ -487,6 +517,7 @@ class InterviewHTTPServer:
         self.session = session
         self.connection = connection
         self.on_session = on_session
+        self.on_questions = on_questions
         self.on_approval = on_approval
         self.lifetime_seconds = lifetime_seconds
         self.token = secrets.token_urlsafe(24)
@@ -538,7 +569,14 @@ class InterviewHTTPServer:
                     if not isinstance(payload, dict):
                         raise ProposalInterviewError("event payload must be an object")
                     with owner._lock:
-                        owner.session = owner._apply(payload)
+                        next_session = owner._apply(payload)
+                        if (
+                            payload.get("event") == "answer"
+                            and payload.get("question_id") == "references"
+                            and owner.on_questions is not None
+                        ):
+                            next_session = owner.on_questions(next_session)
+                        owner.session = next_session
                         if payload.get("event") != "approve" and owner.on_session is not None:
                             owner.on_session(owner.session)
                         if owner.connection is not None:
@@ -677,6 +715,7 @@ __all__ = [
     "ReferenceDecision",
     "STATES",
     "answer_question",
+    "add_questions",
     "approve_session",
     "block_session",
     "build_session",

@@ -33,6 +33,7 @@ from .lifecycle import (
     start_interview,
 )
 from .proposal_interview import InterviewHTTPServer
+from .question_generation import generate_model_questions
 from .setup import (
     build_config,
     default_home_root,
@@ -568,6 +569,16 @@ def create_command(
                     project_id=started.project_id,
                     gig_id=started.gig_id,
                     session=session,
+                ),
+                on_questions=lambda session: (
+                    session
+                    if any(item.question_id == "operator-confirmation" for item in session.questions)
+                    else generate_model_questions(
+                        config=load_config(home),
+                        model_target=model_target,
+                        session=session,
+                        reference_bytes=dict(started.reference_bytes),
+                    )
                 ),
                 on_approval=lambda session: approve_interview_session(
                     home_root=home,

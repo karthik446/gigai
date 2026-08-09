@@ -22,6 +22,8 @@ from gigai.proposal_interview import (
     request_clarification,
     session_record,
 )
+from gigai.question_generation import generate_model_questions
+from gigai.setup import build_config, run_setup
 from gigai.validators import validate_serialized_contract
 
 
@@ -96,6 +98,27 @@ def test_changed_answer_creates_explicit_parent_revision() -> None:
     assert validate_serialized_contract(
         "proposal-interview.schema.json", canonical_json_bytes(session_record(revised))
     ).valid
+
+
+def test_deterministic_question_generation_uses_g18_factory_and_adds_typed_question(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    config = build_config(
+        home_root=home,
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+    )
+    run_setup(config)
+    session = answer_question(_session(), "references", [_session().references[0].reference_id], now=NOW)
+    generated = generate_model_questions(
+        config=config,
+        model_target="offline-default",
+        session=session,
+        reference_bytes={session.references[0].reference_id: b"selected bytes\n"},
+    )
+    question = next(item for item in generated.questions if item.question_id == "operator-confirmation")
+    assert question.answer_type == "confirmation"
+    assert generated.events[-1]["event"] == "question_presented"
 
 
 def test_clarification_round_cap_blocks_without_approval() -> None:
