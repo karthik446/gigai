@@ -17,7 +17,7 @@ from typing import Any, Mapping
 import uuid
 
 from .adapters.factory import AdapterFactoryError, ModelAdapterBinding, resolve_model_adapter
-from .adapters.port import InvocationResult, ModelInvocationError
+from .adapters.port import InvocationResult, ModelInvocationCancelled, ModelInvocationError
 from .canonical import (
     EntityPrefix,
     canonical_json_bytes,
@@ -74,6 +74,31 @@ class InvocationPolicy:
     redaction_policy_version: str = DEFAULT_REDACTION_POLICY
 
 
+@dataclass
+class InvocationBudget:
+    """Mutable per-Run model-call/token ledger with fail-closed reservation."""
+
+    max_model_calls: int
+    max_tokens: int
+    model_calls: int = 0
+    tokens: int = 0
+
+    def __post_init__(self) -> None:
+        if self.max_model_calls < 0 or self.max_tokens < 0:
+            raise ModelExecutionError("budget limits must be non-negative")
+
+    def reserve(self, requested_output_tokens: int) -> bool:
+        if requested_output_tokens <= 0:
+            raise ModelExecutionError("budget reservation requires positive output tokens")
+        if self.model_calls >= self.max_model_calls:
+            return False
+        if self.tokens + requested_output_tokens > self.max_tokens:
+            return False
+        self.model_calls += 1
+        self.tokens += requested_output_tokens
+        return True
+
+
 @dataclass(frozen=True)
 class ModelInvocationExecution:
     """Result and journal evidence for one terminal invocation."""
@@ -95,6 +120,7 @@ def run_model_invocation(
     references: tuple[SelectedReference, ...],
     selected_reference_ids: tuple[str, ...],
     policy: InvocationPolicy,
+    budget: InvocationBudget | None = None,
     uuid_factory: Any = uuid.uuid4,
 ) -> ModelInvocationExecution:
     """Invoke one configured target after the explicit G18 boundary gate.
@@ -140,6 +166,7 @@ def run_model_invocation(
     if selection_reason is None and remote:
         if credential is None:
             selection_reason = "credential_reference_missing"
+            credential_lookup = "missing"
         else:
             try:
                 validate_reference(credential)
@@ -193,6 +220,9 @@ def run_model_invocation(
             except (CredentialReferenceError, CredentialUnavailableError) as exc:
                 selection_reason = "credential_unavailable"
                 error = _safe_error(selection_reason, exc)
+        if selection_reason is None and budget is not None:
+            if not budget.reserve(binding.current.target.max_output_tokens):
+                selection_reason = "budget_exhausted"
         if selection_reason is None:
             try:
                 request = binding.request(role=role, prompt=provider_input or "")
@@ -203,11 +233,19 @@ def run_model_invocation(
                 selection_reason = "credential_unavailable"
                 credential_lookup = "missing"
                 error = _safe_error(selection_reason, exc)
+            except ModelInvocationCancelled as exc:
+                outcome, finish = "cancelled", "cancelled"
+                cancellation = "acknowledged"
+                error = _safe_error("model_invocation_cancelled", exc)
             except ModelInvocationError as exc:
                 message = str(exc)
-                if "timed out" in message.lower():
+                lowered = message.lower()
+                if "timed out" in lowered:
                     outcome, finish = "timeout", "timeout"
                     error = _safe_error("provider_timeout", exc)
+                elif "unavailable" in lowered or "503" in lowered:
+                    outcome, finish = "unavailable", "unavailable"
+                    error = _safe_error("provider_unavailable", exc)
                 else:
                     outcome, finish = "failed", "failed"
                     error = _safe_error("provider_invocation_failed", exc)
@@ -216,7 +254,10 @@ def run_model_invocation(
                 error = _safe_error("provider_invocation_failed", exc)
 
     if selection_reason is not None:
-        outcome, finish = "blocked", "blocked"
+        if selection_reason in {"credential_reference_missing", "credential_unavailable"}:
+            outcome, finish = "unavailable", "unavailable"
+        else:
+            outcome, finish = "blocked", "blocked"
         error = error or _safe_error(selection_reason, RuntimeError(selection_reason))
     response_artifact: JournalArtifact | None = None
     response_artifact_ref: dict[str, object] | None = None
@@ -453,6 +494,7 @@ __all__ = [
     "CHECK_ORDER_VERSION",
     "DEFAULT_REDACTION_POLICY",
     "InvocationPolicy",
+    "InvocationBudget",
     "ModelExecutionError",
     "ModelInvocationExecution",
     "SelectedReference",

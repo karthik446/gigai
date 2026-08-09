@@ -1,6 +1,6 @@
 # G18 — Provider Comparison and Model Handoff
 
-- Status: Proposed for review
+- Status: In progress
 - Depends on: G16 and G17; consumes accepted S16-EVAL, S18-01 through S18-05,
   and S22-01 decision records, plus G11's model port and factory
 - Unblocks: G22 deliberative create, then G19 approved target effects
