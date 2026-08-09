@@ -18,6 +18,8 @@ EXPECTED_SCHEMA_NAMES = {
     "adjudication.schema.json",
     "active-gig-version.schema.json",
     "common.schema.json",
+    "capability-installation.schema.json",
+    "capability-manifest.schema.json",
     "feedback.schema.json",
     "finding.schema.json",
     "gig-proposal.schema.json",
@@ -35,6 +37,9 @@ EXPECTED_SCHEMA_NAMES = {
 
 PROJECT_ID = "project_11111111-1111-4111-8111-111111111111"
 GIG_ID = "gig_22222222-2222-4222-8222-222222222222"
+CAPABILITY_ID = "cap_99999999-9999-4999-8999-999999999999"
+CAPABILITY_MANIFEST_ID = "capmanifest_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+CAPABILITY_INSTALLATION_ID = "capinstall_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 PROPOSAL_ID = "gp_33333333-3333-4333-8333-333333333333"
 GRAPH_ID = "graph_44444444-4444-4444-8444-444444444444"
 GOAL_A = "goal_55555555-5555-4555-8555-555555555555"
@@ -158,6 +163,70 @@ def goal_graph() -> dict[str, Any]:
 
 def actor() -> dict[str, Any]:
     return {"kind": "operator", "id": "local-user", "model_target": None}
+
+
+def capability_manifest() -> dict[str, Any]:
+    return {
+        "schema_version": "1.0",
+        "manifest_id": CAPABILITY_MANIFEST_ID,
+        "manifest_version": 1,
+        "gig_id": GIG_ID,
+        "created_at": NOW,
+        "created_by": actor(),
+        "capabilities": [
+            {
+                "capability_id": CAPABILITY_ID,
+                "goal_ids": [GOAL_A],
+                "kind": "local_capability",
+                "name": "fixture-tool",
+                "requested_version": "1.0.0",
+                "source_constraints": {
+                    "allowed_source_kinds": ["local_artifact"],
+                    "required_digest": ZERO_DIGEST,
+                    "required_identity": "fixture.artifact",
+                },
+                "declared_effects": ["read_local_metadata"],
+                "permissions": {"filesystem": "write_isolated", "network": "none", "credentials": "none"},
+                "credential_requirements": [],
+                "network_requirement": "none",
+                "availability_state": "missing",
+                "compatibility": {"status": "compatible", "reason": None},
+                "security_review": {"status": "passed", "checks": ["path_containment"], "reason": None},
+                "alternatives": [],
+                "options": [
+                    {"option_id": "A", "kind": "install_local", "label": "Install local artifact", "ordinal": 0, "decision": "pending"},
+                    {"option_id": "B", "kind": "continue_without", "label": "Continue without capability", "ordinal": 1, "decision": "pending"},
+                ],
+            }
+        ],
+    }
+
+
+def capability_installation() -> dict[str, Any]:
+    snapshot = {
+        "root": f"tools/{CAPABILITY_ID}",
+        "entries": [],
+        "snapshot_sha256": ZERO_DIGEST,
+        "source_identity": None,
+    }
+    return {
+        "schema_version": "1.0",
+        "installation_id": CAPABILITY_INSTALLATION_ID,
+        "installation_version": 1,
+        "gig_id": GIG_ID,
+        "capability_id": CAPABILITY_ID,
+        "manifest_id": CAPABILITY_MANIFEST_ID,
+        "created_at": NOW,
+        "decision": {"option_id": "A", "status": "approved", "actor": actor(), "recorded_at": NOW, "reason": None},
+        "source": {"path": "tools/.sources/fixture.artifact", "content_sha256": ZERO_DIGEST, "size_bytes": 0, "media_type": "application/octet-stream", "identity": "fixture.artifact", "version": "1.0.0"},
+        "security_checks": [{"name": "source_digest", "status": "passed", "detail": "fixture"}],
+        "before_manifest": snapshot,
+        "after_manifest": snapshot,
+        "outcome": "already_available",
+        "rollback": {"attempted": False, "restored_before": True, "reason": None},
+        "provenance": {"source_kind": "local_artifact", "source_sha256": ZERO_DIGEST, "installed_root": f"tools/{CAPABILITY_ID}", "recorded_by": actor()},
+        "failure_reason": None,
+    }
 
 
 def valid_instances() -> dict[str, dict[str, Any]]:
@@ -595,6 +664,8 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "urn:gigai:schema:report:1": report,
         "urn:gigai:schema:review-loop:1": loop,
         "urn:gigai:schema:addressed-artifact:1": addressed,
+        "urn:gigai:schema:capability-manifest:1": capability_manifest(),
+        "urn:gigai:schema:capability-installation:1": capability_installation(),
     }
 
 
@@ -635,7 +706,7 @@ class SerializedContractTests(unittest.TestCase):
         )
 
     def test_all_schema_documents_are_valid_draft_2020_12(self) -> None:
-        self.assertEqual(len(self.schemas), 17)
+        self.assertEqual(len(self.schemas), 19)
         for schema_id, schema in self.schemas.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)

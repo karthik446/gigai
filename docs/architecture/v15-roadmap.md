@@ -52,6 +52,12 @@ sync-refs
 of the entire Gig. It establishes the immutable input bundle that the review
 contract and later Runs cite.
 
+Gig creation itself needs a separate proposal-interaction stage. The initial
+surface should be a short-lived, loopback-only HTMX web session launched by the
+CLI, with SQLite and the Gig workpad remaining the durable authority. The model
+may generate domain-specific clarification questions, but every question and
+answer becomes a persisted proposal artifact before approval.
+
 ## 2. Product model
 
 V15 keeps the V14 vocabulary and gives the next layer explicit ownership.
@@ -97,6 +103,18 @@ required evidence and citations, output shape, clarification questions,
 closure rules, and cycle/escalation limits. It is the source from which the
 system derives the questions an agent must ask when context is missing or
 ambiguous.
+
+### Proposal interaction
+
+Proposal interaction is a bounded interview, not a fixed checklist and not a
+chat transcript. A local HTMX session starts from the user's description and
+selected references, asks adaptive model-generated questions, persists answers
+in SQLite/workpad state, presents capability and privacy choices, and renders a
+proposal preview for explicit approval. GigAI owns the question protocol,
+question limits, answer provenance, and approval transition; the selected
+model supplies domain-specific question wording and follow-ups. The browser
+session is local-only and ephemeral; it is not a deployed server or a new
+authority store.
 
 ### Finding and feedback
 
@@ -322,21 +340,24 @@ is not an implementation Goal and does not advertise a supported adapter.
 
 V14 Phase 2, deliberative `create`, remains a required product capability. V15
 does not skip it or replace it with a Run. The review contract, reference bundle,
-capability options, and approval decisions first appear as explicit proposal
-artifacts; the early Review Loop fixtures may use hand-authored approved
-versions while those creation surfaces are being materialized. G15 and G17
-define the evidence needed to turn that design into user-facing creation work.
+capability options, clarification questions, answers, and approval decisions
+first appear as explicit proposal artifacts; the early Review Loop fixtures may
+use hand-authored approved versions while those creation surfaces are being
+materialized. G15 and G17 provide the substrate, S22-01 defines the interaction
+protocol, and G22 owns the eventual user-facing creation implementation.
 
 ```text
 G13 -> G14 -> G15 -> G16
            G15 -> G17
+           G15 + G16 + G17 -> S22-01
            G16 + G17 -> S18-01
            G16 + G17 -> S18-02
            G16 + G17 -> S18-03
            G16 + G17 -> S18-04
            G16 + G17 -> S18-05
-           S18-01 + S18-02 + S18-03 + S18-04 + S18-05 -> G18
-           G16 + G18 -> G19 -> G20 -> G21
+           S18-01 + S18-02 + S18-03 + S18-04 + S18-05 + S22-01 -> G18
+           S22-01 + G18 -> G22
+           G16 + G18 + G22 -> G19 -> G20 -> G21
 ```
 
 The graph is intentionally provisional. The arrows express planning
@@ -348,15 +369,56 @@ dependencies, not live status fields or authorization to begin.
 | G15 | Reference bundles and evaluator substrate | G14 |
 | G16 | First Review Loop Gig | G15 |
 | G17 | Proposal-time capability inspection and installation review | G15 |
+| S22-01 | Local HTMX proposal interview and clarification protocol spike | G15, G16, G17 |
 | S18-01 | Common provider-port and evidence contract spike | G16, G17 |
 | S18-02 | Codex CLI and Claude CLI adapter feasibility spike | G16, G17 |
 | S18-03 | Anthropic API and local-model adapter feasibility spike | G16, G17 |
 | S18-04 | Handoff, comparison, cancellation, and unavailable-provider spike | G16, G17 |
 | S18-05 | Provider-input redaction, credential, and network-boundary spike | G16, G17 |
-| G18 | Provider comparison and model handoff implementation | S18-01, S18-02, S18-03, S18-04, S18-05 |
-| G19 | Approved target mutation | G16, G18 |
+| G18 | Provider comparison and model handoff implementation | S18-01, S18-02, S18-03, S18-04, S18-05, S22-01 |
+| G19 | Approved target mutation | G16, G18, G22 |
 | G20 | Local `improve` and evaluator learning | G19 |
 | G21 | Recurring and comparative Gigs | G20 |
+| G22 | Deliberative `create` and user-facing proposal interview | S22-01, G18 |
+
+### Phase 2 — Proposal creation and interaction
+
+#### S22-01 — Local HTMX proposal interview and clarification protocol spike
+
+Design, without adding runtime behavior, the interaction that turns a user's
+free-form request and selected local references into an approved Gig proposal.
+The spike must compare the smallest viable embedded localhost HTTP approach,
+define the HTMX request/fragment protocol, and specify how a short-lived
+browser session persists drafts, questions, answers, reference selections,
+capability decisions, revisions, and approval in SQLite and the Gig workpad.
+
+The question protocol must support model-generated, domain-specific questions
+without requiring one fixed checklist. It must define structured question IDs,
+answer types, dependencies, priorities, rationale, provenance, bounded rounds,
+conditional follow-ups, and the blocking behavior for unanswered ambiguity.
+The spike must also define the evaluation substrate for question quality:
+coverage of material ambiguity, non-redundancy, useful domain adaptation,
+privacy/tool awareness, stopping behavior, and proposal completeness. It must
+prove that the browser process is loopback-only, that local files are copied or
+referenced by exact bytes into the draft Bundle, and that no proposal question
+session silently executes a tool, contacts a provider, or mutates a target.
+
+Exit evidence: a checked-in decision record, a minimal disposable HTMX fixture,
+the proposal/question/answer state machine, a JSON protocol example, a draft
+SQLite/workpad persistence trace, and an evaluation corpus spanning at least a
+repository feature, resume tailoring, reference synchronization, and one
+tabular or finance Gig. S22-01 does not ship `create`, provider adapters, or a
+public multi-user web service.
+
+#### G22 — Deliberative `create` and user-facing proposal interview
+
+Implement the approved S22-01 interaction: launch a short-lived local HTMX
+session from `gigai create`, collect the user's description and references,
+allow the selected model to ask bounded structured questions, persist answers
+and revisions, present capability/privacy/effect choices, and seal an approved
+proposal. The session remains local-first and uses SQLite/workpad authority;
+remote hosting, background service behavior, and unapproved execution remain
+out of scope.
 
 ### Phase 3A — Sequential execution spine
 

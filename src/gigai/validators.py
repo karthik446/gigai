@@ -27,6 +27,8 @@ SCHEMA_NAMES = (
     "addressed-artifact.schema.json",
     "adjudication.schema.json",
     "active-gig-version.schema.json",
+    "capability-installation.schema.json",
+    "capability-manifest.schema.json",
     "common.schema.json",
     "feedback.schema.json",
     "finding.schema.json",

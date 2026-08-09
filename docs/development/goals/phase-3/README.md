@@ -11,6 +11,7 @@ silently stand in for it.
 | [G14](G14-sequential-goal-graph-scheduler.md) | Sequential Goal Graph scheduler | G13 | Complete |
 | [G15](G15-reference-bundles-and-evaluator-substrate.md) | Reference bundles and evaluator substrate | G14 | Complete |
 | [G16](G16-first-review-loop-gig.md) | First Review Loop Gig | G15 | Complete |
+| [G17](G17-proposal-capability-inspection.md) | Proposal-time capability inspection and installation review | G15 | Approved / Ready |
 
 “Ready” records the initial dependency state; it is not a live tracker. A
 completed Phase 3 goal writes durable evidence under

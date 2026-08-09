@@ -14,8 +14,9 @@ and enums.
 The original eight Phase 0/1 resources remain byte-identical. The additive G15
 resources define review bundles, contracts, findings, feedback, adjudications,
 traces, and machine reports; their hashes are pinned separately in
-`SHA256SUMS` and verified as a seventeen-resource set. The two additive G16
-resources are `review-loop.schema.json` and `addressed-artifact.schema.json`.
+`SHA256SUMS`. The additive G16 resources are `review-loop.schema.json` and
+`addressed-artifact.schema.json`. G17 adds the capability manifest and
+installation review resources, for a nineteen-resource set.
 
 ## Production identity API
 
@@ -59,6 +60,10 @@ No other product module implements canonical rendering or SHA-256 identity.
   `adjudication.schema.json` define evaluator findings and operator decisions.
 - `trace.schema.json` and `report.schema.json` define replay identity and the
   machine report projection.
+- `capability-manifest.schema.json` defines proposal-time capability
+  requirements, inspection states, and explicit options.
+- `capability-installation.schema.json` defines approved local installation
+  provenance, before/after snapshots, outcomes, and rollback evidence.
 
 All top-level objects reject unknown fields. `schema_version` names one exact
 contract version. An additive optional field creates a new minor schema version;

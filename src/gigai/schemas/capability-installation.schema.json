@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:capability-installation:1",
+  "title": "GigAI capability installation review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "installation_id", "installation_version", "gig_id",
+    "capability_id", "manifest_id", "created_at", "decision", "source",
+    "security_checks", "before_manifest", "after_manifest", "outcome",
+    "rollback", "provenance"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "installation_id": {"$ref": "#/$defs/installation_id"},
+    "installation_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "capability_id": {"$ref": "#/$defs/capability_id"},
+    "manifest_id": {"$ref": "#/$defs/manifest_id"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "decision": {"$ref": "#/$defs/decision"},
+    "source": {"$ref": "#/$defs/source"},
+    "security_checks": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/security_check"}},
+    "before_manifest": {"$ref": "#/$defs/snapshot"},
+    "after_manifest": {"$ref": "#/$defs/snapshot"},
+    "outcome": {"type": "string", "enum": ["pending", "installed", "already_available", "refused", "failed", "rolled_back"]},
+    "rollback": {"$ref": "#/$defs/rollback"},
+    "provenance": {"$ref": "#/$defs/provenance"},
+    "failure_reason": {"type": ["string", "null"], "maxLength": 2000}
+  },
+  "$defs": {
+    "installation_id": {"type": "string", "pattern": "^capinstall_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "capability_id": {"type": "string", "pattern": "^cap_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "manifest_id": {"type": "string", "pattern": "^capmanifest_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "relative_path": {"$ref": "urn:gigai:schema:common:1#/$defs/relative_path"},
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["option_id", "status", "actor", "recorded_at"],
+      "properties": {
+        "option_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*$", "maxLength": 20},
+        "status": {"type": "string", "enum": ["approved", "refused"]},
+        "actor": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+        "recorded_at": {"type": "string", "format": "date-time"},
+        "reason": {"type": ["string", "null"], "maxLength": 2000}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content_sha256", "size_bytes", "media_type", "identity", "version"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "content_sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"$ref": "urn:gigai:schema:common:1#/$defs/safe_nonnegative_integer"},
+        "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
+        "identity": {"type": "string", "minLength": 1, "maxLength": 255},
+        "version": {"type": "string", "minLength": 1, "maxLength": 255}
+      }
+    },
+    "security_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status", "detail"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 120},
+        "status": {"type": "string", "enum": ["passed", "failed", "not_applicable"]},
+        "detail": {"type": "string", "minLength": 1, "maxLength": 2000}
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content_sha256", "size_bytes", "mode", "kind"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "content_sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"$ref": "urn:gigai:schema:common:1#/$defs/safe_nonnegative_integer"},
+        "mode": {"type": "integer", "minimum": 0, "maximum": 511},
+        "kind": {"type": "string", "enum": ["file", "directory"]}
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "entries", "snapshot_sha256", "source_identity"],
+      "properties": {
+        "root": {"$ref": "#/$defs/relative_path"},
+        "entries": {"type": "array", "items": {"$ref": "#/$defs/entry"}},
+        "snapshot_sha256": {"$ref": "#/$defs/sha256"},
+        "source_identity": {"type": ["string", "null"], "maxLength": 255}
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "restored_before", "reason"],
+      "properties": {
+        "attempted": {"type": "boolean"},
+        "restored_before": {"type": "boolean"},
+        "reason": {"type": ["string", "null"], "maxLength": 2000}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_kind", "source_sha256", "installed_root", "recorded_by"],
+      "properties": {
+        "source_kind": {"type": "string", "const": "local_artifact"},
+        "source_sha256": {"$ref": "#/$defs/sha256"},
+        "installed_root": {"$ref": "#/$defs/relative_path"},
+        "recorded_by": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"}
+      }
+    }
+  }
+}

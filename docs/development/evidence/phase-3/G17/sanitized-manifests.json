@@ -1,0 +1,15 @@
+{
+  "target_before": {"digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000", "changed": false},
+  "target_after": {"digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000", "changed": false},
+  "effects": {
+    "network": false,
+    "credential_value_access": false,
+    "capability_execution": false,
+    "subprocess": false,
+    "shell": false,
+    "target_write": false,
+    "global_installation": false,
+    "silent_fallback": false
+  },
+  "allowed_mutation": "per-Gig workpad tools/ and manifests/ evidence only"
+}
