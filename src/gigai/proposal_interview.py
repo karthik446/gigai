@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import hashlib
+import html
 import http.server
 import json
-from pathlib import Path
 import secrets
 import sqlite3
 import threading
-from typing import Any, Callable, Mapping
+from typing import Callable, Mapping
 import uuid
 
 from .canonical import canonical_json_bytes, digest_imported_bytes
@@ -352,6 +352,77 @@ def session_record(session: InterviewSession) -> dict[str, object]:
     }
 
 
+def session_from_record(payload: Mapping[str, object]) -> InterviewSession:
+    """Rehydrate a validated workpad snapshot without trusting SQLite state."""
+
+    try:
+        references = tuple(
+            ReferenceDecision(
+                str(item["reference_id"]),
+                str(item["content_sha256"]),
+                str(item["decision"]),
+            )
+            for item in payload["references"]  # type: ignore[index]
+        )
+        questions = tuple(
+            Question(
+                str(item["question_id"]),
+                str(item["answer_type"]),
+                bool(item["required"]),
+                tuple(str(value) for value in item["options"]),
+                tuple(str(value) for value in item["depends_on"]),
+                str(item["rationale"]),
+                str(item["provenance"]),
+            )
+            for item in payload["questions"]  # type: ignore[index]
+        )
+        answers = tuple(
+            Answer(
+                str(item["question_id"]),
+                str(item["answer_type"]),
+                item["value"],
+                str(item["answered_at"]),
+            )
+            for item in payload["answers"]  # type: ignore[index]
+        )
+        boundary = payload["boundary"]  # type: ignore[index]
+        request = payload["request"]  # type: ignore[index]
+        if not isinstance(boundary, Mapping) or not isinstance(request, Mapping):
+            raise TypeError
+        session = InterviewSession(
+            session_id=_id(str(payload["session_id"]), "session_"),
+            project_id=_id(str(payload["project_id"]), "project_"),
+            gig_id=_id(str(payload["gig_id"]), "gig_"),
+            proposal_id=(str(payload["proposal_id"]) if payload["proposal_id"] is not None else None),
+            request_kind=str(request["kind"]),
+            request_artifact=dict(request["artifact"]),
+            request_sha256=str(request["content_sha256"]),
+            state=str(payload["state"]),
+            round=int(payload["round"]),
+            max_rounds=int(payload["max_rounds"]),
+            references=references,
+            questions=questions,
+            answers=answers,
+            privacy_choice=str(boundary["privacy"]),
+            capability_choice=str(boundary["capability"]),
+            effect_choice=str(boundary["effect"]),
+            events=tuple(dict(item) for item in payload["events"]),  # type: ignore[index]
+            approval=(dict(payload["approval"]) if payload["approval"] is not None else None),
+            terminal_reason=(str(payload["terminal_reason"]) if payload["terminal_reason"] is not None else None),
+            created_at=str(payload["created_at"]),
+            updated_at=str(payload["updated_at"]),
+        )
+    except (KeyError, TypeError, ValueError, ProposalInterviewError) as exc:
+        raise ProposalInterviewError("proposal-interview snapshot cannot be recovered") from exc
+    if session.state not in STATES:
+        raise ProposalInterviewError("proposal-interview snapshot has an invalid state")
+    expected_selected = set(session.selected_reference_ids)
+    observed_selected = set(payload.get("selected_reference_ids", ()))
+    if expected_selected != observed_selected:
+        raise ProposalInterviewError("proposal-interview reference selection is inconsistent")
+    return session
+
+
 def persist_trace(connection: sqlite3.Connection, session: InterviewSession) -> None:
     """Persist only ordered event identities and redacted state metadata."""
 
@@ -391,13 +462,22 @@ class InterviewHTTPServer:
         *,
         connection: sqlite3.Connection | None = None,
         host: str = "127.0.0.1",
+        on_session: Callable[[InterviewSession], None] | None = None,
+        lifetime_seconds: float = 600.0,
     ) -> None:
-        if host not in {"127.0.0.1", "::1", "localhost"}:
+        if host != "127.0.0.1":
             raise ProposalInterviewError("G22 server must bind to loopback")
+        if lifetime_seconds <= 0:
+            raise ProposalInterviewError("G22 server lifetime must be positive")
         self.session = session
         self.connection = connection
+        self.on_session = on_session
+        self.lifetime_seconds = lifetime_seconds
         self.token = secrets.token_urlsafe(24)
         self._lock = threading.RLock()
+        self._terminal = threading.Event()
+        self._timer: threading.Timer | None = None
+        self._closed = False
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -421,14 +501,11 @@ class InterviewHTTPServer:
                     return
                 with owner._lock:
                     snapshot = session_record(owner.session)
-                body = (
-                    "<!doctype html><meta charset='utf-8'><title>GigAI create</title>"
-                    "<main><h1>GigAI proposal interview</h1>"
-                    "<p>Submit typed answers to this local session.</p></main>"
-                ).encode("utf-8")
+                    body = owner._render_html()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("X-GigAI-State", str(snapshot["state"]))
+                self.send_header("X-GigAI-Loopback", "127.0.0.1")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -446,11 +523,15 @@ class InterviewHTTPServer:
                         raise ProposalInterviewError("event payload must be an object")
                     with owner._lock:
                         owner.session = owner._apply(payload)
+                        if owner.on_session is not None:
+                            owner.on_session(owner.session)
                         if owner.connection is not None:
                             persist_trace(owner.connection, owner.session)
                         snapshot = session_record(owner.session)
+                        if snapshot["state"] in {"approved", "blocked"}:
+                            owner._terminal.set()
                     self._json(200, {"state": snapshot["state"], "session_id": snapshot["session_id"]})
-                except (ProposalInterviewError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                except (ProposalInterviewError, json.JSONDecodeError, TypeError, ValueError, OSError, RuntimeError) as exc:
                     self._json(409, {"error": str(exc)})
 
         self._server = http.server.ThreadingHTTPServer((host, 0), Handler)
@@ -467,18 +548,80 @@ class InterviewHTTPServer:
         return f"http://{host}:{port}/session/{self.token}"
 
     def start(self) -> "InterviewHTTPServer":
-        if self._thread is not None:
+        if self._thread is not None or self._closed:
             raise ProposalInterviewError("interview server is already started")
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
+        self._timer = threading.Timer(self.lifetime_seconds, self.close)
+        self._timer.daemon = True
+        self._timer.start()
         return self
 
+    def wait(self, timeout: float | None = None) -> InterviewSession:
+        """Wait for approval/blocking or lifetime expiry, then return the snapshot."""
+
+        self._terminal.wait(timeout)
+        with self._lock:
+            return self.session
+
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._terminal.set()
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
         self._server.shutdown()
         self._server.server_close()
         if self._thread is not None:
             self._thread.join(timeout=2)
             self._thread = None
+
+    def _render_html(self) -> bytes:
+        session = self.session
+        forms: list[str] = []
+        endpoint = f"/session/{self.token}/events"
+        for question in session.questions:
+            label = html.escape(question.rationale)
+            question_id = html.escape(question.question_id)
+            if question.answer_type == "text":
+                control = f"<input name='value' type='text' required {'disabled' if session.state not in {'questions_pending', 'clarification_required'} else ''}>"
+            elif question.answer_type == "confirmation":
+                control = "<input name='value' type='checkbox'>"
+            elif question.answer_type == "multiselect":
+                control = "".join(
+                    f"<label><input name='value' type='checkbox' value='{html.escape(option)}'>{html.escape(option)}</label>"
+                    for option in question.options
+                )
+            else:
+                options = "".join(
+                    f"<option value='{html.escape(option)}'>{html.escape(option)}</option>"
+                    for option in question.options
+                )
+                control = f"<select name='value'>{options}</select>"
+            forms.append(
+                f"<form class='question' data-question-id='{question_id}' hx-post='{endpoint}'>"
+                f"<label>{question_id}: {label}</label>{control}<button type='submit'>Save</button></form>"
+            )
+        body = (
+            "<!doctype html><meta charset='utf-8'><title>GigAI create</title>"
+            "<main><h1>GigAI proposal interview</h1>"
+            f"<p data-state='{html.escape(session.state)}'>State: {html.escape(session.state)}</p>"
+            + "".join(forms)
+            + "</main><script>"
+            "for (const form of document.querySelectorAll('form.question')) {"
+            "form.addEventListener('submit', async (event) => {event.preventDefault();"
+            "const values=[...form.querySelectorAll('[name=value]')];"
+            "let value; const first=values[0];"
+            "if(first.type==='checkbox' && values.length===1){value=first.checked;}"
+            "else if(first.type==='checkbox'){value=values.filter(x=>x.checked).map(x=>x.value);}"
+            "else if(first.tagName==='SELECT'){value=first.value;} else {value=first.value;}"
+            "const response=await fetch(form.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'answer',question_id:form.dataset.questionId,value})});"
+            "if(!response.ok){alert((await response.json()).error);} else {location.reload();}});}"
+            "</script>"
+        ).encode("utf-8")
+        return body
 
     def _apply(self, payload: Mapping[str, object]) -> InterviewSession:
         event = payload.get("event")
@@ -514,6 +657,7 @@ __all__ = [
     "persist_trace",
     "request_clarification",
     "session_record",
+    "session_from_record",
 ]
 
 

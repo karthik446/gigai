@@ -36,6 +36,10 @@ TRANSACTION_PREFIX = ".gigai-journal-"
 TRANSITIONS = frozenset(
     {
         "creation_started",
+        "proposal_interview_started",
+        "proposal_interview_updated",
+        "proposal_interview_blocked",
+        "proposal_interview_approved",
         "gig_proposal_ready",
         "gig_proposal_feedback_recorded",
         "gig_proposal_revised",

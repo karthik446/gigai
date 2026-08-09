@@ -12,7 +12,8 @@ cluster's commit, but does not rewrite an accepted cluster silently.
 | Criteria | Cluster | Status | Evidence commit |
 |---|---|---|---|
 | 1 | Dependency/contract gate and implementation baseline | Accepted by `6729b88`; runtime evidence pending | `6729b88` |
-| 2–3 | CLI entry point, short-lived loopback session, terminal result | Pending | — |
+| 3 | Short-lived loopback session, token boundary, and bounded lifetime | Accepted; 13 focused tests pass | Pending commit |
+| 2 | CLI entry point and deterministic terminal result | Pending; approval integration remains | — |
 | 4 | Exact selected-reference and byte/digest boundary | Pending | — |
 | 5–6 | Typed questions, answers, clarification rounds, and blocking | Accepted; 8 focused tests pass | Pending commit |
 | 7 | G18 model-port/provider boundary and deterministic failures | Pending | — |

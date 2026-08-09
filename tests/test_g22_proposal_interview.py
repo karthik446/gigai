@@ -116,7 +116,10 @@ def test_loopback_http_requires_token_and_preserves_session_boundary() -> None:
         with urlopen(server.url, timeout=2) as response:
             assert response.status == 200
             assert response.headers["X-GigAI-State"] == "questions_pending"
-            assert b"GigAI proposal interview" in response.read()
+            body = response.read()
+            assert b"GigAI proposal interview" in body
+            assert b"hx-post" in body
+            assert b"scope" in body
 
         request = Request(
             f"{server.url}/events",
