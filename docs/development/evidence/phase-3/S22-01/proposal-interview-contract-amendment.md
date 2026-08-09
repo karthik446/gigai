@@ -13,6 +13,7 @@ persist and replay. The resource covers the S22-01 protocol without shipping
 the HTMX server or changing the proposal lifecycle:
 
 - session identity and project/Gig/proposal linkage;
+- explicit snapshot revision and parent-revision linkage;
 - the accepted question state machine and bounded clarification round;
 - typed question definitions and typed answer values;
 - exact reference bytes/digests and explicit selected/excluded decisions;

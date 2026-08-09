@@ -97,6 +97,8 @@ class InterviewSession:
     project_id: str
     gig_id: str
     proposal_id: str | None
+    revision: int
+    parent_revision: int | None
     request_kind: str
     request_artifact: Mapping[str, object]
     request_sha256: str
@@ -157,6 +159,8 @@ def build_session(
         project_id=project_id,
         gig_id=gig_id,
         proposal_id=None,
+        revision=1,
+        parent_revision=None,
         request_kind=request_kind,
         request_artifact=dict(request_artifact),
         request_sha256=request_sha256,
@@ -188,6 +192,8 @@ def answer_question(
     answers = tuple(item for item in session.answers if item.question_id != question_id)
     answer = Answer(question_id, question.answer_type, value, timestamp)
     answers += (answer,)
+    previous = next((item for item in session.answers if item.question_id == question_id), None)
+    changed = previous is not None and previous.value != value
     selected = session.references
     privacy = session.privacy_choice
     capability = session.capability_choice
@@ -218,8 +224,10 @@ def answer_question(
         terminal_reason=None,
         approval=None,
         updated_at=timestamp,
+        revision=session.revision + 1 if changed else session.revision,
+        parent_revision=session.revision if changed else session.parent_revision,
     )
-    return _event(updated, "answer_recorded", actor={"kind": "operator", "id": "local-user"}, now=timestamp)
+    return _event(updated, "revision_created" if changed else "answer_recorded", actor={"kind": "operator", "id": "local-user"}, now=timestamp)
 
 
 def request_clarification(
@@ -251,6 +259,8 @@ def request_clarification(
         round=session.round + 1,
         questions=session.questions + (question,),
         updated_at=timestamp,
+        revision=session.revision + 1,
+        parent_revision=session.revision,
     )
     return _event(clarified, "clarification_requested", actor={"kind": "model", "id": "g22-questioner"}, now=timestamp)
 
@@ -306,6 +316,8 @@ def session_record(session: InterviewSession) -> dict[str, object]:
     return {
         "schema_version": "1.0",
         "record_version": 1,
+        "revision": session.revision,
+        "parent_revision": session.parent_revision,
         "session_id": session.session_id,
         "project_id": session.project_id,
         "gig_id": session.gig_id,
@@ -394,6 +406,8 @@ def session_from_record(payload: Mapping[str, object]) -> InterviewSession:
             project_id=_id(str(payload["project_id"]), "project_"),
             gig_id=_id(str(payload["gig_id"]), "gig_"),
             proposal_id=(str(payload["proposal_id"]) if payload["proposal_id"] is not None else None),
+            revision=int(payload["revision"]),
+            parent_revision=(int(payload["parent_revision"]) if payload["parent_revision"] is not None else None),
             request_kind=str(request["kind"]),
             request_artifact=dict(request["artifact"]),
             request_sha256=str(request["content_sha256"]),

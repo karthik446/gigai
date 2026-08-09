@@ -7,6 +7,8 @@
   "required": [
     "schema_version",
     "record_version",
+    "revision",
+    "parent_revision",
     "session_id",
     "project_id",
     "gig_id",
@@ -29,6 +31,13 @@
   "properties": {
     "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
     "record_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "revision": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "parent_revision": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+        {"type": "null"}
+      ]
+    },
     "session_id": {"$ref": "#/$defs/session_id"},
     "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
     "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
@@ -85,6 +94,18 @@
     "updated_at": {"type": "string", "format": "date-time"}
   },
   "allOf": [
+    {
+      "if": {"properties": {"revision": {"const": 1}}},
+      "then": {"properties": {"parent_revision": {"type": "null"}}}
+    },
+    {
+      "if": {"properties": {"revision": {"minimum": 2}}},
+      "then": {
+        "properties": {
+          "parent_revision": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
     {
       "if": {"properties": {"state": {"const": "approved"}}},
       "then": {

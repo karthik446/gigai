@@ -25,6 +25,8 @@ def _record(*, state: str = "approved") -> dict[str, object]:
     return {
         "schema_version": "1.0",
         "record_version": 1,
+        "revision": 1,
+        "parent_revision": None,
         "session_id": SESSION,
         "project_id": PROJECT,
         "gig_id": GIG,

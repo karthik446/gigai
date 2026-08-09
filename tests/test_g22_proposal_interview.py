@@ -87,6 +87,17 @@ def test_protocol_rejects_wrong_types_unknown_questions_and_unselected_reference
         answer_question(session, "references", ["ref_00000000-0000-4000-8000-000000000099"], now=NOW)
 
 
+def test_changed_answer_creates_explicit_parent_revision() -> None:
+    first = answer_question(_session(), "scope", "first scope", now=NOW)
+    revised = answer_question(first, "scope", "revised scope", now=NOW)
+    assert revised.revision == 2
+    assert revised.parent_revision == 1
+    assert revised.events[-1]["event"] == "revision_created"
+    assert validate_serialized_contract(
+        "proposal-interview.schema.json", canonical_json_bytes(session_record(revised))
+    ).valid
+
+
 def test_clarification_round_cap_blocks_without_approval() -> None:
     session = request_clarification(_session(max_rounds=1), reason="scope is ambiguous", now=NOW)
     assert session.state == "blocked"
