@@ -271,6 +271,20 @@ def approve_interview_session(
 ) -> InterviewSession:
     """Build and seal the proposal only after the operator approves the interview."""
 
+    if session.state == "approved":
+        if session.proposal_id is None:
+            raise LifecycleError("approved interview has no proposal identity")
+        pointer_path = start.workpad / "manifests" / "active-gig-version.json"
+        try:
+            pointer = parse_json_bytes(pointer_path.read_bytes())
+        except (OSError, ValueError) as exc:
+            raise LifecycleError("approved interview has no recoverable active pointer") from exc
+        if (
+            not isinstance(pointer, dict)
+            or pointer.get("approved_proposal_id") != session.proposal_id
+        ):
+            raise LifecycleError("approved interview points at a different proposal")
+        return session
     if session.state != "proposal_ready":
         raise LifecycleError("only a proposal_ready interview can be approved")
     request_path = start.workpad / str(session.request_artifact["path"])

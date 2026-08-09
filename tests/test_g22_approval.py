@@ -76,3 +76,13 @@ def test_operator_approval_seals_the_proposal_without_starting_a_run(tmp_path: P
     assert not (started.workpad / "runs").exists()
     assert digest_imported_bytes(reference.read_bytes()) == started.session.references[0].content_sha256
     assert _git(started.workpad, "tag", "--list", "gig-v000001").stdout.strip() == "gig-v000001"
+    before_repeat = _git(started.workpad, "rev-list", "--count", "HEAD").stdout.strip()
+    repeated = approve_interview_session(
+        home_root=home,
+        requested_target=target,
+        start=started,
+        session=approved,
+        uuid_factory=values,
+    )
+    assert repeated == approved
+    assert _git(started.workpad, "rev-list", "--count", "HEAD").stdout.strip() == before_repeat
