@@ -463,6 +463,7 @@ class InterviewHTTPServer:
         connection: sqlite3.Connection | None = None,
         host: str = "127.0.0.1",
         on_session: Callable[[InterviewSession], None] | None = None,
+        on_approval: Callable[[InterviewSession], InterviewSession] | None = None,
         lifetime_seconds: float = 600.0,
     ) -> None:
         if host != "127.0.0.1":
@@ -472,6 +473,7 @@ class InterviewHTTPServer:
         self.session = session
         self.connection = connection
         self.on_session = on_session
+        self.on_approval = on_approval
         self.lifetime_seconds = lifetime_seconds
         self.token = secrets.token_urlsafe(24)
         self._lock = threading.RLock()
@@ -523,7 +525,7 @@ class InterviewHTTPServer:
                         raise ProposalInterviewError("event payload must be an object")
                     with owner._lock:
                         owner.session = owner._apply(payload)
-                        if owner.on_session is not None:
+                        if payload.get("event") != "approve" and owner.on_session is not None:
                             owner.on_session(owner.session)
                         if owner.connection is not None:
                             persist_trace(owner.connection, owner.session)
@@ -604,6 +606,10 @@ class InterviewHTTPServer:
                 f"<form class='question' data-question-id='{question_id}' hx-post='{endpoint}'>"
                 f"<label>{question_id}: {label}</label>{control}<button type='submit'>Save</button></form>"
             )
+        if session.state == "proposal_ready":
+            forms.append(
+                f"<form class='approve' hx-post='{endpoint}'><button type='submit'>Approve proposal</button></form>"
+            )
         body = (
             "<!doctype html><meta charset='utf-8'><title>GigAI create</title>"
             "<main><h1>GigAI proposal interview</h1>"
@@ -618,6 +624,9 @@ class InterviewHTTPServer:
             "else if(first.type==='checkbox'){value=values.filter(x=>x.checked).map(x=>x.value);}"
             "else if(first.tagName==='SELECT'){value=first.value;} else {value=first.value;}"
             "const response=await fetch(form.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'answer',question_id:form.dataset.questionId,value})});"
+            "if(!response.ok){alert((await response.json()).error);} else {location.reload();}});}"
+            "const approval=document.querySelector('form.approve'); if(approval){approval.addEventListener('submit', async (event)=>{event.preventDefault();"
+            "const response=await fetch(approval.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'approve'})});"
             "if(!response.ok){alert((await response.json()).error);} else {location.reload();}});}"
             "</script>"
         ).encode("utf-8")
@@ -635,6 +644,10 @@ class InterviewHTTPServer:
             if not isinstance(reason, str):
                 raise ProposalInterviewError("clarification requires a reason")
             return request_clarification(self.session, reason=reason)
+        if event == "approve":
+            if self.on_approval is None:
+                raise ProposalInterviewError("operator approval is not configured")
+            return self.on_approval(self.session)
         raise ProposalInterviewError("unsupported interview event")
 
 

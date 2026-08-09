@@ -42,6 +42,7 @@ from .proposal_interview import (
     ProposalInterviewError,
     ReferenceDecision,
     build_session,
+    approve_session,
     persist_trace,
     session_from_record,
     session_record,
@@ -257,6 +258,66 @@ def persist_interview_session(
     )
     _persist_interview_trace(workpad, session)
     return entry
+
+
+def approve_interview_session(
+    *,
+    home_root: Path,
+    requested_target: Path | None,
+    start: InterviewStartResult,
+    session: InterviewSession,
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> InterviewSession:
+    """Build and seal the proposal only after the operator approves the interview."""
+
+    if session.state != "proposal_ready":
+        raise LifecycleError("only a proposal_ready interview can be approved")
+    request_path = start.workpad / str(session.request_artifact["path"])
+    try:
+        commission = request_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise LifecycleError("interview request artifact cannot be read as UTF-8") from exc
+    proposal_id = _allocate_local_id(EntityPrefix.GIG_PROPOSAL, uuid_factory)
+    artifacts = _build_proposal_artifacts(
+        gig_id=start.gig_id,
+        project_id=start.project_id,
+        proposal_id=proposal_id,
+        name=session.request_kind,
+        commission=commission,
+        model_target="g22-deterministic",
+        model_output="G22 proposal assembled from the bounded operator interview.",
+        uuid_factory=uuid_factory,
+    )
+    proposal_bytes = next(
+        item.content for item in artifacts if item.path == "manifests/gig-proposal.json"
+    )
+    approved = approve_session(
+        session,
+        proposal_id=proposal_id,
+        proposal_sha256=digest_imported_bytes(proposal_bytes),
+    )
+    snapshot = canonical_json_bytes(session_record(approved))
+    report = validate_serialized_contract("proposal-interview.schema.json", snapshot)
+    if not report.valid:
+        codes = ", ".join(item.code for item in report.findings)
+        raise LifecycleError(f"approved interview snapshot failed validation: {codes}")
+    record_transition(
+        workpad=start.workpad,
+        project_id=start.project_id,
+        gig_id=start.gig_id,
+        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+        transition="proposal_interview_approved",
+        body=f"Operator approved interview {session.session_id} as proposal {proposal_id}.",
+        artifacts=(*artifacts, JournalArtifact("manifests/proposal-interview.json", snapshot)),
+    )
+    _persist_interview_trace(start.workpad, approved)
+    approve_offline(
+        home_root=home_root,
+        requested_target=requested_target,
+        proposal_id=proposal_id,
+        uuid_factory=uuid_factory,
+    )
+    return approved
 
 
 def create_offline(
@@ -1107,6 +1168,7 @@ __all__ = [
     "InterviewStartResult",
     "LifecycleError",
     "RevisionResult",
+    "approve_interview_session",
     "approve_offline",
     "create_offline",
     "persist_interview_session",

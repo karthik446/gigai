@@ -15,10 +15,11 @@ cluster's commit, but does not rewrite an accepted cluster silently.
 | 3 | Short-lived loopback session, token boundary, and bounded lifetime | Accepted; 13 focused tests pass | Pending commit |
 | 2 | CLI entry point and deterministic terminal result | Pending; approval integration remains | — |
 | 4 | Exact selected-reference and byte/digest boundary | Pending | — |
-| 5–6 | Typed questions, answers, clarification rounds, and blocking | Accepted; 8 focused tests pass | Pending commit |
+| 5–6 | Typed questions, answers, clarification rounds, and blocking | Accepted; 8 focused tests pass | `d22b577` |
 | 7 | G18 model-port/provider boundary and deterministic failures | Pending | — |
 | 8–9 | SQLite trace, recovery, revisions, and authority split | Pending | — |
-| 10–11 | Boundary choices, proposal validation, operator approval, idempotence | Pending | — |
+| 10 | Boundary choices and operator-only approval edge | Accepted; 14 focused tests pass | Pending commit |
+| 11 | Proposal approval idempotence and terminal handoff | Pending; lifecycle path is proven, duplicate-event proof remains | — |
 | 12 | Interruption, security, and non-effect fixtures | Pending | — |
 | 13 | S22-01 question-quality corpus and reporting | Pending | — |
 | 14 | Installed replay, manifests, completion audit, terminal handoff | Pending | — |

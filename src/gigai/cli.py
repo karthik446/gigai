@@ -23,6 +23,7 @@ from .diagnostics import render_report_json, run_doctor, run_live_doctor
 from .index import JournalIndexError, JournalProjection, read_index
 from .lifecycle import (
     LifecycleError,
+    approve_interview_session,
     approve_offline,
     create_offline,
     persist_interview_session,
@@ -566,6 +567,12 @@ def create_command(
                     workpad=started.workpad,
                     project_id=started.project_id,
                     gig_id=started.gig_id,
+                    session=session,
+                ),
+                on_approval=lambda session: approve_interview_session(
+                    home_root=home,
+                    requested_target=target_value,
+                    start=started,
                     session=session,
                 ),
             ).start()
