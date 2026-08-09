@@ -7,6 +7,8 @@ from urllib.request import Request, urlopen
 
 from gigai.lifecycle import approve_interview_session, persist_interview_session, start_interview
 from gigai.proposal_interview import InterviewHTTPServer
+from gigai.config import load_config
+from gigai.question_generation import generate_model_questions
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 
@@ -51,6 +53,12 @@ def test_http_answers_then_operator_approval_reaches_terminal_lifecycle(tmp_path
             session=session,
             uuid_factory=values,
         ),
+        on_questions=lambda session: generate_model_questions(
+            config=load_config(home),
+            model_target="offline-default",
+            session=session,
+            reference_bytes=dict(started.reference_bytes),
+        ),
         on_approval=lambda session: approve_interview_session(
             home_root=home,
             requested_target=target,
@@ -77,6 +85,7 @@ def test_http_answers_then_operator_approval_reaches_terminal_lifecycle(tmp_path
         send("effect", "write_workpad")
         send("privacy", "local_only")
         send("capability", "none")
+        send("operator-confirmation", True)
 
         with urlopen(
             Request(endpoint, data=b'{"event":"approve"}', headers={"Content-Type": "application/json"}, method="POST"),
