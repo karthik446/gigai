@@ -493,7 +493,10 @@ Goals and not compatibility claims. They may use disposable provider fixtures,
 fake CLIs, and local recordings, but must not add runtime provider behavior to
 GigAI. Each spike produces a checked-in decision record, a minimal executable
 probe or fixture where useful, and a recommendation that G18 can adopt or
-reject. G18 cannot begin until all five have an accepted outcome.
+reject. S22-01 is part of the prerequisite set for G18 while retaining
+proposal-question quality as its separate authority. G18 cannot begin until
+all six records have an accepted outcome and the tranche terminal handoff is
+accepted.
 
 ##### S18-01 — Common provider-port and evidence contract
 
@@ -544,11 +547,12 @@ that provider calls are impossible in offline fixtures. Distinguish what can
 be enforced deterministically from what requires an explicit user review or a
 later privacy-specific Goal.
 
-Spike tranche exit evidence: five decision records, fixture/probe results for
-each named adapter family, a common-port compatibility matrix, an explicit
-G18-versus-follow-up-goal recommendation, and a documented list of rejected
-assumptions. No provider is called by the proposal path, and no adapter is
-advertised as supported solely because a spike succeeded.
+Spike tranche exit evidence: six decision records, fixture/probe results for
+each named adapter family, the S22-01 proposal-interview protocol and corpus,
+a common-port compatibility matrix, an explicit G18-versus-follow-up-goal
+recommendation, and a documented list of rejected assumptions. No provider is
+called by the proposal path, and no adapter is advertised as supported solely
+because a spike succeeded.
 
 #### G18 — Provider comparison and model handoff
 
