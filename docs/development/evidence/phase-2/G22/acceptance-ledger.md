@@ -18,11 +18,11 @@ cluster's commit, but does not rewrite an accepted cluster silently.
 | 5–6 | Typed questions, answers, clarification rounds, and blocking | Accepted; 8 focused tests pass | `d22b577` |
 | 7 | G18 model-port/provider boundary and deterministic failures | Pending | — |
 | 8 | SQLite trace, recovery, stale-event rejection, and authority split | Pending; recovery/trace slice is committed | — |
-| 9 | Explicit durable interview revisions and parentage | Accepted; 15 focused tests pass | Pending commit |
+| 9 | Explicit durable interview revisions and parentage | Accepted; 15 focused tests pass | `3580c31` |
 | 10 | Boundary choices and operator-only approval edge | Accepted; 14 focused tests pass | `6f7dac9` |
 | 11 | Proposal approval idempotence and terminal handoff | Pending; lifecycle path is proven, duplicate-event proof remains | — |
 | 12 | Interruption, security, and non-effect fixtures | Pending | — |
-| 13 | S22-01 question-quality corpus and reporting | Pending | — |
+| 13 | S22-01 question-quality corpus and reporting | Accepted; four named cases pass | This commit |
 | 14 | Installed replay, manifests, completion audit, terminal handoff | Pending | — |
 
 The ledger never substitutes for the completion audit. At closeout, every row
