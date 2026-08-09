@@ -16,6 +16,7 @@ from referencing import Registry, Resource
 from .canonical import (
     CanonicalizationError,
     EntityPrefix,
+    canonical_json_bytes,
     canonicalize_owned_text,
     digest_imported_bytes,
     parse_json_bytes,
@@ -35,6 +36,8 @@ SCHEMA_NAMES = (
     "gig-proposal.schema.json",
     "goal-graph.schema.json",
     "handoff-frontmatter.schema.json",
+    "model-exchange.schema.json",
+    "model-invocation.schema.json",
     "report.schema.json",
     "review-bundle.schema.json",
     "review-contract.schema.json",
@@ -123,6 +126,127 @@ def validate_serialized_contract(schema_name: str, data: bytes) -> ValidationRep
     ):
         pointer = "$" + "".join(f"/{_pointer(part)}" for part in error.absolute_path)
         findings.append(ValidationFinding(pointer, "schema_invalid", error.message))
+    return _report(findings)
+
+
+def validate_model_invocation(data: Mapping[str, Any] | bytes) -> ValidationReport:
+    """Validate a model invocation schema and its terminal/boundary semantics."""
+
+    payload = data if isinstance(data, bytes) else canonical_json_bytes(data)
+    report = validate_serialized_contract("model-invocation.schema.json", payload)
+    if not report.valid:
+        return report
+    instance = parse_json_bytes(payload)
+    findings: list[ValidationFinding] = []
+    expected_finish = {
+        "succeeded": "completed",
+        "partial": "partial",
+        "failed": "failed",
+        "cancelled": "cancelled",
+        "timeout": "timeout",
+        "unavailable": "unavailable",
+        "blocked": "blocked",
+    }[instance["outcome"]]
+    if instance["finish"] != expected_finish:
+        findings.append(
+            ValidationFinding(
+                "finish",
+                "terminal_finish_mismatch",
+                "finish must match the terminal outcome",
+            )
+        )
+    boundary = instance["boundary"]
+    if boundary["redaction"]["result"] == "failed" and instance["outcome"] != "blocked":
+        findings.append(
+            ValidationFinding(
+                "boundary/redaction/result",
+                "redaction_failure_not_blocked",
+                "a failed redaction check must produce a blocked invocation",
+            )
+        )
+    if boundary["network"]["result"] == "denied" and instance["outcome"] != "blocked":
+        findings.append(
+            ValidationFinding(
+                "boundary/network/result",
+                "network_denial_not_blocked",
+                "a denied network check must produce a blocked invocation",
+            )
+        )
+    return _report(findings)
+
+
+def validate_model_exchange(data: Mapping[str, Any] | bytes) -> ValidationReport:
+    """Validate a model handoff/comparison record and cross-field limits."""
+
+    payload = data if isinstance(data, bytes) else canonical_json_bytes(data)
+    report = validate_serialized_contract("model-exchange.schema.json", payload)
+    if not report.valid:
+        return report
+    instance = parse_json_bytes(payload)
+    findings: list[ValidationFinding] = []
+    if instance["kind"] == "handoff":
+        handoff = instance["handoff"]
+        if handoff is None:
+            findings.append(
+                ValidationFinding("handoff", "handoff_missing", "handoff records require handoff details")
+            )
+        elif handoff["index"] > handoff["cap"]:
+            findings.append(
+                ValidationFinding(
+                    "handoff/index",
+                    "handoff_limit_exhausted",
+                    "handoff index cannot exceed the fixed edge cap",
+                )
+            )
+        if instance["status"] != "received" and instance["status"] not in {"cancelled", "unavailable", "blocked"}:
+            findings.append(
+                ValidationFinding(
+                    "status",
+                    "handoff_status_mismatch",
+                    "handoff records must report received or a terminal blocked outcome",
+                )
+            )
+    if instance["kind"] == "comparison":
+        comparison = instance["comparison"]
+        if comparison is None:
+            findings.append(
+                ValidationFinding("comparison", "comparison_missing", "comparison records require comparison details")
+            )
+        else:
+            invocation_ids = [item["invocation_id"] for item in comparison["independent_artifacts"]]
+            if len(set(invocation_ids)) != len(invocation_ids):
+                findings.append(
+                    ValidationFinding(
+                        "comparison/independent_artifacts",
+                        "comparison_not_independent",
+                        "comparison artifacts must come from distinct invocations",
+                    )
+                )
+            if instance["status"] == "disagreement":
+                if not comparison["requires_human_adjudication"]:
+                    findings.append(
+                        ValidationFinding(
+                            "comparison/requires_human_adjudication",
+                            "disagreement_without_adjudication",
+                            "disagreement requires human adjudication",
+                        )
+                    )
+                if comparison["adjudication_input"] is None:
+                    findings.append(
+                        ValidationFinding(
+                            "comparison/adjudication_input",
+                            "disagreement_without_input",
+                            "disagreement requires an adjudication input artifact",
+                        )
+                    )
+        if instance["status"] not in {"agreement", "disagreement"}:
+            findings.append(
+                ValidationFinding(
+                    "status",
+                    "comparison_status_mismatch",
+                    "comparison records must report agreement or disagreement",
+                )
+            )
     return _report(findings)
 
 
@@ -793,6 +917,8 @@ __all__ = [
     "ValidationFinding",
     "ValidationReport",
     "validate_goal_graph",
+    "validate_model_exchange",
+    "validate_model_invocation",
     "validate_proposal_workpad",
     "validate_serialized_contract",
 ]

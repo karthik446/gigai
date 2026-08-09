@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:model-exchange:1",
+  "title": "GigAI model handoff and comparison record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_version",
+    "record_sha256",
+    "run_id",
+    "edge_id",
+    "source_goal_id",
+    "receiver_goal_id",
+    "kind",
+    "source_invocation_ids",
+    "source_artifacts",
+    "handoff",
+    "comparison",
+    "status",
+    "automatic_fallback",
+    "retry_count",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "record_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "record_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256", "description": "Digest of the canonical record with this field omitted."},
+    "run_id": {"$ref": "urn:gigai:schema:common:1#/$defs/run_id"},
+    "edge_id": {"$ref": "urn:gigai:schema:common:1#/$defs/edge_id"},
+    "source_goal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"},
+    "receiver_goal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"},
+    "kind": {"type": "string", "enum": ["handoff", "comparison"]},
+    "source_invocation_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "urn:gigai:schema:common:1#/$defs/invocation_id"}},
+    "source_artifacts": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/exchange_artifact"}},
+    "handoff": {
+      "oneOf": [
+        {"$ref": "#/$defs/handoff"},
+        {"type": "null"}
+      ]
+    },
+    "comparison": {
+      "oneOf": [
+        {"$ref": "#/$defs/comparison"},
+        {"type": "null"}
+      ]
+    },
+    "status": {"type": "string", "enum": ["received", "agreement", "disagreement", "cancelled", "unavailable", "blocked"]},
+    "automatic_fallback": {"type": "boolean", "const": false},
+    "retry_count": {"type": "integer", "const": 0},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "artifact_ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "exchange_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact", "invocation_id", "goal_id"],
+      "properties": {
+        "artifact": {"$ref": "#/$defs/artifact_ref"},
+        "invocation_id": {"$ref": "urn:gigai:schema:common:1#/$defs/invocation_id"},
+        "goal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"}
+      }
+    },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "cap", "input_artifact", "parent_artifact", "hidden_context"],
+      "properties": {
+        "index": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "cap": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "input_artifact": {"$ref": "#/$defs/artifact_ref"},
+        "parent_artifact": {"$ref": "#/$defs/artifact_ref"},
+        "hidden_context": {"type": "boolean", "const": false}
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["independent_artifacts", "requires_human_adjudication", "selected_winner", "adjudication_input"],
+      "properties": {
+        "independent_artifacts": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/exchange_artifact"}},
+        "requires_human_adjudication": {"type": "boolean"},
+        "selected_winner": {"type": "null"},
+        "adjudication_input": {
+          "oneOf": [
+            {"$ref": "#/$defs/artifact_ref"},
+            {"type": "null"}
+          ]
+        }
+      }
+    }
+  }
+}

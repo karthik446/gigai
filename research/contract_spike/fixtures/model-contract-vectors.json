@@ -1,0 +1,143 @@
+{
+  "schema_version": "1.0",
+  "vectors": [
+    {
+      "name": "model-invocation-success",
+      "input": {
+        "schema_version": "1.0",
+        "record_version": 1,
+        "run_id": "run_00000000-0000-4000-8000-000000000001",
+        "goal_id": "goal_00000000-0000-4000-8000-000000000002",
+        "invocation_id": "inv_00000000-0000-4000-8000-000000000005",
+        "role": "reviewer",
+        "provider_family": "fixture_provider",
+        "configured_selector": "fixture-target",
+        "endpoint_identity": "fixture-endpoint",
+        "resolved_model": "fixture-model",
+        "adapter_identity": "fixture-adapter@1",
+        "request": {
+          "selected_references": [
+            {
+              "reference_id": "ref_00000000-0000-4000-8000-000000000006",
+              "content_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          ],
+          "request_artifact": {
+            "path": "invocations/0005/request.json",
+            "content_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "canonical_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "media_type": "application/json",
+            "size_bytes": 1
+          },
+          "request_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "outcome": "succeeded",
+        "finish": "completed",
+        "cancellation": "not_applicable",
+        "error": null,
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "total_tokens": 15,
+          "cost": "0.01",
+          "currency": "USD",
+          "cost_status": "provider_reported"
+        },
+        "boundary": {
+          "redaction": {"policy_version": "fixture-boundary-1", "result": "passed"},
+          "credential": {"reference": null, "lookup": "not_requested"},
+          "network": {"policy": "explicit_permission", "result": "permitted"},
+          "check_order_version": "s18-05-1"
+        },
+        "extensions": [],
+        "replay": {
+          "stable_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "variable_fields": ["terminal_committed_at"]
+        },
+        "terminal_committed_at": "2026-08-09T00:00:00Z"
+      },
+      "canonical_utf8": "{\"adapter_identity\":\"fixture-adapter@1\",\"boundary\":{\"check_order_version\":\"s18-05-1\",\"credential\":{\"lookup\":\"not_requested\",\"reference\":null},\"network\":{\"policy\":\"explicit_permission\",\"result\":\"permitted\"},\"redaction\":{\"policy_version\":\"fixture-boundary-1\",\"result\":\"passed\"}},\"cancellation\":\"not_applicable\",\"configured_selector\":\"fixture-target\",\"endpoint_identity\":\"fixture-endpoint\",\"error\":null,\"extensions\":[],\"finish\":\"completed\",\"goal_id\":\"goal_00000000-0000-4000-8000-000000000002\",\"invocation_id\":\"inv_00000000-0000-4000-8000-000000000005\",\"outcome\":\"succeeded\",\"provider_family\":\"fixture_provider\",\"record_version\":1,\"replay\":{\"stable_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"variable_fields\":[\"terminal_committed_at\"]},\"request\":{\"request_artifact\":{\"canonical_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"content_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"media_type\":\"application/json\",\"path\":\"invocations/0005/request.json\",\"size_bytes\":1},\"request_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"selected_references\":[{\"content_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"reference_id\":\"ref_00000000-0000-4000-8000-000000000006\"}]},\"resolved_model\":\"fixture-model\",\"role\":\"reviewer\",\"run_id\":\"run_00000000-0000-4000-8000-000000000001\",\"schema_version\":\"1.0\",\"terminal_committed_at\":\"2026-08-09T00:00:00Z\",\"usage\":{\"cost\":\"0.01\",\"cost_status\":\"provider_reported\",\"currency\":\"USD\",\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}",
+      "sha256": "sha256:6e52e16193846d056471b788baa5b9e4c357eab567a7073ce4fe8402829d56ad"
+    },
+    {
+      "name": "model-exchange-disagreement",
+      "input": {
+        "schema_version": "1.0",
+        "record_version": 1,
+        "record_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "run_id": "run_00000000-0000-4000-8000-000000000001",
+        "edge_id": "edge_00000000-0000-4000-8000-000000000004",
+        "source_goal_id": "goal_00000000-0000-4000-8000-000000000002",
+        "receiver_goal_id": "goal_00000000-0000-4000-8000-000000000003",
+        "kind": "comparison",
+        "source_invocation_ids": ["inv_00000000-0000-4000-8000-000000000005", "inv_00000000-0000-4000-8000-000000000007"],
+        "source_artifacts": [
+          {
+            "artifact": {
+              "path": "outputs/source.json",
+              "content_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+              "canonical_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+              "media_type": "application/json",
+              "size_bytes": 1
+            },
+            "invocation_id": "inv_00000000-0000-4000-8000-000000000005",
+            "goal_id": "goal_00000000-0000-4000-8000-000000000002"
+          },
+          {
+            "artifact": {
+              "path": "outputs/right.json",
+              "content_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+              "canonical_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+              "media_type": "application/json",
+              "size_bytes": 1
+            },
+            "invocation_id": "inv_00000000-0000-4000-8000-000000000007",
+            "goal_id": "goal_00000000-0000-4000-8000-000000000003"
+          }
+        ],
+        "handoff": null,
+        "comparison": {
+          "independent_artifacts": [
+            {
+              "artifact": {
+                "path": "outputs/source.json",
+                "content_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                "canonical_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                "media_type": "application/json",
+                "size_bytes": 1
+              },
+              "invocation_id": "inv_00000000-0000-4000-8000-000000000005",
+              "goal_id": "goal_00000000-0000-4000-8000-000000000002"
+            },
+            {
+              "artifact": {
+                "path": "outputs/right.json",
+                "content_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                "canonical_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                "media_type": "application/json",
+                "size_bytes": 1
+              },
+              "invocation_id": "inv_00000000-0000-4000-8000-000000000007",
+              "goal_id": "goal_00000000-0000-4000-8000-000000000003"
+            }
+          ],
+          "requires_human_adjudication": true,
+          "selected_winner": null,
+          "adjudication_input": {
+            "path": "comparisons/adjudication.json",
+            "content_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "canonical_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "media_type": "application/json",
+            "size_bytes": 1
+          }
+        },
+        "status": "disagreement",
+        "automatic_fallback": false,
+        "retry_count": 0,
+        "created_at": "2026-08-09T00:00:00Z"
+      },
+      "canonical_utf8": "{\"automatic_fallback\":false,\"comparison\":{\"adjudication_input\":{\"canonical_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"content_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"media_type\":\"application/json\",\"path\":\"comparisons/adjudication.json\",\"size_bytes\":1},\"independent_artifacts\":[{\"artifact\":{\"canonical_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"content_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"media_type\":\"application/json\",\"path\":\"outputs/source.json\",\"size_bytes\":1},\"goal_id\":\"goal_00000000-0000-4000-8000-000000000002\",\"invocation_id\":\"inv_00000000-0000-4000-8000-000000000005\"},{\"artifact\":{\"canonical_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"content_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"media_type\":\"application/json\",\"path\":\"outputs/right.json\",\"size_bytes\":1},\"goal_id\":\"goal_00000000-0000-4000-8000-000000000003\",\"invocation_id\":\"inv_00000000-0000-4000-8000-000000000007\"}],\"requires_human_adjudication\":true,\"selected_winner\":null},\"created_at\":\"2026-08-09T00:00:00Z\",\"edge_id\":\"edge_00000000-0000-4000-8000-000000000004\",\"handoff\":null,\"kind\":\"comparison\",\"receiver_goal_id\":\"goal_00000000-0000-4000-8000-000000000003\",\"record_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"record_version\":1,\"retry_count\":0,\"run_id\":\"run_00000000-0000-4000-8000-000000000001\",\"schema_version\":\"1.0\",\"source_artifacts\":[{\"artifact\":{\"canonical_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"content_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"media_type\":\"application/json\",\"path\":\"outputs/source.json\",\"size_bytes\":1},\"goal_id\":\"goal_00000000-0000-4000-8000-000000000002\",\"invocation_id\":\"inv_00000000-0000-4000-8000-000000000005\"},{\"artifact\":{\"canonical_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"content_sha256\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"media_type\":\"application/json\",\"path\":\"outputs/right.json\",\"size_bytes\":1},\"goal_id\":\"goal_00000000-0000-4000-8000-000000000003\",\"invocation_id\":\"inv_00000000-0000-4000-8000-000000000007\"}],\"source_goal_id\":\"goal_00000000-0000-4000-8000-000000000002\",\"source_invocation_ids\":[\"inv_00000000-0000-4000-8000-000000000005\",\"inv_00000000-0000-4000-8000-000000000007\"],\"status\":\"disagreement\"}",
+      "sha256": "sha256:31bf551226f988a43278080351f4d501763affc54a04e9d119b1ac9902dc1189"
+    }
+  ]
+}

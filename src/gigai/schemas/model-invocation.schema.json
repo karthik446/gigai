@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:model-invocation:1",
+  "title": "GigAI model invocation record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_version",
+    "run_id",
+    "goal_id",
+    "invocation_id",
+    "role",
+    "provider_family",
+    "configured_selector",
+    "endpoint_identity",
+    "resolved_model",
+    "adapter_identity",
+    "request",
+    "outcome",
+    "finish",
+    "cancellation",
+    "error",
+    "usage",
+    "boundary",
+    "extensions",
+    "replay",
+    "terminal_committed_at"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "record_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "run_id": {"$ref": "urn:gigai:schema:common:1#/$defs/run_id"},
+    "goal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"},
+    "invocation_id": {"$ref": "urn:gigai:schema:common:1#/$defs/invocation_id"},
+    "role": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+    "provider_family": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+    "configured_selector": {"type": "string", "minLength": 1, "maxLength": 255},
+    "endpoint_identity": {"type": ["string", "null"], "maxLength": 255},
+    "resolved_model": {"type": ["string", "null"], "maxLength": 255},
+    "adapter_identity": {"type": "string", "minLength": 1, "maxLength": 255},
+    "request": {"$ref": "#/$defs/request"},
+    "outcome": {
+      "type": "string",
+      "enum": ["succeeded", "partial", "failed", "cancelled", "timeout", "unavailable", "blocked"]
+    },
+    "finish": {
+      "type": "string",
+      "enum": ["completed", "partial", "failed", "cancelled", "timeout", "unavailable", "blocked"]
+    },
+    "cancellation": {
+      "type": "string",
+      "enum": ["not_requested", "requested", "acknowledged", "forced", "unsupported", "not_applicable"]
+    },
+    "error": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/error"},
+        {"type": "null"}
+      ]
+    },
+    "usage": {"$ref": "urn:gigai:schema:common:1#/$defs/usage"},
+    "boundary": {"$ref": "#/$defs/boundary"},
+    "extensions": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/extension"}},
+    "replay": {"$ref": "#/$defs/replay"},
+    "terminal_committed_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "reference_id": {"type": "string", "pattern": "^ref_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "artifact_ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selected_references", "request_artifact", "request_sha256"],
+      "properties": {
+        "selected_references": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/selected_reference"}},
+        "request_artifact": {"$ref": "#/$defs/artifact_ref"},
+        "request_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "selected_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference_id", "content_sha256"],
+      "properties": {
+        "reference_id": {"$ref": "#/$defs/reference_id"},
+        "content_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["redaction", "credential", "network", "check_order_version"],
+      "properties": {
+        "redaction": {"$ref": "#/$defs/redaction"},
+        "credential": {"$ref": "#/$defs/credential"},
+        "network": {"$ref": "#/$defs/network"},
+        "check_order_version": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 80}
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_version", "result"],
+      "properties": {
+        "policy_version": {"type": "string", "minLength": 1, "maxLength": 80},
+        "result": {"type": "string", "enum": ["not_started", "passed", "failed"]}
+      }
+    },
+    "credential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "lookup"],
+      "properties": {
+        "reference": {
+          "oneOf": [
+            {"$ref": "#/$defs/credential_reference"},
+            {"type": "null"}
+          ]
+        },
+        "lookup": {"type": "string", "enum": ["not_requested", "reference_valid", "available", "missing", "invalid"]}
+      }
+    },
+    "credential_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "reference"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+        "kind": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 80},
+        "reference": {"type": "string", "minLength": 1, "maxLength": 255}
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "result"],
+      "properties": {
+        "policy": {"type": "string", "enum": ["offline", "explicit_permission"]},
+        "result": {"type": "string", "enum": ["offline", "denied", "permitted", "not_checked"]}
+      }
+    },
+    "extension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "name", "value_type", "value"],
+      "properties": {
+        "namespace": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 80},
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 120},
+        "value_type": {"type": "string", "enum": ["string", "integer", "boolean", "object", "array", "null"]},
+        "value": {}
+      },
+      "allOf": [
+        {"if": {"properties": {"value_type": {"const": "string"}}}, "then": {"properties": {"value": {"type": "string"}}}},
+        {"if": {"properties": {"value_type": {"const": "integer"}}}, "then": {"properties": {"value": {"type": "integer"}}}},
+        {"if": {"properties": {"value_type": {"const": "boolean"}}}, "then": {"properties": {"value": {"type": "boolean"}}}},
+        {"if": {"properties": {"value_type": {"const": "object"}}}, "then": {"properties": {"value": {"type": "object"}}}},
+        {"if": {"properties": {"value_type": {"const": "array"}}}, "then": {"properties": {"value": {"type": "array"}}}},
+        {"if": {"properties": {"value_type": {"const": "null"}}}, "then": {"properties": {"value": {"type": "null"}}}}
+      ]
+    },
+    "replay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stable_sha256", "variable_fields"],
+      "properties": {
+        "stable_sha256": {"$ref": "#/$defs/sha256"},
+        "variable_fields": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 120}}
+      }
+    }
+  }
+}

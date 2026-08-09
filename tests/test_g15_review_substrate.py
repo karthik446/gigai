@@ -143,7 +143,7 @@ def _contract() -> dict[str, object]:
 
 
 def test_g15_additive_schema_inventory_is_exact() -> None:
-    assert len(SCHEMA_NAMES) == 19
+    assert len(SCHEMA_NAMES) == 21
     assert {
         "review-bundle.schema.json",
         "review-contract.schema.json",
@@ -152,6 +152,8 @@ def test_g15_additive_schema_inventory_is_exact() -> None:
         "adjudication.schema.json",
         "trace.schema.json",
         "report.schema.json",
+        "model-exchange.schema.json",
+        "model-invocation.schema.json",
     }.issubset(SCHEMA_NAMES)
 
 

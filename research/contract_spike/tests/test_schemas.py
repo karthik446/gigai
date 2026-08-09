@@ -25,6 +25,8 @@ EXPECTED_SCHEMA_NAMES = {
     "gig-proposal.schema.json",
     "goal-graph.schema.json",
     "handoff-frontmatter.schema.json",
+    "model-exchange.schema.json",
+    "model-invocation.schema.json",
     "report.schema.json",
     "review-bundle.schema.json",
     "review-contract.schema.json",
@@ -647,6 +649,63 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "status": "addressed",
         "created_at": NOW,
     }
+    invocation_id = "inv_99999999-9999-4999-8999-999999999999"
+    invocation = {
+        "schema_version": "1.0",
+        "record_version": 1,
+        "run_id": RUN_ID,
+        "goal_id": GOAL_A,
+        "invocation_id": invocation_id,
+        "role": "researcher",
+        "provider_family": "openai_api",
+        "configured_selector": "target-a",
+        "endpoint_identity": "responses",
+        "resolved_model": "model-a",
+        "adapter_identity": "adapter/openai@1",
+        "request": {
+            "selected_references": [{"reference_id": reference_id, "content_sha256": ZERO_DIGEST}],
+            "request_artifact": artifact("invocations/inv-999/request.json"),
+            "request_sha256": ZERO_DIGEST,
+        },
+        "outcome": "succeeded",
+        "finish": "completed",
+        "cancellation": "not_applicable",
+        "error": None,
+        "usage": usage(),
+        "boundary": {
+            "redaction": {"policy_version": "fixture-1", "result": "passed"},
+            "credential": {"reference": None, "lookup": "not_requested"},
+            "network": {"policy": "explicit_permission", "result": "permitted"},
+            "check_order_version": "s18-05-1",
+        },
+        "extensions": [{"namespace": "provider", "name": "finish_reason", "value_type": "string", "value": "stop"}],
+        "replay": {"stable_sha256": ZERO_DIGEST, "variable_fields": ["created_at"]},
+        "terminal_committed_at": "2026-08-02T12:05:00Z",
+    }
+    exchange = {
+        "schema_version": "1.0",
+        "record_version": 1,
+        "record_sha256": ZERO_DIGEST,
+        "run_id": RUN_ID,
+        "edge_id": "edge_99999999-9999-4999-8999-999999999999",
+        "source_goal_id": GOAL_A,
+        "receiver_goal_id": GOAL_B,
+        "kind": "handoff",
+        "source_invocation_ids": [invocation_id],
+        "source_artifacts": [{"artifact": artifact("outputs/source.json"), "invocation_id": invocation_id, "goal_id": GOAL_A}],
+        "handoff": {
+            "index": 1,
+            "cap": 1,
+            "input_artifact": artifact("handoffs/received.json"),
+            "parent_artifact": artifact("outputs/source.json"),
+            "hidden_context": False,
+        },
+        "comparison": None,
+        "status": "received",
+        "automatic_fallback": False,
+        "retry_count": 0,
+        "created_at": NOW,
+    }
     return {
         "urn:gigai:schema:gig-proposal:1": proposal,
         "urn:gigai:schema:active-gig-version:1": active,
@@ -666,6 +725,8 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "urn:gigai:schema:addressed-artifact:1": addressed,
         "urn:gigai:schema:capability-manifest:1": capability_manifest(),
         "urn:gigai:schema:capability-installation:1": capability_installation(),
+        "urn:gigai:schema:model-invocation:1": invocation,
+        "urn:gigai:schema:model-exchange:1": exchange,
     }
 
 
@@ -706,7 +767,7 @@ class SerializedContractTests(unittest.TestCase):
         )
 
     def test_all_schema_documents_are_valid_draft_2020_12(self) -> None:
-        self.assertEqual(len(self.schemas), 19)
+        self.assertEqual(len(self.schemas), 21)
         for schema_id, schema in self.schemas.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)
