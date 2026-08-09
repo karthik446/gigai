@@ -307,3 +307,22 @@ def test_loopback_http_requires_token_and_preserves_session_boundary() -> None:
         assert error.value.code == 404
     finally:
         server.close()
+
+
+def test_loopback_http_rejects_malformed_payload_and_expires() -> None:
+    server = InterviewHTTPServer(_session(), lifetime_seconds=0.05).start()
+    try:
+        request = Request(
+            f"{server.url}/events",
+            data=b"not-json",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as error:
+            urlopen(request, timeout=2)
+        assert error.value.code == 409
+        assert server.wait(timeout=2).state == "questions_pending"
+        with pytest.raises((HTTPError, OSError)):
+            urlopen(server.url, timeout=2)
+    finally:
+        server.close()

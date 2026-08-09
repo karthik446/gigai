@@ -491,7 +491,7 @@ def init_command(target: Path | None, home_value: Path | None, as_json: bool) ->
     "--model-target",
     default="offline-default",
     show_default=True,
-    help="Configured deterministic model target used only for offline fixture drafting.",
+    help="Configured model target for bounded question generation; offline-default is deterministic.",
 )
 @click.option(
     "--request",

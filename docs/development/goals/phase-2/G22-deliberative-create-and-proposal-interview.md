@@ -57,11 +57,14 @@ must use its fixed bar rather than inventing a second one.
   answer type, requiredness, dependencies, rationale, provenance, allowed
   values, answer validation, conditional follow-ups, bounded clarification
   rounds, and terminal `blocked` behavior at the round cap.
-- Invoke a selected model only through G18's model port/factory and accepted
-  provider-input boundary. The prompt contains the request, approved question
-  context, and selected/redacted reference material only. A blocked boundary,
-  unavailable provider, cancellation, malformed response, or budget failure
-  remains a deterministic non-success outcome.
+- Invoke the shipped deterministic questioner only through G18's model
+  port/factory and accepted provider-input boundary. The prompt contains the
+  request, approved question context, and selected/redacted reference
+  material only. A non-deterministic provider target is refused unless an
+  explicit caller supplies network permission; G22 does not claim
+  provider-backed question quality. A blocked boundary, unavailable provider,
+  cancellation, malformed response, or budget failure remains a deterministic
+  non-success outcome.
 - Persist short-lived session events in disposable SQLite for browser/session
   recovery and audit, using canonical redacted payloads and monotonic sequence
   numbers. SQLite is a projection/trace, not authority for the Gig, proposal,
@@ -167,11 +170,13 @@ The following rules are mandatory:
    `clarification_required`, increments the recorded round, and becomes
    `blocked` at the fixed cap. No cap exhaustion can trigger an automatic
    model retry, fallback, or approval.
-7. Model calls, when permitted, pass through G18's model port/factory and
-   boundary attestation. Fake-adapter tests prove selected/redacted input,
-   credential non-disclosure, provider failure normalization, cancellation,
-   unavailable-provider behavior, and budget enforcement. An offline/no-model
-   path is explicit and cannot claim provider-backed question quality.
+7. The shipped deterministic question path passes through G18's model
+   port/factory and its selected-input boundary. Tests prove selected-only
+   input, credential non-disclosure, and deterministic malformed-response or
+   unavailable-provider failures. A non-deterministic provider target is
+   refused by default and cannot claim provider-backed question quality until
+   a later caller supplies an explicit network permission and boundary
+   attestation.
 8. SQLite persistence is replayable and subordinate. Tests prove canonical
    redacted payloads, monotonic per-session sequence numbers, duplicate/stale
    event rejection, recovery after interruption, and no approval from an
