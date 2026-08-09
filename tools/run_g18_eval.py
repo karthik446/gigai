@@ -1,4 +1,8 @@
-"""Run G18's offline candidate-judge check against S16-EVAL final holdout."""
+"""Verify G18's offline S16-EVAL scoring plumbing against the final holdout.
+
+The observed findings intentionally copy the frozen labels. This is an oracle
+pipeline check, not a production-judge evaluation.
+"""
 
 from __future__ import annotations
 
@@ -50,12 +54,13 @@ def main() -> None:
     ]
     result = score_dataset(records)
     if not _passes(result):
-        raise AssertionError(f"offline candidate judge failed fixed S16-EVAL bar: {result}")
-    print("candidate_judge=deterministic_fixture")
+        raise AssertionError(f"offline oracle pipeline failed fixed S16-EVAL bar: {result}")
+    print("candidate_judge_scored=false")
+    print("observed_findings_source=ground_truth_copy")
     print("split=final_held_out_acceptance")
     print(f"case_count={result['case_count']}")
     print(f"metrics={result}")
-    print("bar=PASS")
+    print("methodology_plumbing=PASS")
 
 
 if __name__ == "__main__":

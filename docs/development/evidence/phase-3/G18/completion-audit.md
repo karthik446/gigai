@@ -3,7 +3,7 @@
 - Status: Complete.
 - Scope: provider invocation, explicit input boundary, comparison, bounded
   handoff, normalized terminal outcomes, budget reservation, offline replay,
-  and evaluator-bar reporting.
+  and evaluator-methodology plumbing.
 - Contract boundary: the accepted 21-resource package is used unchanged. No
   schema, canonical vector, journal transition, Goal authority, or target
   mutation contract was amended during implementation.
@@ -53,7 +53,8 @@ uv run python tools/run_g18_mutation.py
 mutation_killed=8/8
 
 uv run python tools/run_g18_eval.py
-candidate_judge=deterministic_fixture
+candidate_judge_scored=false
+observed_findings_source=ground_truth_copy
 split=final_held_out_acceptance
 case_count=36
 precision=1.0, recall=1.0, false_positive_rate=0.0
@@ -61,7 +62,7 @@ citation_support_correctness=1.0, severity_within_one_tier=1.0
 confidence_ece=0.025000000000000022
 abstention_sensitivity=1.0, abstention_specificity=1.0
 critical_forbidden_findings=0
-bar=PASS
+methodology_plumbing=PASS
 
 uv run python tools/verify_installed_schemas.py
 verified 21 installed GigAI schemas
@@ -78,12 +79,14 @@ rtk git diff --check
 pass
 ```
 
-The S16-EVAL run uses the deterministic fixture judge to prove the frozen
-methodology, labels, final-held-out split, and scoring path. It is not a claim
-that an external provider has been calibrated. No live provider endpoint was
-contacted, no live credential was used, and no target repository was mutated.
-Credentialed live proofs remain explicit operator evidence and are not needed
-for offline CI or installed-artifact acceptance.
+The S16-EVAL run is an oracle pipeline check: it copies each frozen expected
+finding set into the observed side to verify corpus shape, split isolation,
+metric calculation, and fixed-bar enforcement. It does not score a production
+or candidate model judge, and it does not establish provider calibration. No
+live provider endpoint was contacted, no live credential was used, and no
+target repository was mutated. A real candidate judge must be evaluated
+separately against the immutable final-held-out set before claiming judge
+quality.
 
 ## Commits
 
