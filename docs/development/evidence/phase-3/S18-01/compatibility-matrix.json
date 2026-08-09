@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "spike": "S18-01",
+  "common_fields": [
+    "request",
+    "identity",
+    "output",
+    "finish",
+    "error",
+    "cancellation",
+    "usage",
+    "cost",
+    "replay"
+  ],
+  "candidate_families": {
+    "openai_api": {"transport": "https_json_responses", "decision": "existing_g11_adapter; candidate common contract"},
+    "openrouter_api": {"transport": "https_json_chat_completions_or_responses", "decision": "existing_g11_adapter; candidate common contract"},
+    "codex_cli": {"transport": "local_process_stdio", "decision": "deferred_to_s18_02"},
+    "claude_cli": {"transport": "local_process_stdio", "decision": "deferred_to_s18_02"},
+    "anthropic_api": {"transport": "https_json_messages", "decision": "deferred_to_s18_03"},
+    "local_ollama": {"transport": "local_http_ndjson", "decision": "deferred_to_s18_03"}
+  },
+  "support_claim": false,
+  "offline_fixture": "research/s18_01/matrix.py:CANDIDATE_MATRIX"
+}

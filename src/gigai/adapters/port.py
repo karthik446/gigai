@@ -16,6 +16,12 @@ class CapabilityMismatchError(ModelInvocationError):
     code = "model_capability_mismatch"
 
 
+class ModelInvocationCancelled(ModelInvocationError):
+    """The caller cancelled an invocation before a successful result."""
+
+    code = "model_invocation_cancelled"
+
+
 @dataclass(frozen=True)
 class InvocationRequest:
     """One configured target invocation, independent of its transport."""
@@ -97,6 +103,7 @@ __all__ = [
     "InvocationRequest",
     "InvocationResult",
     "ModelInvocationError",
+    "ModelInvocationCancelled",
     "ModelInvocationPort",
     "NormalizedUsage",
 ]

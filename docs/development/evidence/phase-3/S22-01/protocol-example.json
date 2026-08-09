@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "transport": "loopback-only-proposed",
+  "session_id": "session-fixture",
+  "request_kind": "repository-feature",
+  "state": "proposal_ready",
+  "question": {
+    "question_id": "effect",
+    "answer_type": "choice",
+    "options": ["read_local", "write_workpad"],
+    "provenance": "fixture://s22-01/effect"
+  },
+  "answer": {"question_id": "effect", "value": "write_workpad"},
+  "explicit_non_effects": ["provider_invocation", "credential_access", "target_mutation", "background_work"]
+}

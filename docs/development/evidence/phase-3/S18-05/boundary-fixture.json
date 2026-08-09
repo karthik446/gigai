@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "spike": "S18-05",
+  "fixture": "research/s18_05/boundary.py:build_fixture_bundle",
+  "cases": [
+    {"case_id": "selected-only", "result": "eligible", "assertion_id": "s18-05.selection.explicit"},
+    {"case_id": "unselected-excluded", "result": "eligible", "assertion_id": "s18-05.selection.no_implicit_all"},
+    {"case_id": "redaction-failed", "result": "blocked/redaction_failed", "assertion_id": "s18-05.redaction.fail_closed"},
+    {"case_id": "redaction-success-reference-only", "result": "eligible", "assertion_id": "s18-05.credential.reference_only"},
+    {"case_id": "offline-network-denied", "result": "blocked/network_denied", "assertion_id": "s18-05.network.offline_denial"},
+    {"case_id": "unallowed-reference", "result": "blocked/reference_not_allowed", "assertion_id": "s18-05.selection.allowlist"},
+    {"case_id": "invalid-credential-reference", "result": "blocked/credential_reference_invalid", "assertion_id": "s18-05.credential.reference_validation"},
+    {"case_id": "reference-digest-mismatch", "result": "blocked/reference_digest_mismatch", "assertion_id": "s18-05.selection.digest"},
+    {"case_id": "unsafe-reference-path", "result": "blocked/unsafe_reference_path", "assertion_id": "s18-05.selection.path"}
+  ],
+  "real_credentials": "forbidden",
+  "provider_calls": "forbidden",
+  "target_effects": "forbidden"
+}

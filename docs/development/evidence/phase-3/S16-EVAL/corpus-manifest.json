@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "spike": "S16-EVAL",
+  "corpus_id": "s16-eval-prealpha-1",
+  "matrix_version": "s16-eval-matrix-1",
+  "case_factory": "research/s16_eval/methodology.py:build_case_manifest",
+  "source_bytes": "deterministic case source bytes are derived from committed case IDs and behavior labels; SHA-256 is recorded per generated case",
+  "coverage_per_behavior": 8,
+  "split_counts_per_behavior": {
+    "development": 4,
+    "calibration": 2,
+    "final_held_out_acceptance": 2
+  },
+  "total_case_assignments": 144,
+  "total_cases_by_split": {
+    "development": 72,
+    "calibration": 36,
+    "final_held_out_acceptance": 36
+  },
+  "category_labels": [
+    "positive",
+    "negative",
+    "ambiguous",
+    "incomplete-reference"
+  ],
+  "contamination_rule": "A case used to tune taxonomy, prompt, threshold, rubric, judge, or harness cannot certify the final bar.",
+  "behavior_matrix": [
+    {"behavior_id": "artifact_tamper", "source": "G16-10", "label": "tampered artifact rejection"},
+    {"behavior_id": "missing_reference", "source": "G16-10", "label": "missing-reference rejection"},
+    {"behavior_id": "invented_citation", "source": "G16-10", "label": "invented-citation rejection"},
+    {"behavior_id": "missing_citation", "source": "S16-EXT", "label": "missing-citation detection"},
+    {"behavior_id": "citation_support", "source": "S16-EXT", "label": "citation supports the attached claim"},
+    {"behavior_id": "duplicate_merge", "source": "S16-EXT", "label": "duplicate finding merge with provenance"},
+    {"behavior_id": "disagreement_adjudication", "source": "G16-10", "label": "disagreement preservation and adjudication"},
+    {"behavior_id": "unsupported_clarification", "source": "G16-10", "label": "unsupported clarification rejection"},
+    {"behavior_id": "missing_context_block", "source": "S16-EXT", "label": "missing-context blocking clarification"},
+    {"behavior_id": "partial_address", "source": "G16-10", "label": "partial-address detection at closure"},
+    {"behavior_id": "deferred_feedback", "source": "G16-10", "label": "deferred-feedback non-reapplication"},
+    {"behavior_id": "cycle_exhaustion", "source": "G16-10", "label": "cycle-exhaustion rejection"},
+    {"behavior_id": "malformed_loop_state", "source": "G16-10", "label": "malformed loop-state rejection"},
+    {"behavior_id": "parent_mismatch", "source": "G16-10", "label": "addressed-artifact parent-mismatch rejection"},
+    {"behavior_id": "overreporting", "source": "S16-EXT", "label": "valid no-finding versus over-reporting"},
+    {"behavior_id": "severity_confidence", "source": "S16-EXT", "label": "severity and confidence correctness"},
+    {"behavior_id": "abstention_insufficient", "source": "S16-EXT", "label": "abstention when evidence is insufficient"},
+    {"behavior_id": "nonabstention_sufficient", "source": "S16-EXT", "label": "non-abstention when evidence is sufficient"}
+  ],
+  "verification": {
+    "test": "tests/test_s16_eval_methodology.py",
+    "result": "10 passed; mutation harness 10/10 caught",
+    "mutation_harness": "tools/run_s16_eval_mutation.py",
+    "offline": true,
+    "provider_access": "forbidden",
+    "credential_access": "forbidden",
+    "target_effects": "forbidden"
+  }
+}

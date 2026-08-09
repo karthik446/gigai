@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "spike": "S18-01",
+  "fixture": "research/s18_01/matrix.py:build_replay_fixture",
+  "stable_fields": [
+    "request.redacted_payload",
+    "target.name",
+    "target.endpoint",
+    "provider.family",
+    "model.identity",
+    "result.status",
+    "result.output",
+    "result.finish",
+    "result.raw_usage",
+    "result.normalized_usage",
+    "result.cost_status",
+    "extensions.redacted"
+  ],
+  "variable_fields": [
+    "request_id",
+    "trace_id",
+    "started_at",
+    "completed_at",
+    "latency_ms",
+    "process_id",
+    "network_route_metadata"
+  ],
+  "credential_values": "forbidden",
+  "network": "forbidden",
+  "target_effects": "forbidden"
+}

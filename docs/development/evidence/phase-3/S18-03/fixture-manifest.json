@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "spike": "S18-03",
+  "tracks": {
+    "anthropic_api": {
+      "fixture": "research/s18_03/fixtures.py:parse_anthropic_message/parse_anthropic_stream",
+      "covers": ["content_blocks", "usage", "stop_reason", "streaming", "rate_limit_error", "overloaded_error", "malformed_stream"],
+      "decision": "deferred_to_g18_or_additional_adapter_goal"
+    },
+    "local_ollama": {
+      "fixture": "research/s18_03/fixtures.py:parse_ollama_ndjson",
+      "covers": ["ndjson_streaming", "runtime_identity", "done_reason", "eval_counts", "incomplete_stream", "malformed_record"],
+      "decision": "deferred_to_g18_or_additional_adapter_goal"
+    }
+  },
+  "api_calls": "forbidden",
+  "runtime_start": "forbidden",
+  "credential_values": "forbidden",
+  "target_effects": "forbidden"
+}
