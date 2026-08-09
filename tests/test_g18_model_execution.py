@@ -283,3 +283,42 @@ def test_g18_provider_terminal_failures_are_normalized(tmp_path: Path, monkeypat
         )
         assert execution.record["outcome"] == expected
         assert validate_model_invocation(execution.record).valid
+
+
+def test_g18_unselected_reference_never_enters_provider_prompt(tmp_path: Path, monkeypatch) -> None:
+    config, resolved = _fixture(tmp_path)
+    actual = resolve_model_adapter(config, "offline-default")
+    observed: list[str] = []
+
+    class _CapturingPort:
+        def invoke(self, request):
+            observed.append(request.prompt)
+            return _FakePort().invoke(request)
+
+    monkeypatch.setattr(
+        "gigai.model_execution.resolve_model_adapter",
+        lambda _config, _target: ModelAdapterBinding(actual.current, _CapturingPort()),
+    )
+    selected = _reference(b"selected public bytes\n")
+    unselected = SelectedReference(
+        "ref_00000000-0000-4000-8000-000000000109",
+        "references/private.txt",
+        b"private unselected bytes\n",
+        digest_imported_bytes(b"private unselected bytes\n"),
+    )
+    run_model_invocation(
+        resolved=resolved,
+        config=config,
+        run_id=RUN_ID,
+        goal_id=GOAL_ID,
+        model_target="offline-default",
+        role="reviewer",
+        prompt="Review.",
+        references=(selected, unselected),
+        selected_reference_ids=(selected.reference_id,),
+        policy=InvocationPolicy(allowed_reference_ids=frozenset({selected.reference_id, unselected.reference_id}), offline=True),
+        uuid_factory=lambda: uuid.UUID("00000000-0000-4000-8000-000000000109"),
+    )
+    assert len(observed) == 1
+    assert "selected public bytes" in observed[0]
+    assert "private unselected bytes" not in observed[0]
