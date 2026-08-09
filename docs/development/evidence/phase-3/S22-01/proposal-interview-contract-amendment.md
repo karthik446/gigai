@@ -35,8 +35,10 @@ wrong primitive types, states, effects, approval shapes, and answer shapes.
    alter `gig-proposal`, journal, Goal Graph, Run, invocation, exchange, or
    capability meanings.
 3. A non-approved state cannot carry an approval object. A blocked state must
-   carry a terminal reason. The only G22 effects are `read_local` and
-   `write_workpad`.
+   carry a terminal reason. Pending states may have an empty reference
+   selection while the operator is answering the references question, but an
+   approved state must carry at least one selected reference. The only G22
+   effects are `read_local` and `write_workpad`.
 4. Approval is represented as an operator decision and proposal digest. The
    schema provides no model-approval or target-mutation state.
 5. The resource is a contract for G22's durable snapshot; S22-01 remains a

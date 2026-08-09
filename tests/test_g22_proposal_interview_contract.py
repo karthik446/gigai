@@ -143,6 +143,21 @@ def test_g22_schema_validates_blocked_snapshot_and_requires_reason() -> None:
     ).valid
 
 
+def test_g22_schema_allows_pending_reference_selection_but_not_approval() -> None:
+    pending = _record(state="proposal_ready")
+    pending["selected_reference_ids"] = []
+    pending["approval"] = None
+    assert validate_serialized_contract(
+        "proposal-interview.schema.json", canonical_json_bytes(pending)
+    ).valid
+
+    approved = _record()
+    approved["selected_reference_ids"] = []
+    assert not validate_serialized_contract(
+        "proposal-interview.schema.json", canonical_json_bytes(approved)
+    ).valid
+
+
 def test_g22_schema_rejects_wrong_answer_type_approval_and_effect() -> None:
     wrong_answer = _record()
     wrong_answer["answers"][1]["value"] = "yes"  # type: ignore[index]
