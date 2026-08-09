@@ -33,9 +33,11 @@ G18 must inspect the nineteen-resource baseline and determine whether the
 existing Run, Trace, Finding, Feedback, Adjudication, and invocation records
 can represent provider comparison and handoff. If a new artifact, field,
 transition, or authority rule is required, stop for an explicit additive
-contract amendment before runtime code. The amendment must preserve all prior
-hashes and vectors and must update the installed-resource verifier; no schema
-meaning may change by inference.
+contract amendment before runtime code. The accepted pre-G18 contract-impact
+review identifies the required two-resource amendment; G18 must not begin
+runtime implementation until that amendment is accepted. The amendment must
+preserve all prior hashes and vectors and must update the installed-resource
+verifier; no schema meaning may change by inference.
 
 ## In scope
 

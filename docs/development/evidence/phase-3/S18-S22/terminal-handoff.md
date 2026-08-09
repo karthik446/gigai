@@ -1,6 +1,6 @@
 # S18/S22 prerequisite-spike tranche — terminal handoff
 
-- Status: Accepted research evidence; G18 implementation remains start-gated
+- Status: Accepted research evidence; contract amendment required before G18
 - Scope: S18-01 through S18-05 and S22-01
 - Related gate: S16-EVAL (`7968b03`)
 
@@ -73,8 +73,10 @@ G18 may start implementation only when all of the following are true:
 
 - S16-EVAL is accepted and its fixed evaluation bar is available to cite;
 - all six records above and this terminal handoff are committed and accepted;
-- the contract-impact review has explicitly resolved whether each proposed
-  amendment is needed, with no silent schema, authority, or transition change;
+- [the pre-G18 contract-impact review](contract-impact-review.md) is accepted;
+- its two-resource additive amendment (`model-invocation` and
+  `model-exchange`) is accepted, with all nineteen prior resources and hashes
+  preserved and the installed verifier updated to 21 resources;
 - G18 begins under its own approved implementation Goal with the S18-05
   pre-invocation boundary and S18-04 no-fallback/disagreement rules carried
   into its acceptance criteria.
