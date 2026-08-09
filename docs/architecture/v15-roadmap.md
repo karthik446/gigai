@@ -233,9 +233,14 @@ criterion, evaluator version, trace, evidence, and decision state.
 
 ### Minimum eval corpus
 
-Before live provider comparisons, create a small curated corpus with roughly
-5–10 cases for each critical behavior and held-out cases for judge calibration.
-The corpus must include positive, negative, ambiguous, incomplete-reference,
+Before live provider comparisons, create the fixed S16-EVAL corpus with exactly
+8 labeled coverage cases for each critical behavior, split 4/2/2 across
+Development, Calibration, and Final Held-Out Acceptance. S16-EVAL's accepted
+critical-behavior matrix is the authority for the behavior list and counts.
+Calibration may tune judge thresholds, while Final Held-Out Acceptance is
+untouched during tuning and is the only set used to report that the fixed
+evaluation bar was met. The corpus must include positive, negative, ambiguous,
+incomplete-reference,
 duplicate-finding, disagreement, partial-address, and cycle-limit cases.
 
 Required assertions include:
@@ -349,15 +354,16 @@ protocol, and G22 owns the eventual user-facing creation implementation.
 ```text
 G13 -> G14 -> G15 -> G16
            G15 -> G17
+           G15 + G16 -> S16-EVAL
            G15 + G16 + G17 -> S22-01
            G16 + G17 -> S18-01
            G16 + G17 -> S18-02
            G16 + G17 -> S18-03
            G16 + G17 -> S18-04
            G16 + G17 -> S18-05
-           S18-01 + S18-02 + S18-03 + S18-04 + S18-05 + S22-01 -> G18
+           S16-EVAL + S18-01 + S18-02 + S18-03 + S18-04 + S18-05 + S22-01 -> G18
            S22-01 + G18 -> G22
-           G16 + G18 + G22 -> G19 -> G20 -> G21
+           G16 + S16-EVAL + G18 + G22 -> G19 -> G20 -> G21
 ```
 
 The graph is intentionally provisional. The arrows express planning
@@ -369,17 +375,22 @@ dependencies, not live status fields or authorization to begin.
 | G15 | Reference bundles and evaluator substrate | G14 |
 | G16 | First Review Loop Gig | G15 |
 | G17 | Proposal-time capability inspection and installation review | G15 |
+| S16-EVAL | Review Loop evaluation methodology spike | G15, G16 |
 | S22-01 | Local HTMX proposal interview and clarification protocol spike | G15, G16, G17 |
 | S18-01 | Common provider-port and evidence contract spike | G16, G17 |
 | S18-02 | Codex CLI and Claude CLI adapter feasibility spike | G16, G17 |
 | S18-03 | Anthropic API and local-model adapter feasibility spike | G16, G17 |
 | S18-04 | Handoff, comparison, cancellation, and unavailable-provider spike | G16, G17 |
 | S18-05 | Provider-input redaction, credential, and network-boundary spike | G16, G17 |
-| G18 | Provider comparison and model handoff implementation | S18-01, S18-02, S18-03, S18-04, S18-05, S22-01 |
-| G19 | Approved target mutation | G16, G18, G22 |
+| G18 | Provider comparison and model handoff implementation | S16-EVAL, S18-01, S18-02, S18-03, S18-04, S18-05, S22-01 |
+| G19 | Approved target mutation | G16, S16-EVAL, G18, G22 |
 | G20 | Local `improve` and evaluator learning | G19 |
 | G21 | Recurring and comparative Gigs | G20 |
 | G22 | Deliberative `create` and user-facing proposal interview | S22-01, G18 |
+
+S16-EVAL is the hard review-loop quality gate for G18 and G19. G22 may cite
+its evidence only when G22 actually invokes or evaluates the Review Loop;
+S22-01 remains the authority for proposal-question quality evaluation.
 
 ### Phase 2 — Proposal creation and interaction
 

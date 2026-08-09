@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "spike": "S16-EVAL",
+  "judge": "deterministic-methodology-fixture",
+  "judge_version": "s16-eval-methodology-1",
+  "split": "development",
+  "purpose": "prove metric behavior and over-reporting rejection offline; not production judge calibration",
+  "baseline_exact_fixture": {
+    "case_count": 2,
+    "precision": 1.0,
+    "recall": 1.0,
+    "false_positive_rate": 0.0,
+    "abstention_accuracy": 1.0,
+    "status": "pass"
+  },
+  "overreporting_fixture": {
+    "case_count": 1,
+    "precision": 0.0,
+    "recall": 1.0,
+    "false_positive_rate": 1.0,
+    "status": "fail_as_expected",
+    "assertion_id": "s16.case.precision"
+  },
+  "extended_metric_fixture": {
+    "citation_support_correctness": 0.0,
+    "severity_within_one_tier": 1.0,
+    "confidence_ece": 0.8,
+    "abstention_specificity": 1.0,
+    "status": "fail_as_expected",
+    "assertions": [
+      "s16.case.citation_support",
+      "s16.case.severity_confidence",
+      "s16.case.abstention"
+    ]
+  },
+  "final_held_out_acceptance": "not run until a production judge is selected by G18",
+  "live_provider_access": "forbidden"
+}

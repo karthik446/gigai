@@ -1,8 +1,8 @@
 # G18 — Provider Comparison and Model Handoff
 
 - Status: Proposed for review
-- Depends on: G16 and G17; consumes accepted S18-01 through S18-05 and
-  S22-01 decision records, plus G11's model port and factory
+- Depends on: G16 and G17; consumes accepted S16-EVAL, S18-01 through S18-05,
+  and S22-01 decision records, plus G11's model port and factory
 - Unblocks: G22 deliberative create, then G19 approved target effects
 
 ## Outcome
@@ -21,11 +21,13 @@ successful model response equivalent to a verified or approved result.
 
 ## Preconditions and contract gate
 
-Before implementation, all five S18 spikes and S22-01 must have accepted
-decision records. Each record must identify adopted and rejected assumptions,
-the supported adapter families, the input-redaction boundary, cancellation
-semantics, and the G18-versus-follow-up split. A spike probe is not itself a
-support claim.
+Before implementation, S16-EVAL, all five S18 spikes, and S22-01 must have
+accepted decision records. Each record must identify adopted and rejected
+assumptions, the supported adapter families, the input-redaction boundary,
+cancellation semantics, and the G18-versus-follow-up split. A spike probe is
+not itself a support claim. S16-EVAL's quality metrics and normative acceptance
+bar are fixed before G18 selects a candidate judge; G18 may only report whether
+its candidate passes them.
 
 G18 must inspect the nineteen-resource baseline and determine whether the
 existing Run, Trace, Finding, Feedback, Adjudication, and invocation records
@@ -103,9 +105,10 @@ meaning may change by inference.
 ## Acceptance criteria
 
 1. Before runtime implementation, the evidence set contains accepted decision
-   records for S18-01 through S18-05 and S22-01. It names the adopted adapter
-   families, rejected assumptions, supported effects, redaction boundary,
-   handoff limit, cancellation behavior, and deferred follow-up Goals.
+   records for S16-EVAL, S18-01 through S18-05, and S22-01. It names the
+   adopted adapter families, rejected assumptions, supported effects,
+   redaction boundary, handoff limit, cancellation behavior, deferred
+   follow-up Goals, and the fixed S16-EVAL quality bar that G18 must report.
 2. The contract gate is satisfied before code changes. If G18 needs additional
    schemas or transitions, an additive amendment raises the resource count,
    preserves all prior nineteen SHA256SUMS entries and canonical vectors, and
