@@ -65,9 +65,16 @@ def test_cli_create_launches_and_completes_local_interview(tmp_path: Path) -> No
         endpoint = f"{url}/events"
 
         def send(question_id: str, value: object) -> None:
+            current = parse_json_bytes(snapshot_path.read_bytes())
             request = Request(
                 endpoint,
-                data=json.dumps({"event": "answer", "question_id": question_id, "value": value}).encode(),
+                data=json.dumps({
+                    "event": "answer",
+                    "question_id": question_id,
+                    "value": value,
+                    "revision": current["revision"],
+                    "sequence": len(current["events"]) + 1,
+                }).encode(),
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
@@ -80,8 +87,18 @@ def test_cli_create_launches_and_completes_local_interview(tmp_path: Path) -> No
         send("privacy", "local_only")
         send("capability", "none")
         send("operator-confirmation", True)
+        current = parse_json_bytes(snapshot_path.read_bytes())
         with urlopen(
-            Request(endpoint, data=b'{"event":"approve"}', headers={"Content-Type": "application/json"}, method="POST"),
+            Request(
+                endpoint,
+                data=json.dumps({
+                    "event": "approve",
+                    "revision": current["revision"],
+                    "sequence": len(current["events"]) + 1,
+                }).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            ),
             timeout=4,
         ) as response:
             assert json.loads(response.read())["state"] == "approved"

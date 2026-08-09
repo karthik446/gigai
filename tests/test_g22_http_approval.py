@@ -71,9 +71,18 @@ def test_http_answers_then_operator_approval_reaches_terminal_lifecycle(tmp_path
         endpoint = f"{server.url}/events"
 
         def send(question_id: str, value: object) -> None:
+            snapshot = __import__("gigai.canonical", fromlist=["parse_json_bytes"]).parse_json_bytes(
+                (started.workpad / "manifests/proposal-interview.json").read_bytes()
+            )
             request = Request(
                 endpoint,
-                data=json.dumps({"event": "answer", "question_id": question_id, "value": value}).encode(),
+                data=json.dumps({
+                    "event": "answer",
+                    "question_id": question_id,
+                    "value": value,
+                    "revision": snapshot["revision"],
+                    "sequence": len(snapshot["events"]) + 1,
+                }).encode(),
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
@@ -86,9 +95,21 @@ def test_http_answers_then_operator_approval_reaches_terminal_lifecycle(tmp_path
         send("privacy", "local_only")
         send("capability", "none")
         send("operator-confirmation", True)
+        snapshot = __import__("gigai.canonical", fromlist=["parse_json_bytes"]).parse_json_bytes(
+            (started.workpad / "manifests/proposal-interview.json").read_bytes()
+        )
 
         with urlopen(
-            Request(endpoint, data=b'{"event":"approve"}', headers={"Content-Type": "application/json"}, method="POST"),
+            Request(
+                endpoint,
+                data=json.dumps({
+                    "event": "approve",
+                    "revision": snapshot["revision"],
+                    "sequence": len(snapshot["events"]) + 1,
+                }).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            ),
             timeout=4,
         ) as response:
             assert json.loads(response.read())["state"] == "approved"

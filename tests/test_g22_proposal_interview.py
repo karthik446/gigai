@@ -144,6 +144,18 @@ def test_sqlite_trace_contains_only_ordered_redacted_event_metadata() -> None:
     ).valid
 
 
+def test_sqlite_trace_rejects_divergent_or_stale_snapshots() -> None:
+    connection = sqlite3.connect(":memory:")
+    first = answer_question(_session(), "scope", "first", now=NOW)
+    persist_trace(connection, first)
+    persist_trace(connection, first)
+    divergent = answer_question(_session(), "scope", "other", now=NOW)
+    with pytest.raises(ProposalInterviewError, match="conflicts"):
+        persist_trace(connection, divergent)
+    with pytest.raises(ProposalInterviewError, match="truncate"):
+        persist_trace(connection, _session())
+
+
 def test_loopback_http_requires_token_and_preserves_session_boundary() -> None:
     server = InterviewHTTPServer(_session()).start()
     try:
@@ -157,7 +169,13 @@ def test_loopback_http_requires_token_and_preserves_session_boundary() -> None:
 
         request = Request(
             f"{server.url}/events",
-            data=json.dumps({"event": "answer", "question_id": "scope", "value": "local review"}).encode(),
+            data=json.dumps({
+                "event": "answer",
+                "question_id": "scope",
+                "value": "local review",
+                "revision": 1,
+                "sequence": 2,
+            }).encode(),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
@@ -166,6 +184,22 @@ def test_loopback_http_requires_token_and_preserves_session_boundary() -> None:
                 "session_id": SESSION,
                 "state": "questions_pending",
             }
+
+        stale = Request(
+            f"{server.url}/events",
+            data=json.dumps({
+                "event": "answer",
+                "question_id": "references",
+                "value": ["ref_00000000-0000-4000-8000-000000000005"],
+                "revision": 1,
+                "sequence": 2,
+            }).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(HTTPError) as error:
+            urlopen(stale, timeout=2)
+        assert error.value.code == 409
 
         with pytest.raises(HTTPError) as error:
             urlopen(server.url.replace(server.token, "wrong"), timeout=2)

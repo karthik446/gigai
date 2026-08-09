@@ -227,7 +227,13 @@ def answer_question(
         revision=session.revision + 1 if changed else session.revision,
         parent_revision=session.revision if changed else session.parent_revision,
     )
-    return _event(updated, "revision_created" if changed else "answer_recorded", actor={"kind": "operator", "id": "local-user"}, now=timestamp)
+    return _event(
+        updated,
+        "revision_created" if changed else "answer_recorded",
+        actor={"kind": "operator", "id": "local-user"},
+        details={"question_id": question_id, "answer_sha256": _sha256(value)},
+        now=timestamp,
+    )
 
 
 def request_clarification(
@@ -243,7 +249,13 @@ def request_clarification(
     timestamp = now or _now()
     if session.round >= session.max_rounds:
         blocked = replace(session, state="blocked", terminal_reason="question_round_cap_exhausted", updated_at=timestamp)
-        return _event(blocked, "blocked", actor={"kind": "gigai", "id": "g22"}, now=timestamp)
+        return _event(
+            blocked,
+            "blocked",
+            actor={"kind": "gigai", "id": "g22"},
+            details={"reason_sha256": _sha256(reason)},
+            now=timestamp,
+        )
     question = Question(
         f"clarification-{session.round + 1}",
         "text",
@@ -262,7 +274,13 @@ def request_clarification(
         revision=session.revision + 1,
         parent_revision=session.revision,
     )
-    return _event(clarified, "clarification_requested", actor={"kind": "model", "id": "g22-questioner"}, now=timestamp)
+    return _event(
+        clarified,
+        "clarification_requested",
+        actor={"kind": "model", "id": "g22-questioner"},
+        details={"reason_sha256": _sha256(reason)},
+        now=timestamp,
+    )
 
 
 def add_questions(
@@ -291,7 +309,13 @@ def add_questions(
         parent_revision=session.revision,
         updated_at=timestamp,
     )
-    return _event(updated, "question_presented", actor={"kind": "model", "id": "g22-questioner"}, now=timestamp)
+    return _event(
+        updated,
+        "question_presented",
+        actor={"kind": "model", "id": "g22-questioner"},
+        details={"question_ids": [item.question_id for item in questions]},
+        now=timestamp,
+    )
 
 
 def approve_session(
@@ -329,7 +353,13 @@ def approve_session(
         terminal_reason="operator_approved",
         updated_at=timestamp,
     )
-    return _event(approved, "approved", actor={"kind": "operator", "id": "local-user"}, now=timestamp)
+    return _event(
+        approved,
+        "approved",
+        actor={"kind": "operator", "id": "local-user"},
+        details={"proposal_sha256": proposal_sha256},
+        now=timestamp,
+    )
 
 
 def block_session(session: InterviewSession, reason: str, *, now: str | None = None) -> InterviewSession:
@@ -475,9 +505,32 @@ def persist_trace(connection: sqlite3.Connection, session: InterviewSession) -> 
         "state TEXT NOT NULL, payload_sha256 TEXT NOT NULL, occurred_at TEXT NOT NULL, "
         "PRIMARY KEY(session_id, sequence))"
     )
-    for event in session.events:
+    if any(
+        item.get("sequence") != index
+        for index, item in enumerate(session.events, start=1)
+    ):
+        raise ProposalInterviewError("interview event sequence is not contiguous")
+    existing = connection.execute(
+        "SELECT sequence, event, state, payload_sha256, occurred_at FROM interview_events "
+        "WHERE session_id = ? ORDER BY sequence",
+        (session.session_id,),
+    ).fetchall()
+    if len(existing) > len(session.events):
+        raise ProposalInterviewError("stale interview snapshot cannot truncate trace")
+    for row, event in zip(existing, session.events):
+        observed = (row[0], row[1], row[2], row[3], row[4])
+        expected = (
+            event["sequence"],
+            event["event"],
+            event["state"],
+            event["payload_sha256"],
+            event["occurred_at"],
+        )
+        if observed != expected:
+            raise ProposalInterviewError("interview trace conflicts with snapshot")
+    for event in session.events[len(existing) :]:
         connection.execute(
-            "INSERT OR IGNORE INTO interview_events "
+            "INSERT INTO interview_events "
             "(session_id, sequence, event, state, payload_sha256, occurred_at) VALUES (?, ?, ?, ?, ?, ?)",
             (session.session_id, event["sequence"], event["event"], event["state"], event["payload_sha256"], event["occurred_at"]),
         )
@@ -569,6 +622,13 @@ class InterviewHTTPServer:
                     if not isinstance(payload, dict):
                         raise ProposalInterviewError("event payload must be an object")
                     with owner._lock:
+                        expected_sequence = len(owner.session.events) + 1
+                        if payload.get("sequence") != expected_sequence:
+                            raise ProposalInterviewError(
+                                "stale or duplicate event sequence"
+                            )
+                        if payload.get("revision") != owner.session.revision:
+                            raise ProposalInterviewError("stale interview revision")
                         next_session = owner._apply(payload)
                         if (
                             payload.get("event") == "answer"
@@ -655,12 +715,12 @@ class InterviewHTTPServer:
                 )
                 control = f"<select name='value'>{options}</select>"
             forms.append(
-                f"<form class='question' data-question-id='{question_id}' hx-post='{endpoint}'>"
+                f"<form class='question' data-question-id='{question_id}' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'>"
                 f"<label>{question_id}: {label}</label>{control}<button type='submit'>Save</button></form>"
             )
         if session.state == "proposal_ready":
             forms.append(
-                f"<form class='approve' hx-post='{endpoint}'><button type='submit'>Approve proposal</button></form>"
+                f"<form class='approve' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button type='submit'>Approve proposal</button></form>"
             )
         body = (
             "<!doctype html><meta charset='utf-8'><title>GigAI create</title>"
@@ -675,10 +735,10 @@ class InterviewHTTPServer:
             "if(first.type==='checkbox' && values.length===1){value=first.checked;}"
             "else if(first.type==='checkbox'){value=values.filter(x=>x.checked).map(x=>x.value);}"
             "else if(first.tagName==='SELECT'){value=first.value;} else {value=first.value;}"
-            "const response=await fetch(form.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'answer',question_id:form.dataset.questionId,value})});"
+            "const response=await fetch(form.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'answer',question_id:form.dataset.questionId,value,revision:Number(form.dataset.revision),sequence:Number(form.dataset.sequence)})});"
             "if(!response.ok){alert((await response.json()).error);} else {location.reload();}});}"
             "const approval=document.querySelector('form.approve'); if(approval){approval.addEventListener('submit', async (event)=>{event.preventDefault();"
-            "const response=await fetch(approval.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'approve'})});"
+            "const response=await fetch(approval.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'approve',revision:Number(approval.dataset.revision),sequence:Number(approval.dataset.sequence)})});"
             "if(!response.ok){alert((await response.json()).error);} else {location.reload();}});}"
             "</script>"
         ).encode("utf-8")
@@ -732,6 +792,7 @@ def _event(
     event: str,
     *,
     actor: Mapping[str, object],
+    details: Mapping[str, object] | None = None,
     now: str,
 ) -> InterviewSession:
     sequence = len(session.events) + 1
@@ -741,6 +802,8 @@ def _event(
         "round": session.round,
         "actor": dict(actor),
     }
+    if details:
+        payload.update(details)
     item = {
         "sequence": sequence,
         "event": event,
