@@ -23,7 +23,7 @@ cluster's commit, but does not rewrite an accepted cluster silently.
 | 11 | Proposal approval idempotence and terminal handoff | Accepted; repeat approval is terminal and journal-idempotent | `26a90b0` |
 | 12 | Interruption, security, and non-effect fixtures | Accepted; loopback, malformed, expiry, symlink, digest, network, and process-kill negatives pass | `fab3dcd`, `571a442` |
 | 13 | S22-01 question-quality corpus and reporting | Accepted; four named cases pass | `238bdb7` |
-| 14 | Installed replay, manifests, completion audit, terminal handoff | Accepted by this closeout audit and terminal handoff | Closeout commit |
+| 14 | Installed replay, manifests, completion audit, terminal handoff | Accepted by this closeout audit and terminal handoff | `23d16f3` |
 
 The ledger never substitutes for the completion audit. At closeout, every row
 must link to durable evidence, the completion audit must reconcile the full
