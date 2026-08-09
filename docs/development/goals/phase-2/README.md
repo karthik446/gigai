@@ -24,7 +24,7 @@ effects and must not be pulled into G22.
 
 | Goal | Outcome | Depends on | Initial state |
 |---|---|---|---|
-| [G22](G22-deliberative-create-and-proposal-interview.md) | Local deliberative `create` and approved proposal interview | S22-01, proposal-interview amendment, G18 | Active |
+| [G22](G22-deliberative-create-and-proposal-interview.md) | Local deliberative `create` and approved proposal interview | S22-01, proposal-interview amendment, G18 | Complete |
 
 ## Completion rule
 

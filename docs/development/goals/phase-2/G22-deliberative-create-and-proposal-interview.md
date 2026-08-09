@@ -1,6 +1,6 @@
 # G22 — Deliberative Create and User-Facing Proposal Interview
 
-- Status: Active — implementation authorized
+- Status: Complete — implementation and closeout accepted
 - Depends on: accepted S22-01 decision record, accepted additive
   `proposal-interview.schema.json` amendment, and completed G18
   provider comparison/model-handoff boundary; consumes G15 workpad/reference

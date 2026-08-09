@@ -15,7 +15,14 @@ request/reference/boundary answers with revision and sequence guards, and
 reached `approved`. The terminal result contained a session ID and proposal ID.
 The workpad contained no `runs` directory.
 
-The same installed environment ran:
+The checked-in verifier `tools/verify_installed_g22.py` drives the same flow
+through the installed console script. It reports:
+
+```text
+verified installed GigAI G22 create interview
+```
+
+The same installed environment also ran:
 
 ```text
 /private/tmp/gigai-g22-installed/bin/python tools/verify_installed_schemas.py
