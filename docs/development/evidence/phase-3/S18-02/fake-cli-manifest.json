@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "spike": "S18-02",
+  "fake_cli": "research/s18_02/fake_cli.py",
+  "runner": "research/s18_02/runner.py:invoke_fake_cli",
+  "scenarios": [
+    "structured_success",
+    "credential_non_inheritance",
+    "nonzero_exit",
+    "timeout",
+    "cancellation",
+    "malformed_output"
+  ],
+  "real_cli_access": "forbidden",
+  "provider_access": "forbidden",
+  "credential_values": "forbidden",
+  "target_effects": "forbidden"
+}
