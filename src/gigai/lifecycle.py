@@ -192,9 +192,10 @@ def start_interview(
     reference_bytes: dict[str, bytes] = {}
     artifacts = [JournalArtifact(request_path, request_bytes)]
     for source in reference_paths:
-        source = source.expanduser().resolve(strict=True)
+        source = source.expanduser()
         if source.is_symlink() or not source.is_file():
             raise LifecycleError(f"reference is not a regular non-symlink file: {source}")
+        source = source.resolve(strict=True)
         content = source.read_bytes()
         reference_id = _allocate_interview_id("ref", uuid_factory)
         digest = digest_imported_bytes(content)

@@ -5,8 +5,10 @@ from pathlib import Path
 import subprocess
 import uuid
 
+import pytest
+
 from gigai.canonical import canonical_json_bytes, parse_json_bytes
-from gigai.lifecycle import persist_interview_session, start_interview
+from gigai.lifecycle import LifecycleError, persist_interview_session, start_interview
 from gigai.proposal_interview import answer_question, session_record
 from gigai.registry import open_project_registry
 from gigai.setup import build_config, run_setup
@@ -107,6 +109,49 @@ def test_interview_snapshot_recovers_from_workpad_not_sqlite(tmp_path: Path) -> 
     assert recovered.session.session_id == created.session.session_id
     assert recovered.reference_bytes == created.reference_bytes
     assert recovered.session.state == "questions_pending"
+
+
+def test_interview_recovery_rejects_changed_reference_bytes(tmp_path: Path) -> None:
+    home, target = _configured_target(tmp_path)
+    reference = tmp_path / "notes.txt"
+    reference.write_bytes(b"original bytes\n")
+    values = _uuids()
+    created = start_interview(
+        home_root=home,
+        requested_target=target,
+        name="digest-proof",
+        request="Recover only if the reference is unchanged.",
+        reference_paths=(reference,),
+        uuid_factory=values,
+    )
+    stored = next((created.workpad / "review/interviews").rglob("*.bin"))
+    stored.write_bytes(b"tampered committed bytes\n")
+    with pytest.raises(LifecycleError, match="digest"):
+        start_interview(
+            home_root=home,
+            requested_target=target,
+            name="digest-proof",
+            request="ignored after recovery",
+            reference_paths=(),
+            uuid_factory=values,
+        )
+
+
+def test_interview_rejects_symlink_reference_before_capture(tmp_path: Path) -> None:
+    home, target = _configured_target(tmp_path)
+    source = tmp_path / "source.txt"
+    source.write_bytes(b"source bytes\n")
+    link = tmp_path / "link.txt"
+    link.symlink_to(source)
+    with pytest.raises(LifecycleError, match="non-symlink"):
+        start_interview(
+            home_root=home,
+            requested_target=target,
+            name="symlink-proof",
+            request="Reject redirected references.",
+            reference_paths=(link,),
+            uuid_factory=_uuids(),
+        )
 
 
 def test_persist_interview_session_is_schema_validated_and_journaled(tmp_path: Path) -> None:

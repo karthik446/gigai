@@ -4,6 +4,7 @@ from http.client import HTTPResponse
 import json
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -22,7 +23,8 @@ from gigai.proposal_interview import (
     request_clarification,
     session_record,
 )
-from gigai.question_generation import generate_model_questions
+from gigai.question_generation import QuestionGenerationError, generate_model_questions
+import gigai.question_generation as question_generation
 from gigai.setup import build_config, run_setup
 from gigai.validators import validate_serialized_contract
 
@@ -119,6 +121,105 @@ def test_deterministic_question_generation_uses_g18_factory_and_adds_typed_quest
     question = next(item for item in generated.questions if item.question_id == "operator-confirmation")
     assert question.answer_type == "confirmation"
     assert generated.events[-1]["event"] == "question_presented"
+
+
+def test_remote_question_generation_is_explicit_and_selected_bytes_only(monkeypatch, tmp_path: Path) -> None:
+    class FakePort:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def invoke(self, request):
+            self.prompts.append(request.prompt)
+            from gigai.adapters.port import InvocationResult, NormalizedUsage
+
+            return InvocationResult(
+                status="success",
+                output_text=json.dumps({
+                    "questions": [{
+                        "question_id": "remote-confirmation",
+                        "answer_type": "confirmation",
+                        "required": True,
+                        "options": [],
+                        "depends_on": ["references"],
+                        "rationale": "Confirm the selected material.",
+                        "provenance": "model://fake/g22",
+                    }]
+                }),
+                resolved_model="fake",
+                raw_usage={},
+                normalized_usage=NormalizedUsage(None, None, None),
+                cost_status="unavailable",
+            )
+
+    home = tmp_path / "home"
+    config = build_config(
+        home_root=home,
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+    )
+    run_setup(config)
+    selected_content = b"selected material"
+    unselected_content = b"unselected material"
+    selected_reference = ReferenceDecision(
+        "ref_00000000-0000-4000-8000-000000000005",
+        digest_imported_bytes(selected_content),
+    )
+    second = ReferenceDecision(
+        "ref_00000000-0000-4000-8000-000000000006",
+        digest_imported_bytes(unselected_content),
+    )
+    selected = selected_reference.reference_id
+    session = _session()
+    session = build_session(
+        session_id=SESSION,
+        project_id=PROJECT,
+        gig_id=GIG,
+        request_kind="repository-feature",
+        request_artifact=session.request_artifact,
+        request_sha256=SHA,
+        references=(selected_reference, second),
+        now=NOW,
+    )
+    session = answer_question(session, "references", [selected], now=NOW)
+    port = FakePort()
+    binding = SimpleNamespace(
+        current=SimpleNamespace(endpoint=SimpleNamespace(adapter="openai_api")),
+        port=port,
+        request=lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr(question_generation, "resolve_model_adapter", lambda *_args: binding)
+
+    generated = generate_model_questions(
+        config=config,
+        model_target="remote-test",
+        session=session,
+        reference_bytes={selected: selected_content, second.reference_id: unselected_content},
+        network_allowed=True,
+    )
+    assert generated.questions[-1].question_id == "remote-confirmation"
+    assert "selected material" in port.prompts[0]
+    assert "unselected material" not in port.prompts[0]
+
+
+def test_remote_question_generation_fails_closed_without_network_permission(monkeypatch, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    config = build_config(
+        home_root=home,
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+    )
+    run_setup(config)
+    binding = SimpleNamespace(current=SimpleNamespace(endpoint=SimpleNamespace(adapter="openai_api")))
+    monkeypatch.setattr(question_generation, "resolve_model_adapter", lambda *_args: binding)
+    with pytest.raises(QuestionGenerationError, match="network permission is denied"):
+        generate_model_questions(
+            config=config,
+            model_target="remote-test",
+            session=answer_question(_session(), "references", ["ref_00000000-0000-4000-8000-000000000005"], now=NOW),
+            reference_bytes={"ref_00000000-0000-4000-8000-000000000005": b"selected"},
+        )
 
 
 def test_clarification_round_cap_blocks_without_approval() -> None:
