@@ -13,17 +13,17 @@ cluster's commit, but does not rewrite an accepted cluster silently.
 |---|---|---|---|
 | 1 | Dependency/contract gate and implementation baseline | Accepted by `6729b88`; runtime evidence pending | `6729b88` |
 | 3 | Short-lived loopback session, token boundary, and bounded lifetime | Accepted; 13 focused tests pass | `303f058` |
-| 2 | CLI entry point and deterministic terminal result | Pending; approval integration remains | — |
-| 4 | Exact selected-reference and byte/digest boundary | Pending | — |
+| 2 | CLI entry point and deterministic terminal result | Accepted; source and installed black-box flows reach approved without a Run | `aa9ed9a`, installed replay evidence |
+| 4 | Exact selected-reference and byte/digest boundary | Accepted; selected-only input, digest recovery, and symlink negatives pass | `d9418e7` |
 | 5–6 | Typed questions, answers, clarification rounds, and blocking | Accepted; 8 focused tests pass | `d22b577` |
-| 7 | G18 model-port/provider boundary and deterministic failures | Pending | — |
-| 8 | SQLite trace, recovery, stale-event rejection, and authority split | Pending; recovery/trace slice is committed | — |
+| 7 | G18 model-port/provider boundary and deterministic failures | Accepted; factory/port path and explicit network denial pass | `b937291`, `d9418e7`, `fab3dcd` |
+| 8 | SQLite trace, recovery, stale-event rejection, and authority split | Accepted; trace guards, workpad recovery, and process interruption pass | `8e4793b`, `571a442` |
 | 9 | Explicit durable interview revisions and parentage | Accepted; 15 focused tests pass | `3580c31` |
 | 10 | Boundary choices and operator-only approval edge | Accepted; 14 focused tests pass | `6f7dac9` |
-| 11 | Proposal approval idempotence and terminal handoff | Pending; lifecycle path is proven, duplicate-event proof remains | — |
-| 12 | Interruption, security, and non-effect fixtures | Pending | — |
+| 11 | Proposal approval idempotence and terminal handoff | Accepted; repeat approval is terminal and journal-idempotent | `26a90b0` |
+| 12 | Interruption, security, and non-effect fixtures | Accepted; loopback, malformed, expiry, symlink, digest, network, and process-kill negatives pass | `fab3dcd`, `571a442` |
 | 13 | S22-01 question-quality corpus and reporting | Accepted; four named cases pass | This commit |
-| 14 | Installed replay, manifests, completion audit, terminal handoff | Pending | — |
+| 14 | Installed replay, manifests, completion audit, terminal handoff | Installed replay accepted; audit/handoff pending closeout | installed replay evidence |
 
 The ledger never substitutes for the completion audit. At closeout, every row
 must link to durable evidence, the completion audit must reconcile the full
