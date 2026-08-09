@@ -12,6 +12,7 @@ silently stand in for it.
 | [G15](G15-reference-bundles-and-evaluator-substrate.md) | Reference bundles and evaluator substrate | G14 | Complete |
 | [G16](G16-first-review-loop-gig.md) | First Review Loop Gig | G15 | Complete |
 | [G17](G17-proposal-capability-inspection.md) | Proposal-time capability inspection and installation review | G15 | Approved / Ready |
+| [G18](G18-provider-comparison-and-model-handoff.md) | Provider comparison and model handoff | S18-01..S18-05, S22-01, G16, G17 | Proposed for review |
 
 “Ready” records the initial dependency state; it is not a live tracker. A
 completed Phase 3 goal writes durable evidence under
