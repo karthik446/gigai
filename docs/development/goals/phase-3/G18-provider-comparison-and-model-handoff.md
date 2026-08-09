@@ -29,15 +29,19 @@ not itself a support claim. S16-EVAL's quality metrics and normative acceptance
 bar are fixed before G18 selects a candidate judge; G18 may only report whether
 its candidate passes them.
 
-G18 must inspect the nineteen-resource baseline and determine whether the
-existing Run, Trace, Finding, Feedback, Adjudication, and invocation records
-can represent provider comparison and handoff. If a new artifact, field,
+G18 must inspect the frozen nineteen-resource baseline together with the
+accepted 21-resource amendment and determine whether the existing Run, Trace,
+Finding, Feedback, Adjudication, and invocation records can represent provider
+comparison and handoff. If a new artifact, field,
 transition, or authority rule is required, stop for an explicit additive
-contract amendment before runtime code. The accepted pre-G18 contract-impact
-review identifies the required two-resource amendment; G18 must not begin
-runtime implementation until that amendment is accepted. The amendment must
-preserve all prior hashes and vectors and must update the installed-resource
-verifier; no schema meaning may change by inference.
+contract amendment before runtime code. The accepted [pre-G18
+contract-impact review](../../evidence/phase-3/S18-S22/contract-impact-review.md)
+identifies the required two-resource amendment, which is now present in the
+21-resource baseline: `model-invocation.schema.json` and
+`model-exchange.schema.json`. G18 must not begin runtime implementation
+without the installed-resource verifier passing for all 21 resources and the
+nineteen prior hashes and canonical vectors preserved; no schema meaning may
+change by inference.
 
 ## In scope
 
@@ -111,11 +115,13 @@ verifier; no schema meaning may change by inference.
    adopted adapter families, rejected assumptions, supported effects,
    redaction boundary, handoff limit, cancellation behavior, deferred
    follow-up Goals, and the fixed S16-EVAL quality bar that G18 must report.
-2. The contract gate is satisfied before code changes. If G18 needs additional
-   schemas or transitions, an additive amendment raises the resource count,
-   preserves all prior nineteen SHA256SUMS entries and canonical vectors, and
-   updates installed verifiers. If no amendment is needed, evidence proves
-   the existing schemas are sufficient rather than merely omitting the check.
+2. The contract gate is satisfied before code changes. The installed
+   21-resource baseline includes `model-invocation.schema.json` and
+   `model-exchange.schema.json`; the installed-resource verifier passes; all
+   nineteen prior SHA256SUMS entries and canonical vectors remain unchanged;
+   and the amendment's registry, semantic validators, eight named contract
+   cases, and canonical vectors pass. Any later contract need stops G18 for a
+   separate additive amendment.
 3. The factory and ownership tests prove that every supported adapter is
    selected through G11's model port, with no direct concrete-adapter imports
    from domain code and no provider chosen by an ambient environment value.
@@ -133,9 +139,12 @@ verifier; no schema meaning may change by inference.
    become adjudication inputs rather than being merged into a synthetic
    consensus. Agreement is recorded distinctly from disagreement.
 7. Redaction and reference-selection fixtures prove that secrets, credential
-   values, and policy-blocked PII never reach an adapter. A redaction failure,
-   ambiguous policy, or unselected reference is a durable blocked outcome,
-   not a best-effort provider call.
+   values, and policy-blocked PII never reach an adapter. The
+   `model-invocation.schema.json` boundary attestation records selected
+   reference digests, redaction result, credential-reference lookup, network
+   result, and S18-05 check-order version. A redaction failure, ambiguous
+   policy, or unselected reference is a durable blocked outcome, not a
+   best-effort provider call.
 8. Credential, network, and availability behavior is explicit. Missing
    credentials, unavailable providers, denied network, malformed responses,
    timeout, cancellation, and provider errors each map to deterministic
@@ -145,10 +154,13 @@ verifier; no schema meaning may change by inference.
    aggregate usage remain separately attributable to invocation IDs, and
    budget exhaustion prevents a subsequent call.
 10. No automatic fallback, hidden retry, background worker, or provider race
-    exists. Static import/ownership checks, fake adapters, subprocess guards,
-    credential canaries, and network-denial fixtures catch each forbidden
-    path; mutation testing kills each guard rather than merely producing a
-    report file.
+    exists. `model-exchange.schema.json` rejects `automatic_fallback: true`,
+    nonzero `retry_count`, hidden context, and any selected comparison winner;
+    the S18-04 transition rules preserve disagreement for adjudication. Static
+    import/ownership checks, fake adapters, subprocess guards, credential
+    canaries, and network-denial fixtures catch each remaining forbidden path;
+    mutation testing kills each guard rather than merely producing a report
+    file.
 11. Every provider or handoff failure commits its failure/blocked record before
     the parent reports terminal state. Re-running cancellation and unavailable
     fixtures does not duplicate terminal handoffs or rewrite prior evidence.
@@ -157,13 +169,14 @@ verifier; no schema meaning may change by inference.
     adapters without a source checkout, live credentials, network, or target
     repository. Operator-only live proofs, if supported, are stored separately
     and identify exact target/provider/model versions.
-13. Completion evidence includes the adopted provider matrix, contract/hash
-    decision, adapter conformance matrix, handoff and comparison vectors,
-    redaction/capability records, cancellation/unavailable records, usage and
-    cost normalization, mutation report, sanitized manifests, installed-wheel
-    replay, live-proof boundary, completion audit, and terminal handoff. The
-    audit explicitly names which provider families and tool effects remain
-    deferred to later Goals.
+13. Completion evidence includes the adopted provider matrix, the accepted
+    21-resource contract/hash decision, adapter conformance matrix, handoff
+    and comparison vectors, redaction/capability records,
+    cancellation/unavailable records, usage and cost normalization, mutation
+    report, sanitized manifests, installed-wheel replay, live-proof boundary,
+    completion audit, and terminal handoff. The audit explicitly names which
+    provider families and tool effects remain deferred to later Goals and
+    reports the S16-EVAL fixed bar.
 
 ## Verification and evidence
 
