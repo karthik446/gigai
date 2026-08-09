@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "spike": "S18-04",
+  "fixture": "research/s18_04/handoff.py",
+  "cases": [
+    "goal_edge_parented_receive",
+    "visible_disagreement_with_adjudication_input",
+    "operator_cancellation",
+    "receiver_unavailable_without_fallback",
+    "handoff_cap",
+    "source_parent_mismatch",
+    "same_artifact_comparison_rejection"
+  ],
+  "provider_calls": "forbidden",
+  "credential_values": "forbidden",
+  "target_effects": "forbidden",
+  "fallback": "forbidden"
+}
