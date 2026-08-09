@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "spike": "S22-01",
+  "fixture": "research/s22_01/interview.py:EVALUATION_CORPUS",
+  "cases": [
+    {"case_id": "repository-feature", "reference_kinds": ["repository_snapshot", "primary_source"]},
+    {"case_id": "resume-tailoring", "reference_kinds": ["resume", "job_description"]},
+    {"case_id": "reference-synchronization", "reference_kinds": ["source_a", "source_b"]},
+    {"case_id": "tabular-finance", "reference_kinds": ["tabular_data"]}
+  ],
+  "required_outcome": "approved_or_clarification_blocked",
+  "provider_access": "forbidden",
+  "credential_values": "forbidden",
+  "target_effects": "forbidden"
+}
