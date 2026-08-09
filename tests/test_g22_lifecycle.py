@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
+import textwrap
 import uuid
 
 import pytest
@@ -152,6 +155,59 @@ def test_interview_rejects_symlink_reference_before_capture(tmp_path: Path) -> N
             reference_paths=(link,),
             uuid_factory=_uuids(),
         )
+
+
+def test_process_kill_leaves_only_recoverable_pending_interview(tmp_path: Path) -> None:
+    home, target = _configured_target(tmp_path)
+    reference = tmp_path / "notes.txt"
+    reference.write_bytes(b"process interruption bytes\n")
+    script = textwrap.dedent(
+        """
+        from pathlib import Path
+        import sys
+        import time
+        from gigai.lifecycle import start_interview
+
+        start_interview(
+            home_root=Path(sys.argv[1]),
+            requested_target=Path(sys.argv[2]),
+            name="process-kill-proof",
+            request="Recover after process interruption.",
+            reference_paths=(Path(sys.argv[3]),),
+        )
+        print("ready", flush=True)
+        time.sleep(30)
+        """
+    )
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")}
+    process = subprocess.Popen(
+        [sys.executable, "-c", script, str(home), str(target), str(reference)],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert process.stdout is not None
+        assert process.stdout.readline().strip() == "ready"
+        process.kill()
+        process.wait(timeout=5)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+    recovered = start_interview(
+        home_root=home,
+        requested_target=target,
+        name="process-kill-proof",
+        request="ignored after recovery",
+        reference_paths=(),
+        uuid_factory=_uuids(),
+    )
+    assert recovered.resumed is True
+    assert recovered.session.state == "questions_pending"
+    assert recovered.session.approval is None
+    assert not (recovered.workpad / "runs").exists()
 
 
 def test_persist_interview_session_is_schema_validated_and_journaled(tmp_path: Path) -> None:
