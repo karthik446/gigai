@@ -179,11 +179,14 @@ def select_active_workpad(
     requested_target: Path | None,
     gig_id: str,
     cwd: Path | None = None,
+    allow_semantic_state: bool = False,
 ) -> ResolvedWorkpad:
     gig_id = _canonical_id(gig_id, EntityPrefix.GIG)
     home, config = _load_owned_config(home_root)
     bound = _resolve_bound_project(home, requested_target, cwd=cwd)
-    resolved = _resolve_registered(config, home, bound, gig_id)
+    resolved = _resolve_registered(
+        config, home, bound, gig_id, allow_semantic_state=allow_semantic_state
+    )
     registry, _ = open_project_registry(home, create=False)
     if bound.target_kind == "git":
         try:

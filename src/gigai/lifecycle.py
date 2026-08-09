@@ -13,9 +13,10 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sqlite3
 import subprocess
 import tempfile
-from typing import Callable
+from typing import Callable, Mapping
 import uuid
 
 from .adapters.factory import resolve_model_adapter
@@ -35,6 +36,15 @@ from .journal import (
     JournalTransition,
     record_transition,
     record_transition_chain,
+)
+from .proposal_interview import (
+    InterviewSession,
+    ProposalInterviewError,
+    ReferenceDecision,
+    build_session,
+    persist_trace,
+    session_from_record,
+    session_record,
 )
 from .registry import open_project_registry
 from .validators import (
@@ -75,6 +85,17 @@ class CreateResult:
 
 
 @dataclass(frozen=True)
+class InterviewStartResult:
+    project_id: str
+    gig_id: str
+    workpad: Path
+    session: InterviewSession
+    reference_bytes: Mapping[str, bytes]
+    creation_started: JournalEntry
+    resumed: bool
+
+
+@dataclass(frozen=True)
 class ApprovalResult:
     gig_id: str
     proposal_id: str
@@ -90,6 +111,152 @@ class RevisionResult:
     proposal_id: str
     parent_proposal_id: str
     entry: JournalEntry
+
+
+def start_interview(
+    *,
+    home_root: Path,
+    requested_target: Path | None,
+    name: str,
+    request: str,
+    reference_paths: tuple[Path, ...],
+    max_rounds: int = 3,
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> InterviewStartResult:
+    """Start or recover a G22 local interview without creating a proposal."""
+
+    if not _NAME.fullmatch(name):
+        raise LifecycleError("create name must be a lowercase dashed identifier")
+    if not request.strip() or "\0" in request:
+        raise LifecycleError("create request must be non-empty and NUL-free")
+    home = home_root.expanduser().resolve(strict=False)
+    bound = resolve_bound_project(home_root=home, requested_target=requested_target)
+    gig_id = _recoverable_gig_id(home, bound)
+    resumed = gig_id is not None
+    if gig_id is None:
+        gig_id = _allocate_gig_id(home, uuid_factory)
+        provisioned = provision_workpad(home_root=home, project_id=bound.project_id, gig_id=gig_id)
+        workpad = provisioned.path
+    else:
+        workpad = _workpad_for_gig(home, bound, gig_id)
+
+    snapshot_path = workpad / "manifests" / "proposal-interview.json"
+    if snapshot_path.exists():
+        try:
+            payload = parse_json_bytes(snapshot_path.read_bytes())
+            if not isinstance(payload, dict):
+                raise ProposalInterviewError("snapshot is not an object")
+            session = session_from_record(payload)
+            references = _read_interview_references(workpad, session)
+        except (ProposalInterviewError, OSError, ValueError) as exc:
+            raise LifecycleError(f"interview recovery failed: {exc}") from exc
+        select_active_workpad(
+            home_root=home,
+            requested_target=bound.target_root,
+            gig_id=gig_id,
+            allow_semantic_state=True,
+        )
+        creation_started = _creation_started_entry(workpad)
+        return InterviewStartResult(bound.project_id, gig_id, workpad, session, references, creation_started, True)
+
+    if not reference_paths:
+        raise LifecycleError("create requires at least one explicit --reference")
+
+    existing_entries = _journal_entries(workpad)
+    if existing_entries:
+        if len(existing_entries) != 1 or not existing_entries[0].path.name.endswith("-creation-started.txt"):
+            raise LifecycleError("recoverable workpad has an unexpected pre-interview journal")
+        creation_started = existing_entries[0]
+    else:
+        creation_started = record_transition(
+            workpad=workpad,
+            project_id=bound.project_id,
+            gig_id=gig_id,
+            handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+            transition="creation_started",
+            body="GigAI creation started before interview input or proposal effects.",
+        )
+    select_active_workpad(home_root=home, requested_target=bound.target_root, gig_id=gig_id)
+
+    session_id = _allocate_interview_id("session", uuid_factory)
+    request_bytes = request.encode("utf-8")
+    request_path = f"review/interviews/{session_id}/request.txt"
+    request_artifact = {
+        "path": request_path,
+        "content_sha256": digest_imported_bytes(request_bytes),
+        "media_type": "text/plain",
+        "size_bytes": len(request_bytes),
+    }
+    references: list[ReferenceDecision] = []
+    reference_bytes: dict[str, bytes] = {}
+    artifacts = [JournalArtifact(request_path, request_bytes)]
+    for source in reference_paths:
+        source = source.expanduser().resolve(strict=True)
+        if source.is_symlink() or not source.is_file():
+            raise LifecycleError(f"reference is not a regular non-symlink file: {source}")
+        content = source.read_bytes()
+        reference_id = _allocate_interview_id("ref", uuid_factory)
+        digest = digest_imported_bytes(content)
+        references.append(ReferenceDecision(reference_id, digest, "excluded"))
+        reference_bytes[reference_id] = content
+        artifacts.append(JournalArtifact(f"review/interviews/{session_id}/references/{reference_id}.bin", content))
+    session = build_session(
+        session_id=session_id,
+        project_id=bound.project_id,
+        gig_id=gig_id,
+        request_kind=name,
+        request_artifact=request_artifact,
+        request_sha256=request_artifact["content_sha256"],
+        references=tuple(references),
+        max_rounds=max_rounds,
+    )
+    snapshot = canonical_json_bytes(session_record(session))
+    if not validate_serialized_contract("proposal-interview.schema.json", snapshot).valid:
+        raise LifecycleError("initial proposal-interview snapshot failed schema validation")
+    artifacts.append(JournalArtifact("manifests/proposal-interview.json", snapshot))
+    record_transition(
+        workpad=workpad,
+        project_id=bound.project_id,
+        gig_id=gig_id,
+        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+        transition="proposal_interview_started",
+        body=f"Proposal interview {session_id} is ready for explicit operator input.",
+        artifacts=tuple(artifacts),
+    )
+    _persist_interview_trace(workpad, session)
+    return InterviewStartResult(bound.project_id, gig_id, workpad, session, reference_bytes, creation_started, resumed)
+
+
+def persist_interview_session(
+    *,
+    workpad: Path,
+    project_id: str,
+    gig_id: str,
+    session: InterviewSession,
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> JournalEntry:
+    """Commit one schema-validated interview snapshot before its next event."""
+
+    snapshot = canonical_json_bytes(session_record(session))
+    report = validate_serialized_contract("proposal-interview.schema.json", snapshot)
+    if not report.valid:
+        codes = ", ".join(item.code for item in report.findings)
+        raise LifecycleError(f"proposal-interview snapshot failed validation: {codes}")
+    transition = {
+        "blocked": "proposal_interview_blocked",
+        "approved": "proposal_interview_approved",
+    }.get(session.state, "proposal_interview_updated")
+    entry = record_transition(
+        workpad=workpad,
+        project_id=project_id,
+        gig_id=gig_id,
+        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+        transition=transition,
+        body=f"Proposal interview {session.session_id} advanced to {session.state}.",
+        artifacts=(JournalArtifact("manifests/proposal-interview.json", snapshot),),
+    )
+    _persist_interview_trace(workpad, session)
+    return entry
 
 
 def create_offline(
@@ -839,6 +1006,44 @@ def _has_proposal(workpad: Path) -> bool:
     return (workpad / "manifests" / "gig-proposal.json").is_file()
 
 
+def _creation_started_entry(workpad: Path) -> JournalEntry:
+    entries = _journal_entries(workpad)
+    if not entries or not entries[0].path.name.endswith("-creation-started.txt"):
+        raise LifecycleError("interview workpad has no recoverable creation handoff")
+    return entries[0]
+
+
+def _read_interview_references(
+    workpad: Path, session: InterviewSession
+) -> dict[str, bytes]:
+    values: dict[str, bytes] = {}
+    root = workpad / "review" / "interviews" / session.session_id / "references"
+    for reference in session.references:
+        path = root / f"{reference.reference_id}.bin"
+        if path.is_symlink() or not path.is_file():
+            raise LifecycleError("interview reference object is missing or redirected")
+        content = path.read_bytes()
+        if digest_imported_bytes(content) != reference.content_sha256:
+            raise LifecycleError("interview reference bytes do not match their digest")
+        values[reference.reference_id] = content
+    return values
+
+
+def _persist_interview_trace(workpad: Path, session: InterviewSession) -> None:
+    connection = sqlite3.connect(workpad / "state.sqlite")
+    try:
+        persist_trace(connection, session)
+    finally:
+        connection.close()
+
+
+def _allocate_interview_id(prefix: str, uuid_factory: Callable[[], uuid.UUID]) -> str:
+    value = uuid_factory()
+    if type(value) is not uuid.UUID or value.version != 4:
+        raise LifecycleError("interview ID factory must return UUIDv4 values")
+    return f"{prefix}_{value}"
+
+
 def _is_preproposal_journal(workpad: Path) -> bool:
     handoffs = (
         sorted((workpad / "handoffs").glob("*.txt"))
@@ -899,11 +1104,14 @@ def _git(
 __all__ = [
     "ApprovalResult",
     "CreateResult",
+    "InterviewStartResult",
     "LifecycleError",
     "RevisionResult",
     "approve_offline",
     "create_offline",
+    "persist_interview_session",
     "record_feedback",
     "reject_offline",
     "revise_offline",
+    "start_interview",
 ]
