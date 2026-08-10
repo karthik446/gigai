@@ -11,11 +11,11 @@ first bounded deterministic Run. It does not obsolete V14. V14 remains the
 authority for the contracts already implemented and for the boundaries that
 V15 must preserve.
 
-**Current roadmap gate:** G13 through G18 and G22 are complete and independently
-evidenced. G19 is active under its accepted target-effect contract amendment;
-later candidates remain planning-only until their individual goal contracts are
-reviewed and approved. G19 runtime work remains bounded by its accepted
-contract and does not authorize broader target effects by inference.
+**Current roadmap gate:** G13 through G19 and G22 are complete and independently
+evidenced. G20 is the next implementation candidate; later candidates remain
+planning-only until their individual goal contracts are reviewed and approved.
+G19 remains bounded by its accepted contract and does not authorize broader
+target effects by inference.
 
 This document answers a narrower question than a goal contract: what should
 GigAI become useful for next, in what order, and what evidence must exist before
@@ -587,8 +587,10 @@ user-owned commit policy, dirty-target refusal, cancellation, partial-write,
 and recovery behavior. No target mutation is implied by a proposal or by a
 successful read-only review.
 
-Exit evidence: one disposable implementation or document-edit Gig with a
-reviewed patch, exact target delta, refusal paths, and recoverable failure.
+Status: complete. Exit evidence is recorded in the [G19 completion audit](../development/evidence/phase-4/G19/completion-audit.md)
+and [terminal handoff](../development/evidence/phase-4/G19/terminal-handoff.md):
+one disposable document-edit Gig with a reviewed patch, exact target delta,
+refusal paths, mutation evidence, installed replay, and recoverable failure.
 
 ### Phase 5 — Local improvement and recurrence
 

@@ -1,6 +1,6 @@
 # G19 — Approved Target Mutation
 
-- Status: Active — approved for implementation
+- Status: Complete — accepted implementation and evidence
 - Depends on: G16 completion and terminal handoff, accepted S16-EVAL
   methodology, G18 completion and terminal handoff, and G22 completion audit
   and terminal handoff; consumes G04/G05/G06/G09 target, workpad, journal, and
@@ -25,10 +25,10 @@ authority for the one mutation attempt.
 
 Before runtime implementation, read and cite:
 
-- G16's completed Review Loop audit and terminal handoff;
-- S16-EVAL's accepted corpus, judge bar, and mutation evidence;
-- G18's completion audit and terminal handoff;
-- G22's completion audit and terminal handoff; and
+- [G16's completed Review Loop audit](../../evidence/phase-3/G16/completion-audit.md) and [terminal handoff](../../evidence/phase-3/G16/terminal-handoff.md);
+- [S16-EVAL's accepted corpus, judge bar, and mutation evidence](../../evidence/phase-3/S16-EVAL/completion-audit.md);
+- [G18's completion audit](../../evidence/phase-3/G18/completion-audit.md) and [terminal handoff](../../evidence/phase-3/G18/terminal-handoff.md);
+- [G22's completion audit](../../evidence/phase-2/G22/completion-audit.md) and [terminal handoff](../../evidence/phase-2/G22/terminal-handoff.md); and
 - the existing G04/G05/G06/G09 target, workpad, journal, and recovery rules.
 
 The current G22 contract deliberately limits its effect choices to
