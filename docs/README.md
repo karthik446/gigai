@@ -8,6 +8,10 @@
   command contract.
 - [Cheat sheet](reference/cheat-sheet.md) — current installation, offline
   lifecycle, inspection, and opt-in live-diagnostic commands.
+- [External changelog](../CHANGELOG.md) — verified operator-facing capability
+  history.
+- [Internal changelog](development/changelog-internal.md) — cross-goal
+  implementation history, review corrections, and learning candidates.
 - [Architecture decisions](adr/) — standalone-repository decisions that
   supersede a specific part of the V14 snapshot.
 - [Phase 1 development goals](development/goals/phase-1/) — canonical G00-G11
