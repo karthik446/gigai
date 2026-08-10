@@ -59,6 +59,16 @@ TRANSITIONS = frozenset(
         "run_interrupted",
         "gig_accepted",
         "gig_closed",
+        "target_effect_authorized",
+        "target_effect_prepared",
+        "target_effect_exposed",
+        "target_effect_verified",
+        "target_effect_applied",
+        "target_effect_refused",
+        "target_effect_failed",
+        "target_effect_cancelled",
+        "target_effect_rolled_back",
+        "target_effect_blocked",
     }
 )
 JournalObserver = Callable[[str], None]
