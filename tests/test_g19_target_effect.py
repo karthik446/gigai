@@ -7,6 +7,7 @@ from dataclasses import replace
 
 import pytest
 
+from gigai.canonical import parse_json_bytes
 from gigai.lifecycle import approve_offline, create_offline
 from gigai.review_loop import run_review_loop
 from gigai.run import launch_run
@@ -136,6 +137,8 @@ def test_g19_refuses_dirty_target_before_preparation(tmp_path: Path) -> None:
     (target / "README.md").write_text("changed\n", encoding="utf-8")
     with pytest.raises(TargetEffectRefusedError, match="not clean"):
         prepare_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+    refused = (resolved.path / "manifests/target-effects" / f"{authorized.record['effect_id']}.json").read_bytes()
+    assert parse_json_bytes(refused)["state"] == "refused"
 
 
 def test_g19_rejects_path_traversal_and_symlink_targets(tmp_path: Path) -> None:

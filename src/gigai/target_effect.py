@@ -177,33 +177,37 @@ def prepare_target_effect(
     record = _load_record(resolved, effect_id)
     if record["state"] != "effect_authorized":
         raise TargetEffectError("only effect_authorized records can be prepared")
-    _revalidate_record_context(resolved, record)
-    target_path = _safe_target_file(resolved.target_root, str(record["relative_target_path"]))
-    source_path = _safe_workpad_file(resolved.path, str(record["source_artifact"]["path"]))
-    target = _observe_target(resolved)
-    source_bytes = source_path.read_bytes()
-    target_bytes = target_path.read_bytes()
-    _require_clean_expected_target(record, target, target_path, target_bytes)
-    if digest_imported_bytes(source_bytes) != record["expected_after_sha256"]:
-        raise TargetEffectRefusedError("source artifact digest changed before preparation", code="source_digest_mismatch")
-    before_bytes, before_ref = _manifest(
-        resolved,
-        record,
-        target,
-        relative_path=str(record["relative_target_path"]),
-        file_bytes=target_bytes,
-        mode=stat.S_IMODE(target_path.stat().st_mode),
-        phase="before",
-    )
-    now = clock or _now
-    next_record = _next_record(record, state="prepared", clock=now)
-    next_record["target_before_manifest"] = before_ref
-    return _persist(
-        resolved,
-        next_record,
-        artifacts=(JournalArtifact(str(before_ref["path"]), before_bytes),),
-        clock=now,
-    )
+    try:
+        _revalidate_record_context(resolved, record)
+        target_path = _safe_target_file(resolved.target_root, str(record["relative_target_path"]))
+        source_path = _safe_workpad_file(resolved.path, str(record["source_artifact"]["path"]))
+        target = _observe_target(resolved)
+        source_bytes = source_path.read_bytes()
+        target_bytes = target_path.read_bytes()
+        _require_clean_expected_target(record, target, target_path, target_bytes)
+        if digest_imported_bytes(source_bytes) != record["expected_after_sha256"]:
+            raise TargetEffectRefusedError("source artifact digest changed before preparation", code="source_digest_mismatch")
+        before_bytes, before_ref = _manifest(
+            resolved,
+            record,
+            target,
+            relative_path=str(record["relative_target_path"]),
+            file_bytes=target_bytes,
+            mode=stat.S_IMODE(target_path.stat().st_mode),
+            phase="before",
+        )
+        now = clock or _now
+        next_record = _next_record(record, state="prepared", clock=now)
+        next_record["target_before_manifest"] = before_ref
+        return _persist(
+            resolved,
+            next_record,
+            artifacts=(JournalArtifact(str(before_ref["path"]), before_bytes),),
+            clock=now,
+        )
+    except TargetEffectRefusedError as exc:
+        _persist_terminal(resolved, record, "refused", exc.code, clock)
+        raise
 
 
 def apply_target_effect(
@@ -221,15 +225,19 @@ def apply_target_effect(
         return TargetEffectResult(record, ())
     if record["state"] != "prepared":
         raise TargetEffectError("only prepared records can be applied")
-    _revalidate_record_context(resolved, record)
-    target_path = _safe_target_file(resolved.target_root, str(record["relative_target_path"]))
-    source_path = _safe_workpad_file(resolved.path, str(record["source_artifact"]["path"]))
-    target = _observe_target(resolved)
-    source_bytes = source_path.read_bytes()
-    target_bytes = target_path.read_bytes()
-    _require_clean_expected_target(record, target, target_path, target_bytes)
-    if digest_imported_bytes(source_bytes) != record["expected_after_sha256"]:
-        raise TargetEffectRefusedError("source artifact digest changed before exposure", code="source_digest_mismatch")
+    try:
+        _revalidate_record_context(resolved, record)
+        target_path = _safe_target_file(resolved.target_root, str(record["relative_target_path"]))
+        source_path = _safe_workpad_file(resolved.path, str(record["source_artifact"]["path"]))
+        target = _observe_target(resolved)
+        source_bytes = source_path.read_bytes()
+        target_bytes = target_path.read_bytes()
+        _require_clean_expected_target(record, target, target_path, target_bytes)
+        if digest_imported_bytes(source_bytes) != record["expected_after_sha256"]:
+            raise TargetEffectRefusedError("source artifact digest changed before exposure", code="source_digest_mismatch")
+    except TargetEffectRefusedError as exc:
+        _persist_terminal(resolved, record, "refused", exc.code, clock)
+        raise
     _stage_and_replace(target_path, source_bytes, int(record["expected_file_mode"]), observer)
 
     now = clock or _now
