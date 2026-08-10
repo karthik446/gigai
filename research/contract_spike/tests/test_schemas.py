@@ -35,6 +35,7 @@ EXPECTED_SCHEMA_NAMES = {
     "run-details.schema.json",
     "run-manifest.schema.json",
     "review-loop.schema.json",
+    "target-effect.schema.json",
     "trace.schema.json",
 }
 
@@ -760,6 +761,57 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "created_at": NOW,
         "updated_at": NOW,
     }
+    target_effect = {
+        "schema_version": "1.0",
+        "effect_id": "effect_99999999-9999-4999-8999-999999999999",
+        "effect_version": 5,
+        "state": "applied",
+        "project_id": PROJECT_ID,
+        "gig_id": GIG_ID,
+        "gig_proposal_id": PROPOSAL_ID,
+        "target": {
+            "kind": "git",
+            "binding_sha256": ZERO_DIGEST,
+            "repository_identity_sha256": ZERO_DIGEST,
+            "git_head": COMMIT,
+        },
+        "operator": actor(),
+        "effect_kind": "write_target",
+        "operation": "replace_file",
+        "relative_target_path": "README.md",
+        "source_artifact": artifact("addressed/replacement.md", media_type="text/markdown"),
+        "expected_before_sha256": ZERO_DIGEST,
+        "expected_after_sha256": ONE_DIGEST,
+        "expected_file_mode": 420,
+        "authorization": {
+            "gig_proposal_id": PROPOSAL_ID,
+            "operator": actor(),
+            "target_binding_sha256": ZERO_DIGEST,
+            "relative_target_path": "README.md",
+            "source_artifact_sha256": ZERO_DIGEST,
+            "expected_before_sha256": ZERO_DIGEST,
+            "expected_after_sha256": ONE_DIGEST,
+            "authorized_at": NOW,
+            "cancellation_policy": "before_exposure_only",
+            "commit_policy": "leave_uncommitted",
+            "authorization_sha256": ZERO_DIGEST,
+        },
+        "cancellation_policy": "before_exposure_only",
+        "commit_policy": "leave_uncommitted",
+        "patch_identity": {
+            "relative_target_path": "README.md",
+            "source_artifact_sha256": ZERO_DIGEST,
+            "expected_before_sha256": ZERO_DIGEST,
+            "expected_after_sha256": ONE_DIGEST,
+            "expected_file_mode": 420,
+            "descriptor_sha256": ZERO_DIGEST,
+        },
+        "target_before_manifest": artifact("manifests/target-effects/effect-before.json"),
+        "target_after_manifest": artifact("manifests/target-effects/effect-after.json"),
+        "created_at": NOW,
+        "updated_at": NOW,
+        "terminal_reason": None,
+    }
     return {
         "urn:gigai:schema:gig-proposal:1": proposal,
         "urn:gigai:schema:active-gig-version:1": active,
@@ -782,6 +834,7 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "urn:gigai:schema:model-invocation:1": invocation,
         "urn:gigai:schema:model-exchange:1": exchange,
         "urn:gigai:schema:proposal-interview:1": proposal_interview,
+        "urn:gigai:schema:target-effect:1": target_effect,
     }
 
 
@@ -822,7 +875,7 @@ class SerializedContractTests(unittest.TestCase):
         )
 
     def test_all_schema_documents_are_valid_draft_2020_12(self) -> None:
-        self.assertEqual(len(self.schemas), 22)
+        self.assertEqual(len(self.schemas), 23)
         for schema_id, schema in self.schemas.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)
