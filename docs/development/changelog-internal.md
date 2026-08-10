@@ -40,8 +40,9 @@ current.
 - Packaged schema resources: 23.
 - Accepted research/contract prerequisites: S16-EVAL, S18-01 through S18-05,
   and S22-01.
-- G20: Goal contract proposed; no runtime implementation or accepted amendment
-  yet. G21: no Goal document or implementation work yet.
+- G20: Goal contract and additive learning/manifest amendment accepted; runtime
+  implementation is now in progress. G21: no Goal document or implementation
+  work yet.
 - Current closeout: G19 completion audit and terminal handoff are accepted.
 - Known reconciliation work: some older README, Phase 3 status, and evidence
   status lines still reflect earlier snapshots and must be corrected explicitly.
@@ -193,9 +194,9 @@ accepted amendment, mutation report, and installed replay.
 
 ### G20 — Local `improve` and evaluator learning
 
-Proposed contract; not activated. See the [G20 goal contract](goals/phase-5/G20-local-improve-and-evaluator-learning.md).
-Implementation and evidence remain absent until the learning-contract
-amendment is accepted.
+Contract and additive amendment accepted; runtime implementation in progress.
+See the [G20 goal contract](goals/phase-5/G20-local-improve-and-evaluator-learning.md)
+and [learning-contract amendment](evidence/phase-5/G20/learning-contract-amendment.md).
 
 ### G21 — Recurring and comparative Gigs
 

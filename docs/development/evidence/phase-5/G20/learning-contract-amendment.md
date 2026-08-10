@@ -1,6 +1,6 @@
 # G20 Learning and Improvement Contract Amendment
 
-- Status: Proposed additive amendment; no runtime implementation
+- Status: Accepted additive amendment for G20; no runtime implementation
 - Type: Additive serialized-contract amendment for G20
 - Depends on: G20 approved goal contract, G16 completion audit and terminal
   handoff, accepted S16-EVAL methodology, G18 completion audit and terminal
@@ -213,11 +213,12 @@ The amendment package must contain exactly:
    duplicate fixtures; and
 8. no runtime provider, target, Git, approval, or version-advance behavior.
 
-The amendment is accepted only after the source and installed schema
-verification passes, prior hashes are independently unchanged, and the
-contract review confirms the two-resource decision, authority boundaries,
-closed path allowlist, separate gates, and recovery state machine. Acceptance
-unblocks G20 implementation; it does not mark G20 complete.
+Acceptance verification passed: the focused G20 and prior contract suites pass,
+the source verifier reports 25 packaged resources, all prior twenty-three
+schema bytes remain unchanged, and the checksum inventory contains exactly 25
+matching entries. The two-resource decision, authority boundaries, closed path
+allowlist, separate gates, and recovery state machine are therefore accepted.
+This unblocks G20 implementation; it does not mark G20 complete.
 
 ## Evidence references
 

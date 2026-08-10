@@ -19,6 +19,8 @@ EXPECTED_SHA256 = {
     "gig-proposal.schema.json": "515f16368059c7d8d4bf88cb47d8fc0df63afc50a51e13c8c75601c013f134b3",
     "goal-graph.schema.json": "669115492bfed52f4738cb9cbbac626a10f80f6965da3d1f70eb20e4c2e264cf",
     "handoff-frontmatter.schema.json": "de27d69529ae7cce07063fb67dcecc48aff79012ef72c66f3ed077367b9bd09e",
+    "improvement-manifest.schema.json": "b07e44d77a727d68a95472b16a5d3bb06910169acbb9a42bad05697fd7744b32",
+    "learning-record.schema.json": "ffc112c25fb0984d09d076b25756b162f64b042675ec62cebca93c38a77de608",
     "model-exchange.schema.json": "d0f57224c2c75fa1e140d380810fe92fc381e619f8105954ce9989a27911501c",
     "model-invocation.schema.json": "756ca9eb7a746e3f0b6700b028c4807ed98050e15df29d182aeed73335e51bd6",
     "proposal-interview.schema.json": "077474699033fa10fd93d1d7bc9e96c45f90a5735a6bcb595258f0c36fbdea9c",
@@ -59,7 +61,7 @@ def main() -> int:
                 f"expected {expected_digest}, got {actual_digest}"
             )
 
-    print("verified 23 installed GigAI schemas")
+    print("verified 25 installed GigAI schemas")
     return 0
 
 

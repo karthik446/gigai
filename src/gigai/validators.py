@@ -36,6 +36,8 @@ SCHEMA_NAMES = (
     "gig-proposal.schema.json",
     "goal-graph.schema.json",
     "handoff-frontmatter.schema.json",
+    "improvement-manifest.schema.json",
+    "learning-record.schema.json",
     "model-exchange.schema.json",
     "model-invocation.schema.json",
     "proposal-interview.schema.json",
