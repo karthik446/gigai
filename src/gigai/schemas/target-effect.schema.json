@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:target-effect:1",
+  "title": "GigAI approved target effect",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "effect_id",
+    "effect_version",
+    "state",
+    "project_id",
+    "gig_id",
+    "gig_proposal_id",
+    "target",
+    "operator",
+    "effect_kind",
+    "operation",
+    "relative_target_path",
+    "source_artifact",
+    "expected_before_sha256",
+    "expected_after_sha256",
+    "expected_file_mode",
+    "authorization",
+    "cancellation_policy",
+    "commit_policy",
+    "patch_identity",
+    "target_before_manifest",
+    "target_after_manifest",
+    "created_at",
+    "updated_at",
+    "terminal_reason"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "effect_id": {
+      "type": "string",
+      "pattern": "^effect_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "effect_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "state": {
+      "type": "string",
+      "enum": [
+        "effect_authorized",
+        "prepared",
+        "exposed",
+        "verified",
+        "applied",
+        "refused",
+        "failed",
+        "cancelled",
+        "rolled_back",
+        "blocked"
+      ]
+    },
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "gig_proposal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_proposal_id"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "binding_sha256", "repository_identity_sha256", "git_head"],
+      "properties": {
+        "kind": {"const": "git"},
+        "binding_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "repository_identity_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "git_head": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      }
+    },
+    "operator": {"$ref": "#/$defs/operator_actor"},
+    "effect_kind": {
+      "allOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/effect"},
+        {"const": "write_target"}
+      ]
+    },
+    "operation": {"const": "replace_file"},
+    "relative_target_path": {"$ref": "urn:gigai:schema:common:1#/$defs/relative_path"},
+    "source_artifact": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "expected_before_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "expected_after_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "expected_file_mode": {"type": "integer", "minimum": 0, "maximum": 511},
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gig_proposal_id",
+        "operator",
+        "target_binding_sha256",
+        "relative_target_path",
+        "source_artifact_sha256",
+        "expected_before_sha256",
+        "expected_after_sha256",
+        "authorized_at",
+        "cancellation_policy",
+        "commit_policy",
+        "authorization_sha256"
+      ],
+      "properties": {
+        "gig_proposal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_proposal_id"},
+        "operator": {"$ref": "#/$defs/operator_actor"},
+        "target_binding_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "relative_target_path": {"$ref": "urn:gigai:schema:common:1#/$defs/relative_path"},
+        "source_artifact_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "expected_before_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "expected_after_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "authorized_at": {"type": "string", "format": "date-time"},
+        "cancellation_policy": {"const": "before_exposure_only"},
+        "commit_policy": {"const": "leave_uncommitted"},
+        "authorization_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}
+      }
+    },
+    "cancellation_policy": {"const": "before_exposure_only"},
+    "commit_policy": {"const": "leave_uncommitted"},
+    "patch_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_target_path",
+        "source_artifact_sha256",
+        "expected_before_sha256",
+        "expected_after_sha256",
+        "expected_file_mode",
+        "descriptor_sha256"
+      ],
+      "properties": {
+        "relative_target_path": {"$ref": "urn:gigai:schema:common:1#/$defs/relative_path"},
+        "source_artifact_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "expected_before_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "expected_after_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "expected_file_mode": {"type": "integer", "minimum": 0, "maximum": 511},
+        "descriptor_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}
+      }
+    },
+    "target_before_manifest": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        {"type": "null"}
+      ]
+    },
+    "target_after_manifest": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        {"type": "null"}
+      ]
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "terminal_reason": {
+      "oneOf": [
+        {"type": "string", "minLength": 1, "maxLength": 255},
+        {"type": "null"}
+      ]
+    }
+  },
+  "$defs": {
+    "operator_actor": {
+      "allOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+        {"properties": {"kind": {"const": "operator"}}}
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {"enum": ["prepared", "exposed", "verified", "applied"]}
+        }
+      },
+      "then": {
+        "properties": {
+          "target_before_manifest": {"type": "object"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {"enum": ["verified", "applied"]}
+        }
+      },
+      "then": {
+        "properties": {
+          "target_after_manifest": {"type": "object"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {"enum": ["refused", "failed", "cancelled", "rolled_back", "blocked"]}
+        }
+      },
+      "then": {
+        "properties": {
+          "terminal_reason": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {"enum": ["effect_authorized", "prepared", "exposed", "verified", "applied"]}
+        }
+      },
+      "then": {
+        "properties": {
+          "terminal_reason": {"type": "null"}
+        }
+      }
+    }
+  ]
+}
