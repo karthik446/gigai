@@ -21,7 +21,7 @@ non-contiguous and crosses lanes:
 - Phase 3: G13–G18
 - Phase 2: G22
 - Phase 4: G19
-- Not yet materialized: G20 and G21
+- Phase 5: G20 proposed for review; G21 planning-only
 - Research/contract records: S16-EVAL, S18-01 through S18-05, and S22-01
 
 The implementation chronology and the dependency graph are both valid but are
@@ -40,7 +40,8 @@ current.
 - Packaged schema resources: 23.
 - Accepted research/contract prerequisites: S16-EVAL, S18-01 through S18-05,
   and S22-01.
-- G20 and G21: no Goal documents or implementation work yet.
+- G20: Goal contract proposed; no runtime implementation or accepted amendment
+  yet. G21: no Goal document or implementation work yet.
 - Current closeout: G19 completion audit and terminal handoff are accepted.
 - Known reconciliation work: some older README, Phase 3 status, and evidence
   status lines still reflect earlier snapshots and must be corrected explicitly.
@@ -192,8 +193,9 @@ accepted amendment, mutation report, and installed replay.
 
 ### G20 — Local `improve` and evaluator learning
 
-Not yet materialized. This entry must remain a placeholder until G20 has an
-approved Goal contract and implementation evidence.
+Proposed contract; not activated. See the [G20 goal contract](goals/phase-5/G20-local-improve-and-evaluator-learning.md).
+Implementation and evidence remain absent until the learning-contract
+amendment is accepted.
 
 ### G21 — Recurring and comparative Gigs
 

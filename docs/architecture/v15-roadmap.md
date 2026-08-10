@@ -385,7 +385,7 @@ dependencies, not live status fields or authorization to begin.
 | S18-05 | Provider-input redaction, credential, and network-boundary spike | G16, G17 |
 | G18 | Provider comparison and model handoff implementation | S16-EVAL, S18-01, S18-02, S18-03, S18-04, S18-05, S22-01 |
 | G19 | Approved target mutation | G16, S16-EVAL, G18, G22 |
-| G20 | Local `improve` and evaluator learning | G19 |
+| G20 | Local `improve` and evaluator learning | G16, S16-EVAL, G18, G19, G22 |
 | G21 | Recurring and comparative Gigs | G20 |
 | G22 | Deliberative `create` and user-facing proposal interview | S22-01, G18 |
 
@@ -597,10 +597,12 @@ refusal paths, mutation evidence, installed replay, and recoverable failure.
 #### G20 — Local `improve` and evaluator learning
 
 Use completed evidence, findings, feedback, and accepted outcomes to propose
-changes to a Gig's review contract, rubric, verifier, recovery, or parallelism.
-Improvement never edits approved history automatically and never learns outside
-the configured local learning root. Accepted changes create a new proposal and
-version.
+changes to a Gig's review contract, rubric, or verifier. Improvement never edits
+approved history automatically and never learns outside the derived local
+learning root (`home_root / "learning"`). Recovery-policy and bounded-
+parallelism proposals remain deferred until a later contract establishes their
+evidence and authority boundaries. Accepted changes create a new proposal and
+version through the existing `gig-proposal` and active-version lifecycle.
 
 #### G21 — Recurring and comparative Gigs
 
