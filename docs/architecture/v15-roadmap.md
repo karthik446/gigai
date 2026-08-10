@@ -1,8 +1,8 @@
 # GigAI V15 Forward Roadmap
 
-**Date:** 2026-08-06  
+**Date:** 2026-08-10
 **Revision:** 15  
-**Status:** roadmap draft; implementation goals are not yet materialized  
+**Status:** roadmap draft; selected implementation goals are materialized
 **Predecessor:** [V14 implementation plan](v14-implementation-plan.md)  
 **Research input:** [Review Loop Foundation Spike](../research/review-loop-foundation-spike.md)
 
@@ -11,10 +11,11 @@ first bounded deterministic Run. It does not obsolete V14. V14 remains the
 authority for the contracts already implemented and for the boundaries that
 V15 must preserve.
 
-**Current roadmap gate:** G13 is complete and independently evidenced on
-`main`. G14 is the next candidate for review. G14 and all later candidates in
-this document remain planning-only until their individual goal contracts are
-reviewed and approved; this roadmap does not authorize implementation.
+**Current roadmap gate:** G13 through G18 and G22 are complete and independently
+evidenced. G19 is the next candidate for review; its goal contract is proposed
+but not activated. Later candidates remain planning-only until their individual
+goal contracts are reviewed and approved; this roadmap does not authorize
+implementation.
 
 This document answers a narrower question than a goal contract: what should
 GigAI become useful for next, in what order, and what evidence must exist before
@@ -430,6 +431,15 @@ and revisions, present capability/privacy/effect choices, and seal an approved
 proposal. The session remains local-first and uses SQLite/workpad authority;
 remote hosting, background service behavior, and unapproved execution remain
 out of scope.
+
+G22 is complete. Its shipped path is deterministic/offline by default, binds
+only to loopback with a short-lived token, requires explicit reference and
+operator approval, and hands G19 a sealed proposal without target mutation or
+Run authority. The [completion audit](../development/evidence/phase-2/G22/completion-audit.md)
+and [terminal handoff](../development/evidence/phase-2/G22/terminal-handoff.md)
+are the authoritative closeout records. G19 is the next authorized consumer;
+it must define and separately authorize target effects rather than treating
+G22's `write_workpad` choice as permission to mutate a target.
 
 ### Phase 3A — Sequential execution spine
 

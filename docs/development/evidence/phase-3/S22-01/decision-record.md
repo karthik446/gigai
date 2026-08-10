@@ -1,9 +1,10 @@
 # S22-01 — Local proposal-interview and clarification protocol spike
 
-- Status: Research in progress; local protocol proposed, not product code
+- Status: Accepted protocol/design prerequisite; no product code
 - Depends on: G15 reference substrate, G16 review-loop boundary, and G17
   capability inspection
-- Unblocks: G22 proposal-interview design only; does not implement `gigai create`
+- Unblocks: G22 proposal-interview implementation after the accepted additive
+  `proposal-interview.schema.json` amendment; does not implement `gigai create`
 
 ## Decision
 
@@ -57,6 +58,10 @@ execution path, credential flow, or target authority changed. If G22 needs
 durable question/answer records beyond the existing workpad/journal substrate,
 it must raise a separate additive contract amendment preserving existing
 hashes and canonical vectors.
+
+The follow-up [proposal-interview contract amendment](proposal-interview-contract-amendment.md)
+is now accepted for G22. It defines the durable interview snapshot without
+claiming that the local server, HTMX transport, or `gigai create` has shipped.
 
 This spike does not prove HTMX rendering, browser security, concurrent sessions,
 real persistence recovery, proposal quality, provider use, or target mutation.

@@ -27,6 +27,7 @@ EXPECTED_SCHEMA_NAMES = {
     "handoff-frontmatter.schema.json",
     "model-exchange.schema.json",
     "model-invocation.schema.json",
+    "proposal-interview.schema.json",
     "report.schema.json",
     "review-bundle.schema.json",
     "review-contract.schema.json",
@@ -706,6 +707,59 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "retry_count": 0,
         "created_at": NOW,
     }
+    proposal_interview = {
+        "schema_version": "1.0",
+        "record_version": 1,
+        "revision": 1,
+        "parent_revision": None,
+        "session_id": "session_99999999-9999-4999-8999-999999999999",
+        "project_id": PROJECT_ID,
+        "gig_id": GIG_ID,
+        "proposal_id": None,
+        "request": {
+            "kind": "repository-feature",
+            "artifact": artifact("review/interviews/request.txt", media_type="text/plain"),
+            "content_sha256": ZERO_DIGEST,
+        },
+        "state": "questions_pending",
+        "round": 1,
+        "max_rounds": 3,
+        "references": [
+            {
+                "reference_id": "ref_99999999-9999-4999-8999-999999999999",
+                "content_sha256": ZERO_DIGEST,
+                "decision": "excluded",
+            }
+        ],
+        "selected_reference_ids": [],
+        "questions": [
+            {
+                "question_id": "scope",
+                "answer_type": "text",
+                "required": True,
+                "options": [],
+                "depends_on": [],
+                "rationale": "Define the requested outcome.",
+                "provenance": "g22://scope",
+            }
+        ],
+        "answers": [],
+        "boundary": {"privacy": "local_only", "capability": "none", "effect": "read_local"},
+        "events": [
+            {
+                "sequence": 1,
+                "event": "session_created",
+                "state": "questions_pending",
+                "actor": actor(),
+                "payload_sha256": ZERO_DIGEST,
+                "occurred_at": NOW,
+            }
+        ],
+        "approval": None,
+        "terminal_reason": None,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
     return {
         "urn:gigai:schema:gig-proposal:1": proposal,
         "urn:gigai:schema:active-gig-version:1": active,
@@ -727,6 +781,7 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "urn:gigai:schema:capability-installation:1": capability_installation(),
         "urn:gigai:schema:model-invocation:1": invocation,
         "urn:gigai:schema:model-exchange:1": exchange,
+        "urn:gigai:schema:proposal-interview:1": proposal_interview,
     }
 
 
@@ -767,7 +822,7 @@ class SerializedContractTests(unittest.TestCase):
         )
 
     def test_all_schema_documents_are_valid_draft_2020_12(self) -> None:
-        self.assertEqual(len(self.schemas), 21)
+        self.assertEqual(len(self.schemas), 22)
         for schema_id, schema in self.schemas.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)

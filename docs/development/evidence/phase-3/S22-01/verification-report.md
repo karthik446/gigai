@@ -10,5 +10,5 @@ pass
 
 The tests use a local in-memory SQLite trace and pure protocol fixtures. They
 do not start a server, invoke a provider, access credentials, run background
-work, execute capabilities, or mutate a target. S22-01 remains proposed for
-review and does not implement `gigai create`.
+work, execute capabilities, or mutate a target. S22-01 is accepted as a
+protocol/design prerequisite only and does not implement `gigai create`.

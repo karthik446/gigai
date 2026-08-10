@@ -9,7 +9,42 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Detect implementation changes
+    runs-on: ubuntu-latest
+    outputs:
+      code_changed: ${{ steps.detect.outputs.code_changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            changed="$(git diff --name-only "${BASE_SHA}...${SHA}")"
+          else
+            changed="$(git diff --name-only "${SHA}^" "${SHA}")"
+          fi
+
+          code_changed=false
+          if [ -n "${changed}" ]; then
+            while IFS= read -r path; do
+              case "${path}" in
+                *.md|*.markdown) ;;
+                *) code_changed=true; break ;;
+              esac
+            done <<< "${changed}"
+          fi
+          echo "code_changed=${code_changed}" >> "${GITHUB_OUTPUT}"
+          echo "implementation changes: ${code_changed}"
+
   source-tests:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
     name: Python ${{ matrix.python }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -29,6 +64,8 @@ jobs:
       - run: uv run --locked pytest
 
   wheel:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
     name: Built-wheel resources
     runs-on: ubuntu-latest
     steps:
@@ -76,6 +113,8 @@ jobs:
           GIGAI_TEST_EXECUTABLE: ${{ github.workspace }}/.wheel-venv/bin/gigai
 
   debian-offline:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
     name: Debian 12 offline container
     runs-on: ubuntu-latest
     steps:

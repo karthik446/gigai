@@ -38,6 +38,7 @@ SCHEMA_NAMES = (
     "handoff-frontmatter.schema.json",
     "model-exchange.schema.json",
     "model-invocation.schema.json",
+    "proposal-interview.schema.json",
     "report.schema.json",
     "review-bundle.schema.json",
     "review-contract.schema.json",

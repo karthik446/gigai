@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sys
 from dataclasses import replace
+import webbrowser
 
 import click
 
@@ -22,12 +23,17 @@ from .diagnostics import render_report_json, run_doctor, run_live_doctor
 from .index import JournalIndexError, JournalProjection, read_index
 from .lifecycle import (
     LifecycleError,
+    approve_interview_session,
     approve_offline,
     create_offline,
+    persist_interview_session,
     record_feedback,
     reject_offline,
     revise_offline,
+    start_interview,
 )
+from .proposal_interview import InterviewHTTPServer
+from .question_generation import generate_model_questions
 from .setup import (
     build_config,
     default_home_root,
@@ -485,13 +491,37 @@ def init_command(target: Path | None, home_value: Path | None, as_json: bool) ->
     "--model-target",
     default="offline-default",
     show_default=True,
-    help="Configured deterministic model target used only for offline fixture drafting.",
+    help="Configured model target for bounded question generation; offline-default is deterministic.",
+)
+@click.option(
+    "--request",
+    "request_value",
+    help="Free-form request presented to the local proposal interview.",
+)
+@click.option(
+    "--reference",
+    "reference_values",
+    multiple=True,
+    type=click.Path(path_type=Path, dir_okay=False),
+    help="Explicit local reference; repeat for each selected candidate.",
+)
+@click.option(
+    "--offline",
+    is_flag=True,
+    help="Use the legacy deterministic proposal fixture instead of the local interview.",
+)
+@click.option(
+    "--max-rounds",
+    type=click.IntRange(min=1, max=1024),
+    default=3,
+    show_default=True,
+    help="Maximum clarification rounds for the local interview.",
 )
 @click.option(
     "--open/--no-open",
-    "open_editor",
+    "open_browser",
     default=True,
-    help="Open the proposal for review.",
+    help="Open the loopback interview in the configured browser.",
 )
 @click.option(
     "--json", "as_json", is_flag=True, help="Emit a stable path-safe result summary."
@@ -502,21 +532,84 @@ def create_command(
     target_value: Path | None,
     home_value: Path | None,
     model_target: str,
-    open_editor: bool,
+    request_value: str | None,
+    reference_values: tuple[Path, ...],
+    offline: bool,
+    max_rounds: int,
+    open_browser: bool,
     as_json: bool,
 ) -> None:
-    """Create one offline, review-only Gig Proposal and stop for approval."""
+    """Create a local deliberative proposal interview, or an explicit offline fixture."""
 
     _require_supported_platform()
     try:
-        result = create_offline(
-            home_root=home_value or default_home_root(),
-            requested_target=target_value,
-            name=name,
-            commission=commission,
-            model_target=model_target,
-            open_editor=open_editor,
-        )
+        home = home_value or default_home_root()
+        if offline:
+            result = create_offline(
+                home_root=home,
+                requested_target=target_value,
+                name=name,
+                commission=commission,
+                model_target=model_target,
+                open_editor=open_browser,
+            )
+        else:
+            started = start_interview(
+                home_root=home,
+                requested_target=target_value,
+                name=name,
+                request=request_value or commission or name,
+                reference_paths=reference_values,
+                max_rounds=max_rounds,
+            )
+            server = InterviewHTTPServer(
+                started.session,
+                on_session=lambda session: persist_interview_session(
+                    workpad=started.workpad,
+                    project_id=started.project_id,
+                    gig_id=started.gig_id,
+                    session=session,
+                ),
+                on_questions=lambda session: (
+                    session
+                    if any(item.question_id == "operator-confirmation" for item in session.questions)
+                    else generate_model_questions(
+                        config=load_config(home),
+                        model_target=model_target,
+                        session=session,
+                        reference_bytes=dict(started.reference_bytes),
+                    )
+                ),
+                on_approval=lambda session: approve_interview_session(
+                    home_root=home,
+                    requested_target=target_value,
+                    start=started,
+                    session=session,
+                ),
+            ).start()
+            try:
+                click.echo(f"GigAI local interview: {server.url}", err=True)
+                if open_browser:
+                    webbrowser.open(server.url, new=2)
+                session = server.wait()
+            finally:
+                server.close()
+            payload = {
+                "gig_id": started.gig_id,
+                "project_id": started.project_id,
+                "proposal_id": session.proposal_id,
+                "session_id": session.session_id,
+                "status": session.state,
+                "url": server.url,
+            }
+            if as_json:
+                click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+            else:
+                click.echo(
+                    f"GigAI interview {session.session_id} ended in {session.state}; "
+                    "no Run was started."
+                )
+            return
     except (LifecycleError, WorkpadError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     payload = {

@@ -18,7 +18,9 @@ traces, and machine reports; their hashes are pinned separately in
 `addressed-artifact.schema.json`. G17 adds the capability manifest and
 installation review resources. The G18 contract amendment adds
 `model-invocation.schema.json` and `model-exchange.schema.json`, for a
-twenty-one-resource set while preserving all prior hashes and vectors.
+twenty-one-resource set while preserving all prior hashes and vectors. The
+G22 amendment adds `proposal-interview.schema.json` as the twenty-second
+resource for durable, typed interview snapshots.
 
 ## Production identity API
 
@@ -66,6 +68,8 @@ No other product module implements canonical rendering or SHA-256 identity.
   terminal outcome, replay fields, usage, and boundary attestation.
 - `model-exchange.schema.json` defines bounded Goal-edge handoffs and
   provider comparisons without fallback or winner selection.
+- `proposal-interview.schema.json` defines typed, bounded, explicitly
+  selected, operator-approved proposal-interview snapshots.
 - `capability-manifest.schema.json` defines proposal-time capability
   requirements, inspection states, and explicit options.
 - `capability-installation.schema.json` defines approved local installation

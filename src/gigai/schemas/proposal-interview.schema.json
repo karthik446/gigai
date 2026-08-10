@@ -1,0 +1,280 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:proposal-interview:1",
+  "title": "GigAI proposal interview record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_version",
+    "revision",
+    "parent_revision",
+    "session_id",
+    "project_id",
+    "gig_id",
+    "proposal_id",
+    "request",
+    "state",
+    "round",
+    "max_rounds",
+    "references",
+    "selected_reference_ids",
+    "questions",
+    "answers",
+    "boundary",
+    "events",
+    "approval",
+    "terminal_reason",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "record_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "revision": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "parent_revision": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+        {"type": "null"}
+      ]
+    },
+    "session_id": {"$ref": "#/$defs/session_id"},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "proposal_id": {
+      "oneOf": [
+        {"$ref": "urn:gigai:schema:common:1#/$defs/gig_proposal_id"},
+        {"type": "null"}
+      ]
+    },
+    "request": {"$ref": "#/$defs/request"},
+    "state": {
+      "type": "string",
+      "enum": ["questions_pending", "clarification_required", "proposal_ready", "approved", "blocked"]
+    },
+    "round": {"type": "integer", "minimum": 1, "maximum": 1024},
+    "max_rounds": {"type": "integer", "minimum": 1, "maximum": 1024},
+    "references": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/reference_decision"}
+    },
+    "selected_reference_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/reference_id"}
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/question"}
+    },
+    "answers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/answer"}
+    },
+    "boundary": {"$ref": "#/$defs/boundary"},
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/event"}
+    },
+    "approval": {
+      "oneOf": [
+        {"$ref": "#/$defs/approval"},
+        {"type": "null"}
+      ]
+    },
+    "terminal_reason": {"type": ["string", "null"], "maxLength": 255},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"revision": {"const": 1}}},
+      "then": {"properties": {"parent_revision": {"type": "null"}}}
+    },
+    {
+      "if": {"properties": {"revision": {"minimum": 2}}},
+      "then": {
+        "properties": {
+          "parent_revision": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"state": {"const": "approved"}}},
+      "then": {
+        "properties": {
+          "approval": {"$ref": "#/$defs/approval"},
+          "selected_reference_ids": {"minItems": 1}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"state": {"const": "blocked"}}},
+      "then": {
+        "required": ["terminal_reason"],
+        "properties": {"terminal_reason": {"type": "string", "minLength": 1}}
+      }
+    },
+    {
+      "if": {"properties": {"state": {"enum": ["questions_pending", "clarification_required", "proposal_ready"]}}},
+      "then": {"properties": {"approval": {"type": "null"}}}
+    }
+  ],
+  "$defs": {
+    "session_id": {
+      "type": "string",
+      "pattern": "^session_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "reference_id": {
+      "type": "string",
+      "pattern": "^ref_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "artifact", "content_sha256"],
+      "properties": {
+        "kind": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+        "artifact": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        "content_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "reference_decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference_id", "content_sha256", "decision"],
+      "properties": {
+        "reference_id": {"$ref": "#/$defs/reference_id"},
+        "content_sha256": {"$ref": "#/$defs/sha256"},
+        "decision": {"type": "string", "enum": ["selected", "excluded"]}
+      }
+    },
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question_id",
+        "answer_type",
+        "required",
+        "options",
+        "depends_on",
+        "rationale",
+        "provenance"
+      ],
+      "properties": {
+        "question_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+        "answer_type": {"type": "string", "enum": ["text", "choice", "multiselect", "confirmation"]},
+        "required": {"type": "boolean"},
+        "options": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 255}
+        },
+        "depends_on": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120}
+        },
+        "rationale": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "provenance": {"type": "string", "minLength": 1, "maxLength": 255}
+      }
+    },
+    "answer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question_id", "answer_type", "value", "answered_at"],
+      "properties": {
+        "question_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+        "answer_type": {"type": "string", "enum": ["text", "choice", "multiselect", "confirmation"]},
+        "value": {},
+        "answered_at": {"type": "string", "format": "date-time"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"answer_type": {"const": "text"}}},
+          "then": {"properties": {"value": {"type": "string", "minLength": 1}}}
+        },
+        {
+          "if": {"properties": {"answer_type": {"const": "choice"}}},
+          "then": {"properties": {"value": {"type": "string", "minLength": 1}}}
+        },
+        {
+          "if": {"properties": {"answer_type": {"const": "multiselect"}}},
+          "then": {
+            "properties": {
+              "value": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"answer_type": {"const": "confirmation"}}},
+          "then": {"properties": {"value": {"type": "boolean"}}}
+        }
+      ]
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["privacy", "capability", "effect"],
+      "properties": {
+        "privacy": {"type": "string", "enum": ["local_only", "redact_before_share"]},
+        "capability": {"type": "string", "enum": ["none", "local_read"]},
+        "effect": {"type": "string", "enum": ["read_local", "write_workpad"]}
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "event", "state", "actor", "payload_sha256", "occurred_at"],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "event": {
+          "type": "string",
+          "enum": [
+            "session_created",
+            "question_presented",
+            "answer_recorded",
+            "clarification_requested",
+            "boundary_selected",
+            "proposal_ready",
+            "revision_created",
+            "approved",
+            "blocked",
+            "interrupted"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": ["questions_pending", "clarification_required", "proposal_ready", "approved", "blocked"]
+        },
+        "actor": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+        "payload_sha256": {"$ref": "#/$defs/sha256"},
+        "occurred_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "approved_at", "approved_by", "proposal_sha256"],
+      "properties": {
+        "decision": {"const": "approved"},
+        "approved_at": {"type": "string", "format": "date-time"},
+        "approved_by": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+        "proposal_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}
