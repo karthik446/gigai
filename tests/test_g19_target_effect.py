@@ -351,6 +351,32 @@ def test_g19_exposed_record_recovers_to_applied_after_interruption(tmp_path: Pat
     assert (target / "README.md").read_bytes() == (resolved.path / source_path).read_bytes()
 
 
+def test_g19_cancellation_after_exposure_uses_recovery_policy(tmp_path: Path) -> None:
+    _home, target, resolved, proposal_id, source_path = _fixture(tmp_path)
+    authorized = authorize_target_effect(
+        resolved=resolved,
+        proposal_id=proposal_id,
+        relative_target_path="README.md",
+        source_artifact_path=source_path,
+        operator={"kind": "operator", "id": "test-user"},
+    )
+    prepare_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+
+    def interrupt(step: str) -> None:
+        if step == "after_exposed_record":
+            raise RuntimeError("simulated interruption")
+
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        apply_target_effect(
+            resolved=resolved,
+            effect_id=str(authorized.record["effect_id"]),
+            observer=interrupt,
+        )
+    cancelled = cancel_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+    assert cancelled.record["state"] == "applied"
+    assert (target / "README.md").read_bytes() == (resolved.path / source_path).read_bytes()
+
+
 def test_g19_verified_record_recovers_to_applied_after_interruption(tmp_path: Path) -> None:
     _home, target, resolved, proposal_id, source_path = _fixture(tmp_path)
     authorized = authorize_target_effect(
