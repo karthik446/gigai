@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import uuid
+from dataclasses import replace
 
 import pytest
 
@@ -137,6 +138,113 @@ def test_g19_refuses_dirty_target_before_preparation(tmp_path: Path) -> None:
         prepare_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
 
 
+def test_g19_rejects_path_traversal_and_symlink_targets(tmp_path: Path) -> None:
+    _home, target, resolved, proposal_id, source_path = _fixture(tmp_path)
+    with pytest.raises(TargetEffectRefusedError) as traversal:
+        authorize_target_effect(
+            resolved=resolved,
+            proposal_id=proposal_id,
+            relative_target_path="../README.md",
+            source_artifact_path=source_path,
+            operator={"kind": "operator", "id": "test-user"},
+        )
+    assert traversal.value.code == "unsafe_target_path"
+
+    (target / "README-link.md").symlink_to("README.md")
+    _git(target, "add", "README-link.md")
+    _git(target, "commit", "-m", "fixture symlink")
+    with pytest.raises(TargetEffectRefusedError) as symlink:
+        authorize_target_effect(
+            resolved=resolved,
+            proposal_id=proposal_id,
+            relative_target_path="README-link.md",
+            source_artifact_path=source_path,
+            operator={"kind": "operator", "id": "test-user"},
+        )
+    assert symlink.value.code == "unsafe_target_path"
+
+
+def test_g19_rejects_non_git_resolved_targets(tmp_path: Path) -> None:
+    _home, _target, resolved, proposal_id, source_path = _fixture(tmp_path)
+    non_git = replace(resolved, target_kind="non-git")
+    with pytest.raises(TargetEffectRefusedError) as error:
+        authorize_target_effect(
+            resolved=non_git,
+            proposal_id=proposal_id,
+            relative_target_path="README.md",
+            source_artifact_path=source_path,
+            operator={"kind": "operator", "id": "test-user"},
+        )
+    assert error.value.code == "non_git_target"
+
+
+def test_g19_refuses_mode_drift_even_when_git_ignores_file_modes(tmp_path: Path) -> None:
+    _home, target, resolved, proposal_id, source_path = _fixture(tmp_path)
+    authorized = authorize_target_effect(
+        resolved=resolved,
+        proposal_id=proposal_id,
+        relative_target_path="README.md",
+        source_artifact_path=source_path,
+        operator={"kind": "operator", "id": "test-user"},
+    )
+    prepare_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+    _git(target, "config", "core.filemode", "false")
+    (target / "README.md").chmod(0o755)
+    with pytest.raises(TargetEffectRefusedError) as error:
+        apply_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+    assert error.value.code == "mode_mismatch"
+    (target / "README.md").chmod(0o644)
+
+
+def test_g19_refuses_changed_head_before_preparation(tmp_path: Path) -> None:
+    _home, target, resolved, proposal_id, source_path = _fixture(tmp_path)
+    authorized = authorize_target_effect(
+        resolved=resolved,
+        proposal_id=proposal_id,
+        relative_target_path="README.md",
+        source_artifact_path=source_path,
+        operator={"kind": "operator", "id": "test-user"},
+    )
+    (target / "README.md").write_text("new committed baseline\n", encoding="utf-8")
+    _git(target, "add", "README.md")
+    _git(target, "commit", "-m", "changed head")
+    with pytest.raises(TargetEffectRefusedError) as error:
+        prepare_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+    assert error.value.code == "target_head_changed"
+
+
+def test_g19_refuses_tampered_review_artifact_before_preparation(tmp_path: Path) -> None:
+    _home, _target, resolved, proposal_id, source_path = _fixture(tmp_path)
+    authorized = authorize_target_effect(
+        resolved=resolved,
+        proposal_id=proposal_id,
+        relative_target_path="README.md",
+        source_artifact_path=source_path,
+        operator={"kind": "operator", "id": "test-user"},
+    )
+    (resolved.path / source_path).write_bytes(b"tampered source\n")
+    with pytest.raises(TargetEffectRefusedError) as error:
+        prepare_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+    assert error.value.code == "review_artifacts_invalid"
+
+
+def test_g19_refuses_tampered_replacement_source_before_preparation(tmp_path: Path) -> None:
+    _home, _target, resolved, proposal_id, _source_path = _fixture(tmp_path)
+    source_path = "addressed/replacement.md"
+    (resolved.path / source_path).write_text("replacement\n", encoding="utf-8")
+    authorized = authorize_target_effect(
+        resolved=resolved,
+        proposal_id=proposal_id,
+        relative_target_path="README.md",
+        source_artifact_path=source_path,
+        operator={"kind": "operator", "id": "test-user"},
+    )
+    (resolved.path / source_path).write_text("tampered replacement\n", encoding="utf-8")
+    with pytest.raises(TargetEffectRefusedError) as error:
+        prepare_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+    assert error.value.code == "source_digest_mismatch"
+
+
 def test_g19_cancellation_before_exposure_leaves_target_unchanged(tmp_path: Path) -> None:
     _home, target, resolved, proposal_id, source_path = _fixture(tmp_path)
     authorized = authorize_target_effect(
@@ -149,6 +257,32 @@ def test_g19_cancellation_before_exposure_leaves_target_unchanged(tmp_path: Path
     cancelled = cancel_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
     assert cancelled.record["state"] == "cancelled"
     assert (target / "README.md").read_text(encoding="utf-8") == "before\n"
+
+
+def test_g19_failpoint_before_exposure_leaves_target_unchanged(tmp_path: Path) -> None:
+    _home, target, resolved, proposal_id, source_path = _fixture(tmp_path)
+    authorized = authorize_target_effect(
+        resolved=resolved,
+        proposal_id=proposal_id,
+        relative_target_path="README.md",
+        source_artifact_path=source_path,
+        operator={"kind": "operator", "id": "test-user"},
+    )
+    prepare_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+
+    def interrupt(step: str) -> None:
+        if step == "before_exposure":
+            raise RuntimeError("simulated interruption")
+
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        apply_target_effect(
+            resolved=resolved,
+            effect_id=str(authorized.record["effect_id"]),
+            observer=interrupt,
+        )
+    assert (target / "README.md").read_text(encoding="utf-8") == "before\n"
+    recovered = recover_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+    assert recovered.record["state"] == "prepared"
 
 
 def test_g19_exposed_record_recovers_to_applied_after_interruption(tmp_path: Path) -> None:
@@ -164,6 +298,32 @@ def test_g19_exposed_record_recovers_to_applied_after_interruption(tmp_path: Pat
 
     def interrupt(step: str) -> None:
         if step == "after_exposed_record":
+            raise RuntimeError("simulated interruption")
+
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        apply_target_effect(
+            resolved=resolved,
+            effect_id=str(authorized.record["effect_id"]),
+            observer=interrupt,
+        )
+    recovered = recover_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+    assert recovered.record["state"] == "applied"
+    assert (target / "README.md").read_bytes() == (resolved.path / source_path).read_bytes()
+
+
+def test_g19_verified_record_recovers_to_applied_after_interruption(tmp_path: Path) -> None:
+    _home, target, resolved, proposal_id, source_path = _fixture(tmp_path)
+    authorized = authorize_target_effect(
+        resolved=resolved,
+        proposal_id=proposal_id,
+        relative_target_path="README.md",
+        source_artifact_path=source_path,
+        operator={"kind": "operator", "id": "test-user"},
+    )
+    prepare_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+
+    def interrupt(step: str) -> None:
+        if step == "after_verified_record":
             raise RuntimeError("simulated interruption")
 
     with pytest.raises(RuntimeError, match="simulated interruption"):
@@ -201,3 +361,27 @@ def test_g19_recovery_blocks_ambiguous_interruption_before_exposed_record(tmp_pa
     recovered = recover_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
     assert recovered.record["state"] == "blocked"
     assert recovered.record["terminal_reason"] == "ambiguous_state_after_prepared"
+
+
+def test_g19_after_exposure_digest_drift_blocks_recovery(tmp_path: Path) -> None:
+    _home, target, resolved, proposal_id, source_path = _fixture(tmp_path)
+    authorized = authorize_target_effect(
+        resolved=resolved,
+        proposal_id=proposal_id,
+        relative_target_path="README.md",
+        source_artifact_path=source_path,
+        operator={"kind": "operator", "id": "test-user"},
+    )
+    prepare_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+
+    def drift(step: str) -> None:
+        if step == "after_exposure":
+            (target / "README.md").write_text("unexpected concurrent edit\n", encoding="utf-8")
+
+    applied = apply_target_effect(
+        resolved=resolved,
+        effect_id=str(authorized.record["effect_id"]),
+        observer=drift,
+    )
+    assert applied.record["state"] == "blocked"
+    assert applied.record["terminal_reason"] == "ambiguous_exposed_state"
