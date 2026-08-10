@@ -12,10 +12,10 @@ authority for the contracts already implemented and for the boundaries that
 V15 must preserve.
 
 **Current roadmap gate:** G13 through G18 and G22 are complete and independently
-evidenced. G19 is the next candidate for review; its goal contract is proposed
-but not activated. Later candidates remain planning-only until their individual
-goal contracts are reviewed and approved; this roadmap does not authorize
-implementation.
+evidenced. G19 is active under its accepted target-effect contract amendment;
+later candidates remain planning-only until their individual goal contracts are
+reviewed and approved. G19 runtime work remains bounded by its accepted
+contract and does not authorize broader target effects by inference.
 
 This document answers a narrower question than a goal contract: what should
 GigAI become useful for next, in what order, and what evidence must exist before

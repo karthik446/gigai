@@ -1,6 +1,6 @@
 # G19 Target-Effect Contract Amendment
 
-- Status: Proposed for review; blocking prerequisite for G19 runtime code
+- Status: Accepted additive amendment for G19; no runtime implementation
 - Type: Additive serialized-contract amendment; no runtime implementation
 - Depends on: G16 completion audit and terminal handoff, accepted S16-EVAL
   methodology, G18 completion audit and terminal handoff, and G22 completion

@@ -1,6 +1,6 @@
 # G19 — Approved Target Mutation
 
-- Status: Proposed for review; not activated
+- Status: Active — approved for implementation
 - Depends on: G16 completion and terminal handoff, accepted S16-EVAL
   methodology, G18 completion and terminal handoff, and G22 completion audit
   and terminal handoff; consumes G04/G05/G06/G09 target, workpad, journal, and
@@ -34,12 +34,12 @@ Before runtime implementation, read and cite:
 The current G22 contract deliberately limits its effect choices to
 `read_local` and `write_workpad`. Neither choice authorizes a target write.
 The existing `gig-proposal` and `active-gig-version` resources also do not
-silently become mutation authorizations. Before implementation, G19 must
-produce and accept an additive contract amendment if it needs a durable
-target-effect authorization, mutation transition, patch record, or target
-manifest field. The amendment decision must choose whether to add a dedicated
-resource or extend an existing resource additively; runtime code must not
-invent the shape by inference.
+silently become mutation authorizations. The accepted [G19 target-effect
+contract amendment](../../evidence/phase-4/G19/target-effect-contract-amendment.md)
+chooses a dedicated additive resource and settles the durable target-effect
+authorization, mutation transition, patch identity, and target manifest shape.
+Runtime code must conform to that amendment and must not invent the shape by
+inference.
 
 The contract decision must also settle whether the first target-effect record
 contains, at minimum, the target identity, active proposal identity, operator
@@ -148,9 +148,8 @@ effect_authorized -> prepared -> exposed -> verified -> applied
                                   +--> blocked (ambiguous recovery)
 ```
 
-The exact serialized state names and journal transitions must be adopted by
-the additive contract amendment before implementation. The following rules
-are non-negotiable:
+The exact serialized state names and journal transitions are adopted by the
+accepted additive contract amendment. The following rules are non-negotiable:
 
 1. `proposal_approved` is necessary but not sufficient. Only an explicit
    operator target-effect authorization for the exact proposal, target, path,
