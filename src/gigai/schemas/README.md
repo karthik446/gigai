@@ -20,7 +20,9 @@ installation review resources. The G18 contract amendment adds
 `model-invocation.schema.json` and `model-exchange.schema.json`, for a
 twenty-one-resource set while preserving all prior hashes and vectors. The
 G22 amendment adds `proposal-interview.schema.json` as the twenty-second
-resource for durable, typed interview snapshots.
+resource for durable, typed interview snapshots. The G19 amendment adds
+`target-effect.schema.json` as the twenty-third resource for explicitly
+authorized, recoverable one-file target effects.
 
 ## Production identity API
 
@@ -70,6 +72,9 @@ No other product module implements canonical rendering or SHA-256 identity.
   provider comparisons without fallback or winner selection.
 - `proposal-interview.schema.json` defines typed, bounded, explicitly
   selected, operator-approved proposal-interview snapshots.
+- `target-effect.schema.json` defines explicit target-effect authorization,
+  mutation lifecycle states, and before/after evidence without automatic
+  commits or fallback.
 - `capability-manifest.schema.json` defines proposal-time capability
   requirements, inspection states, and explicit options.
 - `capability-installation.schema.json` defines approved local installation

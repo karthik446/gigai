@@ -46,6 +46,7 @@ SCHEMA_NAMES = (
     "run-details.schema.json",
     "run-manifest.schema.json",
     "review-loop.schema.json",
+    "target-effect.schema.json",
     "trace.schema.json",
 )
 _WRITING_EFFECTS = frozenset({"write_target", "write_workpad", "external_write"})
@@ -248,6 +249,137 @@ def validate_model_exchange(data: Mapping[str, Any] | bytes) -> ValidationReport
                     "comparison records must report agreement or disagreement",
                 )
             )
+    return _report(findings)
+
+
+_TARGET_EFFECT_TERMINAL_STATES = frozenset(
+    {"applied", "refused", "failed", "cancelled", "rolled_back", "blocked"}
+)
+_TARGET_EFFECT_TRANSITIONS = {
+    "effect_authorized": frozenset({"prepared", "refused", "failed", "cancelled"}),
+    "prepared": frozenset({"exposed", "refused", "failed", "cancelled"}),
+    "exposed": frozenset({"verified", "rolled_back", "blocked"}),
+    "verified": frozenset({"applied"}),
+}
+
+
+def validate_target_effect(data: Mapping[str, Any] | bytes) -> ValidationReport:
+    """Validate a target-effect record and its authorization identity bindings."""
+
+    payload = data if isinstance(data, bytes) else canonical_json_bytes(data)
+    report = validate_serialized_contract("target-effect.schema.json", payload)
+    if not report.valid:
+        return report
+    instance = parse_json_bytes(payload)
+    authorization = instance["authorization"]
+    patch = instance["patch_identity"]
+    findings: list[ValidationFinding] = []
+
+    def require_equal(left: str, right: str, location: str, code: str, message: str) -> None:
+        if left != right:
+            findings.append(ValidationFinding(location, code, message))
+
+    require_equal(
+        instance["gig_proposal_id"],
+        authorization["gig_proposal_id"],
+        "authorization/gig_proposal_id",
+        "authorization_proposal_mismatch",
+        "authorization must bind the active proposal",
+    )
+    require_equal(
+        instance["operator"],
+        authorization["operator"],
+        "authorization/operator",
+        "authorization_operator_mismatch",
+        "authorization must bind the top-level operator actor",
+    )
+    require_equal(
+        instance["target"]["binding_sha256"],
+        authorization["target_binding_sha256"],
+        "authorization/target_binding_sha256",
+        "authorization_target_mismatch",
+        "authorization must bind the target binding digest",
+    )
+
+    bindings = (
+        (instance["relative_target_path"], authorization["relative_target_path"], "authorization/path"),
+        (instance["source_artifact"]["content_sha256"], authorization["source_artifact_sha256"], "authorization/source"),
+        (instance["expected_before_sha256"], authorization["expected_before_sha256"], "authorization/before"),
+        (instance["expected_after_sha256"], authorization["expected_after_sha256"], "authorization/after"),
+        (instance["relative_target_path"], patch["relative_target_path"], "patch_identity/path"),
+        (instance["source_artifact"]["content_sha256"], patch["source_artifact_sha256"], "patch_identity/source"),
+        (instance["expected_before_sha256"], patch["expected_before_sha256"], "patch_identity/before"),
+        (instance["expected_after_sha256"], patch["expected_after_sha256"], "patch_identity/after"),
+        (instance["expected_file_mode"], patch["expected_file_mode"], "patch_identity/mode"),
+    )
+    for left, right, location in bindings:
+        if left != right:
+            findings.append(
+                ValidationFinding(
+                    location,
+                    "patch_identity_mismatch",
+                    "patch and authorization identity must match the top-level effect",
+                )
+            )
+
+    if instance["cancellation_policy"] != authorization["cancellation_policy"]:
+        findings.append(
+            ValidationFinding(
+                "authorization/cancellation_policy",
+                "authorization_policy_mismatch",
+                "authorization must preserve the cancellation policy",
+            )
+        )
+    if instance["commit_policy"] != authorization["commit_policy"]:
+        findings.append(
+            ValidationFinding(
+                "authorization/commit_policy",
+                "authorization_policy_mismatch",
+                "authorization must preserve the user-owned commit policy",
+            )
+        )
+
+    return _report(findings)
+
+
+def validate_target_effect_transition(
+    previous: Mapping[str, Any], current: Mapping[str, Any]
+) -> ValidationReport:
+    """Validate one persisted target-effect state transition."""
+
+    findings: list[ValidationFinding] = []
+    if previous.get("effect_id") != current.get("effect_id"):
+        findings.append(
+            ValidationFinding(
+                "effect_id",
+                "transition_effect_mismatch",
+                "a target-effect transition must retain the same effect identity",
+            )
+        )
+    if current.get("effect_version") != previous.get("effect_version", 0) + 1:
+        findings.append(
+            ValidationFinding(
+                "effect_version",
+                "transition_version_mismatch",
+                "a target-effect transition must advance effect_version exactly once",
+            )
+        )
+    if previous.get("state") in _TARGET_EFFECT_TERMINAL_STATES:
+        findings.append(
+            ValidationFinding(
+                "state",
+                "terminal_transition_forbidden",
+                "a terminal target-effect state has no outgoing transition",
+            )
+        )
+    elif current.get("state") not in _TARGET_EFFECT_TRANSITIONS.get(previous.get("state"), ()):
+        findings.append(
+            ValidationFinding(
+                "state",
+                "invalid_target_effect_transition",
+                "target-effect state transition is not in the accepted lifecycle",
+            )
+        )
     return _report(findings)
 
 
@@ -922,4 +1054,6 @@ __all__ = [
     "validate_model_invocation",
     "validate_proposal_workpad",
     "validate_serialized_contract",
+    "validate_target_effect",
+    "validate_target_effect_transition",
 ]

@@ -79,7 +79,9 @@ proposal-time capability inspection, and staged execution. The [command sheet](d
 contains both the implemented surface and planned design; this README and
 installed help state what works today. The
 [cheat sheet](docs/reference/cheat-sheet.md) is the copy-paste guide for the
-current installation and local workflow.
+current installation and local workflow. The [external changelog](CHANGELOG.md)
+records verified operator-facing capabilities; the [internal changelog](docs/development/changelog-internal.md)
+records the cross-goal implementation history.
 
 ## Install the published release
 

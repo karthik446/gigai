@@ -16,7 +16,7 @@ authority rules before any target write is implemented.
 
 | Goal | Outcome | Depends on | Initial state |
 |---|---|---|---|
-| [G19](G19-approved-target-mutation.md) | One narrowly bounded, explicitly approved target effect | G16, S16-EVAL, G18, G22 | Proposed for review |
+| [G19](G19-approved-target-mutation.md) | One narrowly bounded, explicitly approved target effect | G16, S16-EVAL, G18, G22 | Complete — accepted |
 
 ## Completion rule
 

@@ -29,6 +29,7 @@ EXPECTED_SHA256 = {
     "run-details.schema.json": "c2388d917e08cfcc0860ecd3a20b389be4f434aadde6b21ffa18ee4d6457111f",
     "run-manifest.schema.json": "a14126ac4943e71980371eb215fbc191434cfb0fb2f2761259a0faabb36af24f",
     "review-loop.schema.json": "e7fc84e0bcca32a97e3a0aca1367af512384ef40b747a2aa13558baf20fd2a2b",
+    "target-effect.schema.json": "ccdee728551d5e43958ca1faa0bdf923cc986d080678c89209864464212e1f42",
     "trace.schema.json": "d1b5a8970e26b753fbbb8275cd30321a3fe0bc2bb56c4443c6d6306b42ca29ef",
 }
 
@@ -58,7 +59,7 @@ def main() -> int:
                 f"expected {expected_digest}, got {actual_digest}"
             )
 
-    print("verified 22 installed GigAI schemas")
+    print("verified 23 installed GigAI schemas")
     return 0
 
 
