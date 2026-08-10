@@ -30,6 +30,8 @@ from .canonical import (
     parse_json_bytes,
 )
 from .config import load_config
+from .improvement import validate_improvement_manifest
+from .learning import load_learning_records, validate_learning_record
 from .journal import (
     JournalArtifact,
     JournalEntry,
@@ -122,6 +124,7 @@ def start_interview(
     request: str,
     reference_paths: tuple[Path, ...],
     max_rounds: int = 3,
+    improve: bool = False,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> InterviewStartResult:
     """Start or recover a G22 local interview without creating a proposal."""
@@ -132,6 +135,15 @@ def start_interview(
         raise LifecycleError("create request must be non-empty and NUL-free")
     home = home_root.expanduser().resolve(strict=False)
     bound = resolve_bound_project(home_root=home, requested_target=requested_target)
+    if improve:
+        return _start_improve_interview(
+            home=home,
+            bound=bound,
+            request=request,
+            reference_paths=reference_paths,
+            max_rounds=max_rounds,
+            uuid_factory=uuid_factory,
+        )
     gig_id = _recoverable_gig_id(home, bound)
     resumed = gig_id is not None
     if gig_id is None:
@@ -229,6 +241,147 @@ def start_interview(
     return InterviewStartResult(bound.project_id, gig_id, workpad, session, reference_bytes, creation_started, resumed)
 
 
+def _start_improve_interview(
+    *,
+    home: Path,
+    bound: BoundProject,
+    request: str,
+    reference_paths: tuple[Path, ...],
+    max_rounds: int,
+    uuid_factory: Callable[[], uuid.UUID],
+) -> InterviewStartResult:
+    """Start an explicit G20 improve interview on the existing active Gig."""
+
+    if not request.strip() or "\0" in request:
+        raise LifecycleError("improve request must be non-empty and NUL-free")
+    if not reference_paths:
+        raise LifecycleError("improve requires at least one explicit evidence reference")
+    registry, _ = open_project_registry(home, create=False)
+    with registry.transaction() as transaction:
+        active = transaction.find_active_workpad(bound.project_id)
+    if active is None:
+        raise LifecycleError("improve requires an existing active Gig")
+    gig_id = active.gig_id
+    workpad = _workpad_for_gig(home, bound, gig_id)
+    pointer_path = workpad / "manifests" / "active-gig-version.json"
+    if not pointer_path.is_file() or pointer_path.is_symlink():
+        raise LifecycleError("improve requires an active-version pointer")
+    snapshot_path = workpad / "manifests" / "proposal-interview.json"
+    if snapshot_path.exists():
+        try:
+            payload = parse_json_bytes(snapshot_path.read_bytes())
+            if not isinstance(payload, dict):
+                raise ProposalInterviewError("snapshot is not an object")
+            session = session_from_record(payload)
+            references = _read_interview_references(workpad, session)
+        except (ProposalInterviewError, OSError, ValueError) as exc:
+            raise LifecycleError(f"improve interview recovery failed: {exc}") from exc
+        return InterviewStartResult(
+            bound.project_id,
+            gig_id,
+            workpad,
+            session,
+            references,
+            _journal_entries(workpad)[-1],
+            True,
+        )
+
+    session_id = _allocate_interview_id("session", uuid_factory)
+    request_bytes = request.encode("utf-8")
+    request_path = f"review/interviews/{session_id}/request.txt"
+    request_artifact = {
+        "path": request_path,
+        "content_sha256": digest_imported_bytes(request_bytes),
+        "media_type": "text/plain",
+        "size_bytes": len(request_bytes),
+    }
+    references: list[ReferenceDecision] = []
+    reference_bytes: dict[str, bytes] = {}
+    artifacts = [JournalArtifact(request_path, request_bytes)]
+    for source in reference_paths:
+        source = source.expanduser()
+        if source.is_symlink() or not source.is_file():
+            raise LifecycleError(f"improve evidence is not a regular non-symlink file: {source}")
+        source = source.resolve(strict=True)
+        content = source.read_bytes()
+        reference_id = _allocate_interview_id("ref", uuid_factory)
+        references.append(ReferenceDecision(reference_id, digest_imported_bytes(content), "excluded"))
+        reference_bytes[reference_id] = content
+        artifacts.append(JournalArtifact(f"review/interviews/{session_id}/references/{reference_id}.bin", content))
+    session = build_session(
+        session_id=session_id,
+        project_id=bound.project_id,
+        gig_id=gig_id,
+        request_kind="improve",
+        request_artifact=request_artifact,
+        request_sha256=request_artifact["content_sha256"],
+        references=tuple(references),
+        max_rounds=max_rounds,
+    )
+    snapshot = canonical_json_bytes(session_record(session))
+    if not validate_serialized_contract("proposal-interview.schema.json", snapshot).valid:
+        raise LifecycleError("initial improve interview snapshot failed schema validation")
+    artifacts.append(JournalArtifact("manifests/proposal-interview.json", snapshot))
+    entries = _journal_entries(workpad)
+    if not entries:
+        raise LifecycleError("active Gig workpad has no recoverable journal")
+    record_transition(
+        workpad=workpad,
+        project_id=bound.project_id,
+        gig_id=gig_id,
+        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+        transition="proposal_interview_started",
+        body=f"G20 improve interview {session_id} is ready for explicit operator input.",
+        artifacts=tuple(artifacts),
+    )
+    _persist_interview_trace(workpad, session)
+    return InterviewStartResult(bound.project_id, gig_id, workpad, session, reference_bytes, entries[-1], False)
+
+
+def stage_improvement_manifest(
+    *,
+    home_root: Path,
+    requested_target: Path | None,
+    manifest: Mapping[str, object] | bytes,
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> JournalEntry:
+    """Journal one validated G20 manifest before opening its approval session."""
+
+    home = home_root.expanduser().resolve(strict=False)
+    resolved = resolve_workpad(
+        home_root=home,
+        requested_target=requested_target,
+        gig_id=None,
+        allow_semantic_state=True,
+    )
+    manifest_payload = manifest if isinstance(manifest, bytes) else canonical_json_bytes(manifest)
+    parsed = parse_json_bytes(manifest_payload)
+    if not isinstance(parsed, dict):
+        raise LifecycleError("improvement manifest is not an object")
+    ids = parsed.get("learning_record_ids")
+    if not isinstance(ids, list) or any(not isinstance(item, str) for item in ids):
+        raise LifecycleError("improvement manifest has invalid learning record IDs")
+    records = load_learning_records(home_root=home, learning_ids=ids)
+    validate_improvement_manifest(parsed, records)
+    pointer_path = resolved.path / "manifests" / "active-gig-version.json"
+    pointer = parse_json_bytes(pointer_path.read_bytes())
+    if not isinstance(pointer, dict):
+        raise LifecycleError("active-version pointer is invalid")
+    if parsed.get("gig_id") != resolved.gig_id or parsed.get("project_id") != resolved.project_id:
+        raise LifecycleError("improvement manifest binding does not match active Gig")
+    if parsed.get("base_gig_version") != pointer.get("active_version"):
+        raise LifecycleError("improvement manifest base version is stale")
+    return record_transition(
+        workpad=resolved.path,
+        project_id=resolved.project_id,
+        gig_id=resolved.gig_id,
+        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+        transition="improvement_manifest_staged",
+        body=f"G20 improvement manifest {parsed['manifest_id']} is staged for explicit approval.",
+        artifacts=(JournalArtifact("manifests/improvement-manifest.json", canonical_json_bytes(parsed)),),
+    )
+
+
 def persist_interview_session(
     *,
     workpad: Path,
@@ -287,6 +440,14 @@ def approve_interview_session(
         return session
     if session.state != "proposal_ready":
         raise LifecycleError("only a proposal_ready interview can be approved")
+    if session.request_kind == "improve":
+        return _approve_improve_interview_session(
+            home_root=home_root,
+            requested_target=requested_target,
+            start=start,
+            session=session,
+            uuid_factory=uuid_factory,
+        )
     request_path = start.workpad / str(session.request_artifact["path"])
     try:
         commission = request_path.read_text(encoding="utf-8")
@@ -323,6 +484,102 @@ def approve_interview_session(
         handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
         transition="proposal_interview_approved",
         body=f"Operator approved interview {session.session_id} as proposal {proposal_id}.",
+        artifacts=(*artifacts, JournalArtifact("manifests/proposal-interview.json", snapshot)),
+    )
+    _persist_interview_trace(start.workpad, approved)
+    approve_offline(
+        home_root=home_root,
+        requested_target=requested_target,
+        proposal_id=proposal_id,
+        uuid_factory=uuid_factory,
+    )
+    return approved
+
+
+def _approve_improve_interview_session(
+    *,
+    home_root: Path,
+    requested_target: Path | None,
+    start: InterviewStartResult,
+    session: InterviewSession,
+    uuid_factory: Callable[[], uuid.UUID],
+) -> InterviewSession:
+    """Create and approve one G20 proposal through the ordinary lifecycle."""
+
+    request_path = start.workpad / str(session.request_artifact["path"])
+    try:
+        commission = request_path.read_text(encoding="utf-8")
+        manifest_path = start.workpad / "manifests" / "improvement-manifest.json"
+        manifest_bytes = manifest_path.read_bytes()
+        manifest = parse_json_bytes(manifest_bytes)
+        if not isinstance(manifest, dict):
+            raise LifecycleError("improvement manifest is not an object")
+        ids = manifest.get("learning_record_ids")
+        if not isinstance(ids, list):
+            raise LifecycleError("improvement manifest has no learning record IDs")
+        home = home_root.expanduser().resolve(strict=False)
+        records: dict[str, bytes] = {}
+        for learning_id in ids:
+            if not isinstance(learning_id, str):
+                raise LifecycleError("improvement manifest has an invalid learning ID")
+            record_path = home / "learning" / "records" / f"{learning_id}.json"
+            if record_path.is_symlink() or not record_path.is_file():
+                raise LifecycleError("improvement manifest cites a missing learning record")
+            record_bytes = record_path.read_bytes()
+            validate_learning_record(record_bytes)
+            records[learning_id] = record_bytes
+        validate_improvement_manifest(manifest, records)
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise LifecycleError(f"improvement proposal inputs cannot be read: {exc}") from exc
+
+    pointer_path = start.workpad / "manifests" / "active-gig-version.json"
+    pointer = parse_json_bytes(pointer_path.read_bytes())
+    current_bytes = (start.workpad / "manifests" / "gig-proposal.json").read_bytes()
+    current = parse_json_bytes(current_bytes)
+    if not isinstance(pointer, dict) or not isinstance(current, dict):
+        raise LifecycleError("improve approval has invalid active proposal state")
+    if pointer.get("approved_proposal_id") != current.get("proposal_id"):
+        raise LifecycleError("improve approval base proposal is not active")
+    if manifest.get("base_gig_version") != pointer.get("active_version"):
+        raise LifecycleError("improvement manifest base version is stale")
+    if manifest.get("gig_id") != start.gig_id or manifest.get("project_id") != start.project_id:
+        raise LifecycleError("improvement manifest binding does not match active Gig")
+
+    proposal_id = _allocate_local_id(EntityPrefix.GIG_PROPOSAL, uuid_factory)
+    proposal = dict(current)
+    proposal.update(
+        {
+            "proposal_id": proposal_id,
+            "status": "proposed",
+            "kind": "improve",
+            "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "created_by": {"kind": "gigai", "id": "g20-improve", "model_target": None},
+            "base_gig_version": pointer["active_version"],
+            "parent_proposal_id": pointer["approved_proposal_id"],
+            "change_request": commission,
+            "creation_manifest": _artifact_ref(
+                "manifests/improvement-manifest.json", "application/json", manifest_bytes
+            ),
+        }
+    )
+    artifacts = (JournalArtifact("manifests/improvement-manifest.json", manifest_bytes), JournalArtifact("manifests/gig-proposal.json", canonical_json_bytes(proposal)))
+    _validate_workpad_overlay(start.workpad, artifacts)
+    proposal_bytes = next(item.content for item in artifacts if item.path == "manifests/gig-proposal.json")
+    approved = approve_session(
+        session,
+        proposal_id=proposal_id,
+        proposal_sha256=digest_imported_bytes(proposal_bytes),
+    )
+    snapshot = canonical_json_bytes(session_record(approved))
+    if not validate_serialized_contract("proposal-interview.schema.json", snapshot).valid:
+        raise LifecycleError("approved improve interview snapshot failed schema validation")
+    record_transition(
+        workpad=start.workpad,
+        project_id=start.project_id,
+        gig_id=start.gig_id,
+        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+        transition="proposal_interview_approved",
+        body=f"Operator approved improve interview {session.session_id} as proposal {proposal_id}.",
         artifacts=(*artifacts, JournalArtifact("manifests/proposal-interview.json", snapshot)),
     )
     _persist_interview_trace(start.workpad, approved)
@@ -1190,5 +1447,6 @@ __all__ = [
     "record_feedback",
     "reject_offline",
     "revise_offline",
+    "stage_improvement_manifest",
     "start_interview",
 ]

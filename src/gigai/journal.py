@@ -40,6 +40,7 @@ TRANSITIONS = frozenset(
         "proposal_interview_updated",
         "proposal_interview_blocked",
         "proposal_interview_approved",
+        "improvement_manifest_staged",
         "gig_proposal_ready",
         "gig_proposal_feedback_recorded",
         "gig_proposal_revised",

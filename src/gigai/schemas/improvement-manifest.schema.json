@@ -113,8 +113,8 @@
         "development": {"$ref": "#/$defs/split_result"},
         "calibration": {"$ref": "#/$defs/split_result"},
         "final_holdout": {"$ref": "#/$defs/split_result"},
-        "final_holdout_pass": {"const": true},
-        "no_regression": {"const": true},
+        "final_holdout_pass": {"type": "boolean"},
+        "no_regression": {"type": "boolean"},
         "checked_at": {"type": "string", "format": "date-time"}
       }
     },

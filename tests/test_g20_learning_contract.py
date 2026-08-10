@@ -141,7 +141,7 @@ def test_improvement_manifest_accepts_typed_change_and_both_gate_reports() -> No
     assert report.valid, report.as_dict()
 
 
-def test_improvement_manifest_rejects_forbidden_path_and_regressing_gate() -> None:
+def test_improvement_manifest_rejects_forbidden_path_but_preserves_gate_semantics() -> None:
     forbidden = _manifest()
     forbidden["changes"] = [
         {
@@ -158,6 +158,7 @@ def test_improvement_manifest_rejects_forbidden_path_and_regressing_gate() -> No
 
     regressing = deepcopy(_manifest())
     regressing["quality_gate"]["no_regression"] = False
-    assert not validate_serialized_contract(
+    # The schema carries the result; the semantic quality gate rejects it.
+    assert validate_serialized_contract(
         "improvement-manifest.schema.json", canonical_json_bytes(regressing)
     ).valid
