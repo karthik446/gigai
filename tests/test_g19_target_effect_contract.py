@@ -151,6 +151,7 @@ def test_target_effect_transition_graph_is_closed_and_terminal() -> None:
     previous = _record("effect_authorized")
     current = copy.deepcopy(previous)
     current["state"] = "prepared"
+    current["effect_version"] = 2
     assert validate_target_effect_transition(previous, current).valid
 
     terminal = _record("applied")

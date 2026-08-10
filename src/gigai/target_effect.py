@@ -60,6 +60,11 @@ class TargetEffectError(RuntimeError):
 class TargetEffectRefusedError(TargetEffectError):
     code = "target_effect_refused"
 
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        if code is not None:
+            self.code = code
+
 
 class TargetEffectRecoveryRequired(TargetEffectError):
     code = "target_effect_recovery_required"
@@ -89,7 +94,7 @@ def authorize_target_effect(
     _assert_approved_context(resolved, proposal_id)
     target = _observe_target(resolved)
     if target["status_bytes"]:
-        raise TargetEffectRefusedError("target must be clean before authorization")
+        raise TargetEffectRefusedError("target must be clean before authorization", code="target_dirty")
     target_path = _safe_target_file(resolved.target_root, relative_target_path)
     source_path = _safe_workpad_file(resolved.path, source_artifact_path)
     source_bytes = source_path.read_bytes()
@@ -180,7 +185,7 @@ def prepare_target_effect(
     target_bytes = target_path.read_bytes()
     _require_clean_expected_target(record, target, target_path, target_bytes)
     if digest_imported_bytes(source_bytes) != record["expected_after_sha256"]:
-        raise TargetEffectRefusedError("source artifact digest changed before preparation")
+        raise TargetEffectRefusedError("source artifact digest changed before preparation", code="source_digest_mismatch")
     before_bytes, before_ref = _manifest(
         resolved,
         record,
@@ -224,7 +229,7 @@ def apply_target_effect(
     target_bytes = target_path.read_bytes()
     _require_clean_expected_target(record, target, target_path, target_bytes)
     if digest_imported_bytes(source_bytes) != record["expected_after_sha256"]:
-        raise TargetEffectRefusedError("source artifact digest changed before exposure")
+        raise TargetEffectRefusedError("source artifact digest changed before exposure", code="source_digest_mismatch")
     _stage_and_replace(target_path, source_bytes, int(record["expected_file_mode"]), observer)
 
     now = clock or _now
@@ -439,11 +444,11 @@ def _revalidate_record_context(resolved: ResolvedWorkpad, record: Mapping[str, o
     target = _observe_target(resolved)
     expected = record["target"]
     if target["binding_sha256"] != expected["binding_sha256"]:
-        raise TargetEffectRefusedError("target binding changed")
+        raise TargetEffectRefusedError("target binding changed", code="target_binding_changed")
     if target["repository_identity_sha256"] != expected["repository_identity_sha256"]:
-        raise TargetEffectRefusedError("repository identity changed")
+        raise TargetEffectRefusedError("repository identity changed", code="target_identity_changed")
     if target["git_head"] != expected["git_head"]:
-        raise TargetEffectRefusedError("Git HEAD changed")
+        raise TargetEffectRefusedError("Git HEAD changed", code="target_head_changed")
 
 
 def _assert_approved_context(resolved: ResolvedWorkpad, proposal_id: str) -> None:
@@ -452,22 +457,22 @@ def _assert_approved_context(resolved: ResolvedWorkpad, proposal_id: str) -> Non
     loop_path = resolved.path / "manifests/review-loop.json"
     for path in (proposal_path, active_path, loop_path):
         if path.is_symlink() or not path.is_file():
-            raise TargetEffectRefusedError("required approved/review authority is unavailable")
+            raise TargetEffectRefusedError("required approved/review authority is unavailable", code="authority_missing")
     proposal_bytes = proposal_path.read_bytes()
     active_bytes = active_path.read_bytes()
     loop_bytes = loop_path.read_bytes()
     if not validate_serialized_contract("gig-proposal.schema.json", proposal_bytes).valid:
-        raise TargetEffectRefusedError("active proposal is invalid")
+        raise TargetEffectRefusedError("active proposal is invalid", code="proposal_invalid")
     if not validate_serialized_contract("active-gig-version.schema.json", active_bytes).valid:
-        raise TargetEffectRefusedError("active Gig version is invalid")
+        raise TargetEffectRefusedError("active Gig version is invalid", code="active_version_invalid")
     loop_report = validate_review_loop_artifacts(resolved.path, loop_bytes)
     if not loop_report.valid:
-        raise TargetEffectRefusedError("Review Loop artifacts are invalid")
+        raise TargetEffectRefusedError("Review Loop artifacts are invalid", code="review_artifacts_invalid")
     proposal = parse_json_bytes(proposal_bytes)
     active = parse_json_bytes(active_bytes)
     loop = parse_json_bytes(loop_bytes)
     if not isinstance(proposal, Mapping) or not isinstance(active, Mapping) or not isinstance(loop, Mapping):
-        raise TargetEffectRefusedError("approved/review authority is malformed")
+        raise TargetEffectRefusedError("approved/review authority is malformed", code="authority_malformed")
     if (
         proposal.get("status") != "approved"
         or proposal.get("proposal_id") != proposal_id
@@ -479,29 +484,29 @@ def _assert_approved_context(resolved: ResolvedWorkpad, proposal_id: str) -> Non
         or loop.get("state") != "complete"
         or not loop.get("addressed_artifact_ids")
     ):
-        raise TargetEffectRefusedError("approved proposal and complete addressed Review Loop are required")
+        raise TargetEffectRefusedError("approved proposal and complete addressed Review Loop are required", code="review_prerequisite_missing")
     for artifact_id in loop["addressed_artifact_ids"]:
         artifact_path = resolved.path / "addressed" / f"{artifact_id}.json"
         artifact = parse_json_bytes(artifact_path.read_bytes())
         if not isinstance(artifact, Mapping) or artifact.get("status") != "addressed":
-            raise TargetEffectRefusedError("Review Loop has no complete addressed artifact")
+            raise TargetEffectRefusedError("Review Loop has no complete addressed artifact", code="addressed_artifact_incomplete")
 
 
 def _observe_target(resolved: ResolvedWorkpad) -> dict[str, object]:
     if resolved.target_kind != "git":
-        raise TargetEffectRefusedError("G19 v1 requires a bound Git target")
+        raise TargetEffectRefusedError("G19 v1 requires a bound Git target", code="non_git_target")
     try:
         target = resolve_target(resolved.target_root)
         assert_target_identity_stable(target)
         root = target.root
         binding = load_project_binding(root)
         if binding.project_id != resolved.project_id:
-            raise TargetEffectRefusedError("Git project binding changed")
+            raise TargetEffectRefusedError("Git project binding changed", code="target_binding_changed")
         binding_bytes = binding_path(root).read_bytes()
         binding_sha256 = digest_imported_bytes(binding_bytes)
         head_result = _git(root, "rev-parse", "HEAD", check=False)
         if head_result.returncode != 0 or not head_result.stdout.strip():
-            raise TargetEffectRefusedError("Git target has no committed HEAD")
+            raise TargetEffectRefusedError("Git target has no committed HEAD", code="target_head_missing")
         status_result = _git(
             root,
             "status",
@@ -522,7 +527,7 @@ def _observe_target(resolved: ResolvedWorkpad) -> dict[str, object]:
             "status_sha256": digest_imported_bytes(status_bytes) if status_bytes else None,
         }
     except (GitTargetError, OSError) as exc:
-        raise TargetEffectRefusedError(f"Git target observation failed: {exc}") from exc
+        raise TargetEffectRefusedError(f"Git target observation failed: {exc}", code="target_observation_failed") from exc
 
 
 def _require_clean_expected_target(
@@ -532,11 +537,11 @@ def _require_clean_expected_target(
     target_bytes: bytes,
 ) -> None:
     if target["status_bytes"]:
-        raise TargetEffectRefusedError("target worktree/index is not clean")
+        raise TargetEffectRefusedError("target worktree/index is not clean", code="target_dirty")
     if digest_imported_bytes(target_bytes) != record["expected_before_sha256"]:
-        raise TargetEffectRefusedError("target before digest changed")
+        raise TargetEffectRefusedError("target before digest changed", code="before_digest_mismatch")
     if stat.S_IMODE(target_path.stat().st_mode) != record["expected_file_mode"]:
-        raise TargetEffectRefusedError("target file mode changed")
+        raise TargetEffectRefusedError("target file mode changed", code="mode_mismatch")
 
 
 def _require_after_target(
@@ -546,13 +551,13 @@ def _require_after_target(
     target_bytes: bytes,
 ) -> None:
     if digest_imported_bytes(target_bytes) != record["expected_after_sha256"]:
-        raise TargetEffectRefusedError("target after digest mismatch")
+        raise TargetEffectRefusedError("target after digest mismatch", code="after_digest_mismatch")
     if stat.S_IMODE(target_path.stat().st_mode) != record["expected_file_mode"]:
-        raise TargetEffectRefusedError("target after mode mismatch")
+        raise TargetEffectRefusedError("target after mode mismatch", code="mode_mismatch")
     entries = [item for item in target["status_bytes"].split(b"\0") if item]
     expected = str(record["relative_target_path"]).encode()
     if len(entries) != 1 or len(entries[0]) < 4 or entries[0][3:] != expected:
-        raise TargetEffectRefusedError("target delta is not exactly the authorized file")
+        raise TargetEffectRefusedError("target delta is not exactly the authorized file", code="target_delta_mismatch")
 
 
 def _is_before_state(record: Mapping[str, object], target: Mapping[str, object], path: Path, data: bytes) -> bool:
@@ -642,27 +647,27 @@ def _safe_workpad_file(root: Path, relative: str) -> Path:
 def _safe_file(root: Path, relative: str, label: str) -> Path:
     path = Path(relative)
     if path.is_absolute() or "\\" in relative or not relative or ".." in path.parts or "." in path.parts:
-        raise TargetEffectRefusedError(f"{label} path is not a safe relative path")
+        raise TargetEffectRefusedError(f"{label} path is not a safe relative path", code="unsafe_target_path")
     candidate = root / path
     if not candidate.is_relative_to(root):
-        raise TargetEffectRefusedError(f"{label} path escaped its root")
+        raise TargetEffectRefusedError(f"{label} path escaped its root", code="unsafe_target_path")
     current = root
     for part in path.parts:
         current = current / part
         if current.is_symlink():
-            raise TargetEffectRefusedError(f"{label} path contains a symlink")
+            raise TargetEffectRefusedError(f"{label} path contains a symlink", code="unsafe_target_path")
     if not candidate.is_file() or candidate.is_symlink():
-        raise TargetEffectRefusedError(f"{label} path is not a regular file")
+        raise TargetEffectRefusedError(f"{label} path is not a regular file", code="target_file_invalid")
     return candidate
 
 
 def _require_document_bytes(data: bytes, label: str) -> None:
     if b"\0" in data:
-        raise TargetEffectRefusedError(f"{label} is not a text document")
+        raise TargetEffectRefusedError(f"{label} is not a text document", code="document_invalid")
     try:
         data.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise TargetEffectRefusedError(f"{label} is not valid UTF-8") from exc
+        raise TargetEffectRefusedError(f"{label} is not valid UTF-8", code="document_invalid") from exc
 
 
 def _artifact_ref(path: str, data: bytes, media_type: str) -> dict[str, object]:
@@ -686,11 +691,11 @@ def _media_type(path: str) -> str:
 def _validate_operator(value: Mapping[str, object]) -> dict[str, object]:
     operator = dict(value)
     if operator.get("kind") != "operator" or not isinstance(operator.get("id"), str) or not operator["id"]:
-        raise TargetEffectRefusedError("target-effect authorization requires an operator actor")
+        raise TargetEffectRefusedError("target-effect authorization requires an operator actor", code="operator_invalid")
     if set(operator) - {"kind", "id", "model_target"}:
-        raise TargetEffectRefusedError("operator actor contains an unsupported field")
+        raise TargetEffectRefusedError("operator actor contains an unsupported field", code="operator_invalid")
     if operator.get("model_target") is not None:
-        raise TargetEffectRefusedError("operator actor cannot carry a model target")
+        raise TargetEffectRefusedError("operator actor cannot carry a model target", code="operator_invalid")
     return operator
 
 
@@ -698,7 +703,7 @@ def _validate_proposal_id(value: str) -> None:
     try:
         validate_entity_id(value, expected_prefix=EntityPrefix.GIG_PROPOSAL)
     except Exception as exc:
-        raise TargetEffectRefusedError("proposal identity is invalid") from exc
+        raise TargetEffectRefusedError("proposal identity is invalid", code="proposal_invalid") from exc
 
 
 def _validate_effect_id(value: str) -> None:
@@ -720,7 +725,7 @@ def _now() -> str:
 
 def _require_git_workpad(resolved: ResolvedWorkpad) -> None:
     if resolved.target_kind != "git":
-        raise TargetEffectRefusedError("G19 v1 requires a bound Git target")
+        raise TargetEffectRefusedError("G19 v1 requires a bound Git target", code="non_git_target")
 
 
 __all__ = [

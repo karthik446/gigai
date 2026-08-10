@@ -356,6 +356,14 @@ def validate_target_effect_transition(
                 "a target-effect transition must retain the same effect identity",
             )
         )
+    if current.get("effect_version") != previous.get("effect_version", 0) + 1:
+        findings.append(
+            ValidationFinding(
+                "effect_version",
+                "transition_version_mismatch",
+                "a target-effect transition must advance effect_version exactly once",
+            )
+        )
     if previous.get("state") in _TARGET_EFFECT_TERMINAL_STATES:
         findings.append(
             ValidationFinding(
