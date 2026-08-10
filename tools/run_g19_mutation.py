@@ -28,10 +28,10 @@ MUTANTS = (
     ),
     (
         "source-digest-revalidation",
-        '    if digest_imported_bytes(source_bytes) != record["expected_after_sha256"]:\n'
-        '        raise TargetEffectRefusedError("source artifact digest changed before preparation", code="source_digest_mismatch")',
-        "    if False:\n"
-        '        raise TargetEffectRefusedError("source artifact digest changed before preparation", code="source_digest_mismatch")',
+        '        if digest_imported_bytes(source_bytes) != record["expected_after_sha256"]:\n'
+        '            raise TargetEffectRefusedError("source artifact digest changed before preparation", code="source_digest_mismatch")',
+        "        if False:\n"
+        '            raise TargetEffectRefusedError("source artifact digest changed before preparation", code="source_digest_mismatch")',
         "tests/test_g19_target_effect.py::test_g19_refuses_tampered_replacement_source_before_preparation",
     ),
     (
