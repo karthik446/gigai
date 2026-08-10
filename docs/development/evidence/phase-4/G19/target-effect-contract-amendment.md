@@ -191,8 +191,8 @@ complete.
 ## Evidence references
 
 - [G19 goal](../../../goals/phase-4/G19-approved-target-mutation.md)
-- [G16 completion audit](../../phase-2/G16/completion-audit.md)
-- [S16-EVAL methodology](../../phase-3/S16-EVAL-review-loop-evaluation-methodology.md)
+- [G16 completion audit](../../phase-3/G16/completion-audit.md)
+- [S16-EVAL completion audit](../../phase-3/S16-EVAL/completion-audit.md)
 - [G18 completion audit](../../phase-3/G18/completion-audit.md)
 - [G22 completion audit](../../phase-2/G22/completion-audit.md)
 - [G22 terminal handoff](../../phase-2/G22/terminal-handoff.md)
