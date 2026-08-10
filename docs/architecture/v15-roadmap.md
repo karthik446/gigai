@@ -1,8 +1,8 @@
 # GigAI V15 Forward Roadmap
 
-**Date:** 2026-08-06  
+**Date:** 2026-08-10
 **Revision:** 15  
-**Status:** roadmap draft; implementation goals are not yet materialized  
+**Status:** roadmap draft; selected implementation goals are materialized
 **Predecessor:** [V14 implementation plan](v14-implementation-plan.md)  
 **Research input:** [Review Loop Foundation Spike](../research/review-loop-foundation-spike.md)
 
@@ -11,10 +11,11 @@ first bounded deterministic Run. It does not obsolete V14. V14 remains the
 authority for the contracts already implemented and for the boundaries that
 V15 must preserve.
 
-**Current roadmap gate:** G13 is complete and independently evidenced on
-`main`. G14 is the next candidate for review. G14 and all later candidates in
-this document remain planning-only until their individual goal contracts are
-reviewed and approved; this roadmap does not authorize implementation.
+**Current roadmap gate:** G13 through G18 and G22 are complete and independently
+evidenced. G19 is the next candidate for review; its goal contract is proposed
+but not activated. Later candidates remain planning-only until their individual
+goal contracts are reviewed and approved; this roadmap does not authorize
+implementation.
 
 This document answers a narrower question than a goal contract: what should
 GigAI become useful for next, in what order, and what evidence must exist before
