@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+import ast
 import subprocess
 import uuid
 from dataclasses import replace
 
 import pytest
+import gigai.target_effect as target_effect_module
 
-from gigai.canonical import parse_json_bytes
+from gigai.canonical import canonical_json_bytes, parse_json_bytes
 from gigai.lifecycle import approve_offline, create_offline
 from gigai.review_loop import run_review_loop
 from gigai.run import launch_run
@@ -216,6 +218,41 @@ def test_g19_refuses_changed_head_before_preparation(tmp_path: Path) -> None:
     assert error.value.code == "target_head_changed"
 
 
+def test_g19_revalidates_active_proposal_before_preparation(tmp_path: Path) -> None:
+    _home, _target, resolved, proposal_id, source_path = _fixture(tmp_path)
+    authorized = authorize_target_effect(
+        resolved=resolved,
+        proposal_id=proposal_id,
+        relative_target_path="README.md",
+        source_artifact_path=source_path,
+        operator={"kind": "operator", "id": "test-user"},
+    )
+    active_path = resolved.path / "manifests/active-gig-version.json"
+    active = parse_json_bytes(active_path.read_bytes())
+    active["approved_proposal_id"] = "gp_99999999-9999-4999-8999-999999999999"
+    active_path.write_bytes(canonical_json_bytes(active))
+    with pytest.raises(TargetEffectRefusedError) as error:
+        prepare_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+    assert error.value.code == "review_prerequisite_missing"
+
+
+def test_g19_requires_an_addressed_review_artifact_before_authorization(tmp_path: Path) -> None:
+    _home, _target, resolved, proposal_id, _source_path = _fixture(tmp_path)
+    loop_path = resolved.path / "manifests/review-loop.json"
+    loop = parse_json_bytes(loop_path.read_bytes())
+    loop["addressed_artifact_ids"] = []
+    loop_path.write_bytes(canonical_json_bytes(loop))
+    with pytest.raises(TargetEffectRefusedError) as error:
+        authorize_target_effect(
+            resolved=resolved,
+            proposal_id=proposal_id,
+            relative_target_path="README.md",
+            source_artifact_path="addressed/missing.md",
+            operator={"kind": "operator", "id": "test-user"},
+        )
+    assert error.value.code == "review_prerequisite_missing"
+
+
 def test_g19_refuses_tampered_review_artifact_before_preparation(tmp_path: Path) -> None:
     _home, _target, resolved, proposal_id, source_path = _fixture(tmp_path)
     authorized = authorize_target_effect(
@@ -340,6 +377,30 @@ def test_g19_verified_record_recovers_to_applied_after_interruption(tmp_path: Pa
     assert (target / "README.md").read_bytes() == (resolved.path / source_path).read_bytes()
 
 
+def test_g19_known_exposed_before_state_recovers_to_rolled_back(tmp_path: Path) -> None:
+    _home, target, resolved, proposal_id, source_path = _fixture(tmp_path)
+    authorized = authorize_target_effect(
+        resolved=resolved,
+        proposal_id=proposal_id,
+        relative_target_path="README.md",
+        source_artifact_path=source_path,
+        operator={"kind": "operator", "id": "test-user"},
+    )
+    prepare_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+
+    def restore_before(step: str) -> None:
+        if step == "after_exposed_record":
+            (target / "README.md").write_text("before\n", encoding="utf-8")
+
+    result = apply_target_effect(
+        resolved=resolved,
+        effect_id=str(authorized.record["effect_id"]),
+        observer=restore_before,
+    )
+    assert result.record["state"] == "rolled_back"
+    assert (target / "README.md").read_text(encoding="utf-8") == "before\n"
+
+
 def test_g19_recovery_blocks_ambiguous_interruption_before_exposed_record(tmp_path: Path) -> None:
     _home, target, resolved, proposal_id, source_path = _fixture(tmp_path)
     authorized = authorize_target_effect(
@@ -388,3 +449,67 @@ def test_g19_after_exposure_digest_drift_blocks_recovery(tmp_path: Path) -> None
     )
     assert applied.record["state"] == "blocked"
     assert applied.record["terminal_reason"] == "ambiguous_exposed_state"
+
+
+def test_g19_runtime_has_no_effectful_imports_and_uses_atomic_exposure() -> None:
+    source_path = Path(target_effect_module.__file__)
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    imported = {
+        alias.name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    imported.update(
+        alias.name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module
+        for alias in node.names
+        if node.module.split(".")[0] in {"subprocess", "socket", "httpx", "requests", "urllib"}
+    )
+    assert not imported & {"subprocess", "socket", "httpx", "requests", "urllib"}
+    atomic_replace_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "os"
+        and node.func.attr == "replace"
+    ]
+    fsync_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "os"
+        and node.func.attr == "fsync"
+    ]
+    assert atomic_replace_calls
+    assert fsync_calls
+
+
+def test_g19_exposure_uses_atomic_replace_at_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _home, target, resolved, proposal_id, source_path = _fixture(tmp_path)
+    authorized = authorize_target_effect(
+        resolved=resolved,
+        proposal_id=proposal_id,
+        relative_target_path="README.md",
+        source_artifact_path=source_path,
+        operator={"kind": "operator", "id": "test-user"},
+    )
+    prepare_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+    replacements: list[tuple[Path, Path]] = []
+    original_replace = target_effect_module.os.replace
+
+    def record_replace(source: str | bytes | Path, destination: str | bytes | Path) -> None:
+        replacements.append((Path(source), Path(destination)))
+        original_replace(source, destination)
+
+    monkeypatch.setattr(target_effect_module.os, "replace", record_replace)
+    applied = apply_target_effect(resolved=resolved, effect_id=str(authorized.record["effect_id"]))
+    assert applied.record["state"] == "applied"
+    target_replacements = [destination for _source, destination in replacements if destination == target / "README.md"]
+    assert target_replacements == [target / "README.md"]

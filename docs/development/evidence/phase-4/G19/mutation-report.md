@@ -11,5 +11,7 @@ integration test per mutant. No mutation was applied to the working tree.
 | \`source-digest-revalidation\` | Replacement source may change after authorization | Caught by source-digest refusal |
 | \`dirty-target-refusal\` | Dirty target may enter preparation | Caught by clean-target refusal |
 | \`after-digest-verification\` | Post-exposure bytes are not verified | Caught by ambiguous recovery blocking |
+| \`atomic-exposure\` | Replacement uses a non-atomic write | Caught by the static atomic-exposure guard |
+| \`exposed-recovery-decision\` | Exact after-state is not recovered as applied | Caught by exposed-record recovery |
 
-Result: \`mutation_killed=5/5\`.
+Result: \`mutation_killed=7/7\`.

@@ -123,6 +123,13 @@ def test_target_effect_rejects_unknown_commit_retry_and_credential_fields() -> N
         assert not report.valid, field
 
 
+def test_target_effect_rejects_a_commit_policy_mutation() -> None:
+    invalid = _record()
+    invalid["commit_policy"] = "auto_commit"
+    report = validate_target_effect(invalid)
+    assert not report.valid
+
+
 def test_target_effect_rejects_unsupported_effect_actor_and_path() -> None:
     for field, value in (
         ("effect_kind", "write_workpad"),

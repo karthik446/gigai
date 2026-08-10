@@ -50,6 +50,18 @@ MUTANTS = (
         '        raise TargetEffectRefusedError("target after digest mismatch", code="after_digest_mismatch")',
         "tests/test_g19_target_effect.py::test_g19_after_exposure_digest_drift_blocks_recovery",
     ),
+    (
+        "atomic-exposure",
+        "        os.replace(temporary, target_path)\n",
+        "        target_path.write_bytes(data)\n",
+        "tests/test_g19_target_effect.py::test_g19_runtime_has_no_effectful_imports_and_uses_atomic_exposure",
+    ),
+    (
+        "exposed-recovery-decision",
+        "        if _is_after_state(record, target, target_path, current):\n",
+        "        if False:\n",
+        "tests/test_g19_target_effect.py::test_g19_exposed_record_recovers_to_applied_after_interruption",
+    ),
 )
 
 
@@ -66,9 +78,21 @@ def main() -> int:
             if original not in payload:
                 raise SystemExit(f"mutation anchor missing: {name}")
             path.write_text(payload.replace(original, mutant, 1), encoding="utf-8")
+            probe = subprocess.run(
+                [str(python), "-c", "import gigai.target_effect as module; print(module.__file__)"],
+                cwd=source_root,
+                env={**os.environ, "PYTHONPATH": str(source_root)},
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            if Path(probe.stdout.strip()).resolve() != path.resolve():
+                raise SystemExit(f"mutation source was not imported: {probe.stdout.strip()}")
+            test_path, separator, test_name = test.partition("::")
+            test_selector = str(root / test_path) + (separator + test_name if separator else "")
             result = subprocess.run(
-                [str(python), "-m", "pytest", "-q", test],
-                cwd=root,
+                [str(python), "-m", "pytest", "-q", test_selector],
+                cwd=source_root,
                 env={**os.environ, "PYTHONPATH": str(source_root)},
                 capture_output=True,
                 text=True,
