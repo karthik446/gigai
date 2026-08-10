@@ -431,6 +431,15 @@ proposal. The session remains local-first and uses SQLite/workpad authority;
 remote hosting, background service behavior, and unapproved execution remain
 out of scope.
 
+G22 is complete. Its shipped path is deterministic/offline by default, binds
+only to loopback with a short-lived token, requires explicit reference and
+operator approval, and hands G19 a sealed proposal without target mutation or
+Run authority. The [completion audit](../development/evidence/phase-2/G22/completion-audit.md)
+and [terminal handoff](../development/evidence/phase-2/G22/terminal-handoff.md)
+are the authoritative closeout records. G19 is the next authorized consumer;
+it must define and separately authorize target effects rather than treating
+G22's `write_workpad` choice as permission to mutate a target.
+
 ### Phase 3A — Sequential execution spine
 
 #### G14 — Sequential Goal Graph scheduler
