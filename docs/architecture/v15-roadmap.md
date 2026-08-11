@@ -12,8 +12,10 @@ authority for the contracts already implemented and for the boundaries that
 V15 must preserve.
 
 **Current roadmap gate:** G13 through G20 and G22 are complete and independently
-evidenced. G21 is the next planning candidate; later candidates remain
-planning-only until their individual goal contracts are reviewed and approved.
+evidenced. G21 and G23 have proposed goal contracts but are not activated;
+G24 remains a planning-only release-lane alpha-readiness candidate. Later
+candidates remain planning-only until their individual goal contracts are
+reviewed and approved.
 G19 remains bounded by its accepted contract and does not authorize broader
 target effects by inference.
 
@@ -365,6 +367,8 @@ G13 -> G14 -> G15 -> G16
            S16-EVAL + S18-01 + S18-02 + S18-03 + S18-04 + S18-05 + S22-01 -> G18
            S22-01 + G18 -> G22
            G16 + S16-EVAL + G18 + G22 -> G19 -> G20 -> G21
+           G17 + G19 + G20 + G22 -> G23
+           G12 + G21 + G23 -> G24
 ```
 
 The graph is intentionally provisional. The arrows express planning
@@ -386,12 +390,17 @@ dependencies, not live status fields or authorization to begin.
 | G18 | Provider comparison and model handoff implementation | S16-EVAL, S18-01, S18-02, S18-03, S18-04, S18-05, S22-01 |
 | G19 | Approved target mutation | G16, S16-EVAL, G18, G22 |
 | G20 | Local `improve` and evaluator learning | G16, S16-EVAL, G18, G19, G22 |
-| G21 | Recurring and comparative Gigs | G20 |
+| [G21](../development/goals/phase-5/G21-recurring-and-comparative-gigs.md) | Recurring and comparative Gigs | G13, G14, G20 |
 | G22 | Deliberative `create` and user-facing proposal interview | S22-01, G18 |
+| G23 | Gig self-containment and portability (capability-manifest reference and proposal-lineage resolution on the active Gig version) | G17, G19, G20, G22 |
+| G24 | Alpha release readiness and final repository cleanup | G12, G21, G23 |
 
 S16-EVAL is the hard review-loop quality gate for G18 and G19. G22 may cite
 its evidence only when G22 actually invokes or evaluates the Review Loop;
-S22-01 remains the authority for proposal-question quality evaluation.
+S22-01 remains the authority for proposal-question quality evaluation. G23 is
+independent of G21: neither depends on the other, and G23 does not by itself
+authorize an alpha or public release, which remains a separate release-lane
+goal.
 
 ### Phase 2 — Proposal creation and interaction
 
@@ -619,6 +628,46 @@ triggered daily/weekly/monthly examples before adding a daemon or OS scheduler.
 Exit evidence: a daily market-state or weekly screener fixture and a monthly
 spreadsheet fixture each produce separate Runs, preserve prior evidence, and
 fail closed when a reference snapshot or capability is unavailable.
+
+The reviewed G21 contract is [here](../development/goals/phase-5/G21-recurring-and-comparative-gigs.md).
+It remains proposed and does not authorize a daemon, OS scheduler, automatic
+retry, or background provider activity.
+
+#### G23 — Gig self-containment and portability
+
+Add a `capability_manifest` reference to `active-gig-version.json` and a
+read-only proposal-lineage resolver, so an approved Gig version can name its
+own declared capability manifest and its full `create`/`improve`/`amend`
+proposal chain without following the Review Bundle's `tool_requirements` or
+walking `parent_proposal_id` by hand. Portability means the pinned manifest
+and, where the accepted source-transport shape requires it, its pinned
+source artifact travel to a second machine for local reinstallation through
+G17's existing installer; installed tool bytes are never copied between
+machines, and `resolved_tools` Run-time authority is unchanged.
+
+G23 does not declare an alpha or public release. It is independent of G21
+and does not gate or unblock recurring Gigs.
+
+Exit evidence: the accepted amendment settling field requiredness,
+version-binding, lineage resolution, and source-transport shape; portability
+and lineage fixtures including a multi-hop chain, a cycle, and a
+cross-Gig/unbound-manifest refusal; a two-disposable-home reinstallation
+record; mutation evidence for the semantic-verification and lineage checks;
+and fresh-wheel replay. See the [G23 goal contract](../development/goals/phase-5/G23-gig-self-containment-and-portability.md).
+
+#### G24 — Alpha release readiness and final repository cleanup
+
+Prepare a true alpha candidate after G21 and G23 are accepted, while reusing
+G12's release-lane mechanics. G24 owns the final support-surface freeze,
+roadmap/README/internal-changelog reconciliation, release-candidate artifact
+checks, exact-tag CI, fresh-install proofs, and release evidence needed to
+decide whether GigAI is ready for an alpha declaration.
+
+G24 does not infer release authority from product-goal completion, does not
+publish merely because its prerequisites are complete, and does not replace
+G12's exact-tag, TestPyPI, Trusted Publisher, provenance, or clean-machine
+requirements. The alpha version, publication action, and final release
+approval remain explicit decisions in the release lane.
 
 ## 10. Example Gigs after the foundation
 
