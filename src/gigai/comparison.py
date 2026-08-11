@@ -79,6 +79,8 @@ def compare_occurrences(
     reason: str | None = None
     if current_run.get("gig_id") != prior_run.get("gig_id"):
         result, reason = "incomparable", "Run Gig identities differ"
+    elif current["snapshot"].get("bundle_id") != prior["snapshot"].get("bundle_id"):
+        result, reason = "incomparable", "Review Bundle identities differ"
     elif current_run.get("goal_graph", {}).get("content_sha256") != prior_run.get("goal_graph", {}).get("content_sha256"):
         result, reason = "incomparable", "Goal Graph identities differ"
     elif _ref_digests(current_contracts) != _ref_digests(prior_contracts):
@@ -161,12 +163,10 @@ def _read_run(workpad: Path, run_id: str) -> dict[str, object]:
 
 
 def _run_output_ref(workpad: Path, run_id: str) -> dict[str, object] | None:
-    path = workpad / "runs" / run_id / "run-details.json"
+    path = workpad / "runs" / run_id / "target-after.json"
     if path.is_symlink() or not path.is_file():
         return None
     payload = path.read_bytes()
-    if not validate_serialized_contract("run-details.schema.json", payload).valid:
-        return None
     return _artifact_ref(path.relative_to(workpad).as_posix(), payload)
 
 

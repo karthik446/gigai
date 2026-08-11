@@ -60,7 +60,43 @@ def test_comparison_binds_two_runs_and_never_selects_winner(tmp_path: Path) -> N
     )
     assert comparison["current_run_id"] == second_run.run_id
     assert comparison["prior_run_id"] == first_run.run_id
-    assert comparison["result"] == "changed"
+    assert comparison["result"] == "unchanged"
     assert comparison["selected_winner"] is None
     assert attached.state == "closed"
     assert (attached.workpad / comparison["evidence"][0]["path"]).is_file()
+
+
+def test_missing_output_is_blocked_without_fabricated_delta(tmp_path: Path, monkeypatch) -> None:
+    home, target, gig_id, bundle_path = _fixture(tmp_path)
+    snapshot = bundle_path.relative_to(next((tmp_path / "workpads").rglob("gig_*/"))).as_posix()
+    first = declare_occurrence(
+        home_root=home,
+        requested_target=target,
+        gig_id=gig_id,
+        cadence="weekly",
+        occurrence_key="2026-w35",
+        snapshot_path=snapshot,
+        uuid_factory=_uuids(),
+    )
+    trigger_occurrence(home_root=home, requested_target=target, gig_id=gig_id, occurrence_id=first.occurrence_id, wait=True, uuid_factory=_uuids())
+    second = declare_occurrence(
+        home_root=home,
+        requested_target=target,
+        gig_id=gig_id,
+        cadence="weekly",
+        occurrence_key="2026-w36",
+        snapshot_path=snapshot,
+        prior_occurrence_id=first.occurrence_id,
+        uuid_factory=_uuids(),
+    )
+    trigger_occurrence(home_root=home, requested_target=target, gig_id=gig_id, occurrence_id=second.occurrence_id, wait=True, uuid_factory=_uuids())
+    monkeypatch.setattr("gigai.comparison._run_output_ref", lambda *_args: None)
+    comparison, attached = compare_occurrences(
+        home_root=home,
+        requested_target=target,
+        gig_id=gig_id,
+        current_occurrence_id=second.occurrence_id,
+        uuid_factory=_uuids(),
+    )
+    assert comparison["result"] == "blocked"
+    assert attached.state == "closed"
