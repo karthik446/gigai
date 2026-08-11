@@ -247,6 +247,8 @@ The following rules are normative:
    records `missed`, `skipped`, and `unavailable` with explicit reason,
    matching outcome, and outcome actor. The schema enforces these refusal
    invariants, as well as requiring a comparison reference for `compared`.
+   The API and CLI require the outcome actor explicitly and never fabricate a
+   human identity by default.
    No background timer or scheduler process is involved, and no missing Run is
    reported as successful.
 7. **Comparison integrity.** A valid prior/current pair produces a comparison

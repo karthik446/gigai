@@ -11,7 +11,8 @@ any new active-version authority.
 
 Refusal terminals are attributable: the declaration actor is preserved, while
 the terminal decision records a bounded reason, matching outcome, and explicit
-outcome actor. A prepared Run must be reconciled before any refusal terminal
+outcome actor supplied by the caller. The occurrence API and CLI reject omitted
+actors. A prepared Run must be reconciled before any refusal terminal
 can be recorded. Comparisons explicitly refuse differing Run Gig versions as
 `incomparable`.
 

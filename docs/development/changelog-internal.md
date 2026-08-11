@@ -216,7 +216,8 @@ runner, retry system, or target-effect authority. See the [completion audit](evi
 and [installed replay](evidence/phase-5/G21/installed-replay.md). The later
 corrective review added schema-enforced refusal reason/outcome/actor fields,
 prepared-Run reconciliation protection, and explicit Gig-version comparison
-refusal; the final suite reports 504 passing tests.
+refusal, and mandatory caller-supplied actor attribution; the final suite
+reports 505 passing tests.
 
 ### G23 — Gig self-containment and portability
 

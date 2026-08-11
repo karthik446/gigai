@@ -5,6 +5,7 @@
 - Accepted amendment: [occurrence/comparison contract amendment](occurrence-comparison-contract-amendment.md)
 - Original implementation range: `fade42f..87840da`
 - Corrective review commits: `702ff1c`, `e8e5269`
+- Final attribution correction: `d654adc`
 
 ## Acceptance evidence
 
@@ -21,7 +22,9 @@
 5. Interruption, recovery, terminal replay, missed-state, unavailable, and
    cancellation fixtures are covered in the focused lifecycle suite. Refusal
    terminals preserve explicit outcome actors and outcomes, while prepared
-   Runs cannot be manually terminalized before reconciliation.
+   Runs cannot be manually terminalized before reconciliation. The outcome
+   actor is mandatory at both the API and CLI boundary; no human identity is
+   fabricated when it is omitted.
 6. The implementation boundary has no provider, network, credential,
    scheduler, daemon, subprocess, or target-effect authority.
 7. Mutation evidence killed all nine named semantic mutations, including the
@@ -31,9 +34,9 @@
 
 ## Verification record
 
-- Corrective focused G21 suite: `22 passed in 35.47s`.
+- Final focused G21 suite: `23 passed in 38.14s`.
 - Affected schema/contract suite: `50 passed, 53 subtests passed in 52.27s`.
-- Full suite after corrective fixes: `504 passed, 60 subtests passed in 244.00s`.
+- Full suite after final attribution correction: `505 passed, 60 subtests passed in 246.83s`.
 - Mutation harness: `mutation_killed=9/9`.
 - `git diff --check`: passed before closeout.
 
@@ -42,7 +45,9 @@ those were corrected in `87840da`. A subsequent review then identified five
 G21 enforcement gaps: refusal actor attribution, in-flight terminalization,
 schema conditionals, refusal outcomes, and explicit version mismatch handling.
 Those were corrected in `702ff1c` and `e8e5269`; the clean full-suite and
-fresh-wheel results above were rerun afterward.
+fresh-wheel results above were rerun afterward. A final review found the
+remaining implicit `operator/local-user` fallback; `d654adc` removed it and
+made actor attribution mandatory, followed by the final suite and wheel replay.
 
 ## Scope conclusion
 

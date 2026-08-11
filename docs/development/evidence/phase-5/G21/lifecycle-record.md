@@ -19,6 +19,8 @@ Refusal records retain the immutable declaration-time `trigger_actor` and add
 an explicit `outcome_actor`, bounded reason, and populated outcome. A prepared
 occurrence cannot be marked cancelled/failed/etc. while its linked Run is in
 flight or complete but unreconciled; the caller must reconcile the Run first.
+The Python API and CLI require the outcome actor and reject omission rather than
+falling back to `operator/local-user`.
 
 The trigger boundary revalidates the complete declared snapshot, including
 Bundle identity, version, artifact digest, and reference-set digest, before Run

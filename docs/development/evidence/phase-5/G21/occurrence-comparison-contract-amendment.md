@@ -165,7 +165,8 @@ both in the runtime and in the serialized contract:
 The declaration-time `trigger_actor` remains immutable; `outcome_actor` records
 who or what made the later terminal decision. These are additive constraints
 within the accepted `gig-occurrence` resource and do not create a new authority
-or schema resource.
+or schema resource. The `mark_occurrence` API and CLI require this actor from
+the caller; they do not synthesize a human identity when it is omitted.
 7. A comparison binds two explicit occurrences, distinct Runs, versions,
    snapshots, Goal Graphs, Review Contracts, outputs, and method identity.
 8. `selected_winner` is always `null`; comparisons are not adjudication,
