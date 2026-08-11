@@ -21,7 +21,7 @@ non-contiguous and crosses lanes:
 - Phase 3: G13–G18
 - Phase 2: G22
 - Phase 4: G19
-- Phase 5: G20 and G21 complete; G23 amendment accepted, runtime proposed
+- Phase 5: G20 and G21 complete; G23 active under its accepted amendment
 - Research/contract records: S16-EVAL, S18-01 through S18-05, and S22-01
 
 The implementation chronology and the dependency graph are both valid but are
@@ -35,8 +35,8 @@ schema-resource count, release, or next-goal status changes. A stale snapshot
 must be marked with its last-known date; it must never silently be treated as
 current.
 
-- Roadmap gate: G00–G21 and G22 are represented as complete; G23's additive
-  amendment is accepted but runtime remains proposed.
+- Roadmap gate: G00–G21 and G22 are represented as complete; G23 is active
+  under its accepted additive amendment.
 - Packaged schema resources: 27.
 - Accepted research/contract prerequisites: S16-EVAL, S18-01 through S18-05,
   and S22-01.
@@ -44,11 +44,11 @@ current.
   improve approval path, mutation report, and installed replay are accepted.
   G21: complete; additive amendment, runtime implementation, mutation evidence,
   and installed replay accepted.
-  G23: additive amendment accepted; runtime implementation is not activated.
+  G23: additive amendment accepted; runtime implementation is in progress.
   G23 is independent of G21 and does not declare an alpha or public
   release.
 - Current closeout: G21 completion audit and terminal handoff are accepted;
-  G23 remains the independent proposed prerequisite before G24.
+  G23 is the independent active prerequisite before G24.
 - Known reconciliation work: some older README, Phase 3 status, and evidence
   status lines still reflect earlier snapshots and must be corrected explicitly.
 
@@ -221,7 +221,7 @@ reports 505 passing tests.
 
 ### G23 — Gig self-containment and portability
 
-Goal contract and additive amendment accepted; runtime not activated. See the [G23 goal contract](goals/phase-5/G23-gig-self-containment-and-portability.md)
+Goal contract and additive amendment accepted; runtime implementation active. See the [G23 goal contract](goals/phase-5/G23-gig-self-containment-and-portability.md)
 and [accepted amendment](evidence/phase-5/G23/gig-self-containment-and-portability-contract-amendment.md).
 The contract adds a `capability_manifest` reference to
 `active-gig-version.json` and a read-only proposal-lineage resolver so an
@@ -231,8 +231,8 @@ The capability-manifest binding is authoritative through the same
 approval-time lifecycle write that already sets `goal_graph`; it is not
 derived through `gig-proposal.creation_manifest`, which remains a
 single-purpose slot already used by `create` and G20 `improve` proposals.
-Implementation evidence remains absent until the goal is activated. G23 is
-independent of G21 and does not
+Implementation evidence will be recorded under the G23 evidence directory as
+milestones land. G23 is independent of G21 and does not
 declare an alpha or public release.
 
 ## Cross-goal change ledger

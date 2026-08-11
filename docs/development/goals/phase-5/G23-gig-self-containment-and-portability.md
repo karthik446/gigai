@@ -1,7 +1,6 @@
 # G23 — Gig Self-Containment and Portability
 
-- Status: Proposed for implementation; additive amendment accepted; runtime
-  not activated
+- Status: Active; additive amendment accepted; implementation in progress
 - Accepted amendment: [G23 gig self-containment and portability contract amendment](../../evidence/phase-5/G23/gig-self-containment-and-portability-contract-amendment.md)
 - Depends on: G17 completion (capability manifest and installation), G19
   completion and terminal handoff, G20 completion and terminal handoff, and

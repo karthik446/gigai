@@ -12,7 +12,7 @@ authority for the contracts already implemented and for the boundaries that
 V15 must preserve.
 
 **Current roadmap gate:** G13 through G22 are complete and independently
-evidenced. G23 has an accepted additive amendment but is not activated. G24 remains a planning-only
+evidenced. G23 is active under its accepted additive amendment. G24 remains a planning-only
 release-lane alpha-readiness candidate. Later
 candidates remain planning-only until their individual goal contracts are
 reviewed and approved.
@@ -648,7 +648,8 @@ source artifact travel to a second machine for local reinstallation through
 G17's existing installer; installed tool bytes are never copied between
 machines, and `resolved_tools` Run-time authority is unchanged.
 
-G23 does not declare an alpha or public release. It is independent of G21
+G23 is active under its accepted additive amendment and does not declare an
+alpha or public release. It is independent of G21
 and does not gate or unblock recurring Gigs.
 
 Exit evidence: the accepted amendment settling field requiredness,
