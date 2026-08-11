@@ -1081,7 +1081,7 @@ def occurrence_reconcile_command(
 @click.argument("occurrence_id")
 @click.argument("state", type=click.Choice(["missed", "skipped", "unavailable", "cancelled", "blocked", "failed"]))
 @click.option("--reason", required=True)
-@click.option("--actor-id", default="local-user", show_default=True)
+@click.option("--actor-id", required=True)
 @click.option("--gig-id")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))

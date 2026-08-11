@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import inspect
 import subprocess
 import time
 import uuid
@@ -270,6 +271,7 @@ def test_missed_state_requires_explicit_reason_and_has_no_run(tmp_path: Path) ->
         occurrence_id=occurrence.occurrence_id,
         state="missed",
         reason="operator reconciliation: no external trigger arrived",
+        outcome_actor={"kind": "operator", "id": "test-operator"},
     )
     assert result.state == "missed"
     assert result.run_id is None
@@ -311,6 +313,7 @@ def test_mark_refuses_inflight_prepared_run_until_reconciled(tmp_path: Path, mon
         mark_occurrence(
             home_root=home, requested_target=target, gig_id=gig_id,
             occurrence_id=occurrence.occurrence_id, state="cancelled", reason="operator cancellation",
+            outcome_actor={"kind": "operator", "id": "test-operator"},
         )
     assert parse_json_bytes(prepared.record_path.read_bytes())["state"] == "run_prepared"
 
@@ -332,6 +335,7 @@ def test_mark_refuses_completed_prepared_run_until_reconciled(tmp_path: Path, mo
         mark_occurrence(
             home_root=home, requested_target=target, gig_id=gig_id,
             occurrence_id=occurrence.occurrence_id, state="cancelled", reason="operator cancellation",
+            outcome_actor={"kind": "operator", "id": "test-operator"},
         )
     assert parse_json_bytes(prepared.record_path.read_bytes())["state"] == "run_prepared"
 
@@ -375,6 +379,11 @@ def test_prepared_occurrence_reconciles_without_relaunch(tmp_path: Path) -> None
         occurrence_id=occurrence.occurrence_id,
     ).state == "closed"
     assert len(list((resolved.path / "runs").glob("run_*/run-manifest.json"))) == 1
+
+
+def test_mark_requires_explicit_outcome_actor() -> None:
+    parameter = inspect.signature(mark_occurrence).parameters["outcome_actor"]
+    assert parameter.default is inspect.Parameter.empty
 
 
 def test_interruption_after_run_preparation_is_terminal_failure(tmp_path: Path) -> None:
@@ -427,6 +436,7 @@ def test_explicit_terminal_states_are_idempotent_and_never_run(tmp_path: Path) -
             occurrence_id=occurrence.occurrence_id,
             state=state,
             reason=f"explicit {state} fixture",
+            outcome_actor={"kind": "operator", "id": "test-operator"},
         )
         replay = mark_occurrence(
             home_root=home,
@@ -435,6 +445,7 @@ def test_explicit_terminal_states_are_idempotent_and_never_run(tmp_path: Path) -
             occurrence_id=occurrence.occurrence_id,
             state=state,
             reason="different replay reason is ignored",
+            outcome_actor={"kind": "operator", "id": "test-operator"},
         )
         assert first.state == replay.state == state
         assert replay.run_id is None

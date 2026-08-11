@@ -131,7 +131,7 @@ def main() -> int:
         close_occurrence(home_root=home, requested_target=target, gig_id=created.gig_id, occurrence_id=first.occurrence_id)
 
         weekly = declare_occurrence(home_root=home, requested_target=target, gig_id=created.gig_id, cadence="weekly", occurrence_key="2026-w33", snapshot_path=paths["installed-screener"], uuid_factory=_uuids())
-        if mark_occurrence(home_root=home, requested_target=target, gig_id=created.gig_id, occurrence_id=weekly.occurrence_id, state="missed", reason="installed external trigger was absent").state != "missed":
+        if mark_occurrence(home_root=home, requested_target=target, gig_id=created.gig_id, occurrence_id=weekly.occurrence_id, state="missed", reason="installed external trigger was absent", outcome_actor={"kind": "operator", "id": "installed-g21"}).state != "missed":
             raise SystemExit("installed weekly missed state failed")
         monthly = declare_occurrence(home_root=home, requested_target=target, gig_id=created.gig_id, cadence="monthly", occurrence_key="2026-08", snapshot_path=paths["installed-spreadsheet"], uuid_factory=_uuids())
         if trigger_occurrence(home_root=home, requested_target=target, gig_id=created.gig_id, occurrence_id=monthly.occurrence_id, wait=True, uuid_factory=_uuids()).state != "run_terminal":

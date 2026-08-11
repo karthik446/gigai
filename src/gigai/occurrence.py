@@ -259,7 +259,7 @@ def mark_occurrence(
     occurrence_id: str,
     state: str,
     reason: str,
-    outcome_actor: Mapping[str, object] | None = None,
+    outcome_actor: Mapping[str, object],
     gig_id: str | None = None,
     observer: OccurrenceObserver | None = None,
 ) -> OccurrenceResult:
@@ -269,7 +269,7 @@ def mark_occurrence(
         raise OccurrenceError("mark_occurrence accepts only explicit terminal states")
     if not reason or len(reason) > 1000 or "\n" in reason:
         raise OccurrenceError("occurrence reason must be one share-safe line")
-    actor = _validate_actor(outcome_actor or {"kind": "operator", "id": "local-user"})
+    actor = _validate_actor(outcome_actor)
     resolved = _resolve(resolved_home=home_root, target=requested_target, gig_id=gig_id)
     record = _read_record(resolved.path, occurrence_id)
     if record["state"] in _TERMINAL_STATES:
