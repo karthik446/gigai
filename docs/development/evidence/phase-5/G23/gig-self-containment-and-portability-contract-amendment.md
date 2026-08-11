@@ -1,6 +1,6 @@
 # G23 Gig Self-Containment and Portability Contract Amendment
 
-- Status: Accepted additive amendment; runtime not activated
+- Status: Accepted additive amendment; G23 runtime implementation complete
 - Type: Contract and serialized-resource amendment for G23
 - Depends on: G17, G19, G20, and G22 completion audits and terminal handoffs
 - Unblocks: G23 runtime implementation only

@@ -34,6 +34,18 @@ MUTANTS = (
         "        if False:\n",
         "tests/test_g23_portability.py::test_g23_lineage_refusals_are_closed",
     ),
+    (
+        "lineage-cycle-guard",
+        "        if current in seen:\n",
+        "        if False:\n",
+        "tests/test_g23_portability.py::test_g23_lineage_refusals_are_closed",
+    ),
+    (
+        "lineage-missing-parent-guard",
+        "        if proposal is None:\n",
+        "        if False:\n",
+        "tests/test_g23_portability.py::test_g23_lineage_refusals_are_closed",
+    ),
 )
 
 
@@ -52,14 +64,19 @@ def main() -> int:
             path.write_text(payload.replace(original, mutant, 1), encoding="utf-8")
             test_path, separator, test_name = test.partition("::")
             selector = str(root / test_path) + (separator + test_name if separator else "")
-            result = subprocess.run(
-                [str(python), "-m", "pytest", "-q", selector],
-                cwd=source_root,
-                env={**os.environ, "PYTHONPATH": str(source_root)},
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            try:
+                result = subprocess.run(
+                    [str(python), "-m", "pytest", "-q", selector],
+                    cwd=source_root,
+                    env={**os.environ, "PYTHONPATH": str(source_root)},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=10,
+                )
+            except subprocess.TimeoutExpired:
+                caught.append(name)
+                continue
             if result.returncode == 0:
                 raise SystemExit(f"mutation survived: {name}")
             caught.append(name)

@@ -91,8 +91,7 @@ def verify_active_version_portability(workpad: Path) -> PortabilityResult:
     manifest_bytes = _read_referenced_manifest(root, reference)
     _require_schema("capability-manifest.schema.json", manifest_bytes, "refused_digest_mismatch")
     manifest = parse_json_bytes(manifest_bytes)
-    if not isinstance(manifest, dict) or manifest.get("gig_id") != live.get("gig_id"):
-        raise PortabilityError("capability manifest belongs to another Gig", code="refused_unbound_manifest")
+    _validate_manifest_binding(manifest, live.get("gig_id"))
     return PortabilityResult("verified_portable", sealed_commit, publication_commit, live, manifest)
 
 
@@ -177,6 +176,11 @@ def _read_referenced_manifest(root: Path, reference: object) -> bytes:
     if reference.get("content_sha256") != digest_imported_bytes(payload) or reference.get("size_bytes") != len(payload):
         raise PortabilityError("capability manifest bytes differ from the pointer", code="refused_digest_mismatch")
     return payload
+
+
+def _validate_manifest_binding(manifest: object, gig_id: object) -> None:
+    if not isinstance(manifest, Mapping) or manifest.get("gig_id") != gig_id:
+        raise PortabilityError("capability manifest belongs to another Gig", code="refused_unbound_manifest")
 
 
 def _require_schema(schema_name: str, payload: bytes, code: str) -> None:
