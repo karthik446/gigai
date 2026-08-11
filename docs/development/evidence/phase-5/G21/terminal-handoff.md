@@ -9,6 +9,12 @@ occurrences and winnerless comparisons. It does not authorize a daemon, OS
 scheduler, automatic retry/catch-up, provider execution, target mutation, or
 any new active-version authority.
 
+Refusal terminals are attributable: the declaration actor is preserved, while
+the terminal decision records a bounded reason, matching outcome, and explicit
+outcome actor. A prepared Run must be reconciled before any refusal terminal
+can be recorded. Comparisons explicitly refuse differing Run Gig versions as
+`incomparable`.
+
 G20 may consume a comparison only through its existing learning-record and
 improvement gates. G21 does not turn comparison output into mutation or
 improvement authority.

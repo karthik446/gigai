@@ -3,7 +3,8 @@
 - Status: Complete
 - Goal: [G21 recurring and comparative Gigs](../../../../goals/phase-5/G21-recurring-and-comparative-gigs.md)
 - Accepted amendment: [occurrence/comparison contract amendment](occurrence-comparison-contract-amendment.md)
-- Implementation range: `fade42f..87840da`
+- Original implementation range: `fade42f..87840da`
+- Corrective review commits: `702ff1c`, `e8e5269`
 
 ## Acceptance evidence
 
@@ -18,23 +19,30 @@
    preserve disagreement by leaving `selected_winner` null and fail closed on
    incomparable or missing evidence.
 5. Interruption, recovery, terminal replay, missed-state, unavailable, and
-   cancellation fixtures are covered in the focused lifecycle suite.
+   cancellation fixtures are covered in the focused lifecycle suite. Refusal
+   terminals preserve explicit outcome actors and outcomes, while prepared
+   Runs cannot be manually terminalized before reconciliation.
 6. The implementation boundary has no provider, network, credential,
    scheduler, daemon, subprocess, or target-effect authority.
-7. Mutation evidence killed all six named semantic mutations.
+7. Mutation evidence killed all nine named semantic mutations, including the
+   new schema, in-flight terminalization, and version-mismatch guards.
 8. The fresh-wheel installed replay passed for all three cadence fixtures, and
    the G20 replay remained green from the same wheel.
 
 ## Verification record
 
-- Focused G21 suite: `16 passed in 26.08s`.
+- Corrective focused G21 suite: `22 passed in 35.47s`.
 - Affected schema/contract suite: `50 passed, 53 subtests passed in 52.27s`.
-- Full suite after the inventory fix: `498 passed, 60 subtests passed in 237.43s`.
+- Full suite after corrective fixes: `504 passed, 60 subtests passed in 244.00s`.
+- Mutation harness: `mutation_killed=9/9`.
 - `git diff --check`: passed before closeout.
 
 The earlier full-suite run exposed stale pre-G21 schema-count expectations;
-those were corrected in `87840da`, and the clean full-suite result above was
-then rerun. No acceptance claim depends on the failed pre-fix run.
+those were corrected in `87840da`. A subsequent review then identified five
+G21 enforcement gaps: refusal actor attribution, in-flight terminalization,
+schema conditionals, refusal outcomes, and explicit version mismatch handling.
+Those were corrected in `702ff1c` and `e8e5269`; the clean full-suite and
+fresh-wheel results above were rerun afterward.
 
 ## Scope conclusion
 

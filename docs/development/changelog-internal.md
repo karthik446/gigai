@@ -213,7 +213,10 @@ interruption-safe terminal outcomes, and sealed-output comparisons that never
 select a winner. The implementation is deliberately not a scheduler, provider
 runner, retry system, or target-effect authority. See the [completion audit](evidence/phase-5/G21/completion-audit.md),
 [terminal handoff](evidence/phase-5/G21/terminal-handoff.md), [mutation report](evidence/phase-5/G21/mutation-report.md),
-and [installed replay](evidence/phase-5/G21/installed-replay.md).
+and [installed replay](evidence/phase-5/G21/installed-replay.md). The later
+corrective review added schema-enforced refusal reason/outcome/actor fields,
+prepared-Run reconciliation protection, and explicit Gig-version comparison
+refusal; the final suite reports 504 passing tests.
 
 ### G23 — Gig self-containment and portability
 
