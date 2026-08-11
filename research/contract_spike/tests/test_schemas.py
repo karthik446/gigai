@@ -22,6 +22,8 @@ EXPECTED_SCHEMA_NAMES = {
     "capability-manifest.schema.json",
     "feedback.schema.json",
     "finding.schema.json",
+    "gig-comparison.schema.json",
+    "gig-occurrence.schema.json",
     "gig-proposal.schema.json",
     "goal-graph.schema.json",
     "handoff-frontmatter.schema.json",
@@ -879,6 +881,61 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "created_at": NOW,
         "updated_at": NOW,
     }
+    occurrence = {
+        "schema_version": "1.0",
+        "occurrence_version": 1,
+        "occurrence_id": "occurrence_99999999-9999-4999-8999-999999999999",
+        "project_id": PROJECT_ID,
+        "gig_id": GIG_ID,
+        "gig_version": 1,
+        "cadence": "daily",
+        "occurrence_key": "2026-08-02",
+        "trigger_actor": actor(),
+        "scheduled_for": NOW,
+        "snapshot": {
+            "bundle_id": "bundle_99999999-9999-4999-8999-999999999999",
+            "bundle_version": 1,
+            "artifact": artifact("manifests/review-bundles/occurrence.json"),
+            "reference_set_sha256": ZERO_DIGEST,
+        },
+        "prior_occurrence_id": None,
+        "run_id": RUN_ID,
+        "state": "run_terminal",
+        "outcome": "succeeded",
+        "comparison": None,
+        "reason": None,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    comparison = {
+        "schema_version": "1.0",
+        "comparison_version": 1,
+        "comparison_id": "comparison_99999999-9999-4999-8999-999999999999",
+        "project_id": PROJECT_ID,
+        "gig_id": GIG_ID,
+        "current_occurrence_id": occurrence["occurrence_id"],
+        "prior_occurrence_id": "occurrence_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "current_run_id": RUN_ID,
+        "prior_run_id": "run_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "current_gig_version": 1,
+        "prior_gig_version": 1,
+        "current_snapshot": artifact("manifests/review-bundles/current.json"),
+        "prior_snapshot": artifact("manifests/review-bundles/prior.json"),
+        "current_output": artifact("runs/current/target-after.json"),
+        "prior_output": artifact("runs/prior/target-after.json"),
+        "current_goal_graph": artifact("graphs/current.json"),
+        "prior_goal_graph": artifact("graphs/prior.json"),
+        "current_review_contracts": [artifact("contracts/current.json")],
+        "prior_review_contracts": [artifact("contracts/prior.json")],
+        "method_id": "content_digest",
+        "method_version": "g21-v1",
+        "result": "unchanged",
+        "reason": None,
+        "evidence": [artifact("comparisons/evidence.json")],
+        "selected_winner": None,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
     return {
         "urn:gigai:schema:gig-proposal:1": proposal,
         "urn:gigai:schema:active-gig-version:1": active,
@@ -904,6 +961,8 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "urn:gigai:schema:target-effect:1": target_effect,
         "urn:gigai:schema:learning-record:1": learning_record,
         "urn:gigai:schema:improvement-manifest:1": improvement_manifest,
+        "urn:gigai:schema:gig-occurrence:1": occurrence,
+        "urn:gigai:schema:gig-comparison:1": comparison,
     }
 
 
@@ -944,7 +1003,7 @@ class SerializedContractTests(unittest.TestCase):
         )
 
     def test_all_schema_documents_are_valid_draft_2020_12(self) -> None:
-        self.assertEqual(len(self.schemas), 25)
+        self.assertEqual(len(self.schemas), 27)
         for schema_id, schema in self.schemas.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)

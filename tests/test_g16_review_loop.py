@@ -44,7 +44,7 @@ _G15_SCHEMA_DIGESTS = {
 
 
 def test_g16_additive_schema_inventory_preserves_g15_baseline() -> None:
-    assert len(SCHEMA_NAMES) == 25
+    assert len(SCHEMA_NAMES) == 27
     root = Path(__file__).parents[1] / "src/gigai/schemas"
     for name, expected in _G15_SCHEMA_DIGESTS.items():
         assert hashlib.sha256((root / name).read_bytes()).hexdigest() == expected
