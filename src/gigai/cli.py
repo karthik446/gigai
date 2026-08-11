@@ -19,6 +19,7 @@ from .config import (
     load_config,
     migrate_config,
 )
+from .comparison import ComparisonError, compare_occurrences
 from .diagnostics import render_report_json, run_doctor, run_live_doctor
 from .index import JournalIndexError, JournalProjection, read_index
 from .lifecycle import (
@@ -34,6 +35,15 @@ from .lifecycle import (
     start_interview,
 )
 from .proposal_interview import InterviewHTTPServer
+from .occurrence import (
+    OccurrenceError,
+    close_occurrence,
+    declare_occurrence,
+    mark_occurrence,
+    read_occurrence,
+    reconcile_occurrence,
+    trigger_occurrence,
+)
 from .question_generation import generate_model_questions
 from .setup import (
     build_config,
@@ -70,7 +80,7 @@ def cli(context: click.Context) -> None:
         raise click.UsageError(
             "Choose 'setup', 'doctor', 'init', 'create', 'improve', 'feedback', 'revise', "
             "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
-            "'plan', 'run', 'run-details', 'workpad', 'check', or 'open'; "
+            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', or 'open'; "
             "use --help for details."
         )
 
@@ -940,6 +950,238 @@ def run_details_command(
         click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     else:
         click.echo(f"{payload['run_id']}: {payload['status']}")
+
+
+@cli.group("occurrence")
+def occurrence_group() -> None:
+    """Manually declare, trigger, reconcile, and compare G21 occurrences."""
+
+
+def _occurrence_payload(result) -> dict[str, object]:
+    payload = read_occurrence(workpad=result.workpad, occurrence_id=result.occurrence_id)
+    payload["workpad"] = str(result.workpad)
+    return payload
+
+
+@occurrence_group.command("declare")
+@click.argument("cadence", type=click.Choice(["daily", "weekly", "monthly"]))
+@click.argument("occurrence_key")
+@click.option("--snapshot", "snapshot_path", required=True, help="Relative Review Bundle manifest path.")
+@click.option("--prior-occurrence")
+@click.option("--version", type=click.IntRange(min=1))
+@click.option("--scheduled-for")
+@click.option("--gig-id")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def occurrence_declare_command(
+    cadence: str,
+    occurrence_key: str,
+    snapshot_path: str,
+    prior_occurrence: str | None,
+    version: int | None,
+    scheduled_for: str | None,
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Declare one explicit recurrence slot without starting a Run."""
+
+    _require_supported_platform()
+    try:
+        result = declare_occurrence(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            gig_id=gig_id,
+            version=version,
+            cadence=cadence,
+            occurrence_key=occurrence_key,
+            snapshot_path=snapshot_path,
+            prior_occurrence_id=prior_occurrence,
+            scheduled_for=scheduled_for,
+        )
+        payload = _occurrence_payload(result)
+    except (OccurrenceError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Declared {payload['occurrence_id']} for {payload['cadence']}:{payload['occurrence_key']}.")
+
+
+@occurrence_group.command("trigger")
+@click.argument("occurrence_id")
+@click.option("--wait", is_flag=True)
+@click.option("--gig-id")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def occurrence_trigger_command(
+    occurrence_id: str,
+    wait: bool,
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Trigger one declared occurrence through the existing Run path."""
+
+    _require_supported_platform()
+    try:
+        result = trigger_occurrence(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            gig_id=gig_id,
+            occurrence_id=occurrence_id,
+            wait=wait,
+        )
+        payload = _occurrence_payload(result)
+    except (OccurrenceError, RunError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Occurrence {payload['occurrence_id']} is {payload['state']}.")
+
+
+@occurrence_group.command("reconcile")
+@click.argument("occurrence_id")
+@click.option("--gig-id")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def occurrence_reconcile_command(
+    occurrence_id: str,
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Reconcile a prepared occurrence without relaunching its Run."""
+
+    _require_supported_platform()
+    try:
+        result = reconcile_occurrence(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            gig_id=gig_id,
+            occurrence_id=occurrence_id,
+        )
+        payload = _occurrence_payload(result)
+    except (OccurrenceError, RunError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Occurrence {payload['occurrence_id']} is {payload['state']}.")
+
+
+@occurrence_group.command("mark")
+@click.argument("occurrence_id")
+@click.argument("state", type=click.Choice(["missed", "skipped", "unavailable", "cancelled", "blocked", "failed"]))
+@click.option("--reason", required=True)
+@click.option("--actor-id", required=True)
+@click.option("--gig-id")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def occurrence_mark_command(
+    occurrence_id: str,
+    state: str,
+    reason: str,
+    actor_id: str,
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Record an explicit occurrence outcome without starting a Run."""
+
+    _require_supported_platform()
+    try:
+        result = mark_occurrence(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            gig_id=gig_id,
+            occurrence_id=occurrence_id,
+            state=state,
+            reason=reason,
+            outcome_actor={"kind": "operator", "id": actor_id},
+        )
+        payload = _occurrence_payload(result)
+    except (OccurrenceError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Occurrence {payload['occurrence_id']} is {payload['state']}.")
+
+
+@occurrence_group.command("close")
+@click.argument("occurrence_id")
+@click.option("--gig-id")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def occurrence_close_command(
+    occurrence_id: str,
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Close a terminal occurrence without creating another Run."""
+
+    _require_supported_platform()
+    try:
+        result = close_occurrence(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            gig_id=gig_id,
+            occurrence_id=occurrence_id,
+        )
+        payload = _occurrence_payload(result)
+    except (OccurrenceError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Occurrence {payload['occurrence_id']} is {payload['state']}.")
+
+
+@occurrence_group.command("compare")
+@click.argument("current_occurrence_id")
+@click.option("--prior-occurrence")
+@click.option("--gig-id")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def occurrence_compare_command(
+    current_occurrence_id: str,
+    prior_occurrence: str | None,
+    gig_id: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Compare one completed occurrence with its explicitly named prior."""
+
+    _require_supported_platform()
+    try:
+        comparison, result = compare_occurrences(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            gig_id=gig_id,
+            current_occurrence_id=current_occurrence_id,
+            prior_occurrence_id=prior_occurrence,
+        )
+    except (ComparisonError, OccurrenceError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(json.dumps(comparison, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Comparison {comparison['comparison_id']} is {comparison['result']} for {result.occurrence_id}.")
 
 
 def _read_projection(

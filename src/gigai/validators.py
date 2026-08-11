@@ -33,6 +33,8 @@ SCHEMA_NAMES = (
     "common.schema.json",
     "feedback.schema.json",
     "finding.schema.json",
+    "gig-comparison.schema.json",
+    "gig-occurrence.schema.json",
     "gig-proposal.schema.json",
     "goal-graph.schema.json",
     "handoff-frontmatter.schema.json",

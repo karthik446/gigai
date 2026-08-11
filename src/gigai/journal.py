@@ -70,6 +70,20 @@ TRANSITIONS = frozenset(
         "target_effect_cancelled",
         "target_effect_rolled_back",
         "target_effect_blocked",
+        "occurrence_declared",
+        "occurrence_triggered",
+        "occurrence_snapshot_verified",
+        "occurrence_run_prepared",
+        "occurrence_run_terminal",
+        "occurrence_compared",
+        "occurrence_closed",
+        "occurrence_blocked",
+        "occurrence_skipped",
+        "occurrence_cancelled",
+        "occurrence_unavailable",
+        "occurrence_failed",
+        "occurrence_missed",
+        "comparison_published",
     }
 )
 JournalObserver = Callable[[str], None]

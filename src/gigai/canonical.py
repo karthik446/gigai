@@ -31,7 +31,7 @@ SAFE_INTEGER_MAX = 9_007_199_254_740_991
 ID_COLLISION_RETRIES = 3
 MEMBER_NAME = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 ENTITY_ID = re.compile(
-    r"^(?P<prefix>project|gig|gp|graph|goal|edge|run|handoff|inv|learning|improve_manifest)_"
+    r"^(?P<prefix>project|gig|gp|graph|goal|edge|run|handoff|inv|learning|improve_manifest|occurrence|comparison)_"
     r"(?P<uuid>[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12})$"
 )
@@ -109,6 +109,8 @@ class EntityPrefix(StrEnum):
     INVOCATION = "inv"
     LEARNING = "learning"
     IMPROVEMENT_MANIFEST = "improve_manifest"
+    OCCURRENCE = "occurrence"
+    COMPARISON = "comparison"
 
 
 def _validate_canonical_value(

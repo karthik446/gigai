@@ -26,7 +26,9 @@ authorized, recoverable one-file target effects.
 The G20 amendment adds `learning-record.schema.json` and
 `improvement-manifest.schema.json` as the twenty-fourth and twenty-fifth
 resources for local provenance-tagged observations and subordinate typed
-improvement manifests.
+improvement manifests. The G21 amendment adds `gig-occurrence.schema.json`
+and `gig-comparison.schema.json` as the twenty-sixth and twenty-seventh
+resources for explicit operator-triggered occurrences and derived comparisons.
 
 ## Production identity API
 

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:gig-occurrence:1",
+  "title": "GigAI recurring Gig occurrence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "occurrence_version",
+    "occurrence_id",
+    "project_id",
+    "gig_id",
+    "gig_version",
+    "cadence",
+    "occurrence_key",
+    "trigger_actor",
+    "outcome_actor",
+    "scheduled_for",
+    "snapshot",
+    "prior_occurrence_id",
+    "run_id",
+    "state",
+    "outcome",
+    "comparison",
+    "reason",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "occurrence_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "occurrence_id": {"$ref": "#/$defs/occurrence_id"},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "gig_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "cadence": {"type": "string", "enum": ["daily", "weekly", "monthly"]},
+    "occurrence_key": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$"},
+    "trigger_actor": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+    "outcome_actor": {"oneOf": [{"$ref": "urn:gigai:schema:common:1#/$defs/actor"}, {"type": "null"}]},
+    "scheduled_for": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+    "snapshot": {"$ref": "#/$defs/snapshot"},
+    "prior_occurrence_id": {"oneOf": [{"$ref": "#/$defs/occurrence_id"}, {"type": "null"}]},
+    "run_id": {"oneOf": [{"$ref": "urn:gigai:schema:common:1#/$defs/run_id"}, {"type": "null"}]},
+    "state": {"type": "string", "enum": ["declared", "triggered", "snapshot_verified", "run_prepared", "run_terminal", "compared", "closed", "blocked", "skipped", "cancelled", "unavailable", "failed", "missed"]},
+    "outcome": {"oneOf": [{"type": "string", "enum": ["succeeded", "failed", "interrupted", "blocked", "skipped", "cancelled", "unavailable", "missed"]}, {"type": "null"}]},
+    "comparison": {"oneOf": [{"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}, {"type": "null"}]},
+    "reason": {"oneOf": [{"type": "string", "minLength": 1, "maxLength": 1000}, {"type": "null"}]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["state"],
+        "properties": {"state": {"enum": ["blocked", "skipped", "cancelled", "unavailable", "failed", "missed"]}}
+      },
+      "then": {
+        "required": ["reason", "outcome", "outcome_actor"],
+        "properties": {
+          "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
+          "outcome": {"type": "string", "enum": ["succeeded", "failed", "interrupted", "blocked", "skipped", "cancelled", "unavailable", "missed"]},
+          "outcome_actor": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"}
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["state"],
+        "properties": {"state": {"const": "compared"}}
+      },
+      "then": {
+        "required": ["comparison"],
+        "properties": {
+          "comparison": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "occurrence_id": {"type": "string", "pattern": "^occurrence_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "bundle_id": {"type": "string", "pattern": "^bundle_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bundle_id", "bundle_version", "artifact", "reference_set_sha256"],
+      "properties": {
+        "bundle_id": {"$ref": "#/$defs/bundle_id"},
+        "bundle_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+        "artifact": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        "reference_set_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}
