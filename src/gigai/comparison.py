@@ -79,6 +79,8 @@ def compare_occurrences(
     reason: str | None = None
     if current_run.get("gig_id") != prior_run.get("gig_id"):
         result, reason = "incomparable", "Run Gig identities differ"
+    elif current_run.get("gig_version") != prior_run.get("gig_version"):
+        result, reason = "incomparable", "Gig versions differ"
     elif current["snapshot"].get("bundle_id") != prior["snapshot"].get("bundle_id"):
         result, reason = "incomparable", "Review Bundle identities differ"
     elif current_run.get("goal_graph", {}).get("content_sha256") != prior_run.get("goal_graph", {}).get("content_sha256"):

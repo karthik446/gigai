@@ -5,10 +5,13 @@ import subprocess
 import time
 import uuid
 
+import pytest
+import gigai.occurrence as occurrence_module
 from gigai.canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes
 from gigai.lifecycle import approve_offline, create_offline
 from gigai.journal import JournalArtifact, record_transition
 from gigai.occurrence import (
+    OccurrenceError,
     declare_occurrence,
     mark_occurrence,
     trigger_occurrence,
@@ -270,6 +273,67 @@ def test_missed_state_requires_explicit_reason_and_has_no_run(tmp_path: Path) ->
     )
     assert result.state == "missed"
     assert result.run_id is None
+
+
+def test_refusal_terminal_records_outcome_and_actor(tmp_path: Path) -> None:
+    home, target, gig_id, bundle_path = _fixture(tmp_path)
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
+    occurrence = declare_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        cadence="monthly", occurrence_key="2026-08", snapshot_path=bundle_path.relative_to(resolved.path).as_posix(),
+        uuid_factory=_uuids(),
+    )
+    result = mark_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        occurrence_id=occurrence.occurrence_id, state="missed", reason="no trigger",
+        outcome_actor={"kind": "operator", "id": "scheduler-reviewer"},
+    )
+    record = parse_json_bytes(result.record_path.read_bytes())
+    assert record["outcome"] == "missed"
+    assert record["outcome_actor"] == {"kind": "operator", "id": "scheduler-reviewer"}
+
+
+def test_mark_refuses_inflight_prepared_run_until_reconciled(tmp_path: Path, monkeypatch) -> None:
+    home, target, gig_id, bundle_path = _fixture(tmp_path)
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
+    occurrence = declare_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        cadence="daily", occurrence_key="2026-08-14", snapshot_path=bundle_path.relative_to(resolved.path).as_posix(),
+        uuid_factory=_uuids(),
+    )
+    prepared = trigger_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        occurrence_id=occurrence.occurrence_id, wait=False, uuid_factory=_uuids(),
+    )
+    assert prepared.state == "run_prepared"
+    monkeypatch.setattr(occurrence_module, "read_run_details", lambda **_kwargs: {"status": "running"})
+    with pytest.raises(OccurrenceError, match="still in flight"):
+        mark_occurrence(
+            home_root=home, requested_target=target, gig_id=gig_id,
+            occurrence_id=occurrence.occurrence_id, state="cancelled", reason="operator cancellation",
+        )
+    assert parse_json_bytes(prepared.record_path.read_bytes())["state"] == "run_prepared"
+
+
+def test_mark_refuses_completed_prepared_run_until_reconciled(tmp_path: Path, monkeypatch) -> None:
+    home, target, gig_id, bundle_path = _fixture(tmp_path)
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
+    occurrence = declare_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        cadence="daily", occurrence_key="2026-08-15", snapshot_path=bundle_path.relative_to(resolved.path).as_posix(),
+        uuid_factory=_uuids(),
+    )
+    prepared = trigger_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        occurrence_id=occurrence.occurrence_id, wait=False, uuid_factory=_uuids(),
+    )
+    monkeypatch.setattr(occurrence_module, "read_run_details", lambda **_kwargs: {"status": "succeeded"})
+    with pytest.raises(OccurrenceError, match="complete"):
+        mark_occurrence(
+            home_root=home, requested_target=target, gig_id=gig_id,
+            occurrence_id=occurrence.occurrence_id, state="cancelled", reason="operator cancellation",
+        )
+    assert parse_json_bytes(prepared.record_path.read_bytes())["state"] == "run_prepared"
 
 
 def test_prepared_occurrence_reconciles_without_relaunch(tmp_path: Path) -> None:

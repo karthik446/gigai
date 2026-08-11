@@ -52,6 +52,27 @@ MUTANTS = (
         "tests/test_g21_contract.py::test_comparison_schema_enforces_null_winner",
         "src/gigai/schemas/gig-comparison.schema.json",
     ),
+    (
+        "prepared-run-terminalization-guard",
+        '    if record["state"] == "run_prepared":\n',
+        "    if False:\n",
+        "tests/test_g21_occurrence.py::test_mark_refuses_inflight_prepared_run_until_reconciled",
+        "src/gigai/occurrence.py",
+    ),
+    (
+        "refusal-outcome-actor-schema-guard",
+        '          "outcome_actor": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"}\n',
+        '          "outcome_actor": {"type": ["object", "null"]}\n',
+        "tests/test_g21_contract.py::test_occurrence_schema_requires_refusal_reason_outcome_and_actor",
+        "src/gigai/schemas/gig-occurrence.schema.json",
+    ),
+    (
+        "comparison-version-mismatch-guard",
+        '    elif current_run.get("gig_version") != prior_run.get("gig_version"):\n',
+        "    elif False:\n",
+        "tests/test_g21_comparison.py::test_different_run_versions_are_explicitly_incomparable",
+        "src/gigai/comparison.py",
+    ),
 )
 
 

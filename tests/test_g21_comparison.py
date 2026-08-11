@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import gigai.comparison as comparison_module
 from gigai.comparison import compare_occurrences
 from gigai.occurrence import declare_occurrence, trigger_occurrence
 
@@ -99,4 +100,44 @@ def test_missing_output_is_blocked_without_fabricated_delta(tmp_path: Path, monk
         uuid_factory=_uuids(),
     )
     assert comparison["result"] == "blocked"
+    assert attached.state == "closed"
+
+
+def test_different_run_versions_are_explicitly_incomparable(tmp_path: Path, monkeypatch) -> None:
+    home, target, gig_id, bundle_path = _fixture(tmp_path)
+    snapshot = bundle_path.relative_to(next((tmp_path / "workpads").rglob("gig_*/"))).as_posix()
+    first = declare_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        cadence="monthly", occurrence_key="2026-08", snapshot_path=snapshot,
+        uuid_factory=_uuids(),
+    )
+    first_run = trigger_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        occurrence_id=first.occurrence_id, wait=True, uuid_factory=_uuids(),
+    )
+    second = declare_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        cadence="monthly", occurrence_key="2026-09", snapshot_path=snapshot,
+        prior_occurrence_id=first.occurrence_id, uuid_factory=_uuids(),
+    )
+    second_run = trigger_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        occurrence_id=second.occurrence_id, wait=True, uuid_factory=_uuids(),
+    )
+    assert first_run.run_id and second_run.run_id
+    original_read_run = comparison_module._read_run
+
+    def different_prior_version(workpad: Path, run_id: str) -> dict[str, object]:
+        value = original_read_run(workpad, run_id)
+        if run_id == first_run.run_id:
+            value["gig_version"] = 2
+        return value
+
+    monkeypatch.setattr(comparison_module, "_read_run", different_prior_version)
+    comparison, attached = compare_occurrences(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        current_occurrence_id=second.occurrence_id, uuid_factory=_uuids(),
+    )
+    assert comparison["result"] == "incomparable"
+    assert comparison["reason"] == "Gig versions differ"
     assert attached.state == "closed"

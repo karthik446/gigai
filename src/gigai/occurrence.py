@@ -42,6 +42,10 @@ _CADENCES = frozenset({"daily", "weekly", "monthly"})
 _TERMINAL_STATES = frozenset(
     {"closed", "blocked", "skipped", "cancelled", "unavailable", "failed", "missed"}
 )
+_REFUSAL_STATES = frozenset(
+    {"blocked", "skipped", "cancelled", "unavailable", "failed", "missed"}
+)
+_MACHINE_ACTOR = {"kind": "gigai", "id": "occurrence"}
 _TRANSITIONS = {
     "declared": frozenset({"triggered", "skipped", "cancelled", "unavailable", "failed", "missed"}),
     "triggered": frozenset({"snapshot_verified", "blocked", "skipped", "cancelled", "unavailable", "failed", "missed"}),
@@ -127,6 +131,7 @@ def declare_occurrence(
         "cadence": cadence,
         "occurrence_key": occurrence_key,
         "trigger_actor": actor,
+        "outcome_actor": None,
         "scheduled_for": scheduled_for,
         "snapshot": snapshot,
         "prior_occurrence_id": prior_occurrence_id,
@@ -234,7 +239,14 @@ def reconcile_occurrence(
         return _result(resolved, record)
     outcome = "succeeded" if status == "succeeded" else "interrupted" if status == "interrupted" else "failed"
     if outcome != "succeeded":
-        record = _transition(resolved, record, "failed", outcome=outcome, observer=observer)
+        record = _transition(
+            resolved,
+            record,
+            "failed",
+            reason=f"linked Run ended with {outcome}",
+            outcome=outcome,
+            observer=observer,
+        )
         return _result(resolved, record)
     record = _transition(resolved, record, "run_terminal", outcome=outcome, observer=observer)
     return _transition_result(resolved, record, observer)
@@ -247,6 +259,7 @@ def mark_occurrence(
     occurrence_id: str,
     state: str,
     reason: str,
+    outcome_actor: Mapping[str, object] | None = None,
     gig_id: str | None = None,
     observer: OccurrenceObserver | None = None,
 ) -> OccurrenceResult:
@@ -256,11 +269,36 @@ def mark_occurrence(
         raise OccurrenceError("mark_occurrence accepts only explicit terminal states")
     if not reason or len(reason) > 1000 or "\n" in reason:
         raise OccurrenceError("occurrence reason must be one share-safe line")
+    actor = _validate_actor(outcome_actor or {"kind": "operator", "id": "local-user"})
     resolved = _resolve(resolved_home=home_root, target=requested_target, gig_id=gig_id)
     record = _read_record(resolved.path, occurrence_id)
     if record["state"] in _TERMINAL_STATES:
         return _result(resolved, record)
-    record = _transition(resolved, record, state, reason=reason, observer=observer)
+    if record["state"] == "run_prepared":
+        run_id = record.get("run_id")
+        if not isinstance(run_id, str):
+            raise OccurrenceError("prepared occurrence has no Run identity")
+        try:
+            details = read_run_details(
+                home_root=home_root,
+                requested_target=requested_target,
+                gig_id=resolved.gig_id,
+                run_id=run_id,
+            )
+        except (RunError, WorkpadError, OSError, ValueError) as exc:
+            raise OccurrenceError("prepared occurrence cannot be terminalized before Run reconciliation") from exc
+        if details.get("status") in {"preparing", "running"}:
+            raise OccurrenceError("occurrence Run is still in flight; reconcile before terminalization")
+        raise OccurrenceError("occurrence Run is complete; reconcile before terminalization")
+    record = _transition(
+        resolved,
+        record,
+        state,
+        reason=reason,
+        outcome=state,
+        outcome_actor=actor,
+        observer=observer,
+    )
     return _result(resolved, record)
 
 
@@ -336,7 +374,14 @@ def _reconcile_result(
         return _result(resolved, record, run=run)
     outcome = "succeeded" if run.status == "succeeded" else "interrupted" if run.status == "interrupted" else "failed"
     if outcome != "succeeded":
-        record = _transition(resolved, record, "failed", outcome=outcome, observer=observer)
+        record = _transition(
+            resolved,
+            record,
+            "failed",
+            reason=f"linked Run ended with {outcome}",
+            outcome=outcome,
+            observer=observer,
+        )
         return _result(resolved, record, run=run)
     record = _transition(resolved, record, "run_terminal", outcome=outcome, observer=observer)
     return _transition_result(resolved, record, observer, run=run)
@@ -359,6 +404,7 @@ def _transition(
     *,
     reason: str | None = None,
     outcome: str | None = None,
+    outcome_actor: Mapping[str, object] | None = None,
     observer: OccurrenceObserver | None = None,
     record: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
@@ -367,8 +413,14 @@ def _transition(
         raise OccurrenceError(f"occurrence cannot transition from {old_state} to {state}")
     next_record = dict(record or previous)
     next_record["state"] = state
+    if state in _REFUSAL_STATES and outcome_actor is None:
+        outcome_actor = _MACHINE_ACTOR
+    if outcome_actor is not None:
+        next_record["outcome_actor"] = _validate_actor(outcome_actor)
     if outcome is not None:
         next_record["outcome"] = outcome
+    elif state in _REFUSAL_STATES:
+        next_record["outcome"] = state
     if reason is not None:
         next_record["reason"] = reason
     next_record["updated_at"] = _now()
@@ -404,7 +456,7 @@ def _publish(
             "run_id": record.get("run_id"),
             "source_manifest_sha256": digest_imported_bytes(payload),
             "outcome": str(record["state"]).upper(),
-            "actor": {"kind": "gigai", "id": "occurrence"},
+            "actor": record.get("outcome_actor") or _MACHINE_ACTOR,
         },
         observer=observer,
     )

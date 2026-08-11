@@ -1081,6 +1081,7 @@ def occurrence_reconcile_command(
 @click.argument("occurrence_id")
 @click.argument("state", type=click.Choice(["missed", "skipped", "unavailable", "cancelled", "blocked", "failed"]))
 @click.option("--reason", required=True)
+@click.option("--actor-id", default="local-user", show_default=True)
 @click.option("--gig-id")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
@@ -1089,6 +1090,7 @@ def occurrence_mark_command(
     occurrence_id: str,
     state: str,
     reason: str,
+    actor_id: str,
     gig_id: str | None,
     target_value: Path | None,
     home_value: Path | None,
@@ -1105,6 +1107,7 @@ def occurrence_mark_command(
             occurrence_id=occurrence_id,
             state=state,
             reason=reason,
+            outcome_actor={"kind": "operator", "id": actor_id},
         )
         payload = _occurrence_payload(result)
     except (OccurrenceError, WorkpadError, OSError, ValueError) as exc:
