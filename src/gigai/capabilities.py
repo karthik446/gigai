@@ -230,6 +230,32 @@ def materialize_capability_manifest(root: Path, manifest: Mapping[str, Any]) -> 
     return manifest_bytes
 
 
+def capability_manifest_artifact_ref(
+    root: Path, manifest_id: str, *, gig_id: str | None = None
+) -> dict[str, Any]:
+    """Return a validated content reference for one local capability manifest."""
+
+    path = _manifest_path(root, manifest_id)
+    if _is_symlinked_path(path, root) or not path.is_file():
+        raise CapabilityManifestError("capability manifest path is not a regular file")
+    payload = path.read_bytes()
+    report = validate_capability_manifest(payload)
+    if not report.valid:
+        raise CapabilityManifestError("capability manifest is invalid")
+    manifest = _parse_manifest(payload)
+    assert manifest is not None
+    if manifest.get("manifest_id") != manifest_id:
+        raise CapabilityManifestError("capability manifest identity does not match its path")
+    if gig_id is not None and manifest.get("gig_id") != gig_id:
+        raise CapabilityManifestError("capability manifest belongs to another Gig")
+    return {
+        "path": path.relative_to(root).as_posix(),
+        "content_sha256": digest_imported_bytes(payload),
+        "media_type": "application/json",
+        "size_bytes": len(payload),
+    }
+
+
 def _source_path(root: Path, capability_id: str) -> Path:
     path = _safe_relative(root, f"tools/.sources/{capability_id}.artifact")
     if path is None:
@@ -494,6 +520,7 @@ __all__ = [
     "CapabilityInspection",
     "CapabilityManifestError",
     "inspect_capability_manifest",
+    "capability_manifest_artifact_ref",
     "install_local_capability",
     "materialize_capability_manifest",
     "validate_capability_bundle_link",

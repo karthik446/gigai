@@ -21,6 +21,7 @@
     "active_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
     "approved_proposal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_proposal_id"},
     "goal_graph": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "capability_manifest": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
     "journal_commit": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
     "journal_tag": {"type": "string", "pattern": "^gig-v[0-9]{6}$"},
     "approved_at": {"type": "string", "format": "date-time"},

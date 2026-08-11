@@ -20,6 +20,7 @@ from typing import Callable, Mapping
 import uuid
 
 from .adapters.factory import resolve_model_adapter
+from .capabilities import capability_manifest_artifact_ref
 from .canonical import (
     EntityPrefix,
     canonical_json_bytes,
@@ -728,6 +729,7 @@ def approve_offline(
     home_root: Path,
     requested_target: Path | None,
     proposal_id: str,
+    capability_manifest_id: str | None = None,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
     observer: CreateObserver | None = None,
 ) -> ApprovalResult:
@@ -750,6 +752,7 @@ def approve_offline(
             resolved=resolved,
             proposal=proposal,
             proposal_id=proposal_id,
+            capability_manifest_id=capability_manifest_id,
             uuid_factory=uuid_factory,
         )
     report = validate_proposal_workpad(workpad)
@@ -787,6 +790,13 @@ def approve_offline(
                 },
             }
         )
+        if capability_manifest_id is not None:
+            pointer_payload = parse_json_bytes(pointer)
+            assert isinstance(pointer_payload, dict)
+            pointer_payload["capability_manifest"] = capability_manifest_artifact_ref(
+                workpad, capability_manifest_id, gig_id=resolved.gig_id
+            )
+            pointer = canonical_json_bytes(pointer_payload)
         if not validate_serialized_contract(
             "active-gig-version.schema.json", pointer
         ).valid:
@@ -827,6 +837,7 @@ def _recover_approved_publication(
     resolved: ResolvedWorkpad,
     proposal: dict[str, object],
     proposal_id: str,
+    capability_manifest_id: str | None,
     uuid_factory: Callable[[], uuid.UUID],
 ) -> ApprovalResult:
     """Publish only the missing Commit B for an already sealed approval."""
@@ -874,6 +885,14 @@ def _recover_approved_publication(
             raise LifecycleError(
                 "existing active-version pointer names another approval"
             )
+        if capability_manifest_id is not None:
+            expected = capability_manifest_artifact_ref(
+                workpad, capability_manifest_id, gig_id=resolved.gig_id
+            )
+            if payload.get("capability_manifest") != expected:
+                raise LifecycleError(
+                    "existing active-version pointer has another capability manifest"
+                )
         return ApprovalResult(
             resolved.gig_id,
             proposal_id,
@@ -902,6 +921,13 @@ def _recover_approved_publication(
             },
         }
     )
+    if capability_manifest_id is not None:
+        pointer_payload = parse_json_bytes(pointer)
+        assert isinstance(pointer_payload, dict)
+        pointer_payload["capability_manifest"] = capability_manifest_artifact_ref(
+            workpad, capability_manifest_id, gig_id=resolved.gig_id
+        )
+        pointer = canonical_json_bytes(pointer_payload)
     if not validate_serialized_contract(
         "active-gig-version.schema.json", pointer
     ).valid:
