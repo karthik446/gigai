@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from gigai.capabilities import materialize_capability_manifest
+from gigai.capabilities import install_local_capability, materialize_capability_manifest
+from gigai.canonical import canonical_json_bytes, parse_json_bytes
 from gigai.lifecycle import approve_offline, create_offline
 from gigai.portability import (
     PortabilityError,
@@ -88,3 +89,35 @@ def test_g23_pointer_substitution_is_refused(tmp_path):
     with pytest.raises(PortabilityError, match="sealed publication") as error:
         verify_active_version_portability(created.workpad)
     assert error.value.code == "refused_unsealed_pointer"
+
+
+def test_g23_reinstalls_from_manifest_and_source_on_second_home(tmp_path):
+    first_home = tmp_path / "machine-a"
+    second_home = tmp_path / "machine-b"
+    first_home.mkdir()
+    second_home.mkdir()
+    digest = _stage_source(first_home, payload=b"portable source bytes\n")
+    manifest_bytes = canonical_json_bytes(_manifest(_capability(digest=digest)))
+    materialize_capability_manifest(
+        first_home, parse_json_bytes(manifest_bytes)
+    )
+    # The transport boundary copies only the pinned source and manifest bytes;
+    # it does not copy the installed tools/<capability-id> directory.
+    (second_home / "tools/.sources").mkdir(parents=True)
+    (second_home / "tools/.sources" / "cap_00000000-0000-4000-8000-000000000003.artifact").write_bytes(
+        (first_home / "tools/.sources" / "cap_00000000-0000-4000-8000-000000000003.artifact").read_bytes()
+    )
+    materialize_capability_manifest(second_home, parse_json_bytes(manifest_bytes))
+    assert not (second_home / "tools/cap_00000000-0000-4000-8000-000000000003").exists()
+    record = install_local_capability(
+        second_home,
+        manifest_bytes,
+        capability_id="cap_00000000-0000-4000-8000-000000000003",
+        option_id="A",
+        approving_actor={"kind": "operator", "id": "portable-test", "model_target": None},
+        now="2026-08-11T00:00:00Z",
+        installation_id="capinstall_00000000-0000-4000-8000-000000000005",
+    )
+    assert parse_json_bytes(record)["outcome"] == "installed"
+    assert (second_home / "tools/cap_00000000-0000-4000-8000-000000000003/artifact").read_bytes() == b"portable source bytes\n"
+    assert not (first_home / "tools/cap_00000000-0000-4000-8000-000000000003").exists()

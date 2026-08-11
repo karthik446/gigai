@@ -773,30 +773,31 @@ def approve_offline(
         _git(workpad, "tag", tag, sealed.commit)
         if observer is not None:
             observer("after_approval_tag")
-        pointer = canonical_json_bytes(
-            {
-                "schema_version": "1.0",
-                "gig_id": resolved.gig_id,
-                "active_version": version,
-                "approved_proposal_id": proposal_id,
-                "goal_graph": proposal["goal_graph"],
-                "journal_commit": sealed.commit,
-                "journal_tag": tag,
-                "approved_at": approved_at,
-                "approved_by": {
-                    "kind": "operator",
-                    "id": "local-user",
-                    "model_target": None,
-                },
-            }
-        )
-        if capability_manifest_id is not None:
-            pointer_payload = parse_json_bytes(pointer)
-            assert isinstance(pointer_payload, dict)
-            pointer_payload["capability_manifest"] = capability_manifest_artifact_ref(
+        pointer_payload: dict[str, object] = {
+            "schema_version": "1.0",
+            "gig_id": resolved.gig_id,
+            "active_version": version,
+            "approved_proposal_id": proposal_id,
+            "goal_graph": proposal["goal_graph"],
+            "journal_commit": sealed.commit,
+            "journal_tag": tag,
+            "approved_at": approved_at,
+            "approved_by": {
+                "kind": "operator",
+                "id": "local-user",
+                "model_target": None,
+            },
+        }
+        manifest_ref = (
+            capability_manifest_artifact_ref(
                 workpad, capability_manifest_id, gig_id=resolved.gig_id
             )
-            pointer = canonical_json_bytes(pointer_payload)
+            if capability_manifest_id is not None
+            else _existing_capability_manifest_ref(workpad)
+        )
+        if manifest_ref is not None:
+            pointer_payload["capability_manifest"] = manifest_ref
+        pointer = canonical_json_bytes(pointer_payload)
         if not validate_serialized_contract(
             "active-gig-version.schema.json", pointer
         ).valid:
@@ -904,30 +905,31 @@ def _recover_approved_publication(
     approved_at = metadata.get("timestamp")
     if not isinstance(approved_at, str):
         raise LifecycleError("sealed approval handoff lacks its timestamp")
-    pointer = canonical_json_bytes(
-        {
-            "schema_version": "1.0",
-            "gig_id": resolved.gig_id,
-            "active_version": version,
-            "approved_proposal_id": proposal_id,
-            "goal_graph": proposal["goal_graph"],
-            "journal_commit": sealed_commit,
-            "journal_tag": tag,
-            "approved_at": approved_at,
-            "approved_by": {
-                "kind": "operator",
-                "id": "local-user",
-                "model_target": None,
-            },
-        }
-    )
-    if capability_manifest_id is not None:
-        pointer_payload = parse_json_bytes(pointer)
-        assert isinstance(pointer_payload, dict)
-        pointer_payload["capability_manifest"] = capability_manifest_artifact_ref(
+    pointer_payload: dict[str, object] = {
+        "schema_version": "1.0",
+        "gig_id": resolved.gig_id,
+        "active_version": version,
+        "approved_proposal_id": proposal_id,
+        "goal_graph": proposal["goal_graph"],
+        "journal_commit": sealed_commit,
+        "journal_tag": tag,
+        "approved_at": approved_at,
+        "approved_by": {
+            "kind": "operator",
+            "id": "local-user",
+            "model_target": None,
+        },
+    }
+    manifest_ref = (
+        capability_manifest_artifact_ref(
             workpad, capability_manifest_id, gig_id=resolved.gig_id
         )
-        pointer = canonical_json_bytes(pointer_payload)
+        if capability_manifest_id is not None
+        else _existing_capability_manifest_ref(workpad)
+    )
+    if manifest_ref is not None:
+        pointer_payload["capability_manifest"] = manifest_ref
+    pointer = canonical_json_bytes(pointer_payload)
     if not validate_serialized_contract(
         "active-gig-version.schema.json", pointer
     ).valid:
@@ -1431,6 +1433,25 @@ def _next_version(workpad: Path) -> int:
     if not isinstance(payload, dict) or type(payload.get("active_version")) is not int:
         raise LifecycleError("active-version pointer has no valid version")
     return payload["active_version"] + 1
+
+
+def _existing_capability_manifest_ref(workpad: Path) -> Mapping[str, object] | None:
+    """Carry an existing approved pointer reference into the next version."""
+
+    path = workpad / "manifests" / "active-gig-version.json"
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise LifecycleError("active-version pointer is invalid")
+    payload = parse_json_bytes(path.read_bytes())
+    if not isinstance(payload, dict):
+        raise LifecycleError("active-version pointer is invalid")
+    reference = payload.get("capability_manifest")
+    if reference is None:
+        return None
+    if not isinstance(reference, Mapping):
+        raise LifecycleError("active-version capability manifest reference is invalid")
+    return dict(reference)
 
 
 def _journal_entries(workpad: Path) -> tuple[JournalEntry, ...]:
