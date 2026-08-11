@@ -25,6 +25,8 @@ EXPECTED_SCHEMA_NAMES = {
     "gig-proposal.schema.json",
     "goal-graph.schema.json",
     "handoff-frontmatter.schema.json",
+    "improvement-manifest.schema.json",
+    "learning-record.schema.json",
     "model-exchange.schema.json",
     "model-invocation.schema.json",
     "proposal-interview.schema.json",
@@ -812,6 +814,71 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "updated_at": NOW,
         "terminal_reason": None,
     }
+    learning_record = {
+        "schema_version": "1.0",
+        "record_version": 1,
+        "learning_id": "learning_99999999-9999-4999-8999-999999999999",
+        "project_id": PROJECT_ID,
+        "gig_id": GIG_ID,
+        "subject": {"kind": "run", "run_id": RUN_ID},
+        "active_version": 1,
+        "active_pointer_sha256": ZERO_DIGEST,
+        "source": {
+            "kind": "finding",
+            "source_id": "finding_99999999-9999-4999-8999-999999999999",
+            "artifact": artifact("evidence/finding.json"),
+        },
+        "provenance": "observed_outcome",
+        "observed_at": NOW,
+        "explanation": None,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    improvement_manifest = {
+        "schema_version": "1.0",
+        "manifest_version": 1,
+        "manifest_id": "improve_manifest_99999999-9999-4999-8999-999999999999",
+        "project_id": PROJECT_ID,
+        "gig_id": GIG_ID,
+        "base_gig_version": 1,
+        "parent_proposal_id": PROPOSAL_ID,
+        "learning_record_ids": [learning_record["learning_id"]],
+        "change_request": None,
+        "changes": [{
+            "target": "rubric",
+            "path": "rubric.minimum_evidence",
+            "operation": "replace",
+            "before": artifact("before.json"),
+            "after": artifact("after.json"),
+        }],
+        "evidence_gate": {
+            "result": "pass",
+            "report": artifact("evidence-gate.json"),
+            "supporting_record_ids": [learning_record["learning_id"]],
+            "checked_at": NOW,
+        },
+        "quality_gate": {
+            "result": "pass",
+            "report": artifact("quality-gate.json"),
+            "evaluator_version": "g20-v1",
+            "corpus_id": "corpus_g20_v1",
+            "baseline_sha256": ZERO_DIGEST,
+            "candidate_sha256": ONE_DIGEST,
+            "baseline": {"development": {"recall": 1, "false_positive_rate": 0}, "calibration": {"recall": 1, "false_positive_rate": 0}, "final_held_out_acceptance": {"recall": 1, "false_positive_rate": 0}},
+            "candidate": {"development": {"recall": 1, "false_positive_rate": 0}, "calibration": {"recall": 1, "false_positive_rate": 0}, "final_held_out_acceptance": {"recall": 1, "false_positive_rate": 0}},
+            "minimums": {"recall": 1},
+            "maximums": {"false_positive_rate": 1},
+            "case_counts": {"development": 4, "calibration": 2, "final_held_out_acceptance": 2},
+            "development": {"case_count": 4, "bar_pass": True, "metrics": {"recall": 1, "false_positive_rate": 0}},
+            "calibration": {"case_count": 2, "bar_pass": True, "metrics": {"recall": 1, "false_positive_rate": 0}},
+            "final_holdout": {"case_count": 2, "bar_pass": True, "metrics": {"recall": 1, "false_positive_rate": 0}},
+            "final_holdout_pass": True,
+            "no_regression": True,
+            "checked_at": NOW,
+        },
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
     return {
         "urn:gigai:schema:gig-proposal:1": proposal,
         "urn:gigai:schema:active-gig-version:1": active,
@@ -835,6 +902,8 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "urn:gigai:schema:model-exchange:1": exchange,
         "urn:gigai:schema:proposal-interview:1": proposal_interview,
         "urn:gigai:schema:target-effect:1": target_effect,
+        "urn:gigai:schema:learning-record:1": learning_record,
+        "urn:gigai:schema:improvement-manifest:1": improvement_manifest,
     }
 
 
@@ -875,7 +944,7 @@ class SerializedContractTests(unittest.TestCase):
         )
 
     def test_all_schema_documents_are_valid_draft_2020_12(self) -> None:
-        self.assertEqual(len(self.schemas), 23)
+        self.assertEqual(len(self.schemas), 25)
         for schema_id, schema in self.schemas.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)

@@ -23,6 +23,10 @@ G22 amendment adds `proposal-interview.schema.json` as the twenty-second
 resource for durable, typed interview snapshots. The G19 amendment adds
 `target-effect.schema.json` as the twenty-third resource for explicitly
 authorized, recoverable one-file target effects.
+The G20 amendment adds `learning-record.schema.json` and
+`improvement-manifest.schema.json` as the twenty-fourth and twenty-fifth
+resources for local provenance-tagged observations and subordinate typed
+improvement manifests.
 
 ## Production identity API
 
@@ -75,6 +79,10 @@ No other product module implements canonical rendering or SHA-256 identity.
 - `target-effect.schema.json` defines explicit target-effect authorization,
   mutation lifecycle states, and before/after evidence without automatic
   commits or fallback.
+- `learning-record.schema.json` defines one exact, provenance-tagged local
+  observation of an existing evidence artifact.
+- `improvement-manifest.schema.json` defines the typed, allowlisted,
+  two-gate change manifest subordinate to `gig-proposal` kind `improve`.
 - `capability-manifest.schema.json` defines proposal-time capability
   requirements, inspection states, and explicit options.
 - `capability-installation.schema.json` defines approved local installation

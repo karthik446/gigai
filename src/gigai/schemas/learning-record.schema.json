@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:learning-record:1",
+  "title": "GigAI Learning Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_version",
+    "learning_id",
+    "project_id",
+    "gig_id",
+    "subject",
+    "active_version",
+    "active_pointer_sha256",
+    "source",
+    "provenance",
+    "observed_at",
+    "explanation",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "record_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "learning_id": {"$ref": "#/$defs/learning_id"},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "subject": {"oneOf": [{"$ref": "#/$defs/run_subject"}, {"$ref": "#/$defs/goal_subject"}]},
+    "active_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "active_pointer_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "source": {"$ref": "#/$defs/source"},
+    "provenance": {
+      "type": "string",
+      "enum": ["observed_outcome", "evaluator_judgment", "operator_feedback", "accepted_outcome"]
+    },
+    "observed_at": {"type": "string", "format": "date-time"},
+    "explanation": {"type": ["string", "null"], "maxLength": 2000},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "learning_id": {
+      "type": "string",
+      "pattern": "^learning_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "run_subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "run_id"],
+      "properties": {
+        "kind": {"const": "run"},
+        "run_id": {"$ref": "urn:gigai:schema:common:1#/$defs/run_id"}
+      }
+    },
+    "goal_subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "goal_id"],
+      "properties": {
+        "kind": {"const": "goal"},
+        "goal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "source_id", "artifact"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["finding", "feedback", "adjudication", "report", "addressed_artifact", "target_effect"]
+        },
+        "source_id": {"$ref": "#/$defs/source_id"},
+        "artifact": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "finding"}}}, "then": {"properties": {"source_id": {"pattern": "^finding_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}}}},
+        {"if": {"properties": {"kind": {"const": "feedback"}}}, "then": {"properties": {"source_id": {"pattern": "^feedback_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}}}},
+        {"if": {"properties": {"kind": {"const": "adjudication"}}}, "then": {"properties": {"source_id": {"pattern": "^adjudication_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}}}},
+        {"if": {"properties": {"kind": {"const": "report"}}}, "then": {"properties": {"source_id": {"pattern": "^report_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}}}},
+        {"if": {"properties": {"kind": {"const": "addressed_artifact"}}}, "then": {"properties": {"source_id": {"pattern": "^addressed_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}}}},
+        {"if": {"properties": {"kind": {"const": "target_effect"}}}, "then": {"properties": {"source_id": {"pattern": "^effect_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}}}}
+      ]
+    },
+    "source_id": {"type": "string", "minLength": 1, "maxLength": 160}
+  }
+}

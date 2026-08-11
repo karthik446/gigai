@@ -36,6 +36,8 @@ SCHEMA_NAMES = (
     "gig-proposal.schema.json",
     "goal-graph.schema.json",
     "handoff-frontmatter.schema.json",
+    "improvement-manifest.schema.json",
+    "learning-record.schema.json",
     "model-exchange.schema.json",
     "model-invocation.schema.json",
     "proposal-interview.schema.json",
@@ -595,7 +597,13 @@ def validate_proposal_workpad(root: Path) -> ValidationReport:
                     "proposal must be drafting or proposed before approval",
                 )
             )
-        for field, (relative, media_type) in _PROPOSAL_PATHS.items():
+        proposal_paths = dict(_PROPOSAL_PATHS)
+        if proposal.get("kind") == "improve":
+            proposal_paths["creation_manifest"] = (
+                "manifests/improvement-manifest.json",
+                "application/json",
+            )
+        for field, (relative, media_type) in proposal_paths.items():
             _validate_artifact_ref(
                 proposal.get(field), field, relative, media_type, root, findings
             )
