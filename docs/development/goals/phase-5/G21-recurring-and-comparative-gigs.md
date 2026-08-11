@@ -1,6 +1,6 @@
 # G21 — Recurring and Comparative Gigs
 
-- Status: Proposed for review; not activated
+- Status: Active; contract amendment accepted; implementation in progress
 - Depends on: G13 and G14 sealed Run/sequential scheduler evidence, and the
   G20 completion audit and terminal handoff; consumes existing G15/G16 review
   artifacts without changing their authority

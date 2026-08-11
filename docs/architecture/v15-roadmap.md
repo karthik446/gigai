@@ -12,8 +12,9 @@ authority for the contracts already implemented and for the boundaries that
 V15 must preserve.
 
 **Current roadmap gate:** G13 through G20 and G22 are complete and independently
-evidenced. G21 and G23 have proposed goal contracts but are not activated;
-G24 remains a planning-only release-lane alpha-readiness candidate. Later
+evidenced. G21 is active under its accepted additive amendment; G23 has a
+proposed goal contract but is not activated. G24 remains a planning-only
+release-lane alpha-readiness candidate. Later
 candidates remain planning-only until their individual goal contracts are
 reviewed and approved.
 G19 remains bounded by its accepted contract and does not authorize broader
@@ -629,9 +630,10 @@ Exit evidence: a daily market-state or weekly screener fixture and a monthly
 spreadsheet fixture each produce separate Runs, preserve prior evidence, and
 fail closed when a reference snapshot or capability is unavailable.
 
-The reviewed G21 contract is [here](../development/goals/phase-5/G21-recurring-and-comparative-gigs.md).
-It remains proposed and does not authorize a daemon, OS scheduler, automatic
-retry, or background provider activity.
+The reviewed G21 contract is [here](../development/goals/phase-5/G21-recurring-and-comparative-gigs.md)
+and its accepted additive amendment is [here](../development/evidence/phase-5/G21/occurrence-comparison-contract-amendment.md).
+G21 is active but does not authorize a daemon, OS scheduler, automatic retry,
+or background provider activity.
 
 #### G23 — Gig self-containment and portability
 

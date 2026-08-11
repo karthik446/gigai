@@ -21,7 +21,7 @@ non-contiguous and crosses lanes:
 - Phase 3: G13–G18
 - Phase 2: G22
 - Phase 4: G19
-- Phase 5: G20 complete; G21 and G23 proposed for review
+- Phase 5: G20 complete; G21 active; G23 proposed for review
 - Research/contract records: S16-EVAL, S18-01 through S18-05, and S22-01
 
 The implementation chronology and the dependency graph are both valid but are
@@ -35,14 +35,14 @@ schema-resource count, release, or next-goal status changes. A stale snapshot
 must be marked with its last-known date; it must never silently be treated as
 current.
 
-- Roadmap gate: G00–G20 and G22 are represented as complete; G21 and G23 are
-  proposed candidates with reviewed goal contracts, neither yet accepted.
+- Roadmap gate: G00–G20 and G22 are represented as complete; G21 is active
+  under its accepted additive amendment; G23 remains a proposed candidate.
 - Packaged schema resources: 25.
 - Accepted research/contract prerequisites: S16-EVAL, S18-01 through S18-05,
   and S22-01.
 - G20: complete; its learning records, improvement manifest, two gates, recovery,
   improve approval path, mutation report, and installed replay are accepted.
-  G21: goal contract proposed; no runtime implementation work yet.
+  G21: active; additive amendment accepted; runtime implementation in progress.
   G23: goal contract proposed; no accepted amendment or runtime implementation
   yet. G23 is independent of G21 and does not declare an alpha or public
   release.
@@ -205,9 +205,9 @@ and [learning-contract amendment](evidence/phase-5/G20/learning-contract-amendme
 
 ### G21 — Recurring and comparative Gigs
 
-Goal contract proposed; runtime not activated. See the [G21 goal contract](goals/phase-5/G21-recurring-and-comparative-gigs.md).
-Implementation evidence remains absent until the contract amendment is
-accepted and the goal is activated.
+Active under the [G21 goal contract](goals/phase-5/G21-recurring-and-comparative-gigs.md)
+and [accepted occurrence/comparison amendment](evidence/phase-5/G21/occurrence-comparison-contract-amendment.md).
+Runtime implementation and completion evidence are in progress.
 
 ### G23 — Gig self-containment and portability
 
