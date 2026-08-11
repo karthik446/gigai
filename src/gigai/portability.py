@@ -70,9 +70,7 @@ def verify_active_version_portability(workpad: Path) -> PortabilityResult:
         raise PortabilityError("active-version pointer is not an object", code="refused_unsealed_pointer")
     sealed_commit = _required_string(live, "journal_commit", "refused_unsealed_pointer")
     tag = _required_string(live, "journal_tag", "refused_unsealed_pointer")
-    resolved_tag = _git(root, "rev-parse", "--verify", tag, check=False)
-    if resolved_tag.returncode != 0 or resolved_tag.stdout.strip() != sealed_commit:
-        raise PortabilityError("active-version tag does not resolve to journal_commit", code="refused_unsealed_pointer")
+    _require_approval_tag(root, tag, sealed_commit)
 
     publication_commits = _publication_children(root, sealed_commit)
     if not publication_commits:
@@ -107,7 +105,7 @@ def resolve_proposal_lineage(
     ordered: list[Mapping[str, Any]] = []
     while True:
         if current in seen:
-            raise PortabilityError("proposal lineage contains a cycle", code="refused_lineage_cycle")
+            raise PortabilityError("proposal lineage contains a cycle", code="refused_cycle")
         seen.add(current)
         proposal = proposals.get(current)
         if proposal is None:
@@ -118,7 +116,7 @@ def resolve_proposal_lineage(
         parent = proposal.get("parent_proposal_id")
         if parent is None:
             if proposal.get("kind") != "create":
-                raise PortabilityError("proposal lineage does not terminate at a create proposal", code="refused_unsealed_lineage")
+                raise PortabilityError("proposal lineage does not terminate at a create proposal", code="refused_lineage_authority")
             break
         if not isinstance(parent, str):
             raise PortabilityError("proposal lineage parent is malformed", code="refused_missing_parent")
@@ -128,6 +126,22 @@ def resolve_proposal_lineage(
 
 def _publication_children(root: Path, sealed_commit: str) -> tuple[str, ...]:
     result = _git(root, "rev-list", "--all", "--children")
+    try:
+        sealed_proposal = parse_json_bytes(
+            _git_bytes(root, "show", f"{sealed_commit}:manifests/gig-proposal.json")
+        )
+    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+        raise PortabilityError(
+            "sealed approval proposal is unavailable",
+            code="refused_ambiguous_publication",
+        ) from exc
+    if not isinstance(sealed_proposal, Mapping):
+        raise PortabilityError(
+            "sealed approval proposal is malformed",
+            code="refused_ambiguous_publication",
+        )
+    expected_proposal_id = sealed_proposal.get("proposal_id")
+    expected_gig_id = sealed_proposal.get("gig_id")
     matches: list[str] = []
     for line in result.stdout.splitlines():
         parts = line.split()
@@ -138,10 +152,67 @@ def _publication_children(root: Path, sealed_commit: str) -> tuple[str, ...]:
             handoffs = [name for name in names if name.startswith("handoffs/") and name.endswith(".txt")]
             if len(handoffs) != 1 or "manifests/active-gig-version.json" not in names:
                 continue
-            metadata, _body = parse_json_front_matter(_git_bytes(root, "show", f"{child}:{handoffs[0]}"))
-            if metadata.get("transition") == "gig_accepted" and metadata.get("previous_journal_commit") == sealed_commit:
-                matches.append(child)
+            metadata, _body = parse_json_front_matter(
+                _git_bytes(root, "show", f"{child}:{handoffs[0]}")
+            )
+            if metadata.get("transition") != "gig_accepted":
+                continue
+            if metadata.get("previous_journal_commit") != sealed_commit:
+                raise PortabilityError(
+                    "publication child has an inconsistent handoff parent",
+                    code="refused_ambiguous_publication",
+                )
+            try:
+                pointer_bytes = _git_bytes(
+                    root, "show", f"{child}:manifests/active-gig-version.json"
+                )
+                _require_schema(
+                    "active-gig-version.schema.json",
+                    pointer_bytes,
+                    "refused_ambiguous_publication",
+                )
+                pointer = parse_json_bytes(pointer_bytes)
+                if (
+                    not isinstance(pointer, Mapping)
+                    or pointer.get("journal_commit") != sealed_commit
+                    or pointer.get("approved_proposal_id") != expected_proposal_id
+                    or pointer.get("gig_id") != expected_gig_id
+                    or metadata.get("gig_id") != expected_gig_id
+                ):
+                    raise PortabilityError(
+                        "publication child pointer names another approval",
+                        code="refused_ambiguous_publication",
+                    )
+                child_tag = pointer.get("journal_tag")
+                if not isinstance(child_tag, str):
+                    raise PortabilityError(
+                        "publication child pointer has no tag",
+                        code="refused_ambiguous_publication",
+                    )
+                resolved_tag = _git(root, "rev-parse", "--verify", child_tag, check=False)
+                if resolved_tag.returncode != 0 or resolved_tag.stdout.strip() != sealed_commit:
+                    raise PortabilityError(
+                        "publication child pointer tag names another approval",
+                        code="refused_ambiguous_publication",
+                    )
+            except PortabilityError:
+                raise
+            except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+                raise PortabilityError(
+                    "publication child pointer is inconsistent",
+                    code="refused_ambiguous_publication",
+                ) from exc
+            matches.append(child)
     return tuple(sorted(set(matches)))
+
+
+def _require_approval_tag(root: Path, tag: str, sealed_commit: str) -> None:
+    resolved_tag = _git(root, "rev-parse", "--verify", tag, check=False)
+    if resolved_tag.returncode != 0 or resolved_tag.stdout.strip() != sealed_commit:
+        raise PortabilityError(
+            "active-version tag does not resolve to journal_commit",
+            code="refused_unsealed_pointer",
+        )
 
 
 def _historical_proposals(root: Path, sealed_commit: str) -> dict[str, Mapping[str, Any]]:
@@ -153,8 +224,8 @@ def _historical_proposals(root: Path, sealed_commit: str) -> dict[str, Mapping[s
             continue
         payload = parse_json_bytes(_git_bytes(root, "show", f"{commit}:manifests/gig-proposal.json"))
         if not isinstance(payload, dict) or not isinstance(payload.get("proposal_id"), str):
-            raise PortabilityError("historical proposal is malformed", code="refused_unsealed_lineage")
-        _require_schema("gig-proposal.schema.json", canonical_json_bytes(payload), "refused_unsealed_lineage")
+            raise PortabilityError("historical proposal is malformed", code="refused_lineage_authority")
+        _require_schema("gig-proposal.schema.json", canonical_json_bytes(payload), "refused_lineage_authority")
         found[payload["proposal_id"]] = payload
     return found
 

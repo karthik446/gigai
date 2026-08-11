@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import ast
 from pathlib import Path
+import subprocess
 
 import pytest
 
 from gigai.capabilities import install_local_capability, materialize_capability_manifest
 from gigai.canonical import canonical_json_bytes, parse_json_bytes
-from gigai.lifecycle import approve_offline, create_offline
+from gigai.lifecycle import LifecycleError, approve_offline, create_offline
 from gigai.portability import (
     PortabilityError,
     resolve_proposal_lineage,
@@ -189,6 +190,167 @@ def test_g23_three_hop_lineage_is_ordered(monkeypatch, tmp_path):
     assert lineage.proposal_ids == ("gp_current", "gp_middle", "gp_root")
 
 
+def _real_lineage_fixture(tmp_path, revisions):
+    home, target = _configured_target(tmp_path)
+    created = create_offline(
+        home_root=home,
+        requested_target=target,
+        name="real-lineage-gig",
+        open_editor=False,
+        uuid_factory=_uuids(),
+    )
+    workpad = created.workpad
+    base = parse_json_bytes((workpad / "manifests/gig-proposal.json").read_bytes())
+    assert isinstance(base, dict)
+    for proposal_id, parent_id, kind, gig_id in revisions:
+        if parent_id == "$ROOT":
+            parent_id = created.proposal_id
+        if gig_id == "$GIG":
+            gig_id = created.gig_id
+        proposal = dict(base)
+        proposal.update(
+            {
+                "proposal_id": proposal_id,
+                "parent_proposal_id": parent_id,
+                "kind": kind,
+                "status": "approved",
+                "gig_id": gig_id,
+            }
+        )
+        (workpad / "manifests/gig-proposal.json").write_bytes(canonical_json_bytes(proposal))
+        subprocess.run(["git", "-C", str(workpad), "add", "manifests/gig-proposal.json"], check=True)
+        subprocess.run(
+            ["git", "-C", str(workpad), "commit", "-m", f"fixture {proposal_id}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    sealed = subprocess.run(
+        ["git", "-C", str(workpad), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return workpad, created.gig_id, sealed, created.proposal_id
+
+
+def test_g23_three_hop_lineage_walks_real_git_history(tmp_path):
+    p2 = "gp_11111111-1111-4111-8111-111111111111"
+    p3 = "gp_22222222-2222-4222-8222-222222222222"
+    workpad, gig_id, sealed, root_id = _real_lineage_fixture(
+        tmp_path,
+        ((p2, "$ROOT", "amend", "$GIG"), (p3, p2, "improve", "$GIG")),
+    )
+    lineage = resolve_proposal_lineage(
+        workpad, approved_proposal_id=p3, gig_id=gig_id, sealed_commit=sealed
+    )
+    assert lineage.proposal_ids == (p3, p2, root_id)
+
+
+@pytest.mark.parametrize("case", ["cycle", "missing", "cross_gig"])
+def test_g23_lineage_refusals_walk_real_git_history(tmp_path, case):
+    root_id = "gp_00000000-0000-4000-8000-000000000003"
+    gig_id = "gig_00000000-0000-4000-8000-000000000001"
+    p2 = "gp_11111111-1111-4111-8111-111111111111"
+    p3 = "gp_22222222-2222-4222-8222-222222222222"
+    if case == "cycle":
+        revisions = ((p2, p3, "amend", "$GIG"), (p3, p2, "improve", "$GIG"))
+        expected = "refused_cycle"
+        current = p3
+    elif case == "missing":
+        revisions = ((p2, "gp_33333333-3333-4333-8333-333333333333", "amend", "$GIG"),)
+        expected = "refused_missing_parent"
+        current = p2
+    else:
+        revisions = ((p2, None, "create", "gig_00000000-0000-4000-8000-000000000099"),)
+        expected = "refused_cross_gig_lineage"
+        current = p2
+    workpad, actual_gig_id, sealed, _root = _real_lineage_fixture(tmp_path, revisions)
+    with pytest.raises(PortabilityError) as error:
+        resolve_proposal_lineage(
+            workpad,
+            approved_proposal_id=current,
+            gig_id=actual_gig_id,
+            sealed_commit=sealed,
+        )
+    assert error.value.code == expected
+
+
+def test_g23_forged_publication_child_is_ambiguous(tmp_path):
+    home, target = _configured_target(tmp_path)
+    created = create_offline(
+        home_root=home,
+        requested_target=target,
+        name="ambiguous-publication-gig",
+        open_editor=False,
+        uuid_factory=_uuids(),
+    )
+    approved = approve_offline(
+        home_root=home,
+        requested_target=target,
+        proposal_id=created.proposal_id,
+        uuid_factory=_uuids(),
+    )
+    base_branch = subprocess.run(
+        ["git", "-C", str(created.workpad), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    names = subprocess.run(
+        ["git", "-C", str(created.workpad), "show", "--format=", "--name-only", approved.publication_commit],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    handoff = next(name for name in names if name.startswith("handoffs/") and name.endswith(".txt"))
+    handoff_bytes = subprocess.run(
+        ["git", "-C", str(created.workpad), "show", f"{approved.publication_commit}:{handoff}"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    pointer = parse_json_bytes(
+        subprocess.run(
+            ["git", "-C", str(created.workpad), "show", f"{approved.publication_commit}:manifests/active-gig-version.json"],
+            check=True,
+            capture_output=True,
+        ).stdout
+    )
+    assert isinstance(pointer, dict)
+    pointer["approved_proposal_id"] = "gp_99999999-9999-4999-8999-999999999999"
+    subprocess.run(["git", "-C", str(created.workpad), "checkout", "-b", "g23-forged", approved.sealed_commit], check=True, capture_output=True)
+    (created.workpad / handoff).parent.mkdir(parents=True, exist_ok=True)
+    (created.workpad / handoff).write_bytes(handoff_bytes)
+    (created.workpad / "manifests/active-gig-version.json").write_bytes(canonical_json_bytes(pointer))
+    subprocess.run(["git", "-C", str(created.workpad), "add", handoff, "manifests/active-gig-version.json"], check=True)
+    subprocess.run(["git", "-C", str(created.workpad), "commit", "-m", "forged publication"], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "-C", str(created.workpad), "checkout", "--detach"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(created.workpad), "update-ref", "-d", f"refs/heads/{base_branch}"], check=True)
+    with pytest.raises(PortabilityError) as error:
+        verify_active_version_portability(created.workpad)
+    assert error.value.code == "refused_ambiguous_publication"
+
+
+def test_g23_tag_resolution_is_independently_refused(tmp_path):
+    home, target = _configured_target(tmp_path)
+    created = create_offline(
+        home_root=home,
+        requested_target=target,
+        name="tag-gig",
+        open_editor=False,
+        uuid_factory=_uuids(),
+    )
+    approved = approve_offline(
+        home_root=home,
+        requested_target=target,
+        proposal_id=created.proposal_id,
+        uuid_factory=_uuids(),
+    )
+    with pytest.raises(PortabilityError) as error:
+        portability._require_approval_tag(created.workpad, "gig-v999999", approved.sealed_commit)
+    assert error.value.code == "refused_unsealed_pointer"
+
+
 def test_g23_readers_do_not_touch_installed_tool_bytes():
     source = portability.__file__
     assert source is not None
@@ -276,7 +438,11 @@ def test_g23_reinstalls_from_manifest_and_source_on_second_home(tmp_path):
                 "gp_current": {"proposal_id": "gp_current", "gig_id": "gig_a", "parent_proposal_id": "gp_parent", "kind": "improve"},
                 "gp_parent": {"proposal_id": "gp_parent", "gig_id": "gig_a", "parent_proposal_id": "gp_current", "kind": "amend"},
             },
-            "refused_lineage_cycle",
+            "refused_cycle",
+        ),
+        (
+            {"gp_current": {"proposal_id": "gp_current", "gig_id": "gig_a", "parent_proposal_id": None, "kind": "amend"}},
+            "refused_lineage_authority",
         ),
         (
             {"gp_current": {"proposal_id": "gp_current", "gig_id": "gig_a", "parent_proposal_id": "gp_missing", "kind": "improve"}},
@@ -298,3 +464,48 @@ def test_g23_lineage_refusals_are_closed(monkeypatch, tmp_path, proposals, code)
             sealed_commit="a" * 40,
         )
     assert error.value.code == code
+
+
+def test_g23_historical_proposal_schema_is_real_git_guarded(tmp_path):
+    home, target = _configured_target(tmp_path)
+    created = create_offline(
+        home_root=home,
+        requested_target=target,
+        name="malformed-lineage-gig",
+        open_editor=False,
+        uuid_factory=_uuids(),
+    )
+    proposal_path = created.workpad / "manifests/gig-proposal.json"
+    proposal_path.write_text('{"proposal_id":"' + created.proposal_id + '"}')
+    subprocess.run(["git", "-C", str(created.workpad), "add", str(proposal_path.relative_to(created.workpad))], check=True)
+    subprocess.run(["git", "-C", str(created.workpad), "commit", "-m", "malformed lineage fixture"], check=True, capture_output=True, text=True)
+    sealed = subprocess.run(["git", "-C", str(created.workpad), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    with pytest.raises(PortabilityError) as error:
+        resolve_proposal_lineage(created.workpad, approved_proposal_id=created.proposal_id, gig_id=created.gig_id, sealed_commit=sealed)
+    assert error.value.code == "refused_lineage_authority"
+
+
+def test_g23_implicit_manifest_carry_forward_revalidates_bytes(tmp_path):
+    home, target = _configured_target(tmp_path)
+    created = create_offline(
+        home_root=home,
+        requested_target=target,
+        name="carry-forward-gig",
+        open_editor=False,
+        uuid_factory=_uuids(),
+    )
+    digest = _stage_source(created.workpad)
+    materialize_capability_manifest(created.workpad, _manifest(_capability(digest=digest)))
+    approve_offline(home_root=home, requested_target=target, proposal_id=created.proposal_id, capability_manifest_id="capmanifest_00000000-0000-4000-8000-000000000004", uuid_factory=_uuids())
+    proposal_path = created.workpad / "manifests/gig-proposal.json"
+    proposal = parse_json_bytes(proposal_path.read_bytes())
+    assert isinstance(proposal, dict)
+    proposal.update({"proposal_id": "gp_99999999-9999-4999-8999-999999999999", "parent_proposal_id": created.proposal_id, "status": "proposed", "kind": "amend"})
+    proposal_path.write_bytes(canonical_json_bytes(proposal))
+    manifest_path = created.workpad / "manifests/capabilities/capmanifest_00000000-0000-4000-8000-000000000004.json"
+    manifest = parse_json_bytes(manifest_path.read_bytes())
+    assert isinstance(manifest, dict)
+    manifest["created_by"] = {"kind": "gigai", "id": "changed", "model_target": None}
+    manifest_path.write_bytes(canonical_json_bytes(manifest))
+    with pytest.raises(LifecycleError, match="stale or invalid"):
+        approve_offline(home_root=home, requested_target=target, proposal_id=proposal["proposal_id"], uuid_factory=_uuids())

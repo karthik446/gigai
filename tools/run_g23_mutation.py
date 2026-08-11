@@ -32,19 +32,47 @@ MUTANTS = (
         "lineage-cross-gig-refusal",
         "        if proposal.get(\"gig_id\") != gig_id:\n",
         "        if False:\n",
-        "tests/test_g23_portability.py::test_g23_lineage_refusals_are_closed",
+        "tests/test_g23_portability.py::test_g23_lineage_refusals_walk_real_git_history",
     ),
     (
         "lineage-cycle-guard",
         "        if current in seen:\n",
         "        if False:\n",
-        "tests/test_g23_portability.py::test_g23_lineage_refusals_are_closed",
+        "tests/test_g23_portability.py::test_g23_lineage_refusals_walk_real_git_history",
     ),
     (
         "lineage-missing-parent-guard",
         "        if proposal is None:\n",
         "        if False:\n",
+        "tests/test_g23_portability.py::test_g23_lineage_refusals_walk_real_git_history",
+    ),
+    (
+        "ambiguous-publication-identity",
+        "                    or pointer.get(\"approved_proposal_id\") != expected_proposal_id\n",
+        "                    or False\n",
+        "tests/test_g23_portability.py::test_g23_forged_publication_child_is_ambiguous",
+    ),
+    (
+        "tag-resolution-guard",
+        "def _require_approval_tag(root: Path, tag: str, sealed_commit: str) -> None:\n"
+        "    resolved_tag = _git(root, \"rev-parse\", \"--verify\", tag, check=False)\n"
+        "    if resolved_tag.returncode != 0 or resolved_tag.stdout.strip() != sealed_commit:\n",
+        "def _require_approval_tag(root: Path, tag: str, sealed_commit: str) -> None:\n"
+        "    resolved_tag = _git(root, \"rev-parse\", \"--verify\", tag, check=False)\n"
+        "    if False:\n",
+        "tests/test_g23_portability.py::test_g23_tag_resolution_is_independently_refused",
+    ),
+    (
+        "lineage-create-terminus",
+        "            if proposal.get(\"kind\") != \"create\":\n",
+        "            if False:\n",
         "tests/test_g23_portability.py::test_g23_lineage_refusals_are_closed",
+    ),
+    (
+        "historical-proposal-schema-guard",
+        "        _require_schema(\"gig-proposal.schema.json\", canonical_json_bytes(payload), \"refused_lineage_authority\")\n",
+        "        if False:\n",
+        "tests/test_g23_portability.py::test_g23_historical_proposal_schema_is_real_git_guarded",
     ),
 )
 

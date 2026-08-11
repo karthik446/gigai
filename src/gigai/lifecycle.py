@@ -793,7 +793,7 @@ def approve_offline(
                 workpad, capability_manifest_id, gig_id=resolved.gig_id
             )
             if capability_manifest_id is not None
-            else _existing_capability_manifest_ref(workpad)
+            else _existing_capability_manifest_ref(workpad, resolved.gig_id)
         )
         if manifest_ref is not None:
             pointer_payload["capability_manifest"] = manifest_ref
@@ -925,7 +925,7 @@ def _recover_approved_publication(
             workpad, capability_manifest_id, gig_id=resolved.gig_id
         )
         if capability_manifest_id is not None
-        else _existing_capability_manifest_ref(workpad)
+        else _existing_capability_manifest_ref(workpad, resolved.gig_id)
     )
     if manifest_ref is not None:
         pointer_payload["capability_manifest"] = manifest_ref
@@ -1435,7 +1435,9 @@ def _next_version(workpad: Path) -> int:
     return payload["active_version"] + 1
 
 
-def _existing_capability_manifest_ref(workpad: Path) -> Mapping[str, object] | None:
+def _existing_capability_manifest_ref(
+    workpad: Path, gig_id: str
+) -> Mapping[str, object] | None:
     """Carry an existing approved pointer reference into the next version."""
 
     path = workpad / "manifests" / "active-gig-version.json"
@@ -1451,7 +1453,17 @@ def _existing_capability_manifest_ref(workpad: Path) -> Mapping[str, object] | N
         return None
     if not isinstance(reference, Mapping):
         raise LifecycleError("active-version capability manifest reference is invalid")
-    return dict(reference)
+    path_value = reference.get("path")
+    if not isinstance(path_value, str):
+        raise LifecycleError("active-version capability manifest reference is invalid")
+    path = Path(path_value)
+    if len(path.parts) != 3 or path.parts[0:2] != ("manifests", "capabilities") or not path.parts[2].endswith(".json"):
+        raise LifecycleError("active-version capability manifest reference is invalid")
+    manifest_id = path.parts[2][:-5]
+    expected = capability_manifest_artifact_ref(workpad, manifest_id, gig_id=gig_id)
+    if dict(reference) != expected:
+        raise LifecycleError("active-version capability manifest reference is stale or invalid")
+    return expected
 
 
 def _journal_entries(workpad: Path) -> tuple[JournalEntry, ...]:
