@@ -90,7 +90,9 @@ def _prepare_observation(root: Path, record: dict[str, object], pointer_path: Pa
 
 
 def _manifest(record_ids: list[str]) -> dict[str, object]:
-    split = {"case_count": 8, "bar_pass": True, "metrics": {"recall": 1, "false_positive_rate": 0}}
+    development = {"case_count": 4, "bar_pass": True, "metrics": {"recall": 1, "false_positive_rate": 0}}
+    calibration = {"case_count": 2, "bar_pass": True, "metrics": {"recall": 1, "false_positive_rate": 0}}
+    final_holdout = {"case_count": 2, "bar_pass": True, "metrics": {"recall": 1, "false_positive_rate": 0}}
     return {
         "schema_version": "1.0",
         "manifest_version": 1,
@@ -126,9 +128,9 @@ def _manifest(record_ids: list[str]) -> dict[str, object]:
             "minimums": {"recall": 1},
             "maximums": {"false_positive_rate": 1},
             "case_counts": {"development": 4, "calibration": 2, "final_held_out_acceptance": 2},
-            "development": split,
-            "calibration": split,
-            "final_holdout": split,
+            "development": development,
+            "calibration": calibration,
+            "final_holdout": final_holdout,
             "final_holdout_pass": True,
             "no_regression": True,
             "checked_at": "2026-08-10T12:00:00Z",
@@ -179,6 +181,11 @@ def test_improvement_has_independent_evidence_and_quality_gates() -> None:
     parsed, gates = validate_improvement_manifest(manifest, {learning_id: record})
     assert parsed["manifest_id"] == manifest["manifest_id"]
     assert gates.evidence_sufficient and gates.quality_passed
+
+    wrong_case_count = _manifest([learning_id])
+    wrong_case_count["quality_gate"]["development"]["case_count"] = 999
+    with pytest.raises(ImprovementRefusedError, match="does not match replay"):
+        validate_improvement_manifest(wrong_case_count, {learning_id: record})
 
     feedback = _record(provenance="operator_feedback")
     feedback_id = feedback["learning_id"]

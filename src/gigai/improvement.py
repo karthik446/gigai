@@ -197,7 +197,11 @@ def validate_improvement_manifest(
         computed = replay[replay_split]
         if not isinstance(reported, Mapping) or not isinstance(computed, Mapping):
             raise ImprovementRefusedError("quality split report is malformed", code="quality_replay_incomplete")
-        if reported.get("metrics") != computed.get("metrics") or reported.get("bar_pass") != computed.get("bar_pass"):
+        if (
+            reported.get("case_count") != computed.get("case_count")
+            or reported.get("metrics") != computed.get("metrics")
+            or reported.get("bar_pass") != computed.get("bar_pass")
+        ):
             raise ImprovementRefusedError("quality split report does not match replay", code="quality_replay_mismatch")
     if quality_gate["final_holdout_pass"] != replay["final_holdout_pass"] or quality_gate["no_regression"] != replay["no_regression"]:
         raise ImprovementRefusedError("quality gate summary does not match replay", code="quality_replay_mismatch")
