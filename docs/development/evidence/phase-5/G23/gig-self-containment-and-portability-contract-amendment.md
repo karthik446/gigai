@@ -1,6 +1,6 @@
 # G23 Gig Self-Containment and Portability Contract Amendment
 
-- Status: Accepted additive amendment; G23 runtime implementation complete
+- Status: Accepted additive amendment; implementation complete after post-closeout repair
 - Type: Contract and serialized-resource amendment for G23
 - Depends on: G17, G19, G20, and G22 completion audits and terminal handoffs
 - Unblocks: G23 runtime implementation only
@@ -107,7 +107,7 @@ existing Run contract.
 
 ## Proposal-lineage resolution
 
-`resolve_proposal_lineage(gig_id, active_version)` starts at the approved
+`resolve_proposal_lineage(workpad, approved_proposal_id, gig_id, sealed_commit)` starts at the approved
 proposal named by the sealed active pointer and walks `parent_proposal_id`
 backward. For each proposal it reads the historical `gig-proposal.json` bytes
 from the sealed Git journal history, validates the proposal, and verifies the

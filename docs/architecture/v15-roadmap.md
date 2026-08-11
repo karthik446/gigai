@@ -648,8 +648,8 @@ source artifact travel to a second machine for local reinstallation through
 G17's existing installer; installed tool bytes are never copied between
 machines, and `resolved_tools` Run-time authority is unchanged.
 
-G23 is complete under its accepted additive amendment and does not declare an
-alpha or public release. It is independent of G21
+G23 is complete after post-closeout repair under its accepted additive amendment
+and does not declare an alpha or public release. It is independent of G21
 and does not gate or unblock recurring Gigs.
 
 Exit evidence: the accepted amendment settling field requiredness,
@@ -657,7 +657,7 @@ version-binding, lineage resolution, and source-transport shape; portability
 and lineage fixtures including a multi-hop chain, a cycle, and a
 cross-Gig/unbound-manifest refusal; a two-disposable-home reinstallation
 record; mutation evidence for the semantic-verification and lineage checks;
-and fresh-wheel replay. The [G23 completion audit](../development/evidence/phase-5/G23/completion-audit.md)
+and fresh-wheel replay, including post-closeout repair verification. The [G23 completion audit](../development/evidence/phase-5/G23/completion-audit.md)
 and [terminal handoff](../development/evidence/phase-5/G23/terminal-handoff.md)
 record the accepted result. See the [G23 goal contract](../development/goals/phase-5/G23-gig-self-containment-and-portability.md).
 The accepted contract amendment is [here](../development/evidence/phase-5/G23/gig-self-containment-and-portability-contract-amendment.md).

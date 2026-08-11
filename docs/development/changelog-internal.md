@@ -44,12 +44,12 @@ current.
   improve approval path, mutation report, and installed replay are accepted.
   G21: complete; additive amendment, runtime implementation, mutation evidence,
   and installed replay accepted.
-  G23: additive amendment accepted; runtime implementation and installed
-  replay are complete.
+  G23: additive amendment accepted; runtime implementation and post-closeout
+  publication/lineage repair are complete.
   G23 is independent of G21 and does not declare an alpha or public
   release.
-- Current closeout: G21 and G23 completion audits and terminal handoffs are
-  accepted; G24 is the next release-lane planning candidate.
+- Current closeout: G21 and G23 are complete after their corrective review
+  passes; G24 remains the later release-lane planning candidate.
 - Known reconciliation work: some older README, Phase 3 status, and evidence
   status lines still reflect earlier snapshots and must be corrected explicitly.
 
@@ -222,7 +222,8 @@ reports 505 passing tests.
 
 ### G23 — Gig self-containment and portability
 
-Goal contract and additive amendment accepted; runtime implementation complete. See the [G23 goal contract](goals/phase-5/G23-gig-self-containment-and-portability.md)
+Goal contract and additive amendment accepted; runtime implementation and
+post-closeout repair are complete. See the [G23 goal contract](goals/phase-5/G23-gig-self-containment-and-portability.md)
 and [accepted amendment](evidence/phase-5/G23/gig-self-containment-and-portability-contract-amendment.md).
 The contract adds a `capability_manifest` reference to
 `active-gig-version.json` and a read-only proposal-lineage resolver so an

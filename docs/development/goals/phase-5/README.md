@@ -37,11 +37,11 @@ stale-base refusal, installed replay, completion audit, and terminal handoff
 were accepted. Evidence belongs under
 `docs/development/evidence/phase-5/G20/`.
 
-G23 is complete under its accepted additive amendment. It stopped after its additive amendment (field naming, backward
-compatibility, semantic verification, lineage resolution, source transport,
-and the install/execution boundary), portability and lineage fixture corpus,
-two-home reinstallation record, mutation report, installed replay, completion
-audit, and terminal handoff are accepted. Evidence belongs under
+G23 is complete after its post-closeout repair under the accepted additive
+amendment. The repaired refusal-code contract, publication-child ambiguity
+guard, implicit manifest revalidation, real Git-history lineage fixtures,
+10/10 mutation report, installed replay, completion audit, and terminal handoff
+are accepted. Evidence belongs under
 `docs/development/evidence/phase-5/G23/`.
 
 G21 is complete after its accepted occurrence/comparison amendment, immutable
