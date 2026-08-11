@@ -14,6 +14,7 @@
     "cadence",
     "occurrence_key",
     "trigger_actor",
+    "outcome_actor",
     "scheduled_for",
     "snapshot",
     "prior_occurrence_id",
@@ -35,6 +36,7 @@
     "cadence": {"type": "string", "enum": ["daily", "weekly", "monthly"]},
     "occurrence_key": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$"},
     "trigger_actor": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"},
+    "outcome_actor": {"oneOf": [{"$ref": "urn:gigai:schema:common:1#/$defs/actor"}, {"type": "null"}]},
     "scheduled_for": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
     "snapshot": {"$ref": "#/$defs/snapshot"},
     "prior_occurrence_id": {"oneOf": [{"$ref": "#/$defs/occurrence_id"}, {"type": "null"}]},
@@ -46,6 +48,34 @@
     "created_at": {"type": "string", "format": "date-time"},
     "updated_at": {"type": "string", "format": "date-time"}
   },
+  "allOf": [
+    {
+      "if": {
+        "required": ["state"],
+        "properties": {"state": {"enum": ["blocked", "skipped", "cancelled", "unavailable", "failed", "missed"]}}
+      },
+      "then": {
+        "required": ["reason", "outcome", "outcome_actor"],
+        "properties": {
+          "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
+          "outcome": {"type": "string", "enum": ["succeeded", "failed", "interrupted", "blocked", "skipped", "cancelled", "unavailable", "missed"]},
+          "outcome_actor": {"$ref": "urn:gigai:schema:common:1#/$defs/actor"}
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["state"],
+        "properties": {"state": {"const": "compared"}}
+      },
+      "then": {
+        "required": ["comparison"],
+        "properties": {
+          "comparison": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}
+        }
+      }
+    }
+  ],
   "$defs": {
     "uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
     "occurrence_id": {"type": "string", "pattern": "^occurrence_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},

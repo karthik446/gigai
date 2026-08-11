@@ -45,7 +45,8 @@ fields, and requires these fields:
 | `gig_version` | The explicitly selected approved Gig version. |
 | `cadence` | Exactly `daily`, `weekly`, or `monthly`; descriptive only. |
 | `occurrence_key` | Canonical lowercase external slot key, unique within `(gig_id, cadence)`. |
-| `trigger_actor` | Existing actor shape; v1 accepts only an explicit operator or GigAI reconciliation actor. |
+| `trigger_actor` | Existing actor shape for the declaration/requesting actor; v1 accepts only an explicit operator or GigAI reconciliation actor. |
+| `outcome_actor` | Nullable until a refusal/outcome terminal is recorded; then the explicit operator or GigAI actor responsible for that terminal decision. |
 | `scheduled_for` | Optional RFC 3339 timestamp supplied by the caller; G21 does not calculate it. |
 | `snapshot` | Object containing the exact Review Bundle `bundle_id`, `bundle_version`, artifact reference, and reference-set digest. |
 | `prior_occurrence_id` | Nullable explicit prior occurrence identity; never inferred from chronology. |
@@ -146,8 +147,25 @@ requested separately and only after both inputs pass the compatibility gate.
 5. Every occurrence snapshot is a digest-bound canonical Review Bundle whose
    exact references are revalidated before Run preparation.
 6. Every successful occurrence links exactly one fresh Run and preserves the
-   selected approved version and sealed Goal Graph; it never advances the
-   active pointer.
+selected approved version and sealed Goal Graph; it never advances the
+active pointer.
+
+### Corrective contract clarification (accepted 2026-08-11)
+
+The implementation review identified three invariants that must be enforced
+both in the runtime and in the serialized contract:
+
+- refusal/outcome states (`blocked`, `skipped`, `cancelled`, `unavailable`,
+  `failed`, and `missed`) require a share-safe `reason`, matching `outcome`,
+  and non-null `outcome_actor`;
+- a prepared occurrence cannot be manually terminalized while its linked Run
+  is still in flight or has completed without reconciliation; and
+- `compared` requires a non-null comparison artifact reference.
+
+The declaration-time `trigger_actor` remains immutable; `outcome_actor` records
+who or what made the later terminal decision. These are additive constraints
+within the accepted `gig-occurrence` resource and do not create a new authority
+or schema resource.
 7. A comparison binds two explicit occurrences, distinct Runs, versions,
    snapshots, Goal Graphs, Review Contracts, outputs, and method identity.
 8. `selected_winner` is always `null`; comparisons are not adjudication,

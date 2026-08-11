@@ -44,6 +44,7 @@ def _occurrence() -> dict[str, object]:
         "cadence": "daily",
         "occurrence_key": "2026-08-10",
         "trigger_actor": {"kind": "operator", "id": "test-operator"},
+        "outcome_actor": None,
         "scheduled_for": "2026-08-10T12:00:00Z",
         "snapshot": _snapshot(),
         "prior_occurrence_id": None,
@@ -108,6 +109,30 @@ def test_occurrence_schema_rejects_unknown_fields() -> None:
     payload = _occurrence()
     payload["scheduler"] = "not allowed"
     assert not validate_serialized_contract(
+        "gig-occurrence.schema.json", canonical_json_bytes(payload)
+    ).valid
+
+
+def test_occurrence_schema_requires_refusal_reason_outcome_and_actor() -> None:
+    payload = _occurrence()
+    payload.update({"state": "missed", "outcome": "missed", "reason": "no trigger"})
+    assert not validate_serialized_contract(
+        "gig-occurrence.schema.json", canonical_json_bytes(payload)
+    ).valid
+    payload["outcome_actor"] = {"kind": "operator", "id": "test-operator"}
+    assert validate_serialized_contract(
+        "gig-occurrence.schema.json", canonical_json_bytes(payload)
+    ).valid
+
+
+def test_occurrence_schema_requires_comparison_when_compared() -> None:
+    payload = _occurrence()
+    payload["state"] = "compared"
+    assert not validate_serialized_contract(
+        "gig-occurrence.schema.json", canonical_json_bytes(payload)
+    ).valid
+    payload["comparison"] = _artifact("comparisons/result.json")
+    assert validate_serialized_contract(
         "gig-occurrence.schema.json", canonical_json_bytes(payload)
     ).valid
 

@@ -211,7 +211,7 @@ The following rules are normative:
 5. A comparison is evidence about two named occurrences. It is not review
    adjudication, evaluator consensus, improvement approval, or target authority.
 6. Missed, skipped, cancelled, unavailable, and failed states require an
-   explicit reason and actor. G21 never silently converts absence of a Run into
+   explicit reason, matching outcome, and outcome actor. G21 never silently converts absence of a Run into
    success or silently catches up a missed slot.
 7. A comparison failure or incompatibility does not rewrite either occurrence.
    It records `incomparable`/`blocked` evidence and leaves both Runs intact.
@@ -244,7 +244,9 @@ The following rules are normative:
    after Run preparation, and replay after terminalization. Terminal states
    have no outgoing retry/fallback transition.
 6. **Missed occurrence.** A deterministic operator/reconciliation fixture
-   records `missed`, `skipped`, and `unavailable` with explicit reason/actor.
+   records `missed`, `skipped`, and `unavailable` with explicit reason,
+   matching outcome, and outcome actor. The schema enforces these refusal
+   invariants, as well as requiring a comparison reference for `compared`.
    No background timer or scheduler process is involved, and no missing Run is
    reported as successful.
 7. **Comparison integrity.** A valid prior/current pair produces a comparison

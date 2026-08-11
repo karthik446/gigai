@@ -891,6 +891,7 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "cadence": "daily",
         "occurrence_key": "2026-08-02",
         "trigger_actor": actor(),
+        "outcome_actor": None,
         "scheduled_for": NOW,
         "snapshot": {
             "bundle_id": "bundle_99999999-9999-4999-8999-999999999999",
