@@ -68,6 +68,61 @@ def test_g23_legacy_pointer_reports_non_portable(tmp_path):
     assert verify_active_version_portability(created.workpad).outcome == "reported_non_portable"
 
 
+def test_g23_unpublished_pointer_is_recoverable_refusal(tmp_path):
+    home, target = _configured_target(tmp_path)
+    created = create_offline(
+        home_root=home,
+        requested_target=target,
+        name="unpublished-gig",
+        open_editor=False,
+        uuid_factory=_uuids(),
+    )
+
+    def crash(step):
+        if step == "after_approval_tag":
+            raise RuntimeError(step)
+
+    with pytest.raises(RuntimeError):
+        approve_offline(
+            home_root=home,
+            requested_target=target,
+            proposal_id=created.proposal_id,
+            uuid_factory=_uuids(),
+            observer=crash,
+        )
+    with pytest.raises(PortabilityError) as error:
+        verify_active_version_portability(created.workpad)
+    assert error.value.code == "refused_unpublished_pointer"
+
+
+def test_g23_manifest_digest_is_revalidated(tmp_path):
+    home, target = _configured_target(tmp_path)
+    created = create_offline(
+        home_root=home,
+        requested_target=target,
+        name="digest-gig",
+        open_editor=False,
+        uuid_factory=_uuids(),
+    )
+    digest = _stage_source(created.workpad)
+    materialize_capability_manifest(created.workpad, _manifest(_capability(digest=digest)))
+    approve_offline(
+        home_root=home,
+        requested_target=target,
+        proposal_id=created.proposal_id,
+        capability_manifest_id="capmanifest_00000000-0000-4000-8000-000000000004",
+        uuid_factory=_uuids(),
+    )
+    manifest_path = created.workpad / "manifests/capabilities/capmanifest_00000000-0000-4000-8000-000000000004.json"
+    tampered = parse_json_bytes(manifest_path.read_bytes())
+    assert isinstance(tampered, dict)
+    tampered["created_by"] = {"kind": "gigai", "id": "tampered", "model_target": None}
+    manifest_path.write_bytes(canonical_json_bytes(tampered))
+    with pytest.raises(PortabilityError) as error:
+        verify_active_version_portability(created.workpad)
+    assert error.value.code == "refused_digest_mismatch"
+
+
 def test_g23_pointer_substitution_is_refused(tmp_path):
     home, target = _configured_target(tmp_path)
     created = create_offline(

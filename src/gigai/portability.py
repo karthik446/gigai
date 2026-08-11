@@ -53,8 +53,16 @@ def verify_active_version_portability(workpad: Path) -> PortabilityResult:
 
     root = workpad.expanduser().resolve(strict=False)
     pointer_path = root / "manifests" / "active-gig-version.json"
-    if pointer_path.is_symlink() or not pointer_path.is_file():
+    if pointer_path.is_symlink():
         raise PortabilityError("active-version pointer is not a regular file", code="refused_unsealed_pointer")
+    if not pointer_path.is_file():
+        tags = tuple(value for value in _git(root, "tag", "--list", "gig-v[0-9]*").stdout.splitlines() if value)
+        if len(tags) != 1:
+            raise PortabilityError("missing active-version pointer has no unambiguous approval tag", code="refused_unsealed_pointer")
+        sealed_commit = _git(root, "rev-parse", "--verify", tags[0]).stdout.strip()
+        if not _publication_children(root, sealed_commit):
+            raise PortabilityError("active-version pointer has not been published", code="refused_unpublished_pointer")
+        raise PortabilityError("published active-version pointer is missing", code="refused_unsealed_pointer")
     live_bytes = pointer_path.read_bytes()
     _require_schema("active-gig-version.schema.json", live_bytes, "refused_unsealed_pointer")
     live = parse_json_bytes(live_bytes)
