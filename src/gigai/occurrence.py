@@ -166,7 +166,11 @@ def trigger_occurrence(
         record = _transition(resolved, record, "triggered", observer=observer)
     if record["state"] == "triggered":
         try:
-            _verify_snapshot(resolved, str(record["snapshot"]["artifact"]["path"]))
+            verified_snapshot = _verify_snapshot(
+                resolved, str(record["snapshot"]["artifact"]["path"])
+            )
+            if verified_snapshot != record["snapshot"]:
+                raise OccurrenceError("reference snapshot identity changed after declaration")
         except OccurrenceError as exc:
             record = _transition(
                 resolved, record, "blocked", reason=_safe_reason(exc), observer=observer

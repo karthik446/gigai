@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import uuid
 
+from gigai.canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes
 from gigai.lifecycle import approve_offline, create_offline
 from gigai.journal import JournalArtifact, record_transition
 from gigai.occurrence import (
@@ -77,7 +78,6 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, str, Path]:
         "redaction_status": "not_required",
     }
     source = b"date,value\n2026-08-10,10\n"
-    from gigai.canonical import digest_imported_bytes
 
     reference["content_sha256"] = digest_imported_bytes(source)
     reference["size_bytes"] = len(source)
@@ -185,6 +185,46 @@ def test_changed_snapshot_blocks_before_run_allocation(tmp_path: Path) -> None:
         uuid_factory=_uuids(),
     )
     (resolved.path / "occurrences/inputs/market.csv").write_bytes(b"tampered\n")
+    result = trigger_occurrence(
+        home_root=home,
+        requested_target=target,
+        gig_id=gig_id,
+        occurrence_id=occurrence.occurrence_id,
+        wait=True,
+        uuid_factory=_uuids(),
+    )
+    assert result.state == "blocked"
+    assert not list((resolved.path / "runs").glob("run_*/run-manifest.json"))
+
+
+def test_valid_replacement_snapshot_is_blocked_by_identity_digest(tmp_path: Path) -> None:
+    home, target, gig_id, bundle_path = _fixture(tmp_path)
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
+    occurrence = declare_occurrence(
+        home_root=home,
+        requested_target=target,
+        gig_id=gig_id,
+        cadence="daily",
+        occurrence_key="2026-08-12",
+        snapshot_path=bundle_path.relative_to(resolved.path).as_posix(),
+        uuid_factory=_uuids(),
+    )
+    replacement = parse_json_bytes(bundle_path.read_bytes())
+    replacement["question"] = "A different valid Bundle at the same path."
+    record_transition(
+        workpad=resolved.path,
+        project_id=resolved.project_id,
+        gig_id=resolved.gig_id,
+        handoff_id="handoff_32345678-1234-4234-9234-123456789abc",
+        transition="creation_started",
+        body="G21 fixture replaces the snapshot manifest.",
+        artifacts=(
+            JournalArtifact(
+                "manifests/review-bundles/daily.json",
+                canonical_json_bytes(replacement),
+            ),
+        ),
+    )
     result = trigger_occurrence(
         home_root=home,
         requested_target=target,
