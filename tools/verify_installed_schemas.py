@@ -21,6 +21,8 @@ EXPECTED_SHA256 = {
     "handoff-frontmatter.schema.json": "de27d69529ae7cce07063fb67dcecc48aff79012ef72c66f3ed077367b9bd09e",
     "improvement-manifest.schema.json": "7055101d0a11cdb8aa1563056c0f22a655b7088fdd41f51997e655af3e505e71",
     "learning-record.schema.json": "ffc112c25fb0984d09d076b25756b162f64b042675ec62cebca93c38a77de608",
+    "gig-comparison.schema.json": "a88336179e1b48996d922bfbfa3d3b4af93a91f9ca3f55077cb74a806d234ce1",
+    "gig-occurrence.schema.json": "fd10c0ba0d15e30a3944dab18b5f9fb74b9c3699afca2bfd305a84ed36f3b52e",
     "model-exchange.schema.json": "d0f57224c2c75fa1e140d380810fe92fc381e619f8105954ce9989a27911501c",
     "model-invocation.schema.json": "756ca9eb7a746e3f0b6700b028c4807ed98050e15df29d182aeed73335e51bd6",
     "proposal-interview.schema.json": "077474699033fa10fd93d1d7bc9e96c45f90a5735a6bcb595258f0c36fbdea9c",
@@ -61,7 +63,7 @@ def main() -> int:
                 f"expected {expected_digest}, got {actual_digest}"
             )
 
-    print("verified 25 installed GigAI schemas")
+    print("verified 27 installed GigAI schemas")
     return 0
 
 
