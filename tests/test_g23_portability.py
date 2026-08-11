@@ -276,12 +276,12 @@ def test_g23_lineage_refusals_walk_real_git_history(tmp_path, case):
     assert error.value.code == expected
 
 
-def test_g23_forged_publication_child_is_ambiguous(tmp_path):
+def _approved_publication_fixture(tmp_path, name):
     home, target = _configured_target(tmp_path)
     created = create_offline(
         home_root=home,
         requested_target=target,
-        name="ambiguous-publication-gig",
+        name=name,
         open_editor=False,
         uuid_factory=_uuids(),
     )
@@ -291,6 +291,12 @@ def test_g23_forged_publication_child_is_ambiguous(tmp_path):
         proposal_id=created.proposal_id,
         uuid_factory=_uuids(),
     )
+    base_branch = subprocess.run(
+        ["git", "-C", str(created.workpad), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     base_branch = subprocess.run(
         ["git", "-C", str(created.workpad), "branch", "--show-current"],
         check=True,
@@ -317,15 +323,103 @@ def test_g23_forged_publication_child_is_ambiguous(tmp_path):
         ).stdout
     )
     assert isinstance(pointer, dict)
-    pointer["approved_proposal_id"] = "gp_99999999-9999-4999-8999-999999999999"
-    subprocess.run(["git", "-C", str(created.workpad), "checkout", "-b", "g23-forged", approved.sealed_commit], check=True, capture_output=True)
+    return created, approved, base_branch, handoff, handoff_bytes, pointer
+
+
+def _commit_publication_child(created, approved, handoff, handoff_bytes, pointer, branch_name):
+    subprocess.run(
+        ["git", "-C", str(created.workpad), "checkout", "-b", branch_name, approved.sealed_commit],
+        check=True,
+        capture_output=True,
+    )
     (created.workpad / handoff).parent.mkdir(parents=True, exist_ok=True)
     (created.workpad / handoff).write_bytes(handoff_bytes)
-    (created.workpad / "manifests/active-gig-version.json").write_bytes(canonical_json_bytes(pointer))
-    subprocess.run(["git", "-C", str(created.workpad), "add", handoff, "manifests/active-gig-version.json"], check=True)
-    subprocess.run(["git", "-C", str(created.workpad), "commit", "-m", "forged publication"], check=True, capture_output=True, text=True)
-    subprocess.run(["git", "-C", str(created.workpad), "checkout", "--detach"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(created.workpad), "update-ref", "-d", f"refs/heads/{base_branch}"], check=True)
+    (created.workpad / "manifests/active-gig-version.json").write_bytes(
+        canonical_json_bytes(pointer)
+    )
+    subprocess.run(
+        ["git", "-C", str(created.workpad), "add", handoff, "manifests/active-gig-version.json"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(created.workpad), "commit", "-m", f"{branch_name} publication"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(created.workpad), "checkout", "--detach"],
+        check=True,
+        capture_output=True,
+    )
+
+
+def _remove_original_publication_branch(workpad, base_branch):
+    subprocess.run(
+        ["git", "-C", str(workpad), "update-ref", "-d", f"refs/heads/{base_branch}"],
+        check=True,
+    )
+
+
+def _restore_live_pointer(workpad, pointer):
+    (workpad / "manifests/active-gig-version.json").write_bytes(
+        canonical_json_bytes(pointer)
+    )
+
+
+def test_g23_forged_publication_child_is_ambiguous(tmp_path):
+    created, approved, base_branch, handoff, handoff_bytes, pointer = _approved_publication_fixture(
+        tmp_path, "forged-publication-gig"
+    )
+    pointer["approved_proposal_id"] = "gp_99999999-9999-4999-8999-999999999999"
+    _commit_publication_child(
+        created, approved, handoff, handoff_bytes, pointer, "g23-forged"
+    )
+    _remove_original_publication_branch(created.workpad, base_branch)
+    with pytest.raises(PortabilityError) as error:
+        verify_active_version_portability(created.workpad)
+    assert error.value.code == "refused_ambiguous_publication"
+
+
+def test_g23_two_genuine_publication_children_are_ambiguous(tmp_path):
+    created, approved, _base_branch, handoff, handoff_bytes, pointer = _approved_publication_fixture(
+        tmp_path, "two-publication-gig"
+    )
+    _commit_publication_child(
+        created, approved, handoff, handoff_bytes, pointer, "g23-second-publication"
+    )
+    with pytest.raises(PortabilityError) as error:
+        verify_active_version_portability(created.workpad)
+    assert error.value.code == "refused_ambiguous_publication"
+
+
+def test_g23_publication_child_sealed_commit_mismatch_is_ambiguous(tmp_path):
+    created, approved, base_branch, handoff, handoff_bytes, pointer = _approved_publication_fixture(
+        tmp_path, "wrong-publication-commit-gig"
+    )
+    live_pointer = dict(pointer)
+    pointer["journal_commit"] = "f" * 40
+    _commit_publication_child(
+        created, approved, handoff, handoff_bytes, pointer, "g23-wrong-publication-commit"
+    )
+    _remove_original_publication_branch(created.workpad, base_branch)
+    _restore_live_pointer(created.workpad, live_pointer)
+    with pytest.raises(PortabilityError) as error:
+        verify_active_version_portability(created.workpad)
+    assert error.value.code == "refused_ambiguous_publication"
+
+
+def test_g23_publication_child_tag_mismatch_is_ambiguous(tmp_path):
+    created, approved, base_branch, handoff, handoff_bytes, pointer = _approved_publication_fixture(
+        tmp_path, "wrong-publication-tag-gig"
+    )
+    live_pointer = dict(pointer)
+    pointer["journal_tag"] = "gig-v999999"
+    _commit_publication_child(
+        created, approved, handoff, handoff_bytes, pointer, "g23-wrong-publication-tag"
+    )
+    _remove_original_publication_branch(created.workpad, base_branch)
+    _restore_live_pointer(created.workpad, live_pointer)
     with pytest.raises(PortabilityError) as error:
         verify_active_version_portability(created.workpad)
     assert error.value.code == "refused_ambiguous_publication"

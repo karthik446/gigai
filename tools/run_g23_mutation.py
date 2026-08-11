@@ -53,6 +53,24 @@ MUTANTS = (
         "tests/test_g23_portability.py::test_g23_forged_publication_child_is_ambiguous",
     ),
     (
+        "ambiguous-publication-count",
+        "    if len(publication_commits) != 1:\n",
+        "    if len(publication_commits) < 1:\n",
+        "tests/test_g23_portability.py::test_g23_two_genuine_publication_children_are_ambiguous",
+    ),
+    (
+        "publication-child-sealed-commit",
+        "                    or pointer.get(\"journal_commit\") != sealed_commit\n",
+        "                    or False\n",
+        "tests/test_g23_portability.py::test_g23_publication_child_sealed_commit_mismatch_is_ambiguous",
+    ),
+    (
+        "publication-child-tag-resolution",
+        "                if resolved_tag.returncode != 0 or resolved_tag.stdout.strip() != sealed_commit:\n",
+        "                if False:\n",
+        "tests/test_g23_portability.py::test_g23_publication_child_tag_mismatch_is_ambiguous",
+    ),
+    (
         "tag-resolution-guard",
         "def _require_approval_tag(root: Path, tag: str, sealed_commit: str) -> None:\n"
         "    resolved_tag = _git(root, \"rev-parse\", \"--verify\", tag, check=False)\n"
