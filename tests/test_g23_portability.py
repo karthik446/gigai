@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import ast
+from pathlib import Path
 
 import pytest
 
@@ -38,6 +40,14 @@ def test_g23_binds_manifest_and_resolves_sealed_lineage(tmp_path):
         uuid_factory=_uuids(),
     )
 
+    pointer_path = created.workpad / "manifests/active-gig-version.json"
+    pointer_before = pointer_path.read_bytes()
+    head_before = __import__("subprocess").run(
+        ["git", "-C", str(created.workpad), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
     result = verify_active_version_portability(created.workpad)
     assert result.outcome == "verified_portable"
     assert result.publication_commit == approved.publication_commit
@@ -48,6 +58,13 @@ def test_g23_binds_manifest_and_resolves_sealed_lineage(tmp_path):
         sealed_commit=approved.sealed_commit,
     )
     assert lineage.proposal_ids == (created.proposal_id,)
+    assert pointer_path.read_bytes() == pointer_before
+    assert __import__("subprocess").run(
+        ["git", "-C", str(created.workpad), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout == head_before
 
 
 def test_g23_legacy_pointer_reports_non_portable(tmp_path):
@@ -121,6 +138,78 @@ def test_g23_manifest_digest_is_revalidated(tmp_path):
     with pytest.raises(PortabilityError) as error:
         verify_active_version_portability(created.workpad)
     assert error.value.code == "refused_digest_mismatch"
+
+
+def test_g23_semantic_manifest_refusals_are_independent(tmp_path):
+    manifest = _manifest(_capability(digest="sha256:" + "a" * 64))
+    payload = canonical_json_bytes(manifest)
+    path = tmp_path / "manifests/capabilities/manifest.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(payload)
+    reference = {
+        "path": "manifests/capabilities/manifest.json",
+        "content_sha256": "sha256:" + "b" * 64,
+        "media_type": "application/json",
+        "size_bytes": len(payload),
+    }
+    with pytest.raises(PortabilityError) as digest_error:
+        portability._read_referenced_manifest(tmp_path, reference)
+    assert digest_error.value.code == "refused_digest_mismatch"
+
+    outside = tmp_path / "outside.json"
+    outside.write_bytes(payload)
+    unsafe = dict(reference, path="../outside.json")
+    with pytest.raises(PortabilityError) as path_error:
+        portability._read_referenced_manifest(tmp_path, unsafe)
+    assert path_error.value.code == "refused_unsafe_path"
+
+    other = dict(manifest, gig_id="gig_00000000-0000-4000-8000-000000000099")
+    other_path = tmp_path / "manifests/capabilities/other.json"
+    other_bytes = canonical_json_bytes(other)
+    other_path.write_bytes(other_bytes)
+    with pytest.raises(PortabilityError) as binding_error:
+        parsed = parse_json_bytes(other_bytes)
+        portability._validate_manifest_binding(parsed, manifest["gig_id"])
+    assert binding_error.value.code == "refused_unbound_manifest"
+
+
+def test_g23_three_hop_lineage_is_ordered(monkeypatch, tmp_path):
+    proposals = {
+        "gp_current": {"proposal_id": "gp_current", "gig_id": "gig_a", "parent_proposal_id": "gp_middle", "kind": "improve"},
+        "gp_middle": {"proposal_id": "gp_middle", "gig_id": "gig_a", "parent_proposal_id": "gp_root", "kind": "amend"},
+        "gp_root": {"proposal_id": "gp_root", "gig_id": "gig_a", "parent_proposal_id": None, "kind": "create"},
+    }
+    monkeypatch.setattr(portability, "_historical_proposals", lambda _root, _sealed: proposals)
+    lineage = resolve_proposal_lineage(
+        tmp_path,
+        approved_proposal_id="gp_current",
+        gig_id="gig_a",
+        sealed_commit="a" * 40,
+    )
+    assert lineage.proposal_ids == ("gp_current", "gp_middle", "gp_root")
+
+
+def test_g23_readers_do_not_touch_installed_tool_bytes():
+    source = portability.__file__
+    assert source is not None
+    text = Path(source).read_text(encoding="utf-8")
+    assert "tools/" not in text
+
+
+def test_g23_effect_boundary_has_no_network_or_write_imports():
+    tree = ast.parse(Path(portability.__file__).read_text(encoding="utf-8"))
+    imported = {
+        node.names[0].name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+    }
+    imported.update(
+        node.module.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    )
+    assert not imported.intersection({"socket", "httpx", "urllib", "requests"})
+    assert '"commit"' not in Path(portability.__file__).read_text(encoding="utf-8")
 
 
 def test_g23_pointer_substitution_is_refused(tmp_path):

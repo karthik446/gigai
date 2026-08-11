@@ -405,7 +405,7 @@ The authority rules are non-negotiable:
    schema-valid, same-`gig_id` `capability_manifest` than the sealed copy
    names. A fixture with a live pointer that matches the sealed copy exactly
    passes the prerequisite and proceeds to the three manifest checks.
-4. **Portability verification.** `verify_gig_portability` fixtures cover
+4. **Portability verification.** `verify_active_version_portability` fixtures cover
    present-and-valid, absent (`reported_non_portable`), unsafe path,
    digest mismatch, and cross-Gig/unbound manifest
    (`refused_unbound_manifest`) cases, each returning the exact named result
