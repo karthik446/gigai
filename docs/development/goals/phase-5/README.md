@@ -40,7 +40,7 @@ were accepted. Evidence belongs under
 G23 is complete after its post-closeout repair under the accepted additive
 amendment. The repaired refusal-code contract, publication-child ambiguity
 guard, implicit manifest revalidation, real Git-history lineage fixtures,
-10/10 mutation report, installed replay, completion audit, and terminal handoff
+13/13 mutation report, installed replay, completion audit, and terminal handoff
 are accepted. Evidence belongs under
 `docs/development/evidence/phase-5/G23/`.
 

@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Harness: `tools/run_g23_mutation.py`
-- Result: `mutation_killed=10/10`
+- Result: `mutation_killed=13/13`
 
 The harness killed mutants removing:
 
@@ -13,9 +13,12 @@ The harness killed mutants removing:
 5. proposal-lineage cycle refusal;
 6. proposal-lineage missing-parent refusal;
 7. forged publication proposal-identity refusal;
-8. approval-tag resolution;
-9. create-proposal lineage termination; and
-10. historical-proposal schema validation.
+8. ambiguous publication child-count refusal;
+9. publication-child sealed-commit refusal;
+10. publication-child tag resolution;
+11. approval-tag resolution;
+12. create-proposal lineage termination; and
+13. historical-proposal schema validation.
 
 Each mutant ran in a disposable source tree and was killed by a real fixture.
 The cycle mutant is bounded by a

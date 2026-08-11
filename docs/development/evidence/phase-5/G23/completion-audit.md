@@ -4,7 +4,7 @@
 - Goal: [G23 Gig Self-Containment and Portability](../../../../goals/phase-5/G23-gig-self-containment-and-portability.md)
 - Accepted amendment: [contract amendment](gig-self-containment-and-portability-contract-amendment.md)
 - Activation commit: `85c2baa`
-- Final implementation commits: `67d9d9c`, `268edf4`, `a9ba756`, `f2fa8c0`, `f74e6bd`, `2ccb490`, `0345d73`, `1e563e0`
+- Final implementation commits: `67d9d9c`, `268edf4`, `a9ba756`, `f2fa8c0`, `f74e6bd`, `2ccb490`, `0345d73`, `1e563e0`, `e8d6328`
 
 ## Delivered
 
@@ -33,12 +33,13 @@
 
 ## Verification
 
-- Focused G23 suite: 22 passed; focused regression set: 45 passed.
-- Broad suite: 523 passed and 60 subtests; four pre-existing G22 loopback tests
+- Focused G23 suite: 25 passed; focused regression set: 48 passed.
+- Broad suite: 526 passed and 60 subtests; four pre-existing G22 loopback tests
   were blocked by the sandbox's local socket restriction and then independently
   rerun with local-bind permission: 4 passed. Combined repository verification:
-  527 passing tests.
-- Mutation harness: 10/10 killed, including all amendment-named publication,
+  530 passing tests.
+- Mutation harness: 13/13 killed, including the exact publication-child
+  cardinality, sealed-commit, and tag guards plus all other amendment-named
   semantic, lineage, and historical-schema guards.
 - Fresh wheel: 27 installed schemas and the installed G23 pointer/lineage/
   two-home replay passed in a disposable environment.

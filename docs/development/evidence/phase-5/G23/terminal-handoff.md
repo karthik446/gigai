@@ -22,6 +22,8 @@ Downstream consumers may rely on:
   `refused_lineage_authority`, and `refused_ambiguous_publication`;
 - publication-child identity checks and capability-manifest revalidation on
   implicit re-approval.
+- the exact publication-child cardinality, sealed-commit, and tag guards are
+  covered by real fixtures and 13/13 killed mutations.
 
 Downstream consumers must not infer from G23 that installed capabilities are
 executable, that `resolved_tools` has changed, that target effects are broader,
