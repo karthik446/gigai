@@ -17,9 +17,13 @@ MUTANTS = (
         "tests/test_g20_learning_runtime.py::test_improvement_has_independent_evidence_and_quality_gates",
     ),
     (
-        "quality-no-regression-gate",
-        "    if quality_gate[\"final_holdout_pass\"] is not True or quality_gate[\"no_regression\"] is not True:\n",
-        "    if False:\n",
+        "quality-split-bar-gate",
+        "    if not all(_split_passes(quality_gate[name]) for name in split_names):\n"
+        "        raise ImprovementRefusedError(\"quality gate did not pass every corpus split\", code=\"quality_gate_failed\")\n"
+        "    if quality_gate[\"final_holdout_pass\"] is not True or quality_gate[\"no_regression\"] is not True:\n"
+        "        raise ImprovementRefusedError(\"quality gate reports a held-out failure or regression\", code=\"quality_gate_failed\")\n",
+        "    if False:\n"
+        "        raise ImprovementRefusedError(\"mutated quality gate\", code=\"quality_gate_failed\")\n",
         "tests/test_g20_learning_runtime.py::test_improvement_has_independent_evidence_and_quality_gates",
     ),
 )

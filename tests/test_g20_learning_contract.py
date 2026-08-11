@@ -49,7 +49,7 @@ def _learning(provenance: str = "observed_outcome") -> dict[str, object]:
 
 
 def _split() -> dict[str, object]:
-    return {"case_count": 8, "bar_pass": True, "metrics": {"recall": 1}}
+    return {"case_count": 8, "bar_pass": True, "metrics": {"recall": 1, "false_positive_rate": 0}}
 
 
 def _manifest() -> dict[str, object]:
@@ -85,6 +85,11 @@ def _manifest() -> dict[str, object]:
             "corpus_id": "corpus_g20_improvement_v1",
             "baseline_sha256": DIGEST,
             "candidate_sha256": DIGEST,
+            "baseline": {"development": {"recall": 1, "false_positive_rate": 0}, "calibration": {"recall": 1, "false_positive_rate": 0}, "final_held_out_acceptance": {"recall": 1, "false_positive_rate": 0}},
+            "candidate": {"development": {"recall": 1, "false_positive_rate": 0}, "calibration": {"recall": 1, "false_positive_rate": 0}, "final_held_out_acceptance": {"recall": 1, "false_positive_rate": 0}},
+            "minimums": {"recall": 1},
+            "maximums": {"false_positive_rate": 1},
+            "case_counts": {"development": 4, "calibration": 2, "final_held_out_acceptance": 2},
             "development": _split(),
             "calibration": _split(),
             "final_holdout": _split(),

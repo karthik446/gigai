@@ -176,6 +176,31 @@ def validate_improvement_manifest(
 
     quality_gate = parsed["quality_gate"]
     assert isinstance(quality_gate, Mapping)
+    try:
+        replay = evaluate_quality_replay(
+            baseline=quality_gate["baseline"],
+            candidate=quality_gate["candidate"],
+            minimums=quality_gate["minimums"],
+            maximums=quality_gate["maximums"],
+            case_counts=quality_gate["case_counts"],
+        )
+    except (KeyError, TypeError, ImprovementError) as exc:
+        if isinstance(exc, ImprovementError):
+            raise
+        raise ImprovementRefusedError("quality replay inputs are malformed", code="quality_replay_incomplete") from exc
+    for manifest_split, replay_split in (
+        ("development", "development"),
+        ("calibration", "calibration"),
+        ("final_holdout", "final_held_out_acceptance"),
+    ):
+        reported = quality_gate[manifest_split]
+        computed = replay[replay_split]
+        if not isinstance(reported, Mapping) or not isinstance(computed, Mapping):
+            raise ImprovementRefusedError("quality split report is malformed", code="quality_replay_incomplete")
+        if reported.get("metrics") != computed.get("metrics") or reported.get("bar_pass") != computed.get("bar_pass"):
+            raise ImprovementRefusedError("quality split report does not match replay", code="quality_replay_mismatch")
+    if quality_gate["final_holdout_pass"] != replay["final_holdout_pass"] or quality_gate["no_regression"] != replay["no_regression"]:
+        raise ImprovementRefusedError("quality gate summary does not match replay", code="quality_replay_mismatch")
     split_names = ("development", "calibration", "final_holdout")
     if not all(_split_passes(quality_gate[name]) for name in split_names):
         raise ImprovementRefusedError("quality gate did not pass every corpus split", code="quality_gate_failed")

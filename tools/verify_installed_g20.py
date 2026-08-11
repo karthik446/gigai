@@ -86,7 +86,8 @@ def main() -> int:
             "evidence_gate": {"result": "pass", "report": _artifact("evidence-gate.json"), "supporting_record_ids": [record["learning_id"]], "checked_at": "2026-08-10T12:00:00Z"},
             "quality_gate": {
                 "result": "pass", "report": _artifact("quality-gate.json"), "evaluator_version": "g20-installed-v1", "corpus_id": "corpus_g20_installed_v1", "baseline_sha256": DIGEST, "candidate_sha256": DIGEST,
-                "development": {"case_count": 4, "bar_pass": True, "metrics": {"recall": 1}}, "calibration": {"case_count": 2, "bar_pass": True, "metrics": {"recall": 1}}, "final_holdout": {"case_count": 2, "bar_pass": True, "metrics": {"recall": 1}}, "final_holdout_pass": True, "no_regression": True, "checked_at": "2026-08-10T12:00:00Z"
+                "baseline": {"development": {"recall": 1, "false_positive_rate": 0}, "calibration": {"recall": 1, "false_positive_rate": 0}, "final_held_out_acceptance": {"recall": 1, "false_positive_rate": 0}}, "candidate": {"development": {"recall": 1, "false_positive_rate": 0}, "calibration": {"recall": 1, "false_positive_rate": 0}, "final_held_out_acceptance": {"recall": 1, "false_positive_rate": 0}}, "minimums": {"recall": 1}, "maximums": {"false_positive_rate": 1}, "case_counts": {"development": 4, "calibration": 2, "final_held_out_acceptance": 2},
+                "development": {"case_count": 4, "bar_pass": True, "metrics": {"recall": 1, "false_positive_rate": 0}}, "calibration": {"case_count": 2, "bar_pass": True, "metrics": {"recall": 1, "false_positive_rate": 0}}, "final_holdout": {"case_count": 2, "bar_pass": True, "metrics": {"recall": 1, "false_positive_rate": 0}}, "final_holdout_pass": True, "no_regression": True, "checked_at": "2026-08-10T12:00:00Z"
             },
             "created_at": "2026-08-10T12:00:00Z",
             "updated_at": "2026-08-10T12:00:00Z",

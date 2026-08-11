@@ -96,6 +96,11 @@
         "corpus_id",
         "baseline_sha256",
         "candidate_sha256",
+        "baseline",
+        "candidate",
+        "minimums",
+        "maximums",
+        "case_counts",
         "development",
         "calibration",
         "final_holdout",
@@ -110,6 +115,11 @@
         "corpus_id": {"type": "string", "pattern": "^corpus_[a-z][a-z0-9_-]{0,159}$"},
         "baseline_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
         "candidate_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "baseline": {"$ref": "#/$defs/metric_splits"},
+        "candidate": {"$ref": "#/$defs/metric_splits"},
+        "minimums": {"$ref": "#/$defs/metric_map"},
+        "maximums": {"$ref": "#/$defs/metric_map"},
+        "case_counts": {"$ref": "#/$defs/case_counts"},
         "development": {"$ref": "#/$defs/split_result"},
         "calibration": {"$ref": "#/$defs/split_result"},
         "final_holdout": {"$ref": "#/$defs/split_result"},
@@ -124,8 +134,39 @@
       "required": ["case_count", "bar_pass", "metrics"],
       "properties": {
         "case_count": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
-        "bar_pass": {"const": true},
+        "bar_pass": {"type": "boolean"},
         "metrics": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "number"}}
+      }
+    },
+    "metric_value": {
+      "oneOf": [
+        {"type": "integer", "minimum": 0},
+        {"type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"}
+      ]
+    },
+    "metric_map": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/metric_value"}
+    },
+    "metric_splits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["development", "calibration", "final_held_out_acceptance"],
+      "properties": {
+        "development": {"$ref": "#/$defs/metric_map"},
+        "calibration": {"$ref": "#/$defs/metric_map"},
+        "final_held_out_acceptance": {"$ref": "#/$defs/metric_map"}
+      }
+    },
+    "case_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["development", "calibration", "final_held_out_acceptance"],
+      "properties": {
+        "development": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+        "calibration": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+        "final_held_out_acceptance": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"}
       }
     }
   }

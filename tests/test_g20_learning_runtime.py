@@ -90,7 +90,7 @@ def _prepare_observation(root: Path, record: dict[str, object], pointer_path: Pa
 
 
 def _manifest(record_ids: list[str]) -> dict[str, object]:
-    split = {"case_count": 8, "bar_pass": True, "metrics": {"recall": 1}}
+    split = {"case_count": 8, "bar_pass": True, "metrics": {"recall": 1, "false_positive_rate": 0}}
     return {
         "schema_version": "1.0",
         "manifest_version": 1,
@@ -121,6 +121,11 @@ def _manifest(record_ids: list[str]) -> dict[str, object]:
             "corpus_id": "corpus_g20_v1",
             "baseline_sha256": DIGEST,
             "candidate_sha256": DIGEST,
+            "baseline": {"development": {"recall": 1, "false_positive_rate": 0}, "calibration": {"recall": 1, "false_positive_rate": 0}, "final_held_out_acceptance": {"recall": 1, "false_positive_rate": 0}},
+            "candidate": {"development": {"recall": 1, "false_positive_rate": 0}, "calibration": {"recall": 1, "false_positive_rate": 0}, "final_held_out_acceptance": {"recall": 1, "false_positive_rate": 0}},
+            "minimums": {"recall": 1},
+            "maximums": {"false_positive_rate": 1},
+            "case_counts": {"development": 4, "calibration": 2, "final_held_out_acceptance": 2},
             "development": split,
             "calibration": split,
             "final_holdout": split,
@@ -185,6 +190,18 @@ def test_improvement_has_independent_evidence_and_quality_gates() -> None:
     regressing["quality_gate"]["no_regression"] = False
     with pytest.raises(Exception, match="quality"):
         validate_improvement_manifest(regressing, {learning_id: record})
+
+    bar_failure = _manifest([learning_id])
+    bar_failure["quality_gate"]["candidate"]["final_held_out_acceptance"]["recall"] = 0
+    bar_failure["quality_gate"]["final_holdout"] = {
+        "case_count": 2,
+        "bar_pass": False,
+        "metrics": {"recall": 0, "false_positive_rate": 0},
+    }
+    bar_failure["quality_gate"]["final_holdout_pass"] = False
+    bar_failure["quality_gate"]["no_regression"] = False
+    with pytest.raises(Exception, match="quality"):
+        validate_improvement_manifest(bar_failure, {learning_id: record})
 
 
 def test_quality_replay_compares_candidate_to_bar_and_baseline() -> None:
