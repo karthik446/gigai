@@ -86,6 +86,8 @@ def publish_learning_record(
     *,
     home_root: Path,
     record: Mapping[str, object] | bytes,
+    source_root: Path,
+    active_pointer_path: Path,
     observer: LearningObserver | None = None,
     failpoint: str | None = None,
 ) -> LearningResult:
@@ -97,6 +99,8 @@ def publish_learning_record(
     if reconciliation.discarded:
         observer("reconciled")
     parsed = validate_learning_record(record)
+    _verify_source_identity(parsed, source_root)
+    _verify_active_pointer(parsed, active_pointer_path)
     learning_id = parsed["learning_id"]
     assert isinstance(learning_id, str)
     records_dir = root / RECORD_DIRECTORY
@@ -232,6 +236,43 @@ def _source_key(record: Mapping[str, object]) -> tuple[object, ...]:
         artifact["path"],
         artifact["content_sha256"],
     )
+
+
+def _verify_source_identity(record: Mapping[str, object], source_root: Path) -> None:
+    root = Path(source_root).expanduser().resolve(strict=False)
+    source = record["source"]
+    assert isinstance(source, Mapping)
+    artifact = source["artifact"]
+    assert isinstance(artifact, Mapping)
+    relative = artifact["path"]
+    assert isinstance(relative, str)
+    path = root / relative
+    if path.is_symlink() or not path.is_file():
+        raise LearningRefusedError("source artifact is unavailable", code="source_missing")
+    try:
+        path.resolve(strict=True).relative_to(root)
+    except ValueError as exc:
+        raise LearningRefusedError("source artifact escapes its root", code="source_escape") from exc
+    payload = path.read_bytes()
+    if digest_imported_bytes(payload) != artifact["content_sha256"] or len(payload) != artifact["size_bytes"]:
+        raise LearningRefusedError("source artifact bytes changed", code="source_digest_mismatch")
+
+
+def _verify_active_pointer(record: Mapping[str, object], pointer_path: Path) -> None:
+    path = Path(pointer_path).expanduser()
+    if path.is_symlink() or not path.is_file():
+        raise LearningRefusedError("active-version pointer is unavailable", code="pointer_missing")
+    payload = path.read_bytes()
+    try:
+        pointer = parse_json_bytes(payload)
+    except ValueError as exc:
+        raise LearningRefusedError("active-version pointer is malformed", code="pointer_invalid") from exc
+    if not isinstance(pointer, Mapping):
+        raise LearningRefusedError("active-version pointer is not an object", code="pointer_invalid")
+    if pointer.get("gig_id") != record["gig_id"] or pointer.get("active_version") != record["active_version"]:
+        raise LearningRefusedError("active-version pointer does not match observation", code="pointer_mismatch")
+    if digest_imported_bytes(payload) != record["active_pointer_sha256"]:
+        raise LearningRefusedError("active-version pointer bytes changed", code="pointer_digest_mismatch")
 
 
 def _read_published_records(root: Path) -> tuple[dict[str, object], ...]:

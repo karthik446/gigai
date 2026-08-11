@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from gigai.canonical import canonical_json_bytes
-from gigai.improvement import ImprovementRefusedError, validate_improvement_manifest
+from gigai.canonical import canonical_json_bytes, digest_imported_bytes
+from gigai.improvement import ImprovementRefusedError, evaluate_quality_replay, validate_improvement_manifest
 from gigai.learning import LearningRefusedError, publish_learning_record, reconcile_learning_root
 from gigai.lifecycle import (
     approve_interview_session,
@@ -66,6 +66,29 @@ def _artifact(path: str) -> dict[str, object]:
     }
 
 
+def _prepare_observation(root: Path, record: dict[str, object], pointer_path: Path | None = None) -> Path:
+    source = record["source"]
+    assert isinstance(source, dict)
+    artifact = source["artifact"]
+    assert isinstance(artifact, dict)
+    source_path = root / str(artifact["path"])
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_bytes = b"source bytes\n"
+    source_path.write_bytes(source_bytes)
+    artifact["content_sha256"] = digest_imported_bytes(source_bytes)
+    artifact["size_bytes"] = len(source_bytes)
+    pointer_path = pointer_path or root / "active-gig-version.json"
+    pointer_path.parent.mkdir(parents=True, exist_ok=True)
+    if pointer_path.is_file() and not pointer_path.is_symlink():
+        pointer_bytes = pointer_path.read_bytes()
+    else:
+        pointer = {"gig_id": record["gig_id"], "active_version": record["active_version"]}
+        pointer_bytes = canonical_json_bytes(pointer)
+        pointer_path.write_bytes(pointer_bytes)
+    record["active_pointer_sha256"] = digest_imported_bytes(pointer_bytes)
+    return pointer_path
+
+
 def _manifest(record_ids: list[str]) -> dict[str, object]:
     split = {"case_count": 8, "bar_pass": True, "metrics": {"recall": 1}}
     return {
@@ -113,19 +136,22 @@ def _manifest(record_ids: list[str]) -> dict[str, object]:
 def test_learning_publication_is_atomic_and_duplicate_safe(tmp_path: Path) -> None:
     home = tmp_path / "home"
     record = _record()
-    published = publish_learning_record(home_root=home, record=record)
+    pointer = _prepare_observation(home, record)
+    published = publish_learning_record(home_root=home, record=record, source_root=home, active_pointer_path=pointer)
     assert published.path.is_file()
     assert (home / "learning" / "journal.jsonl").is_file()
     duplicate = deepcopy(record)
     duplicate["learning_id"] = "learning_12345678-1234-4234-9234-000000000002"
     with pytest.raises(LearningRefusedError, match="already observed"):
-        publish_learning_record(home_root=home, record=duplicate)
+        publish_learning_record(home_root=home, record=duplicate, source_root=home, active_pointer_path=pointer)
 
 
 def test_orphan_after_rename_is_discarded_on_reconcile(tmp_path: Path) -> None:
     home = tmp_path / "home"
+    record = _record()
+    pointer = _prepare_observation(home, record)
     with pytest.raises(Exception, match="injected interruption"):
-        publish_learning_record(home_root=home, record=_record(), failpoint="after_atomic_rename")
+        publish_learning_record(home_root=home, record=record, source_root=home, active_pointer_path=pointer, failpoint="after_atomic_rename")
     result = reconcile_learning_root(home)
     assert result.retained == 0
     assert not list((home / "learning" / "records").glob("*.json"))
@@ -138,7 +164,7 @@ def test_learning_root_refuses_symlink_escape(tmp_path: Path) -> None:
     outside.mkdir()
     (home / "learning").symlink_to(outside, target_is_directory=True)
     with pytest.raises(LearningRefusedError, match="real directory"):
-        publish_learning_record(home_root=home, record=_record())
+        publish_learning_record(home_root=home, record=_record(), source_root=home, active_pointer_path=home / "pointer.json")
 
 
 def test_improvement_has_independent_evidence_and_quality_gates() -> None:
@@ -161,6 +187,30 @@ def test_improvement_has_independent_evidence_and_quality_gates() -> None:
         validate_improvement_manifest(regressing, {learning_id: record})
 
 
+def test_quality_replay_compares_candidate_to_bar_and_baseline() -> None:
+    splits = {"development": 4, "calibration": 2, "final_held_out_acceptance": 2}
+    baseline = {split: {"recall": "0.90", "false_positive_rate": "0.10"} for split in splits}
+    candidate = {split: {"recall": "0.95", "false_positive_rate": "0.05"} for split in splits}
+    result = evaluate_quality_replay(
+        baseline=baseline,
+        candidate=candidate,
+        minimums={"recall": "0.90"},
+        maximums={"false_positive_rate": "0.10"},
+        case_counts=splits,
+    )
+    assert result["final_holdout_pass"] is True
+    assert result["no_regression"] is True
+    candidate["final_held_out_acceptance"]["recall"] = "0.80"
+    failed = evaluate_quality_replay(
+        baseline=baseline,
+        candidate=candidate,
+        minimums={"recall": "0.90"},
+        maximums={"false_positive_rate": "0.10"},
+        case_counts=splits,
+    )
+    assert failed["final_holdout_pass"] is False
+
+
 def test_g22_improve_mode_advances_existing_version_once(tmp_path: Path) -> None:
     home = tmp_path / "home"
     target = tmp_path / "target"
@@ -173,8 +223,10 @@ def test_g22_improve_mode_advances_existing_version_once(tmp_path: Path) -> None
     record = _record()
     record["project_id"] = created.project_id
     record["gig_id"] = created.gig_id
-    publish_learning_record(home_root=home, record=record)
     resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=created.gig_id, allow_semantic_state=True)
+    pointer_path = resolved.path / "manifests/active-gig-version.json"
+    _prepare_observation(home, record, pointer_path)
+    publish_learning_record(home_root=home, record=record, source_root=home, active_pointer_path=pointer_path)
     manifest = _manifest([record["learning_id"]])
     manifest["project_id"] = created.project_id
     manifest["gig_id"] = created.gig_id

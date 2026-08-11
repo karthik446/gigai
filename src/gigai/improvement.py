@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Mapping
 
 from .canonical import canonical_json_bytes, parse_json_bytes, validate_entity_id, EntityPrefix
@@ -50,6 +51,72 @@ class ImprovementRefusedError(ImprovementError):
 class ImprovementGates:
     evidence_sufficient: bool
     quality_passed: bool
+
+
+def evaluate_quality_replay(
+    *,
+    baseline: Mapping[str, Mapping[str, int | str]],
+    candidate: Mapping[str, Mapping[str, int | str]],
+    minimums: Mapping[str, int | str],
+    maximums: Mapping[str, int | str],
+    case_counts: Mapping[str, int],
+) -> dict[str, object]:
+    """Compare baseline/candidate metrics over the fixed three-way split.
+
+    The caller supplies metrics produced by the accepted S16-EVAL extension;
+    this function owns only deterministic bar and no-regression evaluation.
+    Metrics are integers or decimal strings because canonical GigAI JSON does
+    not admit floating-point identity values.
+    """
+
+    splits = ("development", "calibration", "final_held_out_acceptance")
+    result: dict[str, object] = {}
+    for split in splits:
+        if split not in baseline or split not in candidate or split not in case_counts:
+            raise ImprovementRefusedError("quality replay is missing a corpus split", code="quality_replay_incomplete")
+        base = baseline[split]
+        actual = candidate[split]
+        metrics: dict[str, int | str] = {}
+        bar_pass = True
+        no_regression = True
+        for metric, minimum in minimums.items():
+            if metric not in actual or metric not in base:
+                raise ImprovementRefusedError("quality replay is missing a metric", code="quality_replay_incomplete")
+            metrics[metric] = actual[metric]
+            bar_pass &= _decimal(actual[metric]) >= _decimal(minimum)
+            no_regression &= _decimal(actual[metric]) >= _decimal(base[metric])
+        for metric, maximum in maximums.items():
+            if metric not in actual or metric not in base:
+                raise ImprovementRefusedError("quality replay is missing a metric", code="quality_replay_incomplete")
+            metrics[metric] = actual[metric]
+            bar_pass &= _decimal(actual[metric]) <= _decimal(maximum)
+            no_regression &= _decimal(actual[metric]) <= _decimal(base[metric])
+        result[split] = {
+            "case_count": case_counts[split],
+            "bar_pass": bar_pass,
+            "metrics": metrics,
+            "no_regression": no_regression,
+        }
+    final = result["final_held_out_acceptance"]
+    assert isinstance(final, Mapping)
+    result["final_holdout_pass"] = final["bar_pass"] is True
+    result["no_regression"] = all(
+        isinstance(value, Mapping) and value.get("no_regression") is True
+        for value in result.values()
+        if isinstance(value, Mapping)
+    )
+    return result
+
+
+def _decimal(value: int | str) -> Decimal:
+    if type(value) is int:
+        return Decimal(value)
+    if type(value) is str:
+        try:
+            return Decimal(value)
+        except InvalidOperation as exc:
+            raise ImprovementRefusedError("quality metric is not numeric", code="quality_metric_invalid") from exc
+    raise ImprovementRefusedError("quality metric has an unsupported type", code="quality_metric_invalid")
 
 
 def validate_improvement_manifest(
@@ -139,5 +206,6 @@ __all__ = [
     "ImprovementError",
     "ImprovementGates",
     "ImprovementRefusedError",
+    "evaluate_quality_replay",
     "validate_improvement_manifest",
 ]

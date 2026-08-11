@@ -30,6 +30,7 @@ from .lifecycle import (
     record_feedback,
     reject_offline,
     revise_offline,
+    stage_improvement_manifest,
     start_interview,
 )
 from .proposal_interview import InterviewHTTPServer
@@ -67,7 +68,7 @@ def cli(context: click.Context) -> None:
 
     if context.invoked_subcommand is None:
         raise click.UsageError(
-            "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', "
+            "Choose 'setup', 'doctor', 'init', 'create', 'improve', 'feedback', 'revise', "
             "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
             "'plan', 'run', 'run-details', 'workpad', 'check', or 'open'; "
             "use --help for details."
@@ -626,6 +627,95 @@ def create_command(
             f"Gig proposal {result.proposal_id} is ready for operator review; "
             "no Gig version or Run was created."
         )
+
+
+@cli.command("improve")
+@click.argument("manifest", type=click.Path(path_type=Path, dir_okay=False))
+@click.option("--request", "request_value", required=True, help="Human-readable improvement request.")
+@click.option("--reference", "reference_values", multiple=True, type=click.Path(path_type=Path, dir_okay=False), required=True, help="Explicit local evidence reference; repeat as needed.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--model-target", default="offline-default", show_default=True)
+@click.option("--max-rounds", type=click.IntRange(min=1, max=1024), default=3, show_default=True)
+@click.option("--open/--no-open", "open_browser", default=True)
+@click.option("--json", "as_json", is_flag=True)
+def improve_command(
+    manifest: Path,
+    request_value: str,
+    reference_values: tuple[Path, ...],
+    target_value: Path | None,
+    home_value: Path | None,
+    model_target: str,
+    max_rounds: int,
+    open_browser: bool,
+    as_json: bool,
+) -> None:
+    """Open an explicit G20 improvement proposal interview."""
+
+    _require_supported_platform()
+    try:
+        home = home_value or default_home_root()
+        stage_improvement_manifest(
+            home_root=home,
+            requested_target=target_value,
+            manifest=manifest.read_bytes(),
+        )
+        started = start_interview(
+            home_root=home,
+            requested_target=target_value,
+            name="improve",
+            request=request_value,
+            reference_paths=reference_values,
+            max_rounds=max_rounds,
+            improve=True,
+        )
+        server = InterviewHTTPServer(
+            started.session,
+            on_session=lambda session: persist_interview_session(
+                workpad=started.workpad,
+                project_id=started.project_id,
+                gig_id=started.gig_id,
+                session=session,
+            ),
+            on_questions=lambda session: (
+                session
+                if any(item.question_id == "operator-confirmation" for item in session.questions)
+                else generate_model_questions(
+                    config=load_config(home),
+                    model_target=model_target,
+                    session=session,
+                    reference_bytes=dict(started.reference_bytes),
+                )
+            ),
+            on_approval=lambda session: approve_interview_session(
+                home_root=home,
+                requested_target=target_value,
+                start=started,
+                session=session,
+            ),
+        ).start()
+        try:
+            click.echo(f"GigAI local improve interview: {server.url}", err=True)
+            if open_browser:
+                webbrowser.open(server.url, new=2)
+            session = server.wait()
+        finally:
+            server.close()
+        payload = {
+            "gig_id": started.gig_id,
+            "project_id": started.project_id,
+            "proposal_id": session.proposal_id,
+            "session_id": session.session_id,
+            "status": session.state,
+            "kind": "improve",
+            "url": server.url,
+        }
+        if as_json:
+            click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        else:
+            click.echo(f"GigAI improve interview {session.session_id} ended in {session.state}.")
+    except (LifecycleError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @cli.command("feedback")
