@@ -85,7 +85,7 @@ fields, and requires:
 | `current_snapshot` / `prior_snapshot` | Exact snapshot artifact references copied from the occurrences. |
 | `current_output` / `prior_output` | Exact nullable output artifact references; missing output prevents a changed/unchanged result. |
 | `current_goal_graph` / `prior_goal_graph` | Exact Goal Graph artifact identities from both Run manifests. |
-| `current_review_contract` / `prior_review_contract` | Exact Review Contract identities from both sealed Run inputs. |
+| `current_review_contracts` / `prior_review_contracts` | Complete ordered Review Contract identity sets from both sealed Run inputs. |
 | `method_id` / `method_version` | Deterministic comparison method identity and version. |
 | `result` | Exactly `changed`, `unchanged`, `incomparable`, or `blocked`. |
 | `reason` | Nullable bounded reason; required for `incomparable` and `blocked`. |
