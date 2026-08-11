@@ -18,7 +18,7 @@ G20 -> G23
 |---|---|---|---|
 | [G20](G20-local-improve-and-evaluator-learning.md) | Local evidence-backed improvement proposals and evaluator learning | G16, S16-EVAL, G18, G19, G22 | Complete |
 | [G21](G21-recurring-and-comparative-gigs.md) | Recurring and comparative Gigs | G13, G14, G20 | Complete |
-| [G23](G23-gig-self-containment-and-portability.md) | Capability-manifest reference and proposal-lineage resolution on the active Gig version | G17, G19, G20, G22 | Proposed for review |
+| [G23](G23-gig-self-containment-and-portability.md) | Capability-manifest reference and proposal-lineage resolution on the active Gig version | G17, G19, G20, G22 | Amendment accepted; proposed |
 
 G20 must preserve G19's explicit target-effect authority and the existing
 workpad journal/active-version authority. G21 must not be activated merely

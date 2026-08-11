@@ -12,8 +12,7 @@ authority for the contracts already implemented and for the boundaries that
 V15 must preserve.
 
 **Current roadmap gate:** G13 through G22 are complete and independently
-evidenced. G23 has a
-proposed goal contract but is not activated. G24 remains a planning-only
+evidenced. G23 has an accepted additive amendment but is not activated. G24 remains a planning-only
 release-lane alpha-readiness candidate. Later
 candidates remain planning-only until their individual goal contracts are
 reviewed and approved.
@@ -658,6 +657,7 @@ and lineage fixtures including a multi-hop chain, a cycle, and a
 cross-Gig/unbound-manifest refusal; a two-disposable-home reinstallation
 record; mutation evidence for the semantic-verification and lineage checks;
 and fresh-wheel replay. See the [G23 goal contract](../development/goals/phase-5/G23-gig-self-containment-and-portability.md).
+The accepted contract amendment is [here](../development/evidence/phase-5/G23/gig-self-containment-and-portability-contract-amendment.md).
 
 #### G24 — Alpha release readiness and final repository cleanup
 
