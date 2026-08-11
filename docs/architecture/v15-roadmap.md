@@ -11,8 +11,8 @@ first bounded deterministic Run. It does not obsolete V14. V14 remains the
 authority for the contracts already implemented and for the boundaries that
 V15 must preserve.
 
-**Current roadmap gate:** G13 through G20 and G22 are complete and independently
-evidenced. G21 is active under its accepted additive amendment; G23 has a
+**Current roadmap gate:** G13 through G22 are complete and independently
+evidenced. G23 has a
 proposed goal contract but is not activated. G24 remains a planning-only
 release-lane alpha-readiness candidate. Later
 candidates remain planning-only until their individual goal contracts are
@@ -626,13 +626,15 @@ Add explicit schedule occurrences, repeatable reference snapshots, prior-output
 comparison, and operator-visible missed-run behavior. Start with manually
 triggered daily/weekly/monthly examples before adding a daemon or OS scheduler.
 
-Exit evidence: a daily market-state or weekly screener fixture and a monthly
-spreadsheet fixture each produce separate Runs, preserve prior evidence, and
-fail closed when a reference snapshot or capability is unavailable.
+Status: complete. Exit evidence is recorded in the [G21 completion audit](../development/evidence/phase-5/G21/completion-audit.md)
+and [terminal handoff](../development/evidence/phase-5/G21/terminal-handoff.md):
+a daily market-state, weekly screener, and monthly spreadsheet fixture produce
+separate Runs, preserve prior evidence, compare sealed outputs without selecting
+a winner, and fail closed when snapshot evidence is unavailable.
 
 The reviewed G21 contract is [here](../development/goals/phase-5/G21-recurring-and-comparative-gigs.md)
 and its accepted additive amendment is [here](../development/evidence/phase-5/G21/occurrence-comparison-contract-amendment.md).
-G21 is active but does not authorize a daemon, OS scheduler, automatic retry,
+G21 is complete but does not authorize a daemon, OS scheduler, automatic retry,
 or background provider activity.
 
 #### G23 — Gig self-containment and portability

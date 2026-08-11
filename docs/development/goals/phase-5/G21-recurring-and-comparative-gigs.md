@@ -1,11 +1,12 @@
 # G21 — Recurring and Comparative Gigs
 
-- Status: Active; contract amendment accepted; implementation in progress
+- Status: Complete; contract amendment accepted; implementation and closeout
+  evidence accepted
 - Depends on: G13 and G14 sealed Run/sequential scheduler evidence, and the
   G20 completion audit and terminal handoff; consumes existing G15/G16 review
   artifacts without changing their authority
-- Unblocks: later alpha-readiness and release-lane work; does not authorize a
-  daemon, OS scheduler, or background provider activity
+- Unblocks: G24 alpha-readiness planning after G23 completion; does not
+  authorize a daemon, OS scheduler, or background provider activity
 
 ## Outcome
 
