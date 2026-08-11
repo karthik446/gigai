@@ -1,6 +1,6 @@
 # GigAI Internal Changelog
 
-- Status: Initial structure; historical backfill in progress
+- Status: Historical backfill in progress; G20 closeout recorded
 - Snapshot date: 2026-08-10
 - Authority: goal contracts, accepted amendments, completion audits, terminal
   handoffs, and committed evidence remain authoritative
@@ -21,7 +21,7 @@ non-contiguous and crosses lanes:
 - Phase 3: G13–G18
 - Phase 2: G22
 - Phase 4: G19
-- Phase 5: G20 proposed for review; G21 planning-only
+- Phase 5: G20 complete; G21 planning-only
 - Research/contract records: S16-EVAL, S18-01 through S18-05, and S22-01
 
 The implementation chronology and the dependency graph are both valid but are
@@ -35,14 +35,14 @@ schema-resource count, release, or next-goal status changes. A stale snapshot
 must be marked with its last-known date; it must never silently be treated as
 current.
 
-- Roadmap gate: G00–G19 and G22 are represented as complete; G20 is the next
-  implementation candidate.
-- Packaged schema resources: 23.
+- Roadmap gate: G00–G20 and G22 are represented as complete; G21 is the next
+  planning candidate.
+- Packaged schema resources: 25.
 - Accepted research/contract prerequisites: S16-EVAL, S18-01 through S18-05,
   and S22-01.
-- G20: Goal contract and additive learning/manifest amendment accepted; runtime
-  implementation is now in progress. G21: no Goal document or implementation
-  work yet.
+- G20: complete; its learning records, improvement manifest, two gates, recovery,
+  improve approval path, mutation report, and installed replay are accepted.
+  G21: no runtime implementation work yet.
 - Current closeout: G19 completion audit and terminal handoff are accepted.
 - Known reconciliation work: some older README, Phase 3 status, and evidence
   status lines still reflect earlier snapshots and must be corrected explicitly.
@@ -194,7 +194,9 @@ accepted amendment, mutation report, and installed replay.
 
 ### G20 — Local `improve` and evaluator learning
 
-Contract and additive amendment accepted; runtime implementation in progress.
+Contract, additive amendment, runtime implementation, mutation evidence, and
+installed replay complete. See the [G20 completion audit](evidence/phase-5/G20/completion-audit.md)
+and [terminal handoff](evidence/phase-5/G20/terminal-handoff.md).
 See the [G20 goal contract](goals/phase-5/G20-local-improve-and-evaluator-learning.md)
 and [learning-contract amendment](evidence/phase-5/G20/learning-contract-amendment.md).
 

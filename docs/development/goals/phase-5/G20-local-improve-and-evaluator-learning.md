@@ -1,6 +1,6 @@
 # G20 — Local Improve and Evaluator Learning
 
-- Status: Proposed for review; not activated
+- Status: Complete; accepted implementation
 - Depends on: G16 completion and terminal handoff, accepted S16-EVAL
   methodology and improvement-evaluation extension, G18 completion and
   terminal handoff, G19 completion and terminal handoff, and G22 completion

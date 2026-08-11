@@ -11,8 +11,8 @@ first bounded deterministic Run. It does not obsolete V14. V14 remains the
 authority for the contracts already implemented and for the boundaries that
 V15 must preserve.
 
-**Current roadmap gate:** G13 through G19 and G22 are complete and independently
-evidenced. G20 is the next implementation candidate; later candidates remain
+**Current roadmap gate:** G13 through G20 and G22 are complete and independently
+evidenced. G21 is the next planning candidate; later candidates remain
 planning-only until their individual goal contracts are reviewed and approved.
 G19 remains bounded by its accepted contract and does not authorize broader
 target effects by inference.
@@ -603,6 +603,12 @@ learning root (`home_root / "learning"`). Recovery-policy and bounded-
 parallelism proposals remain deferred until a later contract establishes their
 evidence and authority boundaries. Accepted changes create a new proposal and
 version through the existing `gig-proposal` and active-version lifecycle.
+
+Status: complete. Exit evidence is recorded in the [G20 completion audit](../development/evidence/phase-5/G20/completion-audit.md)
+and [terminal handoff](../development/evidence/phase-5/G20/terminal-handoff.md):
+local provenance-tagged learning records, independently enforced evidence and
+quality gates, authoring recovery, explicit G22 improve approval, stale-base
+refusal, mutation evidence, and fresh-wheel replay.
 
 #### G21 — Recurring and comparative Gigs
 
