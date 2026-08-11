@@ -12,6 +12,7 @@ from gigai.portability import (
     resolve_proposal_lineage,
     verify_active_version_portability,
 )
+import gigai.portability as portability
 from tests.test_g08_offline_create_lifecycle import _configured_target, _uuids
 from tests.test_g17_capabilities import _capability, _manifest, _stage_source
 
@@ -121,3 +122,35 @@ def test_g23_reinstalls_from_manifest_and_source_on_second_home(tmp_path):
     assert parse_json_bytes(record)["outcome"] == "installed"
     assert (second_home / "tools/cap_00000000-0000-4000-8000-000000000003/artifact").read_bytes() == b"portable source bytes\n"
     assert not (first_home / "tools/cap_00000000-0000-4000-8000-000000000003").exists()
+
+
+@pytest.mark.parametrize(
+    ("proposals", "code"),
+    [
+        (
+            {
+                "gp_current": {"proposal_id": "gp_current", "gig_id": "gig_a", "parent_proposal_id": "gp_parent", "kind": "improve"},
+                "gp_parent": {"proposal_id": "gp_parent", "gig_id": "gig_a", "parent_proposal_id": "gp_current", "kind": "amend"},
+            },
+            "refused_lineage_cycle",
+        ),
+        (
+            {"gp_current": {"proposal_id": "gp_current", "gig_id": "gig_a", "parent_proposal_id": "gp_missing", "kind": "improve"}},
+            "refused_missing_parent",
+        ),
+        (
+            {"gp_current": {"proposal_id": "gp_current", "gig_id": "gig_b", "parent_proposal_id": None, "kind": "create"}},
+            "refused_cross_gig_lineage",
+        ),
+    ],
+)
+def test_g23_lineage_refusals_are_closed(monkeypatch, tmp_path, proposals, code):
+    monkeypatch.setattr(portability, "_historical_proposals", lambda _root, _sealed: proposals)
+    with pytest.raises(PortabilityError) as error:
+        resolve_proposal_lineage(
+            tmp_path,
+            approved_proposal_id="gp_current",
+            gig_id="gig_a",
+            sealed_commit="a" * 40,
+        )
+    assert error.value.code == code

@@ -145,8 +145,10 @@ def _historical_proposals(root: Path, sealed_commit: str) -> dict[str, Mapping[s
         if probe.returncode != 0:
             continue
         payload = parse_json_bytes(_git_bytes(root, "show", f"{commit}:manifests/gig-proposal.json"))
-        if isinstance(payload, dict) and isinstance(payload.get("proposal_id"), str):
-            found[payload["proposal_id"]] = payload
+        if not isinstance(payload, dict) or not isinstance(payload.get("proposal_id"), str):
+            raise PortabilityError("historical proposal is malformed", code="refused_unsealed_lineage")
+        _require_schema("gig-proposal.schema.json", canonical_json_bytes(payload), "refused_unsealed_lineage")
+        found[payload["proposal_id"]] = payload
     return found
 
 
