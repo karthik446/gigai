@@ -43,7 +43,9 @@ jobs:
   ci:
     name: Exact-tag CI
     needs: preflight
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/pull_request.yaml
+    with:
+      full_matrix: true
 
   build:
     name: Build and attest release artifacts
