@@ -26,7 +26,7 @@ from gigai.validators import SCHEMA_NAMES
 
 _G15_SCHEMA_DIGESTS = {
     "adjudication.schema.json": "9b6d3f489dcff15b510e4c041be5bcef0afcd10d6e9d584a21ef79c9842f49fe",
-    "active-gig-version.schema.json": "77a2f9df0928a8cfe60b496f63b981ab941268cdfc8c557902549f645e4a76f6",
+    "active-gig-version.schema.json": "634af1729f4dbfe1f8564fd9d31b6c5cb8c56a2e1c7b80393e59ae877f76f5e1",
     "common.schema.json": "825a15da8f61348cc16afe315c2aca0e3218c78c0bf0f93394f74fe78cb7b53a",
     "feedback.schema.json": "c89cda74feb86d34448a3e8afbfcded2554e3c077622ecfaa64e525951502461",
     "finding.schema.json": "4444e0cfec3a32bb83b016172331072a369afb2699b093ad670dc36dfbcdd8f7",
