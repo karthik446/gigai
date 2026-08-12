@@ -12,7 +12,7 @@ from gigai.cli import cli
 from gigai.canonical import canonical_json_bytes, parse_json_bytes
 from gigai.index import JournalIndexError, read_index, rebuild_index
 from gigai.diagnostics import run_doctor
-from gigai.lifecycle import create_offline
+from gigai.lifecycle import create_offline, start_interview
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 from gigai.workpad import resolve_workpad
@@ -115,6 +115,49 @@ def test_index_repair_temp_stays_inside_allowed_scratch_surface(
     assert repaired.project_id == created.project_id
     assert not list((created.workpad / "scratch").iterdir())
     assert not (created.workpad / ".state.sqlite.tmp").exists()
+
+
+def test_index_repair_preserves_g22_interview_trace(
+    tmp_path: Path,
+) -> None:
+    home, target = _configured(tmp_path)
+    reference = tmp_path / "reference.txt"
+    reference.write_text("UAT reference\n", encoding="utf-8")
+    started = start_interview(
+        home_root=home,
+        requested_target=target,
+        name="trace-preservation-proof",
+        request="Inspect the interview trace.",
+        reference_paths=(reference,),
+        uuid_factory=_uuids(),
+    )
+    index_path = started.workpad / "state.sqlite"
+
+    def trace_rows() -> list[tuple[object, ...]]:
+        with sqlite3.connect(index_path) as connection:
+            return connection.execute(
+                "SELECT session_id, sequence, event, state, payload_sha256, occurred_at "
+                "FROM interview_events ORDER BY session_id, sequence"
+            ).fetchall()
+
+    before = trace_rows()
+    assert before
+    read_index(
+        workpad=started.workpad,
+        project_id=started.project_id,
+        gig_id=started.gig_id,
+    )
+    assert trace_rows() == before
+
+    with sqlite3.connect(index_path) as connection:
+        connection.execute("UPDATE projection SET payload = ?", (b"tampered",))
+        connection.commit()
+    read_index(
+        workpad=started.workpad,
+        project_id=started.project_id,
+        gig_id=started.gig_id,
+    )
+    assert trace_rows() == before
 
 
 def test_index_never_conceals_authoritative_workpad_divergence(tmp_path: Path) -> None:

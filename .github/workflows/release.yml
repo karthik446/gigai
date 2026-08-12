@@ -256,6 +256,12 @@ jobs:
           PY
       - env:
           GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/*.whl dist/*.tar.gz dist/SHA256SUMS dist/release-manifest.json --title "GigAI ${VERSION}" --generate-notes
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${REPOSITORY}" \
+            --verify-tag \
+            dist/*.whl dist/*.tar.gz dist/SHA256SUMS dist/release-manifest.json \
+            --title "GigAI ${VERSION}" \
+            --generate-notes
