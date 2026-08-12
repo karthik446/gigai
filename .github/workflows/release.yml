@@ -129,6 +129,7 @@ jobs:
         with:
           packages-dir: publish/
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
   verify-testpypi:
     name: TestPyPI clean install on ${{ matrix.os }}
