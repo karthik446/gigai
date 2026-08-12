@@ -1,9 +1,14 @@
-name: CI
+name: Pull request
 
 on:
-  push:
   pull_request:
   workflow_call:
+    inputs:
+      full_matrix:
+        description: Run every supported Python and operating-system combination.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,22 +27,34 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          FULL_MATRIX: ${{ inputs.full_matrix }}
           SHA: ${{ github.sha }}
         run: |
-          if [ "${EVENT_NAME}" = "pull_request" ]; then
+          if [ "${FULL_MATRIX}" = "true" ]; then
+            code_changed=true
+            changed="full compatibility profile"
+          elif [ "${EVENT_NAME}" = "pull_request" ]; then
             changed="$(git diff --name-only "${BASE_SHA}...${SHA}")"
+            code_changed=false
+            if [ -n "${changed}" ]; then
+              while IFS= read -r path; do
+                case "${path}" in
+                  *.md|*.markdown) ;;
+                  *) code_changed=true; break ;;
+                esac
+              done <<< "${changed}"
+            fi
           else
             changed="$(git diff --name-only "${SHA}^" "${SHA}")"
-          fi
-
-          code_changed=false
-          if [ -n "${changed}" ]; then
-            while IFS= read -r path; do
-              case "${path}" in
-                *.md|*.markdown) ;;
-                *) code_changed=true; break ;;
-              esac
-            done <<< "${changed}"
+            code_changed=false
+            if [ -n "${changed}" ]; then
+              while IFS= read -r path; do
+                case "${path}" in
+                  *.md|*.markdown) ;;
+                  *) code_changed=true; break ;;
+                esac
+              done <<< "${changed}"
+            fi
           fi
           echo "code_changed=${code_changed}" >> "${GITHUB_OUTPUT}"
           echo "implementation changes: ${code_changed}"
@@ -50,8 +67,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python: ["3.11", "3.12", "3.13"]
+        os: ${{ fromJSON(inputs.full_matrix && '["ubuntu-latest", "macos-latest"]' || '["ubuntu-latest"]') }}
+        python: ${{ fromJSON(inputs.full_matrix && '["3.11", "3.12", "3.13"]' || '["3.11"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -118,7 +135,7 @@ jobs:
 
   debian-offline:
     needs: changes
-    if: needs.changes.outputs.code_changed == 'true'
+    if: needs.changes.outputs.code_changed == 'true' && inputs.full_matrix
     name: Debian 12 offline container
     runs-on: ubuntu-latest
     steps:

@@ -1,0 +1,16 @@
+name: Compatibility job
+
+on:
+  schedule:
+    - cron: "17 06 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    name: Full compatibility matrix
+    uses: ./.github/workflows/pull_request.yaml
+    with:
+      full_matrix: true

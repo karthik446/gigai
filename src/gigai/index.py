@@ -16,6 +16,16 @@ class JournalIndexError(RuntimeError):
     """The index cannot truthfully represent the authoritative journal."""
 
 
+_INTERVIEW_EVENTS_COLUMNS = (
+    ("session_id", "TEXT", 1, 1),
+    ("sequence", "INTEGER", 1, 2),
+    ("event", "TEXT", 1, 0),
+    ("state", "TEXT", 1, 0),
+    ("payload_sha256", "TEXT", 1, 0),
+    ("occurred_at", "TEXT", 1, 0),
+)
+
+
 @dataclass(frozen=True)
 class JournalProjection:
     project_id: str
@@ -123,6 +133,7 @@ def read_index(*, workpad: Path, project_id: str, gig_id: str) -> JournalProject
 
 
 def _write_projection(path: Path, projection: JournalProjection) -> None:
+    interview_events = _read_interview_events(path)
     scratch = path.parent / "scratch"
     if scratch.is_symlink() or (scratch.exists() and not scratch.is_dir()):
         raise JournalIndexError("index scratch surface is unavailable")
@@ -141,12 +152,66 @@ def _write_projection(path: Path, projection: JournalProjection) -> None:
                 "INSERT INTO projection(payload) VALUES (?)",
                 (canonical_json_bytes(projection.as_dict()),),
             )
+            if interview_events is not None:
+                connection.execute(
+                    "CREATE TABLE interview_events ("
+                    "session_id TEXT NOT NULL, sequence INTEGER NOT NULL, "
+                    "event TEXT NOT NULL, state TEXT NOT NULL, "
+                    "payload_sha256 TEXT NOT NULL, occurred_at TEXT NOT NULL, "
+                    "PRIMARY KEY(session_id, sequence))"
+                )
+                connection.executemany(
+                    "INSERT INTO interview_events "
+                    "(session_id, sequence, event, state, payload_sha256, occurred_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    interview_events,
+                )
             connection.commit()
         finally:
             connection.close()
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _read_interview_events(
+    path: Path,
+) -> list[tuple[object, ...]] | None:
+    """Read the G22 trace before replacing the disposable projection database.
+
+    ``state.sqlite`` is currently shared by the rebuildable projection and the
+    append-only interview trace.  A malformed database can be safely replaced,
+    but a recognized trace table must never be silently discarded.
+    """
+
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        try:
+            table = connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'interview_events'"
+            ).fetchone()
+        except sqlite3.DatabaseError:
+            return None
+        if table is None:
+            return None
+        columns = tuple(
+            (row[1], row[2], row[3], row[5])
+            for row in connection.execute("PRAGMA table_info(interview_events)")
+        )
+        if columns != _INTERVIEW_EVENTS_COLUMNS:
+            raise JournalIndexError("interview trace table schema is invalid")
+        return connection.execute(
+            "SELECT session_id, sequence, event, state, payload_sha256, occurred_at "
+            "FROM interview_events ORDER BY session_id, sequence"
+        ).fetchall()
+    finally:
+        connection.close()
 
 
 def _read_projection(path: Path) -> JournalProjection:
