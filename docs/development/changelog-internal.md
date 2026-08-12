@@ -21,7 +21,8 @@ non-contiguous and crosses lanes:
 - Phase 3: G13–G18
 - Phase 2: G22
 - Phase 4: G19
-- Phase 5: G20, G21, and G23 complete; G24 remains planning-only
+- Phase 5: G20, G21, and G23 complete; G24 UAT proposed; G25 alpha readiness
+  remains planning-only
 - Research/contract records: S16-EVAL, S18-01 through S18-05, and S22-01
 
 The implementation chronology and the dependency graph are both valid but are
@@ -35,8 +36,9 @@ schema-resource count, release, or next-goal status changes. A stale snapshot
 must be marked with its last-known date; it must never silently be treated as
 current.
 
-- Roadmap gate: G00–G23 are represented as complete; G24 remains a
-  planning-only release-lane alpha-readiness candidate.
+- Roadmap gate: G00–G23 are represented as complete; G24 is the proposed
+  local UAT/dogfooding gate and G25 remains the later alpha-readiness
+  candidate.
 - Packaged schema resources: 27.
 - Accepted research/contract prerequisites: S16-EVAL, S18-01 through S18-05,
   and S22-01.
@@ -49,7 +51,8 @@ current.
   G23 is independent of G21 and does not declare an alpha or public
   release.
 - Current closeout: G21 and G23 are complete after their corrective review
-  passes; G24 remains the later release-lane planning candidate.
+  passes; G24 is the proposed local UAT gate and G25 is the later
+  alpha-readiness lane.
 - Known reconciliation work: some older README, Phase 3 status, and evidence
   status lines still reflect earlier snapshots and must be corrected explicitly.
 
@@ -236,6 +239,17 @@ single-purpose slot already used by `create` and G20 `improve` proposals.
 Implementation evidence is recorded under the G23 evidence directory. G23 is
 independent of G21 and does not
 declare an alpha or public release.
+
+### G24 — Human UAT and dogfooding
+
+G24 is the proposed human-executed UAT gate before alpha planning. The operator
+runs real workflows on the real machine; the review partner inspects each
+checkpoint across CLI behavior, SQLite, workpad artifacts, Git handoffs, active
+version state, and rebuildable projections. UAT records remain local and
+sanitized. An early checkpoint distinguishes `registry.sqlite` from workpad
+`state.sqlite` and tests whether projection rebuild preserves G22's
+`interview_events` rows. G24 does not add runtime behavior or declare alpha; it
+supplies the operator evidence G25 must use.
 
 ## Cross-goal change ledger
 

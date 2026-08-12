@@ -53,5 +53,5 @@ made actor attribution mandatory, followed by the final suite and wheel replay.
 
 G21 is complete for manually triggered recurring and comparative Gigs. It does
 not ship a scheduler, recurring background authority, provider execution, or
-target mutation. G23 remains independent, and G24 remains the later alpha
-readiness/release-lane goal.
+target mutation. G23 remains independent; G24 is the local UAT gate and G25 is
+the later alpha readiness/release-lane goal.

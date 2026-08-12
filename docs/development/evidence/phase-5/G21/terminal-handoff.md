@@ -2,7 +2,8 @@
 
 - Status: Accepted terminal handoff
 - Completed goal: G21 recurring and comparative Gigs
-- Next planning consumer: G24 alpha release readiness, after G23 is also complete
+- Next planning consumer: G24 local UAT and dogfooding; G25 owns alpha release
+  readiness after G23 and G24 are complete
 
 G21 may be consumed as evidence for manual daily, weekly, and monthly
 occurrences and winnerless comparisons. It does not authorize a daemon, OS
@@ -21,5 +22,6 @@ improvement gates. G21 does not turn comparison output into mutation or
 improvement authority.
 
 G23 remains independent of G21 and must complete its own portability contract
-and two-machine evidence. G24 may begin alpha-readiness planning only after
-both G21 and G23 have accepted completion audits and terminal handoffs.
+and two-machine evidence. G24 may begin local UAT after G23 is complete; G25
+may begin alpha-readiness planning only after both G23 and G24 have accepted
+completion evidence.

@@ -12,6 +12,7 @@ declare an alpha or public release.
 ```text
 G19 -> G20 -> G21
 G20 -> G23
+G23 -> G24 -> G25
 ```
 
 | Goal | Outcome | Depends on | Initial state |
@@ -19,6 +20,7 @@ G20 -> G23
 | [G20](G20-local-improve-and-evaluator-learning.md) | Local evidence-backed improvement proposals and evaluator learning | G16, S16-EVAL, G18, G19, G22 | Complete |
 | [G21](G21-recurring-and-comparative-gigs.md) | Recurring and comparative Gigs | G13, G14, G20 | Complete |
 | [G23](G23-gig-self-containment-and-portability.md) | Capability-manifest reference and proposal-lineage resolution on the active Gig version | G17, G19, G20, G22 | Complete |
+| [G24](G24-human-uat-and-dogfooding.md) | Human-executed UAT and dogfooding across real GigAI workflows | G18, G19, G20, G21, G22, G23 | Proposed for review |
 
 G20 must preserve G19's explicit target-effect authority and the existing
 workpad journal/active-version authority. G21 must not be activated merely
@@ -49,3 +51,9 @@ reference snapshots, manual occurrence lifecycle, explicit missed-state
 handling, deterministic comparisons, mutation evidence, installed replay,
 completion audit, and terminal handoff. Evidence belongs under
 `docs/development/evidence/phase-5/G21/`.
+
+G24 is a human-executed UAT goal. Its session records live outside the
+repository under the operator's local GigAI UAT directory; no prompts,
+references, credentials, databases, transcripts, or model outputs are
+committed as evidence. The goal contract defines the checkpoint-by-checkpoint
+review protocol and artifact authority map.
