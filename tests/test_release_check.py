@@ -21,10 +21,9 @@ def test_pypi_publish_jobs_receive_only_distributions() -> None:
     assert workflow.count("cp dist/*.whl dist/*.tar.gz publish/") == 2
     assert workflow.count("packages-dir: publish/") == 2
     assert "packages-dir: dist/" not in workflow
-    assert (
-        "--index https://pypi.org/simple --index https://test.pypi.org/simple"
-        in workflow
-    )
+    assert "--index https://test.pypi.org/simple" in workflow
+    assert "--index https://pypi.org/simple" in workflow
+    assert "--index-strategy unsafe-best-match" in workflow
 
 
 def _write_project(path: Path, version: str = "0.1.0") -> Path:
