@@ -1,6 +1,7 @@
 # G23 — Gig Self-Containment and Portability
 
-- Status: Proposed for review; not activated
+- Status: Complete after post-closeout repair; additive amendment accepted
+- Accepted amendment: [G23 gig self-containment and portability contract amendment](../../evidence/phase-5/G23/gig-self-containment-and-portability-contract-amendment.md)
 - Depends on: G17 completion (capability manifest and installation), G19
   completion and terminal handoff, G20 completion and terminal handoff, and
   G22 completion audit and terminal handoff; consumes G09 workpad and G04/G05
@@ -49,8 +50,9 @@ Before runtime implementation, G23 must read and cite:
   [terminal handoff](../../evidence/phase-2/G22/terminal-handoff.md) for the
   proposal/approval surface this goal reads but does not change.
 
-Before runtime code, an accepted additive amendment must resolve six points
-raised in contract review and settle their exact schema and runtime shape:
+Before runtime code, G23 must conform to the accepted additive amendment,
+which resolves six points raised in contract review and settles their exact
+schema and runtime shape:
 
 1. **Field naming.** The new reference field is named `capability_manifest`,
    not `tool_manifest`. G17 already owns the term "capability manifest"
@@ -94,8 +96,10 @@ raised in contract review and settle their exact schema and runtime shape:
      existing check unmodified.
 
      G23 therefore adds a new sealed-pointer comparison rather than merely
-     reusing `_resolve_authority` as-is: read the live active pointer; read
-     `manifests/active-gig-version.json` from `journal_commit` via
+     reusing `_resolve_authority` as-is: read the live active pointer; derive
+     the unique `pointer_publication_commit` from the `gig_accepted` child
+     handoff of `journal_commit` as specified in the accepted amendment; read
+     `manifests/active-gig-version.json` from that publication commit via
      `git show <commit>:manifests/active-gig-version.json`; parse and
      canonicalize both documents, compare the complete live pointer against
      the complete sealed copy, and refuse as
@@ -216,11 +220,13 @@ add a package registry, remote fetch, or network resolution step.
   `manifests/capabilities/<manifest-id>.json` artifact; G23 does not
   introduce a second capability-manifest storage location.
 - Implement `verify_gig_portability(resolved_workpad)` that first performs
-  the new sealed-pointer comparison from Contract gate point 3 — reading
-  `active-gig-version.json` from `journal_commit` via `git show` and
-  comparing it against the live pointer, refusing `refused_unsealed_pointer`
-  on any mismatch — then performs the three semantic checks against the
-  sealed pointer, and returns a typed pass/fail result naming the exact
+  the new sealed-pointer comparison from Contract gate point 3 — deriving
+  `pointer_publication_commit` from the matching `gig_accepted` child of
+  `journal_commit`, reading `active-gig-version.json` from that commit via
+  `git show`, and comparing it against the live pointer. It refuses
+  `refused_unsealed_pointer`, `refused_unpublished_pointer`, or
+  `refused_ambiguous_publication` before performing the three semantic checks
+  against the sealed pointer, and returns a typed result naming the exact
   failing check; never a boolean alone and never a check performed against
   an unrevalidated live-tree pointer.
 - Implement `resolve_proposal_lineage(gig_id, active_version)` performing the
@@ -305,6 +311,11 @@ capability_manifest_present? --no--> reported_non_portable (terminal, informatio
 
 `pointer_sealed` is a prerequisite, not one of the three manifest checks,
 and it is new code, not a reuse of `run.py:268`'s `_resolve_authority`.
+If the approval commit is sealed but its `gig_accepted` continuation has not
+yet published the pointer, the result is `refused_unpublished_pointer`; G23
+does not inspect the manifest and the existing journal recovery path may be
+retried. Multiple or inconsistent publication children produce
+`refused_ambiguous_publication`.
 `_resolve_authority` reads the *live* pointer, checks only that its own
 `journal_tag`/`journal_commit` fields are mutually consistent with what Git
 actually resolves, and then reads `gig-proposal.json`/`goal-graph.json` —
@@ -312,7 +323,8 @@ never `active-gig-version.json` itself — from the sealed commit. That leaves
 a gap: a locally substituted live pointer that keeps `journal_tag` and
 `journal_commit` untouched but carries a different `capability_manifest`
 would satisfy `_resolve_authority`'s existing check unmodified. G23 closes
-that gap by reading `active-gig-version.json` from the sealed commit as well
+that gap by deriving the pointer publication commit from the matching
+`gig_accepted` child and reading `active-gig-version.json` from that commit as well
 and comparing it against the live copy field-by-field, refusing on any
 mismatch before `capability_manifest` is inspected for any other check.
 
@@ -393,7 +405,7 @@ The authority rules are non-negotiable:
    schema-valid, same-`gig_id` `capability_manifest` than the sealed copy
    names. A fixture with a live pointer that matches the sealed copy exactly
    passes the prerequisite and proceeds to the three manifest checks.
-4. **Portability verification.** `verify_gig_portability` fixtures cover
+4. **Portability verification.** `verify_active_version_portability` fixtures cover
    present-and-valid, absent (`reported_non_portable`), unsafe path,
    digest mismatch, and cross-Gig/unbound manifest
    (`refused_unbound_manifest`) cases, each returning the exact named result

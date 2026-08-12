@@ -768,6 +768,12 @@ def feedback_command(
 )
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option(
+    "--capability-manifest-id",
+    type=str,
+    default=None,
+    help="Bind an existing local capability manifest to the approved Gig version.",
+)
+@click.option(
     "--json", "as_json", is_flag=True, help="Emit the new canonical proposal ID."
 )
 def revise_command(
@@ -818,7 +824,11 @@ def revise_command(
     "--json", "as_json", is_flag=True, help="Emit the sealed version and commit IDs."
 )
 def approve_command(
-    proposal_id: str, target_value: Path | None, home_value: Path | None, as_json: bool
+    proposal_id: str,
+    target_value: Path | None,
+    home_value: Path | None,
+    capability_manifest_id: str | None,
+    as_json: bool,
 ) -> None:
     """Seal one pending proposal as an offline approved Gig version."""
 
@@ -828,6 +838,7 @@ def approve_command(
             home_root=home_value or default_home_root(),
             requested_target=target_value,
             proposal_id=proposal_id,
+            capability_manifest_id=capability_manifest_id,
         )
     except (LifecycleError, WorkpadError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

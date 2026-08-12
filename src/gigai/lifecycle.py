@@ -20,6 +20,7 @@ from typing import Callable, Mapping
 import uuid
 
 from .adapters.factory import resolve_model_adapter
+from .capabilities import capability_manifest_artifact_ref
 from .canonical import (
     EntityPrefix,
     canonical_json_bytes,
@@ -728,6 +729,7 @@ def approve_offline(
     home_root: Path,
     requested_target: Path | None,
     proposal_id: str,
+    capability_manifest_id: str | None = None,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
     observer: CreateObserver | None = None,
 ) -> ApprovalResult:
@@ -750,6 +752,7 @@ def approve_offline(
             resolved=resolved,
             proposal=proposal,
             proposal_id=proposal_id,
+            capability_manifest_id=capability_manifest_id,
             uuid_factory=uuid_factory,
         )
     report = validate_proposal_workpad(workpad)
@@ -770,23 +773,31 @@ def approve_offline(
         _git(workpad, "tag", tag, sealed.commit)
         if observer is not None:
             observer("after_approval_tag")
-        pointer = canonical_json_bytes(
-            {
-                "schema_version": "1.0",
-                "gig_id": resolved.gig_id,
-                "active_version": version,
-                "approved_proposal_id": proposal_id,
-                "goal_graph": proposal["goal_graph"],
-                "journal_commit": sealed.commit,
-                "journal_tag": tag,
-                "approved_at": approved_at,
-                "approved_by": {
-                    "kind": "operator",
-                    "id": "local-user",
-                    "model_target": None,
-                },
-            }
+        pointer_payload: dict[str, object] = {
+            "schema_version": "1.0",
+            "gig_id": resolved.gig_id,
+            "active_version": version,
+            "approved_proposal_id": proposal_id,
+            "goal_graph": proposal["goal_graph"],
+            "journal_commit": sealed.commit,
+            "journal_tag": tag,
+            "approved_at": approved_at,
+            "approved_by": {
+                "kind": "operator",
+                "id": "local-user",
+                "model_target": None,
+            },
+        }
+        manifest_ref = (
+            capability_manifest_artifact_ref(
+                workpad, capability_manifest_id, gig_id=resolved.gig_id
+            )
+            if capability_manifest_id is not None
+            else _existing_capability_manifest_ref(workpad, resolved.gig_id)
         )
+        if manifest_ref is not None:
+            pointer_payload["capability_manifest"] = manifest_ref
+        pointer = canonical_json_bytes(pointer_payload)
         if not validate_serialized_contract(
             "active-gig-version.schema.json", pointer
         ).valid:
@@ -827,6 +838,7 @@ def _recover_approved_publication(
     resolved: ResolvedWorkpad,
     proposal: dict[str, object],
     proposal_id: str,
+    capability_manifest_id: str | None,
     uuid_factory: Callable[[], uuid.UUID],
 ) -> ApprovalResult:
     """Publish only the missing Commit B for an already sealed approval."""
@@ -874,6 +886,14 @@ def _recover_approved_publication(
             raise LifecycleError(
                 "existing active-version pointer names another approval"
             )
+        if capability_manifest_id is not None:
+            expected = capability_manifest_artifact_ref(
+                workpad, capability_manifest_id, gig_id=resolved.gig_id
+            )
+            if payload.get("capability_manifest") != expected:
+                raise LifecycleError(
+                    "existing active-version pointer has another capability manifest"
+                )
         return ApprovalResult(
             resolved.gig_id,
             proposal_id,
@@ -885,23 +905,31 @@ def _recover_approved_publication(
     approved_at = metadata.get("timestamp")
     if not isinstance(approved_at, str):
         raise LifecycleError("sealed approval handoff lacks its timestamp")
-    pointer = canonical_json_bytes(
-        {
-            "schema_version": "1.0",
-            "gig_id": resolved.gig_id,
-            "active_version": version,
-            "approved_proposal_id": proposal_id,
-            "goal_graph": proposal["goal_graph"],
-            "journal_commit": sealed_commit,
-            "journal_tag": tag,
-            "approved_at": approved_at,
-            "approved_by": {
-                "kind": "operator",
-                "id": "local-user",
-                "model_target": None,
-            },
-        }
+    pointer_payload: dict[str, object] = {
+        "schema_version": "1.0",
+        "gig_id": resolved.gig_id,
+        "active_version": version,
+        "approved_proposal_id": proposal_id,
+        "goal_graph": proposal["goal_graph"],
+        "journal_commit": sealed_commit,
+        "journal_tag": tag,
+        "approved_at": approved_at,
+        "approved_by": {
+            "kind": "operator",
+            "id": "local-user",
+            "model_target": None,
+        },
+    }
+    manifest_ref = (
+        capability_manifest_artifact_ref(
+            workpad, capability_manifest_id, gig_id=resolved.gig_id
+        )
+        if capability_manifest_id is not None
+        else _existing_capability_manifest_ref(workpad, resolved.gig_id)
     )
+    if manifest_ref is not None:
+        pointer_payload["capability_manifest"] = manifest_ref
+    pointer = canonical_json_bytes(pointer_payload)
     if not validate_serialized_contract(
         "active-gig-version.schema.json", pointer
     ).valid:
@@ -1405,6 +1433,37 @@ def _next_version(workpad: Path) -> int:
     if not isinstance(payload, dict) or type(payload.get("active_version")) is not int:
         raise LifecycleError("active-version pointer has no valid version")
     return payload["active_version"] + 1
+
+
+def _existing_capability_manifest_ref(
+    workpad: Path, gig_id: str
+) -> Mapping[str, object] | None:
+    """Carry an existing approved pointer reference into the next version."""
+
+    path = workpad / "manifests" / "active-gig-version.json"
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise LifecycleError("active-version pointer is invalid")
+    payload = parse_json_bytes(path.read_bytes())
+    if not isinstance(payload, dict):
+        raise LifecycleError("active-version pointer is invalid")
+    reference = payload.get("capability_manifest")
+    if reference is None:
+        return None
+    if not isinstance(reference, Mapping):
+        raise LifecycleError("active-version capability manifest reference is invalid")
+    path_value = reference.get("path")
+    if not isinstance(path_value, str):
+        raise LifecycleError("active-version capability manifest reference is invalid")
+    path = Path(path_value)
+    if len(path.parts) != 3 or path.parts[0:2] != ("manifests", "capabilities") or not path.parts[2].endswith(".json"):
+        raise LifecycleError("active-version capability manifest reference is invalid")
+    manifest_id = path.parts[2][:-5]
+    expected = capability_manifest_artifact_ref(workpad, manifest_id, gig_id=gig_id)
+    if dict(reference) != expected:
+        raise LifecycleError("active-version capability manifest reference is stale or invalid")
+    return expected
 
 
 def _journal_entries(workpad: Path) -> tuple[JournalEntry, ...]:
