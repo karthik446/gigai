@@ -76,7 +76,15 @@ def test_create_runs_model_facilitated_build_then_explicit_approval(tmp_path: Pa
                 raise AssertionError(error.read().decode()) from error
 
         send("answer", question_id="scope", value="Review this repository")
+        snapshot = parse_json_bytes(snapshot_path.read_bytes())
+        main_drive = next(item for item in snapshot["questions"] if item["question_id"] == "main-drive")
+        assert main_drive["provenance"].startswith("model://")
         send("answer", question_id="main-drive", value="Explain the important work")
+        snapshot = parse_json_bytes(snapshot_path.read_bytes())
+        success_definition = next(
+            item for item in snapshot["questions"] if item["question_id"] == "success-definition"
+        )
+        assert success_definition["provenance"].startswith("model://")
         send("answer", question_id="success-definition", value="A clear reviewed proposal")
         send("build")
         with urlopen(session_url, timeout=5) as response:
