@@ -413,7 +413,7 @@ def request_revision(session: InterviewSession, *, now: str | None = None) -> In
     )
     return _event(
         revised,
-        "revision_requested",
+        "revision_created",
         actor={"kind": "operator", "id": "local-user"},
         now=timestamp,
     )
