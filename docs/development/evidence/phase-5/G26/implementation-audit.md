@@ -31,8 +31,12 @@
 
 ## Evidence
 
-- Focused G22/G26 regression set: `29 passed`.
-- Full repository run: `549 passed, 64 subtests`.
+- Focused G22/G26 regression set: `32 passed`.
+- Full repository run: `551 passed, 64 subtests`; one pre-existing
+  multiprocessing journal-lock race failed during the concurrent run and
+  passed in isolation (`1 passed`). The failure is the
+  `mount.interprocess_lock` probe in
+  `tests/test_journal_locking_recovery.py`, outside the G26 change surface.
 - Source and installed schema verifier: `verified 29 installed GigAI schemas`.
 - Fresh-wheel installed G26 replay: `verified installed GigAI G26 builder
   contract`; it reached model draft creation and explicit approval in a
