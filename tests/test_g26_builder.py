@@ -115,10 +115,11 @@ def test_malformed_model_output_fails_closed(monkeypatch, tmp_path) -> None:
             },
         )(),
     )
-    with pytest.raises(GigBuilderError, match="invalid draft shape"):
+    with pytest.raises(GigBuilderError, match="invalid draft shape") as error:
         build_model_draft(
             config=config,
             model_target="offline-default",
             session=start.session,
             reference_bytes={},
         )
+    assert error.value.reason == "malformed"

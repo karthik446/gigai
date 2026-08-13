@@ -10,5 +10,6 @@ source references, provider output, API keys, cookies, local home/workpad
 databases, or unsanitized UAT material.
 
 The initial record is `contract-amendment.md`. The current implementation
-milestone is covered by focused contract, discovery, builder, and browser-flow
-tests; sanitized installed replay and full UAT evidence remain outstanding.
+milestone is covered by focused contract, discovery, builder, browser-flow, and
+bounded-call tests; sanitized installed replay is passing, while full UAT
+evidence remains outstanding.

@@ -4,17 +4,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import threading
 from typing import Any, Mapping
 
 from .adapters.factory import AdapterFactoryError, resolve_model_adapter
 from .adapters.port import ModelInvocationError
 from .config import GigAIConfig
+from .model_call import BoundedCallError, invoke_bounded
 from .proposal_interview import InterviewSession, ProposalInterviewError
 from .review import redact_text
 
 
 class GigBuilderError(ProposalInterviewError):
     """The selected model could not safely produce a builder response."""
+
+    def __init__(self, message: str, *, reason: str = "failed") -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -43,6 +49,9 @@ def build_model_draft(
     reference_bytes: Mapping[str, bytes],
     intent_text: str | None = None,
     network_allowed: bool = False,
+    max_wall_time_ms: int = 300_000,
+    max_output_tokens: int = 4_000,
+    cancel_event: threading.Event | None = None,
 ) -> tuple[BuilderDraft, dict[str, object]]:
     """Ask one selected target to research and draft a proposal.
 
@@ -55,10 +64,13 @@ def build_model_draft(
     try:
         binding = resolve_model_adapter(config, model_target)
     except (AdapterFactoryError, ValueError) as exc:
-        raise GigBuilderError(f"model target is not usable: {exc}") from exc
+        raise GigBuilderError(f"model target is not usable: {exc}", reason="unavailable") from exc
     remote = binding.current.endpoint.adapter != "deterministic"
     if remote and not network_allowed:
-        raise GigBuilderError("proposal research requires explicit configured-provider permission")
+        raise GigBuilderError(
+            "proposal research requires explicit configured-provider permission",
+            reason="blocked",
+        )
     prompt = "g26-proposal-build"
     if remote:
         parts = [
@@ -74,17 +86,28 @@ def build_model_draft(
                 continue
             content = reference_bytes.get(reference.reference_id)
             if content is None:
-                raise GigBuilderError("selected reference bytes are unavailable")
+                raise GigBuilderError("selected reference bytes are unavailable", reason="unavailable")
             try:
                 text = content.decode("utf-8")
             except UnicodeDecodeError as exc:
-                raise GigBuilderError("selected reference is not UTF-8 text") from exc
+                raise GigBuilderError("selected reference is not UTF-8 text", reason="malformed") from exc
             parts.append(f"[{reference.reference_id}]\n{redact_text(text, ())}")
         prompt = "\n".join(parts)
     try:
-        result = binding.port.invoke(binding.request(role="gig-builder", prompt=prompt))
+        request = binding.request(role="gig-builder", prompt=prompt)
+        result = invoke_bounded(
+            binding.port,
+            request,
+            max_wall_time_ms=max_wall_time_ms,
+            max_output_tokens=max_output_tokens,
+            cancel_event=cancel_event,
+        )
         payload = json.loads(result.output_text)
-    except (AdapterFactoryError, ModelInvocationError, ValueError, json.JSONDecodeError) as exc:
+    except BoundedCallError as exc:
+        raise GigBuilderError(str(exc), reason=exc.reason) from exc
+    except json.JSONDecodeError as exc:
+        raise GigBuilderError(f"model proposal response is malformed JSON: {exc}", reason="malformed") from exc
+    except (AdapterFactoryError, ModelInvocationError, ValueError) as exc:
         raise GigBuilderError(f"model proposal build failed: {exc}") from exc
     draft = _parse_draft(payload)
     selection = {
@@ -98,7 +121,7 @@ def build_model_draft(
 
 def _parse_draft(payload: Any) -> BuilderDraft:
     if not isinstance(payload, dict):
-        raise GigBuilderError("model proposal response must be an object")
+        raise GigBuilderError("model proposal response must be an object", reason="malformed")
     summary = payload.get("summary")
     assumptions = payload.get("assumptions")
     unresolved = payload.get("unresolved_questions")
@@ -110,15 +133,15 @@ def _parse_draft(payload: Any) -> BuilderDraft:
         or not isinstance(unresolved, list)
         or not isinstance(citations, list)
     ):
-        raise GigBuilderError("model proposal response has an invalid draft shape")
+        raise GigBuilderError("model proposal response has an invalid draft shape", reason="malformed")
     if any(not isinstance(item, str) or not item.strip() for item in assumptions + unresolved):
-        raise GigBuilderError("model proposal assumptions and open questions must be text")
+        raise GigBuilderError("model proposal assumptions and open questions must be text", reason="malformed")
     normalized_citations: list[dict[str, object]] = []
     for item in citations:
         if not isinstance(item, dict):
-            raise GigBuilderError("model proposal citations must be objects")
+            raise GigBuilderError("model proposal citations must be objects", reason="malformed")
         if not isinstance(item.get("claim_id"), str) or not isinstance(item.get("locator"), str):
-            raise GigBuilderError("model proposal citations require claim_id and locator")
+            raise GigBuilderError("model proposal citations require claim_id and locator", reason="malformed")
         normalized_citations.append(
             {
                 "claim_id": item["claim_id"],

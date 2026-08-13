@@ -671,22 +671,37 @@ def build_interview_proposal(
             network_allowed=network_allowed,
         )
     except GigBuilderError as exc:
+        terminal_state = exc.reason if exc.reason in {
+            "cancelled",
+            "timed_out",
+            "unavailable",
+            "malformed",
+            "budget_exhausted",
+            "blocked",
+            "failed",
+        } else "failed"
         failed_payload = _builder_session_record(
             session=session,
             start=start,
-            selection={**base_selection, "readiness": "unavailable"},
-            state="failed",
+            selection=base_selection,
+            state=terminal_state,
             draft_ref=None,
-            terminal_reason="model_build_failed",
+            terminal_reason=exc.reason,
         )
         failed_bytes = canonical_json_bytes(failed_payload)
+        failed_report = validate_gig_builder_session(failed_bytes)
+        if not failed_report.valid:
+            raise LifecycleError(
+                "terminal Gig builder session failed contract validation: "
+                + ", ".join(item.code for item in failed_report.findings)
+            ) from exc
         record_transition(
             workpad=start.workpad,
             project_id=start.project_id,
             gig_id=start.gig_id,
             handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
             transition="gig_builder_failed",
-            body="Gig builder failed closed before proposal approval.",
+            body=f"Gig builder stopped before proposal approval: {exc.reason}.",
             artifacts=(JournalArtifact("manifests/gig-builder-session.json", failed_bytes),),
         )
         raise LifecycleError(str(exc)) from exc
