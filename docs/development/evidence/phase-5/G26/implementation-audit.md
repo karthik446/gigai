@@ -28,13 +28,15 @@
 - Added restart-safe builder recovery: interrupted `researching` snapshots
   terminalize without an implicit retry, while an existing review draft
   reopens with its original proposal identity.
+- Added loopback review-flow coverage for revise → rebuild → reject; a rejected
+  draft preserves its history and never creates `active-gig-version.json`.
 - Added sanitized contract, builder, discovery, browser-flow, and installed
   replay tests. No raw UAT data, prompts, provider output, credentials, or
   local databases are included here.
 
 ## Evidence
 
-- Focused G22/G26 regression set: `34 passed`.
+- Focused G22/G26 regression set: `35 passed`.
 - Full repository run before the final recovery milestone: `551 passed, 64
   subtests`; one pre-existing
   multiprocessing journal-lock race failed during the concurrent run and
