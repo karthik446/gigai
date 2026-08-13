@@ -974,7 +974,7 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "model_selection": {"target_name": "offline-default", "endpoint_name": "offline", "model": "fixture-v1", "adapter": "deterministic", "selection_digest": ZERO_DIGEST},
         "build": {"status": "completed", "mode": "deterministic_fixture", "started_at": NOW, "completed_at": NOW, "accounting": {"model_calls": 1, "input_tokens": None, "output_tokens": None, "elapsed_ms": 0, "cost": None, "cost_currency": None}},
         "proposal_artifact": artifact("manifests/gig-proposal.json"),
-        "research": {"citations": [], "assumptions": ["Operator review is required."], "unresolved_questions": []},
+        "research": {"summary": "A bounded fixture proposal.", "citations": [], "assumptions": ["Operator review is required."], "unresolved_questions": []},
         "boundary": {"reference_ids": [], "network": "local_only", "credential_reference": None, "effects": ["write_workpad"]},
         "created_at": NOW,
         "updated_at": NOW,

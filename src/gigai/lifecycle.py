@@ -736,6 +736,7 @@ def build_interview_proposal(
             "manifests/gig-proposal.json", "application/json", proposal_bytes
         ),
         "research": {
+            "summary": draft.summary,
             "citations": list(draft.citations),
             "assumptions": list(draft.assumptions),
             "unresolved_questions": list(draft.unresolved_questions),

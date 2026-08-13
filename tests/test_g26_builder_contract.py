@@ -134,6 +134,7 @@ def _manifest(*, status: str = "completed") -> dict[str, object]:
         },
         "proposal_artifact": _artifact("draft/proposal.json"),
         "research": {
+            "summary": "A bounded fixture proposal.",
             "citations": [
                 {
                     "claim_id": "claim_intent",

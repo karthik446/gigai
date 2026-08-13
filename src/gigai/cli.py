@@ -643,6 +643,7 @@ def create_command(
             )
             reference_bytes = dict(started.reference_bytes)
             built_proposal_id: str | None = None
+            builder_review: dict[str, object] = {}
 
             def select_references(session, paths: tuple[str, ...]):
                 updated, selected_ids, labels, selected_bytes = select_interview_references(
@@ -689,6 +690,12 @@ def create_command(
                     )
                 )
                 built_proposal_id = str(proposal["proposal_id"])
+                draft_manifest = json.loads(
+                    (started.workpad / "manifests/proposal-draft-manifest.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                builder_review.update(draft_manifest.get("research", {}))
                 return built
 
             def revise_proposal(session):
@@ -736,6 +743,7 @@ def create_command(
                 on_build=build_proposal,
                 on_revision=revise_proposal,
                 on_rejection=reject_proposal,
+                builder_review=builder_review,
                 builder_mode=True,
             ).start()
             try:

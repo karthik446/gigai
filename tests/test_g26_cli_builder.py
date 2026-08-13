@@ -49,7 +49,8 @@ def test_create_runs_model_facilitated_build_then_explicit_approval(tmp_path: Pa
         line = process.stderr.readline().strip()
         match = re.fullmatch(r"GigAI local interview: (http://127\.0\.0\.1:\d+/session/[A-Za-z0-9_-]+)", line)
         assert match is not None, line
-        endpoint = f"{match.group(1)}/events"
+        session_url = match.group(1)
+        endpoint = f"{session_url}/events"
         snapshot_path = next((tmp_path / "workpads").rglob("manifests/proposal-interview.json"))
 
         def send(event: str, **values: object) -> dict[str, object]:
@@ -78,6 +79,10 @@ def test_create_runs_model_facilitated_build_then_explicit_approval(tmp_path: Pa
         send("answer", question_id="main-drive", value="Explain the important work")
         send("answer", question_id="success-definition", value="A clear reviewed proposal")
         send("build")
+        with urlopen(session_url, timeout=5) as response:
+            review_html = response.read().decode()
+        assert "A local Gig proposal assembled" in review_html
+        assert "The operator will review" in review_html
         workpad = next((tmp_path / "workpads").rglob("manifests/gig-proposal.json")).parent.parent
         assert (workpad / "manifests/proposal-draft-manifest.json").is_file()
         builder_snapshot = parse_json_bytes((workpad / "manifests/gig-builder-session.json").read_bytes())

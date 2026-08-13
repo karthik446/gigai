@@ -627,6 +627,7 @@ class InterviewHTTPServer:
         on_build: Callable[[InterviewSession], InterviewSession] | None = None,
         on_revision: Callable[[InterviewSession], InterviewSession] | None = None,
         on_rejection: Callable[[InterviewSession], InterviewSession] | None = None,
+        builder_review: Mapping[str, object] | None = None,
         builder_mode: bool = False,
         lifetime_seconds: float = 600.0,
     ) -> None:
@@ -644,6 +645,7 @@ class InterviewHTTPServer:
         self.on_build = on_build
         self.on_revision = on_revision
         self.on_rejection = on_rejection
+        self.builder_review = builder_review if builder_review is not None else {}
         self.builder_mode = builder_mode
         self.builder_ready = False
         self.lifetime_seconds = lifetime_seconds
@@ -866,8 +868,13 @@ class InterviewHTTPServer:
                 f"<form class='build' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button class='primary' type='submit'>Build proposal</button></form></section>"
             )
         elif session.state == "proposal_ready" and self.builder_mode and self.builder_ready:
+            summary = html.escape(str(self.builder_review.get("summary", "Draft summary is available in the workpad.")))
+            assumptions = self.builder_review.get("assumptions", ())
+            unresolved = self.builder_review.get("unresolved_questions", ())
+            assumption_html = "".join(f"<li>{html.escape(str(item))}</li>" for item in assumptions) or "<li>None recorded.</li>"
+            unresolved_html = "".join(f"<li>{html.escape(str(item))}</li>" for item in unresolved) or "<li>None recorded.</li>"
             forms.append(
-                f"<section class='approval'><h2>Proposal draft ready</h2><p>Review the model's summary, assumptions, citations, unresolved questions, and boundaries in the workpad before deciding.</p>"
+                f"<section class='approval'><h2>Proposal draft ready</h2><p><strong>Summary:</strong> {summary}</p><p><strong>Assumptions</strong></p><ul>{assumption_html}</ul><p><strong>Unresolved questions</strong></p><ul>{unresolved_html}</ul><p>Review citations and boundaries in the workpad before deciding.</p>"
                 f"<form class='review-action' data-event='revise' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button type='submit'>Revise answers</button></form>"
                 f"<form class='review-action' data-event='reject' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button type='submit'>Reject draft</button></form>"
                 f"<form class='approve' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button class='primary' type='submit'>Approve proposal</button></form></section>"

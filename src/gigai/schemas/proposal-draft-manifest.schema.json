@@ -48,8 +48,9 @@
     },
     "research": {
       "type": "object", "additionalProperties": false,
-      "required": ["citations", "assumptions", "unresolved_questions"],
+      "required": ["summary", "citations", "assumptions", "unresolved_questions"],
       "properties": {
+        "summary": {"type": "string", "minLength": 1, "maxLength": 10000},
         "citations": {"type": "array", "items": {"$ref": "#/$defs/citation"}},
         "assumptions": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 2000}},
         "unresolved_questions": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 2000}}
