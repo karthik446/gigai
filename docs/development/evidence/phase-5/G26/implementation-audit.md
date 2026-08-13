@@ -47,8 +47,9 @@
 - Fresh-wheel installed G26 replay: `verified installed GigAI G26 builder
   contract`; it reached model draft creation and explicit approval in a
   disposable home/target.
-- Mutation harness: `mutation_killed=8/8` across bounded-call, reference,
-  recovery, duplicate-build, and unavailable-target guards.
+- Mutation harness: `mutation_killed=9/9` across bounded-call, reference,
+  recovery, duplicate-build, unavailable-target, and existing-proposal
+  approval-identity guards.
 - `git diff --check` and focused Ruff checks pass.
 
 ## Remaining before G26 closeout

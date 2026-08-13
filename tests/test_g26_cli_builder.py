@@ -101,6 +101,21 @@ def test_create_runs_model_facilitated_build_then_explicit_approval(tmp_path: Pa
         result = json.loads(stdout)
         assert result["status"] == "approved"
         assert (workpad / "manifests/active-gig-version.json").is_file()
+        proposal_commits = subprocess.check_output(
+            ["git", "-C", str(workpad), "log", "--format=%H", "--", "manifests/gig-proposal.json"],
+            text=True,
+        ).splitlines()
+        proposal_ids = [
+            json.loads(
+                subprocess.check_output(
+                    ["git", "-C", str(workpad), "show", f"{commit}:manifests/gig-proposal.json"],
+                    text=True,
+                )
+            )["proposal_id"]
+            for commit in proposal_commits
+        ]
+        assert len(proposal_ids) >= 1
+        assert len(set(proposal_ids)) == 1
     finally:
         if process.poll() is None:
             process.kill()

@@ -66,6 +66,13 @@ MUTANTS = (
         "tests/test_g26_builder.py::test_unavailable_builder_target_writes_terminal_session",
         "src/gigai/lifecycle.py",
     ),
+    (
+        "existing-proposal-approval-guard",
+        "    if existing_proposal_id is not None:\n",
+        "    if False:\n",
+        "tests/test_g26_cli_builder.py::test_create_runs_model_facilitated_build_then_explicit_approval",
+        "src/gigai/lifecycle.py",
+    ),
 )
 
 
