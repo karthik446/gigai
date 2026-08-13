@@ -31,6 +31,7 @@ from .lifecycle import (
     record_feedback,
     reject_offline,
     revise_offline,
+    select_interview_references,
     stage_improvement_manifest,
     start_interview,
 )
@@ -47,6 +48,7 @@ from .occurrence import (
 from .question_generation import generate_model_questions
 from .setup import (
     build_config,
+    detect_editor_argv,
     default_home_root,
     default_workpad_root,
     resolve_editor_argv,
@@ -249,9 +251,15 @@ def setup_command(
                 environment_editor = resolve_editor_argv(None)
                 default_editor = environment_editor[0]
                 environment_editor_args = environment_editor[1:]
+        if default_editor is None:
+            detected_editor = detect_editor_argv()
+            if detected_editor is not None:
+                default_editor = detected_editor[0]
         resolved_editor = resolve_editor_argv(
             click.prompt(
-                "Editor executable", default=default_editor, show_default=True
+                "Editor program (used to open workpads)",
+                default=default_editor,
+                show_default=True,
             ),
             (
                 editor_arg
@@ -345,14 +353,21 @@ def setup_command(
             credential_summary = [
                 {"name": item.name, "kind": item.kind} for item in credentials
             ]
-            click.echo(f"Home: {requested_home}")
-            click.echo(f"Authoritative workpad root: {resolved_workpad}")
-            click.echo(f"Editor argv: {json.dumps(resolved_editor)}")
-            click.echo(f"Credential references: {json.dumps(credential_summary)}")
-            click.echo("Offline endpoint: offline (deterministic)")
-            click.echo("Model target: offline-default (fixture-v1)")
-            click.echo("Profile: default")
-            click.echo("Standard pack: standard version 1")
+            click.secho("\nGigAI setup review", bold=True, fg="cyan")
+            click.echo(f"  GigAI home: {requested_home}")
+            click.echo(f"  Workpad storage: {resolved_workpad}")
+            click.echo(
+                f"  Editor argv: {json.dumps(resolved_editor)} "
+                "(program used to open workpads)"
+            )
+            click.echo(f"  Credential references: {json.dumps(credential_summary)}")
+            click.echo(
+                "  Built-in local mode: no network or provider credentials "
+                "(offline-default / fixture-v1)"
+            )
+            click.echo("  Profile: default")
+            click.echo("  Standard pack: standard version 1")
+            click.secho("\nThese are machine-local changes. Nothing will be written to a target repository.", dim=True)
             if not click.confirm("Apply this setup?", default=True):
                 raise click.Abort()
         config = build_config(
@@ -573,6 +588,19 @@ def create_command(
                 reference_paths=reference_values,
                 max_rounds=max_rounds,
             )
+            reference_bytes = dict(started.reference_bytes)
+
+            def select_references(session, paths: tuple[str, ...]):
+                updated, selected_ids, labels, selected_bytes = select_interview_references(
+                    home_root=home,
+                    requested_target=target_value,
+                    start=started,
+                    session=session,
+                    paths=paths,
+                )
+                reference_bytes.update(selected_bytes)
+                return updated, selected_ids, labels
+
             server = InterviewHTTPServer(
                 started.session,
                 on_session=lambda session: persist_interview_session(
@@ -588,9 +616,11 @@ def create_command(
                         config=load_config(home),
                         model_target=model_target,
                         session=session,
-                        reference_bytes=dict(started.reference_bytes),
+                        reference_bytes=reference_bytes,
                     )
                 ),
+                on_reference_paths=select_references,
+                reference_labels={},
                 on_approval=lambda session: approve_interview_session(
                     home_root=home,
                     requested_target=target_value,

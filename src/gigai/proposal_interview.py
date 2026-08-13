@@ -133,21 +133,26 @@ def build_session(
     max_rounds: int = 3,
     now: str | None = None,
 ) -> InterviewSession:
-    """Create a protocol session with only explicit reference choices."""
+    """Create a protocol session that collects explicit reference choices."""
 
     _id(session_id, "session_")
     _id(project_id, "project_")
     _id(gig_id, "gig_")
     if not request_kind.strip() or max_rounds < 1:
         raise ProposalInterviewError("request kind and positive round cap are required")
-    if not references or len({item.reference_id for item in references}) != len(references):
-        raise ProposalInterviewError("at least one unique reference is required")
+    if len({item.reference_id for item in references}) != len(references):
+        raise ProposalInterviewError("reference IDs must be unique")
     if not request_sha256.startswith("sha256:") or len(request_sha256) != 71:
         raise ProposalInterviewError("request digest is invalid")
     reference_ids = tuple(item.reference_id for item in references)
+    reference_question = (
+        Question("references", "multiselect", True, reference_ids, (), "Select exact local references.", "g22://references")
+        if reference_ids
+        else Question("references", "text", True, (), (), "Enter one or more exact local paths, one per line.", "g22://references")
+    )
     questions = (
         Question("scope", "text", True, (), (), "Define the requested outcome.", "g22://scope"),
-        Question("references", "multiselect", True, reference_ids, (), "Select exact local references.", "g22://references"),
+        reference_question,
         Question("effect", "choice", True, EFFECT_CHOICES, (), "Choose a bounded local effect.", "g22://effect"),
         Question("privacy", "choice", True, PRIVACY_CHOICES, (), "Choose the privacy boundary.", "g22://privacy"),
         Question("capability", "choice", True, CAPABILITY_CHOICES, (), "Choose the local capability boundary.", "g22://capability"),
@@ -174,6 +179,30 @@ def build_session(
     return _event(session, "session_created", actor={"kind": "gigai", "id": "g22"}, now=timestamp)
 
 
+def attach_reference_choices(
+    session: InterviewSession,
+    references: tuple[ReferenceDecision, ...],
+) -> InterviewSession:
+    """Replace the initial path-entry question with explicit reference choices."""
+
+    if session.references:
+        raise ProposalInterviewError("reference choices are already attached")
+    if not references or len({item.reference_id for item in references}) != len(references):
+        raise ProposalInterviewError("at least one unique reference choice is required")
+    updated_questions = tuple(
+        replace(
+            item,
+            answer_type="multiselect",
+            options=tuple(reference.reference_id for reference in references),
+            rationale="Select the exact local references for this proposal.",
+        )
+        if item.question_id == "references"
+        else item
+        for item in session.questions
+    )
+    return replace(session, references=references, questions=updated_questions)
+
+
 def answer_question(
     session: InterviewSession,
     question_id: str,
@@ -197,7 +226,7 @@ def answer_question(
     privacy = session.privacy_choice
     capability = session.capability_choice
     effect = session.effect_choice
-    if question_id == "references":
+    if question_id == "references" and question.answer_type == "multiselect":
         selected_ids = tuple(value)  # type: ignore[arg-type]
         selected = tuple(
             replace(item, decision="selected" if item.reference_id in selected_ids else "excluded")
@@ -211,7 +240,8 @@ def answer_question(
         effect = str(value)
     required_ids = {item.question_id for item in session.questions if item.required}
     answered_ids = {item.question_id for item in answers}
-    state = "proposal_ready" if required_ids.issubset(answered_ids) else "questions_pending"
+    references_ready = any(item.decision == "selected" for item in selected)
+    state = "proposal_ready" if required_ids.issubset(answered_ids) and references_ready else "questions_pending"
     updated = replace(
         session,
         answers=answers,
@@ -559,6 +589,12 @@ class InterviewHTTPServer:
         host: str = "127.0.0.1",
         on_session: Callable[[InterviewSession], None] | None = None,
         on_questions: Callable[[InterviewSession], InterviewSession] | None = None,
+        on_reference_paths: Callable[
+            [InterviewSession, tuple[str, ...]],
+            tuple[InterviewSession, tuple[str, ...], Mapping[str, str]],
+        ]
+        | None = None,
+        reference_labels: Mapping[str, str] | None = None,
         on_approval: Callable[[InterviewSession], InterviewSession] | None = None,
         lifetime_seconds: float = 600.0,
     ) -> None:
@@ -570,6 +606,8 @@ class InterviewHTTPServer:
         self.connection = connection
         self.on_session = on_session
         self.on_questions = on_questions
+        self.on_reference_paths = on_reference_paths
+        self.reference_labels = dict(reference_labels or {})
         self.on_approval = on_approval
         self.lifetime_seconds = lifetime_seconds
         self.token = secrets.token_urlsafe(24)
@@ -628,7 +666,33 @@ class InterviewHTTPServer:
                             )
                         if payload.get("revision") != owner.session.revision:
                             raise ProposalInterviewError("stale interview revision")
-                        next_session = owner._apply(payload)
+                        apply_payload = payload
+                        if (
+                            payload.get("event") == "answer"
+                            and payload.get("question_id") == "references"
+                            and not owner.session.references
+                        ):
+                            value = payload.get("value")
+                            if not isinstance(value, str):
+                                raise ProposalInterviewError(
+                                    "reference selection requires one path per line"
+                                )
+                            paths = tuple(
+                                line.strip()
+                                for line in value.splitlines()
+                                if line.strip()
+                            )
+                            if owner.on_reference_paths is None:
+                                raise ProposalInterviewError(
+                                    "reference selection is not configured"
+                                )
+                            owner.session, selected_ids, labels = owner.on_reference_paths(
+                                owner.session, paths
+                            )
+                            owner.reference_labels.update(labels)
+                            apply_payload = dict(payload)
+                            apply_payload["value"] = list(selected_ids)
+                        next_session = owner._apply(apply_payload)
                         if (
                             payload.get("event") == "answer"
                             and payload.get("question_id") == "references"
@@ -695,38 +759,82 @@ class InterviewHTTPServer:
         session = self.session
         forms: list[str] = []
         endpoint = f"/session/{self.token}/events"
+        titles = {
+            "scope": "What should GigAI help accomplish?",
+            "references": "Which local references should GigAI use?",
+            "effect": "What may GigAI change?",
+            "privacy": "Where may information be used?",
+            "capability": "What local capability is allowed?",
+            "operator-confirmation": "Are these choices correct?",
+        }
+        explanations = {
+            "read_local": "Read selected local files only; do not write to the target.",
+            "write_workpad": "Write proposal artifacts to GigAI's private workpad only.",
+            "local_only": "Keep this interview and its evidence on this machine.",
+            "redact_before_share": "Redact selected content before any configured sharing.",
+            "none": "Do not grant a local capability beyond the interview itself.",
+            "local_read": "Permit reading the references you explicitly select.",
+        }
+        editable = session.state in {"questions_pending", "clarification_required"}
+        answered = {item.question_id for item in session.answers}
+        total_required = sum(1 for item in session.questions if item.required)
+        completed_required = sum(1 for item in session.questions if item.required and item.question_id in answered)
         for question in session.questions:
-            label = html.escape(question.rationale)
+            title = html.escape(titles.get(question.question_id, question.question_id.replace("-", " ").capitalize()))
+            rationale = html.escape(question.rationale)
             question_id = html.escape(question.question_id)
             if question.answer_type == "text":
-                control = f"<input name='value' type='text' required {'disabled' if session.state not in {'questions_pending', 'clarification_required'} else ''}>"
+                control = f"<input name='value' type='text' aria-label='{title}' required {'disabled' if not editable else ''}>"
             elif question.answer_type == "confirmation":
-                control = "<input name='value' type='checkbox'>"
+                control = f"<label class='checkbox'><input name='value' type='checkbox' {'disabled' if not editable else ''}> <span>Yes, continue</span></label>"
             elif question.answer_type == "multiselect":
                 control = "".join(
-                    f"<label><input name='value' type='checkbox' value='{html.escape(option)}'>{html.escape(option)}</label>"
-                    for option in question.options
+                    f"<label class='checkbox'><input name='value' type='checkbox' value='{html.escape(option)}' {'disabled' if not editable else ''}> <span>{html.escape(self.reference_labels.get(option, f'Reference {index}'))}</span></label>"
+                    for index, option in enumerate(question.options, start=1)
                 )
             else:
                 options = "".join(
-                    f"<option value='{html.escape(option)}'>{html.escape(option)}</option>"
+                    f"<option value='{html.escape(option)}'>{html.escape(option.replace('_', ' ').capitalize())}</option>"
                     for option in question.options
                 )
-                control = f"<select name='value'>{options}</select>"
+                descriptions = "".join(
+                    f"<li><strong>{html.escape(option.replace('_', ' ').capitalize())}</strong>: {html.escape(explanations[option])}</li>"
+                    for option in question.options if option in explanations
+                )
+                control = f"<select name='value' aria-label='{title}' {'disabled' if not editable else ''}>{options}</select>"
+                if descriptions:
+                    control += f"<ul class='help'>{descriptions}</ul>"
             forms.append(
                 f"<form class='question' data-question-id='{question_id}' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'>"
-                f"<label>{question_id}: {label}</label>{control}<button type='submit'>Save</button></form>"
+                f"<div class='question-heading'><h2>{title}</h2><span class='required'>{'Required' if question.required else 'Optional'}</span></div>"
+                f"<p class='rationale'>{rationale}</p>{control}"
+                f"<button type='submit' {'disabled' if not editable else ''}>Save answer</button></form>"
             )
         if session.state == "proposal_ready":
             forms.append(
-                f"<form class='approve' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button type='submit'>Approve proposal</button></form>"
+                f"<section class='approval'><h2>Proposal ready</h2><p>Review the recorded choices before creating the proposal. Approval does not run work or modify the target repository.</p>"
+                f"<form class='approve' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button class='primary' type='submit'>Approve proposal</button></form></section>"
             )
         body = (
-            "<!doctype html><meta charset='utf-8'><title>GigAI create</title>"
-            "<main><h1>GigAI proposal interview</h1>"
-            f"<p data-state='{html.escape(session.state)}'>State: {html.escape(session.state)}</p>"
+            "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+            "<title>GigAI proposal interview</title><style>"
+            ":root{font:16px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;background:#f5f7fb}"
+            "body{margin:0}.shell{max-width:760px;margin:0 auto;padding:32px 20px 64px}"
+            "header{background:#172033;color:white;border-radius:16px;padding:24px;margin-bottom:20px}"
+            "h1{font-size:1.65rem;margin:0 0 8px}h2{font-size:1rem;margin:0}p{line-height:1.5}"
+            ".intro{color:#dbe4f5;margin:0}.status{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-top:18px;font-size:.9rem}"
+            ".badge,.required{border-radius:999px;padding:4px 9px;font-size:.75rem;font-weight:700;background:#dbeafe;color:#1e40af}"
+            ".required{background:#eef2ff;color:#4338ca;float:right}.question,.approval{background:white;border:1px solid #dbe2ef;border-radius:12px;padding:20px;margin:14px 0;box-shadow:0 2px 8px #1720330d}"
+            ".question-heading{display:flex;justify-content:space-between;gap:12px}.rationale{color:#526079;margin:8px 0 14px}.help{color:#526079;font-size:.88rem;margin:10px 0 0;padding-left:20px}"
+            "input[type=text],select{box-sizing:border-box;width:100%;border:1px solid #aab6cc;border-radius:7px;padding:10px;font:inherit;background:white}"
+            ".checkbox{display:block;margin:10px 0;color:#26334d}.checkbox input{margin-right:8px}"
+            "button{border:1px solid #9aa8bf;border-radius:7px;background:#f8fafc;padding:9px 14px;font:inherit;font-weight:600;cursor:pointer;margin-top:14px}button:hover{background:#e8eef8}button:disabled{cursor:not-allowed;opacity:.55}button.primary{background:#2563eb;color:white;border-color:#2563eb}"
+            ".approval{border-color:#93c5fd;background:#eff6ff}.approval p{color:#274060}.footer{color:#61708a;font-size:.82rem;margin-top:18px}"
+            "</style><main class='shell'><header><h1>GigAI proposal interview</h1>"
+            "<p class='intro'>Answer a few questions to turn your request into a reviewable proposal. Nothing runs and the target is not modified during this interview.</p>"
+            f"<div class='status'><span data-state='{html.escape(session.state)}'>State: {html.escape(session.state.replace('_', ' ').capitalize())}</span><span class='badge'>{completed_required}/{total_required} required answers</span></div></header>"
             + "".join(forms)
-            + "</main><script>"
+            + "<p class='footer'>This local interview expires automatically. You can stop before approval at any time.</p></main><script>"
             "for (const form of document.querySelectorAll('form.question')) {"
             "form.addEventListener('submit', async (event) => {event.preventDefault();"
             "const values=[...form.querySelectorAll('[name=value]')];"

@@ -11,8 +11,8 @@
 ## Outcome
 
 Implement the approved S22-01 interaction as the user-facing `gigai create`
-flow. An operator supplies a request and explicitly selected local references;
-the local session gathers bounded, typed, domain-specific clarification;
+flow. An operator supplies a request; the local session collects explicitly
+selected local references and then gathers bounded, typed, domain-specific clarification;
 the operator chooses the privacy, capability, and effect boundary; and the
 system seals a reviewable Gig proposal only after explicit operator approval.
 

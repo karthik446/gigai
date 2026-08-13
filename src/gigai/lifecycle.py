@@ -44,6 +44,7 @@ from .proposal_interview import (
     InterviewSession,
     ProposalInterviewError,
     ReferenceDecision,
+    attach_reference_choices,
     build_session,
     approve_session,
     persist_trace,
@@ -173,9 +174,6 @@ def start_interview(
         creation_started = _creation_started_entry(workpad)
         return InterviewStartResult(bound.project_id, gig_id, workpad, session, references, creation_started, True)
 
-    if not reference_paths:
-        raise LifecycleError("create requires at least one explicit --reference")
-
     existing_entries = _journal_entries(workpad)
     if existing_entries:
         if len(existing_entries) != 1 or not existing_entries[0].path.name.endswith("-creation-started.txt"):
@@ -240,6 +238,66 @@ def start_interview(
     )
     _persist_interview_trace(workpad, session)
     return InterviewStartResult(bound.project_id, gig_id, workpad, session, reference_bytes, creation_started, resumed)
+
+
+def select_interview_references(
+    *,
+    home_root: Path,
+    requested_target: Path | None,
+    start: InterviewStartResult,
+    session: InterviewSession,
+    paths: tuple[str, ...],
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> tuple[InterviewSession, tuple[str, ...], dict[str, str], dict[str, bytes]]:
+    """Resolve operator-entered target-relative paths into pinned references."""
+
+    if session.references:
+        raise LifecycleError("interview references have already been selected")
+    if not paths:
+        raise LifecycleError("enter at least one local reference path")
+    bound = resolve_bound_project(home_root=home_root, requested_target=requested_target)
+    target_root = bound.target_root.expanduser().resolve(strict=True)
+    references: list[ReferenceDecision] = []
+    labels: dict[str, str] = {}
+    reference_bytes: dict[str, bytes] = {}
+    seen: set[Path] = set()
+    artifacts: list[JournalArtifact] = []
+    for raw_path in paths:
+        raw = Path(raw_path).expanduser()
+        candidate = raw if raw.is_absolute() else target_root / raw
+        if candidate.is_symlink() or not candidate.is_file():
+            raise LifecycleError("reference must be an existing regular non-symlink file")
+        resolved = candidate.resolve(strict=True)
+        if not resolved.is_relative_to(target_root):
+            raise LifecycleError("reference must remain inside the bound target")
+        if resolved in seen:
+            raise LifecycleError("reference paths must be unique")
+        seen.add(resolved)
+        content = resolved.read_bytes()
+        reference_id = _allocate_interview_id("ref", uuid_factory)
+        references.append(
+            ReferenceDecision(reference_id, digest_imported_bytes(content), "selected")
+        )
+        relative_label = resolved.relative_to(target_root).as_posix()
+        labels[reference_id] = relative_label
+        reference_bytes[reference_id] = content
+        artifacts.append(
+            JournalArtifact(
+                f"review/interviews/{session.session_id}/references/{reference_id}.bin",
+                content,
+            )
+        )
+    updated = attach_reference_choices(session, tuple(references))
+    record_transition(
+        workpad=start.workpad,
+        project_id=start.project_id,
+        gig_id=start.gig_id,
+        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+        transition="proposal_interview_references_selected",
+        body=f"Operator selected {len(references)} explicit local interview reference(s).",
+        artifacts=tuple(artifacts),
+    )
+    return updated, tuple(item.reference_id for item in references), labels, reference_bytes
 
 
 def _start_improve_interview(

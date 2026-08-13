@@ -37,6 +37,7 @@ TRANSITIONS = frozenset(
     {
         "creation_started",
         "proposal_interview_started",
+        "proposal_interview_references_selected",
         "proposal_interview_updated",
         "proposal_interview_blocked",
         "proposal_interview_approved",

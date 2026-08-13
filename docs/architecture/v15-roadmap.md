@@ -445,7 +445,7 @@ remote hosting, background service behavior, and unapproved execution remain
 out of scope.
 
 G22 is complete. Its shipped path is deterministic/offline by default, binds
-only to loopback with a short-lived token, requires explicit reference and
+only to loopback with a short-lived token, requires explicit reference selection and
 operator approval, and hands G19 a sealed proposal without target mutation or
 Run authority. The [completion audit](../development/evidence/phase-2/G22/completion-audit.md)
 and [terminal handoff](../development/evidence/phase-2/G22/terminal-handoff.md)
