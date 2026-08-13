@@ -122,6 +122,15 @@ class RevisionResult:
     entry: JournalEntry
 
 
+@dataclass(frozen=True)
+class BuilderRecovery:
+    """Recovered builder state needed to reopen a browser review safely."""
+
+    proposal_id: str | None
+    review: Mapping[str, object]
+    builder_ready: bool
+
+
 def start_interview(
     *,
     home_root: Path,
@@ -633,6 +642,33 @@ def build_interview_proposal(
 
     if session.state != "proposal_ready":
         raise LifecycleError("a complete Gig definition is required before proposal build")
+    builder_path = start.workpad / "manifests/gig-builder-session.json"
+    if builder_path.is_file():
+        try:
+            existing_builder = parse_json_bytes(builder_path.read_bytes())
+        except (OSError, ValueError) as exc:
+            raise LifecycleError("existing builder session snapshot is not recoverable") from exc
+        if not isinstance(existing_builder, dict):
+            raise LifecycleError("existing builder session snapshot is not an object")
+        existing_state = existing_builder.get("state")
+        if existing_state == "researching":
+            recover_builder_session(start=start, uuid_factory=uuid_factory)
+            raise LifecycleError("interrupted builder research was terminalized; start a new session")
+        if existing_state in {
+            "operator_review",
+            "approved",
+            "rejected",
+            "cancelled",
+            "timed_out",
+            "unavailable",
+            "malformed",
+            "budget_exhausted",
+            "failed",
+            "blocked",
+        }:
+            raise LifecycleError(
+                f"builder session is already terminal or reviewable: {existing_state}"
+            )
     config = load_config(home_root)
     commission_path = start.workpad / str(session.request_artifact["path"])
     try:
@@ -830,6 +866,68 @@ def build_interview_proposal(
         ),
     )
     return session
+
+
+def recover_builder_session(
+    *,
+    start: InterviewStartResult,
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> BuilderRecovery:
+    """Reconcile an interrupted builder before reopening its browser flow.
+
+    A committed ``researching`` snapshot is never retried implicitly. It is
+    terminalized as an interrupted failure. A durable review snapshot is
+    reopened with its existing proposal identity, so a browser refresh cannot
+    allocate another proposal or invoke the model again.
+    """
+
+    path = start.workpad / "manifests/gig-builder-session.json"
+    if not path.is_file():
+        return BuilderRecovery(None, {}, False)
+    try:
+        payload = parse_json_bytes(path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise LifecycleError("builder session snapshot is not recoverable") from exc
+    if not isinstance(payload, dict):
+        raise LifecycleError("builder session snapshot is not an object")
+    state = payload.get("state")
+    if state == "researching":
+        payload["state"] = "failed"
+        payload["terminal_reason"] = "interrupted_build_recovery"
+        payload["updated_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        recovered_bytes = canonical_json_bytes(payload)
+        report = validate_gig_builder_session(recovered_bytes)
+        if not report.valid:
+            raise LifecycleError("interrupted builder session failed contract validation")
+        record_transition(
+            workpad=start.workpad,
+            project_id=start.project_id,
+            gig_id=start.gig_id,
+            handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+            transition="gig_builder_failed",
+            body="Gig builder recovered an interrupted research session without retrying it.",
+            artifacts=(JournalArtifact("manifests/gig-builder-session.json", recovered_bytes),),
+        )
+        return BuilderRecovery(None, {}, False)
+    if state != "operator_review":
+        return BuilderRecovery(None, {}, False)
+    draft_ref = payload.get("draft")
+    if not isinstance(draft_ref, dict) or not isinstance(draft_ref.get("path"), str):
+        raise LifecycleError("reviewable builder session has no draft reference")
+    draft_path = start.workpad / draft_ref["path"]
+    proposal_path = start.workpad / "manifests/gig-proposal.json"
+    try:
+        draft = parse_json_bytes(draft_path.read_bytes())
+        proposal = parse_json_bytes(proposal_path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise LifecycleError("reviewable builder session is missing its proposal artifacts") from exc
+    if not isinstance(draft, dict) or not isinstance(proposal, dict):
+        raise LifecycleError("reviewable builder artifacts are not objects")
+    proposal_id = proposal.get("proposal_id")
+    research = draft.get("research")
+    if not isinstance(proposal_id, str) or not isinstance(research, dict):
+        raise LifecycleError("reviewable builder artifacts are incomplete")
+    return BuilderRecovery(proposal_id, research, True)
 
 
 def _builder_session_record(

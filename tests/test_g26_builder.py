@@ -7,9 +7,16 @@ import time
 import pytest
 
 from gigai.builder import GigBuilderError, build_model_draft
-from gigai.canonical import digest_imported_bytes, parse_json_bytes
+from gigai.canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes
 from gigai.config import CredentialReference, Endpoint, ModelTarget, Profile
-from gigai.lifecycle import LifecycleError, build_interview_proposal, start_interview
+from gigai.lifecycle import (
+    LifecycleError,
+    _builder_selection,
+    _builder_session_record,
+    build_interview_proposal,
+    recover_builder_session,
+    start_interview,
+)
 from gigai.proposal_interview import answer_question, attach_reference_choices
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
@@ -239,3 +246,53 @@ def test_builder_timeout_is_classified_without_a_draft(monkeypatch, tmp_path) ->
             max_wall_time_ms=5,
         )
     assert error.value.reason == "timed_out"
+
+
+def test_interrupted_builder_recovery_terminalizes_without_retry(tmp_path) -> None:
+    config, start = _start(tmp_path)
+    session = answer_question(start.session, "scope", "Review this repository.")
+    payload = _builder_session_record(
+        session=session,
+        start=start,
+        selection=_builder_selection(config, "offline-default"),
+        state="researching",
+        draft_ref=None,
+        terminal_reason=None,
+    )
+    builder_path = start.workpad / "manifests/gig-builder-session.json"
+    builder_path.write_bytes(canonical_json_bytes(payload))
+
+    recovered = recover_builder_session(start=start)
+
+    assert recovered.proposal_id is None
+    assert not recovered.builder_ready
+    snapshot = parse_json_bytes(builder_path.read_bytes())
+    assert snapshot["state"] == "failed"
+    assert snapshot["terminal_reason"] == "interrupted_build_recovery"
+
+
+def test_completed_builder_cannot_be_run_again(tmp_path) -> None:
+    config, start = _start(tmp_path)
+    session = answer_question(start.session, "scope", "Review this repository.")
+    build_interview_proposal(
+        home_root=config.home_root,
+        requested_target=tmp_path / "target",
+        start=start,
+        session=session,
+        model_target="offline-default",
+        reference_bytes={},
+    )
+    recovered = recover_builder_session(start=start)
+    assert recovered.proposal_id is not None
+    assert recovered.review["summary"]
+    assert recovered.builder_ready
+
+    with pytest.raises(LifecycleError, match="reviewable"):
+        build_interview_proposal(
+            home_root=config.home_root,
+            requested_target=tmp_path / "target",
+            start=start,
+            session=session,
+            model_target="offline-default",
+            reference_bytes={},
+        )

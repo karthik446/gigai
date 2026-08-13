@@ -629,6 +629,7 @@ class InterviewHTTPServer:
         on_rejection: Callable[[InterviewSession], InterviewSession] | None = None,
         builder_review: Mapping[str, object] | None = None,
         builder_mode: bool = False,
+        builder_ready: bool = False,
         lifetime_seconds: float = 600.0,
     ) -> None:
         if host != "127.0.0.1":
@@ -647,7 +648,7 @@ class InterviewHTTPServer:
         self.on_rejection = on_rejection
         self.builder_review = builder_review if builder_review is not None else {}
         self.builder_mode = builder_mode
-        self.builder_ready = False
+        self.builder_ready = builder_ready
         self.lifetime_seconds = lifetime_seconds
         self.token = secrets.token_urlsafe(24)
         self._lock = threading.RLock()

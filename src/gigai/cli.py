@@ -31,6 +31,7 @@ from .lifecycle import (
     persist_interview_session,
     record_feedback,
     record_builder_state,
+    recover_builder_session,
     reject_offline,
     revise_offline,
     select_interview_references,
@@ -642,8 +643,9 @@ def create_command(
                 max_rounds=max_rounds,
             )
             reference_bytes = dict(started.reference_bytes)
-            built_proposal_id: str | None = None
-            builder_review: dict[str, object] = {}
+            recovered_builder = recover_builder_session(start=started)
+            built_proposal_id: str | None = recovered_builder.proposal_id
+            builder_review: dict[str, object] = dict(recovered_builder.review)
 
             def select_references(session, paths: tuple[str, ...]):
                 updated, selected_ids, labels, selected_bytes = select_interview_references(
@@ -745,6 +747,7 @@ def create_command(
                 on_rejection=reject_proposal,
                 builder_review=builder_review,
                 builder_mode=True,
+                builder_ready=recovered_builder.builder_ready,
             ).start()
             try:
                 click.echo(f"GigAI local interview: {server.url}", err=True)
