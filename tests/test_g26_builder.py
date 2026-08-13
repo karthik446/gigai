@@ -6,7 +6,9 @@ import pytest
 
 from gigai.builder import GigBuilderError, build_model_draft
 from gigai.config import CredentialReference, Endpoint, ModelTarget, Profile
-from gigai.lifecycle import start_interview
+from gigai.canonical import parse_json_bytes
+from gigai.lifecycle import LifecycleError, build_interview_proposal, start_interview
+from gigai.proposal_interview import answer_question
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 
@@ -123,3 +125,24 @@ def test_malformed_model_output_fails_closed(monkeypatch, tmp_path) -> None:
             reference_bytes={},
         )
     assert error.value.reason == "malformed"
+
+
+def test_unavailable_builder_target_writes_terminal_session(tmp_path) -> None:
+    config, start = _start(tmp_path)
+    session = answer_question(start.session, "scope", "Review this repository.")
+
+    with pytest.raises(LifecycleError, match="unknown model target"):
+        build_interview_proposal(
+            home_root=config.home_root,
+            requested_target=tmp_path / "target",
+            start=start,
+            session=session,
+            model_target="missing-model",
+            reference_bytes={},
+        )
+
+    snapshot = parse_json_bytes(
+        (start.workpad / "manifests/gig-builder-session.json").read_bytes()
+    )
+    assert snapshot["state"] == "unavailable"
+    assert snapshot["terminal_reason"] == "unavailable"

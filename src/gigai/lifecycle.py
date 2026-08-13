@@ -639,7 +639,36 @@ def build_interview_proposal(
         commission = commission_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise LifecycleError("Gig intent artifact cannot be read as UTF-8") from exc
-    base_selection = _builder_selection(config, model_target)
+    try:
+        base_selection = _builder_selection(config, model_target)
+    except LifecycleError as exc:
+        base_selection = _unusable_builder_selection(model_target)
+        terminal_reason = "unavailable"
+        terminal_payload = _builder_session_record(
+            session=session,
+            start=start,
+            selection=base_selection,
+            state=terminal_reason,
+            draft_ref=None,
+            terminal_reason=terminal_reason,
+        )
+        terminal_bytes = canonical_json_bytes(terminal_payload)
+        terminal_report = validate_gig_builder_session(terminal_bytes)
+        if not terminal_report.valid:
+            raise LifecycleError(
+                "unavailable Gig builder session failed contract validation: "
+                + ", ".join(item.code for item in terminal_report.findings)
+            ) from exc
+        record_transition(
+            workpad=start.workpad,
+            project_id=start.project_id,
+            gig_id=start.gig_id,
+            handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+            transition="gig_builder_failed",
+            body="Gig builder stopped before research because the selected model is unavailable.",
+            artifacts=(JournalArtifact("manifests/gig-builder-session.json", terminal_bytes),),
+        )
+        raise LifecycleError(str(exc)) from exc
     researching_payload = _builder_session_record(
         session=session,
         start=start,
@@ -908,6 +937,24 @@ def _builder_selection(config, model_target: str) -> dict[str, object]:
     return {
         **identity,
         "readiness": "usable",
+        "selection_actor": {"kind": "operator", "id": "local-user"},
+        "selection_digest": digest_imported_bytes(canonical_json_bytes(identity)),
+    }
+
+
+def _unusable_builder_selection(model_target: str) -> dict[str, object]:
+    """Return a schema-valid non-authoritative selection for terminal failures."""
+
+    requested = model_target if model_target and model_target.replace("-", "").replace("_", "").isalnum() else "unavailable-target"
+    identity = {
+        "target_name": requested,
+        "endpoint_name": "unavailable",
+        "model": "unavailable",
+        "adapter": "unavailable",
+    }
+    return {
+        **identity,
+        "readiness": "unavailable",
         "selection_actor": {"kind": "operator", "id": "local-user"},
         "selection_digest": digest_imported_bytes(canonical_json_bytes(identity)),
     }
