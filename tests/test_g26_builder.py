@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
+import time
 
 import pytest
 
 from gigai.builder import GigBuilderError, build_model_draft
+from gigai.canonical import digest_imported_bytes, parse_json_bytes
 from gigai.config import CredentialReference, Endpoint, ModelTarget, Profile
-from gigai.canonical import parse_json_bytes
 from gigai.lifecycle import LifecycleError, build_interview_proposal, start_interview
-from gigai.proposal_interview import answer_question
+from gigai.proposal_interview import answer_question, attach_reference_choices
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 
@@ -146,3 +148,94 @@ def test_unavailable_builder_target_writes_terminal_session(tmp_path) -> None:
     )
     assert snapshot["state"] == "unavailable"
     assert snapshot["terminal_reason"] == "unavailable"
+
+
+def test_remote_builder_receives_only_selected_reference_content(monkeypatch, tmp_path) -> None:
+    config, start = _start(tmp_path)
+    selected = b"selected context"
+    excluded = b"unselected context and synthetic-secret"
+    from gigai.proposal_interview import ReferenceDecision
+
+    references = (
+        ReferenceDecision("ref_00000000-0000-4000-8000-000000000005", digest_imported_bytes(selected)),
+        ReferenceDecision("ref_00000000-0000-4000-8000-000000000006", digest_imported_bytes(excluded)),
+    )
+    session = attach_reference_choices(start.session, references)
+    session = answer_question(session, "references", [references[0].reference_id])
+    prompts: list[str] = []
+
+    class FakePort:
+        def invoke(self, request):
+            prompts.append(request.prompt)
+            from gigai.adapters.port import InvocationResult, NormalizedUsage
+
+            return InvocationResult(
+                status="success",
+                output_text=json.dumps(
+                    {
+                        "summary": "Remote bounded draft",
+                        "assumptions": [],
+                        "unresolved_questions": [],
+                        "citations": [],
+                    }
+                ),
+                resolved_model="fake",
+                raw_usage={},
+                normalized_usage=NormalizedUsage(None, None, None),
+                cost_status="unavailable",
+            )
+
+    binding = SimpleNamespace(
+        current=SimpleNamespace(
+            endpoint=SimpleNamespace(adapter="openai_api", name="remote", credential="remote-key"),
+            target=SimpleNamespace(name="remote-model", model="gpt-test"),
+        ),
+        port=FakePort(),
+        request=lambda **kwargs: SimpleNamespace(max_output_tokens=64, **kwargs),
+    )
+    from gigai import builder
+
+    monkeypatch.setattr(builder, "resolve_model_adapter", lambda *_args: binding)
+    draft, _selection = builder.build_model_draft(
+        config=config,
+        model_target="remote-model",
+        session=session,
+        reference_bytes={references[0].reference_id: selected, references[1].reference_id: excluded},
+        network_allowed=True,
+    )
+    assert draft.summary == "Remote bounded draft"
+    assert len(prompts) == 1
+    assert "selected context" in prompts[0]
+    assert "unselected context" not in prompts[0]
+    assert "synthetic-secret" not in prompts[0]
+    assert "remote-key" not in prompts[0]
+
+
+def test_builder_timeout_is_classified_without_a_draft(monkeypatch, tmp_path) -> None:
+    config, start = _start(tmp_path)
+
+    class SlowPort:
+        def invoke(self, request):
+            time.sleep(0.05)
+            raise AssertionError("late result must not be consumed")
+
+    binding = SimpleNamespace(
+        current=SimpleNamespace(
+            endpoint=SimpleNamespace(adapter="deterministic", name="offline"),
+            target=SimpleNamespace(name="offline-default", model="fixture-v1"),
+        ),
+        port=SlowPort(),
+        request=lambda **kwargs: SimpleNamespace(max_output_tokens=64, **kwargs),
+    )
+    from gigai import builder
+
+    monkeypatch.setattr(builder, "resolve_model_adapter", lambda *_args: binding)
+    with pytest.raises(GigBuilderError) as error:
+        builder.build_model_draft(
+            config=config,
+            model_target="offline-default",
+            session=start.session,
+            reference_bytes={},
+            max_wall_time_ms=5,
+        )
+    assert error.value.reason == "timed_out"
