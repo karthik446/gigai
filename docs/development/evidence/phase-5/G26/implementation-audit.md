@@ -45,14 +45,16 @@
 - Fresh-wheel installed G26 replay: `verified installed GigAI G26 builder
   contract`; it reached model draft creation and explicit approval in a
   disposable home/target.
+- Mutation harness: `mutation_killed=8/8` across bounded-call, reference,
+  recovery, duplicate-build, and unavailable-target guards.
 - `git diff --check` and focused Ruff checks pass.
 
 ## Remaining before G26 closeout
 
 - Run real G24 UAT with a configured/evidenced builder target and inspect the
   resulting workpad/SQLite artifacts with the operator.
-- Add full UAT and mutation evidence for the builder-specific guards,
-  including stale events and selected-reference exclusion on a configured
-  provider target.
+- Run real G24 UAT with a configured/evidenced builder target, inspect the
+  resulting workpad/SQLite artifacts with the operator, and capture stale
+  browser-event observations from that session.
 - Complete the G26 completion audit and terminal handoff after that UAT
   evidence is sanitized and accepted.
