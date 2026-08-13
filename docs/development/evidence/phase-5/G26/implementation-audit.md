@@ -25,14 +25,18 @@
   cancellation, and fail-closed `timed_out`, `cancelled`, and
   `budget_exhausted` outcomes. A late provider result is never used to write a
   draft.
+- Added restart-safe builder recovery: interrupted `researching` snapshots
+  terminalize without an implicit retry, while an existing review draft
+  reopens with its original proposal identity.
 - Added sanitized contract, builder, discovery, browser-flow, and installed
   replay tests. No raw UAT data, prompts, provider output, credentials, or
   local databases are included here.
 
 ## Evidence
 
-- Focused G22/G26 regression set: `32 passed`.
-- Full repository run: `551 passed, 64 subtests`; one pre-existing
+- Focused G22/G26 regression set: `34 passed`.
+- Full repository run before the final recovery milestone: `551 passed, 64
+  subtests`; one pre-existing
   multiprocessing journal-lock race failed during the concurrent run and
   passed in isolation (`1 passed`). The failure is the
   `mount.interprocess_lock` probe in
