@@ -1,6 +1,6 @@
 # TD-0003 — GitHub Actions Node.js runtime warnings
 
-- Status: Open
+- Status: In verification
 - Discovered during: `0.1.3` release workflow and pull-request runs
 - Affected surfaces: `actions/checkout@v4`, `actions/setup-python@v5`,
   `astral-sh/setup-uv@v5`
@@ -8,10 +8,10 @@
 
 ## Observation
 
-GitHub Actions reports that the pinned actions target Node.js 20 and are being
-forced onto Node.js 24 by the runner. The warning is currently non-blocking,
-but it signals that the workflow depends on a compatibility shim that may be
-removed or become stricter.
+GitHub Actions previously reported that the pinned actions targeted Node.js 20
+and were being forced onto Node.js 24 by the runner. The workflows now use
+Node 24-compatible action releases (`checkout@v6`, `setup-python@v6`, and
+`setup-uv@v8.0.0`); hosted workflow confirmation remains pending.
 
 ## Proposed resolution
 

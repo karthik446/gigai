@@ -1,17 +1,17 @@
 # TD-0002 — Owner-controlled release workflow
 
-- Status: Open
+- Status: In verification
 - Discovered during: G24 UAT and `0.1.3` release preparation
 - Affected surface: `.github/workflows/release.yml`
 - Ownering lane: G25 alpha release readiness
 
 ## Observation
 
-The current release workflow is triggered by pushing a `v*` tag. That makes a
-local tag creation and push part of the release procedure. The intended
-operating model is a private, manual GitHub Action that only the repository
-owner can invoke, with the action creating and pushing the release tag from
-the selected `main` commit.
+The previous release workflow was triggered by pushing a `v*` tag, which made a
+local tag creation and push part of the release procedure. The branch now
+implements the intended private, manual GitHub Action: it accepts an explicit
+version, verifies the selected `main` source, checks the actor, and creates the
+tag from GitHub before publication. GitHub workflow evidence remains pending.
 
 ## Proposed resolution
 
