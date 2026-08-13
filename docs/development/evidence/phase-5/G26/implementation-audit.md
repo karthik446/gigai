@@ -53,8 +53,6 @@
 
 ## Remaining before G26 closeout
 
-- Run real G24 UAT with a configured/evidenced builder target and inspect the
-  resulting workpad/SQLite artifacts with the operator.
 - Run real G24 UAT with a configured/evidenced builder target, inspect the
   resulting workpad/SQLite artifacts with the operator, and capture stale
   browser-event observations from that session.
