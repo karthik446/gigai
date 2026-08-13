@@ -16,7 +16,9 @@ The screen exposes internal protocol concepts and opaque reference IDs without
 operator explanations. It does not clearly show the request context, progress
 through the interview, what remains unanswered, or what the next action will
 do. Privacy, capability, and effect choices are presented as raw controls
-rather than decisions with plain-language consequences.
+rather than decisions with plain-language consequences. UAT also showed that
+these are safe create-flow defaults, not questions the operator should answer
+before defining a Gig.
 
 ## Proposed resolution
 
@@ -24,6 +26,9 @@ rather than decisions with plain-language consequences.
   accessible labels and focus states.
 - Replace opaque reference IDs with safe operator-facing names while retaining
   canonical IDs in the underlying record.
+- Make the first screen ask only what the Gig should do; make local references
+  optional and keep private-workpad, local-only, and local-read defaults in the
+  protocol record.
 - Explain each effect, privacy, and capability choice in plain language.
 - Show the Gig/request context, interview progress, pending questions, and the
   next permitted action.

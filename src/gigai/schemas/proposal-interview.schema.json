@@ -110,8 +110,7 @@
       "if": {"properties": {"state": {"const": "approved"}}},
       "then": {
         "properties": {
-          "approval": {"$ref": "#/$defs/approval"},
-          "selected_reference_ids": {"minItems": 1}
+          "approval": {"$ref": "#/$defs/approval"}
         }
       }
     },

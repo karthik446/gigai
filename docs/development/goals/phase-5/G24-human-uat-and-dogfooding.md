@@ -108,9 +108,13 @@ commit, remote, credential access, or target write.
 ### 4. First `create` checkpoint
 
 Run one real `gigai create` session for a bounded request. The operator answers
-the questions in their own words. Do not optimize for a successful approval;
-record unclear wording, missing context, incorrect assumptions, and questions
-that do not help the decision.
+the single Gig-definition question in their own words. Local references are
+optional and may be added only when the Gig needs local context. The initial
+boundary defaults are private-workpad proposal output, local-only privacy, and
+local reading only for references the operator explicitly adds. Follow-up
+questions are shown only when the interview needs more context. Do not optimize
+for a successful approval; record unclear wording, missing context, incorrect
+assumptions, and questions that do not help the decision.
 
 At the end of the interaction, inspect the proposal ID, Gig ID, session state,
 selected references, effect/privacy/capability choices, and approval state.

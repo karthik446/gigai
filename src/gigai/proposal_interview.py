@@ -23,6 +23,9 @@ QUESTION_TYPES = frozenset({"text", "choice", "multiselect", "confirmation"})
 EFFECT_CHOICES = ("read_local", "write_workpad")
 PRIVACY_CHOICES = ("local_only", "redact_before_share")
 CAPABILITY_CHOICES = ("none", "local_read")
+DEFAULT_EFFECT = "write_workpad"
+DEFAULT_PRIVACY = "local_only"
+DEFAULT_CAPABILITY = "local_read"
 
 
 class ProposalInterviewError(ValueError):
@@ -146,16 +149,16 @@ def build_session(
         raise ProposalInterviewError("request digest is invalid")
     reference_ids = tuple(item.reference_id for item in references)
     reference_question = (
-        Question("references", "multiselect", True, reference_ids, (), "Select exact local references.", "g22://references")
+        Question("references", "multiselect", False, reference_ids, (), "Add exact local references only when this Gig needs local context. You can skip this.", "g22://references")
         if reference_ids
-        else Question("references", "text", True, (), (), "Enter one or more exact local paths, one per line.", "g22://references")
+        else Question("references", "text", False, (), (), "Add exact local paths only when this Gig needs local context. You can skip this.", "g22://references")
     )
     questions = (
-        Question("scope", "text", True, (), (), "Define the requested outcome.", "g22://scope"),
+        Question("scope", "text", True, (), (), "Describe the outcome this Gig should own.", "g22://scope"),
         reference_question,
-        Question("effect", "choice", True, EFFECT_CHOICES, (), "Choose a bounded local effect.", "g22://effect"),
-        Question("privacy", "choice", True, PRIVACY_CHOICES, (), "Choose the privacy boundary.", "g22://privacy"),
-        Question("capability", "choice", True, CAPABILITY_CHOICES, (), "Choose the local capability boundary.", "g22://capability"),
+        Question("effect", "choice", False, EFFECT_CHOICES, (), "GigAI writes proposal artifacts to its private workpad.", "g22://effect"),
+        Question("privacy", "choice", False, PRIVACY_CHOICES, (), "The interview stays on this machine by default.", "g22://privacy"),
+        Question("capability", "choice", False, CAPABILITY_CHOICES, (), "Local reading is available only for references you explicitly add.", "g22://capability"),
     )
     timestamp = now or _now()
     session = InterviewSession(
@@ -173,6 +176,9 @@ def build_session(
         max_rounds=max_rounds,
         references=references,
         questions=questions,
+        privacy_choice=DEFAULT_PRIVACY,
+        capability_choice=DEFAULT_CAPABILITY,
+        effect_choice=DEFAULT_EFFECT,
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -210,11 +216,13 @@ def answer_question(
     *,
     now: str | None = None,
 ) -> InterviewSession:
-    if session.state not in {"questions_pending", "clarification_required"}:
-        raise ProposalInterviewError(f"cannot answer in terminal state {session.state!r}")
     question = next((item for item in session.questions if item.question_id == question_id), None)
     if question is None:
         raise ProposalInterviewError(f"unknown question {question_id!r}")
+    if session.state not in {"questions_pending", "clarification_required"} and not (
+        session.state == "proposal_ready" and (not question.required or question_id == "scope")
+    ):
+        raise ProposalInterviewError(f"cannot answer in terminal state {session.state!r}")
     _validate_answer(question, value)
     timestamp = now or _now()
     answers = tuple(item for item in session.answers if item.question_id != question_id)
@@ -240,8 +248,7 @@ def answer_question(
         effect = str(value)
     required_ids = {item.question_id for item in session.questions if item.required}
     answered_ids = {item.question_id for item in answers}
-    references_ready = any(item.decision == "selected" for item in selected)
-    state = "proposal_ready" if required_ids.issubset(answered_ids) and references_ready else "questions_pending"
+    state = "proposal_ready" if required_ids.issubset(answered_ids) else "questions_pending"
     updated = replace(
         session,
         answers=answers,
@@ -359,8 +366,6 @@ def approve_session(
     _id(proposal_id, "gp_")
     if not proposal_sha256.startswith("sha256:") or len(proposal_sha256) != 71:
         raise ProposalInterviewError("proposal digest is invalid")
-    if not session.selected_reference_ids:
-        raise ProposalInterviewError("approval requires explicit reference selection")
     if session.privacy_choice not in PRIVACY_CHOICES:
         raise ProposalInterviewError("approval requires a privacy choice")
     if session.capability_choice not in CAPABILITY_CHOICES:
@@ -760,9 +765,9 @@ class InterviewHTTPServer:
         forms: list[str] = []
         endpoint = f"/session/{self.token}/events"
         titles = {
-            "scope": "What should GigAI help accomplish?",
-            "references": "Which local references should GigAI use?",
-            "effect": "What may GigAI change?",
+            "scope": "What should this Gig do?",
+            "references": "Add local context (optional)",
+            "effect": "What may this Gig change?",
             "privacy": "Where may information be used?",
             "capability": "What local capability is allowed?",
             "operator-confirmation": "Are these choices correct?",
@@ -780,16 +785,20 @@ class InterviewHTTPServer:
         total_required = sum(1 for item in session.questions if item.required)
         completed_required = sum(1 for item in session.questions if item.required and item.question_id in answered)
         for question in session.questions:
+            if question.question_id in {"effect", "privacy", "capability"}:
+                continue
             title = html.escape(titles.get(question.question_id, question.question_id.replace("-", " ").capitalize()))
             rationale = html.escape(question.rationale)
             question_id = html.escape(question.question_id)
+            required = "required" if question.required else ""
+            disabled = "disabled" if not editable else ""
             if question.answer_type == "text":
-                control = f"<input name='value' type='text' aria-label='{title}' required {'disabled' if not editable else ''}>"
+                control = f"<input name='value' type='text' aria-label='{title}' {required} {disabled}>"
             elif question.answer_type == "confirmation":
-                control = f"<label class='checkbox'><input name='value' type='checkbox' {'disabled' if not editable else ''}> <span>Yes, continue</span></label>"
+                control = f"<label class='checkbox'><input name='value' type='checkbox' {disabled}> <span>Yes, continue</span></label>"
             elif question.answer_type == "multiselect":
                 control = "".join(
-                    f"<label class='checkbox'><input name='value' type='checkbox' value='{html.escape(option)}' {'disabled' if not editable else ''}> <span>{html.escape(self.reference_labels.get(option, f'Reference {index}'))}</span></label>"
+                    f"<label class='checkbox'><input name='value' type='checkbox' value='{html.escape(option)}' {disabled}> <span>{html.escape(self.reference_labels.get(option, f'Reference {index}'))}</span></label>"
                     for index, option in enumerate(question.options, start=1)
                 )
             else:
@@ -801,37 +810,39 @@ class InterviewHTTPServer:
                     f"<li><strong>{html.escape(option.replace('_', ' ').capitalize())}</strong>: {html.escape(explanations[option])}</li>"
                     for option in question.options if option in explanations
                 )
-                control = f"<select name='value' aria-label='{title}' {'disabled' if not editable else ''}>{options}</select>"
+                control = f"<select name='value' aria-label='{title}' {disabled}>{options}</select>"
                 if descriptions:
                     control += f"<ul class='help'>{descriptions}</ul>"
+            card_class = "question optional-context" if question.question_id == "references" else "question"
+            button_label = "Continue" if question.question_id == "scope" else "Save answer"
             forms.append(
-                f"<form class='question' data-question-id='{question_id}' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'>"
+                f"<form class='{card_class}' data-question-id='{question_id}' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'>"
                 f"<div class='question-heading'><h2>{title}</h2><span class='required'>{'Required' if question.required else 'Optional'}</span></div>"
                 f"<p class='rationale'>{rationale}</p>{control}"
-                f"<button type='submit' {'disabled' if not editable else ''}>Save answer</button></form>"
+                f"<button type='submit' {disabled}>{button_label}</button></form>"
             )
         if session.state == "proposal_ready":
             forms.append(
-                f"<section class='approval'><h2>Proposal ready</h2><p>Review the recorded choices before creating the proposal. Approval does not run work or modify the target repository.</p>"
+                f"<section class='approval'><h2>Gig definition ready</h2><p>Review the Gig definition before creating the proposal. GigAI will write proposal artifacts to its private workpad, stay local-only, and read only references you explicitly add. Approval does not run work or modify the target repository.</p>"
                 f"<form class='approve' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button class='primary' type='submit'>Approve proposal</button></form></section>"
             )
         body = (
             "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
-            "<title>GigAI proposal interview</title><style>"
+            "<title>Define a Gig</title><style>"
             ":root{font:16px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;background:#f5f7fb}"
             "body{margin:0}.shell{max-width:760px;margin:0 auto;padding:32px 20px 64px}"
             "header{background:#172033;color:white;border-radius:16px;padding:24px;margin-bottom:20px}"
             "h1{font-size:1.65rem;margin:0 0 8px}h2{font-size:1rem;margin:0}p{line-height:1.5}"
             ".intro{color:#dbe4f5;margin:0}.status{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-top:18px;font-size:.9rem}"
             ".badge,.required{border-radius:999px;padding:4px 9px;font-size:.75rem;font-weight:700;background:#dbeafe;color:#1e40af}"
-            ".required{background:#eef2ff;color:#4338ca;float:right}.question,.approval{background:white;border:1px solid #dbe2ef;border-radius:12px;padding:20px;margin:14px 0;box-shadow:0 2px 8px #1720330d}"
+            ".required{background:#eef2ff;color:#4338ca;float:right}.question,.approval{background:white;border:1px solid #dbe2ef;border-radius:12px;padding:20px;margin:14px 0;box-shadow:0 2px 8px #1720330d}.optional-context{border-style:dashed}"
             ".question-heading{display:flex;justify-content:space-between;gap:12px}.rationale{color:#526079;margin:8px 0 14px}.help{color:#526079;font-size:.88rem;margin:10px 0 0;padding-left:20px}"
             "input[type=text],select{box-sizing:border-box;width:100%;border:1px solid #aab6cc;border-radius:7px;padding:10px;font:inherit;background:white}"
             ".checkbox{display:block;margin:10px 0;color:#26334d}.checkbox input{margin-right:8px}"
             "button{border:1px solid #9aa8bf;border-radius:7px;background:#f8fafc;padding:9px 14px;font:inherit;font-weight:600;cursor:pointer;margin-top:14px}button:hover{background:#e8eef8}button:disabled{cursor:not-allowed;opacity:.55}button.primary{background:#2563eb;color:white;border-color:#2563eb}"
             ".approval{border-color:#93c5fd;background:#eff6ff}.approval p{color:#274060}.footer{color:#61708a;font-size:.82rem;margin-top:18px}"
-            "</style><main class='shell'><header><h1>GigAI proposal interview</h1>"
-            "<p class='intro'>Answer a few questions to turn your request into a reviewable proposal. Nothing runs and the target is not modified during this interview.</p>"
+            "</style><main class='shell'><header><h1>Define a Gig</h1>"
+            "<p class='intro'>Describe the Gig you want to create. GigAI may ask a follow-up only when it needs more context. Nothing runs and the target is not modified during this interview.</p>"
             f"<div class='status'><span data-state='{html.escape(session.state)}'>State: {html.escape(session.state.replace('_', ' ').capitalize())}</span><span class='badge'>{completed_required}/{total_required} required answers</span></div></header>"
             + "".join(forms)
             + "<p class='footer'>This local interview expires automatically. You can stop before approval at any time.</p></main><script>"

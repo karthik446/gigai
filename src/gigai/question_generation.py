@@ -28,15 +28,13 @@ def generate_model_questions(
     reference_bytes: dict[str, bytes],
     network_allowed: bool = False,
 ) -> InterviewSession:
-    """Ask the selected model for typed questions after reference selection.
+    """Ask the selected model for typed follow-up questions.
 
     The built-in deterministic target uses a fixed offline prompt. A remote
     target is refused unless the caller explicitly opts into network access;
     G22 does not infer that permission from configuration presence.
     """
 
-    if not session.selected_reference_ids:
-        raise QuestionGenerationError("question generation requires explicit references")
     binding = resolve_model_adapter(config, model_target)
     remote = binding.current.endpoint.adapter != "deterministic"
     if remote and not network_allowed:
