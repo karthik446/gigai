@@ -26,16 +26,19 @@ from .lifecycle import (
     LifecycleError,
     approve_interview_session,
     approve_offline,
+    build_interview_proposal,
     create_offline,
     persist_interview_session,
     record_feedback,
+    record_builder_state,
     reject_offline,
     revise_offline,
     select_interview_references,
     stage_improvement_manifest,
     start_interview,
 )
-from .proposal_interview import InterviewHTTPServer
+from .model_discovery import discover_installed_models, resolve_target_readiness
+from .proposal_interview import InterviewHTTPServer, block_session, request_revision
 from .occurrence import (
     OccurrenceError,
     close_occurrence,
@@ -46,6 +49,7 @@ from .occurrence import (
     trigger_occurrence,
 )
 from .question_generation import generate_model_questions
+from .question_generation import G26_QUESTION_PROMPTS
 from .setup import (
     build_config,
     detect_editor_argv,
@@ -82,9 +86,52 @@ def cli(context: click.Context) -> None:
         raise click.UsageError(
             "Choose 'setup', 'doctor', 'init', 'create', 'improve', 'feedback', 'revise', "
             "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
-            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', or 'open'; "
+            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', 'models', or 'open'; "
             "use --help for details."
         )
+
+
+@cli.command("models")
+@click.option(
+    "--home",
+    "home_value",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="GigAI machine-state directory (default: GIGAI_HOME or ~/.gigai).",
+)
+@click.option("--json", "as_json", is_flag=True)
+def models_command(home_value: Path | None, as_json: bool) -> None:
+    """Show detected local model CLIs and configured target readiness."""
+
+    try:
+        home = home_value or default_home_root()
+        config = load_config(home)
+        payload = {
+            "detected": [
+                {
+                    "name": item.name,
+                    "executable": str(item.executable) if item.executable else None,
+                    "readiness": item.readiness,
+                }
+                for item in discover_installed_models()
+            ],
+            "configured": [
+                resolve_target_readiness(config, item.name).__dict__
+                for item in config.model_targets
+            ],
+        }
+        if as_json:
+            click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+            return
+        for item in payload["detected"]:
+            location = f" ({item['executable']})" if item["executable"] else ""
+            click.echo(f"{item['name']}: {item['readiness']}{location}")
+        for item in payload["configured"]:
+            click.echo(
+                f"target {item['target_name']}: {item['readiness']} "
+                f"({item['adapter'] or 'unresolved'} / {item['model'] or 'unknown'})"
+            )
+    except (ConfigurationError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @cli.command("setup")
@@ -537,6 +584,11 @@ def init_command(target: Path | None, home_value: Path | None, as_json: bool) ->
     help="Use the legacy deterministic proposal fixture instead of the local interview.",
 )
 @click.option(
+    "--allow-provider-network",
+    is_flag=True,
+    help="Allow a configured remote model target to ask questions and build the draft.",
+)
+@click.option(
     "--max-rounds",
     type=click.IntRange(min=1, max=1024),
     default=3,
@@ -561,6 +613,7 @@ def create_command(
     request_value: str | None,
     reference_values: tuple[Path, ...],
     offline: bool,
+    allow_provider_network: bool,
     max_rounds: int,
     open_browser: bool,
     as_json: bool,
@@ -589,6 +642,7 @@ def create_command(
                 max_rounds=max_rounds,
             )
             reference_bytes = dict(started.reference_bytes)
+            built_proposal_id: str | None = None
 
             def select_references(session, paths: tuple[str, ...]):
                 updated, selected_ids, labels, selected_bytes = select_interview_references(
@@ -601,6 +655,66 @@ def create_command(
                 reference_bytes.update(selected_bytes)
                 return updated, selected_ids, labels
 
+            def builder_questions(session):
+                question_ids = {item.question_id for item in session.questions}
+                if "main-drive" not in question_ids:
+                    prompt_name = G26_QUESTION_PROMPTS[0]
+                elif "success-definition" not in question_ids:
+                    prompt_name = G26_QUESTION_PROMPTS[1]
+                else:
+                    return session
+                return generate_model_questions(
+                    config=load_config(home),
+                    model_target=model_target,
+                    session=session,
+                    reference_bytes=reference_bytes,
+                    prompt_name=prompt_name,
+                    network_allowed=allow_provider_network,
+                )
+
+            def build_proposal(session):
+                nonlocal built_proposal_id
+                built = build_interview_proposal(
+                    home_root=home,
+                    requested_target=target_value,
+                    start=started,
+                    session=session,
+                    model_target=model_target,
+                    reference_bytes=reference_bytes,
+                    network_allowed=allow_provider_network,
+                )
+                proposal = json.loads(
+                    (started.workpad / "manifests" / "gig-proposal.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                built_proposal_id = str(proposal["proposal_id"])
+                return built
+
+            def revise_proposal(session):
+                nonlocal built_proposal_id
+                built_proposal_id = None
+                revised = request_revision(session)
+                record_builder_state(
+                    start=started,
+                    session=revised,
+                    state="revised",
+                    terminal_reason=None,
+                    transition="gig_builder_revised",
+                )
+                return revised
+
+            def reject_proposal(session):
+                rejected = block_session(session, "operator_rejected")
+                record_builder_state(
+                    start=started,
+                    session=rejected,
+                    state="rejected",
+                    terminal_reason="operator_rejected",
+                    transition="gig_builder_rejected",
+                )
+                return rejected
+
             server = InterviewHTTPServer(
                 started.session,
                 on_session=lambda session: persist_interview_session(
@@ -609,16 +723,7 @@ def create_command(
                     gig_id=started.gig_id,
                     session=session,
                 ),
-                on_questions=lambda session: (
-                    session
-                    if any(item.question_id == "operator-confirmation" for item in session.questions)
-                    else generate_model_questions(
-                        config=load_config(home),
-                        model_target=model_target,
-                        session=session,
-                        reference_bytes=reference_bytes,
-                    )
-                ),
+                on_questions=builder_questions,
                 on_reference_paths=select_references,
                 reference_labels={},
                 on_approval=lambda session: approve_interview_session(
@@ -626,7 +731,12 @@ def create_command(
                     requested_target=target_value,
                     start=started,
                     session=session,
+                    existing_proposal_id=built_proposal_id,
                 ),
+                on_build=build_proposal,
+                on_revision=revise_proposal,
+                on_rejection=reject_proposal,
+                builder_mode=True,
             ).start()
             try:
                 click.echo(f"GigAI local interview: {server.url}", err=True)

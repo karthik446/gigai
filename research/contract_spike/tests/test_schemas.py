@@ -22,6 +22,7 @@ EXPECTED_SCHEMA_NAMES = {
     "capability-manifest.schema.json",
     "feedback.schema.json",
     "finding.schema.json",
+    "gig-builder-session.schema.json",
     "gig-comparison.schema.json",
     "gig-occurrence.schema.json",
     "gig-proposal.schema.json",
@@ -32,6 +33,7 @@ EXPECTED_SCHEMA_NAMES = {
     "model-exchange.schema.json",
     "model-invocation.schema.json",
     "proposal-interview.schema.json",
+    "proposal-draft-manifest.schema.json",
     "report.schema.json",
     "review-bundle.schema.json",
     "review-contract.schema.json",
@@ -937,6 +939,46 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "created_at": NOW,
         "updated_at": NOW,
     }
+    builder_session = {
+        "schema_version": "1.0",
+        "record_version": 1,
+        "session_id": "session_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "project_id": PROJECT_ID,
+        "gig_id": GIG_ID,
+        "request_kind": "create",
+        "state": "clarify",
+        "revision": 1,
+        "parent_revision": None,
+        "round": 1,
+        "max_rounds": 8,
+        "intent": {"text_artifact": artifact("review/intents/request.txt", media_type="text/plain"), "content_sha256": ZERO_DIGEST, "answered_at": NOW, "actor": {"kind": "operator", "id": "local-user"}},
+        "references": [],
+        "questions": [{"question_id": "main-drive", "answer_type": "text", "required": True, "options": [], "depends_on": [], "rationale": "Define the Gig drive.", "provenance": "fixture://g26"}],
+        "answers": [],
+        "model_selection": {"target_name": "offline-default", "endpoint_name": "offline", "model": "fixture-v1", "adapter": "deterministic", "readiness": "usable", "selection_actor": {"kind": "operator", "id": "local-user"}, "selection_digest": ZERO_DIGEST},
+        "policy": {"network": "local_only", "credential_reference": None, "budget": budget(), "cancellation": "operator_or_timeout"},
+        "accounting": {"model_calls": 0, "input_tokens": None, "output_tokens": None, "elapsed_ms": 0, "cost": None, "cost_currency": None},
+        "draft": None,
+        "terminal_reason": None,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    draft_manifest = {
+        "schema_version": "1.0",
+        "manifest_version": 1,
+        "manifest_id": "draft_manifest_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "session_id": builder_session["session_id"],
+        "project_id": PROJECT_ID,
+        "gig_id": GIG_ID,
+        "parent_manifest_id": None,
+        "model_selection": {"target_name": "offline-default", "endpoint_name": "offline", "model": "fixture-v1", "adapter": "deterministic", "selection_digest": ZERO_DIGEST},
+        "build": {"status": "completed", "mode": "deterministic_fixture", "started_at": NOW, "completed_at": NOW, "accounting": {"model_calls": 1, "input_tokens": None, "output_tokens": None, "elapsed_ms": 0, "cost": None, "cost_currency": None}},
+        "proposal_artifact": artifact("manifests/gig-proposal.json"),
+        "research": {"citations": [], "assumptions": ["Operator review is required."], "unresolved_questions": []},
+        "boundary": {"reference_ids": [], "network": "local_only", "credential_reference": None, "effects": ["write_workpad"]},
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
     return {
         "urn:gigai:schema:gig-proposal:1": proposal,
         "urn:gigai:schema:active-gig-version:1": active,
@@ -964,6 +1006,8 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "urn:gigai:schema:improvement-manifest:1": improvement_manifest,
         "urn:gigai:schema:gig-occurrence:1": occurrence,
         "urn:gigai:schema:gig-comparison:1": comparison,
+        "urn:gigai:schema:gig-builder-session:1": builder_session,
+        "urn:gigai:schema:proposal-draft-manifest:1": draft_manifest,
     }
 
 
@@ -1004,7 +1048,7 @@ class SerializedContractTests(unittest.TestCase):
         )
 
     def test_all_schema_documents_are_valid_draft_2020_12(self) -> None:
-        self.assertEqual(len(self.schemas), 27)
+        self.assertEqual(len(self.schemas), 29)
         for schema_id, schema in self.schemas.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)

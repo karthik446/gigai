@@ -103,7 +103,7 @@ def _manifest() -> dict[str, object]:
 
 
 def test_g20_adds_exactly_two_schema_resources() -> None:
-    assert len(SCHEMA_NAMES) == 27
+    assert len(SCHEMA_NAMES) == 29
     assert "learning-record.schema.json" in SCHEMA_NAMES
     assert "improvement-manifest.schema.json" in SCHEMA_NAMES
 

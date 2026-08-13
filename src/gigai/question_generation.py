@@ -14,6 +14,7 @@ from .review import redact_text
 
 
 DETERMINISTIC_PROMPT = "g22-question-probe"
+G26_QUESTION_PROMPTS = ("g26-question-probe-1", "g26-question-probe-2")
 
 
 class QuestionGenerationError(ProposalInterviewError):
@@ -27,6 +28,7 @@ def generate_model_questions(
     session: InterviewSession,
     reference_bytes: dict[str, bytes],
     network_allowed: bool = False,
+    prompt_name: str = DETERMINISTIC_PROMPT,
 ) -> InterviewSession:
     """Ask the selected model for typed follow-up questions.
 
@@ -39,9 +41,9 @@ def generate_model_questions(
     remote = binding.current.endpoint.adapter != "deterministic"
     if remote and not network_allowed:
         raise QuestionGenerationError("question-generation network permission is denied")
-    prompt = DETERMINISTIC_PROMPT
+    prompt = prompt_name
     if remote:
-        parts = [DETERMINISTIC_PROMPT]
+        parts = [prompt_name]
         for reference_id in session.selected_reference_ids:
             content = reference_bytes.get(reference_id)
             reference = next(item for item in session.references if item.reference_id == reference_id)
@@ -81,4 +83,9 @@ def generate_model_questions(
     return add_questions(session, tuple(questions))
 
 
-__all__ = ["DETERMINISTIC_PROMPT", "QuestionGenerationError", "generate_model_questions"]
+__all__ = [
+    "DETERMINISTIC_PROMPT",
+    "G26_QUESTION_PROMPTS",
+    "QuestionGenerationError",
+    "generate_model_questions",
+]

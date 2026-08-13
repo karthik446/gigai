@@ -65,8 +65,8 @@ def _bundle(name: str, reference_id: str, source: bytes) -> tuple[dict[str, obje
 
 
 def main() -> int:
-    if len(SCHEMA_NAMES) != 27:
-        raise SystemExit(f"installed G21 schema inventory is {len(SCHEMA_NAMES)}, expected 27")
+    if len(SCHEMA_NAMES) != 29:
+        raise SystemExit(f"installed G21 schema inventory is {len(SCHEMA_NAMES)}, expected 29")
     with tempfile.TemporaryDirectory(prefix="gigai-g21-installed-") as directory:
         root = Path(directory)
         home = root / "home"

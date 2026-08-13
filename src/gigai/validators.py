@@ -33,6 +33,7 @@ SCHEMA_NAMES = (
     "common.schema.json",
     "feedback.schema.json",
     "finding.schema.json",
+    "gig-builder-session.schema.json",
     "gig-comparison.schema.json",
     "gig-occurrence.schema.json",
     "gig-proposal.schema.json",
@@ -43,6 +44,7 @@ SCHEMA_NAMES = (
     "model-exchange.schema.json",
     "model-invocation.schema.json",
     "proposal-interview.schema.json",
+    "proposal-draft-manifest.schema.json",
     "report.schema.json",
     "review-bundle.schema.json",
     "review-contract.schema.json",
@@ -132,6 +134,62 @@ def validate_serialized_contract(schema_name: str, data: bytes) -> ValidationRep
     ):
         pointer = "$" + "".join(f"/{_pointer(part)}" for part in error.absolute_path)
         findings.append(ValidationFinding(pointer, "schema_invalid", error.message))
+    return _report(findings)
+
+
+def validate_gig_builder_session(data: Mapping[str, Any] | bytes) -> ValidationReport:
+    """Validate G26 session schema plus readiness and digest semantics."""
+
+    payload = data if isinstance(data, bytes) else canonical_json_bytes(data)
+    report = validate_serialized_contract("gig-builder-session.schema.json", payload)
+    if not report.valid:
+        return report
+    instance = parse_json_bytes(payload)
+    findings: list[ValidationFinding] = []
+    if instance["intent"]["content_sha256"] != instance["intent"]["text_artifact"]["content_sha256"]:
+        findings.append(
+            ValidationFinding(
+                "intent/content_sha256",
+                "intent_digest_mismatch",
+                "intent digest must match the pinned intent artifact",
+            )
+        )
+    if instance["state"] in {"build_requested", "researching", "proposal_draft_ready", "operator_review", "approved"} and instance["model_selection"]["readiness"] != "usable":
+        findings.append(
+            ValidationFinding(
+                "model_selection/readiness",
+                "builder_target_not_usable",
+                "proposal research states require a usable selected target",
+            )
+        )
+    return _report(findings)
+
+
+def validate_proposal_draft_manifest(data: Mapping[str, Any] | bytes) -> ValidationReport:
+    """Validate G26 draft evidence and enforce its workpad-only effect boundary."""
+
+    payload = data if isinstance(data, bytes) else canonical_json_bytes(data)
+    report = validate_serialized_contract("proposal-draft-manifest.schema.json", payload)
+    if not report.valid:
+        return report
+    instance = parse_json_bytes(payload)
+    findings: list[ValidationFinding] = []
+    if instance["boundary"]["effects"] != ["write_workpad"]:
+        findings.append(
+            ValidationFinding(
+                "boundary/effects",
+                "builder_effect_boundary_invalid",
+                "G26 drafts may only write proposal artifacts to the private workpad",
+            )
+        )
+    if instance["build"]["mode"] == "configured_model" and instance["boundary"]["network"] != "configured_provider_only":
+        findings.append(
+            ValidationFinding(
+                "boundary/network",
+                "configured_model_network_boundary_invalid",
+                "configured model drafts require the configured-provider network boundary",
+            )
+        )
     return _report(findings)
 
 
@@ -1060,9 +1118,11 @@ __all__ = [
     "ValidationFinding",
     "ValidationReport",
     "validate_goal_graph",
+    "validate_gig_builder_session",
     "validate_model_exchange",
     "validate_model_invocation",
     "validate_proposal_workpad",
+    "validate_proposal_draft_manifest",
     "validate_serialized_contract",
     "validate_target_effect",
     "validate_target_effect_transition",

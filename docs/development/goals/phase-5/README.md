@@ -13,6 +13,7 @@ declare an alpha or public release.
 G19 -> G20 -> G21
 G20 -> G23
 G23 -> G24 -> G25
+G22 -> G26 -> G24 -> G25
 ```
 
 | Goal | Outcome | Depends on | Initial state |
@@ -21,6 +22,7 @@ G23 -> G24 -> G25
 | [G21](G21-recurring-and-comparative-gigs.md) | Recurring and comparative Gigs | G13, G14, G20 | Complete |
 | [G23](G23-gig-self-containment-and-portability.md) | Capability-manifest reference and proposal-lineage resolution on the active Gig version | G17, G19, G20, G22 | Complete |
 | [G24](G24-human-uat-and-dogfooding.md) | Human-executed UAT and dogfooding across real GigAI workflows | G18, G19, G20, G21, G22, G23 | Proposed for review |
+| [G26](G26-model-facilitated-gig-builder.md) | Model-facilitated Gig definition, adaptive clarification, and proposal research | G18, G22, S18-02, G24 findings | Active — amendment accepted, implementation underway |
 
 G20 must preserve G19's explicit target-effect authority and the existing
 workpad journal/active-version authority. G21 must not be activated merely
@@ -57,3 +59,9 @@ repository under the operator's local GigAI UAT directory; no prompts,
 references, credentials, databases, transcripts, or model outputs are
 committed as evidence. The goal contract defines the checkpoint-by-checkpoint
 review protocol and artifact authority map.
+
+G26 addresses the create-flow finding that the current interview can jump from
+one operator answer to approval without a genuine model-backed proposal-build
+phase. GigAI remains the facilitator and authority boundary; the selected model
+asks domain-specific questions and performs bounded proposal research. G26 must
+land before G24's final UAT pass and before G25 alpha-readiness review.

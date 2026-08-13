@@ -67,15 +67,17 @@ def test_cli_create_launches_and_completes_local_interview(tmp_path: Path) -> No
 
         def send(question_id: str, value: object) -> None:
             current = parse_json_bytes(snapshot_path.read_bytes())
+            event = question_id if question_id in {"build", "approve"} else "answer"
+            payload = {
+                "event": event,
+                "revision": current["revision"],
+                "sequence": len(current["events"]) + 1,
+            }
+            if event == "answer":
+                payload.update({"question_id": question_id, "value": value})
             request = Request(
                 endpoint,
-                data=json.dumps({
-                    "event": "answer",
-                    "question_id": question_id,
-                    "value": value,
-                    "revision": current["revision"],
-                    "sequence": len(current["events"]) + 1,
-                }).encode(),
+                data=json.dumps(payload).encode(),
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
@@ -84,10 +86,12 @@ def test_cli_create_launches_and_completes_local_interview(tmp_path: Path) -> No
 
         send("scope", "Create a bounded CLI proposal.")
         send("references", [reference_id])
+        send("main-drive", "Make the proposal easy to review.")
+        send("success-definition", "The operator can approve a clear proposal.")
         send("effect", "write_workpad")
         send("privacy", "local_only")
         send("capability", "none")
-        send("operator-confirmation", True)
+        send("build", None)
         current = parse_json_bytes(snapshot_path.read_bytes())
         with urlopen(
             Request(
@@ -150,17 +154,19 @@ def test_cli_create_collects_references_inside_interview(tmp_path: Path) -> None
 
         def send(question_id: str, value: object) -> None:
             current = parse_json_bytes(snapshot_path.read_bytes())
+            event = question_id if question_id in {"build", "approve"} else "answer"
+            payload = {
+                "event": event,
+                "revision": current["revision"],
+                "sequence": len(current["events"]) + 1,
+            }
+            if event == "answer":
+                payload.update({"question_id": question_id, "value": value})
             try:
                 with urlopen(
                     Request(
                         endpoint,
-                        data=json.dumps({
-                            "event": "answer",
-                            "question_id": question_id,
-                            "value": value,
-                            "revision": current["revision"],
-                            "sequence": len(current["events"]) + 1,
-                        }).encode(),
+                        data=json.dumps(payload).encode(),
                         headers={"Content-Type": "application/json"},
                         method="POST",
                     ),
@@ -174,10 +180,12 @@ def test_cli_create_collects_references_inside_interview(tmp_path: Path) -> None
         send("references", "README.md")
         current = parse_json_bytes(snapshot_path.read_bytes())
         assert current["selected_reference_ids"]
+        send("main-drive", "Explain the important work.")
+        send("success-definition", "A clear reviewed proposal.")
         send("effect", "read_local")
         send("privacy", "local_only")
         send("capability", "none")
-        send("operator-confirmation", True)
+        send("build", None)
         current = parse_json_bytes(snapshot_path.read_bytes())
         with urlopen(
             Request(

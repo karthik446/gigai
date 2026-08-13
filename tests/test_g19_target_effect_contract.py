@@ -88,7 +88,7 @@ def _record(state: str = "effect_authorized") -> dict[str, object]:
 
 
 def test_g19_adds_the_twenty_third_schema_resource() -> None:
-    assert len(SCHEMA_NAMES) == 27
+    assert len(SCHEMA_NAMES) == 29
     assert "target-effect.schema.json" in SCHEMA_NAMES
     assert validate_target_effect(_record()).valid
 

@@ -13,7 +13,7 @@ import threading
 from typing import Callable, Mapping
 import uuid
 
-from .canonical import canonical_json_bytes, canonical_json_digest, digest_imported_bytes
+from .canonical import canonical_json_digest
 
 
 STATES = frozenset(
@@ -396,6 +396,29 @@ def approve_session(
     )
 
 
+def request_revision(session: InterviewSession, *, now: str | None = None) -> InterviewSession:
+    """Return a reviewed draft to answerable clarification without approval."""
+
+    if session.state != "proposal_ready":
+        raise ProposalInterviewError("only a reviewable proposal can be revised")
+    timestamp = now or _now()
+    revised = replace(
+        session,
+        state="questions_pending",
+        approval=None,
+        terminal_reason=None,
+        revision=session.revision + 1,
+        parent_revision=session.revision,
+        updated_at=timestamp,
+    )
+    return _event(
+        revised,
+        "revision_requested",
+        actor={"kind": "operator", "id": "local-user"},
+        now=timestamp,
+    )
+
+
 def block_session(session: InterviewSession, reason: str, *, now: str | None = None) -> InterviewSession:
     if not reason.strip() or "\0" in reason:
         raise ProposalInterviewError("block reason must be non-empty and NUL-free")
@@ -601,6 +624,10 @@ class InterviewHTTPServer:
         | None = None,
         reference_labels: Mapping[str, str] | None = None,
         on_approval: Callable[[InterviewSession], InterviewSession] | None = None,
+        on_build: Callable[[InterviewSession], InterviewSession] | None = None,
+        on_revision: Callable[[InterviewSession], InterviewSession] | None = None,
+        on_rejection: Callable[[InterviewSession], InterviewSession] | None = None,
+        builder_mode: bool = False,
         lifetime_seconds: float = 600.0,
     ) -> None:
         if host != "127.0.0.1":
@@ -614,6 +641,11 @@ class InterviewHTTPServer:
         self.on_reference_paths = on_reference_paths
         self.reference_labels = dict(reference_labels or {})
         self.on_approval = on_approval
+        self.on_build = on_build
+        self.on_revision = on_revision
+        self.on_rejection = on_rejection
+        self.builder_mode = builder_mode
+        self.builder_ready = False
         self.lifetime_seconds = lifetime_seconds
         self.token = secrets.token_urlsafe(24)
         self._lock = threading.RLock()
@@ -700,10 +732,17 @@ class InterviewHTTPServer:
                         next_session = owner._apply(apply_payload)
                         if (
                             payload.get("event") == "answer"
-                            and payload.get("question_id") == "references"
                             and owner.on_questions is not None
+                            and (
+                                owner.builder_mode
+                                or payload.get("question_id") == "references"
+                            )
                         ):
                             next_session = owner.on_questions(next_session)
+                        if payload.get("event") == "build":
+                            owner.builder_ready = True
+                        elif payload.get("event") == "revise":
+                            owner.builder_ready = False
                         owner.session = next_session
                         if payload.get("event") != "approve" and owner.on_session is not None:
                             owner.on_session(owner.session)
@@ -821,9 +860,21 @@ class InterviewHTTPServer:
                 f"<p class='rationale'>{rationale}</p>{control}"
                 f"<button type='submit' {disabled}>{button_label}</button></form>"
             )
-        if session.state == "proposal_ready":
+        if session.state == "proposal_ready" and self.builder_mode and not self.builder_ready:
             forms.append(
-                f"<section class='approval'><h2>Gig definition ready</h2><p>Review the Gig definition before creating the proposal. GigAI will write proposal artifacts to its private workpad, stay local-only, and read only references you explicitly add. Approval does not run work or modify the target repository.</p>"
+                f"<section class='approval'><h2>Ready to build the proposal</h2><p>Your Gig definition is complete. Build proposal asks the selected model to research the request and prepare a draft for review. Nothing is approved or run yet.</p>"
+                f"<form class='build' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button class='primary' type='submit'>Build proposal</button></form></section>"
+            )
+        elif session.state == "proposal_ready" and self.builder_mode and self.builder_ready:
+            forms.append(
+                f"<section class='approval'><h2>Proposal draft ready</h2><p>Review the model's summary, assumptions, citations, unresolved questions, and boundaries in the workpad before deciding.</p>"
+                f"<form class='review-action' data-event='revise' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button type='submit'>Revise answers</button></form>"
+                f"<form class='review-action' data-event='reject' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button type='submit'>Reject draft</button></form>"
+                f"<form class='approve' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button class='primary' type='submit'>Approve proposal</button></form></section>"
+            )
+        elif session.state == "proposal_ready":
+            forms.append(
+                f"<section class='approval'><h2>Proposal draft ready</h2><p>Review the model-facilitated Gig definition before approval. GigAI will write proposal artifacts to its private workpad, stay local-only, and read only references you explicitly add. Approval does not run work or modify the target repository.</p>"
                 f"<form class='approve' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button class='primary' type='submit'>Approve proposal</button></form></section>"
             )
         body = (
@@ -855,6 +906,12 @@ class InterviewHTTPServer:
             "else if(first.tagName==='SELECT'){value=first.value;} else {value=first.value;}"
             "const response=await fetch(form.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'answer',question_id:form.dataset.questionId,value,revision:Number(form.dataset.revision),sequence:Number(form.dataset.sequence)})});"
             "if(!response.ok){alert((await response.json()).error);} else {location.reload();}});}"
+            "const build=document.querySelector('form.build'); if(build){build.addEventListener('submit', async (event)=>{event.preventDefault();"
+            "const response=await fetch(build.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'build',revision:Number(build.dataset.revision),sequence:Number(build.dataset.sequence)})});"
+            "if(!response.ok){alert((await response.json()).error);} else {location.reload();}});}"
+            "for (const form of document.querySelectorAll('form.review-action')) {form.addEventListener('submit', async (event)=>{event.preventDefault();"
+            "const response=await fetch(form.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:form.dataset.event,revision:Number(form.dataset.revision),sequence:Number(form.dataset.sequence)})});"
+            "if(!response.ok){alert((await response.json()).error);} else {location.reload();}});}"
             "const approval=document.querySelector('form.approve'); if(approval){approval.addEventListener('submit', async (event)=>{event.preventDefault();"
             "const response=await fetch(approval.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'approve',revision:Number(approval.dataset.revision),sequence:Number(approval.dataset.sequence)})});"
             "if(!response.ok){alert((await response.json()).error);} else {location.reload();}});}"
@@ -878,6 +935,20 @@ class InterviewHTTPServer:
             if self.on_approval is None:
                 raise ProposalInterviewError("operator approval is not configured")
             return self.on_approval(self.session)
+        if event == "build":
+            if not self.builder_mode or self.on_build is None:
+                raise ProposalInterviewError("proposal build is not configured")
+            if self.session.state != "proposal_ready":
+                raise ProposalInterviewError("proposal build requires a complete Gig definition")
+            return self.on_build(self.session)
+        if event == "revise":
+            if not self.builder_mode or self.on_revision is None:
+                raise ProposalInterviewError("proposal revision is not configured")
+            return self.on_revision(self.session)
+        if event == "reject":
+            if not self.builder_mode or self.on_rejection is None:
+                raise ProposalInterviewError("proposal rejection is not configured")
+            return self.on_rejection(self.session)
         raise ProposalInterviewError("unsupported interview event")
 
 
@@ -900,6 +971,7 @@ __all__ = [
     "load_trace",
     "persist_trace",
     "request_clarification",
+    "request_revision",
     "session_record",
     "session_from_record",
 ]
