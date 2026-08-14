@@ -13,7 +13,7 @@ import threading
 from typing import Callable, Mapping
 import uuid
 
-from .canonical import canonical_json_bytes, canonical_json_digest, digest_imported_bytes
+from .canonical import canonical_json_digest
 
 
 STATES = frozenset(
@@ -23,6 +23,9 @@ QUESTION_TYPES = frozenset({"text", "choice", "multiselect", "confirmation"})
 EFFECT_CHOICES = ("read_local", "write_workpad")
 PRIVACY_CHOICES = ("local_only", "redact_before_share")
 CAPABILITY_CHOICES = ("none", "local_read")
+DEFAULT_EFFECT = "write_workpad"
+DEFAULT_PRIVACY = "local_only"
+DEFAULT_CAPABILITY = "local_read"
 
 
 class ProposalInterviewError(ValueError):
@@ -133,24 +136,29 @@ def build_session(
     max_rounds: int = 3,
     now: str | None = None,
 ) -> InterviewSession:
-    """Create a protocol session with only explicit reference choices."""
+    """Create a protocol session that collects explicit reference choices."""
 
     _id(session_id, "session_")
     _id(project_id, "project_")
     _id(gig_id, "gig_")
     if not request_kind.strip() or max_rounds < 1:
         raise ProposalInterviewError("request kind and positive round cap are required")
-    if not references or len({item.reference_id for item in references}) != len(references):
-        raise ProposalInterviewError("at least one unique reference is required")
+    if len({item.reference_id for item in references}) != len(references):
+        raise ProposalInterviewError("reference IDs must be unique")
     if not request_sha256.startswith("sha256:") or len(request_sha256) != 71:
         raise ProposalInterviewError("request digest is invalid")
     reference_ids = tuple(item.reference_id for item in references)
+    reference_question = (
+        Question("references", "multiselect", False, reference_ids, (), "Add exact local references only when this Gig needs local context. You can skip this.", "g22://references")
+        if reference_ids
+        else Question("references", "text", False, (), (), "Add exact local paths only when this Gig needs local context. You can skip this.", "g22://references")
+    )
     questions = (
-        Question("scope", "text", True, (), (), "Define the requested outcome.", "g22://scope"),
-        Question("references", "multiselect", True, reference_ids, (), "Select exact local references.", "g22://references"),
-        Question("effect", "choice", True, EFFECT_CHOICES, (), "Choose a bounded local effect.", "g22://effect"),
-        Question("privacy", "choice", True, PRIVACY_CHOICES, (), "Choose the privacy boundary.", "g22://privacy"),
-        Question("capability", "choice", True, CAPABILITY_CHOICES, (), "Choose the local capability boundary.", "g22://capability"),
+        Question("scope", "text", True, (), (), "Describe the outcome this Gig should own.", "g22://scope"),
+        reference_question,
+        Question("effect", "choice", False, EFFECT_CHOICES, (), "GigAI writes proposal artifacts to its private workpad.", "g22://effect"),
+        Question("privacy", "choice", False, PRIVACY_CHOICES, (), "The interview stays on this machine by default.", "g22://privacy"),
+        Question("capability", "choice", False, CAPABILITY_CHOICES, (), "Local reading is available only for references you explicitly add.", "g22://capability"),
     )
     timestamp = now or _now()
     session = InterviewSession(
@@ -168,10 +176,37 @@ def build_session(
         max_rounds=max_rounds,
         references=references,
         questions=questions,
+        privacy_choice=DEFAULT_PRIVACY,
+        capability_choice=DEFAULT_CAPABILITY,
+        effect_choice=DEFAULT_EFFECT,
         created_at=timestamp,
         updated_at=timestamp,
     )
     return _event(session, "session_created", actor={"kind": "gigai", "id": "g22"}, now=timestamp)
+
+
+def attach_reference_choices(
+    session: InterviewSession,
+    references: tuple[ReferenceDecision, ...],
+) -> InterviewSession:
+    """Replace the initial path-entry question with explicit reference choices."""
+
+    if session.references:
+        raise ProposalInterviewError("reference choices are already attached")
+    if not references or len({item.reference_id for item in references}) != len(references):
+        raise ProposalInterviewError("at least one unique reference choice is required")
+    updated_questions = tuple(
+        replace(
+            item,
+            answer_type="multiselect",
+            options=tuple(reference.reference_id for reference in references),
+            rationale="Select the exact local references for this proposal.",
+        )
+        if item.question_id == "references"
+        else item
+        for item in session.questions
+    )
+    return replace(session, references=references, questions=updated_questions)
 
 
 def answer_question(
@@ -181,11 +216,13 @@ def answer_question(
     *,
     now: str | None = None,
 ) -> InterviewSession:
-    if session.state not in {"questions_pending", "clarification_required"}:
-        raise ProposalInterviewError(f"cannot answer in terminal state {session.state!r}")
     question = next((item for item in session.questions if item.question_id == question_id), None)
     if question is None:
         raise ProposalInterviewError(f"unknown question {question_id!r}")
+    if session.state not in {"questions_pending", "clarification_required"} and not (
+        session.state == "proposal_ready" and (not question.required or question_id == "scope")
+    ):
+        raise ProposalInterviewError(f"cannot answer in terminal state {session.state!r}")
     _validate_answer(question, value)
     timestamp = now or _now()
     answers = tuple(item for item in session.answers if item.question_id != question_id)
@@ -197,7 +234,7 @@ def answer_question(
     privacy = session.privacy_choice
     capability = session.capability_choice
     effect = session.effect_choice
-    if question_id == "references":
+    if question_id == "references" and question.answer_type == "multiselect":
         selected_ids = tuple(value)  # type: ignore[arg-type]
         selected = tuple(
             replace(item, decision="selected" if item.reference_id in selected_ids else "excluded")
@@ -329,8 +366,6 @@ def approve_session(
     _id(proposal_id, "gp_")
     if not proposal_sha256.startswith("sha256:") or len(proposal_sha256) != 71:
         raise ProposalInterviewError("proposal digest is invalid")
-    if not session.selected_reference_ids:
-        raise ProposalInterviewError("approval requires explicit reference selection")
     if session.privacy_choice not in PRIVACY_CHOICES:
         raise ProposalInterviewError("approval requires a privacy choice")
     if session.capability_choice not in CAPABILITY_CHOICES:
@@ -357,6 +392,29 @@ def approve_session(
         "approved",
         actor={"kind": "operator", "id": "local-user"},
         details={"proposal_sha256": proposal_sha256},
+        now=timestamp,
+    )
+
+
+def request_revision(session: InterviewSession, *, now: str | None = None) -> InterviewSession:
+    """Return a reviewed draft to answerable clarification without approval."""
+
+    if session.state != "proposal_ready":
+        raise ProposalInterviewError("only a reviewable proposal can be revised")
+    timestamp = now or _now()
+    revised = replace(
+        session,
+        state="questions_pending",
+        approval=None,
+        terminal_reason=None,
+        revision=session.revision + 1,
+        parent_revision=session.revision,
+        updated_at=timestamp,
+    )
+    return _event(
+        revised,
+        "revision_created",
+        actor={"kind": "operator", "id": "local-user"},
         now=timestamp,
     )
 
@@ -559,7 +617,19 @@ class InterviewHTTPServer:
         host: str = "127.0.0.1",
         on_session: Callable[[InterviewSession], None] | None = None,
         on_questions: Callable[[InterviewSession], InterviewSession] | None = None,
+        on_reference_paths: Callable[
+            [InterviewSession, tuple[str, ...]],
+            tuple[InterviewSession, tuple[str, ...], Mapping[str, str]],
+        ]
+        | None = None,
+        reference_labels: Mapping[str, str] | None = None,
         on_approval: Callable[[InterviewSession], InterviewSession] | None = None,
+        on_build: Callable[[InterviewSession], InterviewSession] | None = None,
+        on_revision: Callable[[InterviewSession], InterviewSession] | None = None,
+        on_rejection: Callable[[InterviewSession], InterviewSession] | None = None,
+        builder_review: Mapping[str, object] | None = None,
+        builder_mode: bool = False,
+        builder_ready: bool = False,
         lifetime_seconds: float = 600.0,
     ) -> None:
         if host != "127.0.0.1":
@@ -570,7 +640,15 @@ class InterviewHTTPServer:
         self.connection = connection
         self.on_session = on_session
         self.on_questions = on_questions
+        self.on_reference_paths = on_reference_paths
+        self.reference_labels = dict(reference_labels or {})
         self.on_approval = on_approval
+        self.on_build = on_build
+        self.on_revision = on_revision
+        self.on_rejection = on_rejection
+        self.builder_review = builder_review if builder_review is not None else {}
+        self.builder_mode = builder_mode
+        self.builder_ready = builder_ready
         self.lifetime_seconds = lifetime_seconds
         self.token = secrets.token_urlsafe(24)
         self._lock = threading.RLock()
@@ -628,13 +706,46 @@ class InterviewHTTPServer:
                             )
                         if payload.get("revision") != owner.session.revision:
                             raise ProposalInterviewError("stale interview revision")
-                        next_session = owner._apply(payload)
+                        apply_payload = payload
                         if (
                             payload.get("event") == "answer"
                             and payload.get("question_id") == "references"
+                            and not owner.session.references
+                        ):
+                            value = payload.get("value")
+                            if not isinstance(value, str):
+                                raise ProposalInterviewError(
+                                    "reference selection requires one path per line"
+                                )
+                            paths = tuple(
+                                line.strip()
+                                for line in value.splitlines()
+                                if line.strip()
+                            )
+                            if owner.on_reference_paths is None:
+                                raise ProposalInterviewError(
+                                    "reference selection is not configured"
+                                )
+                            owner.session, selected_ids, labels = owner.on_reference_paths(
+                                owner.session, paths
+                            )
+                            owner.reference_labels.update(labels)
+                            apply_payload = dict(payload)
+                            apply_payload["value"] = list(selected_ids)
+                        next_session = owner._apply(apply_payload)
+                        if (
+                            payload.get("event") == "answer"
                             and owner.on_questions is not None
+                            and (
+                                owner.builder_mode
+                                or payload.get("question_id") == "references"
+                            )
                         ):
                             next_session = owner.on_questions(next_session)
+                        if payload.get("event") == "build":
+                            owner.builder_ready = True
+                        elif payload.get("event") == "revise":
+                            owner.builder_ready = False
                         owner.session = next_session
                         if payload.get("event") != "approve" and owner.on_session is not None:
                             owner.on_session(owner.session)
@@ -695,38 +806,105 @@ class InterviewHTTPServer:
         session = self.session
         forms: list[str] = []
         endpoint = f"/session/{self.token}/events"
+        titles = {
+            "scope": "What should this Gig do?",
+            "references": "Add local context (optional)",
+            "effect": "What may this Gig change?",
+            "privacy": "Where may information be used?",
+            "capability": "What local capability is allowed?",
+            "operator-confirmation": "Are these choices correct?",
+        }
+        explanations = {
+            "read_local": "Read selected local files only; do not write to the target.",
+            "write_workpad": "Write proposal artifacts to GigAI's private workpad only.",
+            "local_only": "Keep this interview and its evidence on this machine.",
+            "redact_before_share": "Redact selected content before any configured sharing.",
+            "none": "Do not grant a local capability beyond the interview itself.",
+            "local_read": "Permit reading the references you explicitly select.",
+        }
+        editable = session.state in {"questions_pending", "clarification_required"}
+        answered = {item.question_id for item in session.answers}
+        total_required = sum(1 for item in session.questions if item.required)
+        completed_required = sum(1 for item in session.questions if item.required and item.question_id in answered)
         for question in session.questions:
-            label = html.escape(question.rationale)
+            if question.question_id in {"effect", "privacy", "capability"}:
+                continue
+            title = html.escape(titles.get(question.question_id, question.question_id.replace("-", " ").capitalize()))
+            rationale = html.escape(question.rationale)
             question_id = html.escape(question.question_id)
+            required = "required" if question.required else ""
+            disabled = "disabled" if not editable else ""
             if question.answer_type == "text":
-                control = f"<input name='value' type='text' required {'disabled' if session.state not in {'questions_pending', 'clarification_required'} else ''}>"
+                control = f"<input name='value' type='text' aria-label='{title}' {required} {disabled}>"
             elif question.answer_type == "confirmation":
-                control = "<input name='value' type='checkbox'>"
+                control = f"<label class='checkbox'><input name='value' type='checkbox' {disabled}> <span>Yes, continue</span></label>"
             elif question.answer_type == "multiselect":
                 control = "".join(
-                    f"<label><input name='value' type='checkbox' value='{html.escape(option)}'>{html.escape(option)}</label>"
-                    for option in question.options
+                    f"<label class='checkbox'><input name='value' type='checkbox' value='{html.escape(option)}' {disabled}> <span>{html.escape(self.reference_labels.get(option, f'Reference {index}'))}</span></label>"
+                    for index, option in enumerate(question.options, start=1)
                 )
             else:
                 options = "".join(
-                    f"<option value='{html.escape(option)}'>{html.escape(option)}</option>"
+                    f"<option value='{html.escape(option)}'>{html.escape(option.replace('_', ' ').capitalize())}</option>"
                     for option in question.options
                 )
-                control = f"<select name='value'>{options}</select>"
+                descriptions = "".join(
+                    f"<li><strong>{html.escape(option.replace('_', ' ').capitalize())}</strong>: {html.escape(explanations[option])}</li>"
+                    for option in question.options if option in explanations
+                )
+                control = f"<select name='value' aria-label='{title}' {disabled}>{options}</select>"
+                if descriptions:
+                    control += f"<ul class='help'>{descriptions}</ul>"
+            card_class = "question optional-context" if question.question_id == "references" else "question"
+            button_label = "Continue" if question.question_id == "scope" else "Save answer"
             forms.append(
-                f"<form class='question' data-question-id='{question_id}' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'>"
-                f"<label>{question_id}: {label}</label>{control}<button type='submit'>Save</button></form>"
+                f"<form class='{card_class}' data-question-id='{question_id}' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'>"
+                f"<div class='question-heading'><h2>{title}</h2><span class='required'>{'Required' if question.required else 'Optional'}</span></div>"
+                f"<p class='rationale'>{rationale}</p>{control}"
+                f"<button type='submit' {disabled}>{button_label}</button></form>"
             )
-        if session.state == "proposal_ready":
+        if session.state == "proposal_ready" and self.builder_mode and not self.builder_ready:
             forms.append(
-                f"<form class='approve' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button type='submit'>Approve proposal</button></form>"
+                f"<section class='approval'><h2>Ready to build the proposal</h2><p>Your Gig definition is complete. Build proposal asks the selected model to research the request and prepare a draft for review. Nothing is approved or run yet.</p>"
+                f"<form class='build' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button class='primary' type='submit'>Build proposal</button></form></section>"
+            )
+        elif session.state == "proposal_ready" and self.builder_mode and self.builder_ready:
+            summary = html.escape(str(self.builder_review.get("summary", "Draft summary is available in the workpad.")))
+            assumptions = self.builder_review.get("assumptions", ())
+            unresolved = self.builder_review.get("unresolved_questions", ())
+            assumption_html = "".join(f"<li>{html.escape(str(item))}</li>" for item in assumptions) or "<li>None recorded.</li>"
+            unresolved_html = "".join(f"<li>{html.escape(str(item))}</li>" for item in unresolved) or "<li>None recorded.</li>"
+            forms.append(
+                f"<section class='approval'><h2>Proposal draft ready</h2><p><strong>Summary:</strong> {summary}</p><p><strong>Assumptions</strong></p><ul>{assumption_html}</ul><p><strong>Unresolved questions</strong></p><ul>{unresolved_html}</ul><p>Review citations and boundaries in the workpad before deciding.</p>"
+                f"<form class='review-action' data-event='revise' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button type='submit'>Revise answers</button></form>"
+                f"<form class='review-action' data-event='reject' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button type='submit'>Reject draft</button></form>"
+                f"<form class='approve' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button class='primary' type='submit'>Approve proposal</button></form></section>"
+            )
+        elif session.state == "proposal_ready":
+            forms.append(
+                f"<section class='approval'><h2>Proposal draft ready</h2><p>Review the model-facilitated Gig definition before approval. GigAI will write proposal artifacts to its private workpad, stay local-only, and read only references you explicitly add. Approval does not run work or modify the target repository.</p>"
+                f"<form class='approve' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button class='primary' type='submit'>Approve proposal</button></form></section>"
             )
         body = (
-            "<!doctype html><meta charset='utf-8'><title>GigAI create</title>"
-            "<main><h1>GigAI proposal interview</h1>"
-            f"<p data-state='{html.escape(session.state)}'>State: {html.escape(session.state)}</p>"
+            "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+            "<title>Define a Gig</title><style>"
+            ":root{font:16px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;background:#f5f7fb}"
+            "body{margin:0}.shell{max-width:760px;margin:0 auto;padding:32px 20px 64px}"
+            "header{background:#172033;color:white;border-radius:16px;padding:24px;margin-bottom:20px}"
+            "h1{font-size:1.65rem;margin:0 0 8px}h2{font-size:1rem;margin:0}p{line-height:1.5}"
+            ".intro{color:#dbe4f5;margin:0}.status{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-top:18px;font-size:.9rem}"
+            ".badge,.required{border-radius:999px;padding:4px 9px;font-size:.75rem;font-weight:700;background:#dbeafe;color:#1e40af}"
+            ".required{background:#eef2ff;color:#4338ca;float:right}.question,.approval{background:white;border:1px solid #dbe2ef;border-radius:12px;padding:20px;margin:14px 0;box-shadow:0 2px 8px #1720330d}.optional-context{border-style:dashed}"
+            ".question-heading{display:flex;justify-content:space-between;gap:12px}.rationale{color:#526079;margin:8px 0 14px}.help{color:#526079;font-size:.88rem;margin:10px 0 0;padding-left:20px}"
+            "input[type=text],select{box-sizing:border-box;width:100%;border:1px solid #aab6cc;border-radius:7px;padding:10px;font:inherit;background:white}"
+            ".checkbox{display:block;margin:10px 0;color:#26334d}.checkbox input{margin-right:8px}"
+            "button{border:1px solid #9aa8bf;border-radius:7px;background:#f8fafc;padding:9px 14px;font:inherit;font-weight:600;cursor:pointer;margin-top:14px}button:hover{background:#e8eef8}button:disabled{cursor:not-allowed;opacity:.55}button.primary{background:#2563eb;color:white;border-color:#2563eb}"
+            ".approval{border-color:#93c5fd;background:#eff6ff}.approval p{color:#274060}.footer{color:#61708a;font-size:.82rem;margin-top:18px}"
+            "</style><main class='shell'><header><h1>Define a Gig</h1>"
+            "<p class='intro'>Describe the Gig you want to create. GigAI may ask a follow-up only when it needs more context. Nothing runs and the target is not modified during this interview.</p>"
+            f"<div class='status'><span data-state='{html.escape(session.state)}'>State: {html.escape(session.state.replace('_', ' ').capitalize())}</span><span class='badge'>{completed_required}/{total_required} required answers</span></div></header>"
             + "".join(forms)
-            + "</main><script>"
+            + "<p class='footer'>This local interview expires automatically. You can stop before approval at any time.</p></main><script>"
             "for (const form of document.querySelectorAll('form.question')) {"
             "form.addEventListener('submit', async (event) => {event.preventDefault();"
             "const values=[...form.querySelectorAll('[name=value]')];"
@@ -735,6 +913,12 @@ class InterviewHTTPServer:
             "else if(first.type==='checkbox'){value=values.filter(x=>x.checked).map(x=>x.value);}"
             "else if(first.tagName==='SELECT'){value=first.value;} else {value=first.value;}"
             "const response=await fetch(form.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'answer',question_id:form.dataset.questionId,value,revision:Number(form.dataset.revision),sequence:Number(form.dataset.sequence)})});"
+            "if(!response.ok){alert((await response.json()).error);} else {location.reload();}});}"
+            "const build=document.querySelector('form.build'); if(build){build.addEventListener('submit', async (event)=>{event.preventDefault();"
+            "const response=await fetch(build.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'build',revision:Number(build.dataset.revision),sequence:Number(build.dataset.sequence)})});"
+            "if(!response.ok){alert((await response.json()).error);} else {location.reload();}});}"
+            "for (const form of document.querySelectorAll('form.review-action')) {form.addEventListener('submit', async (event)=>{event.preventDefault();"
+            "const response=await fetch(form.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:form.dataset.event,revision:Number(form.dataset.revision),sequence:Number(form.dataset.sequence)})});"
             "if(!response.ok){alert((await response.json()).error);} else {location.reload();}});}"
             "const approval=document.querySelector('form.approve'); if(approval){approval.addEventListener('submit', async (event)=>{event.preventDefault();"
             "const response=await fetch(approval.getAttribute('hx-post'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'approve',revision:Number(approval.dataset.revision),sequence:Number(approval.dataset.sequence)})});"
@@ -759,6 +943,20 @@ class InterviewHTTPServer:
             if self.on_approval is None:
                 raise ProposalInterviewError("operator approval is not configured")
             return self.on_approval(self.session)
+        if event == "build":
+            if not self.builder_mode or self.on_build is None:
+                raise ProposalInterviewError("proposal build is not configured")
+            if self.session.state != "proposal_ready":
+                raise ProposalInterviewError("proposal build requires a complete Gig definition")
+            return self.on_build(self.session)
+        if event == "revise":
+            if not self.builder_mode or self.on_revision is None:
+                raise ProposalInterviewError("proposal revision is not configured")
+            return self.on_revision(self.session)
+        if event == "reject":
+            if not self.builder_mode or self.on_rejection is None:
+                raise ProposalInterviewError("proposal rejection is not configured")
+            return self.on_rejection(self.session)
         raise ProposalInterviewError("unsupported interview event")
 
 
@@ -781,6 +979,7 @@ __all__ = [
     "load_trace",
     "persist_trace",
     "request_clarification",
+    "request_revision",
     "session_record",
     "session_from_record",
 ]

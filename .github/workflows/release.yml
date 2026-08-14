@@ -20,17 +20,19 @@ jobs:
       commit: ${{ steps.metadata.outputs.commit }}
       version: ${{ steps.metadata.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ github.ref }}
       - id: metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           test "${GITHUB_REF_TYPE}" = tag
-          test "$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")" = tag
-          python tools/release_check.py verify-tag --tag "${GITHUB_REF_NAME}"
+          test "$(git cat-file -t "refs/tags/${RELEASE_TAG}")" = tag
+          python tools/release_check.py verify-tag --tag "${RELEASE_TAG}"
           python tools/release_check.py verify-lockfile
-          echo "commit=$(git rev-parse "${GITHUB_REF_NAME}^{}")" >> "${GITHUB_OUTPUT}"
+          echo "commit=$(git rev-parse "refs/tags/${RELEASE_TAG}^{}")" >> "${GITHUB_OUTPUT}"
           echo "version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "${GITHUB_OUTPUT}"
       - name: Require named publication environments
         env:
@@ -46,6 +48,7 @@ jobs:
     uses: ./.github/workflows/pull_request.yaml
     with:
       full_matrix: true
+      ref: refs/tags/${{ github.ref_name }}
 
   build:
     name: Build and attest release artifacts
@@ -57,13 +60,13 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
-          ref: ${{ github.ref }}
-      - uses: actions/setup-python@v5
+          ref: refs/tags/${{ github.ref_name }}
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v8.0.0
         with:
           enable-cache: true
       - run: rm -rf dist
@@ -86,10 +89,10 @@ jobs:
     needs: [preflight, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v8.0.0
         with:
           enable-cache: true
       - uses: actions/download-artifact@v4
@@ -140,7 +143,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v8.0.0
         with:
           enable-cache: true
       - env:
@@ -190,7 +193,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v8.0.0
         with:
           enable-cache: true
       - env:
@@ -264,9 +267,10 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
+          gh release create "${TAG}" \
             --repo "${REPOSITORY}" \
             --verify-tag \
             dist/*.whl dist/*.tar.gz dist/SHA256SUMS dist/release-manifest.json \

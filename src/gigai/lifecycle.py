@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import json
 import os
 from pathlib import Path
 import re
@@ -20,6 +21,7 @@ from typing import Callable, Mapping
 import uuid
 
 from .adapters.factory import resolve_model_adapter
+from .builder import GigBuilderError, build_model_draft
 from .capabilities import capability_manifest_artifact_ref
 from .canonical import (
     EntityPrefix,
@@ -44,6 +46,7 @@ from .proposal_interview import (
     InterviewSession,
     ProposalInterviewError,
     ReferenceDecision,
+    attach_reference_choices,
     build_session,
     approve_session,
     persist_trace,
@@ -53,6 +56,8 @@ from .proposal_interview import (
 from .registry import open_project_registry
 from .validators import (
     ValidationReport,
+    validate_gig_builder_session,
+    validate_proposal_draft_manifest,
     validate_proposal_workpad,
     validate_serialized_contract,
 )
@@ -117,6 +122,15 @@ class RevisionResult:
     entry: JournalEntry
 
 
+@dataclass(frozen=True)
+class BuilderRecovery:
+    """Recovered builder state needed to reopen a browser review safely."""
+
+    proposal_id: str | None
+    review: Mapping[str, object]
+    builder_ready: bool
+
+
 def start_interview(
     *,
     home_root: Path,
@@ -172,9 +186,6 @@ def start_interview(
         )
         creation_started = _creation_started_entry(workpad)
         return InterviewStartResult(bound.project_id, gig_id, workpad, session, references, creation_started, True)
-
-    if not reference_paths:
-        raise LifecycleError("create requires at least one explicit --reference")
 
     existing_entries = _journal_entries(workpad)
     if existing_entries:
@@ -240,6 +251,66 @@ def start_interview(
     )
     _persist_interview_trace(workpad, session)
     return InterviewStartResult(bound.project_id, gig_id, workpad, session, reference_bytes, creation_started, resumed)
+
+
+def select_interview_references(
+    *,
+    home_root: Path,
+    requested_target: Path | None,
+    start: InterviewStartResult,
+    session: InterviewSession,
+    paths: tuple[str, ...],
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> tuple[InterviewSession, tuple[str, ...], dict[str, str], dict[str, bytes]]:
+    """Resolve operator-entered target-relative paths into pinned references."""
+
+    if session.references:
+        raise LifecycleError("interview references have already been selected")
+    if not paths:
+        raise LifecycleError("enter at least one local reference path")
+    bound = resolve_bound_project(home_root=home_root, requested_target=requested_target)
+    target_root = bound.target_root.expanduser().resolve(strict=True)
+    references: list[ReferenceDecision] = []
+    labels: dict[str, str] = {}
+    reference_bytes: dict[str, bytes] = {}
+    seen: set[Path] = set()
+    artifacts: list[JournalArtifact] = []
+    for raw_path in paths:
+        raw = Path(raw_path).expanduser()
+        candidate = raw if raw.is_absolute() else target_root / raw
+        if candidate.is_symlink() or not candidate.is_file():
+            raise LifecycleError("reference must be an existing regular non-symlink file")
+        resolved = candidate.resolve(strict=True)
+        if not resolved.is_relative_to(target_root):
+            raise LifecycleError("reference must remain inside the bound target")
+        if resolved in seen:
+            raise LifecycleError("reference paths must be unique")
+        seen.add(resolved)
+        content = resolved.read_bytes()
+        reference_id = _allocate_interview_id("ref", uuid_factory)
+        references.append(
+            ReferenceDecision(reference_id, digest_imported_bytes(content), "selected")
+        )
+        relative_label = resolved.relative_to(target_root).as_posix()
+        labels[reference_id] = relative_label
+        reference_bytes[reference_id] = content
+        artifacts.append(
+            JournalArtifact(
+                f"review/interviews/{session.session_id}/references/{reference_id}.bin",
+                content,
+            )
+        )
+    updated = attach_reference_choices(session, tuple(references))
+    record_transition(
+        workpad=start.workpad,
+        project_id=start.project_id,
+        gig_id=start.gig_id,
+        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+        transition="proposal_interview_references_selected",
+        body=f"Operator selected {len(references)} explicit local interview reference(s).",
+        artifacts=tuple(artifacts),
+    )
+    return updated, tuple(item.reference_id for item in references), labels, reference_bytes
 
 
 def _start_improve_interview(
@@ -421,6 +492,7 @@ def approve_interview_session(
     requested_target: Path | None,
     start: InterviewStartResult,
     session: InterviewSession,
+    existing_proposal_id: str | None = None,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> InterviewSession:
     """Build and seal the proposal only after the operator approves the interview."""
@@ -449,6 +521,64 @@ def approve_interview_session(
             session=session,
             uuid_factory=uuid_factory,
         )
+    if existing_proposal_id is not None:
+        proposal_path = start.workpad / "manifests" / "gig-proposal.json"
+        try:
+            proposal_bytes = proposal_path.read_bytes()
+            proposal = parse_json_bytes(proposal_bytes)
+        except (OSError, ValueError) as exc:
+            raise LifecycleError("model-built proposal is not recoverable") from exc
+        if not isinstance(proposal, dict) or proposal.get("proposal_id") != existing_proposal_id:
+            raise LifecycleError("model-built proposal identity does not match approval")
+        approved = approve_session(
+            session,
+            proposal_id=existing_proposal_id,
+            proposal_sha256=digest_imported_bytes(proposal_bytes),
+        )
+        snapshot = canonical_json_bytes(session_record(approved))
+        report = validate_serialized_contract("proposal-interview.schema.json", snapshot)
+        if not report.valid:
+            raise LifecycleError("approved builder interview snapshot failed validation")
+        record_transition(
+            workpad=start.workpad,
+            project_id=start.project_id,
+            gig_id=start.gig_id,
+            handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+            transition="proposal_interview_approved",
+            body=f"Operator approved model-built proposal {existing_proposal_id}.",
+            artifacts=(JournalArtifact("manifests/proposal-interview.json", snapshot),),
+        )
+        _persist_interview_trace(start.workpad, approved)
+        builder_path = start.workpad / "manifests" / "gig-builder-session.json"
+        if builder_path.is_file():
+            builder_payload = parse_json_bytes(builder_path.read_bytes())
+            if not isinstance(builder_payload, dict):
+                raise LifecycleError("builder session snapshot is not recoverable")
+            builder_payload["state"] = "approved"
+            builder_payload["terminal_reason"] = "operator_approved"
+            builder_payload["updated_at"] = approved.updated_at
+            builder_bytes = canonical_json_bytes(builder_payload)
+            builder_report = validate_serialized_contract(
+                "gig-builder-session.schema.json", builder_bytes
+            )
+            if not builder_report.valid:
+                raise LifecycleError("approved builder session failed contract validation")
+            record_transition(
+                workpad=start.workpad,
+                project_id=start.project_id,
+                gig_id=start.gig_id,
+                handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+                transition="gig_builder_approved",
+                body=f"Operator approved Gig builder session {session.session_id}.",
+                artifacts=(JournalArtifact("manifests/gig-builder-session.json", builder_bytes),),
+            )
+        approve_offline(
+            home_root=home_root,
+            requested_target=requested_target,
+            proposal_id=existing_proposal_id,
+            uuid_factory=uuid_factory,
+        )
+        return approved
     request_path = start.workpad / str(session.request_artifact["path"])
     try:
         commission = request_path.read_text(encoding="utf-8")
@@ -495,6 +625,473 @@ def approve_interview_session(
         uuid_factory=uuid_factory,
     )
     return approved
+
+
+def build_interview_proposal(
+    *,
+    home_root: Path,
+    requested_target: Path | None,
+    start: InterviewStartResult,
+    session: InterviewSession,
+    model_target: str,
+    reference_bytes: Mapping[str, bytes],
+    network_allowed: bool = False,
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> InterviewSession:
+    """Research and materialize one reviewable G26 draft, without approval."""
+
+    if session.state != "proposal_ready":
+        raise LifecycleError("a complete Gig definition is required before proposal build")
+    builder_path = start.workpad / "manifests/gig-builder-session.json"
+    if builder_path.is_file():
+        try:
+            existing_builder = parse_json_bytes(builder_path.read_bytes())
+        except (OSError, ValueError) as exc:
+            raise LifecycleError("existing builder session snapshot is not recoverable") from exc
+        if not isinstance(existing_builder, dict):
+            raise LifecycleError("existing builder session snapshot is not an object")
+        existing_state = existing_builder.get("state")
+        if existing_state == "researching":
+            recover_builder_session(start=start, uuid_factory=uuid_factory)
+            raise LifecycleError("interrupted builder research was terminalized; start a new session")
+        if existing_state in {
+            "operator_review",
+            "approved",
+            "rejected",
+            "cancelled",
+            "timed_out",
+            "unavailable",
+            "malformed",
+            "budget_exhausted",
+            "failed",
+            "blocked",
+        }:
+            raise LifecycleError(
+                f"builder session is already terminal or reviewable: {existing_state}"
+            )
+    config = load_config(home_root)
+    commission_path = start.workpad / str(session.request_artifact["path"])
+    try:
+        commission = commission_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise LifecycleError("Gig intent artifact cannot be read as UTF-8") from exc
+    try:
+        base_selection = _builder_selection(config, model_target)
+    except LifecycleError as exc:
+        base_selection = _unusable_builder_selection(model_target)
+        terminal_reason = "unavailable"
+        terminal_payload = _builder_session_record(
+            session=session,
+            start=start,
+            selection=base_selection,
+            state=terminal_reason,
+            draft_ref=None,
+            terminal_reason=terminal_reason,
+        )
+        terminal_bytes = canonical_json_bytes(terminal_payload)
+        terminal_report = validate_gig_builder_session(terminal_bytes)
+        if not terminal_report.valid:
+            raise LifecycleError(
+                "unavailable Gig builder session failed contract validation: "
+                + ", ".join(item.code for item in terminal_report.findings)
+            ) from exc
+        record_transition(
+            workpad=start.workpad,
+            project_id=start.project_id,
+            gig_id=start.gig_id,
+            handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+            transition="gig_builder_failed",
+            body="Gig builder stopped before research because the selected model is unavailable.",
+            artifacts=(JournalArtifact("manifests/gig-builder-session.json", terminal_bytes),),
+        )
+        raise LifecycleError(str(exc)) from exc
+    researching_payload = _builder_session_record(
+        session=session,
+        start=start,
+        selection=base_selection,
+        state="researching",
+        draft_ref=None,
+        terminal_reason=None,
+    )
+    researching_bytes = canonical_json_bytes(researching_payload)
+    researching_report = validate_gig_builder_session(researching_bytes)
+    if not researching_report.valid:
+        raise LifecycleError("researching Gig builder session failed contract validation")
+    record_transition(
+        workpad=start.workpad,
+        project_id=start.project_id,
+        gig_id=start.gig_id,
+        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+        transition="gig_builder_researching",
+        body=f"Gig builder is researching with selected target {model_target}.",
+        artifacts=(JournalArtifact("manifests/gig-builder-session.json", researching_bytes),),
+    )
+    try:
+        draft, selection = build_model_draft(
+            config=config,
+            model_target=model_target,
+            session=session,
+            reference_bytes=reference_bytes,
+            intent_text=commission,
+            network_allowed=network_allowed,
+        )
+    except GigBuilderError as exc:
+        terminal_state = exc.reason if exc.reason in {
+            "cancelled",
+            "timed_out",
+            "unavailable",
+            "malformed",
+            "budget_exhausted",
+            "blocked",
+            "failed",
+        } else "failed"
+        failed_payload = _builder_session_record(
+            session=session,
+            start=start,
+            selection=base_selection,
+            state=terminal_state,
+            draft_ref=None,
+            terminal_reason=exc.reason,
+        )
+        failed_bytes = canonical_json_bytes(failed_payload)
+        failed_report = validate_gig_builder_session(failed_bytes)
+        if not failed_report.valid:
+            raise LifecycleError(
+                "terminal Gig builder session failed contract validation: "
+                + ", ".join(item.code for item in failed_report.findings)
+            ) from exc
+        record_transition(
+            workpad=start.workpad,
+            project_id=start.project_id,
+            gig_id=start.gig_id,
+            handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+            transition="gig_builder_failed",
+            body=f"Gig builder stopped before proposal approval: {exc.reason}.",
+            artifacts=(JournalArtifact("manifests/gig-builder-session.json", failed_bytes),),
+        )
+        raise LifecycleError(str(exc)) from exc
+    proposal_id = _allocate_local_id(EntityPrefix.GIG_PROPOSAL, uuid_factory)
+    model_output = json.dumps(draft.as_dict(), sort_keys=True, separators=(",", ":"))
+    artifacts = _build_proposal_artifacts(
+        gig_id=start.gig_id,
+        project_id=start.project_id,
+        proposal_id=proposal_id,
+        name=session.request_kind,
+        commission=commission,
+        model_target=model_target,
+        model_output=model_output,
+        uuid_factory=uuid_factory,
+    )
+    proposal_bytes = next(
+        item.content for item in artifacts if item.path == "manifests/gig-proposal.json"
+    )
+    created_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    selection_digest = digest_imported_bytes(canonical_json_bytes(selection))
+    endpoint = next(item for item in config.endpoints if item.name == selection["endpoint_name"])
+    manifest_id = _allocate_local_id(EntityPrefix.DRAFT_MANIFEST, uuid_factory)
+    draft_manifest = {
+        "schema_version": "1.0",
+        "manifest_version": 1,
+        "manifest_id": manifest_id,
+        "session_id": session.session_id,
+        "project_id": start.project_id,
+        "gig_id": start.gig_id,
+        "parent_manifest_id": None,
+        "model_selection": {**selection, "selection_digest": selection_digest},
+        "build": {
+            "status": "completed",
+            "mode": "deterministic_fixture" if selection["adapter"] == "deterministic" else "configured_model",
+            "started_at": created_at,
+            "completed_at": created_at,
+            "accounting": {
+                "model_calls": 1,
+                "input_tokens": None,
+                "output_tokens": None,
+                "elapsed_ms": 0,
+                "cost": None,
+                "cost_currency": None,
+            },
+        },
+        "proposal_artifact": _artifact_ref(
+            "manifests/gig-proposal.json", "application/json", proposal_bytes
+        ),
+        "research": {
+            "summary": draft.summary,
+            "citations": list(draft.citations),
+            "assumptions": list(draft.assumptions),
+            "unresolved_questions": list(draft.unresolved_questions),
+        },
+        "boundary": {
+            "reference_ids": list(session.selected_reference_ids),
+            "network": "local_only" if endpoint.adapter == "deterministic" else "configured_provider_only",
+            "credential_reference": endpoint.credential,
+            "effects": ["write_workpad"],
+        },
+        "created_at": created_at,
+        "updated_at": created_at,
+    }
+    draft_bytes = canonical_json_bytes(draft_manifest)
+    draft_report = validate_proposal_draft_manifest(draft_bytes)
+    if not draft_report.valid:
+        raise LifecycleError("proposal draft manifest failed contract validation")
+    session_record_payload = _builder_session_record(
+        session=session,
+        start=start,
+        selection={**selection, "readiness": "usable", "selection_digest": selection_digest},
+        state="operator_review",
+        draft_ref=_artifact_ref(
+            "manifests/proposal-draft-manifest.json", "application/json", draft_bytes
+        ),
+        terminal_reason=None,
+    )
+    session_bytes = canonical_json_bytes(session_record_payload)
+    session_report = validate_gig_builder_session(session_bytes)
+    if not session_report.valid:
+        raise LifecycleError(
+            "Gig builder session failed contract validation: "
+            + ", ".join(item.code + ":" + item.location for item in session_report.findings)
+        )
+    _validate_artifacts(artifacts)
+    record_transition(
+        workpad=start.workpad,
+        project_id=start.project_id,
+        gig_id=start.gig_id,
+        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+        transition="gig_builder_draft_ready",
+        body=f"Model-built proposal draft {proposal_id} is ready for operator review.",
+        artifacts=(
+            *artifacts,
+            JournalArtifact("manifests/proposal-draft-manifest.json", draft_bytes),
+            JournalArtifact("manifests/gig-builder-session.json", session_bytes),
+        ),
+    )
+    return session
+
+
+def recover_builder_session(
+    *,
+    start: InterviewStartResult,
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> BuilderRecovery:
+    """Reconcile an interrupted builder before reopening its browser flow.
+
+    A committed ``researching`` snapshot is never retried implicitly. It is
+    terminalized as an interrupted failure. A durable review snapshot is
+    reopened with its existing proposal identity, so a browser refresh cannot
+    allocate another proposal or invoke the model again.
+    """
+
+    path = start.workpad / "manifests/gig-builder-session.json"
+    if not path.is_file():
+        return BuilderRecovery(None, {}, False)
+    try:
+        payload = parse_json_bytes(path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise LifecycleError("builder session snapshot is not recoverable") from exc
+    if not isinstance(payload, dict):
+        raise LifecycleError("builder session snapshot is not an object")
+    state = payload.get("state")
+    if state == "researching":
+        payload["state"] = "failed"
+        payload["terminal_reason"] = "interrupted_build_recovery"
+        payload["updated_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        recovered_bytes = canonical_json_bytes(payload)
+        report = validate_gig_builder_session(recovered_bytes)
+        if not report.valid:
+            raise LifecycleError("interrupted builder session failed contract validation")
+        record_transition(
+            workpad=start.workpad,
+            project_id=start.project_id,
+            gig_id=start.gig_id,
+            handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+            transition="gig_builder_failed",
+            body="Gig builder recovered an interrupted research session without retrying it.",
+            artifacts=(JournalArtifact("manifests/gig-builder-session.json", recovered_bytes),),
+        )
+        return BuilderRecovery(None, {}, False)
+    if state != "operator_review":
+        return BuilderRecovery(None, {}, False)
+    draft_ref = payload.get("draft")
+    if not isinstance(draft_ref, dict) or not isinstance(draft_ref.get("path"), str):
+        raise LifecycleError("reviewable builder session has no draft reference")
+    draft_path = start.workpad / draft_ref["path"]
+    proposal_path = start.workpad / "manifests/gig-proposal.json"
+    try:
+        draft = parse_json_bytes(draft_path.read_bytes())
+        proposal = parse_json_bytes(proposal_path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise LifecycleError("reviewable builder session is missing its proposal artifacts") from exc
+    if not isinstance(draft, dict) or not isinstance(proposal, dict):
+        raise LifecycleError("reviewable builder artifacts are not objects")
+    proposal_id = proposal.get("proposal_id")
+    research = draft.get("research")
+    if not isinstance(proposal_id, str) or not isinstance(research, dict):
+        raise LifecycleError("reviewable builder artifacts are incomplete")
+    return BuilderRecovery(proposal_id, research, True)
+
+
+def _builder_session_record(
+    *,
+    session: InterviewSession,
+    start: InterviewStartResult,
+    selection: Mapping[str, object],
+    state: str,
+    draft_ref: Mapping[str, object] | None,
+    terminal_reason: str | None,
+) -> dict[str, object]:
+    return {
+        "schema_version": "1.0",
+        "record_version": 1,
+        "session_id": session.session_id,
+        "project_id": start.project_id,
+        "gig_id": start.gig_id,
+        "request_kind": "improve" if session.request_kind == "improve" else "create",
+        "state": state,
+        "revision": session.revision,
+        "parent_revision": session.parent_revision,
+        "round": session.round,
+        "max_rounds": session.max_rounds,
+        "intent": {
+            "text_artifact": dict(session.request_artifact),
+            "content_sha256": session.request_sha256,
+            "answered_at": session.updated_at,
+            "actor": {"kind": "operator", "id": "local-user"},
+        },
+        "references": [
+            {
+                "reference_id": item.reference_id,
+                "content_sha256": item.content_sha256,
+                "decision": item.decision,
+            }
+            for item in session.references
+        ],
+        "questions": [
+            {
+                "question_id": item.question_id,
+                "answer_type": item.answer_type,
+                "required": item.required,
+                "options": list(item.options),
+                "depends_on": list(item.depends_on),
+                "rationale": item.rationale,
+                "provenance": item.provenance,
+            }
+            for item in session.questions
+        ],
+        "answers": [
+            {
+                "question_id": item.question_id,
+                "answer_type": item.answer_type,
+                "value": item.value,
+                "answered_at": item.answered_at,
+            }
+            for item in session.answers
+        ],
+        "model_selection": {
+            **dict(selection),
+            "selection_actor": {"kind": "operator", "id": "local-user"},
+        },
+        "policy": {
+            "network": "local_only",
+            "credential_reference": None,
+            "budget": {
+                "max_model_calls": 4,
+                "max_tool_calls": 0,
+                "max_tokens": 4000,
+                "max_cost": None,
+                "currency": None,
+                "max_wall_time_ms": 300000,
+                "max_parallel_goals": 1,
+            },
+            "cancellation": "operator_or_timeout",
+        },
+        "accounting": {
+            "model_calls": 1 if draft_ref is not None else 0,
+            "input_tokens": None,
+            "output_tokens": None,
+            "elapsed_ms": 0,
+            "cost": None,
+            "cost_currency": None,
+        },
+        "draft": dict(draft_ref) if draft_ref is not None else None,
+        "terminal_reason": terminal_reason,
+        "created_at": session.created_at,
+        "updated_at": session.updated_at,
+    }
+
+
+def _builder_selection(config, model_target: str) -> dict[str, object]:
+    target = next((item for item in config.model_targets if item.name == model_target), None)
+    if target is None:
+        raise LifecycleError(f"unknown model target {model_target!r}")
+    endpoint = next((item for item in config.endpoints if item.name == target.endpoint), None)
+    if endpoint is None:
+        raise LifecycleError(f"model target {model_target!r} has no endpoint")
+    identity = {
+        "target_name": target.name,
+        "endpoint_name": endpoint.name,
+        "model": target.model,
+        "adapter": endpoint.adapter,
+    }
+    return {
+        **identity,
+        "readiness": "usable",
+        "selection_actor": {"kind": "operator", "id": "local-user"},
+        "selection_digest": digest_imported_bytes(canonical_json_bytes(identity)),
+    }
+
+
+def _unusable_builder_selection(model_target: str) -> dict[str, object]:
+    """Return a schema-valid non-authoritative selection for terminal failures."""
+
+    requested = model_target if model_target and model_target.replace("-", "").replace("_", "").isalnum() else "unavailable-target"
+    identity = {
+        "target_name": requested,
+        "endpoint_name": "unavailable",
+        "model": "unavailable",
+        "adapter": "unavailable",
+    }
+    return {
+        **identity,
+        "readiness": "unavailable",
+        "selection_actor": {"kind": "operator", "id": "local-user"},
+        "selection_digest": digest_imported_bytes(canonical_json_bytes(identity)),
+    }
+
+
+def record_builder_state(
+    *,
+    start: InterviewStartResult,
+    session: InterviewSession,
+    state: str,
+    terminal_reason: str | None,
+    transition: str,
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> None:
+    """Persist a review/rejection state without creating proposal authority."""
+
+    path = start.workpad / "manifests" / "gig-builder-session.json"
+    try:
+        payload = parse_json_bytes(path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise LifecycleError("builder session snapshot is not recoverable") from exc
+    if not isinstance(payload, dict):
+        raise LifecycleError("builder session snapshot is not an object")
+    payload["state"] = state
+    payload["terminal_reason"] = terminal_reason
+    payload["updated_at"] = session.updated_at
+    snapshot = canonical_json_bytes(payload)
+    report = validate_gig_builder_session(snapshot)
+    if not report.valid:
+        raise LifecycleError("updated builder session failed contract validation")
+    record_transition(
+        workpad=start.workpad,
+        project_id=start.project_id,
+        gig_id=start.gig_id,
+        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+        transition=transition,
+        body=f"Gig builder session {session.session_id} advanced to {state}.",
+        artifacts=(JournalArtifact("manifests/gig-builder-session.json", snapshot),),
+    )
 
 
 def _approve_improve_interview_session(

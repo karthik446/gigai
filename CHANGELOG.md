@@ -30,6 +30,14 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.4
+
+- Adds the model-facilitated Gig builder for UAT: GigAI can guide an operator
+  through a Gig definition, ask bounded adaptive follow-up questions, build a
+  reviewable proposal, and require explicit approval before sealing it.
+- This release is an alpha UAT candidate; configured live model families and
+  real operator workflows remain subject to the G24/G26 UAT gate.
+
 ### 0.1.3
 
 Release-specific capability notes will be reconciled from the G12 release

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:proposal-draft-manifest:1",
+  "title": "GigAI subordinate proposal draft manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest_version", "manifest_id", "session_id", "project_id", "gig_id", "parent_manifest_id", "model_selection", "build", "proposal_artifact", "research", "boundary", "created_at", "updated_at"],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "manifest_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "manifest_id": {"type": "string", "pattern": "^draft_manifest_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "session_id": {"$ref": "urn:gigai:schema:proposal-interview:1#/$defs/session_id"},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "parent_manifest_id": {"oneOf": [{"$ref": "#/$defs/manifest_id"}, {"type": "null"}]},
+    "model_selection": {"$ref": "#/$defs/model_selection"},
+    "build": {"$ref": "#/$defs/build"},
+    "proposal_artifact": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "research": {"$ref": "#/$defs/research"},
+    "boundary": {"$ref": "#/$defs/boundary"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "manifest_id": {"type": "string", "pattern": "^draft_manifest_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "model_selection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target_name", "endpoint_name", "model", "adapter", "selection_digest"],
+      "properties": {
+        "target_name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+        "endpoint_name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+        "model": {"type": "string", "minLength": 1, "maxLength": 255},
+        "adapter": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 120},
+        "selection_digest": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}
+      }
+    },
+    "build": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "mode", "started_at", "completed_at", "accounting"],
+      "properties": {
+        "status": {"type": "string", "enum": ["not_started", "running", "completed", "cancelled", "timed_out", "unavailable", "malformed", "budget_exhausted", "failed"]},
+        "mode": {"type": "string", "enum": ["deterministic_fixture", "configured_model"]},
+        "started_at": {"type": "string", "format": "date-time"},
+        "completed_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+        "accounting": {"$ref": "urn:gigai:schema:gig-builder-session:1#/$defs/accounting"}
+      },
+      "allOf": [{"if": {"properties": {"status": {"const": "completed"}}}, "then": {"required": ["completed_at"], "properties": {"completed_at": {"type": "string"}}}}]
+    },
+    "research": {
+      "type": "object", "additionalProperties": false,
+      "required": ["summary", "citations", "assumptions", "unresolved_questions"],
+      "properties": {
+        "summary": {"type": "string", "minLength": 1, "maxLength": 10000},
+        "citations": {"type": "array", "items": {"$ref": "#/$defs/citation"}},
+        "assumptions": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 2000}},
+        "unresolved_questions": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 2000}}
+      }
+    },
+    "citation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["claim_id", "source_kind", "locator", "source_sha256", "verification"],
+      "properties": {
+        "claim_id": {"type": "string", "pattern": "^claim_[a-z0-9_-]+$", "maxLength": 120},
+        "source_kind": {"type": "string", "enum": ["local_reference", "provider_source", "operator_statement"]},
+        "locator": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "source_sha256": {"oneOf": [{"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}, {"type": "null"}]},
+        "verification": {"type": "string", "enum": ["verified", "unresolved", "not_applicable"]}
+      }
+    },
+    "boundary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reference_ids", "network", "credential_reference", "effects"],
+      "properties": {
+        "reference_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:gigai:schema:proposal-interview:1#/$defs/reference_id"}},
+        "network": {"type": "string", "enum": ["local_only", "configured_provider_only"]},
+        "credential_reference": {"oneOf": [{"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120}, {"type": "null"}]},
+        "effects": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["write_workpad"]}}
+      }
+    }
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:gig-builder-session:1",
+  "title": "GigAI model-facilitated Gig builder session",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "record_version", "session_id", "project_id", "gig_id", "request_kind", "state", "revision", "parent_revision", "round", "max_rounds", "intent", "references", "questions", "answers", "model_selection", "policy", "accounting", "draft", "terminal_reason", "created_at", "updated_at"],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "record_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "session_id": {"$ref": "urn:gigai:schema:proposal-interview:1#/$defs/session_id"},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "request_kind": {"type": "string", "enum": ["create", "improve"]},
+    "state": {"type": "string", "enum": ["define_intent", "clarify", "build_requested", "researching", "proposal_draft_ready", "operator_review", "revised", "approved", "rejected", "cancelled", "timed_out", "unavailable", "malformed", "budget_exhausted", "failed", "blocked"]},
+    "revision": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "parent_revision": {"oneOf": [{"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"}, {"type": "null"}]},
+    "round": {"type": "integer", "minimum": 1, "maximum": 1024},
+    "max_rounds": {"type": "integer", "minimum": 1, "maximum": 1024},
+    "intent": {"$ref": "#/$defs/intent"},
+    "references": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:gigai:schema:proposal-interview:1#/$defs/reference_decision"}},
+    "questions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "urn:gigai:schema:proposal-interview:1#/$defs/question"}},
+    "answers": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:gigai:schema:proposal-interview:1#/$defs/answer"}},
+    "model_selection": {"$ref": "#/$defs/model_selection"},
+    "policy": {"$ref": "#/$defs/policy"},
+    "accounting": {"$ref": "#/$defs/accounting"},
+    "draft": {"oneOf": [{"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}, {"type": "null"}]},
+    "terminal_reason": {"type": ["string", "null"], "minLength": 1, "maxLength": 255},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [
+    {"if": {"properties": {"revision": {"const": 1}}}, "then": {"properties": {"parent_revision": {"type": "null"}}}},
+    {"if": {"properties": {"revision": {"minimum": 2}}}, "then": {"properties": {"parent_revision": {"type": "integer", "minimum": 1}}}},
+    {"if": {"properties": {"state": {"enum": ["define_intent", "clarify", "build_requested", "researching"]}}}, "then": {"properties": {"draft": {"type": "null"}}}},
+    {"if": {"properties": {"state": {"enum": ["build_requested", "researching", "proposal_draft_ready", "operator_review", "approved"]}}}, "then": {"properties": {"model_selection": {"properties": {"readiness": {"const": "usable"}}}}}},
+    {"if": {"properties": {"state": {"const": "proposal_draft_ready"}}}, "then": {"required": ["draft"], "properties": {"draft": {"type": "object"}}}},
+    {"if": {"properties": {"state": {"enum": ["approved", "rejected", "cancelled", "timed_out", "unavailable", "malformed", "budget_exhausted", "failed", "blocked"]}}}, "then": {"required": ["terminal_reason"], "properties": {"terminal_reason": {"type": "string", "minLength": 1}}}}
+  ],
+  "$defs": {
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text_artifact", "content_sha256", "answered_at", "actor"],
+      "properties": {
+        "text_artifact": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        "content_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "answered_at": {"type": "string", "format": "date-time"},
+        "actor": {"type": "object", "additionalProperties": false, "required": ["kind", "id"], "properties": {"kind": {"const": "operator"}, "id": {"type": "string", "minLength": 1, "maxLength": 255}}}
+      }
+    },
+    "model_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_name", "endpoint_name", "model", "adapter", "readiness", "selection_actor", "selection_digest"],
+      "properties": {
+        "target_name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+        "endpoint_name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+        "model": {"type": "string", "minLength": 1, "maxLength": 255},
+        "adapter": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 120},
+        "readiness": {"type": "string", "enum": ["detected", "configured", "verified", "usable", "unavailable", "unsupported"]},
+        "selection_actor": {"type": "object", "additionalProperties": false, "required": ["kind", "id"], "properties": {"kind": {"const": "operator"}, "id": {"type": "string", "minLength": 1, "maxLength": 255}}},
+        "selection_digest": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["network", "credential_reference", "budget", "cancellation"],
+      "properties": {
+        "network": {"type": "string", "enum": ["local_only", "configured_provider_only"]},
+        "credential_reference": {"oneOf": [{"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120}, {"type": "null"}]},
+        "budget": {"$ref": "urn:gigai:schema:common:1#/$defs/budget"},
+        "cancellation": {"const": "operator_or_timeout"}
+      }
+    },
+    "accounting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_calls", "input_tokens", "output_tokens", "elapsed_ms", "cost", "cost_currency"],
+      "properties": {
+        "model_calls": {"$ref": "urn:gigai:schema:common:1#/$defs/safe_nonnegative_integer"},
+        "input_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "output_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "elapsed_ms": {"$ref": "urn:gigai:schema:common:1#/$defs/safe_nonnegative_integer"},
+        "cost": {"oneOf": [{"$ref": "urn:gigai:schema:common:1#/$defs/decimal"}, {"type": "null"}]},
+        "cost_currency": {"oneOf": [{"type": "string", "pattern": "^[A-Z]{3}$"}, {"type": "null"}]}
+      }
+    }
+  }
+}

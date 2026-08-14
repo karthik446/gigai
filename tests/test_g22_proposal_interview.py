@@ -79,6 +79,32 @@ def test_protocol_reaches_ready_and_operator_approval_only() -> None:
         answer_question(approved, "scope", "try again", now=NOW)
 
 
+def test_minimal_gig_definition_can_be_approved_without_references() -> None:
+    session = build_session(
+        session_id=SESSION,
+        project_id=PROJECT,
+        gig_id=GIG,
+        request_kind="repository-feature",
+        request_artifact={
+            "path": "draft/request.txt",
+            "content_sha256": SHA,
+            "media_type": "text/plain",
+            "size_bytes": 12,
+        },
+        request_sha256=SHA,
+        references=(),
+        now=NOW,
+    )
+    session = answer_question(session, "scope", "Review this repository.", now=NOW)
+    assert session.state == "proposal_ready"
+    approved = approve_session(session, proposal_id=PROPOSAL, proposal_sha256=SHA, now=NOW)
+    assert approved.state == "approved"
+    assert approved.selected_reference_ids == ()
+    assert approved.effect_choice == "write_workpad"
+    assert approved.privacy_choice == "local_only"
+    assert approved.capability_choice == "local_read"
+
+
 def test_protocol_rejects_wrong_types_unknown_questions_and_unselected_references() -> None:
     session = _session()
     with pytest.raises(ProposalInterviewError, match="text answer"):
@@ -264,7 +290,7 @@ def test_loopback_http_requires_token_and_preserves_session_boundary() -> None:
             assert response.status == 200
             assert response.headers["X-GigAI-State"] == "questions_pending"
             body = response.read()
-            assert b"GigAI proposal interview" in body
+            assert b"Define a Gig" in body
             assert b"hx-post" in body
             assert b"scope" in body
 
@@ -281,10 +307,10 @@ def test_loopback_http_requires_token_and_preserves_session_boundary() -> None:
             method="POST",
         )
         with urlopen(request, timeout=2) as response:
-            assert json.loads(response.read()) == {
-                "session_id": SESSION,
-                "state": "questions_pending",
-            }
+                assert json.loads(response.read()) == {
+                    "session_id": SESSION,
+                    "state": "proposal_ready",
+                }
 
         stale = Request(
             f"{server.url}/events",

@@ -26,15 +26,20 @@ from .lifecycle import (
     LifecycleError,
     approve_interview_session,
     approve_offline,
+    build_interview_proposal,
     create_offline,
     persist_interview_session,
     record_feedback,
+    record_builder_state,
+    recover_builder_session,
     reject_offline,
     revise_offline,
+    select_interview_references,
     stage_improvement_manifest,
     start_interview,
 )
-from .proposal_interview import InterviewHTTPServer
+from .model_discovery import discover_installed_models, resolve_target_readiness
+from .proposal_interview import InterviewHTTPServer, block_session, request_revision
 from .occurrence import (
     OccurrenceError,
     close_occurrence,
@@ -45,8 +50,10 @@ from .occurrence import (
     trigger_occurrence,
 )
 from .question_generation import generate_model_questions
+from .question_generation import G26_QUESTION_PROMPTS
 from .setup import (
     build_config,
+    detect_editor_argv,
     default_home_root,
     default_workpad_root,
     resolve_editor_argv,
@@ -80,9 +87,52 @@ def cli(context: click.Context) -> None:
         raise click.UsageError(
             "Choose 'setup', 'doctor', 'init', 'create', 'improve', 'feedback', 'revise', "
             "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
-            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', or 'open'; "
+            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', 'models', or 'open'; "
             "use --help for details."
         )
+
+
+@cli.command("models")
+@click.option(
+    "--home",
+    "home_value",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="GigAI machine-state directory (default: GIGAI_HOME or ~/.gigai).",
+)
+@click.option("--json", "as_json", is_flag=True)
+def models_command(home_value: Path | None, as_json: bool) -> None:
+    """Show detected local model CLIs and configured target readiness."""
+
+    try:
+        home = home_value or default_home_root()
+        config = load_config(home)
+        payload = {
+            "detected": [
+                {
+                    "name": item.name,
+                    "executable": str(item.executable) if item.executable else None,
+                    "readiness": item.readiness,
+                }
+                for item in discover_installed_models()
+            ],
+            "configured": [
+                resolve_target_readiness(config, item.name).__dict__
+                for item in config.model_targets
+            ],
+        }
+        if as_json:
+            click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+            return
+        for item in payload["detected"]:
+            location = f" ({item['executable']})" if item["executable"] else ""
+            click.echo(f"{item['name']}: {item['readiness']}{location}")
+        for item in payload["configured"]:
+            click.echo(
+                f"target {item['target_name']}: {item['readiness']} "
+                f"({item['adapter'] or 'unresolved'} / {item['model'] or 'unknown'})"
+            )
+    except (ConfigurationError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @cli.command("setup")
@@ -249,9 +299,15 @@ def setup_command(
                 environment_editor = resolve_editor_argv(None)
                 default_editor = environment_editor[0]
                 environment_editor_args = environment_editor[1:]
+        if default_editor is None:
+            detected_editor = detect_editor_argv()
+            if detected_editor is not None:
+                default_editor = detected_editor[0]
         resolved_editor = resolve_editor_argv(
             click.prompt(
-                "Editor executable", default=default_editor, show_default=True
+                "Editor program (used to open workpads)",
+                default=default_editor,
+                show_default=True,
             ),
             (
                 editor_arg
@@ -345,14 +401,21 @@ def setup_command(
             credential_summary = [
                 {"name": item.name, "kind": item.kind} for item in credentials
             ]
-            click.echo(f"Home: {requested_home}")
-            click.echo(f"Authoritative workpad root: {resolved_workpad}")
-            click.echo(f"Editor argv: {json.dumps(resolved_editor)}")
-            click.echo(f"Credential references: {json.dumps(credential_summary)}")
-            click.echo("Offline endpoint: offline (deterministic)")
-            click.echo("Model target: offline-default (fixture-v1)")
-            click.echo("Profile: default")
-            click.echo("Standard pack: standard version 1")
+            click.secho("\nGigAI setup review", bold=True, fg="cyan")
+            click.echo(f"  GigAI home: {requested_home}")
+            click.echo(f"  Workpad storage: {resolved_workpad}")
+            click.echo(
+                f"  Editor argv: {json.dumps(resolved_editor)} "
+                "(program used to open workpads)"
+            )
+            click.echo(f"  Credential references: {json.dumps(credential_summary)}")
+            click.echo(
+                "  Built-in local mode: no network or provider credentials "
+                "(offline-default / fixture-v1)"
+            )
+            click.echo("  Profile: default")
+            click.echo("  Standard pack: standard version 1")
+            click.secho("\nThese are machine-local changes. Nothing will be written to a target repository.", dim=True)
             if not click.confirm("Apply this setup?", default=True):
                 raise click.Abort()
         config = build_config(
@@ -522,6 +585,11 @@ def init_command(target: Path | None, home_value: Path | None, as_json: bool) ->
     help="Use the legacy deterministic proposal fixture instead of the local interview.",
 )
 @click.option(
+    "--allow-provider-network",
+    is_flag=True,
+    help="Allow a configured remote model target to ask questions and build the draft.",
+)
+@click.option(
     "--max-rounds",
     type=click.IntRange(min=1, max=1024),
     default=3,
@@ -546,6 +614,7 @@ def create_command(
     request_value: str | None,
     reference_values: tuple[Path, ...],
     offline: bool,
+    allow_provider_network: bool,
     max_rounds: int,
     open_browser: bool,
     as_json: bool,
@@ -573,6 +642,88 @@ def create_command(
                 reference_paths=reference_values,
                 max_rounds=max_rounds,
             )
+            reference_bytes = dict(started.reference_bytes)
+            recovered_builder = recover_builder_session(start=started)
+            built_proposal_id: str | None = recovered_builder.proposal_id
+            builder_review: dict[str, object] = dict(recovered_builder.review)
+
+            def select_references(session, paths: tuple[str, ...]):
+                updated, selected_ids, labels, selected_bytes = select_interview_references(
+                    home_root=home,
+                    requested_target=target_value,
+                    start=started,
+                    session=session,
+                    paths=paths,
+                )
+                reference_bytes.update(selected_bytes)
+                return updated, selected_ids, labels
+
+            def builder_questions(session):
+                question_ids = {item.question_id for item in session.questions}
+                if "main-drive" not in question_ids:
+                    prompt_name = G26_QUESTION_PROMPTS[0]
+                elif "success-definition" not in question_ids:
+                    prompt_name = G26_QUESTION_PROMPTS[1]
+                else:
+                    return session
+                return generate_model_questions(
+                    config=load_config(home),
+                    model_target=model_target,
+                    session=session,
+                    reference_bytes=reference_bytes,
+                    prompt_name=prompt_name,
+                    network_allowed=allow_provider_network,
+                )
+
+            def build_proposal(session):
+                nonlocal built_proposal_id
+                built = build_interview_proposal(
+                    home_root=home,
+                    requested_target=target_value,
+                    start=started,
+                    session=session,
+                    model_target=model_target,
+                    reference_bytes=reference_bytes,
+                    network_allowed=allow_provider_network,
+                )
+                proposal = json.loads(
+                    (started.workpad / "manifests" / "gig-proposal.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                built_proposal_id = str(proposal["proposal_id"])
+                draft_manifest = json.loads(
+                    (started.workpad / "manifests/proposal-draft-manifest.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                builder_review.update(draft_manifest.get("research", {}))
+                return built
+
+            def revise_proposal(session):
+                nonlocal built_proposal_id
+                built_proposal_id = None
+                revised = request_revision(session)
+                record_builder_state(
+                    start=started,
+                    session=revised,
+                    state="revised",
+                    terminal_reason=None,
+                    transition="gig_builder_revised",
+                )
+                return revised
+
+            def reject_proposal(session):
+                rejected = block_session(session, "operator_rejected")
+                record_builder_state(
+                    start=started,
+                    session=rejected,
+                    state="rejected",
+                    terminal_reason="operator_rejected",
+                    transition="gig_builder_rejected",
+                )
+                return rejected
+
             server = InterviewHTTPServer(
                 started.session,
                 on_session=lambda session: persist_interview_session(
@@ -581,22 +732,22 @@ def create_command(
                     gig_id=started.gig_id,
                     session=session,
                 ),
-                on_questions=lambda session: (
-                    session
-                    if any(item.question_id == "operator-confirmation" for item in session.questions)
-                    else generate_model_questions(
-                        config=load_config(home),
-                        model_target=model_target,
-                        session=session,
-                        reference_bytes=dict(started.reference_bytes),
-                    )
-                ),
+                on_questions=builder_questions,
+                on_reference_paths=select_references,
+                reference_labels={},
                 on_approval=lambda session: approve_interview_session(
                     home_root=home,
                     requested_target=target_value,
                     start=started,
                     session=session,
+                    existing_proposal_id=built_proposal_id,
                 ),
+                on_build=build_proposal,
+                on_revision=revise_proposal,
+                on_rejection=reject_proposal,
+                builder_review=builder_review,
+                builder_mode=True,
+                builder_ready=recovered_builder.builder_ready,
             ).start()
             try:
                 click.echo(f"GigAI local interview: {server.url}", err=True)

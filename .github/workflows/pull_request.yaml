@@ -9,6 +9,11 @@ on:
         required: false
         type: boolean
         default: false
+      ref:
+        description: Exact ref to test when called by another workflow.
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -20,9 +25,10 @@ jobs:
     outputs:
       code_changed: ${{ steps.detect.outputs.code_changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ inputs.ref || github.sha }}
       - id: detect
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -70,11 +76,13 @@ jobs:
         os: ${{ fromJSON(inputs.full_matrix && '["ubuntu-latest", "macos-latest"]' || '["ubuntu-latest"]') }}
         python: ${{ fromJSON(inputs.full_matrix && '["3.11", "3.12", "3.13"]' || '["3.11"]') }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v8.0.0
         with:
           enable-cache: true
       - run: uv sync --locked --extra test --python "${{ matrix.python }}"
@@ -86,11 +94,13 @@ jobs:
     name: Built-wheel resources
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v8.0.0
         with:
           enable-cache: true
       - run: rm -rf dist
@@ -139,7 +149,9 @@ jobs:
     name: Debian 12 offline container
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
       - run: docker build --tag gigai-debian-offline:${{ github.sha }} --file containers/debian-offline/Dockerfile .
       - run: >-
           docker run --rm

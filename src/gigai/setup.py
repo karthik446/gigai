@@ -53,6 +53,23 @@ def default_workpad_root(home_root: Path) -> Path:
     return Path(configured).expanduser() if configured else home_root / "workpads"
 
 
+def detect_editor_argv() -> tuple[str, ...] | None:
+    """Find a common installed editor without invoking or shell-parsing it."""
+
+    candidates = (
+        "code",
+        "zed",
+        "cursor",
+        "vim",
+        "nano",
+    )
+    for candidate in candidates:
+        resolved = shutil.which(candidate)
+        if resolved is not None:
+            return (resolved,)
+    return None
+
+
 def resolve_editor_argv(
     editor: str | None, editor_args: tuple[str, ...] = ()
 ) -> tuple[str, ...]:
@@ -194,6 +211,7 @@ def run_setup(config: GigAIConfig) -> SetupResult:
 __all__ = [
     "SetupResult",
     "build_config",
+    "detect_editor_argv",
     "default_home_root",
     "default_workpad_root",
     "resolve_editor_argv",

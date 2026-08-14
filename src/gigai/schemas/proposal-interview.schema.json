@@ -56,7 +56,7 @@
     "max_rounds": {"type": "integer", "minimum": 1, "maximum": 1024},
     "references": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/reference_decision"}
     },
@@ -110,8 +110,7 @@
       "if": {"properties": {"state": {"const": "approved"}}},
       "then": {
         "properties": {
-          "approval": {"$ref": "#/$defs/approval"},
-          "selected_reference_ids": {"minItems": 1}
+          "approval": {"$ref": "#/$defs/approval"}
         }
       }
     },

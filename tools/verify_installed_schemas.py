@@ -16,6 +16,7 @@ EXPECTED_SHA256 = {
     "common.schema.json": "825a15da8f61348cc16afe315c2aca0e3218c78c0bf0f93394f74fe78cb7b53a",
     "feedback.schema.json": "c89cda74feb86d34448a3e8afbfcded2554e3c077622ecfaa64e525951502461",
     "finding.schema.json": "4444e0cfec3a32bb83b016172331072a369afb2699b093ad670dc36dfbcdd8f7",
+    "gig-builder-session.schema.json": "40e8042c69c33cf8fb763ff9a3074e9118c40d7c5e2711e6c23497a86b16b247",
     "gig-proposal.schema.json": "515f16368059c7d8d4bf88cb47d8fc0df63afc50a51e13c8c75601c013f134b3",
     "goal-graph.schema.json": "669115492bfed52f4738cb9cbbac626a10f80f6965da3d1f70eb20e4c2e264cf",
     "handoff-frontmatter.schema.json": "de27d69529ae7cce07063fb67dcecc48aff79012ef72c66f3ed077367b9bd09e",
@@ -25,7 +26,8 @@ EXPECTED_SHA256 = {
     "gig-occurrence.schema.json": "9620157b7d028534968347c9cbb7b133e4521bfcb353ec3a2f8e70b7a8e60364",
     "model-exchange.schema.json": "d0f57224c2c75fa1e140d380810fe92fc381e619f8105954ce9989a27911501c",
     "model-invocation.schema.json": "756ca9eb7a746e3f0b6700b028c4807ed98050e15df29d182aeed73335e51bd6",
-    "proposal-interview.schema.json": "077474699033fa10fd93d1d7bc9e96c45f90a5735a6bcb595258f0c36fbdea9c",
+    "proposal-interview.schema.json": "980ce753e050f8cb953957075b2f2c7591aaf88c8f0aa7088a622ca5c7d6a8da",
+    "proposal-draft-manifest.schema.json": "cbc0fc6d3cafbdea3bafad0002302839dc3b7b08a2f98e6214728e3aacfa1a1a",
     "report.schema.json": "dc012ee13f66d45e3bdaab857c82a152a66be46cf98a8d50ffd21a4e581cac8c",
     "review-bundle.schema.json": "ab60331eaf6095aa2c70690592f1b66769012aa6973a03e6cb4a1d36f904b531",
     "review-contract.schema.json": "d7cc23e267ce07e071138e62c65accba9fc0b64ff967880fa05bf5cc5a4626f1",
@@ -63,7 +65,7 @@ def main() -> int:
                 f"expected {expected_digest}, got {actual_digest}"
             )
 
-    print("verified 27 installed GigAI schemas")
+    print("verified 29 installed GigAI schemas")
     return 0
 
 

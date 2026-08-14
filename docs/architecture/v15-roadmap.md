@@ -12,8 +12,8 @@ authority for the contracts already implemented and for the boundaries that
 V15 must preserve.
 
 **Current roadmap gate:** G13 through G23 are complete and independently
-evidenced. G24 remains a planning-only
-release-lane alpha-readiness candidate. Later
+evidenced. G24 is the planning-only local UAT and dogfooding goal; G25 is the
+later release-lane alpha-readiness candidate. Later
 candidates remain planning-only until their individual goal contracts are
 reviewed and approved.
 G19 remains bounded by its accepted contract and does not authorize broader
@@ -368,7 +368,9 @@ G13 -> G14 -> G15 -> G16
            S22-01 + G18 -> G22
            G16 + S16-EVAL + G18 + G22 -> G19 -> G20 -> G21
            G17 + G19 + G20 + G22 -> G23
-           G12 + G21 + G23 -> G24
+           G22 + G18 + S18-02 -> G26 -> G24 -> G25
+           G21 + G23 + G22 + G26 -> G24
+           G12 + G21 + G23 + G24 + G26 -> G25
 ```
 
 The graph is intentionally provisional. The arrows express planning
@@ -393,14 +395,19 @@ dependencies, not live status fields or authorization to begin.
 | [G21](../development/goals/phase-5/G21-recurring-and-comparative-gigs.md) | Recurring and comparative Gigs | G13, G14, G20 |
 | G22 | Deliberative `create` and user-facing proposal interview | S22-01, G18 |
 | G23 | Gig self-containment and portability (capability-manifest reference and proposal-lineage resolution on the active Gig version) | G17, G19, G20, G22 |
-| G24 | Alpha release readiness and final repository cleanup | G12, G21, G23 |
+| G24 | Local UAT and dogfooding across isolated GigAI installations | G18, G19, G20, G21, G22, G23, G26 |
+| G26 | Model-facilitated Gig builder, adaptive clarification, and bounded proposal research | G18, G22, S18-02, G24 findings |
+| G25 | Alpha release readiness and final repository cleanup | G12, G21, G23, G24, G26 |
 
 S16-EVAL is the hard review-loop quality gate for G18 and G19. G22 may cite
 its evidence only when G22 actually invokes or evaluates the Review Loop;
 S22-01 remains the authority for proposal-question quality evaluation. G23 is
-independent of G21: neither depends on the other, and G23 does not by itself
-authorize an alpha or public release, which remains a separate release-lane
-goal.
+independent of G21: neither depends on the other. G24 is a local UAT and
+dogfooding gate, not a release declaration; it produces local-only evidence
+about interaction quality, artifact shape, installation, and operator
+workflows. G26 must land before G24's final UAT pass because the current create
+flow does not yet perform a real model-backed proposal build. G25 owns the
+later release-lane alpha decision.
 
 ### Phase 2 — Proposal creation and interaction
 
@@ -442,7 +449,7 @@ remote hosting, background service behavior, and unapproved execution remain
 out of scope.
 
 G22 is complete. Its shipped path is deterministic/offline by default, binds
-only to loopback with a short-lived token, requires explicit reference and
+only to loopback with a short-lived token, requires explicit reference selection and
 operator approval, and hands G19 a sealed proposal without target mutation or
 Run authority. The [completion audit](../development/evidence/phase-2/G22/completion-audit.md)
 and [terminal handoff](../development/evidence/phase-2/G22/terminal-handoff.md)
@@ -662,15 +669,56 @@ and [terminal handoff](../development/evidence/phase-5/G23/terminal-handoff.md)
 record the accepted result. See the [G23 goal contract](../development/goals/phase-5/G23-gig-self-containment-and-portability.md).
 The accepted contract amendment is [here](../development/evidence/phase-5/G23/gig-self-containment-and-portability-contract-amendment.md).
 
-#### G24 — Alpha release readiness and final repository cleanup
+#### G24 — Local UAT and dogfooding
 
-Prepare a true alpha candidate after G21 and G23 are accepted, while reusing
-G12's release-lane mechanics. G24 owns the final support-surface freeze,
+Run GigAI as an operator would use it: install the current package in an
+isolated container, enter the container, create real test Gigs step by step,
+inspect the resulting proposal/workpad/journal artifacts, and record where the
+interaction or data model is confusing. UAT cases may cover review-and-verify,
+repository review, resume tailoring, research synthesis, and other bounded
+operator workflows.
+
+G24's evidence is deliberately local and disposable. It must not commit user
+prompts, source material, credentials, model outputs, home directories,
+container state, or raw transcripts to GitHub. Each session records its package
+version, container image, command sequence, selected model configuration,
+operator decisions, observed artifact paths, and sanitized findings in a
+local UAT directory outside the repository. The default first pass should use
+the deterministic/offline path; external model targets are opt-in and must be
+named in the local record rather than treated as shipped provider support. After
+G26, the final UAT pass must use a configured, evidenced builder target; the
+deterministic/offline path remains available for fixture testing but must be
+labeled as such.
+
+G24 does not change schemas, add runtime authority, publish a package, or
+declare alpha readiness. It is the dogfooding gate that tells G25 what is
+actually understandable and usable before release work begins.
+
+#### G26 — Model-facilitated Gig builder and proposal research
+
+G26 replaces the current shallow `create` shortcut with a distinct
+model-backed build phase. GigAI facilitates the local browser session and owns
+question validation, persistence, model/provider boundaries, budgets,
+progress, recovery, and approval. The operator-selected model asks the
+domain-specific follow-up questions and performs bounded research/synthesis.
+
+Installed `codex` or `claude` executables may be discovered as candidates, but
+discovery is not support. G26 must distinguish detected, configured, verified,
+and usable targets and must refuse to proceed with a real build when no usable
+model is configured. It must present a reviewable draft before the operator can
+approve the existing `gig-proposal` lifecycle. G26 does not grant target
+mutation or Run authority and does not make a model the approval authority.
+
+#### G25 — Alpha release readiness and final repository cleanup
+
+Prepare a true alpha candidate after G24 and its G21/G23 prerequisites are
+accepted, while reusing
+G12's release-lane mechanics. G25 owns the final support-surface freeze,
 roadmap/README/internal-changelog reconciliation, release-candidate artifact
 checks, exact-tag CI, fresh-install proofs, and release evidence needed to
 decide whether GigAI is ready for an alpha declaration.
 
-G24 does not infer release authority from product-goal completion, does not
+G25 does not infer release authority from product-goal completion, does not
 publish merely because its prerequisites are complete, and does not replace
 G12's exact-tag, TestPyPI, Trusted Publisher, provenance, or clean-machine
 requirements. The alpha version, publication action, and final release

@@ -76,8 +76,8 @@ No other product module implements canonical rendering or SHA-256 identity.
   terminal outcome, replay fields, usage, and boundary attestation.
 - `model-exchange.schema.json` defines bounded Goal-edge handoffs and
   provider comparisons without fallback or winner selection.
-- `proposal-interview.schema.json` defines typed, bounded, explicitly
-  selected, operator-approved proposal-interview snapshots.
+- `proposal-interview.schema.json` defines typed, bounded proposal-interview
+  snapshots; explicit reference selection is required before approval.
 - `target-effect.schema.json` defines explicit target-effect authorization,
   mutation lifecycle states, and before/after evidence without automatic
   commits or fallback.
