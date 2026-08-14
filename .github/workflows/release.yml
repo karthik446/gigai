@@ -1,17 +1,9 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Published package version (must match pyproject.toml).
-        required: true
-        type: string
-      source_ref:
-        description: Main branch ref to release.
-        required: false
-        default: main
-        type: string
+  push:
+    tags:
+      - "v*"
 
 concurrency:
   group: release-${{ github.ref }}
@@ -27,35 +19,21 @@ jobs:
     outputs:
       commit: ${{ steps.metadata.outputs.commit }}
       version: ${{ steps.metadata.outputs.version }}
-      tag: ${{ steps.metadata.outputs.tag }}
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ inputs.source_ref }}
+          ref: ${{ github.ref }}
       - id: metadata
         env:
-          REQUESTED_VERSION: ${{ inputs.version }}
-          SOURCE_REF: ${{ inputs.source_ref }}
-          ACTOR: ${{ github.actor }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          test "${ACTOR}" = "karthik446"
-          test "${SOURCE_REF}" = "main"
-          test "${REQUESTED_VERSION}" = "$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          test "${GITHUB_REF_TYPE}" = tag
+          test "$(git cat-file -t "refs/tags/${RELEASE_TAG}")" = tag
+          python tools/release_check.py verify-tag --tag "${RELEASE_TAG}"
           python tools/release_check.py verify-lockfile
-          tag="v${REQUESTED_VERSION}"
-          if git ls-remote --exit-code origin "refs/tags/${tag}" >/dev/null 2>&1; then
-            echo "tag ${tag} already exists" >&2
-            exit 1
-          fi
-          commit="$(git rev-parse HEAD)"
-          git tag --annotate "${tag}" --message "GigAI ${REQUESTED_VERSION}" "${commit}"
-          git push origin "${tag}"
-          echo "commit=${commit}" >> "${GITHUB_OUTPUT}"
-          echo "version=${REQUESTED_VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "commit=$(git rev-parse "refs/tags/${RELEASE_TAG}^{}")" >> "${GITHUB_OUTPUT}"
+          echo "version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "${GITHUB_OUTPUT}"
       - name: Require named publication environments
         env:
           GH_TOKEN: ${{ github.token }}
@@ -70,7 +48,7 @@ jobs:
     uses: ./.github/workflows/pull_request.yaml
     with:
       full_matrix: true
-      ref: refs/tags/${{ needs.preflight.outputs.tag }}
+      ref: refs/tags/${{ github.ref_name }}
 
   build:
     name: Build and attest release artifacts
@@ -84,7 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: refs/tags/${{ needs.preflight.outputs.tag }}
+          ref: refs/tags/${{ github.ref_name }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -247,7 +225,7 @@ jobs:
       - env:
           COMMIT: ${{ needs.preflight.outputs.commit }}
           REPOSITORY: ${{ github.repository }}
-          TAG: ${{ needs.preflight.outputs.tag }}
+          TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           python - <<'PY'
@@ -284,7 +262,7 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          TAG: ${{ needs.preflight.outputs.tag }}
+          TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           gh release create "${TAG}" \
