@@ -35,6 +35,7 @@ SCHEMA_NAMES = (
     "finding.schema.json",
     "gig-builder-session.schema.json",
     "gig-comparison.schema.json",
+    "gig-discovery-manifest.schema.json",
     "gig-occurrence.schema.json",
     "gig-proposal.schema.json",
     "goal-graph.schema.json",

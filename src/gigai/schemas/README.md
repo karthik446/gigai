@@ -29,6 +29,9 @@ resources for local provenance-tagged observations and subordinate typed
 improvement manifests. The G21 amendment adds `gig-occurrence.schema.json`
 and `gig-comparison.schema.json` as the twenty-sixth and twenty-seventh
 resources for explicit operator-triggered occurrences and derived comparisons.
+The G27 amendment adds `gig-discovery-manifest.schema.json` as the thirtieth
+resource for model-selected discovery rounds, truthful capability disclosure,
+bounded research planning, and the stable Gig/Run-input distinction.
 
 ## Production identity API
 
@@ -85,6 +88,9 @@ No other product module implements canonical rendering or SHA-256 identity.
   observation of an existing evidence artifact.
 - `improvement-manifest.schema.json` defines the typed, allowlisted,
   two-gate change manifest subordinate to `gig-proposal` kind `improve`.
+- `gig-discovery-manifest.schema.json` defines one subordinate adaptive
+  discovery result without becoming proposal, version, Run, or target
+  authority.
 - `capability-manifest.schema.json` defines proposal-time capability
   requirements, inspection states, and explicit options.
 - `capability-installation.schema.json` defines approved local installation
