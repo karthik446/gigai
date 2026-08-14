@@ -23,8 +23,8 @@ def _artifact(path: str) -> dict[str, object]:
 
 
 def main() -> int:
-    if len(SCHEMA_NAMES) != 29:
-        raise SystemExit(f"installed G26 schema inventory is {len(SCHEMA_NAMES)}, expected 29")
+    if len(SCHEMA_NAMES) != 30:
+        raise SystemExit(f"installed G26 schema inventory is {len(SCHEMA_NAMES)}, expected 30")
     session = {
         "schema_version": "1.0",
         "record_version": 1,

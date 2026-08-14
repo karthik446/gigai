@@ -159,7 +159,7 @@ def _manifest(*, status: str = "completed") -> dict[str, object]:
 
 
 def test_g26_adds_two_packaged_contract_resources() -> None:
-    assert len(SCHEMA_NAMES) == 29
+    assert len(SCHEMA_NAMES) == 30
     assert "gig-builder-session.schema.json" in SCHEMA_NAMES
     assert "proposal-draft-manifest.schema.json" in SCHEMA_NAMES
     assert validate_serialized_contract(

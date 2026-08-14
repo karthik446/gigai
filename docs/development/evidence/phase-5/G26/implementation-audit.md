@@ -1,7 +1,7 @@
-# G26 Implementation Audit — Active Milestone
+# G26 Implementation Audit — Implementation Evidence
 
-- Status: Implementation milestone verified; G24 human UAT remains open
-- Date: 2026-08-13
+- Status: Implementation evidence verified; G24 human UAT remains open
+- Date: 2026-08-14
 - Scope: deterministic/offline builder path and model-readiness boundary
 
 ## Delivered
@@ -36,15 +36,18 @@
 
 ## Evidence
 
-- Focused G22/G26 regression set: `35 passed`.
+- Current focused G26 selection: `22 passed` across contract, discovery,
+  bounded-call, builder, browser-flow, and review-action tests.
 - Full repository run before the final recovery milestone: `551 passed, 64
   subtests`; one pre-existing
   multiprocessing journal-lock race failed during the concurrent run and
   passed in isolation (`1 passed`). The failure is the
   `mount.interprocess_lock` probe in
   `tests/test_journal_locking_recovery.py`, outside the G26 change surface.
-- Source and installed schema verifier: `verified 29 installed GigAI schemas`.
-- Fresh-wheel installed G26 replay: `verified installed GigAI G26 builder
+- Source and installed schema verifier: `verified 30 installed GigAI schemas`;
+  the thirtieth resource is the additive G27 discovery manifest and does not
+  alter any G26 schema bytes.
+- Current installed G26 replay: `verified installed GigAI G26 builder
   contract`; it reached model draft creation and explicit approval in a
   disposable home/target.
 - Mutation harness: `mutation_killed=9/9` across bounded-call, reference,
@@ -54,8 +57,12 @@
 
 ## Remaining before G26 closeout
 
-- Run real G24 UAT with a configured/evidenced builder target, inspect the
-  resulting workpad/SQLite artifacts with the operator, and capture stale
-  browser-event observations from that session.
-- Complete the G26 completion audit and terminal handoff after that UAT
-  evidence is sanitized and accepted.
+- Run the human-executed G24 UAT on the operator's real machine, including
+  installation, setup, real target binding, one create session, SQLite and
+  workpad inspection, one revision, one rejection, reinstall/reopen, and at
+  least three representative workflows.
+- Capture the operator and review-partner verdicts in the local-only G24
+  evidence boundary; do not commit raw UAT material.
+- Accept or resolve any authority, storage, prompt, or usability findings.
+- Flip the G26 completion audit and terminal handoff to accepted only after
+  that evidence exists.
