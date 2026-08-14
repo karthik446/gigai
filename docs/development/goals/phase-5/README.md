@@ -13,7 +13,7 @@ declare an alpha or public release.
 G19 -> G20 -> G21
 G20 -> G23
 G23 -> G24 -> G25
-G22 -> G26 -> G24 -> G25
+G22 -> G26 -> G27 -> G24 -> G25
 ```
 
 | Goal | Outcome | Depends on | Initial state |
@@ -23,6 +23,7 @@ G22 -> G26 -> G24 -> G25
 | [G23](G23-gig-self-containment-and-portability.md) | Capability-manifest reference and proposal-lineage resolution on the active Gig version | G17, G19, G20, G22 | Complete |
 | [G24](G24-human-uat-and-dogfooding.md) | Human-executed UAT and dogfooding across real GigAI workflows | G18, G19, G20, G21, G22, G23 | Proposed for review |
 | [G26](G26-model-facilitated-gig-builder.md) | Model-facilitated Gig definition, adaptive clarification, and proposal research | G18, G22, S18-02, G24 findings | Active — amendment accepted, implementation underway |
+| [G27](G27-adaptive-gig-discovery-and-pre-proposal-research.md) | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G24 findings | Proposed for review |
 
 G20 must preserve G19's explicit target-effect authority and the existing
 workpad journal/active-version authority. G21 must not be activated merely
@@ -65,3 +66,9 @@ one operator answer to approval without a genuine model-backed proposal-build
 phase. GigAI remains the facilitator and authority boundary; the selected model
 asks domain-specific questions and performs bounded proposal research. G26 must
 land before G24's final UAT pass and before G25 alpha-readiness review.
+
+G27 makes the browser interview the actual Gig-definition canvas. It gives the
+model a truthful capability inventory, allows a bounded pre-proposal research
+plan, and limits each discovery round to five model-selected direction
+questions. G27 reuses G20's evidence gates for later improvement and does not
+create a second proposal or version authority.
