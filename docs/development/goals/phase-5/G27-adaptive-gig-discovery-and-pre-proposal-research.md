@@ -73,6 +73,12 @@ resource byte and hash, keep `gig-proposal` as the sole proposal/version/
 approval authority, and include installed-schema verification and canonical
 vectors before implementation continues.
 
+G27 contract-impact analysis may begin against the current G20, G22, and G26
+artifacts. G27 runtime implementation, schema-amendment landing, and changes
+that depend on G26 behavior must not begin until G26's completion audit and
+terminal handoff have been accepted. G27 must not absorb unfinished G26 work by
+inference.
+
 The amendment must explicitly refuse any design in which:
 
 - a model claims a provider, web, credential, or target capability merely
@@ -127,6 +133,50 @@ stable ID, answer type, dependency information, rationale, and provenance.
 
 The builder must not repeatedly ask for facts already approved in the Gig
 definition unless the operator is explicitly revising that definition.
+
+## State and authority contract
+
+The following invariants are normative for every G27 creation and improvement
+session:
+
+1. **Durable session state is authoritative.** The existing builder-session
+   record and ordered event trace own discovery state, questions, answers,
+   research progress, revisions, and recovery. Browser state, HTMX fragments,
+   model memory, and any UI session cache are disposable projections.
+2. **Model output is advisory.** A model may propose capabilities, research
+   sources, question shapes, Goals, and wording. It cannot grant a capability,
+   enable network access, resolve an approval, create a Run, mutate a target,
+   or advance a Gig version.
+3. **Capability status is truthful and closed.** `detected`, `configured`,
+   `verified`, and `usable` are distinct statuses. A lower status cannot be
+   rendered or recorded as a higher status merely because the model requested
+   it.
+4. **The question ceiling is authoritative.** A discovery round contains zero
+   to five accepted direction questions. The model, browser, or retry path
+   cannot create a sixth question by replaying or bypassing the typed event
+   path.
+5. **Stable definition and Run input remain separate.** Approved Gig Goals,
+   constraints, and stable references belong to the Gig version. Job URLs,
+   current files, operator answers, and other changing context belong to a Run
+   or discovery session and cannot silently rewrite the approved definition.
+6. **Research requires an explicit boundary.** A research suggestion is not a
+   network permission. Every external source, provider call, credential lookup,
+   and effect must pass the existing configured policy and budget checks before
+   execution.
+7. **Existing lifecycle authority is preserved.** `gig-proposal` remains the
+   sole proposal identity, version, and approval authority. Approval is
+   explicit and idempotent; G27 cannot create a parallel proposal or version
+   ledger.
+8. **Improve context is filtered and provenance-bearing.** Only bounded,
+   selected Run summaries and cited evidence enter an improve proposal. G20's
+   evidence-sufficiency and improvement-quality gates remain mandatory even
+   when the model presents a confident recommendation.
+9. **Recovery is fail-closed.** Interruption, stale browser events, malformed
+   model output, or a repeated request may reopen or terminalize a session, but
+   cannot duplicate a proposal, silently complete research, or produce partial
+   approval.
+10. **The UI is an adapter.** HTMX renders and submits typed protocol events;
+    it does not own lifecycle transitions, authority, or durable evidence.
 
 ## Improve context contract
 
