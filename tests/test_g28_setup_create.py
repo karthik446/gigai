@@ -6,6 +6,8 @@ from click.testing import CliRunner
 
 from gigai.cli import cli
 from gigai.config import load_config
+from gigai.target_binding import initialize_target
+from gigai.workpad import resolve_bound_project
 
 
 def test_setup_persists_the_operator_selected_create_model_target(tmp_path: Path) -> None:
@@ -57,3 +59,38 @@ def test_setup_rejects_unconfigured_create_model_target(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "is not configured" in result.output
+
+
+def test_initialized_non_git_target_resolves_implicitly_from_its_directory(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    workpad = tmp_path / "workpads"
+    target = tmp_path / "target"
+    target.mkdir()
+    setup = CliRunner().invoke(
+        cli,
+        [
+            "setup",
+            "--non-interactive",
+            "--home",
+            str(home),
+            "--workpad-root",
+            str(workpad),
+            "--editor",
+            "/usr/bin/true",
+        ],
+    )
+    assert setup.exit_code == 0, setup.output
+
+    initialized = initialize_target(home_root=home, requested_target=target)
+    assert initialized.target_kind == "non-git"
+
+    resolved = resolve_bound_project(
+        home_root=home,
+        requested_target=None,
+        cwd=target,
+    )
+    assert resolved.project_id == initialized.project_id
+    assert resolved.target_root == target.resolve()
+    assert resolved.target_kind == "non-git"
