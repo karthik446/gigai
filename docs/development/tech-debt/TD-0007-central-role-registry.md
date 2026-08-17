@@ -4,7 +4,7 @@
 - Discovered during: G27 contract review, 2026-08-16
 - Affected surfaces: model invocation, adapters, Goal Graph executors, review
   reference roles, run front matter, and model-invocation schemas
-- Owning lane: v0.1.5 contract/runtime foundation
+- Owning lane: S27-ROLE -> G28 v0.1.5 contract/runtime foundation
 
 ## Observation
 
@@ -59,4 +59,3 @@ they must not change meaning silently.
 - Existing persisted records replay through an explicit compatibility path.
 - Role registry vectors cover typo, unknown namespace, version mismatch, and
   valid extension cases.
-

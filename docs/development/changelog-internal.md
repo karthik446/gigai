@@ -266,6 +266,15 @@ capabilities, propose bounded research, and select up to five high-value
 direction questions. It will reuse G20's evidence gates for future improve
 flows and does not itself declare an alpha release.
 
+### S27 spikes and G28 — v0.1.5 readiness foundation
+
+S27-EVAL, S27-ROLE, and S27-CREATE are proposed prerequisite spikes for a
+unified behavioral-eval framework, central namespaced roles, and a
+browser-first setup/create path. G28 is the proposed implementation goal for
+their accepted decisions and the v0.1.5 candidate. G24 human UAT and G27
+runtime work wait for that candidate; G25 remains the later alpha-readiness
+and release-decision lane.
+
 ### v0.1.5 readiness gate
 
 The next meaningful UAT candidate must close three technical-debt items before

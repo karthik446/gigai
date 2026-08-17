@@ -368,8 +368,8 @@ G13 -> G14 -> G15 -> G16
            S22-01 + G18 -> G22
            G16 + S16-EVAL + G18 + G22 -> G19 -> G20 -> G21
            G17 + G19 + G20 + G22 -> G23
-           G22 + G18 + S18-02 -> G26 -> G27 -> G24 -> G25
-           G20 + G22 + G26 -> G27
+           G22 + G18 + S18-02 -> G26 + G27-contract
+             -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G24 -> G25
            G21 + G23 + G22 + G26 -> G24
            G12 + G21 + G23 + G24 + G26 -> G25
 ```
@@ -398,7 +398,8 @@ dependencies, not live status fields or authorization to begin.
 | G23 | Gig self-containment and portability (capability-manifest reference and proposal-lineage resolution on the active Gig version) | G17, G19, G20, G22 |
 | G24 | Local UAT and dogfooding across isolated GigAI installations | G18, G19, G20, G21, G22, G23, G26 |
 | G26 | Model-facilitated Gig builder, adaptive clarification, and bounded proposal research | G18, G22, S18-02, G24 findings |
-| G27 | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G24 findings |
+| G28 | v0.1.5 evaluation, role-registry, and browser-first create readiness | G26, G27 contract, S27-EVAL, S27-ROLE, S27-CREATE |
+| G27 | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G28, G24 findings |
 | G25 | Alpha release readiness and final repository cleanup | G12, G21, G23, G24, G26 |
 
 S16-EVAL is the hard review-loop quality gate for G18 and G19. G22 may cite
@@ -726,6 +727,22 @@ G27 applies the same discovery shape to G20 improvement by supplying bounded,
 provenance-tagged Run summaries and cited evidence. It does not grant arbitrary
 web access, target authority, provider support, or a second improvement gate.
 G27 must land before G24's final UAT pass and does not declare an alpha release.
+
+### S27-EVAL, S27-ROLE, and S27-CREATE — v0.1.5 prerequisite spikes
+
+These spikes define the evaluation taxonomy/behavioral-eval framework, the
+namespaced role registry, and the browser-first setup/create flow. They are
+research and contract-design records, not runtime Goals. G28 implements their
+accepted decisions and produces the v0.1.5 candidate before G24 human UAT.
+
+### G28 — v0.1.5 Product Readiness Foundation
+
+G28 implements the accepted S27 prerequisite decisions: separate unit,
+integration, installed-E2E, and behavioral-eval tiers; a central namespaced
+role registry; and a truthful setup/model-selection path where
+`gigai create <gig-name>` opens the HTMX flow after normal setup. G28 is a
+release-candidate goal, not an alpha declaration. G27 runtime work follows G28
+because adaptive discovery must be evaluated on a usable product foundation.
 
 Before that UAT pass, the v0.1.5 product-readiness gate must close the
 evaluation taxonomy/behavioral-eval debt, the central namespaced role registry,

@@ -3,7 +3,9 @@
 - Status: Proposed for review; not activated
 - Type: Goal-builder and pre-proposal interaction implementation goal
 - Depends on: G20 improvement evidence, G22 proposal interview, G26 model-
-  facilitated builder, and relevant G24 UAT findings
+  facilitated builder, and G28 v0.1.5 readiness
+- Incorporates: relevant G24 UAT findings when available; these are feedback
+  inputs, not a prerequisite for G27 runtime activation
 - Unblocks: G24 final human UAT and G25 alpha-readiness review
 
 ## Outcome
@@ -74,10 +76,10 @@ approval authority, and include installed-schema verification and canonical
 vectors before implementation continues.
 
 G27 contract-impact analysis may begin against the current G20, G22, and G26
-artifacts. G27 runtime implementation, schema-amendment landing, and changes
-that depend on G26 behavior must not begin until G26's completion audit and
-terminal handoff have been accepted. G27 must not absorb unfinished G26 work by
-inference.
+artifacts. G27 runtime implementation and changes that depend on G26 behavior
+must not begin until G26's completion audit and terminal handoff and G28's
+v0.1.5 readiness evidence have been accepted. G27 must not absorb unfinished
+G26 or G28 work by inference.
 
 The amendment must explicitly refuse any design in which:
 

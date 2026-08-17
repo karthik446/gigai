@@ -4,7 +4,7 @@
 - Discovered during: G26/G27 sequencing review, 2026-08-16
 - Affected surfaces: `tests/`, `research/s16_eval/`, `research/s22_01/`,
   `tools/run_g18_eval.py`, G20 quality replay, and CI workflows
-- Owning lane: v0.1.5 readiness before G24 final UAT
+- Owning lane: S27-EVAL -> G28 before G24 final UAT
 
 ## Observation
 
@@ -64,4 +64,3 @@ authorities rather than silently merging their bars.
 - At least one deliberate bad model output fails each first eval suite.
 - Fast PR checks, scheduled exhaustive tests, installed E2E, and behavioral
   evals are separate commands with documented runtime expectations.
-

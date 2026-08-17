@@ -4,7 +4,7 @@
 - Discovered during: G24/G26 UAT preparation, 2026-08-16
 - Affected surfaces: `gigai setup`, `gigai init`, `gigai create`, model
   readiness, and the local HTMX session
-- Owning lane: G26/G27 runtime before G24 final UAT
+- Owning lane: S27-CREATE -> G28 before G24 final UAT
 
 ## Observation
 
@@ -57,4 +57,3 @@ detected/unavailable state until an adapter contract and evidence exist.
 - Adaptive question, research, proposal-review, rejection, and approval flows
   are covered by the eval and integration tiers.
 - The exact command is exercised in the v0.1.5 candidate before G24 UAT.
-
