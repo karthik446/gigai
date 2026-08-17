@@ -72,3 +72,9 @@ model a truthful capability inventory, allows a bounded pre-proposal research
 plan, and limits each discovery round to five model-selected direction
 questions. G27 reuses G20's evidence gates for later improvement and does not
 create a second proposal or version authority.
+
+Before G24's final human UAT pass, the v0.1.5 readiness gate must close
+[TD-0006](../../tech-debt/TD-0006-evaluation-taxonomy-and-behavioral-evals.md),
+[TD-0007](../../tech-debt/TD-0007-central-role-registry.md), and
+[TD-0008](../../tech-debt/TD-0008-browser-first-create-and-model-setup.md).
+These are release-readiness debt items, not new proposal or version authority.

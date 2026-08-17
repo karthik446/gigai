@@ -727,6 +727,11 @@ provenance-tagged Run summaries and cited evidence. It does not grant arbitrary
 web access, target authority, provider support, or a second improvement gate.
 G27 must land before G24's final UAT pass and does not declare an alpha release.
 
+Before that UAT pass, the v0.1.5 product-readiness gate must close the
+evaluation taxonomy/behavioral-eval debt, the central namespaced role registry,
+and the browser-first setup/create path. G24 should evaluate the resulting
+candidate, not the current implementation-plumbing release.
+
 #### G25 — Alpha release readiness and final repository cleanup
 
 Prepare a true alpha candidate after G24 and its G21/G23 prerequisites are

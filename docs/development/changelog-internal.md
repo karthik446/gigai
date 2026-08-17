@@ -266,6 +266,15 @@ capabilities, propose bounded research, and select up to five high-value
 direction questions. It will reuse G20's evidence gates for future improve
 flows and does not itself declare an alpha release.
 
+### v0.1.5 readiness gate
+
+The next meaningful UAT candidate must close three technical-debt items before
+G24 begins: a unified evaluation taxonomy and behavioral-eval framework, a
+central namespaced role registry, and a browser-first setup/model-selection
+flow where `gigai create <gig-name>` opens the HTMX discovery experience after
+normal project setup. The current `0.1.4` release proves implementation
+plumbing but is not the final human-UAT candidate for these product behaviors.
+
 ## Cross-goal change ledger
 
 Backfill synthesis entries under these themes:
