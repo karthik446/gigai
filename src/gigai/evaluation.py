@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import json
 from pathlib import Path
 from typing import Any, Mapping
+
+from .canonical import canonical_json_digest
 
 
 class EvaluationError(ValueError):
@@ -17,8 +18,7 @@ SPLITS = {"development", "calibration", "final_held_out_acceptance"}
 
 
 def _canonical_digest(value: object) -> str:
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+    return canonical_json_digest(value)
 
 
 def _object(value: object, label: str) -> dict[str, Any]:

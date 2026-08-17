@@ -490,12 +490,26 @@ def setup_command(
                 ),
             )
         else:
-            profiles = tuple(
-                replace(profile, planner=selected_create_target)
-                if profile.name == "default"
-                else profile
-                for profile in current_profiles
-            )
+            profiles_list = []
+            replaced_default = False
+            for profile in current_profiles:
+                if profile.name == "default":
+                    profiles_list.append(
+                        replace(profile, planner=selected_create_target)
+                    )
+                    replaced_default = True
+                else:
+                    profiles_list.append(profile)
+            if not replaced_default:
+                profiles_list.append(
+                    Profile(
+                        name="default",
+                        planner=selected_create_target,
+                        critic="offline-default",
+                        adjudicator="offline-default",
+                    )
+                )
+            profiles = tuple(profiles_list)
         if not non_interactive:
             credential_summary = [
                 {"name": item.name, "kind": item.kind} for item in credentials

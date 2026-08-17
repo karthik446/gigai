@@ -238,7 +238,7 @@ def test_installed_interactive_setup_reviews_effects_before_applying(
         ScenarioSpec(
             name="interactive-setup",
             argv=("setup", "--editor", "/usr/bin/true"),
-            stdin="\n\n\n\n\n",
+            stdin="\n\n\n\n\n\n",
             expected_home_changes=_fresh_home_changes(),
             allowed_subprocesses=(_python_executable(installed_gigai),),
         )

@@ -122,6 +122,8 @@ def main() -> int:
             raise SystemExit("installed eval report overclaimed candidate judge quality")
 
         process = subprocess.Popen(
+            # Suppress only the operating-system browser handoff in this
+            # headless replay; the HTMX server and session still launch.
             [str(executable), "create", "installed-g28", "--home", str(home), "--no-open", "--json"],
             cwd=target,
             env=environment,

@@ -41,8 +41,9 @@ socket-bearing and must run in an environment that permits the loopback
 interview server. The installed tier builds and exercises the installed
 candidate, including the no-flag create path from an initialized non-Git
 target. Pull requests run the focused G28 tiers and installed replay; the
-scheduled/manual Compatibility job retains the exhaustive source, platform,
-and historical installed-scenario matrix.
+full source suite remains a required PR check, and the scheduled/manual
+Compatibility job retains the exhaustive source, platform, and historical
+installed-scenario matrix.
 
 The G28 role registry is also packaged as the additive
 `role-reference.schema.json` resource. It defines only the closed namespace,

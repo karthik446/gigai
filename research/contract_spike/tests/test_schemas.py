@@ -24,6 +24,7 @@ EXPECTED_SCHEMA_NAMES = {
     "finding.schema.json",
     "gig-builder-session.schema.json",
     "gig-comparison.schema.json",
+    "gig-discovery-manifest.schema.json",
     "gig-occurrence.schema.json",
     "gig-proposal.schema.json",
     "goal-graph.schema.json",
@@ -41,6 +42,7 @@ EXPECTED_SCHEMA_NAMES = {
     "run-details.schema.json",
     "run-manifest.schema.json",
     "review-loop.schema.json",
+    "role-reference.schema.json",
     "target-effect.schema.json",
     "trace.schema.json",
 }
@@ -979,6 +981,64 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "created_at": NOW,
         "updated_at": NOW,
     }
+    discovery_manifest = {
+        "schema_version": "1.0",
+        "manifest_version": 1,
+        "manifest_id": "discovery_manifest_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "session_id": builder_session["session_id"],
+        "project_id": PROJECT_ID,
+        "gig_id": GIG_ID,
+        "request_kind": "create",
+        "parent_manifest_id": None,
+        "capabilities": [
+            {
+                "capability_id": "local_reference_read",
+                "status": "usable",
+                "status_source": "accepted_contract",
+                "network": "local_only",
+                "effects": ["read_target"],
+            }
+        ],
+        "research_plan": {
+            "status": "not_started",
+            "sources": [],
+            "network": "local_only",
+            "privacy": "local_only",
+            "credential_reference": None,
+            "budget": budget(),
+            "evidence_requirements": [],
+        },
+        "question_rounds": [
+            {
+                "round": 1,
+                "parent_round": None,
+                "status": "pending",
+                "model_selection_digest": ZERO_DIGEST,
+                "provenance_artifact": artifact("discovery/questions.json"),
+                "questions": [builder_session["questions"][0]],
+                "answers": [],
+                "created_at": NOW,
+                "updated_at": NOW,
+            }
+        ],
+        "stable_definition": {
+            "artifact": artifact("discovery/stable-definition.json"),
+            "fields": ["goals"],
+        },
+        "run_input_contract": {
+            "artifact": artifact("discovery/run-inputs.json"),
+            "fields": [],
+        },
+        "improve_context": None,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    role_reference = {
+        "schema_version": "1.0",
+        "namespace": "model_invocation",
+        "id": "proposal-questioner",
+        "version": 1,
+    }
     return {
         "urn:gigai:schema:gig-proposal:1": proposal,
         "urn:gigai:schema:active-gig-version:1": active,
@@ -1008,6 +1068,8 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "urn:gigai:schema:gig-comparison:1": comparison,
         "urn:gigai:schema:gig-builder-session:1": builder_session,
         "urn:gigai:schema:proposal-draft-manifest:1": draft_manifest,
+        "urn:gigai:schema:gig-discovery-manifest:1": discovery_manifest,
+        "urn:gigai:schema:role-reference:1": role_reference,
     }
 
 
@@ -1048,7 +1110,7 @@ class SerializedContractTests(unittest.TestCase):
         )
 
     def test_all_schema_documents_are_valid_draft_2020_12(self) -> None:
-        self.assertEqual(len(self.schemas), 29)
+        self.assertEqual(len(self.schemas), 31)
         for schema_id, schema in self.schemas.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)

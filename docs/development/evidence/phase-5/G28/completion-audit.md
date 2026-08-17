@@ -43,11 +43,12 @@ or Claude executables are supported adapters, or that human UAT has passed.
   against the deterministic fixture observation set.
 - Installed schema verifier: 31 packaged resources verified.
 - Focused CLI/setup regression: 24 passed.
+- Full repository suite after the closeout repair: 574 passed and 68
+  subtests passed in 4m47s.
 
-The exhaustive repository suite was not rerun in this closeout; it remains in
-the scheduled/manual Compatibility workflow. The pull-request workflow now
-runs the focused G28 tiers and the installed G28 replay, while compatibility
-retains the exhaustive source/platform/installed matrix.
+The pull-request workflow runs the full source suite plus the focused G28 tiers
+and installed G28 replay. The scheduled/manual Compatibility workflow retains
+the exhaustive source/platform/installed matrix.
 
 ## Known limitations
 
@@ -56,4 +57,3 @@ retains the exhaustive source/platform/installed matrix.
 2. Codex and Claude executable discovery is detection-only. GigAI does not
    invoke or advertise either executable as a supported adapter.
 3. The v0.1.5 package/tag/release and human UAT remain downstream work.
-

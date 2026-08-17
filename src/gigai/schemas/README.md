@@ -94,6 +94,8 @@ No other product module implements canonical rendering or SHA-256 identity.
 - `gig-discovery-manifest.schema.json` defines one subordinate adaptive
   discovery result without becoming proposal, version, Run, or target
   authority.
+- `role-reference.schema.json` defines a namespaced, versioned role purpose
+  reference; it grants no capability or other authority.
 - `capability-manifest.schema.json` defines proposal-time capability
   requirements, inspection states, and explicit options.
 - `capability-installation.schema.json` defines approved local installation

@@ -96,7 +96,6 @@ jobs:
         if: ${{ !inputs.full_matrix }}
         run: python tools/run_g28_tier.py behavior
       - name: Full source suite
-        if: ${{ inputs.full_matrix }}
         run: uv run --locked pytest
 
   wheel:
