@@ -865,6 +865,20 @@ def create_command(
                     )
                 )
                 builder_review.update(draft_manifest.get("research", {}))
+                discovery_manifest = json.loads(
+                    (started.workpad / "manifests/gig-discovery-manifest.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                builder_review["stable_definition_fields"] = discovery_manifest.get(
+                    "stable_definition", {}
+                ).get("fields", [])
+                builder_review["run_input_fields"] = discovery_manifest.get(
+                    "run_input_contract", {}
+                ).get("fields", [])
+                builder_review["research_plan"] = discovery_manifest.get(
+                    "research_plan", {}
+                )
                 return built
 
             def revise_proposal(session):

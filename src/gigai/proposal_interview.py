@@ -876,8 +876,15 @@ class InterviewHTTPServer:
             unresolved = self.builder_review.get("unresolved_questions", ())
             assumption_html = "".join(f"<li>{html.escape(str(item))}</li>" for item in assumptions) or "<li>None recorded.</li>"
             unresolved_html = "".join(f"<li>{html.escape(str(item))}</li>" for item in unresolved) or "<li>None recorded.</li>"
+            stable_fields = self.builder_review.get("stable_definition_fields", ())
+            run_input_fields = self.builder_review.get("run_input_fields", ())
+            research_plan = self.builder_review.get("research_plan", {})
+            stable_html = ", ".join(html.escape(str(item).replace("_", " ")) for item in stable_fields) or "None recorded"
+            run_inputs_html = ", ".join(html.escape(str(item.get("field_id", ""))) for item in run_input_fields if isinstance(item, Mapping)) or "None defined"
+            research_status = html.escape(str(research_plan.get("status", "not_started"))) if isinstance(research_plan, Mapping) else "not_started"
+            research_network = html.escape(str(research_plan.get("network", "local_only"))) if isinstance(research_plan, Mapping) else "local_only"
             forms.append(
-                f"<section class='approval'><h2>Proposal draft ready</h2><p><strong>Summary:</strong> {summary}</p><p><strong>Assumptions</strong></p><ul>{assumption_html}</ul><p><strong>Unresolved questions</strong></p><ul>{unresolved_html}</ul><p>Review citations and boundaries in the workpad before deciding.</p>"
+                f"<section class='approval'><h2>Proposal draft ready</h2><p><strong>Summary:</strong> {summary}</p><p><strong>Reusable Gig definition</strong><br>{stable_html}</p><p><strong>Changing Run inputs</strong><br>{run_inputs_html}</p><p><strong>Research boundary</strong><br>Status: {research_status}; network: {research_network}</p><p><strong>Assumptions</strong></p><ul>{assumption_html}</ul><p><strong>Unresolved questions</strong></p><ul>{unresolved_html}</ul><p>Review citations and boundaries in the workpad before deciding.</p>"
                 f"<form class='review-action' data-event='revise' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button type='submit'>Revise answers</button></form>"
                 f"<form class='review-action' data-event='reject' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button type='submit'>Reject draft</button></form>"
                 f"<form class='approve' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button class='primary' type='submit'>Approve proposal</button></form></section>"
