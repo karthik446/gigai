@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Protocol
 
+from ..roles import RoleReference, resolve_role
+
 
 class ModelInvocationError(RuntimeError):
     """An adapter could not complete one requested model invocation."""
@@ -35,6 +37,12 @@ class InvocationRequest:
     required_capabilities: frozenset[str] = frozenset({"text"})
     max_output_tokens: int = 64
     reasoning_effort: str | None = None
+
+    @property
+    def role_reference(self) -> RoleReference | None:
+        """Return the registered role when legacy decoding can prove it."""
+
+        return resolve_role(self.role, namespace="model_invocation").reference
 
     def __post_init__(self) -> None:
         if not self.target_name or not self.endpoint_name or not self.model or not self.role:
