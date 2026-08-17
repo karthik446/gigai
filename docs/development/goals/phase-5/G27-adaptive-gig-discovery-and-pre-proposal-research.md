@@ -1,6 +1,6 @@
 # G27 — Adaptive Gig Discovery and Pre-Proposal Research
 
-- Status: Activated; contract amendment accepted; runtime implementation underway
+- Status: Complete; runtime implementation and machine evidence accepted
 - Type: Goal-builder and pre-proposal interaction implementation goal
 - Depends on: G20 improvement evidence, G22 proposal interview, G26 model-
   facilitated builder, and G28 v0.1.5 readiness

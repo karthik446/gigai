@@ -179,7 +179,9 @@ def build_discovery_artifacts(
             "status": local_reference_status,
             "status_source": "runtime_check",
             "network": "local_only",
-            "effects": ["read_local"] if session.selected_reference_ids else [],
+            # The interview's read_local choice is a UI policy value. The
+            # packaged capability manifest uses the common effect vocabulary.
+            "effects": ["read_target"] if session.selected_reference_ids else [],
         },
         {
             "capability_id": "model_invocation",

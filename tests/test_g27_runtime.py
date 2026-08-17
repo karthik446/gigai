@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from gigai.canonical import canonical_json_bytes
+from gigai.canonical import canonical_json_bytes, digest_imported_bytes
 from gigai.config import load_config
 from gigai.discovery import DiscoveryError, build_discovery_artifacts
 from gigai.journal import reconcile_journal
@@ -199,6 +199,29 @@ def test_g27_refuses_selected_reference_digest_drift(tmp_path: Path) -> None:
             session=session,
             reference_bytes={reference_id: b"tampered"},
         )
+
+
+def test_g27_selected_reference_uses_the_common_effect_vocabulary(tmp_path: Path) -> None:
+    home, started = _started(tmp_path)
+    content = b"selected reference bytes"
+    reference_id = "ref_12345678-1234-4234-9234-123456789abc"
+    selected = ReferenceDecision(reference_id, digest_imported_bytes(content), "selected")
+    session = replace(started.session, references=(selected,))
+    built = build_discovery_artifacts(
+        config=load_config(home),
+        model_target="offline-default",
+        session=session,
+        reference_bytes={reference_id: content},
+    )
+    report = validate_serialized_contract(
+        "gig-discovery-manifest.schema.json", canonical_json_bytes(built.manifest)
+    )
+    assert report.valid, report.as_dict()
+    local_read = next(
+        item for item in built.manifest["capabilities"]
+        if item["capability_id"] == "local_reference_read"
+    )
+    assert local_read["effects"] == ["read_target"]
 
 
 def test_g27_reconciles_interrupted_discovery_manifest_publish(tmp_path: Path) -> None:

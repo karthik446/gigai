@@ -728,7 +728,8 @@ approval, and version authority in the existing lifecycle.
 G27 applies the same discovery shape to G20 improvement by supplying bounded,
 provenance-tagged Run summaries and cited evidence. It does not grant arbitrary
 web access, target authority, provider support, or a second improvement gate.
-G27 must land before G29's final UAT pass and does not declare an alpha release.
+G27 is complete at the runtime and machine-evidence boundary before G29's
+final UAT pass; it does not declare an alpha release.
 
 ### S27-EVAL, S27-ROLE, and S27-CREATE — v0.1.5 prerequisite spikes
 

@@ -21,8 +21,9 @@ non-contiguous and crosses lanes:
 - Phase 3: G13–G18
 - Phase 2: G22
 - Phase 4: G19
-- Phase 5: G20, G21, and G23 complete; G24 exploratory 0.1.4 UAT; G25 alpha
-  readiness; G29 full post-0.1.5 UAT proposed
+- Phase 5: G20, G21, G23, and G27 runtime/machine evidence complete; G24
+  exploratory 0.1.4 UAT; G25 alpha readiness; G29 full post-0.1.5 UAT
+  proposed
 - Research/contract records: S16-EVAL, S18-01 through S18-05, and S22-01
 
 The implementation chronology and the dependency graph are both valid but are
@@ -36,9 +37,9 @@ schema-resource count, release, or next-goal status changes. A stale snapshot
 must be marked with its last-known date; it must never silently be treated as
 current.
 
-- Roadmap gate: G00–G23 are represented as complete; G24 records exploratory
-  0.1.4 UAT; G27 is active; G29 is the proposed post-0.1.5 UAT gate; and G25
-  remains the later alpha-readiness candidate.
+- Roadmap gate: G00–G23 and G27 runtime/machine evidence are complete; G24
+  records exploratory 0.1.4 UAT; G29 is the proposed post-0.1.5 UAT gate; and
+  G25 remains the later alpha-readiness candidate.
 - Packaged schema resources: 31.
 - Accepted research/contract prerequisites: S16-EVAL, S18-01 through S18-05,
   and S22-01.
@@ -51,9 +52,9 @@ current.
   G23 is independent of G21 and does not declare an alpha or public
   release.
 - Current closeout: G21 and G23 are complete after their corrective review
-  passes; G28 is the accepted v0.1.5 readiness foundation; G27 is active;
-  G29 is the proposed full UAT gate; and G25 is the later alpha-readiness
-  lane.
+  passes; G28 is the accepted v0.1.5 readiness foundation; G27 runtime and
+  machine evidence are complete; G29 is the proposed full UAT gate; and G25 is
+  the later alpha-readiness lane.
 - Known reconciliation work: some older README, Phase 3 status, and evidence
   status lines still reflect earlier snapshots and must be corrected explicitly.
 
@@ -259,11 +260,13 @@ acceptance is deferred to G29.
 
 ### G27 — Adaptive Gig discovery and pre-proposal research
 
-G27 is the active follow-on that makes the HTMX session the actual Gig-
-definition canvas. It will let the configured model explain available
-capabilities, propose bounded research, and select up to five high-value
-direction questions. It will reuse G20's evidence gates for future improve
-flows and does not itself declare an alpha release.
+G27 is complete at the runtime and machine-evidence boundary. The HTMX session
+is now the Gig-definition canvas: the configured model supplies up to five
+typed direction questions, capability and research boundaries are disclosed,
+stable definition and Run-input projections are separated, and revisioned
+discovery manifests remain subordinate to proposal/version authority. G20's
+evidence gates remain authoritative for improve flows. G29 owns real operator
+UAT after v0.1.5; G27 makes no alpha-release claim.
 
 ### S27 spikes and G28 — v0.1.5 readiness foundation
 
@@ -273,8 +276,8 @@ browser-first setup/create path. G28 is complete against their accepted
 decisions and owns a verified v0.1.5 source candidate. Its four evidence tiers,
 31-resource schema set, role registry, truthful setup readiness, and no-flag
 browser-first create path are recorded under the G28 evidence directory. G29
-human UAT and G27 runtime work consume the candidate; G25 remains the later
-alpha-readiness and release-decision lane.
+human UAT consumes the candidate and G27's completed runtime evidence; G25
+remains the later alpha-readiness and release-decision lane.
 
 ### v0.1.5 readiness gate
 

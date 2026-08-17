@@ -24,7 +24,7 @@ G22 -> G26 + G27-contract -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G29 -
 | [G24](G24-human-uat-and-dogfooding.md) | Exploratory 0.1.4 UAT and dogfooding record | G18, G19, G20, G21, G22, G23, G26 | Historical exploratory gate; superseded by G29 |
 | [G26](G26-model-facilitated-gig-builder.md) | Model-facilitated Gig definition, adaptive clarification, and proposal research | G18, G22, S18-02, G24 findings | Active — amendment accepted, implementation underway |
 | [G28](G28-v0.1.5-readiness.md) | v0.1.5 evaluation, role-registry, and browser-first create readiness | G26, G27 contract, S27-EVAL, S27-ROLE, S27-CREATE | Complete — candidate evidence accepted |
-| [G27](G27-adaptive-gig-discovery-and-pre-proposal-research.md) | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G28 | Active — amendment accepted, runtime underway |
+| [G27](G27-adaptive-gig-discovery-and-pre-proposal-research.md) | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G28 | Complete — runtime and machine evidence accepted; G29 owns human UAT |
 | [G29](G29-v0.1.5-human-uat-and-dogfooding.md) | Full human UAT and dogfooding against the released v0.1.5 product | G27, G28, G24 findings | Proposed for review |
 
 G20 must preserve G19's explicit target-effect authority and the existing
