@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,7 +12,11 @@ from gigai.config import load_config
 from gigai.discovery import DiscoveryError, build_discovery_artifacts
 from gigai.lifecycle import start_interview
 from gigai.proposal_interview import Question
-from gigai.question_generation import G27_DISCOVERY_PROMPT, generate_model_questions
+from gigai.question_generation import (
+    G27_DISCOVERY_PROMPT,
+    QuestionGenerationError,
+    generate_model_questions,
+)
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 from gigai.validators import validate_serialized_contract
@@ -93,4 +99,37 @@ def test_g27_refuses_a_sixth_direction_question(tmp_path: Path) -> None:
             model_target="offline-default",
             session=session,
             reference_bytes={},
+        )
+
+
+def test_g27_rejects_six_questions_before_session_persistence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, started = _started(tmp_path)
+    config = load_config(home)
+    response = {
+        "questions": [
+            {
+                "question_id": f"question-{index}",
+                "answer_type": "text",
+                "required": False,
+                "options": [],
+                "depends_on": ["scope"],
+                "rationale": "This changes the Gig definition.",
+                "provenance": "model://test/g27",
+            }
+            for index in range(6)
+        ]
+    }
+    monkeypatch.setattr(
+        "gigai.question_generation.invoke_bounded",
+        lambda *args, **kwargs: SimpleNamespace(output_text=json.dumps(response)),
+    )
+    with pytest.raises(QuestionGenerationError, match="5-question ceiling"):
+        generate_model_questions(
+            config=config,
+            model_target="offline-default",
+            session=started.session,
+            reference_bytes={},
+            prompt_name=G27_DISCOVERY_PROMPT,
         )

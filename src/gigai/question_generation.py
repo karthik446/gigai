@@ -33,6 +33,7 @@ def generate_model_questions(
     prompt_name: str = DETERMINISTIC_PROMPT,
     max_wall_time_ms: int = 300_000,
     max_output_tokens: int = 4_000,
+    max_questions: int = 5,
     cancel_event: threading.Event | None = None,
 ) -> InterviewSession:
     """Ask the selected model for typed follow-up questions.
@@ -80,6 +81,10 @@ def generate_model_questions(
         raise QuestionGenerationError(f"model question generation failed: {exc}") from exc
     if not isinstance(payload, dict) or not isinstance(payload.get("questions"), list):
         raise QuestionGenerationError("model question response must contain questions")
+    if len(payload["questions"]) > max_questions:
+        raise QuestionGenerationError(
+            f"model question response exceeds the {max_questions}-question ceiling"
+        )
     questions: list[Question] = []
     for item in payload["questions"]:
         if not isinstance(item, dict):
