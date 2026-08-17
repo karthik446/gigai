@@ -1,13 +1,13 @@
 # G27 Adaptive Gig Discovery Contract Amendment
 
-- Status: Proposed additive amendment; runtime implementation may not proceed
+- Status: Accepted additive amendment; runtime implementation authorized
 - Type: Serialized discovery, capability-disclosure, and Gig-definition
   amendment for G27
 - Depends on: G27 contract-impact record, accepted G26 builder contract,
   accepted G20 learning/improvement contract, G22 proposal-interview contract,
-  and G26 completion audit before runtime activation
-- Unblocks: G27 runtime implementation after this amendment and G26 closeout
-  are accepted
+  and G28 v0.1.5 readiness evidence
+- Unblocks: G27 runtime implementation; G29 remains the downstream human UAT
+  gate
 - Baseline: twenty-nine packaged schema resources and their current hashes
 
 ## Decision
@@ -331,8 +331,9 @@ The amendment package must contain:
     network dependency.
 
 No runtime implementation is included in this amendment. Acceptance permits
-G27 implementation only after G26's completion audit and terminal handoff are
-accepted. It does not claim dynamic model support, arbitrary research,
+G27 implementation only after G28 readiness evidence is accepted. G29 human
+UAT remains downstream and is not silently treated as complete by automated
+evidence. It does not claim dynamic model support, arbitrary research,
 proposal approval, Run execution, target mutation, alpha readiness, or public
 release.
 
@@ -351,9 +352,9 @@ following:
 - a browser/model/in-memory object to become durable authority; or
 - a new proposal, version, Run, approval, or target-effect authority.
 
-This amendment is ready for review. Its status must remain proposed until the
-schema package, vectors, authority fixtures, installed replay, and G26
-completion dependency are separately accepted.
+This amendment is accepted for implementation. The schema package, vectors,
+authority fixtures, installed replay, and G28 readiness dependency are the
+runtime prerequisite; G29 is the later human acceptance gate.
 
 ## Evidence references
 
@@ -366,4 +367,3 @@ completion dependency are separately accepted.
 - [G20 terminal handoff](../G20/terminal-handoff.md)
 - [G22 completion audit](../../phase-2/G22/completion-audit.md)
 - [G22 terminal handoff](../../phase-2/G22/terminal-handoff.md)
-
