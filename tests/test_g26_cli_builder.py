@@ -93,6 +93,8 @@ def test_create_runs_model_facilitated_build_then_explicit_approval(tmp_path: Pa
             review_html = response.read().decode()
         assert "A local Gig proposal assembled" in review_html
         assert "The operator will review" in review_html
+        assert "Available capabilities" in review_html
+        assert "<strong>Target effect</strong>: unsupported" in review_html
         workpad = next((tmp_path / "workpads").rglob("manifests/gig-proposal.json")).parent.parent
         assert (workpad / "manifests/proposal-draft-manifest.json").is_file()
         discovery_manifest = parse_json_bytes(

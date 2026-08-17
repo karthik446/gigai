@@ -788,6 +788,15 @@ def create_command(
                 == next(target.endpoint for target in config.model_targets if target.name == selected_model_target)
             )
             selected_network_policy = selected_endpoint.adapter != "deterministic"
+            selected_readiness = resolve_target_readiness(config, selected_model_target)
+            capability_summary = {
+                "local_reference_read": "usable",
+                "model_invocation": selected_readiness.readiness,
+                "bounded_research": "usable" if selected_readiness.readiness == "usable" else "unavailable",
+                "proposal_construction": "usable",
+                "approved_run_execution": "unsupported",
+                "target_effect": "unsupported",
+            }
             started = start_interview(
                 home_root=home,
                 requested_target=target_value,
@@ -904,6 +913,7 @@ def create_command(
                 on_revision=revise_proposal,
                 on_rejection=reject_proposal,
                 builder_review=builder_review,
+                capability_summary=capability_summary,
                 builder_mode=True,
                 builder_ready=recovered_builder.builder_ready,
             ).start()
