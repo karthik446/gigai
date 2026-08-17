@@ -1,12 +1,12 @@
 # G27 — Adaptive Gig Discovery and Pre-Proposal Research
 
-- Status: Proposed for review; not activated
+- Status: Complete; runtime implementation and machine evidence accepted
 - Type: Goal-builder and pre-proposal interaction implementation goal
 - Depends on: G20 improvement evidence, G22 proposal interview, G26 model-
   facilitated builder, and G28 v0.1.5 readiness
 - Incorporates: relevant G24 UAT findings when available; these are feedback
   inputs, not a prerequisite for G27 runtime activation
-- Unblocks: G24 final human UAT and G25 alpha-readiness review
+- Unblocks: G29 final human UAT and G25 alpha-readiness review
 
 ## Outcome
 
@@ -76,10 +76,11 @@ approval authority, and include installed-schema verification and canonical
 vectors before implementation continues.
 
 G27 contract-impact analysis may begin against the current G20, G22, and G26
-artifacts. G27 runtime implementation and changes that depend on G26 behavior
-must not begin until G26's completion audit and terminal handoff and G28's
-v0.1.5 readiness evidence have been accepted. G27 must not absorb unfinished
-G26 or G28 work by inference.
+artifacts. G27 runtime implementation may begin against G26's accepted
+builder contract and G28's accepted v0.1.5 readiness evidence. The human UAT
+gate is deliberately downstream: G24 records exploratory 0.1.4 findings, and
+G29 will perform full post-0.1.5 acceptance. G27 must not absorb unfinished
+G26 or G28 runtime work by inference.
 
 The amendment must explicitly refuse any design in which:
 
@@ -223,7 +224,7 @@ No second UI state machine, proposal authority, or version ledger is allowed.
 - interrupted discovery/research recovery;
 - mutation tests for the five-question ceiling, capability truthfulness,
   network boundary, context filtering, and duplicate approval; and
-- fresh-wheel installed replay plus real G24 UAT.
+- fresh-wheel installed replay; real human UAT is owned by downstream G29.
 
 ## Out of scope
 
@@ -267,10 +268,11 @@ No second UI state machine, proposal authority, or version ledger is allowed.
     approval.
 12. A fresh wheel can replay the contract, installed builder flow, and offline
     deterministic discovery path without contacting a provider.
-13. G24 reruns at least `tailor-resume-for-job` and one structurally different
-    Gig, recording whether the operator understands stable definition, Run
-    input, adaptive questions, research boundaries, and approval consequences.
-14. Completion audit and terminal handoff identify G24 as the next consumer and
+13. The downstream G29 UAT goal reruns at least `tailor-resume-for-job` and one
+    structurally different Gig, recording whether the operator understands
+    stable definition, Run input, adaptive questions, research boundaries, and
+    approval consequences.
+14. Completion audit and terminal handoff identify G29 as the next consumer and
     G25 as the release-lane consumer; no alpha claim is inferred from G27 alone.
 
 ## Verification and evidence
@@ -279,9 +281,9 @@ Evidence belongs under `docs/development/evidence/phase-5/G27/` and must
 include the accepted contract-impact record, schema/vector results if needed,
 question-boundary fixtures, capability and network-boundary fixtures, improve
 context filtering, mutation report, recovery tests, installed replay, and
-sanitized G24 observations.
+sanitized G29 observations when available.
 
-Human UAT records remain outside the repository under the operator's local G24
+Human UAT records remain outside the repository under the operator's local G29
 directory. No resume, job posting, repository content, credential, prompt,
 raw model output, or private database may be committed.
 

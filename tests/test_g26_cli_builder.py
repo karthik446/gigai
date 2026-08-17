@@ -77,22 +77,40 @@ def test_create_runs_model_facilitated_build_then_explicit_approval(tmp_path: Pa
 
         send("answer", question_id="scope", value="Review this repository")
         snapshot = parse_json_bytes(snapshot_path.read_bytes())
-        main_drive = next(item for item in snapshot["questions"] if item["question_id"] == "main-drive")
-        assert main_drive["provenance"].startswith("model://")
-        send("answer", question_id="main-drive", value="Explain the important work")
-        snapshot = parse_json_bytes(snapshot_path.read_bytes())
-        success_definition = next(
-            item for item in snapshot["questions"] if item["question_id"] == "success-definition"
+        desired_outputs = next(
+            item for item in snapshot["questions"] if item["question_id"] == "desired-outputs"
         )
-        assert success_definition["provenance"].startswith("model://")
-        send("answer", question_id="success-definition", value="A clear reviewed proposal")
+        assert desired_outputs["provenance"].startswith("model://")
+        send("answer", question_id="desired-outputs", value=["comparison"])
+        snapshot = parse_json_bytes(snapshot_path.read_bytes())
+        changing_context = next(
+            item for item in snapshot["questions"] if item["question_id"] == "changing-context"
+        )
+        assert changing_context["provenance"].startswith("model://")
+        send("answer", question_id="changing-context", value="The repository changes between Runs")
         send("build")
         with urlopen(session_url, timeout=5) as response:
             review_html = response.read().decode()
         assert "A local Gig proposal assembled" in review_html
         assert "The operator will review" in review_html
+        assert "Available capabilities" in review_html
+        assert "<strong>Target effect</strong>: unsupported" in review_html
+        assert "Reusable Gig definition" in review_html
+        assert "Changing Run inputs" in review_html
+        assert "Research boundary" in review_html
         workpad = next((tmp_path / "workpads").rglob("manifests/gig-proposal.json")).parent.parent
         assert (workpad / "manifests/proposal-draft-manifest.json").is_file()
+        discovery_manifest = parse_json_bytes(
+            (workpad / "manifests/gig-discovery-manifest.json").read_bytes()
+        )
+        assert discovery_manifest["request_kind"] == "create"
+        assert len(discovery_manifest["question_rounds"][1]["questions"]) == 3
+        assert discovery_manifest["manifest_version"] >= 3
+        assert discovery_manifest["parent_manifest_id"] is not None
+        assert any(
+            path.name.endswith("gig-discovery-manifest-written.txt")
+            for path in (workpad / "handoffs").iterdir()
+        )
         builder_snapshot = parse_json_bytes((workpad / "manifests/gig-builder-session.json").read_bytes())
         assert builder_snapshot["state"] == "operator_review"
         send("approve")

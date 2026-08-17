@@ -18,7 +18,7 @@ from gigai.proposal_interview import (
     block_session,
     request_revision,
 )
-from gigai.question_generation import G26_QUESTION_PROMPTS, generate_model_questions
+from gigai.question_generation import G27_DISCOVERY_PROMPT, generate_model_questions
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 
@@ -49,18 +49,14 @@ def test_builder_review_can_revise_rebuild_and_reject_without_activation(tmp_pat
 
     def on_questions(session):
         question_ids = {item.question_id for item in session.questions}
-        if "main-drive" not in question_ids:
-            prompt_name = G26_QUESTION_PROMPTS[0]
-        elif "success-definition" not in question_ids:
-            prompt_name = G26_QUESTION_PROMPTS[1]
-        else:
+        if "desired-outputs" in question_ids:
             return session
         return generate_model_questions(
             config=load_config(home),
             model_target="offline-default",
             session=session,
             reference_bytes=reference_bytes,
-            prompt_name=prompt_name,
+            prompt_name=G27_DISCOVERY_PROMPT,
         )
 
     def on_build(session):
@@ -151,8 +147,8 @@ def test_builder_review_can_revise_rebuild_and_reject_without_activation(tmp_pat
                 raise AssertionError(error.read().decode()) from error
 
         send("answer", question_id="scope", value="Review this repository")
-        send("answer", question_id="main-drive", value="Explain the important work")
-        send("answer", question_id="success-definition", value="A clear reviewed proposal")
+        send("answer", question_id="desired-outputs", value=["resume"])
+        send("answer", question_id="changing-context", value="The repository changes between Runs")
         send("build")
         first_proposal_id = built_proposal_id
         assert first_proposal_id is not None

@@ -1,11 +1,11 @@
 # G26 — Model-Facilitated Gig Builder and Proposal Research
 
-- Status: Activated; amendment accepted; implementation and UAT evidence underway
+- Status: Activated; amendment accepted; implementation evidence complete
 - Type: Runtime implementation goal; model-backed proposal construction
 - Depends on: G18 model execution and provider boundary, G22 proposal
-  interview, S18-02 CLI feasibility evidence, and G24 UAT findings
-- Unblocks: G24 repeat UAT against the real Gig-builder flow and G25 alpha
-  release readiness
+  interview, and S18-02 CLI feasibility evidence
+- Unblocks: G27 runtime and G29 post-0.1.5 UAT against the real Gig-builder
+  flow and G25 alpha release readiness
 
 ## Outcome
 

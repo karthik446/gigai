@@ -11,5 +11,5 @@ databases, or unsanitized UAT material.
 
 The initial record is `contract-amendment.md`. The current implementation
 milestone is covered by focused contract, discovery, builder, browser-flow, and
-bounded-call tests; the current installed replay is passing, while the human
-G24 UAT gate remains outstanding.
+bounded-call tests; the current installed replay is passing. Full human UAT is
+deferred to the post-0.1.5 G29 gate; G24 records the exploratory 0.1.4 pass.

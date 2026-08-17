@@ -86,8 +86,8 @@ def test_cli_create_launches_and_completes_local_interview(tmp_path: Path) -> No
 
         send("scope", "Create a bounded CLI proposal.")
         send("references", [reference_id])
-        send("main-drive", "Make the proposal easy to review.")
-        send("success-definition", "The operator can approve a clear proposal.")
+        send("desired-outputs", ["resume"])
+        send("changing-context", "The source repository changes between Runs.")
         send("effect", "write_workpad")
         send("privacy", "local_only")
         send("capability", "none")
@@ -180,8 +180,8 @@ def test_cli_create_collects_references_inside_interview(tmp_path: Path) -> None
         send("references", "README.md")
         current = parse_json_bytes(snapshot_path.read_bytes())
         assert current["selected_reference_ids"]
-        send("main-drive", "Explain the important work.")
-        send("success-definition", "A clear reviewed proposal.")
+        send("desired-outputs", ["resume"])
+        send("changing-context", "The source repository changes between Runs.")
         send("effect", "read_local")
         send("privacy", "local_only")
         send("capability", "none")

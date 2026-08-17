@@ -31,6 +31,7 @@ from .lifecycle import (
     build_interview_proposal,
     create_offline,
     persist_interview_session,
+    persist_discovery_manifest,
     record_feedback,
     record_builder_state,
     recover_builder_session,
@@ -51,8 +52,7 @@ from .occurrence import (
     reconcile_occurrence,
     trigger_occurrence,
 )
-from .question_generation import generate_model_questions
-from .question_generation import G26_QUESTION_PROMPTS
+from .question_generation import G27_DISCOVERY_PROMPT, generate_model_questions
 from .setup import (
     build_config,
     detect_editor_argv,
@@ -788,6 +788,15 @@ def create_command(
                 == next(target.endpoint for target in config.model_targets if target.name == selected_model_target)
             )
             selected_network_policy = selected_endpoint.adapter != "deterministic"
+            selected_readiness = resolve_target_readiness(config, selected_model_target)
+            capability_summary = {
+                "local_reference_read": "usable",
+                "model_invocation": selected_readiness.readiness,
+                "bounded_research": "usable" if selected_readiness.readiness == "usable" else "unavailable",
+                "proposal_construction": "usable",
+                "approved_run_execution": "unsupported",
+                "target_effect": "unsupported",
+            }
             started = start_interview(
                 home_root=home,
                 requested_target=target_value,
@@ -813,21 +822,30 @@ def create_command(
                 return updated, selected_ids, labels
 
             def builder_questions(session):
-                question_ids = {item.question_id for item in session.questions}
-                if "main-drive" not in question_ids:
-                    prompt_name = G26_QUESTION_PROMPTS[0]
-                elif "success-definition" not in question_ids:
-                    prompt_name = G26_QUESTION_PROMPTS[1]
-                else:
-                    return session
-                return generate_model_questions(
+                manifest_path = started.workpad / "manifests/gig-discovery-manifest.json"
+                has_direction_questions = any(
+                    item.question_id not in {"scope", "references", "effect", "privacy", "capability"}
+                    and not item.question_id.startswith("clarification-")
+                    for item in session.questions
+                )
+                updated = session
+                if not has_direction_questions and not manifest_path.exists():
+                    updated = generate_model_questions(
+                        config=load_config(home),
+                        model_target=selected_model_target,
+                        session=session,
+                        reference_bytes=reference_bytes,
+                        prompt_name=G27_DISCOVERY_PROMPT,
+                        network_allowed=allow_provider_network or selected_network_policy,
+                    )
+                persist_discovery_manifest(
+                    start=started,
+                    session=updated,
                     config=load_config(home),
                     model_target=selected_model_target,
-                    session=session,
                     reference_bytes=reference_bytes,
-                    prompt_name=prompt_name,
-                    network_allowed=allow_provider_network or selected_network_policy,
                 )
+                return updated
 
             def build_proposal(session):
                 nonlocal built_proposal_id
@@ -852,6 +870,20 @@ def create_command(
                     )
                 )
                 builder_review.update(draft_manifest.get("research", {}))
+                discovery_manifest = json.loads(
+                    (started.workpad / "manifests/gig-discovery-manifest.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                builder_review["stable_definition_fields"] = discovery_manifest.get(
+                    "stable_definition", {}
+                ).get("fields", [])
+                builder_review["run_input_fields"] = discovery_manifest.get(
+                    "run_input_contract", {}
+                ).get("fields", [])
+                builder_review["research_plan"] = discovery_manifest.get(
+                    "research_plan", {}
+                )
                 return built
 
             def revise_proposal(session):
@@ -900,6 +932,7 @@ def create_command(
                 on_revision=revise_proposal,
                 on_rejection=reject_proposal,
                 builder_review=builder_review,
+                capability_summary=capability_summary,
                 builder_mode=True,
                 builder_ready=recovered_builder.builder_ready,
             ).start()
@@ -984,6 +1017,49 @@ def improve_command(
             max_rounds=max_rounds,
             improve=True,
         )
+        improve_reference_bytes = dict(started.reference_bytes)
+        improve_config = load_config(home)
+
+        def improve_questions(session):
+            if (started.workpad / "manifests/gig-discovery-manifest.json").exists():
+                return session
+            updated = generate_model_questions(
+                config=improve_config,
+                model_target=model_target,
+                session=session,
+                reference_bytes=improve_reference_bytes,
+                prompt_name=G27_DISCOVERY_PROMPT,
+            )
+            persist_discovery_manifest(
+                start=started,
+                session=updated,
+                config=improve_config,
+                model_target=model_target,
+                reference_bytes=improve_reference_bytes,
+            )
+            return updated
+
+        improve_readiness = resolve_target_readiness(improve_config, model_target)
+        improve_capabilities = {
+            "local_reference_read": "usable",
+            "model_invocation": improve_readiness.readiness,
+            "bounded_research": "usable" if improve_readiness.readiness == "usable" else "unavailable",
+            "proposal_construction": "usable",
+            "approved_run_execution": "unsupported",
+            "target_effect": "unsupported",
+        }
+        active_pointer = json.loads(
+            (started.workpad / "manifests/active-gig-version.json").read_text(encoding="utf-8")
+        )
+        active_proposal = json.loads(
+            (started.workpad / "manifests/gig-proposal.json").read_text(encoding="utf-8")
+        )
+        improve_context_summary = {
+            "gig": str(active_proposal.get("name", started.gig_id)),
+            "active_version": str(active_pointer.get("active_version", "unknown")),
+            "original_references": str(len(started.session.references)),
+            "context_boundary": "selected G20 learning records only",
+        }
         server = InterviewHTTPServer(
             started.session,
             on_session=lambda session: persist_interview_session(
@@ -992,22 +1068,15 @@ def improve_command(
                 gig_id=started.gig_id,
                 session=session,
             ),
-            on_questions=lambda session: (
-                session
-                if any(item.question_id == "operator-confirmation" for item in session.questions)
-                else generate_model_questions(
-                    config=load_config(home),
-                    model_target=model_target,
-                    session=session,
-                    reference_bytes=dict(started.reference_bytes),
-                )
-            ),
+            on_questions=improve_questions,
             on_approval=lambda session: approve_interview_session(
                 home_root=home,
                 requested_target=target_value,
                 start=started,
                 session=session,
             ),
+            capability_summary=improve_capabilities,
+            context_summary=improve_context_summary,
         ).start()
         try:
             click.echo(f"GigAI local improve interview: {server.url}", err=True)

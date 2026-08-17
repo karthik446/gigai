@@ -628,6 +628,8 @@ class InterviewHTTPServer:
         on_revision: Callable[[InterviewSession], InterviewSession] | None = None,
         on_rejection: Callable[[InterviewSession], InterviewSession] | None = None,
         builder_review: Mapping[str, object] | None = None,
+        capability_summary: Mapping[str, str] | None = None,
+        context_summary: Mapping[str, str] | None = None,
         builder_mode: bool = False,
         builder_ready: bool = False,
         lifetime_seconds: float = 600.0,
@@ -647,6 +649,8 @@ class InterviewHTTPServer:
         self.on_revision = on_revision
         self.on_rejection = on_rejection
         self.builder_review = builder_review if builder_review is not None else {}
+        self.capability_summary = dict(capability_summary or {})
+        self.context_summary = dict(context_summary or {})
         self.builder_mode = builder_mode
         self.builder_ready = builder_ready
         self.lifetime_seconds = lifetime_seconds
@@ -874,8 +878,15 @@ class InterviewHTTPServer:
             unresolved = self.builder_review.get("unresolved_questions", ())
             assumption_html = "".join(f"<li>{html.escape(str(item))}</li>" for item in assumptions) or "<li>None recorded.</li>"
             unresolved_html = "".join(f"<li>{html.escape(str(item))}</li>" for item in unresolved) or "<li>None recorded.</li>"
+            stable_fields = self.builder_review.get("stable_definition_fields", ())
+            run_input_fields = self.builder_review.get("run_input_fields", ())
+            research_plan = self.builder_review.get("research_plan", {})
+            stable_html = ", ".join(html.escape(str(item).replace("_", " ")) for item in stable_fields) or "None recorded"
+            run_inputs_html = ", ".join(html.escape(str(item.get("field_id", ""))) for item in run_input_fields if isinstance(item, Mapping)) or "None defined"
+            research_status = html.escape(str(research_plan.get("status", "not_started"))) if isinstance(research_plan, Mapping) else "not_started"
+            research_network = html.escape(str(research_plan.get("network", "local_only"))) if isinstance(research_plan, Mapping) else "local_only"
             forms.append(
-                f"<section class='approval'><h2>Proposal draft ready</h2><p><strong>Summary:</strong> {summary}</p><p><strong>Assumptions</strong></p><ul>{assumption_html}</ul><p><strong>Unresolved questions</strong></p><ul>{unresolved_html}</ul><p>Review citations and boundaries in the workpad before deciding.</p>"
+                f"<section class='approval'><h2>Proposal draft ready</h2><p><strong>Summary:</strong> {summary}</p><p><strong>Reusable Gig definition</strong><br>{stable_html}</p><p><strong>Changing Run inputs</strong><br>{run_inputs_html}</p><p><strong>Research boundary</strong><br>Status: {research_status}; network: {research_network}</p><p><strong>Assumptions</strong></p><ul>{assumption_html}</ul><p><strong>Unresolved questions</strong></p><ul>{unresolved_html}</ul><p>Review citations and boundaries in the workpad before deciding.</p>"
                 f"<form class='review-action' data-event='revise' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button type='submit'>Revise answers</button></form>"
                 f"<form class='review-action' data-event='reject' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button type='submit'>Reject draft</button></form>"
                 f"<form class='approve' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button class='primary' type='submit'>Approve proposal</button></form></section>"
@@ -885,6 +896,26 @@ class InterviewHTTPServer:
                 f"<section class='approval'><h2>Proposal draft ready</h2><p>Review the model-facilitated Gig definition before approval. GigAI will write proposal artifacts to its private workpad, stay local-only, and read only references you explicitly add. Approval does not run work or modify the target repository.</p>"
                 f"<form class='approve' data-revision='{session.revision}' data-sequence='{len(session.events) + 1}' hx-post='{endpoint}'><button class='primary' type='submit'>Approve proposal</button></form></section>"
             )
+        capability_html = (
+            "<section class='capabilities'><h2>Available capabilities</h2><ul>"
+            + "".join(
+                f"<li><strong>{html.escape(label.replace('_', ' ').capitalize())}</strong>: {html.escape(status)}</li>"
+                for label, status in self.capability_summary.items()
+            )
+            + "</ul><p class='capability-note'>These are current configuration disclosures, not permissions granted by the model or this page.</p></section>"
+            if self.capability_summary
+            else ""
+        )
+        context_html = (
+            "<section class='context'><h2>Current Gig context</h2><ul>"
+            + "".join(
+                f"<li><strong>{html.escape(label.replace('_', ' ').capitalize())}</strong>: {html.escape(value)}</li>"
+                for label, value in self.context_summary.items()
+            )
+            + "</ul><p class='context-note'>This is read-only context for the improvement discussion. It does not approve or change the Gig.</p></section>"
+            if self.context_summary
+            else ""
+        )
         body = (
             "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
             "<title>Define a Gig</title><style>"
@@ -893,6 +924,8 @@ class InterviewHTTPServer:
             "header{background:#172033;color:white;border-radius:16px;padding:24px;margin-bottom:20px}"
             "h1{font-size:1.65rem;margin:0 0 8px}h2{font-size:1rem;margin:0}p{line-height:1.5}"
             ".intro{color:#dbe4f5;margin:0}.status{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-top:18px;font-size:.9rem}"
+            ".capabilities{margin-top:18px;padding-top:14px;border-top:1px solid #33415c}.capabilities h2{font-size:.9rem}.capabilities ul{margin:8px 0;padding-left:20px;color:#dbe4f5}.capability-note{font-size:.78rem;color:#b8c5da;margin:8px 0 0}"
+            ".context{margin-top:18px;padding-top:14px;border-top:1px solid #33415c}.context h2{font-size:.9rem}.context ul{margin:8px 0;padding-left:20px;color:#dbe4f5}.context-note{font-size:.78rem;color:#b8c5da;margin:8px 0 0}"
             ".badge,.required{border-radius:999px;padding:4px 9px;font-size:.75rem;font-weight:700;background:#dbeafe;color:#1e40af}"
             ".required{background:#eef2ff;color:#4338ca;float:right}.question,.approval{background:white;border:1px solid #dbe2ef;border-radius:12px;padding:20px;margin:14px 0;box-shadow:0 2px 8px #1720330d}.optional-context{border-style:dashed}"
             ".question-heading{display:flex;justify-content:space-between;gap:12px}.rationale{color:#526079;margin:8px 0 14px}.help{color:#526079;font-size:.88rem;margin:10px 0 0;padding-left:20px}"
@@ -902,7 +935,9 @@ class InterviewHTTPServer:
             ".approval{border-color:#93c5fd;background:#eff6ff}.approval p{color:#274060}.footer{color:#61708a;font-size:.82rem;margin-top:18px}"
             "</style><main class='shell'><header><h1>Define a Gig</h1>"
             "<p class='intro'>Describe the Gig you want to create. GigAI may ask a follow-up only when it needs more context. Nothing runs and the target is not modified during this interview.</p>"
-            f"<div class='status'><span data-state='{html.escape(session.state)}'>State: {html.escape(session.state.replace('_', ' ').capitalize())}</span><span class='badge'>{completed_required}/{total_required} required answers</span></div></header>"
+            + capability_html
+            + context_html
+            + f"<div class='status'><span data-state='{html.escape(session.state)}'>State: {html.escape(session.state.replace('_', ' ').capitalize())}</span><span class='badge'>{completed_required}/{total_required} required answers</span></div></header>"
             + "".join(forms)
             + "<p class='footer'>This local interview expires automatically. You can stop before approval at any time.</p></main><script>"
             "for (const form of document.querySelectorAll('form.question')) {"

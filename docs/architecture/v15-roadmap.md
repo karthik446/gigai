@@ -12,8 +12,9 @@ authority for the contracts already implemented and for the boundaries that
 V15 must preserve.
 
 **Current roadmap gate:** G13 through G23 are complete and independently
-evidenced. G24 is the planning-only local UAT and dogfooding goal; G25 is the
-later release-lane alpha-readiness candidate. Later
+evidenced. G24 records exploratory 0.1.4 UAT; G29 is the full post-0.1.5
+human UAT and dogfooding gate; G25 is the later release-lane alpha-readiness
+candidate. Later
 candidates remain planning-only until their individual goal contracts are
 reviewed and approved.
 G19 remains bounded by its accepted contract and does not authorize broader
@@ -369,9 +370,9 @@ G13 -> G14 -> G15 -> G16
            G16 + S16-EVAL + G18 + G22 -> G19 -> G20 -> G21
            G17 + G19 + G20 + G22 -> G23
            G22 + G18 + S18-02 -> G26 + G27-contract
-             -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G24 -> G25
-           G21 + G23 + G22 + G26 -> G24
-           G12 + G21 + G23 + G24 + G26 -> G25
+             -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G29 -> G25
+           G23 + G24 -> G29
+           G12 + G21 + G23 + G29 + G26 -> G25
 ```
 
 The graph is intentionally provisional. The arrows express planning
@@ -396,22 +397,23 @@ dependencies, not live status fields or authorization to begin.
 | [G21](../development/goals/phase-5/G21-recurring-and-comparative-gigs.md) | Recurring and comparative Gigs | G13, G14, G20 |
 | G22 | Deliberative `create` and user-facing proposal interview | S22-01, G18 |
 | G23 | Gig self-containment and portability (capability-manifest reference and proposal-lineage resolution on the active Gig version) | G17, G19, G20, G22 |
-| G24 | Local UAT and dogfooding across isolated GigAI installations | G18, G19, G20, G21, G22, G23, G26, G27, G28 |
-| G26 | Model-facilitated Gig builder, adaptive clarification, and bounded proposal research | G18, G22, S18-02, G24 findings |
+| G24 | Exploratory 0.1.4 UAT and dogfooding record | G18, G19, G20, G21, G22, G23, G26 |
+| G26 | Model-facilitated Gig builder, adaptive clarification, and bounded proposal research | G18, G22, S18-02 |
 | G28 | v0.1.5 evaluation, role-registry, and browser-first create readiness | G26, G27 contract, S27-EVAL, S27-ROLE, S27-CREATE |
-| G27 | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G28, G24 findings |
-| G25 | Alpha release readiness and final repository cleanup | G12, G21, G23, G24, G26 |
+| G27 | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G28 |
+| G29 | Full human UAT and dogfooding against the released v0.1.5 product | G27, G28, G24 findings |
+| G25 | Alpha release readiness and final repository cleanup | G12, G21, G23, G29, G26 |
 
 S16-EVAL is the hard review-loop quality gate for G18 and G19. G22 may cite
 its evidence only when G22 actually invokes or evaluates the Review Loop;
 S22-01 remains the authority for proposal-question quality evaluation. G23 is
-independent of G21: neither depends on the other. G24 is a local UAT and
-dogfooding gate, not a release declaration; it produces local-only evidence
+independent of G21: neither depends on the other. G24 is an exploratory
+0.1.4 UAT record, not a release declaration; it produces local-only findings
 about interaction quality, artifact shape, installation, and operator
-workflows. G26 must land before G24's final UAT pass because the current create
-flow does not yet perform a real model-backed proposal build. G27 makes that
-builder a genuine pre-proposal discovery canvas with a five-question ceiling
-and bounded research plan. G25 owns the later release-lane alpha decision.
+workflows. G27 makes the builder a genuine pre-proposal discovery canvas with
+a five-question ceiling and bounded research plan. G29 is the full human
+acceptance gate for the released v0.1.5 product. G25 owns the later
+release-lane alpha decision.
 
 ### Phase 2 — Proposal creation and interaction
 
@@ -673,7 +675,7 @@ and [terminal handoff](../development/evidence/phase-5/G23/terminal-handoff.md)
 record the accepted result. See the [G23 goal contract](../development/goals/phase-5/G23-gig-self-containment-and-portability.md).
 The accepted contract amendment is [here](../development/evidence/phase-5/G23/gig-self-containment-and-portability-contract-amendment.md).
 
-#### G24 — Local UAT and dogfooding
+#### G24 — Exploratory 0.1.4 UAT and dogfooding
 
 Run GigAI as an operator would use it: install the current package in an
 isolated container, enter the container, create real test Gigs step by step,
@@ -695,8 +697,8 @@ deterministic/offline path remains available for fixture testing but must be
 labeled as such.
 
 G24 does not change schemas, add runtime authority, publish a package, or
-declare alpha readiness. It is the dogfooding gate that tells G25 what is
-actually understandable and usable before release work begins.
+declare alpha readiness. It is an exploratory record from the narrower 0.1.4
+surface; full acceptance is deferred to G29 after v0.1.5.
 
 #### G26 — Model-facilitated Gig builder and proposal research
 
@@ -726,14 +728,15 @@ approval, and version authority in the existing lifecycle.
 G27 applies the same discovery shape to G20 improvement by supplying bounded,
 provenance-tagged Run summaries and cited evidence. It does not grant arbitrary
 web access, target authority, provider support, or a second improvement gate.
-G27 must land before G24's final UAT pass and does not declare an alpha release.
+G27 is complete at the runtime and machine-evidence boundary before G29's
+final UAT pass; it does not declare an alpha release.
 
 ### S27-EVAL, S27-ROLE, and S27-CREATE — v0.1.5 prerequisite spikes
 
 These spikes define the evaluation taxonomy/behavioral-eval framework, the
 namespaced role registry, and the browser-first setup/create flow. They are
 research and contract-design records, not runtime Goals. G28 implements their
-accepted decisions and produces the v0.1.5 candidate before G24 human UAT.
+accepted decisions and produces the v0.1.5 candidate before G29 human UAT.
 
 ### G28 — v0.1.5 Product Readiness Foundation
 
@@ -746,12 +749,21 @@ because adaptive discovery must be evaluated on a usable product foundation.
 
 Before that UAT pass, the v0.1.5 product-readiness gate must close the
 evaluation taxonomy/behavioral-eval debt, the central namespaced role registry,
-and the browser-first setup/create path. G24 should evaluate the resulting
+and the browser-first setup/create path. G29 should evaluate the resulting
 candidate, not the current implementation-plumbing release.
+
+#### G29 — v0.1.5 human UAT and dogfooding
+
+G29 is the full human acceptance gate after the v0.1.5 candidate is released.
+It exercises installation, setup/model selection, adaptive Gig definition,
+optional references, durable SQLite/workpad/journal state, revision/rejection/
+approval, improve context, reinstall/reopen, and representative workflows such
+as `tailor-resume-for-job` and review-and-verify. Raw UAT material remains
+outside Git; only a sanitized summary and terminal handoff may be committed.
 
 #### G25 — Alpha release readiness and final repository cleanup
 
-Prepare a true alpha candidate after G24 and its G21/G23 prerequisites are
+Prepare a true alpha candidate after G29 and its G21/G23 prerequisites are
 accepted, while reusing
 G12's release-lane mechanics. G25 owns the final support-surface freeze,
 roadmap/README/internal-changelog reconciliation, release-candidate artifact

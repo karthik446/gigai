@@ -162,6 +162,7 @@ jobs:
       - if: ${{ inputs.full_matrix }}
         run: .wheel-venv/bin/python tools/verify_installed_g23.py
       - run: .wheel-venv/bin/python tools/verify_installed_g28.py
+      - run: .wheel-venv/bin/python tools/verify_installed_g27.py
       - run: >-
           uv run --locked --extra test pytest
           tests/test_cli_and_scenario_harness.py

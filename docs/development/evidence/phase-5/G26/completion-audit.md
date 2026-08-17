@@ -1,10 +1,10 @@
 # G26 Completion Audit
 
-- Status: Pending human G24 UAT; implementation evidence complete
+- Status: Pending post-0.1.5 human G29 UAT; implementation evidence complete
 - Date: 2026-08-14
 - Goal: [G26 model-facilitated Gig builder](../../../goals/phase-5/G26-model-facilitated-gig-builder.md)
 - Evidence boundary: sanitized repository evidence only; human UAT remains
-  outside the repository under G24's local-only evidence boundary
+  outside the repository under G29's local-only evidence boundary
 
 ## Verdict
 
@@ -26,7 +26,7 @@ or automated browser tests.
 | Timeout, cancellation, budget, malformed, unavailable, and recovery paths | Pass | Focused G26 tests and [mutation report](mutation-report.md). |
 | No unselected references or secret values | Pass | Builder boundary tests and mutation coverage. |
 | Fresh installed replay | Pass | [installed replay](installed-replay.md); current verifier reports 30 installed schemas and the G26 flow reaches approval. |
-| Human real-machine UAT | Pending | G24 must provide installation, target, SQLite, workpad, revision, rejection, reinstall, and representative-workflow evidence. |
+| Human real-machine UAT | Deferred | G29 must provide installation, target, SQLite, workpad, revision, rejection, reinstall, and representative-workflow evidence against v0.1.5. |
 
 ## Machine verification
 
@@ -46,7 +46,7 @@ repository.
 
 ## Required human closeout
 
-G26 cannot be promoted from pending to accepted until G24 records, outside the
+G26 cannot be promoted from pending to accepted until G29 records, outside the
 repository:
 
 1. the installed executable and version the operator actually used;
@@ -64,4 +64,3 @@ repository:
 
 Until those records are accepted, this audit is a truthful implementation
 closeout checkpoint, not a completed-goal declaration.
-

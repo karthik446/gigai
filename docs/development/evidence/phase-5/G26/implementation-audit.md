@@ -1,6 +1,6 @@
 # G26 Implementation Audit — Implementation Evidence
 
-- Status: Implementation evidence verified; G24 human UAT remains open
+- Status: Implementation evidence verified; G29 post-0.1.5 human UAT remains open
 - Date: 2026-08-14
 - Scope: deterministic/offline builder path and model-readiness boundary
 
@@ -57,11 +57,11 @@
 
 ## Remaining before G26 closeout
 
-- Run the human-executed G24 UAT on the operator's real machine, including
+- Run the human-executed G29 UAT on the operator's real machine after v0.1.5, including
   installation, setup, real target binding, one create session, SQLite and
   workpad inspection, one revision, one rejection, reinstall/reopen, and at
   least three representative workflows.
-- Capture the operator and review-partner verdicts in the local-only G24
+- Capture the operator and review-partner verdicts in the local-only G29
   evidence boundary; do not commit raw UAT material.
 - Accept or resolve any authority, storage, prompt, or usability findings.
 - Flip the G26 completion audit and terminal handoff to accepted only after

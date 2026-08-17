@@ -33,6 +33,7 @@ from .canonical import (
     parse_json_bytes,
 )
 from .config import load_config
+from .discovery import build_discovery_artifacts
 from .improvement import validate_improvement_manifest
 from .learning import load_learning_records, validate_learning_record
 from .journal import (
@@ -484,6 +485,93 @@ def persist_interview_session(
     )
     _persist_interview_trace(workpad, session)
     return entry
+
+
+def persist_discovery_manifest(
+    *,
+    start: InterviewStartResult,
+    session: InterviewSession,
+    config,
+    model_target: str,
+    reference_bytes: Mapping[str, bytes],
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+    observer: CreateObserver | None = None,
+) -> JournalEntry:
+    """Journal one subordinate G27 discovery manifest for a session revision."""
+
+    improve_context = None
+    improve_summary_bytes = None
+    manifest_version = 1
+    parent_manifest_id = None
+    existing_discovery_path = start.workpad / "manifests/gig-discovery-manifest.json"
+    if existing_discovery_path.exists():
+        try:
+            existing_discovery = parse_json_bytes(existing_discovery_path.read_bytes())
+        except (OSError, ValueError) as exc:
+            raise LifecycleError("existing discovery manifest is not recoverable") from exc
+        if not isinstance(existing_discovery, Mapping):
+            raise LifecycleError("existing discovery manifest is invalid")
+        current_version = existing_discovery.get("manifest_version")
+        current_id = existing_discovery.get("manifest_id")
+        if type(current_version) is not int or current_version < 1 or not isinstance(current_id, str):
+            raise LifecycleError("existing discovery manifest revision is invalid")
+        manifest_version = current_version + 1
+        parent_manifest_id = current_id
+    if session.request_kind == "improve":
+        improvement_path = start.workpad / "manifests/improvement-manifest.json"
+        pointer_path = start.workpad / "manifests/active-gig-version.json"
+        try:
+            improvement = parse_json_bytes(improvement_path.read_bytes())
+            pointer = parse_json_bytes(pointer_path.read_bytes())
+        except (OSError, ValueError) as exc:
+            raise LifecycleError("improve discovery context is not recoverable") from exc
+        if not isinstance(improvement, Mapping) or not isinstance(pointer, Mapping):
+            raise LifecycleError("improve discovery context is invalid")
+        learning_ids = improvement.get("learning_record_ids")
+        active_version = pointer.get("active_version")
+        if (
+            not isinstance(learning_ids, list)
+            or not learning_ids
+            or any(not isinstance(item, str) for item in learning_ids)
+            or type(active_version) is not int
+            or active_version < 1
+        ):
+            raise LifecycleError("improve discovery context is incomplete")
+        improve_summary = {
+            "schema_version": "1.0",
+            "kind": "g27_improve_context",
+            "learning_record_ids": learning_ids,
+            "active_version": active_version,
+            "omitted_content_policy": "raw_unselected_and_hidden_context_excluded",
+        }
+        improve_summary_bytes = canonical_json_bytes(improve_summary)
+        improve_context = {
+            "learning_record_ids": learning_ids,
+            "active_version": active_version,
+            "max_source_bytes": len(improve_summary_bytes),
+            "omitted_content_policy": "raw_unselected_and_hidden_context_excluded",
+        }
+    built = build_discovery_artifacts(
+        config=config,
+        model_target=model_target,
+        session=session,
+        reference_bytes=reference_bytes,
+        improve_context=improve_context,
+        improve_summary_bytes=improve_summary_bytes,
+        manifest_version=manifest_version,
+        parent_manifest_id=parent_manifest_id,
+        uuid_factory=uuid_factory,
+    )
+    return record_transition(
+        workpad=start.workpad,
+        project_id=start.project_id,
+        gig_id=start.gig_id,
+        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+        transition="gig_discovery_manifest_written",
+        body=f"G27 discovery manifest recorded for interview {session.session_id}.",
+        artifacts=built.artifacts,
+        observer=observer,
+    )
 
 
 def approve_interview_session(
@@ -1142,6 +1230,26 @@ def _approve_improve_interview_session(
         raise LifecycleError("improvement manifest base version is stale")
     if manifest.get("gig_id") != start.gig_id or manifest.get("project_id") != start.project_id:
         raise LifecycleError("improvement manifest binding does not match active Gig")
+    discovery_path = start.workpad / "manifests/gig-discovery-manifest.json"
+    if discovery_path.exists():
+        if discovery_path.is_symlink() or not discovery_path.is_file():
+            raise LifecycleError("improve discovery manifest is invalid")
+        discovery_bytes = discovery_path.read_bytes()
+        discovery = parse_json_bytes(discovery_bytes)
+        if not isinstance(discovery, Mapping):
+            raise LifecycleError("improve discovery manifest is invalid")
+        discovery_report = validate_serialized_contract(
+            "gig-discovery-manifest.schema.json", discovery_bytes
+        )
+        if not discovery_report.valid:
+            raise LifecycleError("improve discovery manifest failed validation")
+        context = discovery.get("improve_context")
+        if (
+            not isinstance(context, Mapping)
+            or list(context.get("learning_record_ids", ())) != ids
+            or context.get("active_version") != pointer.get("active_version")
+        ):
+            raise LifecycleError("improve discovery evidence does not match G20 inputs")
 
     proposal_id = _allocate_local_id(EntityPrefix.GIG_PROPOSAL, uuid_factory)
     proposal = dict(current)
@@ -2099,6 +2207,7 @@ __all__ = [
     "approve_interview_session",
     "approve_offline",
     "create_offline",
+    "persist_discovery_manifest",
     "persist_interview_session",
     "record_feedback",
     "reject_offline",
