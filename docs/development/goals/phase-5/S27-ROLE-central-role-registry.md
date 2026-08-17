@@ -16,7 +16,9 @@ confused or silently invented as arbitrary strings.
 
 The spike must produce an accepted decision record covering:
 
-1. the namespace model for `model_invocation`, `reference`, and `executor`;
+1. the namespace model for `model_invocation`, `reference`, `executor`, and
+   the separately classified `occurrence` and `protocol` values (the latter
+   remain protocol enums, not extensible registry roles);
 2. the structured role-reference shape, including namespace, ID, and version;
 3. the built-in role catalog and each role's purpose, required capabilities,
    allowed callers, and evidence requirements;

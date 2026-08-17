@@ -1,6 +1,6 @@
 # S27-EVAL — Evaluation Foundation Decision Record
 
-- Status: Proposed for acceptance; no runtime implementation
+- Status: Accepted; no runtime implementation
 - Spike: [S27-EVAL](../../../../goals/phase-5/S27-EVAL-evaluation-foundation.md)
 - Recorded: 2026-08-16
 - Depends on: accepted S16-EVAL and S22-01 evidence, G20 quality-gate

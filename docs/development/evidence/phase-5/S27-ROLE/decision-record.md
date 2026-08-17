@@ -1,6 +1,6 @@
 # S27-ROLE — Central Role Registry Decision Record
 
-- Status: Proposed for acceptance; no runtime implementation
+- Status: Accepted; no runtime implementation
 - Spike: [S27-ROLE](../../../../goals/phase-5/S27-ROLE-central-role-registry.md)
 - Recorded: 2026-08-16
 - Depends on: G18 model invocation contracts, G15/G16 review-reference

@@ -1,6 +1,6 @@
 # S27-CREATE — Browser-First Create and Model Setup Decision Record
 
-- Status: Proposed for acceptance; no runtime implementation
+- Status: Accepted; no runtime implementation
 - Spike: [S27-CREATE](../../../goals/phase-5/S27-CREATE-browser-first-create-and-model-setup.md)
 - Recorded: 2026-08-16
 - Depends on: G22 loopback interview, G26 builder evidence, G18 model
