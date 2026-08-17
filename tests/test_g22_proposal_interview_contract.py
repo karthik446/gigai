@@ -113,7 +113,7 @@ def _record(*, state: str = "approved") -> dict[str, object]:
 
 
 def test_g22_schema_is_additive_and_validates_approved_snapshot() -> None:
-    assert len(SCHEMA_NAMES) == 29
+    assert len(SCHEMA_NAMES) == 31
     assert "proposal-interview.schema.json" in SCHEMA_NAMES
     assert validate_serialized_contract(
         "proposal-interview.schema.json", canonical_json_bytes(_record())

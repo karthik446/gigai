@@ -25,6 +25,7 @@ from .registry import (
     open_project_registry,
 )
 from .target_binding import (
+    GitTargetError,
     ResolvedTarget,
     TargetBindingError,
     resolve_target,
@@ -534,7 +535,28 @@ def _resolve_bound_project(
     cwd: Path | None,
 ) -> BoundProject:
     try:
-        target = resolve_target(requested_target, cwd=cwd)
+        try:
+            target = resolve_target(requested_target, cwd=cwd)
+        except GitTargetError:
+            # An explicitly initialized non-Git target is still a valid implicit
+            # target for commands run from that directory.  resolve_target
+            # deliberately rejects implicit non-Git paths because it has no
+            # registry context; use the registry only for this exact, already
+            # bound directory and never infer a parent or neighboring target.
+            if requested_target is not None:
+                raise
+            current = (cwd or Path.cwd()).resolve(strict=True)
+            registry, _ = open_project_registry(home, create=False)
+            with registry.transaction() as transaction:
+                record = transaction.find_target(current)
+            if record is None or record.target_kind != "non-git":
+                raise
+            target = ResolvedTarget(
+                requested_path=current,
+                requested_identity=current,
+                root=current,
+                kind="non-git",
+            )
         registry, _ = open_project_registry(home, create=False)
         with registry.transaction() as transaction:
             record = transaction.find_target(target.root)

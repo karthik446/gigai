@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:role-reference:1",
+  "title": "GigAI Role Reference",
+  "description": "A namespaced, versioned purpose reference. It grants no capability or authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "namespace", "id", "version"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "namespace": {
+      "type": "string",
+      "enum": ["model_invocation", "reference", "executor", "occurrence", "protocol"]
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "version": {"type": "integer", "minimum": 1}
+  }
+}

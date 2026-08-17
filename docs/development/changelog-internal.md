@@ -251,6 +251,41 @@ sanitized. An early checkpoint distinguishes `registry.sqlite` from workpad
 `interview_events` rows. G24 does not add runtime behavior or declare alpha; it
 supplies the operator evidence G25 must use.
 
+### G26 — Model-facilitated Gig builder
+
+G26 is implemented on the `0.1.4` UAT release path. It adds bounded model
+builder calls, adaptive-question plumbing, proposal research/review, recovery,
+and explicit approval. Its repository evidence is complete; real operator
+acceptance remains part of G24.
+
+### G27 — Adaptive Gig discovery and pre-proposal research
+
+G27 is the proposed follow-on that makes the HTMX session the actual Gig-
+definition canvas. It will let the configured model explain available
+capabilities, propose bounded research, and select up to five high-value
+direction questions. It will reuse G20's evidence gates for future improve
+flows and does not itself declare an alpha release.
+
+### S27 spikes and G28 — v0.1.5 readiness foundation
+
+S27-EVAL, S27-ROLE, and S27-CREATE are accepted prerequisite spikes for a
+unified behavioral-eval framework, central namespaced roles, and a
+browser-first setup/create path. G28 is complete against their accepted
+decisions and owns a verified v0.1.5 source candidate. Its four evidence tiers,
+31-resource schema set, role registry, truthful setup readiness, and no-flag
+browser-first create path are recorded under the G28 evidence directory. G24
+human UAT and G27 runtime work consume the candidate; G25 remains the later
+alpha-readiness and release-decision lane.
+
+### v0.1.5 readiness gate
+
+The next meaningful UAT candidate must close three technical-debt items before
+G24 begins: a unified evaluation taxonomy and behavioral-eval framework, a
+central namespaced role registry, and a browser-first setup/model-selection
+flow where `gigai create <gig-name>` opens the HTMX discovery experience after
+normal project setup. The current `0.1.4` release proves implementation
+plumbing but is not the final human-UAT candidate for these product behaviors.
+
 ## Cross-goal change ledger
 
 Backfill synthesis entries under these themes:

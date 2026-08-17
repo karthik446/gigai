@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "manifest_digest": "sha256:ca517d4b1891f7332d2a24bcd9efddbfc55a4f445074233cd0d8d6fa3a5f86c0",
+  "solver": {
+    "kind": "deterministic_fixture",
+    "id": "g28-g26-g27-fixture",
+    "version": "1"
+  },
+  "contamination_check": "clean",
+  "tuning_cutoff": "commit:g28-deterministic-fixture-1",
+  "cases": [
+    {"case_id": "g26-definition-only", "observed": ["definition_captured"]},
+    {"case_id": "g26-optional-context", "observed": ["optional_reference_selection"]},
+    {"case_id": "g26-adaptive-followup", "observed": ["typed_bounded_questions"]},
+    {"case_id": "g26-proposal-research", "observed": ["bounded_research_plan"]},
+    {"case_id": "g26-revision-recovery", "observed": ["idempotent_revision_recovery"]},
+    {"case_id": "g27-capability-truth", "observed": ["detected_only_disclosure"]},
+    {"case_id": "g27-definition-run-separation", "observed": ["run_input_isolated"]},
+    {"case_id": "g27-improve-evidence", "observed": ["bounded_cited_improve_context"]},
+    {"case_id": "g27-research-plan-quality", "observed": ["bounded_research_boundary"]},
+    {"case_id": "g27-question-provenance", "observed": ["question_provenance_complete"]}
+  ]
+}

@@ -1,0 +1,118 @@
+{
+  "commands": [
+    [
+      "uv",
+      "run",
+      "gigai",
+      "eval",
+      "behavior",
+      "--manifest",
+      "research/evals/g28/g26-g27-manifest.json",
+      "--observations",
+      "research/evals/g28/g26-g27-deterministic-observations.json",
+      "--split",
+      "development",
+      "--output",
+      "docs/development/evidence/phase-5/G28/tier-reports/behavior-development.json"
+    ],
+    [
+      "uv",
+      "run",
+      "gigai",
+      "eval",
+      "behavior",
+      "--manifest",
+      "research/evals/g28/g26-g27-manifest.json",
+      "--observations",
+      "research/evals/g28/g26-g27-deterministic-observations.json",
+      "--split",
+      "calibration",
+      "--output",
+      "docs/development/evidence/phase-5/G28/tier-reports/behavior-calibration.json"
+    ],
+    [
+      "uv",
+      "run",
+      "gigai",
+      "eval",
+      "behavior",
+      "--manifest",
+      "research/evals/g28/g26-g27-manifest.json",
+      "--observations",
+      "research/evals/g28/g26-g27-deterministic-observations.json",
+      "--split",
+      "final_held_out_acceptance",
+      "--output",
+      "docs/development/evidence/phase-5/G28/tier-reports/behavior-final_held_out_acceptance.json"
+    ]
+  ],
+  "duration_seconds": 0.328,
+  "kind": "g28_tier_report",
+  "results": [
+    {
+      "command": [
+        "uv",
+        "run",
+        "gigai",
+        "eval",
+        "behavior",
+        "--manifest",
+        "research/evals/g28/g26-g27-manifest.json",
+        "--observations",
+        "research/evals/g28/g26-g27-deterministic-observations.json",
+        "--split",
+        "development",
+        "--output",
+        "docs/development/evidence/phase-5/G28/tier-reports/behavior-development.json"
+      ],
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    {
+      "command": [
+        "uv",
+        "run",
+        "gigai",
+        "eval",
+        "behavior",
+        "--manifest",
+        "research/evals/g28/g26-g27-manifest.json",
+        "--observations",
+        "research/evals/g28/g26-g27-deterministic-observations.json",
+        "--split",
+        "calibration",
+        "--output",
+        "docs/development/evidence/phase-5/G28/tier-reports/behavior-calibration.json"
+      ],
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    {
+      "command": [
+        "uv",
+        "run",
+        "gigai",
+        "eval",
+        "behavior",
+        "--manifest",
+        "research/evals/g28/g26-g27-manifest.json",
+        "--observations",
+        "research/evals/g28/g26-g27-deterministic-observations.json",
+        "--split",
+        "final_held_out_acceptance",
+        "--output",
+        "docs/development/evidence/phase-5/G28/tier-reports/behavior-final_held_out_acceptance.json"
+      ],
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_tail": ""
+    }
+  ],
+  "returncode": 0,
+  "schema_version": "1.0",
+  "started_at": "2026-08-17T02:15:23.868356+00:00",
+  "status": "pass",
+  "tier": "behavior"
+}

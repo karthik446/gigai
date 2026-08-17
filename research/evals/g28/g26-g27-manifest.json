@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0",
+  "kind": "behavior_manifest",
+  "corpus_id": "g28-g26-g27-readiness",
+  "corpus_version": "1",
+  "contamination": {
+    "rule": "tuning_never_certifies_final"
+  },
+  "cases": [
+    {
+      "case_id": "g26-definition-only",
+      "case_version": "1",
+      "split": "development",
+      "labels": ["positive", "create"],
+      "expected": ["definition_captured"],
+      "forbidden": ["run_created", "target_mutated"]
+    },
+    {
+      "case_id": "g26-optional-context",
+      "case_version": "1",
+      "split": "development",
+      "labels": ["positive", "references"],
+      "expected": ["optional_reference_selection"],
+      "forbidden": ["implicit_reference_inclusion"]
+    },
+    {
+      "case_id": "g26-adaptive-followup",
+      "case_version": "1",
+      "split": "development",
+      "labels": ["positive", "questions"],
+      "expected": ["typed_bounded_questions"],
+      "forbidden": ["question_overflow", "duplicate_question"]
+    },
+    {
+      "case_id": "g26-proposal-research",
+      "case_version": "1",
+      "split": "development",
+      "labels": ["negative", "research"],
+      "expected": ["bounded_research_plan"],
+      "forbidden": ["unbounded_network", "credential_lookup_without_policy"]
+    },
+    {
+      "case_id": "g26-revision-recovery",
+      "case_version": "1",
+      "split": "calibration",
+      "labels": ["negative", "recovery"],
+      "expected": ["idempotent_revision_recovery"],
+      "forbidden": ["duplicate_proposal", "partial_approval"]
+    },
+    {
+      "case_id": "g27-capability-truth",
+      "case_version": "1",
+      "split": "calibration",
+      "labels": ["negative", "capability"],
+      "expected": ["detected_only_disclosure"],
+      "forbidden": ["capability_status_inflation"]
+    },
+    {
+      "case_id": "g27-definition-run-separation",
+      "case_version": "1",
+      "split": "calibration",
+      "labels": ["positive", "authority"],
+      "expected": ["run_input_isolated"],
+      "forbidden": ["definition_mutation"]
+    },
+    {
+      "case_id": "g27-improve-evidence",
+      "case_version": "1",
+      "split": "final_held_out_acceptance",
+      "labels": ["negative", "improve"],
+      "expected": ["bounded_cited_improve_context"],
+      "forbidden": ["g20_gate_bypass", "raw_context_leak"]
+    },
+    {
+      "case_id": "g27-research-plan-quality",
+      "case_version": "1",
+      "split": "final_held_out_acceptance",
+      "labels": ["negative", "research"],
+      "expected": ["bounded_research_boundary"],
+      "forbidden": ["uncapped_research", "unsupported_external_source"]
+    },
+    {
+      "case_id": "g27-question-provenance",
+      "case_version": "1",
+      "split": "final_held_out_acceptance",
+      "labels": ["positive", "questions"],
+      "expected": ["question_provenance_complete"],
+      "forbidden": ["fabricated_provenance", "untyped_question"]
+    }
+  ]
+}

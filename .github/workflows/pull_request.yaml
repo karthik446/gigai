@@ -68,7 +68,7 @@ jobs:
   source-tests:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true'
-    name: Python ${{ matrix.python }} on ${{ matrix.os }}
+    name: G28 readiness tiers (Python ${{ matrix.python }} on ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -86,7 +86,17 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked --extra test --python "${{ matrix.python }}"
-      - run: uv run --locked pytest
+      - name: G28 unit and contract tier
+        if: ${{ !inputs.full_matrix }}
+        run: python tools/run_g28_tier.py unit
+      - name: G28 integration tier
+        if: ${{ !inputs.full_matrix }}
+        run: python tools/run_g28_tier.py integration
+      - name: G28 behavioral evaluation tier
+        if: ${{ !inputs.full_matrix }}
+        run: python tools/run_g28_tier.py behavior
+      - name: Full source suite
+        run: uv run --locked pytest
 
   wheel:
     needs: changes
@@ -117,29 +127,48 @@ jobs:
       - run: .wheel-venv/bin/python tools/verify_installed_schemas.py
       - run: .wheel-venv/bin/python tools/verify_installed_canonical.py
       - run: .wheel-venv/bin/python tools/verify_installed_cli.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g03.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g04.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g05.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g06.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g07.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g08.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g09.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g11.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g13.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g14.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g15.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g16.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g17.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g19.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g20.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g21.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g23.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g03.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g04.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g05.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g06.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g07.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g08.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g09.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g11.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g13.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g14.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g15.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g16.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g17.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g19.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g20.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g21.py
+      - if: ${{ inputs.full_matrix }}
+        run: .wheel-venv/bin/python tools/verify_installed_g23.py
+      - run: .wheel-venv/bin/python tools/verify_installed_g28.py
       - run: >-
           uv run --locked --extra test pytest
           tests/test_cli_and_scenario_harness.py
           tests/test_g*_installed_scenarios.py
           tests/test_g10_phase1_audit.py
           -k 'installed_help_version or installed_'
+        if: ${{ inputs.full_matrix }}
         env:
           GIGAI_TEST_EXECUTABLE: ${{ github.workspace }}/.wheel-venv/bin/gigai
 

@@ -16,11 +16,13 @@ from .config import (
     CredentialReference,
     Endpoint,
     ModelTarget,
+    Profile,
     load_config,
     migrate_config,
 )
 from .comparison import ComparisonError, compare_occurrences
 from .diagnostics import render_report_json, run_doctor, run_live_doctor
+from .evaluation import EvaluationError, load_manifest, score_behavior, write_report
 from .index import JournalIndexError, JournalProjection, read_index
 from .lifecycle import (
     LifecycleError,
@@ -87,7 +89,7 @@ def cli(context: click.Context) -> None:
         raise click.UsageError(
             "Choose 'setup', 'doctor', 'init', 'create', 'improve', 'feedback', 'revise', "
             "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
-            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', 'models', or 'open'; "
+            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', 'models', 'eval', or 'open'; "
             "use --help for details."
         )
 
@@ -133,6 +135,59 @@ def models_command(home_value: Path | None, as_json: bool) -> None:
             )
     except (ConfigurationError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
+
+
+@cli.group("eval")
+def eval_group() -> None:
+    """Validate and run explicit GigAI evaluation contracts."""
+
+
+@eval_group.command("contract")
+@click.option("--manifest", type=click.Path(path_type=Path, dir_okay=False), required=True)
+def eval_contract_command(manifest: Path) -> None:
+    """Validate a versioned behavioral evaluation manifest."""
+
+    try:
+        loaded = load_manifest(manifest)
+    except EvaluationError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(
+        json.dumps(
+            {
+                "kind": "evaluation_contract_report",
+                "manifest": str(manifest),
+                "manifest_digest": loaded.digest,
+                "corpus_id": loaded.corpus_id,
+                "case_count": len(loaded.cases),
+                "status": "pass",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+
+
+@eval_group.command("behavior")
+@click.option("--manifest", type=click.Path(path_type=Path, dir_okay=False), required=True)
+@click.option("--observations", type=click.Path(path_type=Path, dir_okay=False), required=True)
+@click.option(
+    "--split",
+    type=click.Choice(["development", "calibration", "final_held_out_acceptance"]),
+    required=True,
+)
+@click.option("--output", type=click.Path(path_type=Path, dir_okay=False))
+def eval_behavior_command(manifest: Path, observations: Path, split: str, output: Path | None) -> None:
+    """Score separately supplied Solver observations against a Case corpus."""
+
+    try:
+        loaded = load_manifest(manifest)
+        observation_payload = json.loads(observations.read_text(encoding="utf-8"))
+        report = score_behavior(loaded, observation_payload, split)
+        write_report(report, output)
+    except (EvaluationError, OSError, json.JSONDecodeError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if report["status"] != "pass":
+        raise click.exceptions.Exit(1)
 
 
 @cli.command("setup")
@@ -189,6 +244,10 @@ def models_command(home_value: Path | None, as_json: bool) -> None:
     help="Add a text model target resolved through a configured endpoint.",
 )
 @click.option(
+    "--create-model-target",
+    help="Select the configured model target used by create (defaults to the saved setup choice).",
+)
+@click.option(
     "--target-output-limit",
     "target_output_limit_spec",
     multiple=True,
@@ -216,6 +275,7 @@ def setup_command(
     clear_credentials: bool,
     endpoint_spec: tuple[str, ...],
     model_target_spec: tuple[str, ...],
+    create_model_target: str | None,
     target_output_limit_spec: tuple[str, ...],
     target_reasoning_effort_spec: tuple[str, ...],
     as_json: bool,
@@ -397,10 +457,73 @@ def setup_command(
             + target_specs
         )
         endpoints = (*existing_endpoints, *endpoint_specs)
+        target_names = tuple(target.name for target in targets)
+        saved_create_target = next(
+            (
+                profile.planner
+                for profile in (existing.profiles if existing is not None else ())
+                if profile.name == "default"
+            ),
+            "offline-default",
+        )
+        selected_create_target = create_model_target or saved_create_target
+        if not non_interactive and create_model_target is None:
+            selected_create_target = click.prompt(
+                "Model for Gig creation",
+                type=click.Choice(target_names),
+                default=saved_create_target if saved_create_target in target_names else target_names[0],
+                show_default=True,
+            )
+        if selected_create_target not in target_names:
+            raise ValueError(
+                f"create model target {selected_create_target!r} is not configured; "
+                f"choose one of {sorted(target_names)}"
+            )
+        current_profiles = existing.profiles if existing is not None else None
+        if current_profiles is None:
+            profiles = (
+                Profile(
+                    name="default",
+                    planner=selected_create_target,
+                    critic="offline-default",
+                    adjudicator="offline-default",
+                ),
+            )
+        else:
+            profiles_list = []
+            replaced_default = False
+            for profile in current_profiles:
+                if profile.name == "default":
+                    profiles_list.append(
+                        replace(profile, planner=selected_create_target)
+                    )
+                    replaced_default = True
+                else:
+                    profiles_list.append(profile)
+            if not replaced_default:
+                profiles_list.append(
+                    Profile(
+                        name="default",
+                        planner=selected_create_target,
+                        critic="offline-default",
+                        adjudicator="offline-default",
+                    )
+                )
+            profiles = tuple(profiles_list)
         if not non_interactive:
             credential_summary = [
                 {"name": item.name, "kind": item.kind} for item in credentials
             ]
+            preview_config = build_config(
+                home_root=requested_home,
+                workpad_root=resolved_workpad,
+                editor_argv=resolved_editor,
+                open_with_target=resolved_open,
+                credentials=credentials,
+                endpoints=endpoints,
+                model_targets=targets,
+                profiles=profiles,
+            )
             click.secho("\nGigAI setup review", bold=True, fg="cyan")
             click.echo(f"  GigAI home: {requested_home}")
             click.echo(f"  Workpad storage: {resolved_workpad}")
@@ -409,6 +532,28 @@ def setup_command(
                 "(program used to open workpads)"
             )
             click.echo(f"  Credential references: {json.dumps(credential_summary)}")
+            click.secho("  Gig creation choices:", bold=True)
+            for candidate in targets:
+                readiness = resolve_target_readiness(preview_config, candidate.name)
+                endpoint = next(item for item in endpoints if item.name == candidate.endpoint)
+                mode = (
+                    "deterministic fixture"
+                    if endpoint.adapter == "deterministic"
+                    else "configured API"
+                )
+                selected = " [selected]" if candidate.name == selected_create_target else ""
+                click.echo(
+                    f"    - {candidate.name}: {mode}; readiness={readiness.readiness}{selected}"
+                )
+            detected = discover_installed_models()
+            for item in detected:
+                if item.executable:
+                    click.echo(
+                        f"    - {item.name}: detected; readiness=unsupported "
+                        "(no GigAI adapter; not invoked)"
+                    )
+            if not any(item.executable for item in detected):
+                click.echo("    - codex/claude: not detected; no local CLI candidate")
             click.echo(
                 "  Built-in local mode: no network or provider credentials "
                 "(offline-default / fixture-v1)"
@@ -426,7 +571,7 @@ def setup_command(
             credentials=credentials,
             endpoints=endpoints,
             model_targets=targets,
-            profiles=existing.profiles if existing is not None else None,
+            profiles=profiles,
         )
         result = run_setup(config)
     except (ConfigurationError, OSError, ValueError) as exc:
@@ -563,9 +708,8 @@ def init_command(target: Path | None, home_value: Path | None, as_json: bool) ->
 )
 @click.option(
     "--model-target",
-    default="offline-default",
-    show_default=True,
-    help="Configured model target for bounded question generation; offline-default is deterministic.",
+    default=None,
+    help="Override the setup-selected model target for this invocation.",
 )
 @click.option(
     "--request",
@@ -610,7 +754,7 @@ def create_command(
     commission: str | None,
     target_value: Path | None,
     home_value: Path | None,
-    model_target: str,
+    model_target: str | None,
     request_value: str | None,
     reference_values: tuple[Path, ...],
     offline: bool,
@@ -625,15 +769,25 @@ def create_command(
     try:
         home = home_value or default_home_root()
         if offline:
+            offline_model_target = model_target or _default_create_model_target(load_config(home))
             result = create_offline(
                 home_root=home,
                 requested_target=target_value,
                 name=name,
                 commission=commission,
-                model_target=model_target,
+                model_target=offline_model_target,
                 open_editor=open_browser,
             )
         else:
+            config = load_config(home)
+            selected_model_target = model_target or _default_create_model_target(config)
+            selected_endpoint = next(
+                endpoint
+                for endpoint in config.endpoints
+                if endpoint.name
+                == next(target.endpoint for target in config.model_targets if target.name == selected_model_target)
+            )
+            selected_network_policy = selected_endpoint.adapter != "deterministic"
             started = start_interview(
                 home_root=home,
                 requested_target=target_value,
@@ -668,11 +822,11 @@ def create_command(
                     return session
                 return generate_model_questions(
                     config=load_config(home),
-                    model_target=model_target,
+                    model_target=selected_model_target,
                     session=session,
                     reference_bytes=reference_bytes,
                     prompt_name=prompt_name,
-                    network_allowed=allow_provider_network,
+                    network_allowed=allow_provider_network or selected_network_policy,
                 )
 
             def build_proposal(session):
@@ -682,9 +836,9 @@ def create_command(
                     requested_target=target_value,
                     start=started,
                     session=session,
-                    model_target=model_target,
+                    model_target=selected_model_target,
                     reference_bytes=reference_bytes,
-                    network_allowed=allow_provider_network,
+                    network_allowed=allow_provider_network or selected_network_policy,
                 )
                 proposal = json.loads(
                     (started.workpad / "manifests" / "gig-proposal.json").read_text(
@@ -1682,6 +1836,18 @@ def open_command(
         click.echo("Opened the registered workpad.")
     else:
         click.echo("Opened the bound target.")
+
+
+def _default_create_model_target(config) -> str:
+    """Resolve the setup-selected create target from the default profile."""
+
+    target_names = {target.name for target in config.model_targets}
+    for profile in config.profiles:
+        if profile.name == "default" and profile.planner in target_names:
+            return profile.planner
+    if "offline-default" in target_names:
+        return "offline-default"
+    return config.model_targets[0].name
 
 
 def _parse_credential_reference(value: str) -> CredentialReference:

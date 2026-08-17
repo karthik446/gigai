@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:gig-discovery-manifest:1",
+  "title": "GigAI adaptive Gig discovery manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_version",
+    "manifest_id",
+    "session_id",
+    "project_id",
+    "gig_id",
+    "request_kind",
+    "parent_manifest_id",
+    "capabilities",
+    "research_plan",
+    "question_rounds",
+    "stable_definition",
+    "run_input_contract",
+    "improve_context",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "manifest_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "manifest_id": {"$ref": "#/$defs/manifest_id"},
+    "session_id": {"$ref": "urn:gigai:schema:proposal-interview:1#/$defs/session_id"},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "request_kind": {"type": "string", "enum": ["create", "improve"]},
+    "parent_manifest_id": {
+      "oneOf": [
+        {"$ref": "#/$defs/manifest_id"},
+        {"type": "null"}
+      ]
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/capability"}
+    },
+    "research_plan": {"$ref": "#/$defs/research_plan"},
+    "question_rounds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/question_round"}
+    },
+    "stable_definition": {"$ref": "#/$defs/stable_definition"},
+    "run_input_contract": {"$ref": "#/$defs/run_input_contract"},
+    "improve_context": {
+      "oneOf": [
+        {"$ref": "#/$defs/improve_context"},
+        {"type": "null"}
+      ]
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"request_kind": {"const": "create"}}},
+      "then": {"properties": {"improve_context": {"type": "null"}}}
+    },
+    {
+      "if": {"properties": {"request_kind": {"const": "improve"}}},
+      "then": {
+        "properties": {"improve_context": {"$ref": "#/$defs/improve_context"}}
+      }
+    },
+    {
+      "if": {"properties": {"manifest_version": {"const": 1}}},
+      "then": {"properties": {"parent_manifest_id": {"type": "null"}}}
+    },
+    {
+      "if": {"properties": {"manifest_version": {"minimum": 2}}},
+      "then": {
+        "properties": {
+          "parent_manifest_id": {"$ref": "#/$defs/manifest_id"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "manifest_id": {
+      "type": "string",
+      "pattern": "^discovery_manifest_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "capability_id": {
+      "type": "string",
+      "enum": [
+        "local_reference_read",
+        "model_invocation",
+        "bounded_research",
+        "proposal_construction",
+        "approved_run_execution",
+        "target_effect"
+      ]
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability_id", "status", "status_source", "network", "effects"],
+      "properties": {
+        "capability_id": {"$ref": "#/$defs/capability_id"},
+        "status": {
+          "type": "string",
+          "enum": ["detected", "configured", "verified", "usable", "unavailable", "unsupported"]
+        },
+        "status_source": {
+          "type": "string",
+          "enum": ["installed_configuration", "accepted_contract", "runtime_check"]
+        },
+        "network": {"type": "string", "enum": ["local_only", "configured_provider_only"]},
+        "effects": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "urn:gigai:schema:common:1#/$defs/effect"}
+        }
+      }
+    },
+    "research_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "kind", "locator", "selected"],
+      "properties": {
+        "source_id": {"type": "string", "pattern": "^source_[a-z0-9_-]+$", "maxLength": 120},
+        "kind": {"type": "string", "enum": ["local_reference", "external_source"]},
+        "locator": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "reference_id": {
+          "oneOf": [
+            {"$ref": "urn:gigai:schema:proposal-interview:1#/$defs/reference_id"},
+            {"type": "null"}
+          ]
+        },
+        "selected": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "local_reference"}}},
+          "then": {"required": ["reference_id"], "properties": {"reference_id": {"type": "string"}}}
+        },
+        {
+          "if": {"properties": {"kind": {"const": "external_source"}}},
+          "then": {"properties": {"reference_id": {"type": "null"}}}
+        }
+      ]
+    },
+    "research_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "sources",
+        "network",
+        "privacy",
+        "credential_reference",
+        "budget",
+        "evidence_requirements"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["not_started", "planned", "approved", "running", "completed", "cancelled", "unavailable", "blocked"]
+        },
+        "sources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/research_source"}
+        },
+        "network": {"type": "string", "enum": ["local_only", "configured_provider_only"]},
+        "privacy": {"type": "string", "enum": ["local_only", "redact_before_share"]},
+        "credential_reference": {
+          "oneOf": [
+            {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+            {"type": "null"}
+          ]
+        },
+        "budget": {"$ref": "urn:gigai:schema:common:1#/$defs/budget"},
+        "evidence_requirements": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 2000}
+        }
+      }
+    },
+    "question_round": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "round",
+        "parent_round",
+        "status",
+        "model_selection_digest",
+        "provenance_artifact",
+        "questions",
+        "answers",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "round": {"type": "integer", "minimum": 1, "maximum": 1024},
+        "parent_round": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
+        "status": {"type": "string", "enum": ["pending", "answered", "sufficient", "blocked"]},
+        "model_selection_digest": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "provenance_artifact": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        "questions": {
+          "type": "array",
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {"$ref": "urn:gigai:schema:proposal-interview:1#/$defs/question"}
+        },
+        "answers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "urn:gigai:schema:proposal-interview:1#/$defs/answer"}
+        },
+        "created_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"round": {"const": 1}}},
+          "then": {"properties": {"parent_round": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"round": {"minimum": 2}}},
+          "then": {"properties": {"parent_round": {"type": "integer", "minimum": 1}}}
+        }
+      ]
+    },
+    "stable_definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact", "fields"],
+      "properties": {
+        "artifact": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "enum": ["goals", "constraints", "outputs", "stable_references"]}
+        }
+      }
+    },
+    "run_input_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact", "fields"],
+      "properties": {
+        "artifact": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        "fields": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/run_input_field"}
+        }
+      }
+    },
+    "run_input_field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field_id", "value_type", "required", "source"],
+      "properties": {
+        "field_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+        "value_type": {"type": "string", "enum": ["text", "choice", "url", "reference", "date", "number", "boolean"]},
+        "required": {"type": "boolean"},
+        "source": {"type": "string", "enum": ["operator", "reference", "run_context"]}
+      }
+    },
+    "improve_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["learning_record_ids", "active_version", "summary_artifact", "max_source_bytes", "omitted_content_policy"],
+      "properties": {
+        "learning_record_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "urn:gigai:schema:improvement-manifest:1#/$defs/learning_id"}
+        },
+        "active_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+        "summary_artifact": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        "max_source_bytes": {"$ref": "urn:gigai:schema:common:1#/$defs/safe_nonnegative_integer"},
+        "omitted_content_policy": {"const": "raw_unselected_and_hidden_context_excluded"}
+      }
+    }
+  }
+}

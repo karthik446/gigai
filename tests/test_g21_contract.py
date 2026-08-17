@@ -91,7 +91,7 @@ def _comparison() -> dict[str, object]:
 
 
 def test_g21_adds_exactly_two_packaged_resources() -> None:
-    assert len(SCHEMA_NAMES) == 29
+    assert len(SCHEMA_NAMES) == 31
     assert "gig-occurrence.schema.json" in SCHEMA_NAMES
     assert "gig-comparison.schema.json" in SCHEMA_NAMES
 
