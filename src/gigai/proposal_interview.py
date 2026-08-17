@@ -629,6 +629,7 @@ class InterviewHTTPServer:
         on_rejection: Callable[[InterviewSession], InterviewSession] | None = None,
         builder_review: Mapping[str, object] | None = None,
         capability_summary: Mapping[str, str] | None = None,
+        context_summary: Mapping[str, str] | None = None,
         builder_mode: bool = False,
         builder_ready: bool = False,
         lifetime_seconds: float = 600.0,
@@ -649,6 +650,7 @@ class InterviewHTTPServer:
         self.on_rejection = on_rejection
         self.builder_review = builder_review if builder_review is not None else {}
         self.capability_summary = dict(capability_summary or {})
+        self.context_summary = dict(context_summary or {})
         self.builder_mode = builder_mode
         self.builder_ready = builder_ready
         self.lifetime_seconds = lifetime_seconds
@@ -904,6 +906,16 @@ class InterviewHTTPServer:
             if self.capability_summary
             else ""
         )
+        context_html = (
+            "<section class='context'><h2>Current Gig context</h2><ul>"
+            + "".join(
+                f"<li><strong>{html.escape(label.replace('_', ' ').capitalize())}</strong>: {html.escape(value)}</li>"
+                for label, value in self.context_summary.items()
+            )
+            + "</ul><p class='context-note'>This is read-only context for the improvement discussion. It does not approve or change the Gig.</p></section>"
+            if self.context_summary
+            else ""
+        )
         body = (
             "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
             "<title>Define a Gig</title><style>"
@@ -913,6 +925,7 @@ class InterviewHTTPServer:
             "h1{font-size:1.65rem;margin:0 0 8px}h2{font-size:1rem;margin:0}p{line-height:1.5}"
             ".intro{color:#dbe4f5;margin:0}.status{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-top:18px;font-size:.9rem}"
             ".capabilities{margin-top:18px;padding-top:14px;border-top:1px solid #33415c}.capabilities h2{font-size:.9rem}.capabilities ul{margin:8px 0;padding-left:20px;color:#dbe4f5}.capability-note{font-size:.78rem;color:#b8c5da;margin:8px 0 0}"
+            ".context{margin-top:18px;padding-top:14px;border-top:1px solid #33415c}.context h2{font-size:.9rem}.context ul{margin:8px 0;padding-left:20px;color:#dbe4f5}.context-note{font-size:.78rem;color:#b8c5da;margin:8px 0 0}"
             ".badge,.required{border-radius:999px;padding:4px 9px;font-size:.75rem;font-weight:700;background:#dbeafe;color:#1e40af}"
             ".required{background:#eef2ff;color:#4338ca;float:right}.question,.approval{background:white;border:1px solid #dbe2ef;border-radius:12px;padding:20px;margin:14px 0;box-shadow:0 2px 8px #1720330d}.optional-context{border-style:dashed}"
             ".question-heading{display:flex;justify-content:space-between;gap:12px}.rationale{color:#526079;margin:8px 0 14px}.help{color:#526079;font-size:.88rem;margin:10px 0 0;padding-left:20px}"
@@ -923,6 +936,7 @@ class InterviewHTTPServer:
             "</style><main class='shell'><header><h1>Define a Gig</h1>"
             "<p class='intro'>Describe the Gig you want to create. GigAI may ask a follow-up only when it needs more context. Nothing runs and the target is not modified during this interview.</p>"
             + capability_html
+            + context_html
             + f"<div class='status'><span data-state='{html.escape(session.state)}'>State: {html.escape(session.state.replace('_', ' ').capitalize())}</span><span class='badge'>{completed_required}/{total_required} required answers</span></div></header>"
             + "".join(forms)
             + "<p class='footer'>This local interview expires automatically. You can stop before approval at any time.</p></main><script>"

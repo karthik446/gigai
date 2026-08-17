@@ -1048,6 +1048,18 @@ def improve_command(
             "approved_run_execution": "unsupported",
             "target_effect": "unsupported",
         }
+        active_pointer = json.loads(
+            (started.workpad / "manifests/active-gig-version.json").read_text(encoding="utf-8")
+        )
+        active_proposal = json.loads(
+            (started.workpad / "manifests/gig-proposal.json").read_text(encoding="utf-8")
+        )
+        improve_context_summary = {
+            "gig": str(active_proposal.get("name", started.gig_id)),
+            "active_version": str(active_pointer.get("active_version", "unknown")),
+            "original_references": str(len(started.session.references)),
+            "context_boundary": "selected G20 learning records only",
+        }
         server = InterviewHTTPServer(
             started.session,
             on_session=lambda session: persist_interview_session(
@@ -1064,6 +1076,7 @@ def improve_command(
                 session=session,
             ),
             capability_summary=improve_capabilities,
+            context_summary=improve_context_summary,
         ).start()
         try:
             click.echo(f"GigAI local improve interview: {server.url}", err=True)
