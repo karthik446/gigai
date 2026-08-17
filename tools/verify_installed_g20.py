@@ -31,8 +31,8 @@ def _artifact(path: str, digest: str = DIGEST) -> dict[str, object]:
 
 
 def main() -> int:
-    if len(SCHEMA_NAMES) != 31:
-        raise SystemExit(f"installed G20 schema inventory is {len(SCHEMA_NAMES)}, expected 31")
+    if len(SCHEMA_NAMES) != 29:
+        raise SystemExit(f"installed G20 schema inventory is {len(SCHEMA_NAMES)}, expected 29")
     with tempfile.TemporaryDirectory(prefix="gigai-g20-installed-") as raw_root:
         root = Path(raw_root)
         home = root / "home"

@@ -58,8 +58,8 @@ def _manifest(digest: str, *, gig_id: str) -> dict[str, object]:
 
 
 def main() -> int:
-    if len(SCHEMA_NAMES) != 31:
-        raise SystemExit(f"installed G23 schema inventory is {len(SCHEMA_NAMES)}, expected 31")
+    if len(SCHEMA_NAMES) != 29:
+        raise SystemExit(f"installed G23 schema inventory is {len(SCHEMA_NAMES)}, expected 29")
     with tempfile.TemporaryDirectory(prefix="gigai-g23-installed-") as directory:
         root = Path(directory)
         runtime_home = root / "runtime-home"
