@@ -104,7 +104,7 @@ def test_create_runs_model_facilitated_build_then_explicit_approval(tmp_path: Pa
             (workpad / "manifests/gig-discovery-manifest.json").read_bytes()
         )
         assert discovery_manifest["request_kind"] == "create"
-        assert len(discovery_manifest["question_rounds"][0]["questions"]) == 3
+        assert len(discovery_manifest["question_rounds"][1]["questions"]) == 3
         builder_snapshot = parse_json_bytes((workpad / "manifests/gig-builder-session.json").read_bytes())
         assert builder_snapshot["state"] == "operator_review"
         send("approve")

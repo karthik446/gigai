@@ -61,7 +61,7 @@ def test_g27_builds_valid_manifest_with_truthful_capability_boundary(tmp_path: P
         canonical_json_bytes(built.manifest),
     )
     assert report.valid, report.as_dict()
-    assert len(built.manifest["question_rounds"][0]["questions"]) == 3
+    assert len(built.manifest["question_rounds"][1]["questions"]) == 3
     capabilities = {
         item["capability_id"]: item for item in built.manifest["capabilities"]
     }

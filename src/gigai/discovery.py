@@ -11,7 +11,7 @@ from .canonical import EntityPrefix, canonical_json_bytes, digest_imported_bytes
 from .config import GigAIConfig
 from .journal import JournalArtifact
 from .model_discovery import resolve_target_readiness
-from .proposal_interview import InterviewSession
+from .proposal_interview import InterviewSession, Question
 from .validators import validate_serialized_contract
 
 
@@ -118,6 +118,9 @@ def build_discovery_artifacts(
         }
 
     answers_by_id = {item.question_id: item for item in session.answers}
+    initial_questions = tuple(
+        question for question in session.questions if question.question_id == "scope"
+    )
     questions = [
         {
             "question_id": item.question_id,
@@ -130,6 +133,18 @@ def build_discovery_artifacts(
         }
         for item in direction_questions
     ]
+    def answer_records(questions: tuple[Question, ...]) -> list[dict[str, object]]:
+        return [
+            {
+                "question_id": question.question_id,
+                "answer_type": answer.answer_type,
+                "value": answer.value,
+                "answered_at": answer.answered_at,
+            }
+            for question in questions
+            if (answer := answers_by_id.get(question.question_id)) is not None
+        ]
+
     answers = [
         {
             "question_id": item.question_id,
@@ -225,14 +240,42 @@ def build_discovery_artifacts(
             {
                 "round": 1,
                 "parent_round": None,
-                "status": "sufficient" if not direction_questions else "answered" if answers else "pending",
+                "status": "answered" if answer_records(initial_questions) else "pending",
                 "model_selection_digest": selection_digest,
                 "provenance_artifact": artifact(provenance_path, provenance_bytes),
-                "questions": questions,
-                "answers": answers,
+                "questions": [
+                    {
+                        "question_id": item.question_id,
+                        "answer_type": item.answer_type,
+                        "required": item.required,
+                        "options": list(item.options),
+                        "depends_on": list(item.depends_on),
+                        "rationale": item.rationale,
+                        "provenance": item.provenance,
+                    }
+                    for item in initial_questions
+                ],
+                "answers": answer_records(initial_questions),
                 "created_at": session.created_at,
                 "updated_at": session.updated_at,
-            }
+            },
+            *(
+                [
+                    {
+                        "round": 2,
+                        "parent_round": 1,
+                        "status": "answered" if answers else "pending",
+                        "model_selection_digest": selection_digest,
+                        "provenance_artifact": artifact(provenance_path, provenance_bytes),
+                        "questions": questions,
+                        "answers": answers,
+                        "created_at": session.created_at,
+                        "updated_at": session.updated_at,
+                    }
+                ]
+                if direction_questions
+                else []
+            ),
         ],
         "stable_definition": {
             "artifact": artifact(stable_path, stable_bytes),
