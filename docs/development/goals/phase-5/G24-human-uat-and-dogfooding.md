@@ -3,7 +3,8 @@
 - Status: Proposed for review; human-executed; not activated
 - Type: User-acceptance and dogfooding goal; not a runtime implementation goal
 - Depends on: G22 create/interview, G19 target-effect boundary, G20 improvement
-  boundary, G21 recurring/comparison boundary, and G23 portability evidence
+  boundary, G21 recurring/comparison boundary, G23 portability evidence, G26
+  builder implementation, G27 adaptive discovery, and the G28 v0.1.5 candidate
 - Unblocks: G25 alpha release readiness and final repository cleanup
 
 ## Outcome

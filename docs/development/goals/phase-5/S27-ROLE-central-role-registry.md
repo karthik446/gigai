@@ -3,7 +3,7 @@
 - Status: Proposed for review; not activated
 - Type: Research and contract-design spike; no runtime implementation
 - Depends on: G18 model invocation contracts, G15/G16 reference-role contracts,
-  Goal Graph executor contracts, and the G28 readiness goal
+  and Goal Graph executor contracts
 - Unblocks: G28 v0.1.5 readiness implementation
 
 ## Outcome

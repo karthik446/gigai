@@ -14,12 +14,16 @@ The useful product flow should be:
 gigai setup -> choose model path -> gigai create <gig-name> -> HTMX discovery
 ```
 
-Today, the operator can encounter implementation-facing requirements such as
-explicit target binding, `--request`, `--reference`, `--open`, and an offline
-fixture label. The model choice is not yet a clear setup decision between a
-configured API target and an installed local executable. That makes
-`gigai create tailor-resume-for-job` fail before the browser can facilitate the
-Gig definition.
+Today, `--request` and `--reference` are already optional and `--open` already
+defaults to opening the browser, so they are not the main blocker. The real
+gap is that `--model-target` defaults to `offline-default` and
+`--allow-provider-network` defaults to disabled without first presenting a
+clear setup choice. An operator can therefore reach the browser while
+silently using deterministic fixture behavior instead of a configured model.
+The model choice is not yet a clear setup decision between a configured API
+target and an installed local executable. That makes
+`gigai create tailor-resume-for-job` misleading even when it no longer fails
+at the CLI boundary.
 
 ## Required resolution
 

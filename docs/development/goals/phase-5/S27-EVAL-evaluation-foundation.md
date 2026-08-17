@@ -14,6 +14,25 @@ versioned evaluation model. It must distinguish unit/contract tests,
 integration tests, installed end-to-end scenarios, and behavioral evals so a
 plumbing check cannot be reported as model or product quality.
 
+## Canonical evaluation vocabulary
+
+The roadmap's evaluation objects remain canonical. S27-EVAL adds verification
+tiers; it does not create a competing object taxonomy:
+
+| Roadmap object | S27-EVAL use |
+| --- | --- |
+| Case | Versioned test or eval input bundle, including expected behavior and labels |
+| Solver | Code path, fixture, installed command, or model attempting the Case |
+| Verifier | Deterministic checker or judge scoring the Solver output |
+| Trace | Durable Run/Goal/invocation/tool evidence for the execution |
+| Adjudication | Human or policy decision when evidence or evaluators disagree |
+| Report | Regenerable machine-readable and human-readable result |
+
+The four tiers classify the strength and environment of the evidence. They do
+not replace Case/Solver/Verifier/Trace/Adjudication/Report ownership: even a
+unit or integration result should identify the applicable objects, while a
+behavioral result must not omit them.
+
 ## Decisions required
 
 The spike must produce an accepted decision record covering:

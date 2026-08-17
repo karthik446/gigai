@@ -2,8 +2,8 @@
 
 - Status: Proposed for review; not activated
 - Type: Product-flow and contract-design spike; no runtime implementation
-- Depends on: G24 UAT findings, G26 builder implementation, G18 model readiness,
-  G22 loopback interview, and the G28 readiness goal
+- Depends on: G26 builder implementation evidence, G18 model readiness, and the
+  G22 loopback interview; may incorporate G24 observations when available
 - Unblocks: G28 v0.1.5 readiness implementation
 
 ## Outcome

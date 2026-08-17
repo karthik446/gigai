@@ -9,10 +9,10 @@
 ## Observation
 
 Production boundaries currently accept unconstrained `role: str` values such
-as `gig-builder`, `proposal-questioner`, `reviewer`, `diagnostic`, and
-`create`. The same word “role” is also used for review-reference roles and
-Goal Graph executor roles, which are different namespaces with different
-owners and meanings.
+as `gig-builder`, `proposal-questioner`, `live-diagnostic`,
+`offline-diagnostic`, and `create`. The same word “role” is also used for
+review-reference roles and Goal Graph executor roles, which are different
+namespaces with different owners and meanings.
 
 This makes typos, unsupported roles, and accidental cross-namespace reuse
 possible. It also prevents an operator or evaluator from answering which
@@ -24,9 +24,10 @@ role requires.
 Create one central, versioned role registry with separate namespaces at
 minimum:
 
-- `model_invocation` — GigAI-owned model purposes such as
-  `gig_builder`, `proposal_questioner`, `researcher`, `reviewer`, and
-  `diagnostic`;
+- `model_invocation` — GigAI-owned model purposes currently represented by
+  `gig-builder`, `proposal-questioner`, `live-diagnostic`,
+  `offline-diagnostic`, and `create`; the registry may introduce stable IDs
+  separately from these legacy spellings, but must define the mapping;
 - `reference` — domain/review roles such as `primary_source` or
   `subject_repository`; and
 - `executor` — Goal Graph execution roles and capability bindings.

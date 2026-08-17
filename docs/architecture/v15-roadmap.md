@@ -396,7 +396,7 @@ dependencies, not live status fields or authorization to begin.
 | [G21](../development/goals/phase-5/G21-recurring-and-comparative-gigs.md) | Recurring and comparative Gigs | G13, G14, G20 |
 | G22 | Deliberative `create` and user-facing proposal interview | S22-01, G18 |
 | G23 | Gig self-containment and portability (capability-manifest reference and proposal-lineage resolution on the active Gig version) | G17, G19, G20, G22 |
-| G24 | Local UAT and dogfooding across isolated GigAI installations | G18, G19, G20, G21, G22, G23, G26 |
+| G24 | Local UAT and dogfooding across isolated GigAI installations | G18, G19, G20, G21, G22, G23, G26, G27, G28 |
 | G26 | Model-facilitated Gig builder, adaptive clarification, and bounded proposal research | G18, G22, S18-02, G24 findings |
 | G28 | v0.1.5 evaluation, role-registry, and browser-first create readiness | G26, G27 contract, S27-EVAL, S27-ROLE, S27-CREATE |
 | G27 | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G28, G24 findings |
