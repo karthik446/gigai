@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from gigai.canonical import canonical_json_bytes, digest_imported_bytes
-from gigai.config import load_config
+from gigai.config import Endpoint, ModelTarget, load_config
 from gigai.discovery import DiscoveryError, build_discovery_artifacts
 from gigai.journal import reconcile_journal
 from gigai.lifecycle import persist_discovery_manifest, start_interview
@@ -77,6 +77,62 @@ def test_g27_builds_valid_manifest_with_truthful_capability_boundary(tmp_path: P
     assert capabilities["target_effect"]["status"] == "unsupported"
     assert built.manifest["research_plan"]["network"] == "local_only"
     assert all(item.path.startswith(("review/", "manifests/")) for item in built.artifacts)
+
+
+def test_g27_capability_status_does_not_claim_unavailable_model_is_usable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, started = _started(tmp_path)
+    monkeypatch.setattr(
+        "gigai.discovery.resolve_target_readiness",
+        lambda *args, **kwargs: SimpleNamespace(readiness="unavailable"),
+    )
+    built = build_discovery_artifacts(
+        config=load_config(home),
+        model_target="offline-default",
+        session=started.session,
+        reference_bytes={},
+    )
+    capabilities = {
+        item["capability_id"]: item for item in built.manifest["capabilities"]
+    }
+    assert capabilities["model_invocation"]["status"] == "unavailable"
+    assert capabilities["bounded_research"]["status"] == "unavailable"
+
+
+def test_g27_remote_model_discloses_provider_only_network_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, started = _started(tmp_path)
+    config = load_config(home)
+    remote_config = replace(
+        config,
+        endpoints=(Endpoint(name="remote", adapter="openai_api"),),
+        model_targets=(
+            ModelTarget(
+                name="remote-default",
+                endpoint="remote",
+                model="test-model",
+                capabilities=("text",),
+                max_output_tokens=64,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "gigai.discovery.resolve_target_readiness",
+        lambda *args, **kwargs: SimpleNamespace(readiness="usable"),
+    )
+    built = build_discovery_artifacts(
+        config=remote_config,
+        model_target="remote-default",
+        session=started.session,
+        reference_bytes={},
+    )
+    capabilities = {
+        item["capability_id"]: item for item in built.manifest["capabilities"]
+    }
+    assert capabilities["model_invocation"]["network"] == "configured_provider_only"
+    assert capabilities["bounded_research"]["network"] == "configured_provider_only"
 
 
 def test_g27_refuses_a_sixth_direction_question(tmp_path: Path) -> None:

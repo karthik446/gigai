@@ -30,7 +30,7 @@ release has passed. Those are explicitly downstream.
 | Stable definition vs. Run input | review projection artifacts and browser assertions | Pass |
 | Update/improve visibility | revisioned manifests and read-only improve context | Pass |
 | G20 improve gates remain authoritative | bounded learning IDs/active-version checks in lifecycle | Pass |
-| Named mutation guards | `tools/run_g27_mutation.py`: 5/5 killed | Pass |
+| Named mutation guards | `tools/run_g27_mutation.py`: 8/8 killed, covering question ceiling, capability truthfulness, network classification, context filtering, reference integrity, journal publication, and duplicate approval | Pass |
 | Interrupted discovery recovery | transaction interruption, reconciliation, and malformed-response tests | Pass |
 | Fresh-wheel replay | disposable Python 3.11 environment; 31 schemas verified | Pass |
 | Human UAT | explicitly owned by downstream G29 after v0.1.5 | Deferred |
@@ -39,10 +39,13 @@ release has passed. Those are explicitly downstream.
 ## Executed verification
 
 - Focused G22/G26/G27 interview and runtime regressions: 13 passed.
-- G27 mutation harness: 5/5 named guards killed.
+- G27 mutation harness: 8/8 named guards killed, including dedicated
+  capability-truthfulness, network-boundary, and duplicate-approval mutants.
 - Source-installed G27 replay: passed with 31 packaged schemas.
 - Fresh-wheel G27 replay: passed from a newly built `gigai-0.1.4` wheel in a
   disposable Python 3.11 environment.
+- Full repository suite after the guard-fixture closeout: 585 passed and 68
+  subtests passed in 5m07s.
 - `git diff --check`: clean at closeout.
 - The pull-request workflow retains the full source suite and now runs the
   G27 installed replay alongside the existing G28 wheel verifier.

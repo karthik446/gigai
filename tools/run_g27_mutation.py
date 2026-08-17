@@ -48,6 +48,27 @@ MUTANTS = (
         "tests/test_g26_cli_builder.py::test_create_runs_model_facilitated_build_then_explicit_approval",
         "lifecycle.py",
     ),
+    (
+        "capability-truthfulness",
+        '    model_status = readiness.readiness if readiness.readiness in {\n        "detected", "configured", "verified", "usable", "unavailable", "unsupported"\n    } else "unavailable"\n',
+        '    model_status = "usable"\n',
+        "tests/test_g27_runtime.py::test_g27_capability_status_does_not_claim_unavailable_model_is_usable",
+        "discovery.py",
+    ),
+    (
+        "network-boundary-classification",
+        '            "network": "local_only" if endpoint.adapter == "deterministic" else "configured_provider_only",\n',
+        '            "network": "local_only",\n',
+        "tests/test_g27_runtime.py::test_g27_remote_model_discloses_provider_only_network_boundary",
+        "discovery.py",
+    ),
+    (
+        "duplicate-approval-authority",
+        '    if session.state == "approved":\n',
+        '    if False:\n',
+        "tests/test_g22_approval.py::test_operator_approval_seals_the_proposal_without_starting_a_run",
+        "lifecycle.py",
+    ),
 )
 
 
