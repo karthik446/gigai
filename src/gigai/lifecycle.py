@@ -495,6 +495,7 @@ def persist_discovery_manifest(
     model_target: str,
     reference_bytes: Mapping[str, bytes],
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+    observer: CreateObserver | None = None,
 ) -> JournalEntry:
     """Journal one subordinate G27 discovery manifest for a session revision."""
 
@@ -569,6 +570,7 @@ def persist_discovery_manifest(
         transition="gig_discovery_manifest_written",
         body=f"G27 discovery manifest recorded for interview {session.session_id}.",
         artifacts=built.artifacts,
+        observer=observer,
     )
 
 

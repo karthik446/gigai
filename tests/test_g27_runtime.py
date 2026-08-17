@@ -10,8 +10,10 @@ import pytest
 from gigai.canonical import canonical_json_bytes
 from gigai.config import load_config
 from gigai.discovery import DiscoveryError, build_discovery_artifacts
-from gigai.lifecycle import start_interview
+from gigai.journal import reconcile_journal
+from gigai.lifecycle import persist_discovery_manifest, start_interview
 from gigai.proposal_interview import Question
+from gigai.proposal_interview import ReferenceDecision
 from gigai.question_generation import (
     G27_DISCOVERY_PROMPT,
     QuestionGenerationError,
@@ -168,3 +170,93 @@ def test_g27_improve_manifest_requires_bounded_g20_context(tmp_path: Path) -> No
     assert built.manifest["improve_context"]["learning_record_ids"] == [
         "learning_12345678-1234-4234-9234-123456789abc"
     ]
+
+
+def test_g27_refuses_improve_manifest_without_context_summary(tmp_path: Path) -> None:
+    home, started = _started(tmp_path)
+    with pytest.raises(DiscoveryError, match="bounded G20 context"):
+        build_discovery_artifacts(
+            config=load_config(home),
+            model_target="offline-default",
+            session=replace(started.session, request_kind="improve"),
+            reference_bytes={},
+        )
+
+
+def test_g27_refuses_selected_reference_digest_drift(tmp_path: Path) -> None:
+    home, started = _started(tmp_path)
+    reference_id = "ref_12345678-1234-4234-9234-123456789abc"
+    selected = ReferenceDecision(
+        reference_id,
+        "sha256:" + "a" * 64,
+        "selected",
+    )
+    session = replace(started.session, references=(selected,))
+    with pytest.raises(DiscoveryError, match="reference bytes"):
+        build_discovery_artifacts(
+            config=load_config(home),
+            model_target="offline-default",
+            session=session,
+            reference_bytes={reference_id: b"tampered"},
+        )
+
+
+def test_g27_reconciles_interrupted_discovery_manifest_publish(tmp_path: Path) -> None:
+    home, started = _started(tmp_path)
+    config = load_config(home)
+
+    def interrupt(step: str) -> None:
+        if step == "after_artifact_replace":
+            raise RuntimeError(step)
+
+    with pytest.raises(RuntimeError, match="after_artifact_replace"):
+        persist_discovery_manifest(
+            start=started,
+            session=started.session,
+            config=config,
+            model_target="offline-default",
+            reference_bytes={},
+            observer=interrupt,
+        )
+
+    workpad = started.workpad
+    manifest_path = workpad / "manifests/gig-discovery-manifest.json"
+    assert manifest_path.is_file()
+    assert not any(
+        path.name.endswith("gig-discovery-manifest-written.txt")
+        for path in (workpad / "handoffs").iterdir()
+    )
+
+    recovered = reconcile_journal(
+        workpad=workpad,
+        project_id=started.project_id,
+        gig_id=started.gig_id,
+    )
+    assert recovered.reconciled is True
+    assert validate_serialized_contract(
+        "gig-discovery-manifest.schema.json", manifest_path.read_bytes()
+    ).valid
+    assert any(
+        path.name.endswith("gig-discovery-manifest-written.txt")
+        for path in (workpad / "handoffs").iterdir()
+    )
+
+
+def test_g27_malformed_model_response_creates_no_discovery_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, started = _started(tmp_path)
+    config = load_config(home)
+    monkeypatch.setattr(
+        "gigai.question_generation.invoke_bounded",
+        lambda *args, **kwargs: SimpleNamespace(output_text="not-json"),
+    )
+    with pytest.raises(QuestionGenerationError, match="malformed JSON"):
+        generate_model_questions(
+            config=config,
+            model_target="offline-default",
+            session=started.session,
+            reference_bytes={},
+            prompt_name=G27_DISCOVERY_PROMPT,
+        )
+    assert not (started.workpad / "manifests/gig-discovery-manifest.json").exists()
