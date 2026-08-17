@@ -498,11 +498,49 @@ def persist_discovery_manifest(
 ) -> JournalEntry:
     """Journal one subordinate G27 discovery manifest for a session revision."""
 
+    improve_context = None
+    improve_summary_bytes = None
+    if session.request_kind == "improve":
+        improvement_path = start.workpad / "manifests/improvement-manifest.json"
+        pointer_path = start.workpad / "manifests/active-gig-version.json"
+        try:
+            improvement = parse_json_bytes(improvement_path.read_bytes())
+            pointer = parse_json_bytes(pointer_path.read_bytes())
+        except (OSError, ValueError) as exc:
+            raise LifecycleError("improve discovery context is not recoverable") from exc
+        if not isinstance(improvement, Mapping) or not isinstance(pointer, Mapping):
+            raise LifecycleError("improve discovery context is invalid")
+        learning_ids = improvement.get("learning_record_ids")
+        active_version = pointer.get("active_version")
+        if (
+            not isinstance(learning_ids, list)
+            or not learning_ids
+            or any(not isinstance(item, str) for item in learning_ids)
+            or type(active_version) is not int
+            or active_version < 1
+        ):
+            raise LifecycleError("improve discovery context is incomplete")
+        improve_summary = {
+            "schema_version": "1.0",
+            "kind": "g27_improve_context",
+            "learning_record_ids": learning_ids,
+            "active_version": active_version,
+            "omitted_content_policy": "raw_unselected_and_hidden_context_excluded",
+        }
+        improve_summary_bytes = canonical_json_bytes(improve_summary)
+        improve_context = {
+            "learning_record_ids": learning_ids,
+            "active_version": active_version,
+            "max_source_bytes": len(improve_summary_bytes),
+            "omitted_content_policy": "raw_unselected_and_hidden_context_excluded",
+        }
     built = build_discovery_artifacts(
         config=config,
         model_target=model_target,
         session=session,
         reference_bytes=reference_bytes,
+        improve_context=improve_context,
+        improve_summary_bytes=improve_summary_bytes,
         uuid_factory=uuid_factory,
     )
     return record_transition(
@@ -1172,6 +1210,26 @@ def _approve_improve_interview_session(
         raise LifecycleError("improvement manifest base version is stale")
     if manifest.get("gig_id") != start.gig_id or manifest.get("project_id") != start.project_id:
         raise LifecycleError("improvement manifest binding does not match active Gig")
+    discovery_path = start.workpad / "manifests/gig-discovery-manifest.json"
+    if discovery_path.exists():
+        if discovery_path.is_symlink() or not discovery_path.is_file():
+            raise LifecycleError("improve discovery manifest is invalid")
+        discovery_bytes = discovery_path.read_bytes()
+        discovery = parse_json_bytes(discovery_bytes)
+        if not isinstance(discovery, Mapping):
+            raise LifecycleError("improve discovery manifest is invalid")
+        discovery_report = validate_serialized_contract(
+            "gig-discovery-manifest.schema.json", discovery_bytes
+        )
+        if not discovery_report.valid:
+            raise LifecycleError("improve discovery manifest failed validation")
+        context = discovery.get("improve_context")
+        if (
+            not isinstance(context, Mapping)
+            or list(context.get("learning_record_ids", ())) != ids
+            or context.get("active_version") != pointer.get("active_version")
+        ):
+            raise LifecycleError("improve discovery evidence does not match G20 inputs")
 
     proposal_id = _allocate_local_id(EntityPrefix.GIG_PROPOSAL, uuid_factory)
     proposal = dict(current)

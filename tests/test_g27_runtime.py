@@ -133,3 +133,38 @@ def test_g27_rejects_six_questions_before_session_persistence(
             reference_bytes={},
             prompt_name=G27_DISCOVERY_PROMPT,
         )
+
+
+def test_g27_improve_manifest_requires_bounded_g20_context(tmp_path: Path) -> None:
+    home, started = _started(tmp_path)
+    config = load_config(home)
+    session = replace(started.session, request_kind="improve")
+    summary = canonical_json_bytes(
+        {
+            "schema_version": "1.0",
+            "kind": "g27_improve_context",
+            "learning_record_ids": ["learning_12345678-1234-4234-9234-123456789abc"],
+            "active_version": 1,
+            "omitted_content_policy": "raw_unselected_and_hidden_context_excluded",
+        }
+    )
+    built = build_discovery_artifacts(
+        config=config,
+        model_target="offline-default",
+        session=session,
+        reference_bytes={},
+        improve_context={
+            "learning_record_ids": ["learning_12345678-1234-4234-9234-123456789abc"],
+            "active_version": 1,
+            "max_source_bytes": len(summary),
+            "omitted_content_policy": "raw_unselected_and_hidden_context_excluded",
+        },
+        improve_summary_bytes=summary,
+    )
+    report = validate_serialized_contract(
+        "gig-discovery-manifest.schema.json", canonical_json_bytes(built.manifest)
+    )
+    assert report.valid, report.as_dict()
+    assert built.manifest["improve_context"]["learning_record_ids"] == [
+        "learning_12345678-1234-4234-9234-123456789abc"
+    ]

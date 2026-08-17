@@ -1012,6 +1012,37 @@ def improve_command(
             max_rounds=max_rounds,
             improve=True,
         )
+        improve_reference_bytes = dict(started.reference_bytes)
+        improve_config = load_config(home)
+
+        def improve_questions(session):
+            if (started.workpad / "manifests/gig-discovery-manifest.json").exists():
+                return session
+            updated = generate_model_questions(
+                config=improve_config,
+                model_target=model_target,
+                session=session,
+                reference_bytes=improve_reference_bytes,
+                prompt_name=G27_DISCOVERY_PROMPT,
+            )
+            persist_discovery_manifest(
+                start=started,
+                session=updated,
+                config=improve_config,
+                model_target=model_target,
+                reference_bytes=improve_reference_bytes,
+            )
+            return updated
+
+        improve_readiness = resolve_target_readiness(improve_config, model_target)
+        improve_capabilities = {
+            "local_reference_read": "usable",
+            "model_invocation": improve_readiness.readiness,
+            "bounded_research": "usable" if improve_readiness.readiness == "usable" else "unavailable",
+            "proposal_construction": "usable",
+            "approved_run_execution": "unsupported",
+            "target_effect": "unsupported",
+        }
         server = InterviewHTTPServer(
             started.session,
             on_session=lambda session: persist_interview_session(
@@ -1020,22 +1051,14 @@ def improve_command(
                 gig_id=started.gig_id,
                 session=session,
             ),
-            on_questions=lambda session: (
-                session
-                if any(item.question_id == "operator-confirmation" for item in session.questions)
-                else generate_model_questions(
-                    config=load_config(home),
-                    model_target=model_target,
-                    session=session,
-                    reference_bytes=dict(started.reference_bytes),
-                )
-            ),
+            on_questions=improve_questions,
             on_approval=lambda session: approve_interview_session(
                 home_root=home,
                 requested_target=target_value,
                 start=started,
                 session=session,
             ),
+            capability_summary=improve_capabilities,
         ).start()
         try:
             click.echo(f"GigAI local improve interview: {server.url}", err=True)

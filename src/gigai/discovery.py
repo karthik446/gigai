@@ -44,6 +44,8 @@ def build_discovery_artifacts(
     model_target: str,
     session: InterviewSession,
     reference_bytes: Mapping[str, bytes],
+    improve_context: Mapping[str, object] | None = None,
+    improve_summary_bytes: bytes | None = None,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> DiscoveryArtifacts:
     """Build one schema-validated G27 manifest without granting authority."""
@@ -56,6 +58,10 @@ def build_discovery_artifacts(
     )
     if len(direction_questions) > 5:
         raise DiscoveryError("discovery question round exceeds the five-question ceiling")
+    if session.request_kind == "improve" and (
+        improve_context is None or improve_summary_bytes is None
+    ):
+        raise DiscoveryError("improve discovery requires a bounded G20 context summary")
     references_by_id = {item.reference_id: item for item in session.references}
     for reference_id in session.selected_reference_ids:
         content = reference_bytes.get(reference_id)
@@ -209,6 +215,22 @@ def build_discovery_artifacts(
             "effects": [],
         },
     ]
+    artifacts = [
+        JournalArtifact(stable_path, stable_bytes),
+        JournalArtifact(run_input_path, run_input_bytes),
+        JournalArtifact(provenance_path, provenance_bytes),
+    ]
+    serialized_improve_context = None
+    if improve_context is not None and improve_summary_bytes is not None:
+        serialized_improve_context = {
+            **dict(improve_context),
+            "summary_artifact": artifact(
+                "review/discovery/improve-summary.json", improve_summary_bytes
+            ),
+        }
+        artifacts.append(
+            JournalArtifact("review/discovery/improve-summary.json", improve_summary_bytes)
+        )
     manifest = {
         "schema_version": "1.0",
         "manifest_version": 1,
@@ -282,7 +304,7 @@ def build_discovery_artifacts(
             "fields": ["goals", "constraints", "outputs", "stable_references"],
         },
         "run_input_contract": {"artifact": artifact(run_input_path, run_input_bytes), "fields": []},
-        "improve_context": None,
+        "improve_context": serialized_improve_context,
         "created_at": session.created_at or now,
         "updated_at": session.updated_at or now,
     }
@@ -290,15 +312,8 @@ def build_discovery_artifacts(
     report = validate_serialized_contract("gig-discovery-manifest.schema.json", manifest_bytes)
     if not report.valid:
         raise DiscoveryError("discovery manifest failed schema validation: " + ", ".join(item.code for item in report.findings))
-    return DiscoveryArtifacts(
-        manifest=manifest,
-        artifacts=(
-            JournalArtifact(stable_path, stable_bytes),
-            JournalArtifact(run_input_path, run_input_bytes),
-            JournalArtifact(provenance_path, provenance_bytes),
-            JournalArtifact("manifests/gig-discovery-manifest.json", manifest_bytes),
-        ),
-    )
+    artifacts.append(JournalArtifact("manifests/gig-discovery-manifest.json", manifest_bytes))
+    return DiscoveryArtifacts(manifest=manifest, artifacts=tuple(artifacts))
 
 
 __all__ = ["DiscoveryArtifacts", "DiscoveryError", "build_discovery_artifacts"]
