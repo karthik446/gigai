@@ -1,0 +1,60 @@
+{
+  "behavior_scored": "pass",
+  "candidate_judge_scored": false,
+  "cases": [
+    {
+      "case_id": "g27-improve-evidence",
+      "false_negative": 0,
+      "false_positive": 0,
+      "forbidden": [],
+      "split": "final_held_out_acceptance",
+      "status": "pass",
+      "true_positive": 1
+    },
+    {
+      "case_id": "g27-research-plan-quality",
+      "false_negative": 0,
+      "false_positive": 0,
+      "forbidden": [],
+      "split": "final_held_out_acceptance",
+      "status": "pass",
+      "true_positive": 1
+    },
+    {
+      "case_id": "g27-question-provenance",
+      "false_negative": 0,
+      "false_positive": 0,
+      "forbidden": [],
+      "split": "final_held_out_acceptance",
+      "status": "pass",
+      "true_positive": 1
+    }
+  ],
+  "contamination": {
+    "check": "clean",
+    "tuning_cutoff": "commit:g28-deterministic-fixture-1"
+  },
+  "corpus_id": "g28-g26-g27-readiness",
+  "kind": "behavior_report",
+  "manifest_digest": "sha256:ca517d4b1891f7332d2a24bcd9efddbfc55a4f445074233cd0d8d6fa3a5f86c0",
+  "methodology_plumbing": "pass",
+  "metrics": {
+    "false_negative_count": 0,
+    "false_positive_count": 0,
+    "precision": 1.0,
+    "recall": 1.0
+  },
+  "schema_version": "1.0",
+  "solver": {
+    "id": "g28-g26-g27-fixture",
+    "kind": "deterministic_fixture",
+    "version": "1"
+  },
+  "split": "final_held_out_acceptance",
+  "status": "pass",
+  "verifier": {
+    "id": "gigai.behavior-set-verifier",
+    "kind": "deterministic",
+    "version": "1"
+  }
+}

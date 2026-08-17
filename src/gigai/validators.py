@@ -53,6 +53,7 @@ SCHEMA_NAMES = (
     "run-details.schema.json",
     "run-manifest.schema.json",
     "review-loop.schema.json",
+    "role-reference.schema.json",
     "target-effect.schema.json",
     "trace.schema.json",
 )

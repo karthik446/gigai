@@ -1,0 +1,38 @@
+{
+  "commands": [
+    [
+      "uv",
+      "run",
+      "--locked",
+      "pytest",
+      "-q",
+      "tests/test_g28_evaluation.py",
+      "tests/test_g28_roles.py",
+      "tests/test_g28_setup_create.py"
+    ]
+  ],
+  "duration_seconds": 0.356,
+  "kind": "g28_tier_report",
+  "results": [
+    {
+      "command": [
+        "uv",
+        "run",
+        "--locked",
+        "pytest",
+        "-q",
+        "tests/test_g28_evaluation.py",
+        "tests/test_g28_roles.py",
+        "tests/test_g28_setup_create.py"
+      ],
+      "returncode": 0,
+      "stderr_tail": "",
+      "stdout_tail": "...........                                                              [100%]\n11 passed in 0.22s\n"
+    }
+  ],
+  "returncode": 0,
+  "schema_version": "1.0",
+  "started_at": "2026-08-17T02:07:14.446989+00:00",
+  "status": "pass",
+  "tier": "unit"
+}

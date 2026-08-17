@@ -29,8 +29,10 @@ def _run(command: list[str], *, env: dict[str, str]) -> subprocess.CompletedProc
 
 
 def main() -> int:
-    if len(SCHEMA_NAMES) != 30:
-        raise SystemExit(f"installed G28 schema inventory is {len(SCHEMA_NAMES)}, expected 30")
+    if len(SCHEMA_NAMES) != 31:
+        raise SystemExit(f"installed G28 schema inventory is {len(SCHEMA_NAMES)}, expected 31")
+    if "role-reference.schema.json" not in SCHEMA_NAMES:
+        raise SystemExit("installed role-reference schema is missing")
     registered = resolve_role(
         {"namespace": "model_invocation", "id": "proposal-questioner", "version": 1},
         namespace="model_invocation",

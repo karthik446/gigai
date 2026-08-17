@@ -32,6 +32,9 @@ resources for explicit operator-triggered occurrences and derived comparisons.
 The G27 amendment adds `gig-discovery-manifest.schema.json` as the thirtieth
 resource for model-selected discovery rounds, truthful capability disclosure,
 bounded research planning, and the stable Gig/Run-input distinction.
+The G28 role-registry amendment adds `role-reference.schema.json` as the
+thirty-first resource for namespaced, versioned role references that grant no
+capability or authority.
 
 ## Production identity API
 

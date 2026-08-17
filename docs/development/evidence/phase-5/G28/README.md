@@ -25,6 +25,29 @@ is `deterministic_fixture`, and every report correctly records
 `candidate_judge_scored: false`. The final-held-out result is a plumbing
 demonstration, not an alpha-quality claim.
 
+## Tiered verification checkpoint
+
+The four G28 tiers are independently runnable and independently reported:
+
+| Tier | Command surface | Current result |
+| --- | --- | --- |
+| Unit/contract | `python tools/run_g28_tier.py unit` | 11 passed |
+| Integration | `python tools/run_g28_tier.py integration` | 9 passed; loopback permission required |
+| Installed-E2E | `python tools/run_g28_tier.py installed` | fresh installed replay passed |
+| Behavioral eval | `python tools/run_g28_tier.py behavior` | all three fixed splits passed |
+
+Reports are under [`tier-reports/`](tier-reports/). The integration tier is
+socket-bearing and must run in an environment that permits the loopback
+interview server. The installed tier builds and exercises the installed
+candidate, including the no-flag create path from an initialized non-Git
+target.
+
+The G28 role registry is also packaged as the additive
+`role-reference.schema.json` resource. It defines only the closed namespace,
+identifier, and positive version shape; runtime registration remains the
+authority for whether an identifier is selectable. The role reference grants
+no capability or permission.
+
 ## Evidence files
 
 - [G26/G27 behavior manifest](../../../../../research/evals/g28/g26-g27-manifest.json)
@@ -35,9 +58,6 @@ demonstration, not an alpha-quality claim.
 
 ## Next checkpoints
 
-1. Add separate unit/contract, integration, installed-E2E, and behavioral
-   command wrappers with their own reports.
-2. Expand role validation to review-reference and executor boundaries.
-3. Run the exact no-flag create path through a fresh installed candidate.
-4. Replace deterministic fixture observations with adjudicated behavioral
+1. Expand role validation to review-reference and executor boundaries.
+2. Replace deterministic fixture observations with adjudicated behavioral
    cases before any alpha or human-UAT claim.

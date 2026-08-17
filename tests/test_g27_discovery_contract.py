@@ -112,7 +112,7 @@ def _manifest(*, request_kind: str = "create") -> dict[str, object]:
 
 
 def test_g27_adds_one_schema_resource_and_accepts_create_manifest() -> None:
-    assert len(SCHEMA_NAMES) == 30
+    assert len(SCHEMA_NAMES) == 31
     assert "gig-discovery-manifest.schema.json" in SCHEMA_NAMES
     report = validate_serialized_contract(
         "gig-discovery-manifest.schema.json", canonical_json_bytes(_manifest())

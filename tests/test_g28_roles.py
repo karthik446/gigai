@@ -3,7 +3,9 @@ from __future__ import annotations
 import pytest
 
 from gigai.adapters.port import InvocationRequest
+from gigai.canonical import canonical_json_bytes
 from gigai.roles import RoleError, RoleReference, registered_roles, require_registered, resolve_role
+from gigai.validators import validate_serialized_contract
 
 
 def test_registry_is_namespaced_and_structured() -> None:
@@ -55,3 +57,24 @@ def test_invocation_request_exposes_registered_reference_but_replays_legacy_stri
         target_capabilities=frozenset({"text"}),
     )
     assert legacy.role_reference is None
+
+
+def test_role_reference_schema_is_closed_and_versioned() -> None:
+    valid = {
+        "schema_version": "1.0",
+        "namespace": "model_invocation",
+        "id": "proposal-questioner",
+        "version": 1,
+    }
+    assert validate_serialized_contract(
+        "role-reference.schema.json", canonical_json_bytes(valid)
+    ).valid
+
+    for invalid in (
+        {**valid, "namespace": "unknown"},
+        {**valid, "version": 0},
+        {**valid, "extra": "not allowed"},
+    ):
+        assert not validate_serialized_contract(
+            "role-reference.schema.json", canonical_json_bytes(invalid)
+        ).valid
