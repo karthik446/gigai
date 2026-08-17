@@ -270,10 +270,12 @@ flows and does not itself declare an alpha release.
 
 S27-EVAL, S27-ROLE, and S27-CREATE are accepted prerequisite spikes for a
 unified behavioral-eval framework, central namespaced roles, and a
-browser-first setup/create path. G28 is active against their accepted
-decisions and owns the v0.1.5 candidate. G24 human UAT and G27 runtime work
-wait for that candidate; G25 remains the later alpha-readiness and
-release-decision lane.
+browser-first setup/create path. G28 is complete against their accepted
+decisions and owns a verified v0.1.5 source candidate. Its four evidence tiers,
+31-resource schema set, role registry, truthful setup readiness, and no-flag
+browser-first create path are recorded under the G28 evidence directory. G24
+human UAT and G27 runtime work consume the candidate; G25 remains the later
+alpha-readiness and release-decision lane.
 
 ### v0.1.5 readiness gate
 

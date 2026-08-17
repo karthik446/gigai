@@ -23,7 +23,7 @@ G22 -> G26 + G27-contract -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G24 -
 | [G23](G23-gig-self-containment-and-portability.md) | Capability-manifest reference and proposal-lineage resolution on the active Gig version | G17, G19, G20, G22 | Complete |
 | [G24](G24-human-uat-and-dogfooding.md) | Human-executed UAT and dogfooding across real GigAI workflows | G18, G19, G20, G21, G22, G23, G26, G27, G28 | Proposed for review |
 | [G26](G26-model-facilitated-gig-builder.md) | Model-facilitated Gig definition, adaptive clarification, and proposal research | G18, G22, S18-02, G24 findings | Active — amendment accepted, implementation underway |
-| [G28](G28-v0.1.5-readiness.md) | v0.1.5 evaluation, role-registry, and browser-first create readiness | G26, G27 contract, S27-EVAL, S27-ROLE, S27-CREATE | Active — prerequisite spikes accepted |
+| [G28](G28-v0.1.5-readiness.md) | v0.1.5 evaluation, role-registry, and browser-first create readiness | G26, G27 contract, S27-EVAL, S27-ROLE, S27-CREATE | Complete — candidate evidence accepted |
 | [G27](G27-adaptive-gig-discovery-and-pre-proposal-research.md) | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G28 | Proposed for review |
 
 G20 must preserve G19's explicit target-effect authority and the existing

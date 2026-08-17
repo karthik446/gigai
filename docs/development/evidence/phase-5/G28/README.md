@@ -1,6 +1,6 @@
 # G28 — v0.1.5 Readiness Evidence
 
-- Status: Implementation in progress
+- Status: Complete — candidate evidence accepted; not released or UAT-complete
 - Recorded: 2026-08-16
 - Candidate version: not released
 
