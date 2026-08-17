@@ -22,6 +22,7 @@ from .canonical import (
     parse_json_bytes,
     validate_entity_id,
 )
+from .roles import RoleError, require_registered
 
 
 SCHEMA_NAMES = (
@@ -316,6 +317,29 @@ def validate_model_exchange(data: Mapping[str, Any] | bytes) -> ValidationReport
     return _report(findings)
 
 
+def validate_review_bundle(data: Mapping[str, Any] | bytes) -> ValidationReport:
+    """Validate review references against the owner-aware reference registry."""
+
+    payload = data if isinstance(data, bytes) else canonical_json_bytes(data)
+    report = validate_serialized_contract("review-bundle.schema.json", payload)
+    if not report.valid:
+        return report
+    instance = parse_json_bytes(payload)
+    findings: list[ValidationFinding] = []
+    for index, reference in enumerate(instance["references"]):
+        try:
+            require_registered(reference["role"], namespace="reference")
+        except (RoleError, TypeError):
+            findings.append(
+                ValidationFinding(
+                    f"references/{index}/role",
+                    "reference_role_unregistered",
+                    "review reference role must be registered in the reference namespace",
+                )
+            )
+    return _report(findings)
+
+
 _TARGET_EFFECT_TERMINAL_STATES = frozenset(
     {"applied", "refused", "failed", "cancelled", "rolled_back", "blocked"}
 )
@@ -486,6 +510,18 @@ def validate_goal_graph(data: Mapping[str, Any]) -> ValidationReport:
             )
         else:
             by_id[goal_id] = goal
+        executor = goal.get("executor")
+        if isinstance(executor, Mapping) and executor.get("role") is not None:
+            try:
+                require_registered(executor["role"], namespace="executor")
+            except (RoleError, TypeError):
+                findings.append(
+                    ValidationFinding(
+                        location + "/executor/role",
+                        "executor_role_unregistered",
+                        "executor role must be registered in the executor namespace",
+                    )
+                )
         for field, seen, code in (
             ("display_ordinal", seen_ordinals, "duplicate_display_ordinal"),
             ("slug", seen_slugs, "duplicate_slug"),
