@@ -21,6 +21,7 @@ from .config import (
 )
 from .comparison import ComparisonError, compare_occurrences
 from .diagnostics import render_report_json, run_doctor, run_live_doctor
+from .evaluation import EvaluationError, load_manifest, score_behavior, write_report
 from .index import JournalIndexError, JournalProjection, read_index
 from .lifecycle import (
     LifecycleError,
@@ -87,7 +88,7 @@ def cli(context: click.Context) -> None:
         raise click.UsageError(
             "Choose 'setup', 'doctor', 'init', 'create', 'improve', 'feedback', 'revise', "
             "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
-            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', 'models', or 'open'; "
+            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', 'models', 'eval', or 'open'; "
             "use --help for details."
         )
 
@@ -133,6 +134,59 @@ def models_command(home_value: Path | None, as_json: bool) -> None:
             )
     except (ConfigurationError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
+
+
+@cli.group("eval")
+def eval_group() -> None:
+    """Validate and run explicit GigAI evaluation contracts."""
+
+
+@eval_group.command("contract")
+@click.option("--manifest", type=click.Path(path_type=Path, dir_okay=False), required=True)
+def eval_contract_command(manifest: Path) -> None:
+    """Validate a versioned behavioral evaluation manifest."""
+
+    try:
+        loaded = load_manifest(manifest)
+    except EvaluationError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(
+        json.dumps(
+            {
+                "kind": "evaluation_contract_report",
+                "manifest": str(manifest),
+                "manifest_digest": loaded.digest,
+                "corpus_id": loaded.corpus_id,
+                "case_count": len(loaded.cases),
+                "status": "pass",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+
+
+@eval_group.command("behavior")
+@click.option("--manifest", type=click.Path(path_type=Path, dir_okay=False), required=True)
+@click.option("--observations", type=click.Path(path_type=Path, dir_okay=False), required=True)
+@click.option(
+    "--split",
+    type=click.Choice(["development", "calibration", "final_held_out_acceptance"]),
+    required=True,
+)
+@click.option("--output", type=click.Path(path_type=Path, dir_okay=False))
+def eval_behavior_command(manifest: Path, observations: Path, split: str, output: Path | None) -> None:
+    """Score separately supplied Solver observations against a Case corpus."""
+
+    try:
+        loaded = load_manifest(manifest)
+        observation_payload = json.loads(observations.read_text(encoding="utf-8"))
+        report = score_behavior(loaded, observation_payload, split)
+        write_report(report, output)
+    except (EvaluationError, OSError, json.JSONDecodeError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if report["status"] != "pass":
+        raise click.exceptions.Exit(1)
 
 
 @cli.command("setup")
