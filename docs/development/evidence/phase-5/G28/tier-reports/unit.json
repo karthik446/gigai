@@ -11,7 +11,7 @@
       "tests/test_g28_setup_create.py"
     ]
   ],
-  "duration_seconds": 0.356,
+  "duration_seconds": 0.373,
   "kind": "g28_tier_report",
   "results": [
     {
@@ -27,12 +27,12 @@
       ],
       "returncode": 0,
       "stderr_tail": "",
-      "stdout_tail": "...........                                                              [100%]\n11 passed in 0.22s\n"
+      "stdout_tail": "..............                                                           [100%]\n14 passed in 0.24s\n"
     }
   ],
   "returncode": 0,
   "schema_version": "1.0",
-  "started_at": "2026-08-17T02:07:14.446989+00:00",
+  "started_at": "2026-08-17T02:15:23.441419+00:00",
   "status": "pass",
   "tier": "unit"
 }

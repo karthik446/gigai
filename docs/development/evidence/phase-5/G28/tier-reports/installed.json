@@ -7,7 +7,7 @@
       "tools/verify_installed_g28.py"
     ]
   ],
-  "duration_seconds": 0.922,
+  "duration_seconds": 0.923,
   "kind": "g28_tier_report",
   "results": [
     {
@@ -24,7 +24,7 @@
   ],
   "returncode": 0,
   "schema_version": "1.0",
-  "started_at": "2026-08-17T02:07:37.897790+00:00",
+  "started_at": "2026-08-17T02:15:47.591899+00:00",
   "status": "pass",
   "tier": "installed"
 }

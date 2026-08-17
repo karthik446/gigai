@@ -12,7 +12,7 @@
       "tests/test_g27_discovery_contract.py"
     ]
   ],
-  "duration_seconds": 9.496,
+  "duration_seconds": 10.241,
   "kind": "g28_tier_report",
   "results": [
     {
@@ -29,12 +29,12 @@
       ],
       "returncode": 0,
       "stderr_tail": "",
-      "stdout_tail": ".........                                                                [100%]\n9 passed in 9.37s\n"
+      "stdout_tail": ".........                                                                [100%]\n9 passed in 10.11s\n"
     }
   ],
   "returncode": 0,
   "schema_version": "1.0",
-  "started_at": "2026-08-17T02:07:30.132101+00:00",
+  "started_at": "2026-08-17T02:15:40.148096+00:00",
   "status": "pass",
   "tier": "integration"
 }

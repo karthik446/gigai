@@ -500,6 +500,16 @@ def setup_command(
             credential_summary = [
                 {"name": item.name, "kind": item.kind} for item in credentials
             ]
+            preview_config = build_config(
+                home_root=requested_home,
+                workpad_root=resolved_workpad,
+                editor_argv=resolved_editor,
+                open_with_target=resolved_open,
+                credentials=credentials,
+                endpoints=endpoints,
+                model_targets=targets,
+                profiles=profiles,
+            )
             click.secho("\nGigAI setup review", bold=True, fg="cyan")
             click.echo(f"  GigAI home: {requested_home}")
             click.echo(f"  Workpad storage: {resolved_workpad}")
@@ -508,14 +518,28 @@ def setup_command(
                 "(program used to open workpads)"
             )
             click.echo(f"  Credential references: {json.dumps(credential_summary)}")
-            selected_target = next(item for item in targets if item.name == selected_create_target)
-            selected_endpoint = next(item for item in endpoints if item.name == selected_target.endpoint)
-            mode = "deterministic fixture" if selected_endpoint.adapter == "deterministic" else "configured provider"
-            click.echo(f"  Gig creation model: {selected_create_target} ({mode})")
+            click.secho("  Gig creation choices:", bold=True)
+            for candidate in targets:
+                readiness = resolve_target_readiness(preview_config, candidate.name)
+                endpoint = next(item for item in endpoints if item.name == candidate.endpoint)
+                mode = (
+                    "deterministic fixture"
+                    if endpoint.adapter == "deterministic"
+                    else "configured API"
+                )
+                selected = " [selected]" if candidate.name == selected_create_target else ""
+                click.echo(
+                    f"    - {candidate.name}: {mode}; readiness={readiness.readiness}{selected}"
+                )
             detected = discover_installed_models()
-            detected_names = ", ".join(item.name for item in detected if item.executable)
-            if detected_names:
-                click.echo(f"  Detected-only executables (not GigAI adapters): {detected_names}")
+            for item in detected:
+                if item.executable:
+                    click.echo(
+                        f"    - {item.name}: detected; readiness=unsupported "
+                        "(no GigAI adapter; not invoked)"
+                    )
+            if not any(item.executable for item in detected):
+                click.echo("    - codex/claude: not detected; no local CLI candidate")
             click.echo(
                 "  Built-in local mode: no network or provider credentials "
                 "(offline-default / fixture-v1)"
