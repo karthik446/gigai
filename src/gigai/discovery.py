@@ -46,6 +46,8 @@ def build_discovery_artifacts(
     reference_bytes: Mapping[str, bytes],
     improve_context: Mapping[str, object] | None = None,
     improve_summary_bytes: bytes | None = None,
+    manifest_version: int = 1,
+    parent_manifest_id: str | None = None,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> DiscoveryArtifacts:
     """Build one schema-validated G27 manifest without granting authority."""
@@ -233,13 +235,13 @@ def build_discovery_artifacts(
         )
     manifest = {
         "schema_version": "1.0",
-        "manifest_version": 1,
+        "manifest_version": manifest_version,
         "manifest_id": f"{EntityPrefix.DISCOVERY_MANIFEST}_{uuid_factory()}",
         "session_id": session.session_id,
         "project_id": session.project_id,
         "gig_id": session.gig_id,
         "request_kind": "create" if session.request_kind != "improve" else "improve",
-        "parent_manifest_id": None,
+        "parent_manifest_id": parent_manifest_id,
         "capabilities": capabilities,
         "research_plan": {
             "status": "planned" if sources else "not_started",

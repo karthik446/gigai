@@ -105,6 +105,8 @@ def test_create_runs_model_facilitated_build_then_explicit_approval(tmp_path: Pa
         )
         assert discovery_manifest["request_kind"] == "create"
         assert len(discovery_manifest["question_rounds"][1]["questions"]) == 3
+        assert discovery_manifest["manifest_version"] >= 3
+        assert discovery_manifest["parent_manifest_id"] is not None
         builder_snapshot = parse_json_bytes((workpad / "manifests/gig-builder-session.json").read_bytes())
         assert builder_snapshot["state"] == "operator_review"
         send("approve")

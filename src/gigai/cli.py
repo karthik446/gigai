@@ -823,16 +823,21 @@ def create_command(
 
             def builder_questions(session):
                 manifest_path = started.workpad / "manifests/gig-discovery-manifest.json"
-                if manifest_path.exists():
-                    return session
-                updated = generate_model_questions(
-                    config=load_config(home),
-                    model_target=selected_model_target,
-                    session=session,
-                    reference_bytes=reference_bytes,
-                    prompt_name=G27_DISCOVERY_PROMPT,
-                    network_allowed=allow_provider_network or selected_network_policy,
+                has_direction_questions = any(
+                    item.question_id not in {"scope", "references", "effect", "privacy", "capability"}
+                    and not item.question_id.startswith("clarification-")
+                    for item in session.questions
                 )
+                updated = session
+                if not has_direction_questions and not manifest_path.exists():
+                    updated = generate_model_questions(
+                        config=load_config(home),
+                        model_target=selected_model_target,
+                        session=session,
+                        reference_bytes=reference_bytes,
+                        prompt_name=G27_DISCOVERY_PROMPT,
+                        network_allowed=allow_provider_network or selected_network_policy,
+                    )
                 persist_discovery_manifest(
                     start=started,
                     session=updated,

@@ -500,6 +500,22 @@ def persist_discovery_manifest(
 
     improve_context = None
     improve_summary_bytes = None
+    manifest_version = 1
+    parent_manifest_id = None
+    existing_discovery_path = start.workpad / "manifests/gig-discovery-manifest.json"
+    if existing_discovery_path.exists():
+        try:
+            existing_discovery = parse_json_bytes(existing_discovery_path.read_bytes())
+        except (OSError, ValueError) as exc:
+            raise LifecycleError("existing discovery manifest is not recoverable") from exc
+        if not isinstance(existing_discovery, Mapping):
+            raise LifecycleError("existing discovery manifest is invalid")
+        current_version = existing_discovery.get("manifest_version")
+        current_id = existing_discovery.get("manifest_id")
+        if type(current_version) is not int or current_version < 1 or not isinstance(current_id, str):
+            raise LifecycleError("existing discovery manifest revision is invalid")
+        manifest_version = current_version + 1
+        parent_manifest_id = current_id
     if session.request_kind == "improve":
         improvement_path = start.workpad / "manifests/improvement-manifest.json"
         pointer_path = start.workpad / "manifests/active-gig-version.json"
@@ -541,6 +557,8 @@ def persist_discovery_manifest(
         reference_bytes=reference_bytes,
         improve_context=improve_context,
         improve_summary_bytes=improve_summary_bytes,
+        manifest_version=manifest_version,
+        parent_manifest_id=parent_manifest_id,
         uuid_factory=uuid_factory,
     )
     return record_transition(
