@@ -31,6 +31,7 @@ from .lifecycle import (
     build_interview_proposal,
     create_offline,
     persist_interview_session,
+    persist_discovery_manifest,
     record_feedback,
     record_builder_state,
     recover_builder_session,
@@ -51,8 +52,7 @@ from .occurrence import (
     reconcile_occurrence,
     trigger_occurrence,
 )
-from .question_generation import generate_model_questions
-from .question_generation import G26_QUESTION_PROMPTS
+from .question_generation import G27_DISCOVERY_PROMPT, generate_model_questions
 from .setup import (
     build_config,
     detect_editor_argv,
@@ -813,21 +813,25 @@ def create_command(
                 return updated, selected_ids, labels
 
             def builder_questions(session):
-                question_ids = {item.question_id for item in session.questions}
-                if "main-drive" not in question_ids:
-                    prompt_name = G26_QUESTION_PROMPTS[0]
-                elif "success-definition" not in question_ids:
-                    prompt_name = G26_QUESTION_PROMPTS[1]
-                else:
+                manifest_path = started.workpad / "manifests/gig-discovery-manifest.json"
+                if manifest_path.exists():
                     return session
-                return generate_model_questions(
+                updated = generate_model_questions(
                     config=load_config(home),
                     model_target=selected_model_target,
                     session=session,
                     reference_bytes=reference_bytes,
-                    prompt_name=prompt_name,
+                    prompt_name=G27_DISCOVERY_PROMPT,
                     network_allowed=allow_provider_network or selected_network_policy,
                 )
+                persist_discovery_manifest(
+                    start=started,
+                    session=updated,
+                    config=load_config(home),
+                    model_target=selected_model_target,
+                    reference_bytes=reference_bytes,
+                )
+                return updated
 
             def build_proposal(session):
                 nonlocal built_proposal_id

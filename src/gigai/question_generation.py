@@ -16,6 +16,7 @@ from .review import redact_text
 
 DETERMINISTIC_PROMPT = "g22-question-probe"
 G26_QUESTION_PROMPTS = ("g26-question-probe-1", "g26-question-probe-2")
+G27_DISCOVERY_PROMPT = "g27-discovery-round"
 
 
 class QuestionGenerationError(ProposalInterviewError):
@@ -103,6 +104,7 @@ def generate_model_questions(
 __all__ = [
     "DETERMINISTIC_PROMPT",
     "G26_QUESTION_PROMPTS",
+    "G27_DISCOVERY_PROMPT",
     "QuestionGenerationError",
     "generate_model_questions",
 ]

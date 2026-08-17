@@ -33,6 +33,7 @@ from .canonical import (
     parse_json_bytes,
 )
 from .config import load_config
+from .discovery import build_discovery_artifacts
 from .improvement import validate_improvement_manifest
 from .learning import load_learning_records, validate_learning_record
 from .journal import (
@@ -484,6 +485,35 @@ def persist_interview_session(
     )
     _persist_interview_trace(workpad, session)
     return entry
+
+
+def persist_discovery_manifest(
+    *,
+    start: InterviewStartResult,
+    session: InterviewSession,
+    config,
+    model_target: str,
+    reference_bytes: Mapping[str, bytes],
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> JournalEntry:
+    """Journal one subordinate G27 discovery manifest for a session revision."""
+
+    built = build_discovery_artifacts(
+        config=config,
+        model_target=model_target,
+        session=session,
+        reference_bytes=reference_bytes,
+        uuid_factory=uuid_factory,
+    )
+    return record_transition(
+        workpad=start.workpad,
+        project_id=start.project_id,
+        gig_id=start.gig_id,
+        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+        transition="gig_discovery_manifest_written",
+        body=f"G27 discovery manifest recorded for interview {session.session_id}.",
+        artifacts=built.artifacts,
+    )
 
 
 def approve_interview_session(
@@ -2099,6 +2129,7 @@ __all__ = [
     "approve_interview_session",
     "approve_offline",
     "create_offline",
+    "persist_discovery_manifest",
     "persist_interview_session",
     "record_feedback",
     "reject_offline",

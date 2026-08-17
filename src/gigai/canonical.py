@@ -110,6 +110,7 @@ class EntityPrefix(StrEnum):
     LEARNING = "learning"
     IMPROVEMENT_MANIFEST = "improve_manifest"
     DRAFT_MANIFEST = "draft_manifest"
+    DISCOVERY_MANIFEST = "discovery_manifest"
     OCCURRENCE = "occurrence"
     COMPARISON = "comparison"
 
