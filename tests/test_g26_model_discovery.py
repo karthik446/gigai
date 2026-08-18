@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from gigai.model_discovery import discover_installed_models, resolve_target_readiness
 from gigai.setup import build_config
 from click.testing import CliRunner
@@ -21,6 +23,20 @@ def test_model_discovery_is_read_only_and_reports_cli_candidates() -> None:
     assert detected[0].executable is not None
     assert detected[1].readiness == "unavailable"
     assert detected[1].executable is None
+
+
+def test_model_discovery_records_bounded_cli_version_evidence(tmp_path: Path) -> None:
+    executable = tmp_path / "codex"
+    executable.write_text("#! /bin/sh\nprintf 'codex-cli test-version\\n'\n", encoding="utf-8")
+    executable.chmod(0o755)
+
+    detected = discover_installed_models(
+        which=lambda name: str(executable) if name == "codex" else None
+    )
+
+    assert detected[0].readiness == "detected"
+    assert detected[0].version == "codex-cli test-version"
+    assert detected[1].version is None
 
 
 def test_configured_deterministic_target_is_usable_without_a_model_call(tmp_path) -> None:

@@ -5,9 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 import shutil
 from pathlib import Path
+import subprocess
+import tempfile
 from typing import Callable
 
 from .adapters.factory import AdapterFactoryError, resolve_model_adapter
+from .adapters.process import allowed_environment
 from .config import GigAIConfig
 from .model_targets import ModelTargetResolutionError
 
@@ -19,6 +22,7 @@ class DetectedModel:
     name: str
     executable: Path | None
     readiness: str
+    version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -36,13 +40,46 @@ class ModelReadiness:
 def discover_installed_models(
     *, which: Callable[[str], str | None] = shutil.which
 ) -> tuple[DetectedModel, ...]:
-    """Detect supported CLI names without spawning a process or reading secrets."""
+    """Detect supported CLIs and collect bounded, read-only version evidence."""
 
     return tuple(
-        DetectedModel(name, Path(path) if path else None, "detected" if path else "unavailable")
+        DetectedModel(
+            name,
+            Path(path) if path else None,
+            "detected" if path else "unavailable",
+            _probe_version(path) if path else None,
+        )
         for name in ("codex", "claude")
         for path in (which(name),)
     )
+
+
+def _probe_version(executable: str) -> str | None:
+    """Read one CLI version line without invoking a model or inheriting secrets."""
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="gigai-version-") as directory:
+            result = subprocess.run(
+                [executable, "--version"],
+                cwd=directory,
+                env=allowed_environment(),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                shell=False,
+                timeout=10,
+                check=False,
+            )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    for line in (*result.stdout.splitlines(), *result.stderr.splitlines()):
+        value = line.strip()
+        if value and "\0" not in value:
+            return value[:200]
+    return None
 
 
 def resolve_target_readiness(config: GigAIConfig, target_name: str) -> ModelReadiness:

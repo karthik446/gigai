@@ -711,7 +711,7 @@ def _run_browser_setup(
         {
             "id": target.name,
             "label": _model_target_label(target, preview),
-            "description": _model_target_description(target, preview),
+            "description": _browser_model_description(target, preview, detected_models),
             "kind": "api"
             if next(item for item in preview.endpoints if item.name == target.endpoint).adapter
             in {"openai_api", "openrouter_api", "anthropic_api"}
@@ -977,6 +977,20 @@ def _model_target_description(target: ModelTarget, config) -> str:
         return "Provider-default Claude model; authentication remains owned by the installed CLI."
     readiness = resolve_target_readiness(config, target.name)
     return f"Model {target.model}; readiness={readiness.readiness}. Credential values are never read during setup."
+
+
+def _browser_model_description(
+    target: ModelTarget, config, detected_models: tuple[DetectedModel, ...]
+) -> str:
+    description = _model_target_description(target, config)
+    endpoint = next(item for item in config.endpoints if item.name == target.endpoint)
+    if endpoint.adapter in {"codex_cli", "claude_cli"}:
+        detected = next((item for item in detected_models if item.name == endpoint.name), None)
+        if detected is not None and detected.version:
+            description += f" Installed version: {detected.version}."
+        elif detected is not None:
+            description += " Version could not be confirmed yet."
+    return description
 
 
 @cli.command("doctor")
