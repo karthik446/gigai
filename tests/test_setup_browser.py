@@ -31,6 +31,11 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
                 "label": "Codex CLI",
                 "description": "Bounded local model adapter.",
             },
+            {
+                "id": "openai-default",
+                "label": "OpenAI API",
+                "description": "Configure an environment reference first.",
+            },
         ),
         detected_models=(
             DetectedModel("codex", Path("/usr/local/bin/codex"), "detected"),
@@ -54,6 +59,7 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
         assert "Reviewer default" in body
         assert "Verifier default" in body
         assert "Researcher default" in body
+        assert 'value=\'openai-default\'  disabled' in body
         assert "Codex" in body
         assert "Detected — adapter available" in body
         assert "Not detected" in body

@@ -199,15 +199,16 @@ class SetupHTTPServer:
         roster_html = "".join(
             "<label class='model-option'><input type='checkbox' name='enabled_model_targets' "
             f"value='{html.escape(str(item['id']))}' "
-            f"{'checked' if item['id'] in self.draft.enabled_model_targets else ''}>"
+            f"{'checked' if item['id'] in self.draft.enabled_model_targets else ''} "
+            f"{_model_option_disabled(item['id'], self.draft)}>"
             f"<strong>{html.escape(str(item['label']))}</strong>"
             f"<span>{html.escape(str(item['description']))}</span></label>"
             for item in self.model_options
         )
-        reviewer_options = _role_select("Reviewer", "reviewer_model_target", self.draft.reviewer_model_target, self.model_options)
-        verifier_options = _role_select("Verifier", "verifier_model_target", self.draft.verifier_model_target, self.model_options)
-        researcher_options = _role_select("Researcher", "researcher_model_target", self.draft.researcher_model_target, self.model_options)
-        creation_options = _role_select("Gig creation", "selected_model_target", self.draft.selected_model_target, self.model_options)
+        reviewer_options = _role_select("Reviewer", "reviewer_model_target", self.draft.reviewer_model_target, self.model_options, self.draft)
+        verifier_options = _role_select("Verifier", "verifier_model_target", self.draft.verifier_model_target, self.model_options, self.draft)
+        researcher_options = _role_select("Researcher", "researcher_model_target", self.draft.researcher_model_target, self.model_options, self.draft)
+        creation_options = _role_select("Gig creation", "selected_model_target", self.draft.selected_model_target, self.model_options, self.draft)
         api_cards = (
             _api_card(
                 provider="OpenAI",
@@ -268,7 +269,7 @@ class SetupHTTPServer:
             + "</section><label><input name='open_with_target' type='checkbox' " + checked + "> Open workpads with their target later</label>"
             + "<button type='submit'>Apply setup</button></form>"
             + "<section class='card'><h2>Credential sources</h2><p class='muted'>Secret values never belong in config.toml, Gig manifests, or logs.</p><div class='credential-plan'><strong>Environment variable</strong><span>Supported now. GigAI stores only the variable name and reads the value at the provider boundary.</span></div><div class='credential-plan disabled'><strong>Protected local .env file</strong><span>Planned: atomic write, restrictive permissions, and runtime loading under the chosen GigAI home.</span></div><div class='credential-plan disabled'><strong>Anthropic API</strong><span>Coming soon; shown here for discoverability but not selectable yet.</span></div></section><p class='footer'>This page is local-only, loopback-bound, token-protected, and expires automatically.</p></main>"
-            + "<script>const choose=document.querySelector('#choose-folder');choose.addEventListener('click',async()=>{const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'choose_folder'})});const b=await r.json();if(!r.ok){alert(b.error||'Folder chooser unavailable');}else if(b.status==='selected'){const f=document.querySelector('#setup');f.home_root.value=b.path;f.workpad_root.value=b.path.replace(/[\\/]$/,'')+'/workpads';}});document.querySelector('#setup').addEventListener('submit',async(e)=>{e.preventDefault();const f=e.currentTarget;const enabled=[...f.querySelectorAll('input[name=enabled_model_targets]:checked')].map(item=>item.value);const selected=f.querySelector('select[name=selected_model_target]');const p={event:'apply',home_root:f.home_root.value,workpad_root:f.workpad_root.value,editor:f.editor.value,open_with_target:f.open_with_target.checked,selected_model_target:selected&&selected.value,reviewer_model_target:f.reviewer_model_target.value,verifier_model_target:f.verifier_model_target.value,researcher_model_target:f.researcher_model_target.value,enabled_model_targets:enabled,openai_api_env:f.openai_api_env.value,openai_api_model:f.openai_api_model.value,openrouter_api_env:f.openrouter_api_env.value,openrouter_api_model:f.openrouter_api_model.value};const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});if(!r.ok){const b=await r.json();alert(b.error||'Setup could not be applied');}else{document.body.innerHTML='<main class=\"shell\"><header><h1>GigAI setup complete</h1><p class=\"intro\">Configuration saved. You can close this tab.</p></header></main>';}});</script>"
+            + "<script>const choose=document.querySelector('#choose-folder');const form=document.querySelector('#setup');const apiTargets={ 'openai-default':'openai_api_env', 'openrouter-default':'openrouter_api_env' };function refreshProviderAvailability(){for(const [target,field] of Object.entries(apiTargets)){const ready=Boolean(form[field].value.trim());for(const checkbox of form.querySelectorAll('input[name=enabled_model_targets]')){if(checkbox.value===target){checkbox.disabled=!ready;if(!ready)checkbox.checked=false;}}for(const option of form.querySelectorAll('select option[value=\"'+target+'\"]')){option.disabled=!ready;}for(const select of form.querySelectorAll('select')){if(!ready&&select.value===target){const first=[...select.options].find(item=>!item.disabled);if(first)select.value=first.value;}}}}choose.addEventListener('click',async()=>{const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'choose_folder'})});const b=await r.json();if(!r.ok){alert(b.error||'Folder chooser unavailable');}else if(b.status==='selected'){form.home_root.value=b.path;form.workpad_root.value=b.path.replace(/[\\/]$/,'')+'/workpads';}});for(const field of ['openai_api_env','openrouter_api_env'])form[field].addEventListener('input',refreshProviderAvailability);refreshProviderAvailability();form.addEventListener('submit',async(e)=>{e.preventDefault();const enabled=[...form.querySelectorAll('input[name=enabled_model_targets]:checked')].map(item=>item.value);const selected=form.querySelector('select[name=selected_model_target]');const p={event:'apply',home_root:form.home_root.value,workpad_root:form.workpad_root.value,editor:form.editor.value,open_with_target:form.open_with_target.checked,selected_model_target:selected&&selected.value,reviewer_model_target:form.reviewer_model_target.value,verifier_model_target:form.verifier_model_target.value,researcher_model_target:form.researcher_model_target.value,enabled_model_targets:enabled,openai_api_env:form.openai_api_env.value,openai_api_model:form.openai_api_model.value,openrouter_api_env:form.openrouter_api_env.value,openrouter_api_model:form.openrouter_api_model.value};const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});if(!r.ok){const b=await r.json();alert(b.error||'Setup could not be applied');}else{document.body.innerHTML='<main class=\"shell\"><header><h1>GigAI setup complete</h1><p class=\"intro\">Configuration saved. You can close this tab.</p></header></main>';}});</script>"
         ).encode()
         return body
 
@@ -306,10 +307,12 @@ def _role_select(
     name: str,
     selected: str,
     options: tuple[Mapping[str, str], ...],
+    draft: SetupDraft,
 ) -> str:
     option_html = "".join(
         f"<option value='{html.escape(str(item['id']))}' "
-        f"{'selected' if item['id'] == selected else ''}>"
+        f"{'selected' if item['id'] == selected and not _model_option_disabled(item['id'], draft) else ''} "
+        f"{_model_option_disabled(item['id'], draft)}>"
         f"{html.escape(str(item['label']))}</option>"
         for item in options
     )
@@ -318,6 +321,14 @@ def _role_select(
         f"<span class='select-wrap'><select name='{html.escape(name)}' required>{option_html}</select></span>"
         "</label>"
     )
+
+
+def _model_option_disabled(target_id: str, draft: SetupDraft) -> str:
+    if target_id == "openai-default" and not draft.openai_api_env.strip():
+        return "disabled"
+    if target_id == "openrouter-default" and not draft.openrouter_api_env.strip():
+        return "disabled"
+    return ""
 
 
 def _api_card(
