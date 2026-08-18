@@ -23,6 +23,44 @@ Gig-specific roles at the Gig level, edited through a command such as
 defaults. Planner, critic, adjudicator, implementer, and other workflow-specific
 roles are not setup roles unless a later contract explicitly makes them so.
 
+## Accepted browser setup interaction contract
+
+The browser flow is a progressive, one-question-at-a-time setup conversation, not
+an administrator-style configuration dashboard. The browser keeps a concise Gig
+definition explanation beside the active question:
+
+> A Gig is a repeatable unit of work with stable Goals, changing inputs, and
+> reviewable results.
+
+The setup sequence is explicit and revisitable:
+
+1. **Workspace** — choose the GigAI private storage folder; derive the private
+   workpad location and explain what is stored there.
+2. **Access boundary** — choose `CLI only`, `API only`, or `Both CLI and API`.
+3. **Available models** — show only models within the selected boundary. Model
+   availability is multi-select: detected Claude and Codex CLIs may both be
+   enabled, and API providers may be enabled independently.
+4. **Machine defaults** — assign enabled models to the four machine defaults:
+   `reviewer`, `verifier`, `researcher`, and `gig_creator`. Reviewer and verifier
+   remain distinct. Gig-specific roles such as planner, critic, adjudicator, and
+   implementer are not configured here. The human-facing **Gig creator** label
+   maps to the existing registered `model_invocation:gig-builder` purpose; it
+   does not introduce a fifth registry role or a second authority path.
+5. **Ready** — present a clean sectioned summary of Workspace, Access, Models,
+   and Role defaults before the operator applies setup.
+
+Selecting an API provider expands its configuration inline, including the
+environment-variable reference or protected local-secret choice permitted by
+the accepted credential contract. The secret value itself is never displayed,
+stored in browser state, or written to a durable record. A model choice does not
+silently advance the flow; each answer has an explicit next-question action.
+
+The first screen must feel like choosing a trusted starting point, not completing
+an infrastructure form. Secondary explanation and advanced configuration remain
+available without competing with the primary question. The standalone UX
+prototype used to settle this direction is a local design artifact only; runtime
+evidence must prove the behavior independently.
+
 ## Contract gate
 
 Before runtime adapter work, reconcile accepted S18-02 process policy with real Codex CLI and Claude Code invocations. The contract decision must settle:
@@ -43,7 +81,10 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
 4. Add native local-folder selection on supported hosts, derive the private workpad folder from the chosen GigAI home, and retain an absolute-path fallback.
 5. Add supported API-provider onboarding through credential references. Raw values must never enter config, manifests, logs, or browser responses.
 6. Keep Anthropic API visible as disabled until its adapter contract is accepted; do not represent planned support as configured support. Offline/demo fixtures remain internal developer and contract-test paths, not a normal operator model choice.
-7. Refresh the HTMX setup/create surfaces with plain-language labels, adaptive follow-up behavior, proposal-build/review states, and no implementation flags required for ordinary use.
+7. Refresh the HTMX setup/create surfaces with the accepted one-question-at-a-time
+   setup flow, plain-language labels, contextual Gig-definition explanation,
+   adaptive follow-up behavior, proposal-build/review states, and no
+   implementation flags required for ordinary use.
 
 ## In scope
 
@@ -56,6 +97,9 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
 - protected local `.env` onboarding only if its runtime contract is accepted;
 - native folder selection and derived home/workpad paths;
 - setup reruns that preserve existing providers and update one explicit default;
+- the accepted five-step browser setup flow, including access-boundary branching,
+  multi-select model enablement, inline API configuration, role-default assignment,
+  and sectioned final summary;
 - HTMX setup and Gig-definition/create usability fixes;
 - real local CLI probes, mutation tests, integration tests, and installed replay;
 - sanitized evidence for provider/auth/readiness behavior.
@@ -84,6 +128,13 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
 7. A CLI terminal result is normalized through the existing model port and model-invocation record. It cannot create a proposal, Run, target effect, or active-version transition by itself.
 8. Setup folder selection changes ownership only after explicit operator submission and successful atomic configuration publication.
 9. A browser page is a local projection. It cannot approve a Gig or grant a capability outside the existing lifecycle and authority contracts.
+10. The setup browser may collect and summarize machine configuration, but it
+    cannot define a Gig, assign Gig-specific workflow authority, or approve a
+    proposal. The final setup summary is informational until the existing
+    configuration publication path succeeds.
+11. The enabled model roster is a set, not a single choice. Role defaults may
+    reference only enabled, usable targets; changing the roster cannot silently
+    rewrite a Gig's own role definition.
 
 ## Acceptance criteria
 
@@ -98,11 +149,27 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
 9. Browser setup and create flows cover validation errors, cancellation, rerun/idempotence, stale sessions, and interrupted setup without partial configuration.
 10. Fresh-wheel installed replay proves setup, CLI readiness, model selection, and create entry behavior from an isolated environment.
 11. Completion audit and terminal handoff identify G31 as the next consumer; no release or alpha claim is made by G30 alone.
+12. Browser setup implements the five explicit steps—Workspace, Access boundary,
+    Available models, Machine defaults, and Ready—with one active question at a
+    time, clear Back/Continue actions, and revisitable prior answers.
+13. Access-boundary selection branches the model question correctly: CLI-only
+    exposes local CLIs, API-only exposes configured API providers, and Both
+    exposes the combined roster. Local CLI entries support independent selection;
+    API provider selection expands the corresponding configuration fields inline.
+14. The role-default question assigns enabled models independently to reviewer,
+    verifier, researcher, and Gig creator. The Ready screen summarizes the actual
+    workspace, access boundary, enabled models, and role assignments without
+    stale or inferred values. The Gig creator assignment uses the existing
+    `model_invocation:gig-builder` role reference at invocation time.
+15. Browser captures and interaction tests prove the first screen is plain-language
+    and Gig-oriented, no secret value enters the page or durable state, no
+    implementation-facing model flags are required, and setup cannot create or
+    mutate a Gig definition.
 
 ## Verification and evidence
 
-Evidence belongs under `docs/development/evidence/phase-5/G30/` and includes the accepted contract decision, sanitized installed CLI version/probe results, adapter conformance and mutation reports, setup/create browser captures, credential-boundary fixtures, folder-selection fixtures, installed-wheel replay, completion audit, and terminal handoff.
+Evidence belongs under `docs/development/evidence/phase-5/G30/` and includes the accepted contract decision, the accepted browser setup interaction record, sanitized installed CLI version/probe results, adapter conformance and mutation reports, setup/create browser captures for each access branch, credential-boundary fixtures, folder-selection fixtures, installed-wheel replay, completion audit, and terminal handoff.
 
 ## Stop boundary
 
-Stop if either real CLI cannot be invoked through the bounded model port, if provider authentication or model/role-default behavior cannot be reported truthfully, if a secret can enter a durable record, if folder selection can silently replace an existing home, if the ordinary setup/create flow still requires implementation-facing flags, or if setup starts defining Gig-specific workflows. Do not ship a disabled CLI card as evidence of CLI support.
+Stop if either real CLI cannot be invoked through the bounded model port, if provider authentication or model/role-default behavior cannot be reported truthfully, if a secret can enter a durable record, if folder selection can silently replace an existing home, if the ordinary setup/create flow still requires implementation-facing flags, if the browser collapses multiple setup decisions into one opaque form, if the Ready summary is incomplete or stale, or if setup starts defining Gig-specific workflows. Do not ship a disabled CLI card as evidence of CLI support.
