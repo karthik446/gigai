@@ -196,80 +196,137 @@ class SetupHTTPServer:
 
     def _render_html(self) -> bytes:
         configured_labels = {str(item["label"]) for item in self.model_options}
+
+        def target_kind(item: Mapping[str, str]) -> str:
+            return str(item.get("kind", "cli"))
+
+        def api_fields(item: Mapping[str, str]) -> str:
+            fields = {
+                "openai-default": ("openai_api_env", "openai_api_model", "OPENAI_API_KEY"),
+                "openrouter-default": (
+                    "openrouter_api_env",
+                    "openrouter_api_model",
+                    "OPENROUTER_API_KEY",
+                ),
+            }
+            env_field, model_field, placeholder = fields.get(str(item["id"]), ("", "", ""))
+            if not env_field:
+                return ""
+            return (
+                "<div class='api-inline' data-api-inline='"
+                + html.escape(str(item["id"]))
+                + "'><p>GigAI stores only the environment-variable name. The secret value is read at invocation time.</p>"
+                + "<label class='field'>Environment variable<input data-api-env name='"
+                + env_field
+                + "' type='text' value='"
+                + html.escape(getattr(self.draft, env_field))
+                + "' placeholder='"
+                + placeholder
+                + "'></label><label class='field'>Model<input name='"
+                + model_field
+                + "' type='text' value='"
+                + html.escape(getattr(self.draft, model_field))
+                + "' placeholder='Provider model name'></label></div>"
+            )
+
         roster_html = "".join(
-            "<label class='model-option'><input type='checkbox' name='enabled_model_targets' "
-            f"value='{html.escape(str(item['id']))}' "
-            f"{'checked' if item['id'] in self.draft.enabled_model_targets else ''} "
-            f"{_model_option_disabled(item['id'], self.draft)}>"
-            f"<strong>{html.escape(str(item['label']))}</strong>"
-            f"<span>{html.escape(str(item['description']))}</span></label>"
+            "<div class='target-option' data-target-kind='"
+            + html.escape(target_kind(item))
+            + "' data-target-id='"
+            + html.escape(str(item["id"]))
+            + "'><label class='model-option'><input class='target-toggle' type='checkbox' name='enabled_model_targets' "
+            + f"value='{html.escape(str(item['id']))}' "
+            + f"{'checked' if item['id'] in self.draft.enabled_model_targets else ''} "
+            + f"{_model_option_disabled(item['id'], self.draft)}>"
+            + "<span class='target-copy'><strong>"
+            + html.escape(str(item["label"]))
+            + "</strong><span>"
+            + html.escape(str(item["description"]))
+            + "</span></span><span class='provider-status'>"
+            + ("Ready" if not _model_option_disabled(item["id"], self.draft) else "Needs setup")
+            + "</span></label>"
+            + api_fields(item)
+            + "</div>"
             for item in self.model_options
         )
         reviewer_options = _role_select("Reviewer", "reviewer_model_target", self.draft.reviewer_model_target, self.model_options, self.draft)
         verifier_options = _role_select("Verifier", "verifier_model_target", self.draft.verifier_model_target, self.model_options, self.draft)
         researcher_options = _role_select("Researcher", "researcher_model_target", self.draft.researcher_model_target, self.model_options, self.draft)
         creation_options = _role_select("Gig creation", "selected_model_target", self.draft.selected_model_target, self.model_options, self.draft)
-        api_cards = (
-            _api_card(
-                provider="OpenAI",
-                env_field="openai_api_env",
-                model_field="openai_api_model",
-                env_value=self.draft.openai_api_env,
-                model_value=self.draft.openai_api_model,
-                status=self.provider_status.get("OpenAI", "Configured" if "OpenAI API" in configured_labels else "Not configured"),
-            )
-            + _api_card(
-                provider="OpenRouter",
-                env_field="openrouter_api_env",
-                model_field="openrouter_api_model",
-                env_value=self.draft.openrouter_api_env,
-                model_value=self.draft.openrouter_api_model,
-                status=self.provider_status.get("OpenRouter", "Configured" if "OpenRouter API" in configured_labels else "Not configured"),
-            )
-        )
-        cli_cards = "".join(
-            "<li class='provider-item'><div><strong>"
-            + html.escape(item.name.capitalize())
-            + " CLI</strong><span class='provider-status'>"
-            + ("Detected — adapter available" if item.executable else "Not detected")
-            + "</span></div><p>"
-            + (
-                "GigAI can invoke this CLI through a bounded read-only model adapter. "
-                "Authentication remains owned by the CLI."
-                if item.executable
-                else "Install this CLI later if you want to use it when GigAI supports its adapter."
-            )
-            + "</p></li>"
-            for item in self.detected_models
-        )
         error_html = (
             f"<p class='error' role='alert'>{html.escape(self.error)}</p>" if self.error else ""
         )
         checked = "checked" if self.draft.open_with_target else ""
+        has_cli = any(target_kind(item) == "cli" for item in self.model_options)
+        has_api = any(target_kind(item) == "api" for item in self.model_options)
+        initial_access = "both" if has_cli and has_api else "cli" if has_cli else "api"
+        access_choices = "".join(
+            "<label class='access-option'><input type='radio' name='model_access' value='"
+            + access
+            + "' data-access='"
+            + access
+            + "'"
+            + (" checked" if access == initial_access else "")
+            + "><strong>"
+            + label
+            + "</strong><span>"
+            + description
+            + "</span></label>"
+            for access, label, description, available in (
+                (
+                    "cli",
+                    "CLI only",
+                    "Use detected Claude or Codex installations; authentication stays with those tools.",
+                    has_cli,
+                ),
+                (
+                    "api",
+                    "API only",
+                    "Use providers configured through environment-variable references.",
+                    has_api,
+                ),
+                (
+                    "both",
+                    "Both CLI and API",
+                    "Keep both boundaries available and choose defaults by role.",
+                    has_cli and has_api,
+                ),
+            )
+            if available
+        )
         body = (
             "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
             "<title>Set up GigAI</title><link rel='stylesheet' href='"
             + self.url
             + ".css'><main class='shell'><header><h1>Set up GigAI</h1>"
-            "<p class='intro'>Choose where GigAI keeps its local state and which model should facilitate Gig creation. Nothing is sent anywhere during setup.</p></header>"
+            "<p class='intro'>Choose a private place for GigAI and the models that can help define Gigs. Nothing is uploaded during setup.</p>"
+            "<p class='privacy'>Private by default · setup does not upload your files</p></header>"
             + error_html
-            + "<form id='setup' class='card'>"
-            + "<div class='folder-choice'><button id='choose-folder' type='button'>Choose GigAI storage folder</button><span class='muted'>Choose one local folder; GigAI will derive its private workpads underneath it.</span></div>"
+            + "<form id='setup' class='card setup-form'>"
+            + "<div class='steps'><span class='step active' data-step-indicator='workspace'>1 Workspace</span><span class='step' data-step-indicator='access'>2 Access</span><span class='step' data-step-indicator='models'>3 Models</span><span class='step' data-step-indicator='roles'>4 Roles</span><span class='step' data-step-indicator='ready'>5 Ready</span></div>"
+            + "<section class='setup-step active' data-step='workspace'><div class='question-grid'><div><div class='screen-kicker'>Question 1 of 5 · Workspace</div><h2>Where should GigAI keep its private data?</h2><p class='muted'>Choose one local folder. GigAI derives its private workpads underneath it.</p><div class='folder-choice'><button id='choose-folder' type='button'>Choose folder</button></div>"
             + f"<label class='field'>GigAI home<input name='home_root' type='text' value='{html.escape(self.draft.home_root)}' placeholder='Choose a folder or enter an absolute path' required></label>"
-            + f"<label class='field'>Private workpad folder<input name='workpad_root' type='text' value='{html.escape(self.draft.workpad_root)}' placeholder='Derived as <GigAI home>/workpads' required><span class='muted'>This is local filesystem storage for proposals, journals, and Gig state.</span></label>"
-            + f"<label class='field'>Editor executable<input name='editor' type='text' value='{html.escape(self.draft.editor)}' required><span class='muted'>Detected automatically when possible; this is only used to open a workpad later.</span></label>"
-            + "<section><h2>Model providers</h2><p class='muted'>Configure the models GigAI may use. You can enable more than one; role defaults below do not define a Gig workflow.</p><ul class='provider-list'>"
-            + api_cards
-            + cli_cards
-            + "</ul></section>"
-            + "<section><h2>Enabled model roster</h2><p class='muted'>Select every real model GigAI may use. At least one usable model is required; GigAI will not silently switch to a demo fixture.</p>"
+            + f"<label class='field'>Private workpad folder<input name='workpad_root' type='text' value='{html.escape(self.draft.workpad_root)}' placeholder='Derived as <GigAI home>/workpads' required><span class='muted'>Local storage for proposals, journals, and Gig state.</span></label>"
+            + f"<label class='field'>Editor executable<input name='editor' type='text' value='{html.escape(self.draft.editor)}' required><span class='muted'>Used only to open a workpad later.</span></label><div class='setup-actions'><button type='button' data-next='access'>Continue</button></div></div><aside class='context-panel'><strong>Gig definition</strong><p>A repeatable unit of work with stable Goals, changing inputs, and reviewable results.</p><p>Setup chooses how GigAI helps define that work; it does not define the Gig itself.</p></aside></div></section>"
+            + "<section class='setup-step' data-step='access'><div class='question-grid'><div><div class='screen-kicker'>Question 2 of 5 · Access boundary</div><h2>How should GigAI reach models?</h2><p class='muted'>Choose the simplest boundary. This decides which model choices appear next.</p><div class='access-grid'>"
+            + access_choices
+            + "</div><div class='setup-actions'><button type='button' class='secondary' data-back='workspace'>Back</button><button type='button' data-next='models'>Continue</button></div></div><aside class='context-panel'><strong>Why this matters</strong><p>CLI tools keep authentication with the installed tool. APIs use a configured environment reference.</p><p>You can change this setup later without changing a Gig's definition.</p></aside></div></section>"
+            + "<section class='setup-step' data-step='models'><div class='question-grid'><div><div class='screen-kicker'>Question 3 of 5 · Available models</div><h2>Which models should be available?</h2><p class='muted'>Select every model GigAI may use. Selecting an API provider expands its configuration here.</p><div class='model-roster'>"
             + roster_html
-            + "</section><details class='role-config'><summary><strong>Machine-wide role defaults</strong><span class='muted'>Reviewer, verifier, researcher, and Gig creation</span></summary><p class='muted'>These are defaults only. Individual Gigs can define and override their own workflow roles.</p>"
-            + "<div class='role-grid'>" + reviewer_options + verifier_options + researcher_options + creation_options + "</div>"
-            + "</details><label><input name='open_with_target' type='checkbox' " + checked + "> Open workpads with their target later</label>"
-            + "<button type='submit'>Apply setup</button></form>"
-            + "<section class='card'><h2>Credential sources</h2><p class='muted'>Secret values never belong in config.toml, Gig manifests, or logs.</p><div class='credential-plan'><strong>Environment variable</strong><span>Supported now. GigAI stores only the variable name and reads the value at the provider boundary.</span></div><div class='credential-plan disabled'><strong>Protected local .env file</strong><span>Planned: atomic write, restrictive permissions, and runtime loading under the chosen GigAI home.</span></div><div class='credential-plan disabled'><strong>Anthropic API</strong><span>Coming soon; shown here for discoverability but not selectable yet.</span></div></section><p class='footer'>This page is local-only, loopback-bound, token-protected, and expires automatically.</p></main>"
-            + "<script>const choose=document.querySelector('#choose-folder');const form=document.querySelector('#setup');const apiTargets={ 'openai-default':'openai_api_env', 'openrouter-default':'openrouter_api_env' };function refreshProviderAvailability(){for(const [target,field] of Object.entries(apiTargets)){const ready=Boolean(form[field].value.trim());for(const checkbox of form.querySelectorAll('input[name=enabled_model_targets]')){if(checkbox.value===target){checkbox.disabled=!ready;if(!ready)checkbox.checked=false;}}for(const option of form.querySelectorAll('select option[value=\"'+target+'\"]')){option.disabled=!ready;}for(const select of form.querySelectorAll('select')){if(!ready&&select.value===target){const first=[...select.options].find(item=>!item.disabled);if(first)select.value=first.value;}}}}choose.addEventListener('click',async()=>{const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'choose_folder'})});const b=await r.json();if(!r.ok){alert(b.error||'Folder chooser unavailable');}else if(b.status==='selected'){form.home_root.value=b.path;form.workpad_root.value=b.path.replace(/[\\/]$/,'')+'/workpads';}});for(const field of ['openai_api_env','openrouter_api_env'])form[field].addEventListener('input',refreshProviderAvailability);refreshProviderAvailability();form.addEventListener('submit',async(e)=>{e.preventDefault();const enabled=[...form.querySelectorAll('input[name=enabled_model_targets]:checked')].map(item=>item.value);const selected=form.querySelector('select[name=selected_model_target]');const p={event:'apply',home_root:form.home_root.value,workpad_root:form.workpad_root.value,editor:form.editor.value,open_with_target:form.open_with_target.checked,selected_model_target:selected&&selected.value,reviewer_model_target:form.reviewer_model_target.value,verifier_model_target:form.verifier_model_target.value,researcher_model_target:form.researcher_model_target.value,enabled_model_targets:enabled,openai_api_env:form.openai_api_env.value,openai_api_model:form.openai_api_model.value,openrouter_api_env:form.openrouter_api_env.value,openrouter_api_model:form.openrouter_api_model.value};const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});if(!r.ok){const b=await r.json();alert(b.error||'Setup could not be applied');}else{document.body.innerHTML='<main class=\"shell\"><header><h1>GigAI setup complete</h1><p class=\"intro\">Configuration saved. You can close this tab.</p></header></main>';}});</script>"
+            + "</div><div class='setup-actions'><button type='button' class='secondary' data-back='access'>Back</button><button type='button' data-next='roles'>Continue to roles</button></div></div><aside class='context-panel'><strong>Model roster</strong><p>Multiple models can be enabled. Role defaults later choose from this roster.</p><p>Detection alone never grants invocation authority; only usable, configured targets can be enabled.</p></aside></div></section>"
+            + "<section class='setup-step' data-step='roles'><div class='question-grid'><div><div class='screen-kicker'>Question 4 of 5 · Machine defaults</div><h2>Which defaults should GigAI use?</h2><p class='muted'>These are machine defaults only. Each Gig can define and override its own workflow roles.</p><div class='role-grid'>"
+            + reviewer_options
+            + verifier_options
+            + researcher_options
+            + creation_options
+            + "</div><div class='setup-actions'><button type='button' class='secondary' data-back='models'>Back</button><button type='button' data-next='ready'>Review setup</button></div></div><aside class='context-panel'><strong>Four machine defaults</strong><p>Reviewer and verifier are distinct. Researcher gathers bounded context. Gig creator maps to the registered <code>gig-builder</code> model purpose.</p><p>Planner, critic, adjudicator, and implementer belong to individual Gigs.</p></aside></div></section>"
+            + "<section class='setup-step' data-step='ready'><div class='question-grid'><div><div class='screen-kicker'>Question 5 of 5 · Confirmation</div><h2>Your GigAI starting setup</h2><p class='muted'>Review the choices collected across setup. Nothing runs until you create and approve a Gig.</p><div class='summary' data-summary></div><div class='setup-actions'><button type='button' class='secondary' data-back='roles'>Back</button><button type='submit'>Apply setup and define a Gig</button></div></div><aside class='context-panel'><strong>Ready</strong><p>Applying setup publishes one typed configuration atomically. Re-running setup updates the same configuration; it does not create a second store.</p></aside></div></section>"
+            + "<label class='advanced-toggle'><input name='open_with_target' type='checkbox' "
+            + checked
+            + "> Open workpads with their target later</label></form><p class='footer'>This page is local-only, loopback-bound, token-protected, and expires automatically.</p></main>"
+            + "<script>const form=document.querySelector('#setup');const choose=document.querySelector('#choose-folder');const initialAccess='"
+            + initial_access
+            + "';let access=initialAccess;const accessLabels={cli:'CLI only',api:'API only',both:'CLI and API'};function screen(name){for(const item of form.querySelectorAll('[data-step]'))item.classList.toggle('active',item.dataset.step===name);for(const item of form.querySelectorAll('[data-step-indicator]')){const order=['workspace','access','models','roles','ready'];const current=order.indexOf(name);const index=order.indexOf(item.dataset.stepIndicator);item.classList.toggle('active',index===current);item.classList.toggle('done',index>=0&&index<current);}if(name==='ready')summary();}function refresh(){for(const card of form.querySelectorAll('.target-option')){const visible=access==='both'||card.dataset.targetKind===access;card.hidden=!visible;const input=card.querySelector('.target-toggle');card.classList.toggle('selected',Boolean(input&&input.checked));const inline=card.querySelector('.api-inline');if(inline)inline.classList.toggle('expanded',Boolean(input&&input.checked));}for(const input of form.querySelectorAll('.target-toggle')){if(input.dataset.targetId==='openai-default'||input.value==='openai-default'||input.value==='openrouter-default'){const field=input.value==='openai-default'?form.openai_api_env:form.openrouter_api_env;const ready=Boolean(field&&field.value.trim());input.disabled=!ready;if(!ready)input.checked=false;}}const enabled=new Set([...form.querySelectorAll('.target-toggle:checked')].map(item=>item.value));for(const select of form.querySelectorAll('select')){for(const option of select.options){option.disabled=!enabled.has(option.value);}}}function summary(){const enabled=[...form.querySelectorAll('.target-toggle:checked')].map(input=>input.closest('.target-option').querySelector('strong').textContent);const roles=[...form.querySelectorAll('.role-grid select')].map(select=>select.closest('.field').firstChild.textContent.trim()+': '+select.value);form.querySelector('[data-summary]').innerHTML='<div class=\"summary-row\"><strong>Workspace</strong><span>'+form.home_root.value+'</span></div><div class=\"summary-row\"><strong>Access</strong><span>'+accessLabels[access]+'</span></div><div class=\"summary-row\"><strong>Models</strong><span>'+ (enabled.join(', ')||'None selected')+'</span></div><div class=\"summary-row\"><strong>Role defaults</strong><span>'+roles.join(' · ')+'</span></div>';}for(const input of form.querySelectorAll('[data-access]'))input.addEventListener('change',()=>{access=input.value;refresh();});for(const input of form.querySelectorAll('.target-toggle'))input.addEventListener('change',refresh);for(const input of form.querySelectorAll('[data-api-env]'))input.addEventListener('input',refresh);for(const button of form.querySelectorAll('[data-next]'))button.addEventListener('click',()=>{refresh();screen(button.dataset.next);});for(const button of form.querySelectorAll('[data-back]'))button.addEventListener('click',()=>screen(button.dataset.back));choose.addEventListener('click',async()=>{const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'choose_folder'})});const b=await r.json();if(!r.ok){alert(b.error||'Folder chooser unavailable');}else if(b.status==='selected'){form.home_root.value=b.path;form.workpad_root.value=b.path.replace(/[\\/]$/,'')+'/workpads';}});form.addEventListener('submit',async e=>{e.preventDefault();refresh();const enabled=[...form.querySelectorAll('.target-toggle:checked')].map(item=>item.value);const selected=form.querySelector('select[name=selected_model_target]');const p={event:'apply',home_root:form.home_root.value,workpad_root:form.workpad_root.value,editor:form.editor.value,open_with_target:form.open_with_target.checked,selected_model_target:selected&&selected.value,reviewer_model_target:form.reviewer_model_target.value,verifier_model_target:form.verifier_model_target.value,researcher_model_target:form.researcher_model_target.value,enabled_model_targets:enabled,openai_api_env:form.openai_api_env.value,openai_api_model:form.openai_api_model.value,openrouter_api_env:form.openrouter_api_env.value,openrouter_api_model:form.openrouter_api_model.value};const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});if(!r.ok){const b=await r.json();alert(b.error||'Setup could not be applied');}else{document.body.innerHTML='<main class=\"shell\"><header><h1>GigAI setup complete</h1><p class=\"intro\">Configuration saved. You can close this tab.</p></header></main>';}});refresh();screen('workspace');</script>"
         ).encode()
         return body
 

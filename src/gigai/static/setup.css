@@ -5,7 +5,7 @@
 }
 
 body { margin: 0; }
-.shell { max-width: 760px; margin: 0 auto; padding: 32px 20px 64px; }
+.shell { max-width: 1040px; margin: 0 auto; padding: 32px 20px 64px; }
 header { background: #172033; color: white; border-radius: 16px; padding: 24px; margin-bottom: 20px; }
 h1 { margin: 0 0 8px; font-size: 1.7rem; }
 h2 { font-size: 1rem; margin: 0 0 8px; }
@@ -19,6 +19,44 @@ input[type="text"] { box-sizing: border-box; width: 100%; margin-top: 7px; borde
 .model-option:has(input:checked) { border-color: #3b6eea; background: #f5f8ff; box-shadow: 0 0 0 3px #3b6eea1c; }
 .model-option span { display: block; color: #526079; font-size: .9rem; margin: 5px 0 0 26px; }
 .model-option strong { margin-left: 6px; }
+.target-option { margin: 10px 0; }
+.target-option[hidden] { display: none; }
+.target-option .model-option { display: flex; align-items: center; gap: 10px; margin: 0; }
+.target-option .model-option input { flex: 0 0 auto; }
+.target-copy { flex: 1; min-width: 0; }
+.target-copy strong { display: block; margin-left: 0; }
+.target-copy span { margin: 4px 0 0; }
+.target-option.selected .model-option { border-color: #3b6eea; background: #f5f8ff; box-shadow: 0 0 0 3px #3b6eea1c; }
+.target-option .provider-status { flex: 0 0 auto; }
+.api-inline { display: none; margin: -1px 0 0 34px; padding: 10px 12px 2px; border: 1px solid #dbe2ef; border-top: 0; border-radius: 0 0 10px 10px; background: #f8fbff; }
+.api-inline.expanded { display: block; }
+.api-inline p { margin: 0 0 8px; color: #526079; font-size: .82rem; }
+.api-inline .field { margin: 10px 0; }
+.api-inline input[type="text"] { padding: 9px; font-size: .9rem; }
+.privacy { display: inline-block; color: #c8f2d6; background: #1375482b; border: 1px solid #8deeb433; border-radius: 999px; padding: 6px 10px; font-size: .78rem; font-weight: 700; }
+.steps { display: flex; gap: 8px; align-items: center; justify-content: space-between; border-bottom: 1px solid #dbe2ef; padding: 0 0 16px; margin-bottom: 20px; }
+.step { color: #71809a; font-size: .8rem; font-weight: 800; }
+.step.active, .step.done { color: #1d4ed8; }
+.setup-step { display: none; }
+.setup-step.active { display: block; }
+.question-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(240px, .8fr); gap: 22px; align-items: start; }
+.screen-kicker { color: #1d4ed8; font-size: .72rem; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
+.context-panel { background: #f5f8ff; border: 1px solid #cbd8f4; border-radius: 12px; padding: 16px; }
+.context-panel strong { color: #1d4ed8; font-size: .76rem; letter-spacing: .08em; text-transform: uppercase; }
+.context-panel p { color: #526079; font-size: .88rem; }
+.access-grid { display: grid; gap: 10px; margin-top: 14px; }
+.access-option { display: block; border: 1px solid #dbe2ef; border-radius: 12px; padding: 14px; cursor: pointer; }
+.access-option:has(input:checked) { border-color: #3b6eea; background: #f5f8ff; box-shadow: 0 0 0 3px #3b6eea1c; }
+.access-option strong { margin-left: 6px; }
+.access-option span { display: block; color: #526079; font-size: .86rem; margin: 5px 0 0 25px; }
+.setup-actions { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
+.setup-actions .secondary, button.secondary { color: #1d4ed8; background: #fff; }
+.advanced-toggle { display: block; color: #526079; font-size: .86rem; margin-top: 18px; }
+.summary { background: #e5f7ed; border: 1px solid #b9e4ca; color: #195c3b; border-radius: 10px; padding: 14px; margin-top: 15px; }
+.summary-row { display: grid; grid-template-columns: 120px 1fr; gap: 10px; border-top: 1px solid #195c3b2e; padding-top: 8px; margin-top: 8px; font-size: .86rem; }
+.summary-row:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+.summary-row strong { margin: 0; }
+.role-grid .field { margin: 10px 0; }
 .provider-list { margin: 10px 0 0; padding-left: 24px; }
 .provider-item { padding: 8px 0; color: #172033; }
 .provider-item::marker { color: #6f91df; }
@@ -61,3 +99,8 @@ button:hover { background: #1d4ed8; }
 .muted { color: #526079; font-size: .9rem; }
 .detected { padding-left: 20px; color: #526079; }
 .footer { color: #61708a; font-size: .82rem; margin-top: 18px; }
+@media (max-width: 760px) {
+  .question-grid { grid-template-columns: 1fr; }
+  .steps { gap: 5px; overflow-x: auto; justify-content: flex-start; }
+  .step { white-space: nowrap; }
+}

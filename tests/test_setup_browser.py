@@ -35,6 +35,7 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
                 "id": "openai-default",
                 "label": "OpenAI API",
                 "description": "Configure an environment reference first.",
+                "kind": "api",
             },
         ),
         detected_models=(
@@ -53,22 +54,27 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
         assert ".role-grid" in stylesheet
         assert "appearance: none" in stylesheet
         assert "Offline demo mode" not in body
-        assert "Enabled model roster" in body
-        assert "Machine-wide role defaults" in body
-        assert "<details class='role-config'>" in body
-        assert "<ul class='provider-list'>" in body
-        assert "<details class='provider-config'" in body
-        assert "provider-fields" in body
+        assert "GigAI setup" in body
+        assert "Question 1 of 5" in body
+        assert "Question 2 of 5" in body
+        assert "Question 3 of 5" in body
+        assert "Question 4 of 5" in body
+        assert "Question 5 of 5" in body
+        assert "CLI only" in body
+        assert "API only" in body
+        assert "Both CLI and API" in body
+        assert "data-api-inline" in body
+        assert "Gig definition" in body
+        assert "Machine defaults" in body
+        assert "data-summary" in body
         assert 'type=\'checkbox\' name=\'enabled_model_targets\'' in body
-        assert "Reviewer default" in body
-        assert "Verifier default" in body
-        assert "Researcher default" in body
+        assert "Reviewer" in body
+        assert "Verifier" in body
+        assert "Researcher" in body
         assert 'value=\'openai-default\'  disabled' in body
         assert "Codex" in body
-        assert "Detected — adapter available" in body
-        assert "Not detected" in body
         assert "openai_api_env" in body
-        assert "GigAI never receives the secret value" in body
+        assert "GigAI stores only the environment-variable name" in body
 
         with urlopen(
             Request(

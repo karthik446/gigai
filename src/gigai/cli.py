@@ -712,6 +712,10 @@ def _run_browser_setup(
             "id": target.name,
             "label": _model_target_label(target, preview),
             "description": _model_target_description(target, preview),
+            "kind": "api"
+            if next(item for item in preview.endpoints if item.name == target.endpoint).adapter
+            in {"openai_api", "openrouter_api", "anthropic_api"}
+            else "cli",
         }
         for target in real_targets
     )
