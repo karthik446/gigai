@@ -19,16 +19,18 @@ input[type="text"] { box-sizing: border-box; width: 100%; margin-top: 7px; borde
 .model-option:has(input:checked) { border-color: #3b6eea; background: #f5f8ff; box-shadow: 0 0 0 3px #3b6eea1c; }
 .model-option span { display: block; color: #526079; font-size: .9rem; margin: 5px 0 0 26px; }
 .model-option strong { margin-left: 6px; }
-.provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
-.provider-card { border: 1px solid #dbe2ef; border-radius: 12px; padding: 14px; }
-.provider-config { padding: 0; overflow: hidden; }
-.provider-config summary { list-style: none; padding: 14px; cursor: pointer; }
+.provider-list { margin: 10px 0 0; padding-left: 24px; }
+.provider-item { padding: 8px 0; color: #172033; }
+.provider-item::marker { color: #6f91df; }
+.provider-item p { margin: 7px 0 0; }
+.provider-config { border: 1px solid #dbe2ef; border-radius: 10px; overflow: hidden; }
+.provider-config summary { list-style: none; padding: 10px 12px; cursor: pointer; }
 .provider-config summary::-webkit-details-marker { display: none; }
 .provider-config summary:after { content: "+"; float: right; color: #526079; font-size: 1.2rem; line-height: 1; }
 .provider-config[open] summary { border-bottom: 1px solid #dbe2ef; background: #f8fbff; }
 .provider-config[open] summary:after { content: "−"; }
-.provider-fields { padding: 0 14px 14px; }
-.provider-card.disabled { background: #f8fafc; color: #71809a; }
+.provider-fields { padding: 0 12px 12px; }
+.provider-item.disabled { background: #f8fafc; color: #71809a; }
 .provider-card p { color: #526079; font-size: .88rem; margin: 7px 0 0; }
 .provider-status { float: right; border-radius: 999px; background: #dcfce7; color: #166534; padding: 3px 8px; font-size: .72rem; font-weight: 700; }
 .disabled .provider-status { background: #e2e8f0; color: #526079; }

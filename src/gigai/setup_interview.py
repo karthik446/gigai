@@ -228,7 +228,7 @@ class SetupHTTPServer:
             )
         )
         cli_cards = "".join(
-            "<article class='provider-card'><div><strong>"
+            "<li class='provider-item'><div><strong>"
             + html.escape(item.name.capitalize())
             + " CLI</strong><span class='provider-status'>"
             + ("Detected — adapter available" if item.executable else "Not detected")
@@ -239,7 +239,7 @@ class SetupHTTPServer:
                 if item.executable
                 else "Install this CLI later if you want to use it when GigAI supports its adapter."
             )
-            + "</p></article>"
+            + "</p></li>"
             for item in self.detected_models
         )
         error_html = (
@@ -258,10 +258,10 @@ class SetupHTTPServer:
             + f"<label class='field'>GigAI home<input name='home_root' type='text' value='{html.escape(self.draft.home_root)}' placeholder='Choose a folder or enter an absolute path' required></label>"
             + f"<label class='field'>Private workpad folder<input name='workpad_root' type='text' value='{html.escape(self.draft.workpad_root)}' placeholder='Derived as <GigAI home>/workpads' required><span class='muted'>This is local filesystem storage for proposals, journals, and Gig state.</span></label>"
             + f"<label class='field'>Editor executable<input name='editor' type='text' value='{html.escape(self.draft.editor)}' required><span class='muted'>Detected automatically when possible; this is only used to open a workpad later.</span></label>"
-            + "<section><h2>Model providers</h2><p class='muted'>Configure the models GigAI may use. You can enable more than one; role defaults below do not define a Gig workflow.</p><div class='provider-grid'>"
+            + "<section><h2>Model providers</h2><p class='muted'>Configure the models GigAI may use. You can enable more than one; role defaults below do not define a Gig workflow.</p><ul class='provider-list'>"
             + api_cards
             + cli_cards
-            + "</div></section>"
+            + "</ul></section>"
             + "<section><h2>Enabled model roster</h2><p class='muted'>Select every real model GigAI may use. At least one usable model is required; GigAI will not silently switch to a demo fixture.</p>"
             + roster_html
             + "</section><section><h2>Machine-wide role defaults</h2><p class='muted'>These are defaults only. Individual Gigs can define and override their own workflow roles.</p>"
@@ -349,7 +349,7 @@ def _api_card(
     )
     placeholder = provider.upper().replace(" ", "_") + "_API_KEY"
     return (
-        "<details class='provider-card provider-config'"
+        "<li class='provider-item'><details class='provider-config'"
         + open_attribute
         + "><summary><strong>"
         + provider
@@ -367,7 +367,7 @@ def _api_card(
         + model_field
         + "' type='text' value='"
         + html.escape(model_value)
-        + "' placeholder='Provider model name'></label></div></details>"
+        + "' placeholder='Provider model name'></label></div></details></li>"
     )
 
 
