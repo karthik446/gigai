@@ -679,7 +679,32 @@ def _run_browser_setup(
         preview = existing
     detected_models = discover_installed_models()
     preview = _browser_preview_config(preview, detected_models)
-    selected = create_model_target or _default_create_model_target(preview)
+    real_targets = tuple(
+        target
+        for target in preview.model_targets
+        if next(item for item in preview.endpoints if item.name == target.endpoint).adapter
+        != "deterministic"
+    )
+    real_target_names = {target.name for target in real_targets}
+    default_profile = next(
+        (profile for profile in preview.profiles if profile.name == "default"), None
+    )
+    enabled_names: list[str] = []
+    for target in real_targets:
+        endpoint = next(item for item in preview.endpoints if item.name == target.endpoint)
+        if endpoint.adapter in {"codex_cli", "claude_cli"}:
+            enabled_names.append(target.name)
+        elif existing is not None and target.name in {
+            item.name for item in existing.model_targets if item.enabled
+        }:
+            enabled_names.append(target.name)
+    enabled = tuple(enabled_names)
+    selected = create_model_target if create_model_target in set(enabled) else (
+        next(iter(enabled), "")
+    )
+    reviewer = _profile_target(default_profile, "reviewer", "critic", selected)
+    verifier = _profile_target(default_profile, "verifier", "adjudicator", selected)
+    researcher = _profile_target(default_profile, "researcher", "planner", selected)
     browser_home = "" if existing is None and home_value is None else os.fspath(requested_home)
     browser_workpad = "" if existing is None and workpad_root is None else os.fspath(resolved_workpad)
     model_options = tuple(
@@ -688,39 +713,62 @@ def _run_browser_setup(
             "label": _model_target_label(target, preview),
             "description": _model_target_description(target, preview),
         }
-        for target in preview.model_targets
+        for target in real_targets
     )
-    openai_api_env, openai_api_model = _browser_provider_values(preview, "openai")
-    openrouter_api_env, openrouter_api_model = _browser_provider_values(preview, "openrouter")
+    openai_api_env, openai_api_model = _browser_provider_values(existing, "openai")
+    openrouter_api_env, openrouter_api_model = _browser_provider_values(existing, "openrouter")
     provider_status = _browser_provider_status(existing)
 
     def apply_setup(draft: SetupDraft) -> Mapping[str, object]:
-        target_names = {target.name for target in preview.model_targets}
-        if draft.selected_model_target not in target_names:
-            raise ValueError("selected Gig creation model is not configured")
         resolved_editor = resolve_editor_argv(
             draft.editor,
             existing.editor_argv[1:] if existing is not None else (),
         )
-        profiles = list(existing.profiles if existing is not None else preview.profiles)
-        replaced = False
-        for index, profile in enumerate(profiles):
-            if profile.name == "default":
-                profiles[index] = replace(profile, planner=draft.selected_model_target)
-                replaced = True
-                break
-        if not replaced:
-            profiles.append(
-                Profile(
-                    name="default",
-                    planner=draft.selected_model_target,
-                    critic=draft.selected_model_target,
-                    adjudicator=draft.selected_model_target,
-                )
-            )
         provider_credentials, provider_endpoints, provider_targets = _browser_provider_config(
             preview, draft
         )
+        target_by_name = {target.name: target for target in provider_targets}
+        enabled_names = set(draft.enabled_model_targets)
+        role_targets = {
+            "reviewer": draft.reviewer_model_target,
+            "verifier": draft.verifier_model_target,
+            "researcher": draft.researcher_model_target,
+            "gig_creator": draft.selected_model_target,
+        }
+        if not enabled_names:
+            raise ValueError("enable at least one usable model before applying setup")
+        missing = sorted(
+            name for name in (*enabled_names, *role_targets.values()) if name not in target_by_name
+        )
+        if missing:
+            raise ValueError(
+                "selected model is not configured or usable: " + ", ".join(dict.fromkeys(missing))
+            )
+        if any(name not in enabled_names for name in role_targets.values()):
+            raise ValueError("reviewer, verifier, researcher, and Gig creation defaults must be enabled")
+        provider_targets = tuple(
+            replace(target, enabled=target.name in enabled_names)
+            for target in provider_targets
+        )
+        profiles = list(existing.profiles if existing is not None else preview.profiles)
+        default = Profile(
+            name="default",
+            planner=draft.selected_model_target,
+            critic=draft.reviewer_model_target,
+            adjudicator=draft.verifier_model_target,
+            reviewer=draft.reviewer_model_target,
+            verifier=draft.verifier_model_target,
+            researcher=draft.researcher_model_target,
+            gig_creator=draft.selected_model_target,
+        )
+        replaced = False
+        for index, profile in enumerate(profiles):
+            if profile.name == "default":
+                profiles[index] = default
+                replaced = True
+                break
+        if not replaced:
+            profiles.append(default)
         config = build_config(
             home_root=Path(draft.home_root).expanduser().resolve(strict=False),
             workpad_root=Path(draft.workpad_root).expanduser().resolve(strict=False),
@@ -760,6 +808,10 @@ def _run_browser_setup(
             openai_api_model=openai_api_model,
             openrouter_api_env=openrouter_api_env,
             openrouter_api_model=openrouter_api_model,
+            enabled_model_targets=enabled,
+            reviewer_model_target=reviewer,
+            verifier_model_target=verifier,
+            researcher_model_target=researcher,
         ),
         model_options=model_options,
         detected_models=detected_models,
@@ -841,6 +893,12 @@ def _browser_preview_config(config, detected_models):
 
 
 def _browser_provider_values(config, provider: str) -> tuple[str, str]:
+    if config is None:
+        defaults = {
+            "openai": ("", "gpt-4.1-mini"),
+            "openrouter": ("", "openai/gpt-4o-mini"),
+        }
+        return defaults.get(provider, ("", ""))
     endpoint = next((item for item in config.endpoints if item.name == provider), None)
     if endpoint is None or endpoint.credential is None:
         return "", ""
@@ -888,15 +946,21 @@ def _browser_provider_config(config, draft: SetupDraft):
         ("openrouter", "openrouter_api", "openrouter-api", draft.openrouter_api_env, draft.openrouter_api_model, "openai/gpt-4o-mini"),
     )
     for provider, adapter, credential_name, environment_name, model, default_model in providers:
+        credentials = [item for item in credentials if item.name != credential_name]
+        endpoints = [item for item in endpoints if item.name != provider]
+        targets = [item for item in targets if item.name != f"{provider}-default"]
         if not environment_name:
             continue
-        credentials = [item for item in credentials if item.name != credential_name]
         credentials.append(CredentialReference(credential_name, "environment", environment_name))
-        endpoints = [item for item in endpoints if item.name != provider]
         endpoints.append(Endpoint(provider, adapter, credential=credential_name))
-        targets = [item for item in targets if item.name != f"{provider}-default"]
         targets.append(ModelTarget(f"{provider}-default", provider, model or default_model, ("text",), 512))
     return tuple(credentials), tuple(endpoints), tuple(targets)
+
+
+def _profile_target(profile, role: str, legacy_role: str, fallback: str) -> str:
+    if profile is None:
+        return fallback
+    return getattr(profile, role) or getattr(profile, legacy_role) or fallback
 
 
 def _model_target_description(target: ModelTarget, config) -> str:
@@ -2226,13 +2290,20 @@ def open_command(
 def _default_create_model_target(config) -> str:
     """Resolve the setup-selected create target from the default profile."""
 
-    target_names = {target.name for target in config.model_targets}
+    target_names = {target.name for target in config.model_targets if target.enabled}
     for profile in config.profiles:
-        if profile.name == "default" and profile.planner in target_names:
-            return profile.planner
+        if profile.name != "default":
+            continue
+        candidate = profile.gig_creator or profile.planner
+        if candidate in target_names:
+            return candidate
     if "offline-default" in target_names:
         return "offline-default"
-    return config.model_targets[0].name
+    if not target_names:
+        raise click.ClickException(
+            "no enabled model is configured; run 'gigai setup' and choose a usable model"
+        )
+    return sorted(target_names)[0]
 
 
 def _parse_credential_reference(value: str) -> CredentialReference:

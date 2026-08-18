@@ -403,7 +403,7 @@ dependencies, not live status fields or authorization to begin.
 | G28 | v0.1.5 evaluation, role-registry, and browser-first create readiness | G26, G27 contract, S27-EVAL, S27-ROLE, S27-CREATE |
 | G27 | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G28 |
 | G29 | Historical v0.1.5 UAT and dogfooding record | G27, G28, G24 findings |
-| G30 | Real Codex/Claude adapters, API onboarding, folder access, and browser-first setup/create | G18, G26, G27, G28, S18-02 |
+| G30 | Real Codex/Claude adapters, API onboarding, folder access, multi-model setup, and browser-first Gig creation | G18, G26, G27, G28, S18-02 |
 | G31 | v0.1.6 release readiness and human UAT | G30, G27, G28, G12 |
 | G25 | Alpha release readiness and final repository cleanup | G12, G21, G23, G31, G26 |
 
@@ -416,7 +416,9 @@ about interaction quality, artifact shape, installation, and operator
 workflows. G27 makes the builder a genuine pre-proposal discovery canvas with
 a five-question ceiling and bounded research plan. G29 remains the historical
 v0.1.5 UAT record. G30 owns the real CLI adapters, provider onboarding, native
-folder access, and remaining HTMX/setup work. G31 is the full v0.1.6 release-
+folder access, multi-model setup with machine-wide reviewer/verifier/researcher
+defaults, and remaining HTMX/Gig-creation work. Gig-specific workflow roles
+belong to the Gig definition, not global setup. G31 is the full v0.1.6 release-
 candidate human acceptance gate. G25 owns the later release-lane alpha
 decision.
 
@@ -773,8 +775,12 @@ outside Git; only a sanitized summary and terminal handoff may be committed.
 G30 turns the detected local Codex and Claude executables into real bounded
 model-port targets, adds supported API-provider onboarding, and completes the
 folder-access and HTMX/setup usability work needed for an ordinary operator
-flow. Detection, configuration, usability, and selection remain distinct
-states; G30 does not ship a disabled card as support evidence.
+flow. Setup enables a model roster and assigns machine-wide reviewer,
+verifier, researcher, and Gig-creation defaults; it does not define a Gig.
+Gig-specific workflows such as `review-verify-fix-loop` own their roles at the
+Gig level through `gigai update`. Detection, configuration, usability, and
+selection remain distinct states; G30 does not ship a disabled card as support
+evidence or expose offline fixtures as a normal model choice.
 
 #### G31 — v0.1.6 readiness and human UAT
 

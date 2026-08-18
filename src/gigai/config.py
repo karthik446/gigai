@@ -71,6 +71,7 @@ class ModelTarget:
     capabilities: tuple[str, ...]
     max_output_tokens: int
     reasoning_effort: str | None = None
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,10 @@ class Profile:
     planner: str
     critic: str
     adjudicator: str
+    reviewer: str | None = None
+    verifier: str | None = None
+    researcher: str | None = None
+    gig_creator: str | None = None
 
 
 @dataclass(frozen=True)
@@ -152,6 +157,8 @@ def render_config(config: GigAIConfig) -> bytes:
         )
         if target.reasoning_effort is not None:
             lines.append(f'reasoning_effort = {_toml_string(target.reasoning_effort)}')
+        if not target.enabled:
+            lines.append("enabled = false")
     for profile in sorted(config.profiles, key=lambda item: item.name):
         lines.extend(
             (
@@ -163,6 +170,10 @@ def render_config(config: GigAIConfig) -> bytes:
                 f'adjudicator = {_toml_string(profile.adjudicator)}',
             )
         )
+        for role_name in ("reviewer", "verifier", "researcher", "gig_creator"):
+            role_target = getattr(profile, role_name)
+            if role_target is not None:
+                lines.append(f'{role_name} = {_toml_string(role_target)}')
     lines.extend(
         (
             "",
@@ -583,6 +594,7 @@ def _target_v1(value: object, index: int, where: str) -> ModelTarget:
         capabilities=("text",),
         max_output_tokens=64,
         reasoning_effort=None,
+        enabled=True,
     )
 
 
@@ -627,7 +639,7 @@ def _target(value: object, index: int, where: str) -> ModelTarget:
     _allowed_keys(
         item,
         {"name", "endpoint", "model", "capabilities", "max_output_tokens"},
-        {"reasoning_effort"},
+        {"reasoning_effort", "enabled"},
         f"model_targets[{index}]",
         where,
     )
@@ -651,6 +663,11 @@ def _target(value: object, index: int, where: str) -> ModelTarget:
             f"model_targets[{index}].reasoning_effort{where} must be one of "
             f"{sorted(_REASONING_EFFORTS)}"
         )
+    enabled = item.get("enabled", True)
+    if type(enabled) is not bool:
+        raise MalformedConfigurationError(
+            f"model_targets[{index}].enabled{where} must be a boolean"
+        )
     return ModelTarget(
         name=_string(item, "name", f"model_targets[{index}]", where),
         endpoint=_string(item, "endpoint", f"model_targets[{index}]", where),
@@ -658,14 +675,16 @@ def _target(value: object, index: int, where: str) -> ModelTarget:
         capabilities=tuple(sorted(capabilities)),
         max_output_tokens=max_output_tokens,
         reasoning_effort=reasoning_effort,
+        enabled=enabled,
     )
 
 
 def _profile(value: object, index: int, where: str) -> Profile:
     item = _table(value, f"profiles[{index}]", where)
-    _exact_keys(
+    _allowed_keys(
         item,
         {"name", "planner", "critic", "adjudicator"},
+        {"reviewer", "verifier", "researcher", "gig_creator"},
         f"profiles[{index}]",
         where,
     )
@@ -674,6 +693,10 @@ def _profile(value: object, index: int, where: str) -> Profile:
         planner=_string(item, "planner", f"profiles[{index}]", where),
         critic=_string(item, "critic", f"profiles[{index}]", where),
         adjudicator=_string(item, "adjudicator", f"profiles[{index}]", where),
+        reviewer=_optional_string(item, "reviewer", f"profiles[{index}]", where),
+        verifier=_optional_string(item, "verifier", f"profiles[{index}]", where),
+        researcher=_optional_string(item, "researcher", f"profiles[{index}]", where),
+        gig_creator=_optional_string(item, "gig_creator", f"profiles[{index}]", where),
     )
 
 
@@ -724,7 +747,17 @@ def _validate_config_relationships(
                 f"{target.endpoint!r}"
             )
     for profile in profiles:
-        for role in (profile.planner, profile.critic, profile.adjudicator):
+        for role in (
+            profile.planner,
+            profile.critic,
+            profile.adjudicator,
+            profile.reviewer,
+            profile.verifier,
+            profile.researcher,
+            profile.gig_creator,
+        ):
+            if role is None:
+                continue
             if role not in target_names:
                 raise MalformedConfigurationError(
                     f"profile {profile.name!r}{where} references unknown model target {role!r}"

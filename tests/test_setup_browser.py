@@ -7,18 +7,29 @@ import sys
 from urllib.request import Request, urlopen
 
 from gigai.model_discovery import DetectedModel
+from gigai.config import load_config
 from gigai.setup_interview import SetupDraft, SetupHTTPServer
 
 
 def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
     applied: list[SetupDraft] = []
     server = SetupHTTPServer(
-        SetupDraft("/tmp/gigai", "/tmp/gigai/workpads", "/usr/bin/true", False, "offline-default"),
+        SetupDraft(
+            "/tmp/gigai",
+            "/tmp/gigai/workpads",
+            "/usr/bin/true",
+            False,
+            "codex-default",
+            enabled_model_targets=("codex-default",),
+            reviewer_model_target="codex-default",
+            verifier_model_target="codex-default",
+            researcher_model_target="codex-default",
+        ),
         model_options=(
             {
-                "id": "offline-default",
-                "label": "Offline demo mode",
-                "description": "Local deterministic fixture; no network.",
+                "id": "codex-default",
+                "label": "Codex CLI",
+                "description": "Bounded local model adapter.",
             },
         ),
         detected_models=(
@@ -31,8 +42,13 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
     try:
         with urlopen(server.url, timeout=2) as response:
             body = response.read().decode()
-        assert "Offline demo mode" in body
-        assert "Local deterministic fixture" in body
+        assert "Offline demo mode" not in body
+        assert "Enabled model roster" in body
+        assert "Machine-wide role defaults" in body
+        assert 'type=\'checkbox\' name=\'enabled_model_targets\'' in body
+        assert "Reviewer default" in body
+        assert "Verifier default" in body
+        assert "Researcher default" in body
         assert "Codex" in body
         assert "Detected — adapter available" in body
         assert "Not detected" in body
@@ -57,7 +73,11 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
             "workpad_root": "/tmp/new-home/workpads",
             "editor": "/usr/bin/true",
             "open_with_target": True,
-            "selected_model_target": "offline-default",
+            "selected_model_target": "codex-default",
+            "enabled_model_targets": ["codex-default"],
+            "reviewer_model_target": "codex-default",
+            "verifier_model_target": "codex-default",
+            "researcher_model_target": "codex-default",
             "openai_api_env": "OPENAI_API_KEY",
             "openai_api_model": "gpt-test",
             "openrouter_api_env": "",
@@ -79,11 +99,15 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
                 "/tmp/new-home/workpads",
                 "/usr/bin/true",
                 True,
-                "offline-default",
+                "codex-default",
                 "OPENAI_API_KEY",
                 "gpt-test",
                 "",
                 "",
+                ("codex-default",),
+                "codex-default",
+                "codex-default",
+                "codex-default",
             )
         ]
     finally:
@@ -118,7 +142,13 @@ def test_setup_command_opens_browser_flow_and_applies_only_after_event(tmp_path:
             "workpad_root": str(home / "workpads"),
             "editor": "/usr/bin/true",
             "open_with_target": False,
-            "selected_model_target": "offline-default",
+            "selected_model_target": "openai-default",
+            "enabled_model_targets": ["openai-default"],
+            "reviewer_model_target": "openai-default",
+            "verifier_model_target": "openai-default",
+            "researcher_model_target": "openai-default",
+            "openai_api_env": "OPENAI_API_KEY",
+            "openai_api_model": "gpt-test",
         }
         with urlopen(
             Request(
@@ -134,6 +164,13 @@ def test_setup_command_opens_browser_flow_and_applies_only_after_event(tmp_path:
         assert process.returncode == 0, stderr
         assert "configuration updated" in stdout
         assert (home / "config.toml").is_file()
+        config = load_config(home)
+        default = next(profile for profile in config.profiles if profile.name == "default")
+        assert default.reviewer == "openai-default"
+        assert default.verifier == "openai-default"
+        assert default.researcher == "openai-default"
+        assert default.gig_creator == "openai-default"
+        assert next(target for target in config.model_targets if target.name == "openai-default").enabled
     finally:
         if process.poll() is None:
             process.kill()

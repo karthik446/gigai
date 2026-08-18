@@ -30,6 +30,10 @@ class SetupDraft:
     openai_api_model: str = ""
     openrouter_api_env: str = ""
     openrouter_api_model: str = ""
+    enabled_model_targets: tuple[str, ...] = ()
+    reviewer_model_target: str = ""
+    verifier_model_target: str = ""
+    researcher_model_target: str = ""
 
 
 class SetupHTTPServer:
@@ -124,6 +128,10 @@ class SetupHTTPServer:
                         openai_api_model=_optional_text(payload, "openai_api_model"),
                         openrouter_api_env=_optional_text(payload, "openrouter_api_env"),
                         openrouter_api_model=_optional_text(payload, "openrouter_api_model"),
+                        enabled_model_targets=_text_array(payload, "enabled_model_targets"),
+                        reviewer_model_target=_optional_text(payload, "reviewer_model_target"),
+                        verifier_model_target=_optional_text(payload, "verifier_model_target"),
+                        researcher_model_target=_optional_text(payload, "researcher_model_target"),
                     )
                     with owner._lock:
                         owner.result = owner.on_apply(draft)
@@ -176,14 +184,18 @@ class SetupHTTPServer:
 
     def _render_html(self) -> bytes:
         configured_labels = {str(item["label"]) for item in self.model_options}
-        option_html = "".join(
-            "<label class='model-option'><input type='radio' name='selected_model_target' "
+        roster_html = "".join(
+            "<label class='model-option'><input type='checkbox' name='enabled_model_targets' "
             f"value='{html.escape(str(item['id']))}' "
-            f"{'checked' if item['id'] == self.draft.selected_model_target else ''}>"
+            f"{'checked' if item['id'] in self.draft.enabled_model_targets else ''}>"
             f"<strong>{html.escape(str(item['label']))}</strong>"
             f"<span>{html.escape(str(item['description']))}</span></label>"
             for item in self.model_options
         )
+        reviewer_options = _role_select("Reviewer", "reviewer_model_target", self.draft.reviewer_model_target, self.model_options)
+        verifier_options = _role_select("Verifier", "verifier_model_target", self.draft.verifier_model_target, self.model_options)
+        researcher_options = _role_select("Researcher", "researcher_model_target", self.draft.researcher_model_target, self.model_options)
+        creation_options = _role_select("Gig creation", "selected_model_target", self.draft.selected_model_target, self.model_options)
         api_cards = (
             _api_card(
                 provider="OpenAI",
@@ -241,16 +253,18 @@ class SetupHTTPServer:
             + f"<label class='field'>GigAI home<input name='home_root' type='text' value='{html.escape(self.draft.home_root)}' placeholder='Choose a folder or enter an absolute path' required></label>"
             + f"<label class='field'>Private workpad folder<input name='workpad_root' type='text' value='{html.escape(self.draft.workpad_root)}' placeholder='Derived as <GigAI home>/workpads' required><span class='muted'>This is local filesystem storage for proposals, journals, and Gig state.</span></label>"
             + f"<label class='field'>Editor executable<input name='editor' type='text' value='{html.escape(self.draft.editor)}' required><span class='muted'>Detected automatically when possible; this is only used to open a workpad later.</span></label>"
-            + "<section><h2>Model providers</h2><p class='muted'>Register as many providers as you want. The selected option becomes the default model for Gig creation; you can change it by running setup again.</p><div class='provider-grid'>"
+            + "<section><h2>Model providers</h2><p class='muted'>Configure the models GigAI may use. You can enable more than one; role defaults below do not define a Gig workflow.</p><div class='provider-grid'>"
             + api_cards
             + cli_cards
             + "</div></section>"
-            + "<section><h2>Default model for Gig creation</h2><p class='muted'>Choose a configured and usable model, or explicitly choose local demo mode. Detection alone never grants invocation.</p>"
-            + option_html
+            + "<section><h2>Enabled model roster</h2><p class='muted'>Select every real model GigAI may use. At least one usable model is required; GigAI will not silently switch to a demo fixture.</p>"
+            + roster_html
+            + "</section><section><h2>Machine-wide role defaults</h2><p class='muted'>These are defaults only. Individual Gigs can define and override their own workflow roles.</p>"
+            + reviewer_options + verifier_options + researcher_options + creation_options
             + "</section><label><input name='open_with_target' type='checkbox' " + checked + "> Open workpads with their target later</label>"
             + "<button type='submit'>Apply setup</button></form>"
             + "<section class='card'><h2>Credential sources</h2><p class='muted'>Secret values never belong in config.toml, Gig manifests, or logs.</p><div class='credential-plan'><strong>Environment variable</strong><span>Supported now. GigAI stores only the variable name and reads the value at the provider boundary.</span></div><div class='credential-plan disabled'><strong>Protected local .env file</strong><span>Planned: atomic write, restrictive permissions, and runtime loading under the chosen GigAI home.</span></div><div class='credential-plan disabled'><strong>Anthropic API</strong><span>Coming soon; shown here for discoverability but not selectable yet.</span></div></section><p class='footer'>This page is local-only, loopback-bound, token-protected, and expires automatically.</p></main>"
-            + "<script>const choose=document.querySelector('#choose-folder');choose.addEventListener('click',async()=>{const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'choose_folder'})});const b=await r.json();if(!r.ok){alert(b.error||'Folder chooser unavailable');}else if(b.status==='selected'){const f=document.querySelector('#setup');f.home_root.value=b.path;f.workpad_root.value=b.path.replace(/[\\/]$/,'')+'/workpads';}});document.querySelector('#setup').addEventListener('submit',async(e)=>{e.preventDefault();const f=e.currentTarget;const selected=f.querySelector('input[name=selected_model_target]:checked');const p={event:'apply',home_root:f.home_root.value,workpad_root:f.workpad_root.value,editor:f.editor.value,open_with_target:f.open_with_target.checked,selected_model_target:selected&&selected.value,openai_api_env:f.openai_api_env.value,openai_api_model:f.openai_api_model.value,openrouter_api_env:f.openrouter_api_env.value,openrouter_api_model:f.openrouter_api_model.value};const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});if(!r.ok){const b=await r.json();alert(b.error||'Setup could not be applied');}else{document.body.innerHTML='<main class=\"shell\"><header><h1>GigAI setup complete</h1><p class=\"intro\">Configuration saved. You can close this tab.</p></header></main>';}});</script>"
+            + "<script>const choose=document.querySelector('#choose-folder');choose.addEventListener('click',async()=>{const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'choose_folder'})});const b=await r.json();if(!r.ok){alert(b.error||'Folder chooser unavailable');}else if(b.status==='selected'){const f=document.querySelector('#setup');f.home_root.value=b.path;f.workpad_root.value=b.path.replace(/[\\/]$/,'')+'/workpads';}});document.querySelector('#setup').addEventListener('submit',async(e)=>{e.preventDefault();const f=e.currentTarget;const enabled=[...f.querySelectorAll('input[name=enabled_model_targets]:checked')].map(item=>item.value);const selected=f.querySelector('select[name=selected_model_target]');const p={event:'apply',home_root:f.home_root.value,workpad_root:f.workpad_root.value,editor:f.editor.value,open_with_target:f.open_with_target.checked,selected_model_target:selected&&selected.value,reviewer_model_target:f.reviewer_model_target.value,verifier_model_target:f.verifier_model_target.value,researcher_model_target:f.researcher_model_target.value,enabled_model_targets:enabled,openai_api_env:f.openai_api_env.value,openai_api_model:f.openai_api_model.value,openrouter_api_env:f.openrouter_api_env.value,openrouter_api_model:f.openrouter_api_model.value};const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});if(!r.ok){const b=await r.json();alert(b.error||'Setup could not be applied');}else{document.body.innerHTML='<main class=\"shell\"><header><h1>GigAI setup complete</h1><p class=\"intro\">Configuration saved. You can close this tab.</p></header></main>';}});</script>"
         ).encode()
         return body
 
@@ -269,6 +283,34 @@ def _optional_text(payload: Mapping[str, object], key: str) -> str:
     if not isinstance(value, str) or "\0" in value:
         raise SetupInterviewError(f"{key} must be text without NUL bytes")
     return value.strip()
+
+
+def _text_array(payload: Mapping[str, object], key: str) -> tuple[str, ...]:
+    value = payload.get(key, ())
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item.strip() or "\0" in item for item in value
+    ):
+        raise SetupInterviewError(f"{key} must be an array of non-empty NUL-free strings")
+    return tuple(dict.fromkeys(item.strip() for item in value))
+
+
+def _role_select(
+    label: str,
+    name: str,
+    selected: str,
+    options: tuple[Mapping[str, str], ...],
+) -> str:
+    option_html = "".join(
+        f"<option value='{html.escape(str(item['id']))}' "
+        f"{'selected' if item['id'] == selected else ''}>"
+        f"{html.escape(str(item['label']))}</option>"
+        for item in options
+    )
+    return (
+        f"<label class='field'>{html.escape(label)} default"
+        f"<select name='{html.escape(name)}' required>{option_html}</select>"
+        "</label>"
+    )
 
 
 def _api_card(
@@ -322,6 +364,7 @@ def choose_local_folder() -> str | None:
             'POSIX path of (choose folder with prompt "Choose GigAI storage folder")',
         ],
         check=False,
+        shell=False,
         capture_output=True,
         text=True,
         timeout=120,

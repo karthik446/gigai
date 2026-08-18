@@ -21,6 +21,8 @@ def resolve_model_target(config: GigAIConfig, target_name: str) -> ResolvedModel
     target = next((item for item in config.model_targets if item.name == target_name), None)
     if target is None:
         raise ModelTargetResolutionError(f"unknown model target {target_name!r}")
+    if not target.enabled:
+        raise ModelTargetResolutionError(f"model target {target_name!r} is disabled")
     endpoint = next((item for item in config.endpoints if item.name == target.endpoint), None)
     if endpoint is None:  # parse_config normally makes this unreachable.
         raise ModelTargetResolutionError(

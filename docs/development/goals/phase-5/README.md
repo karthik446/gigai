@@ -26,7 +26,7 @@ G22 -> G26 + G27-contract -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G30 -
 | [G28](G28-v0.1.5-readiness.md) | v0.1.5 evaluation, role-registry, and browser-first create readiness | G26, G27 contract, S27-EVAL, S27-ROLE, S27-CREATE | Complete — candidate evidence accepted |
 | [G27](G27-adaptive-gig-discovery-and-pre-proposal-research.md) | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G28 | Complete — runtime and machine evidence accepted; G31 owns human UAT |
 | [G29](G29-v0.1.5-human-uat-and-dogfooding.md) | Historical v0.1.5 UAT and dogfooding record | G27, G28, G24 findings | Superseded by G31 before v0.1.6 |
-| [G30](G30-cli-model-adapters-and-browser-setup-onboarding.md) | Real Codex/Claude adapters, API onboarding, folder access, and browser-first setup/create | G18, G26, G27, G28, S18-02 | Active — implementation underway |
+| [G30](G30-cli-model-adapters-and-browser-setup-onboarding.md) | Real Codex/Claude adapters, API onboarding, folder access, multi-model setup, and browser-first Gig creation | G18, G26, G27, G28, S18-02 | Active — implementation underway |
 | [G31](G31-v0.1.6-readiness-and-uat.md) | v0.1.6 release readiness and human UAT | G30, G27, G28, G12 | Proposed for review |
 
 G20 must preserve G19's explicit target-effect authority and the existing
@@ -88,5 +88,7 @@ Before G31's final human UAT pass, the v0.1.6 readiness gate must close
 [TD-0008](../../tech-debt/TD-0008-browser-first-create-and-model-setup.md).
 These are release-readiness debt items, not new proposal or version authority.
 G30 owns the missing real CLI adapters, supported provider onboarding, native
-folder access, and remaining HTMX/setup usability work. G31 supersedes the
+folder access, multi-model setup with machine-wide reviewer/verifier/researcher
+defaults, and remaining HTMX/Gig-creation usability work. Gig-specific workflow
+roles belong to the Gig definition, not global setup. G31 supersedes the
 unfinished v0.1.5 UAT path and owns the v0.1.6 release-candidate UAT.

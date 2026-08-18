@@ -11,6 +11,7 @@ from gigai.adapters.claude_cli import ClaudeCLIAdapter
 from gigai.adapters.codex_cli import CodexCLIAdapter
 from gigai.adapters.port import InvocationRequest, ModelInvocationError
 from gigai.config import CredentialReference, Endpoint, ModelTarget, Profile
+from gigai.model_targets import ModelTargetResolutionError, resolve_model_target
 from gigai.setup import build_config
 
 
@@ -105,3 +106,20 @@ def test_cli_endpoints_are_typed_without_gigai_credentials(tmp_path: Path) -> No
     )
 
     assert {endpoint.adapter for endpoint in config.endpoints} == {"codex_cli", "openai_api"}
+
+
+def test_disabled_model_target_cannot_be_resolved_for_invocation(tmp_path: Path) -> None:
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpad",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(Endpoint(name="codex", adapter="codex_cli"),),
+        model_targets=(
+            ModelTarget("disabled", "codex", "model-under-test", ("text",), 32, enabled=False),
+        ),
+        profiles=(Profile("default", "disabled", "disabled", "disabled"),),
+    )
+
+    with pytest.raises(ModelTargetResolutionError, match="disabled"):
+        resolve_model_target(config, "disabled")
