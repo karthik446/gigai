@@ -41,6 +41,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "gigai.schemas" = ["*.schema.json", "README.md", "SHA256SUMS"]
 "gigai.data" = ["*.json"]
+"gigai" = ["static/*.css"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers -p no:cacheprovider"

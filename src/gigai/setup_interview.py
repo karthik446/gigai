@@ -10,6 +10,7 @@ import secrets
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from typing import Callable, Mapping
 
 from .model_discovery import DetectedModel
@@ -78,6 +79,9 @@ class SetupHTTPServer:
             def _authorized(self) -> bool:
                 return self.path == f"/setup/{owner.token}"
 
+            def _stylesheet_authorized(self) -> bool:
+                return self.path == f"/setup/{owner.token}.css"
+
             def _json(self, status: int, payload: Mapping[str, object]) -> None:
                 body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
                 self.send_response(status)
@@ -87,6 +91,14 @@ class SetupHTTPServer:
                 self.wfile.write(body)
 
             def do_GET(self) -> None:  # noqa: N802
+                if self._stylesheet_authorized():
+                    body = owner._render_css()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/css; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 if not self._authorized():
                     self._json(404, {"error": "not_found"})
                     return
@@ -235,17 +247,9 @@ class SetupHTTPServer:
         checked = "checked" if self.draft.open_with_target else ""
         body = (
             "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-            "<title>Set up GigAI</title><style>"
-            ":root{font:16px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;background:#f5f7fb}"
-            "body{margin:0}.shell{max-width:760px;margin:0 auto;padding:32px 20px 64px}"
-            "header{background:#172033;color:white;border-radius:16px;padding:24px;margin-bottom:20px}"
-            "h1{margin:0 0 8px;font-size:1.7rem}h2{font-size:1rem;margin:0 0 8px}p{line-height:1.5}"
-            ".intro{color:#dbe4f5;margin:0}.card{background:white;border:1px solid #dbe2ef;border-radius:12px;padding:20px;margin:14px 0;box-shadow:0 2px 8px #1720330d}"
-            "label.field{display:block;font-weight:700;margin:14px 0}input[type=text]{box-sizing:border-box;width:100%;margin-top:7px;border:1px solid #aab6cc;border-radius:7px;padding:10px;font:inherit}"
-            ".model-option{display:block;border:1px solid #dbe2ef;border-radius:9px;padding:12px;margin:10px 0;cursor:pointer}.model-option span{display:block;color:#526079;font-size:.9rem;margin:4px 0 0 24px}.model-option strong{margin-left:6px}"
-            ".provider-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.provider-card{border:1px solid #dbe2ef;border-radius:9px;padding:12px}.provider-card.disabled{background:#f8fafc;color:#71809a}.provider-card p{color:#526079;font-size:.88rem;margin:7px 0 0}.provider-status{float:right;border-radius:999px;background:#dcfce7;color:#166534;padding:3px 8px;font-size:.72rem;font-weight:700}.disabled .provider-status{background:#e2e8f0;color:#526079}.credential-plan{border-top:1px solid #dbe2ef;margin-top:12px;padding-top:12px}.credential-plan strong{display:block}.credential-plan span{display:block;color:#526079;font-size:.88rem;margin-top:4px}.credential-plan.disabled{opacity:.68}"
-            "button{border:1px solid #2563eb;border-radius:7px;background:#2563eb;color:white;padding:10px 16px;font:inherit;font-weight:700;cursor:pointer;margin-top:14px}.folder-choice{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.folder-choice button{background:#e8eef8;color:#172033;border-color:#9aa8bf}.error{background:#fee2e2;color:#991b1b;padding:10px;border-radius:8px}.muted{color:#526079;font-size:.9rem}.detected{padding-left:20px;color:#526079}.footer{color:#61708a;font-size:.82rem;margin-top:18px}"
-            "</style><main class='shell'><header><h1>Set up GigAI</h1>"
+            "<title>Set up GigAI</title><link rel='stylesheet' href='"
+            + self.url
+            + ".css'><main class='shell'><header><h1>Set up GigAI</h1>"
             "<p class='intro'>Choose where GigAI keeps its local state and which model should facilitate Gig creation. Nothing is sent anywhere during setup.</p></header>"
             + error_html
             + "<form id='setup' class='card'>"
@@ -260,13 +264,16 @@ class SetupHTTPServer:
             + "<section><h2>Enabled model roster</h2><p class='muted'>Select every real model GigAI may use. At least one usable model is required; GigAI will not silently switch to a demo fixture.</p>"
             + roster_html
             + "</section><section><h2>Machine-wide role defaults</h2><p class='muted'>These are defaults only. Individual Gigs can define and override their own workflow roles.</p>"
-            + reviewer_options + verifier_options + researcher_options + creation_options
+            + "<div class='role-grid'>" + reviewer_options + verifier_options + researcher_options + creation_options + "</div>"
             + "</section><label><input name='open_with_target' type='checkbox' " + checked + "> Open workpads with their target later</label>"
             + "<button type='submit'>Apply setup</button></form>"
             + "<section class='card'><h2>Credential sources</h2><p class='muted'>Secret values never belong in config.toml, Gig manifests, or logs.</p><div class='credential-plan'><strong>Environment variable</strong><span>Supported now. GigAI stores only the variable name and reads the value at the provider boundary.</span></div><div class='credential-plan disabled'><strong>Protected local .env file</strong><span>Planned: atomic write, restrictive permissions, and runtime loading under the chosen GigAI home.</span></div><div class='credential-plan disabled'><strong>Anthropic API</strong><span>Coming soon; shown here for discoverability but not selectable yet.</span></div></section><p class='footer'>This page is local-only, loopback-bound, token-protected, and expires automatically.</p></main>"
             + "<script>const choose=document.querySelector('#choose-folder');choose.addEventListener('click',async()=>{const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'choose_folder'})});const b=await r.json();if(!r.ok){alert(b.error||'Folder chooser unavailable');}else if(b.status==='selected'){const f=document.querySelector('#setup');f.home_root.value=b.path;f.workpad_root.value=b.path.replace(/[\\/]$/,'')+'/workpads';}});document.querySelector('#setup').addEventListener('submit',async(e)=>{e.preventDefault();const f=e.currentTarget;const enabled=[...f.querySelectorAll('input[name=enabled_model_targets]:checked')].map(item=>item.value);const selected=f.querySelector('select[name=selected_model_target]');const p={event:'apply',home_root:f.home_root.value,workpad_root:f.workpad_root.value,editor:f.editor.value,open_with_target:f.open_with_target.checked,selected_model_target:selected&&selected.value,reviewer_model_target:f.reviewer_model_target.value,verifier_model_target:f.verifier_model_target.value,researcher_model_target:f.researcher_model_target.value,enabled_model_targets:enabled,openai_api_env:f.openai_api_env.value,openai_api_model:f.openai_api_model.value,openrouter_api_env:f.openrouter_api_env.value,openrouter_api_model:f.openrouter_api_model.value};const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});if(!r.ok){const b=await r.json();alert(b.error||'Setup could not be applied');}else{document.body.innerHTML='<main class=\"shell\"><header><h1>GigAI setup complete</h1><p class=\"intro\">Configuration saved. You can close this tab.</p></header></main>';}});</script>"
         ).encode()
         return body
+
+    def _render_css(self) -> bytes:
+        return (Path(__file__).parent / "static" / "setup.css").read_bytes()
 
 
 def _required_text(payload: Mapping[str, object], key: str) -> str:
@@ -308,7 +315,7 @@ def _role_select(
     )
     return (
         f"<label class='field'>{html.escape(label)} default"
-        f"<select name='{html.escape(name)}' required>{option_html}</select>"
+        f"<span class='select-wrap'><select name='{html.escape(name)}' required>{option_html}</select></span>"
         "</label>"
     )
 

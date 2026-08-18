@@ -42,6 +42,11 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
     try:
         with urlopen(server.url, timeout=2) as response:
             body = response.read().decode()
+        assert ".css" in body
+        with urlopen(server.url + ".css", timeout=2) as response:
+            stylesheet = response.read().decode()
+        assert ".role-grid" in stylesheet
+        assert "appearance: none" in stylesheet
         assert "Offline demo mode" not in body
         assert "Enabled model roster" in body
         assert "Machine-wide role defaults" in body
