@@ -342,7 +342,7 @@ def test_live_doctor_is_opt_in_budgeted_and_redacts_the_runtime_secret(
 
 def test_only_factory_may_import_concrete_adapters_and_negative_probe_is_detected() -> None:
     package = Path(__file__).parents[1] / "src" / "gigai"
-    concrete = {"deterministic", "openai_api", "openrouter_api"}
+    concrete = {"deterministic", "openai_api", "openrouter_api", "codex_cli", "claude_cli"}
 
     def imported_concrete_modules(tree: ast.AST) -> set[str]:
         found: set[str] = set()

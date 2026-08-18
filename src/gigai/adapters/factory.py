@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from ..config import CredentialReference, GigAIConfig
 from ..model_targets import ResolvedModelTarget, resolve_model_target
 from .deterministic import DeterministicAdapter
+from .claude_cli import ClaudeCLIAdapter
+from .codex_cli import CodexCLIAdapter
 from .openai_api import OpenAIAPIAdapter
 from .openrouter_api import OpenRouterAPIAdapter
 from .port import InvocationRequest, ModelInvocationPort
@@ -54,6 +56,10 @@ def resolve_model_adapter(config: GigAIConfig, target_name: str) -> ModelAdapter
     endpoint = target.endpoint
     if endpoint.adapter == "deterministic":
         return ModelAdapterBinding(current=target, port=DeterministicAdapter())
+    if endpoint.adapter == "codex_cli":
+        return ModelAdapterBinding(current=target, port=CodexCLIAdapter())
+    if endpoint.adapter == "claude_cli":
+        return ModelAdapterBinding(current=target, port=ClaudeCLIAdapter())
     credential = _credential(config, endpoint.credential, endpoint.name)
     if endpoint.adapter == "openai_api":
         return ModelAdapterBinding(

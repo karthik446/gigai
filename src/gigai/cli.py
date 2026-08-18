@@ -20,6 +20,7 @@ from .config import (
     load_config,
     migrate_config,
 )
+from .credentials import reference_is_available
 from .comparison import ComparisonError, compare_occurrences
 from .diagnostics import render_report_json, run_doctor, run_live_doctor
 from .evaluation import EvaluationError, load_manifest, score_behavior, write_report
@@ -61,6 +62,7 @@ from .setup import (
     resolve_editor_argv,
     run_setup,
 )
+from .setup_interview import SetupDraft, SetupHTTPServer
 from .registry import open_project_registry
 from .run import RunError, launch_run, read_run_details
 from .target_binding import TargetBindingError, initialize_target
@@ -195,6 +197,9 @@ def eval_behavior_command(manifest: Path, observations: Path, split: str, output
     "--non-interactive", is_flag=True, help="Refuse prompts and use explicit options."
 )
 @click.option(
+    "--terminal", is_flag=True, help="Use the legacy terminal prompts instead of the browser setup."
+)
+@click.option(
     "--home",
     "home_value",
     type=click.Path(path_type=Path, file_okay=False),
@@ -264,8 +269,10 @@ def eval_behavior_command(manifest: Path, observations: Path, split: str, output
 @click.option(
     "--json", "as_json", is_flag=True, help="Emit a stable machine-readable summary."
 )
+@click.option("--open/--no-open", "open_browser", default=True, help="Open the local setup page in the browser.")
 def setup_command(
     non_interactive: bool,
+    terminal: bool,
     home_value: Path | None,
     workpad_root: Path | None,
     editor: str | None,
@@ -279,10 +286,28 @@ def setup_command(
     target_output_limit_spec: tuple[str, ...],
     target_reasoning_effort_spec: tuple[str, ...],
     as_json: bool,
+    open_browser: bool,
 ) -> None:
-    """Create or update local config and the deterministic standard pack."""
+    """Open browser-first setup, or update config non-interactively."""
 
     _require_supported_platform()
+    if not non_interactive and not terminal:
+        _run_browser_setup(
+            home_value=home_value,
+            workpad_root=workpad_root,
+            editor=editor,
+            open_with_target=open_with_target,
+            create_model_target=create_model_target,
+            credential_ref=credential_ref,
+            clear_credentials=clear_credentials,
+            endpoint_spec=endpoint_spec,
+            model_target_spec=model_target_spec,
+            target_output_limit_spec=target_output_limit_spec,
+            target_reasoning_effort_spec=target_reasoning_effort_spec,
+            as_json=as_json,
+            open_browser=open_browser,
+        )
+        return
     requested_home = (
         (home_value or default_home_root()).expanduser().resolve(strict=False)
     )
@@ -317,7 +342,7 @@ def setup_command(
             if existing
             else False
         )
-    else:
+    elif terminal:
         requested_home = (
             Path(
                 click.prompt(
@@ -593,6 +618,297 @@ def setup_command(
         changed = "updated" if result.config_changed else "unchanged"
         click.echo(f"GigAI setup complete; configuration {changed}.")
         click.echo(f"Authoritative workpad root: {result.config.workpad_root}")
+
+
+def _run_browser_setup(
+    *,
+    home_value: Path | None,
+    workpad_root: Path | None,
+    editor: str | None,
+    open_with_target: bool | None,
+    create_model_target: str | None,
+    credential_ref: tuple[str, ...],
+    clear_credentials: bool,
+    endpoint_spec: tuple[str, ...],
+    model_target_spec: tuple[str, ...],
+    target_output_limit_spec: tuple[str, ...],
+    target_reasoning_effort_spec: tuple[str, ...],
+    as_json: bool,
+    open_browser: bool,
+) -> None:
+    """Run the human setup flow without exposing internal target identifiers."""
+
+    advanced = (
+        credential_ref
+        or clear_credentials
+        or endpoint_spec
+        or model_target_spec
+        or target_output_limit_spec
+        or target_reasoning_effort_spec
+    )
+    if advanced:
+        raise click.UsageError(
+            "advanced credentials and model flags require --non-interactive; "
+            "ordinary setup is browser-first"
+        )
+    requested_home = (home_value or default_home_root()).expanduser().resolve(strict=False)
+    existing = None
+    if (requested_home / "config.toml").exists():
+        try:
+            existing = load_config(requested_home)
+        except ConfigurationError as exc:
+            try:
+                existing, _ = migrate_config(requested_home)
+            except ConfigurationError:
+                raise click.ClickException(str(exc)) from exc
+
+    detected_editor = detect_editor_argv()
+    existing_editor = existing.editor_argv[0] if existing else None
+    editor_value = editor or existing_editor or (detected_editor[0] if detected_editor else "")
+    resolved_workpad = workpad_root or (
+        existing.workpad_root if existing else default_workpad_root(requested_home)
+    )
+    if existing is None:
+        preview = build_config(
+            home_root=requested_home,
+            workpad_root=resolved_workpad,
+            editor_argv=(editor_value or "/usr/bin/true",),
+            open_with_target=open_with_target if open_with_target is not None else False,
+        )
+    else:
+        preview = existing
+    detected_models = discover_installed_models()
+    preview = _browser_preview_config(preview, detected_models)
+    selected = create_model_target or _default_create_model_target(preview)
+    browser_home = "" if existing is None and home_value is None else os.fspath(requested_home)
+    browser_workpad = "" if existing is None and workpad_root is None else os.fspath(resolved_workpad)
+    model_options = tuple(
+        {
+            "id": target.name,
+            "label": _model_target_label(target, preview),
+            "description": _model_target_description(target, preview),
+        }
+        for target in preview.model_targets
+    )
+    openai_api_env, openai_api_model = _browser_provider_values(preview, "openai")
+    openrouter_api_env, openrouter_api_model = _browser_provider_values(preview, "openrouter")
+    provider_status = _browser_provider_status(existing)
+
+    def apply_setup(draft: SetupDraft) -> Mapping[str, object]:
+        target_names = {target.name for target in preview.model_targets}
+        if draft.selected_model_target not in target_names:
+            raise ValueError("selected Gig creation model is not configured")
+        resolved_editor = resolve_editor_argv(
+            draft.editor,
+            existing.editor_argv[1:] if existing is not None else (),
+        )
+        profiles = list(existing.profiles if existing is not None else preview.profiles)
+        replaced = False
+        for index, profile in enumerate(profiles):
+            if profile.name == "default":
+                profiles[index] = replace(profile, planner=draft.selected_model_target)
+                replaced = True
+                break
+        if not replaced:
+            profiles.append(
+                Profile(
+                    name="default",
+                    planner=draft.selected_model_target,
+                    critic=draft.selected_model_target,
+                    adjudicator=draft.selected_model_target,
+                )
+            )
+        provider_credentials, provider_endpoints, provider_targets = _browser_provider_config(
+            preview, draft
+        )
+        config = build_config(
+            home_root=Path(draft.home_root).expanduser().resolve(strict=False),
+            workpad_root=Path(draft.workpad_root).expanduser().resolve(strict=False),
+            editor_argv=resolved_editor,
+            open_with_target=draft.open_with_target,
+            credentials=provider_credentials,
+            endpoints=provider_endpoints,
+            model_targets=provider_targets,
+            profiles=tuple(profiles),
+        )
+        result = run_setup(config)
+        return {
+            "home_root": os.fspath(result.config.home_root),
+            "workpad_root": os.fspath(result.config.workpad_root),
+            "config_changed": result.config_changed,
+            "standard_pack_changed": result.pack_changed,
+            "selected_model": _model_target_label(
+                next(item for item in result.config.model_targets if item.name == draft.selected_model_target),
+                result.config,
+            ),
+        }
+
+    server = SetupHTTPServer(
+        SetupDraft(
+            home_root=browser_home,
+            workpad_root=browser_workpad,
+            editor=editor_value,
+            open_with_target=(
+                open_with_target
+                if open_with_target is not None
+                else existing.open_with_target
+                if existing is not None
+                else False
+            ),
+            selected_model_target=selected,
+            openai_api_env=openai_api_env,
+            openai_api_model=openai_api_model,
+            openrouter_api_env=openrouter_api_env,
+            openrouter_api_model=openrouter_api_model,
+        ),
+        model_options=model_options,
+        detected_models=detected_models,
+        provider_status=provider_status,
+        on_apply=apply_setup,
+    ).start()
+    try:
+        click.echo(f"GigAI local setup: {server.url}", err=True)
+        if open_browser:
+            webbrowser.open(server.url, new=2)
+        result = server.wait()
+    finally:
+        server.close()
+    if result is None:
+        raise click.ClickException("setup was cancelled or expired; no changes were applied")
+    if as_json:
+        click.echo(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo("GigAI setup complete; configuration updated.")
+        click.echo(f"Authoritative workpad root: {result['workpad_root']}")
+
+
+def _model_target_label(target: ModelTarget, config) -> str:
+    endpoint = next(item for item in config.endpoints if item.name == target.endpoint)
+    if endpoint.adapter == "deterministic":
+        return "Offline demo mode"
+    if endpoint.adapter == "openrouter_api":
+        return "OpenRouter API"
+    if endpoint.adapter == "openai_api":
+        return "OpenAI API"
+    if endpoint.adapter == "codex_cli":
+        return "Codex CLI"
+    if endpoint.adapter == "claude_cli":
+        return "Claude CLI"
+    return "Configured model"
+
+
+def _browser_preview_config(config, detected_models):
+    """Add selectable provider candidates without reading credentials or invoking models."""
+
+    credentials = list(config.credentials)
+    endpoints = list(config.endpoints)
+    targets = list(config.model_targets)
+    endpoint_names = {item.name for item in endpoints}
+    target_names = {item.name for item in targets}
+    credential_names = {item.name for item in credentials}
+
+    api_defaults = (
+        ("openai", "openai_api", "openai-api", "OPENAI_API_KEY", "gpt-4.1-mini"),
+        ("openrouter", "openrouter_api", "openrouter-api", "OPENROUTER_API_KEY", "openai/gpt-4o-mini"),
+    )
+    for provider, adapter, credential_name, environment_name, model in api_defaults:
+        if credential_name not in credential_names:
+            credentials.append(CredentialReference(credential_name, "environment", environment_name))
+        if provider not in endpoint_names:
+            endpoints.append(Endpoint(provider, adapter, credential=credential_name))
+        if f"{provider}-default" not in target_names:
+            targets.append(ModelTarget(f"{provider}-default", provider, model, ("text",), 512))
+
+    for detected in detected_models:
+        if detected.executable is None or detected.name in endpoint_names:
+            continue
+        adapter = f"{detected.name}_cli"
+        target_name = f"{detected.name}-default"
+        endpoints.append(Endpoint(detected.name, adapter))
+        if target_name not in target_names:
+            targets.append(ModelTarget(target_name, detected.name, "default", ("text",), 512))
+
+    return build_config(
+        home_root=config.home_root,
+        workpad_root=config.workpad_root,
+        editor_argv=config.editor_argv,
+        open_with_target=config.open_with_target,
+        credentials=tuple(credentials),
+        endpoints=tuple(endpoints),
+        model_targets=tuple(targets),
+        profiles=config.profiles,
+    )
+
+
+def _browser_provider_values(config, provider: str) -> tuple[str, str]:
+    endpoint = next((item for item in config.endpoints if item.name == provider), None)
+    if endpoint is None or endpoint.credential is None:
+        return "", ""
+    credential = next((item for item in config.credentials if item.name == endpoint.credential), None)
+    target = next((item for item in config.model_targets if item.endpoint == provider), None)
+    return (
+        credential.reference if credential is not None and credential.kind == "environment" else "",
+        target.model if target is not None else "",
+    )
+
+
+def _browser_provider_status(config) -> dict[str, str]:
+    status: dict[str, str] = {}
+    labels = {"openai": "OpenAI", "openrouter": "OpenRouter"}
+    for provider in labels:
+        endpoint = next((item for item in config.endpoints if item.name == provider), None) if config else None
+        credential = (
+            next((item for item in config.credentials if item.name == endpoint.credential), None)
+            if config and endpoint and endpoint.credential
+            else None
+        )
+        if endpoint is None or credential is None:
+            status[labels[provider]] = "Not configured"
+            continue
+        try:
+            available = reference_is_available(credential)
+        except ValueError:
+            available = False
+        status[labels[provider]] = (
+            "Configured"
+            if available is True
+            else "Reference saved — value unavailable"
+        )
+    return status
+
+
+def _browser_provider_config(config, draft: SetupDraft):
+    """Apply browser-provided environment references without accepting secret values."""
+
+    credentials = list(config.credentials)
+    endpoints = list(config.endpoints)
+    targets = list(config.model_targets)
+    providers = (
+        ("openai", "openai_api", "openai-api", draft.openai_api_env, draft.openai_api_model, "gpt-4.1-mini"),
+        ("openrouter", "openrouter_api", "openrouter-api", draft.openrouter_api_env, draft.openrouter_api_model, "openai/gpt-4o-mini"),
+    )
+    for provider, adapter, credential_name, environment_name, model, default_model in providers:
+        if not environment_name:
+            continue
+        credentials = [item for item in credentials if item.name != credential_name]
+        credentials.append(CredentialReference(credential_name, "environment", environment_name))
+        endpoints = [item for item in endpoints if item.name != provider]
+        endpoints.append(Endpoint(provider, adapter, credential=credential_name))
+        targets = [item for item in targets if item.name != f"{provider}-default"]
+        targets.append(ModelTarget(f"{provider}-default", provider, model or default_model, ("text",), 512))
+    return tuple(credentials), tuple(endpoints), tuple(targets)
+
+
+def _model_target_description(target: ModelTarget, config) -> str:
+    endpoint = next(item for item in config.endpoints if item.name == target.endpoint)
+    if endpoint.adapter == "deterministic":
+        return "Local deterministic fixture; no network or provider credentials. Use only for demos and contract checks."
+    if endpoint.adapter == "codex_cli":
+        return "Provider-default Codex model; authentication remains owned by the installed CLI."
+    if endpoint.adapter == "claude_cli":
+        return "Provider-default Claude model; authentication remains owned by the installed CLI."
+    readiness = resolve_target_readiness(config, target.name)
+    return f"Model {target.model}; readiness={readiness.readiness}. Credential values are never read during setup."
 
 
 @cli.command("doctor")

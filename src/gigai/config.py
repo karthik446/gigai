@@ -593,17 +593,25 @@ def _endpoint(value: object, index: int, where: str) -> Endpoint:
     _allowed_keys(item, required, optional, f"endpoints[{index}]", where)
     name = _string(item, "name", f"endpoints[{index}]", where)
     adapter = _string(item, "adapter", f"endpoints[{index}]", where)
-    if adapter not in {"deterministic", "openai_api", "openrouter_api"}:
+    if adapter not in {
+        "deterministic",
+        "openai_api",
+        "openrouter_api",
+        "codex_cli",
+        "claude_cli",
+    }:
         raise MalformedConfigurationError(
             f"endpoints[{index}].adapter{where} is not a supported G11 adapter"
         )
     credential = _optional_string(item, "credential", f"endpoints[{index}]", where)
     base_url = _optional_string(item, "base_url", f"endpoints[{index}]", where)
-    if adapter == "deterministic" and (credential is not None or base_url is not None):
+    if adapter in {"deterministic", "codex_cli", "claude_cli"} and (
+        credential is not None or base_url is not None
+    ):
         raise MalformedConfigurationError(
-            f"deterministic endpoint {name!r}{where} cannot declare credential or base_url"
+            f"local endpoint {name!r}{where} cannot declare credential or base_url"
         )
-    if adapter != "deterministic" and credential is None:
+    if adapter in {"openai_api", "openrouter_api"} and credential is None:
         raise MalformedConfigurationError(
             f"endpoint {name!r}{where} requires a credential reference name"
         )

@@ -142,13 +142,14 @@ def run_model_invocation(
     endpoint = binding.current.endpoint
     credential = _credential_for_endpoint(config, endpoint.credential)
     provider_family = endpoint.adapter
-    remote = endpoint.adapter != "deterministic"
+    networked = endpoint.adapter != "deterministic"
+    gigai_credential_required = endpoint.adapter in {"openai_api", "openrouter_api"}
 
     selected_refs = tuple(_reference_ref(item) for item in selected)
     selection_reason: str | None = None
     redaction_result = "not_started"
     credential_lookup = "not_requested"
-    network_result = "offline" if not remote else "not_checked"
+    network_result = "offline" if not networked else "not_checked"
     provider_input: str | None = None
     provider_input_sha256: str | None = None
     result: InvocationResult | None = None
@@ -163,7 +164,7 @@ def run_model_invocation(
         item not in policy.allowed_reference_ids for item in selected_reference_ids
     ):
         selection_reason = "reference_not_allowed"
-    if selection_reason is None and remote:
+    if selection_reason is None and gigai_credential_required:
         if credential is None:
             selection_reason = "credential_reference_missing"
             credential_lookup = "missing"
@@ -190,7 +191,7 @@ def run_model_invocation(
             redaction_result = "passed"
             provider_input = redacted
             provider_input_sha256 = digest_imported_bytes(redacted.encode("utf-8"))
-    if selection_reason is None and remote:
+    if selection_reason is None and networked:
         if policy.offline or not policy.network_allowed:
             network_result = "denied"
             selection_reason = "network_denied"
@@ -210,7 +211,7 @@ def run_model_invocation(
     request_ref = _artifact_ref(request_path, request_bytes, "application/json")
 
     if selection_reason is None:
-        if remote:
+        if gigai_credential_required:
             try:
                 available = reference_is_available(credential) if credential else False
                 if available is False:
@@ -296,7 +297,7 @@ def run_model_invocation(
         redaction_policy_version=policy.redaction_policy_version,
         credential=credential,
         credential_lookup=credential_lookup,
-        network_policy="offline" if not remote or policy.offline else "explicit_permission",
+        network_policy="offline" if not networked or policy.offline else "explicit_permission",
         network_result=network_result,
         response_artifact=response_artifact_ref,
         terminal_committed_at=now,
