@@ -341,6 +341,7 @@ def _api_card(
     status: str,
 ) -> str:
     configured = status.startswith("Configured") or status.startswith("Reference")
+    open_attribute = " open" if env_value else ""
     detail = (
         "GigAI stores only the environment-variable name; the secret value is read at invocation time."
         if configured
@@ -348,11 +349,13 @@ def _api_card(
     )
     placeholder = provider.upper().replace(" ", "_") + "_API_KEY"
     return (
-        "<article class='provider-card'><div><strong>"
+        "<details class='provider-card provider-config'"
+        + open_attribute
+        + "><summary><strong>"
         + provider
         + " API</strong><span class='provider-status'>"
         + status
-        + "</span></div><p>"
+        + "</span></summary><div class='provider-fields'><p>"
         + detail
         + "</p><label class='field'>Environment variable<input name='"
         + env_field
@@ -364,7 +367,7 @@ def _api_card(
         + model_field
         + "' type='text' value='"
         + html.escape(model_value)
-        + "' placeholder='Provider model name'></label></article>"
+        + "' placeholder='Provider model name'></label></div></details>"
     )
 
 
