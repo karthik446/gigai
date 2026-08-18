@@ -55,6 +55,7 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
         assert "Offline demo mode" not in body
         assert "Enabled model roster" in body
         assert "Machine-wide role defaults" in body
+        assert "<details class='role-config'>" in body
         assert "<ul class='provider-list'>" in body
         assert "<details class='provider-config'" in body
         assert "provider-fields" in body
