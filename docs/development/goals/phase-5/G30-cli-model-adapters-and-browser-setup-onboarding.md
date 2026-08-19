@@ -16,6 +16,12 @@ gigai create tailor-resume-for-job
 
 The browser setup is the user-facing configuration surface. `--non-interactive` remains available for automation and exact scripted configuration.
 
+The published package page is also a user-facing surface. Before the v0.1.6
+release, its README must plainly explain what a Gig is, how setup and creation
+work, and show a few concrete examples. It must not expose internal schema
+inventories, evidence mechanics, or implementation history as the package's
+introduction.
+
 Setup configures the machine-wide model roster and default role assignments; it does
 not define a Gig. A Gig such as `review-verify-fix-loop` owns its workflow and
 Gig-specific roles at the Gig level, edited through a command such as
@@ -103,6 +109,10 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
 - HTMX setup and Gig-definition/create usability fixes;
 - real local CLI probes, mutation tests, integration tests, and installed replay;
 - sanitized evidence for provider/auth/readiness behavior.
+- a concise package README for the published PyPI page, with a plain-language
+  Gig definition, the normal setup/create path, and representative examples;
+  internal schemas and goal/evidence mechanics remain linked only from the
+  repository documentation where appropriate.
 
 ## Out of scope
 
@@ -165,11 +175,17 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
     and Gig-oriented, no secret value enters the page or durable state, no
     implementation-facing model flags are required, and setup cannot create or
     mutate a Gig definition.
+16. Before v0.1.6 publication, the package README renders as a simple operator
+    introduction on PyPI: it defines a Gig in plain language, explains the
+    setup/create flow, and includes concrete examples such as
+    `tailor-resume-for-job` and `review-verify-fix-loop`. It does not lead with
+    schema counts, schema filenames, internal evidence directories, goal
+    numbering, or implementation-history detail.
 
 ## Verification and evidence
 
-Evidence belongs under `docs/development/evidence/phase-5/G30/` and includes the accepted contract decision, the accepted browser setup interaction record, sanitized installed CLI version/probe results, adapter conformance and mutation reports, setup/create browser captures for each access branch, credential-boundary fixtures, folder-selection fixtures, installed-wheel replay, completion audit, and terminal handoff.
+Evidence belongs under `docs/development/evidence/phase-5/G30/` and includes the accepted contract decision, the accepted browser setup interaction record, sanitized installed CLI version/probe results, adapter conformance and mutation reports, setup/create browser captures for each access branch, credential-boundary fixtures, folder-selection fixtures, installed-wheel replay, package-README rendering/content checks, completion audit, and terminal handoff.
 
 ## Stop boundary
 
-Stop if either real CLI cannot be invoked through the bounded model port, if provider authentication or model/role-default behavior cannot be reported truthfully, if a secret can enter a durable record, if folder selection can silently replace an existing home, if the ordinary setup/create flow still requires implementation-facing flags, if the browser collapses multiple setup decisions into one opaque form, if the Ready summary is incomplete or stale, or if setup starts defining Gig-specific workflows. Do not ship a disabled CLI card as evidence of CLI support.
+Stop if either real CLI cannot be invoked through the bounded model port, if provider authentication or model/role-default behavior cannot be reported truthfully, if a secret can enter a durable record, if folder selection can silently replace an existing home, if the ordinary setup/create flow still requires implementation-facing flags, if the browser collapses multiple setup decisions into one opaque form, if the Ready summary is incomplete or stale, if setup starts defining Gig-specific workflows, or if the published package README still presents internal schemas and development history as the primary user experience. Do not ship a disabled CLI card as evidence of CLI support.
