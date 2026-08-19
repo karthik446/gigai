@@ -136,11 +136,12 @@ The bounded command is structurally equivalent to:
 
 ```text
 claude -p --output-format json --no-session-persistence \
-  --permission-mode plan --model <configured-model>
+  --permission-mode plan --tools "" --model <configured-model>
 ```
 
 The prompt is written to stdin and the private workdir is supplied as the
-child cwd. No `--fallback-model`, `--add-dir`, tool permission, or dangerous
+child cwd. `--tools ""` explicitly disables Claude's built-in tools for this
+bounded model-port call. No `--fallback-model`, `--add-dir`, or dangerous
 permission flag is supplied. The JSON result must contain non-empty final text;
 provider metadata is retained only when it is non-secret and structurally
 useful to the existing replay boundary.

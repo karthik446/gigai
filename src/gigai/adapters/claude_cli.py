@@ -36,6 +36,8 @@ class ClaudeCLIAdapter:
                 "--no-session-persistence",
                 "--permission-mode",
                 "plan",
+                "--tools",
+                "",
             ]
             if request.model != "default":
                 argv.extend(("--model", request.model))

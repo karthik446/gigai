@@ -64,7 +64,7 @@ print(json.dumps({"type": "secret-check", "item": {"type": "agent_message", "tex
 def test_claude_adapter_parses_json_result(tmp_path: Path) -> None:
     executable = _script(
         tmp_path,
-        'import json; print(json.dumps({"type": "result", "subtype": "success", "result": "claude-ok", "model": "claude-test", "usage": {"input_tokens": 4, "output_tokens": 6, "total_tokens": 10}}))',
+        'import json, sys; assert sys.argv[1:][sys.argv[1:].index("--tools") + 1] == ""; print(json.dumps({"type": "result", "subtype": "success", "result": "claude-ok", "model": "claude-test", "usage": {"input_tokens": 4, "output_tokens": 6, "total_tokens": 10}}))',
     )
 
     result = ClaudeCLIAdapter(executable=str(executable)).invoke(_request())

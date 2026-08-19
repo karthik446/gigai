@@ -61,8 +61,8 @@ def run_json_process(
 ) -> ProcessOutput:
     """Run one explicit process and fail closed on timeout or cancellation."""
 
-    if not argv or any(not value or "\0" in value for value in argv):
-        raise ModelInvocationError("CLI argv must contain non-empty NUL-free values")
+    if not argv or not argv[0] or any("\0" in value for value in argv):
+        raise ModelInvocationError("CLI argv must contain a non-empty executable and NUL-free values")
     if not prompt or "\0" in prompt:
         raise ModelInvocationError("CLI prompt must be non-empty and NUL-free")
     if not cwd.is_dir():
