@@ -30,6 +30,17 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.5
+
+- Adds a browser-first local setup flow for GigAI's private workspace,
+  workpads, model choices, and machine-wide role defaults.
+- Adds adaptive Gig-definition interviews that turn an operator's intent and
+  selected local context into a reviewable proposal before approval.
+- Adds explicit proposal feedback, revision, approval, rejection, Run
+  inspection, and recurring/comparison command flows around local Gig state.
+- Keeps the workpad, proposal history, approved versions, and review evidence
+  under the operator's selected local home.
+
 ### 0.1.4
 
 - Adds the model-facilitated Gig builder for UAT: GigAI can guide an operator

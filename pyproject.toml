@@ -41,9 +41,13 @@ where = ["src"]
 [tool.setuptools.package-data]
 "gigai.schemas" = ["*.schema.json", "README.md", "SHA256SUMS"]
 "gigai.data" = ["*.json"]
+"gigai" = ["static/*.css"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers -p no:cacheprovider"
+markers = [
+  "g30_live: opt-in local provider UAT; skipped unless GIGAI_G30_UAT=1",
+]
 testpaths = [
   "tests",
   "research/contract_spike/tests",

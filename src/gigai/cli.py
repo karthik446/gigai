@@ -20,6 +20,7 @@ from .config import (
     load_config,
     migrate_config,
 )
+from .credentials import reference_is_available
 from .comparison import ComparisonError, compare_occurrences
 from .diagnostics import render_report_json, run_doctor, run_live_doctor
 from .evaluation import EvaluationError, load_manifest, score_behavior, write_report
@@ -41,7 +42,11 @@ from .lifecycle import (
     stage_improvement_manifest,
     start_interview,
 )
-from .model_discovery import discover_installed_models, resolve_target_readiness
+from .model_discovery import (
+    discover_installed_models,
+    probe_target_readiness,
+    resolve_target_readiness,
+)
 from .proposal_interview import InterviewHTTPServer, block_session, request_revision
 from .occurrence import (
     OccurrenceError,
@@ -61,6 +66,7 @@ from .setup import (
     resolve_editor_argv,
     run_setup,
 )
+from .setup_interview import SetupDraft, SetupHTTPServer
 from .registry import open_project_registry
 from .run import RunError, launch_run, read_run_details
 from .target_binding import TargetBindingError, initialize_target
@@ -102,13 +108,19 @@ def cli(context: click.Context) -> None:
     help="GigAI machine-state directory (default: GIGAI_HOME or ~/.gigai).",
 )
 @click.option("--json", "as_json", is_flag=True)
-def models_command(home_value: Path | None, as_json: bool) -> None:
-    """Show detected local model CLIs and configured target readiness."""
+@click.option(
+    "--probe",
+    "probe_target",
+    metavar="TARGET",
+    help="Explicitly run one bounded readiness invocation for TARGET.",
+)
+def models_command(home_value: Path | None, as_json: bool, probe_target: str | None) -> None:
+    """Show model discovery; optionally run one explicit readiness probe."""
 
     try:
         home = home_value or default_home_root()
         config = load_config(home)
-        payload = {
+        payload: dict[str, object] = {
             "detected": [
                 {
                     "name": item.name,
@@ -122,8 +134,12 @@ def models_command(home_value: Path | None, as_json: bool) -> None:
                 for item in config.model_targets
             ],
         }
+        if probe_target is not None:
+            payload["probe"] = probe_target_readiness(config, probe_target).__dict__
         if as_json:
             click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+            if probe_target is not None and payload["probe"]["readiness"] != "usable":
+                raise click.exceptions.Exit(1)
             return
         for item in payload["detected"]:
             location = f" ({item['executable']})" if item["executable"] else ""
@@ -133,6 +149,14 @@ def models_command(home_value: Path | None, as_json: bool) -> None:
                 f"target {item['target_name']}: {item['readiness']} "
                 f"({item['adapter'] or 'unresolved'} / {item['model'] or 'unknown'})"
             )
+        if probe_target is not None:
+            probe = payload["probe"]
+            click.echo(
+                f"probe target {probe['target_name']}: {probe['readiness']} "
+                f"({probe['adapter'] or 'unresolved'} / {probe['model'] or 'unknown'})"
+            )
+            if probe["readiness"] != "usable":
+                raise click.exceptions.Exit(1)
     except (ConfigurationError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -193,6 +217,9 @@ def eval_behavior_command(manifest: Path, observations: Path, split: str, output
 @cli.command("setup")
 @click.option(
     "--non-interactive", is_flag=True, help="Refuse prompts and use explicit options."
+)
+@click.option(
+    "--terminal", is_flag=True, help="Use the legacy terminal prompts instead of the browser setup."
 )
 @click.option(
     "--home",
@@ -264,8 +291,10 @@ def eval_behavior_command(manifest: Path, observations: Path, split: str, output
 @click.option(
     "--json", "as_json", is_flag=True, help="Emit a stable machine-readable summary."
 )
+@click.option("--open/--no-open", "open_browser", default=True, help="Open the local setup page in the browser.")
 def setup_command(
     non_interactive: bool,
+    terminal: bool,
     home_value: Path | None,
     workpad_root: Path | None,
     editor: str | None,
@@ -279,10 +308,28 @@ def setup_command(
     target_output_limit_spec: tuple[str, ...],
     target_reasoning_effort_spec: tuple[str, ...],
     as_json: bool,
+    open_browser: bool,
 ) -> None:
-    """Create or update local config and the deterministic standard pack."""
+    """Open browser-first setup, or update config non-interactively."""
 
     _require_supported_platform()
+    if not non_interactive and not terminal:
+        _run_browser_setup(
+            home_value=home_value,
+            workpad_root=workpad_root,
+            editor=editor,
+            open_with_target=open_with_target,
+            create_model_target=create_model_target,
+            credential_ref=credential_ref,
+            clear_credentials=clear_credentials,
+            endpoint_spec=endpoint_spec,
+            model_target_spec=model_target_spec,
+            target_output_limit_spec=target_output_limit_spec,
+            target_reasoning_effort_spec=target_reasoning_effort_spec,
+            as_json=as_json,
+            open_browser=open_browser,
+        )
+        return
     requested_home = (
         (home_value or default_home_root()).expanduser().resolve(strict=False)
     )
@@ -317,7 +364,7 @@ def setup_command(
             if existing
             else False
         )
-    else:
+    elif terminal:
         requested_home = (
             Path(
                 click.prompt(
@@ -593,6 +640,429 @@ def setup_command(
         changed = "updated" if result.config_changed else "unchanged"
         click.echo(f"GigAI setup complete; configuration {changed}.")
         click.echo(f"Authoritative workpad root: {result.config.workpad_root}")
+
+
+def _run_browser_setup(
+    *,
+    home_value: Path | None,
+    workpad_root: Path | None,
+    editor: str | None,
+    open_with_target: bool | None,
+    create_model_target: str | None,
+    credential_ref: tuple[str, ...],
+    clear_credentials: bool,
+    endpoint_spec: tuple[str, ...],
+    model_target_spec: tuple[str, ...],
+    target_output_limit_spec: tuple[str, ...],
+    target_reasoning_effort_spec: tuple[str, ...],
+    as_json: bool,
+    open_browser: bool,
+) -> None:
+    """Run the human setup flow without exposing internal target identifiers."""
+
+    advanced = (
+        credential_ref
+        or clear_credentials
+        or endpoint_spec
+        or model_target_spec
+        or target_output_limit_spec
+        or target_reasoning_effort_spec
+    )
+    if advanced:
+        raise click.UsageError(
+            "advanced credentials and model flags require --non-interactive; "
+            "ordinary setup is browser-first"
+        )
+    requested_home = (home_value or default_home_root()).expanduser().resolve(strict=False)
+    existing = None
+    if (requested_home / "config.toml").exists():
+        try:
+            existing = load_config(requested_home)
+        except ConfigurationError as exc:
+            try:
+                existing, _ = migrate_config(requested_home)
+            except ConfigurationError:
+                raise click.ClickException(str(exc)) from exc
+
+    detected_editor = detect_editor_argv()
+    existing_editor = existing.editor_argv[0] if existing else None
+    editor_value = editor or existing_editor or (detected_editor[0] if detected_editor else "")
+    resolved_workpad = workpad_root or (
+        existing.workpad_root if existing else default_workpad_root(requested_home)
+    )
+    if existing is None:
+        preview = build_config(
+            home_root=requested_home,
+            workpad_root=resolved_workpad,
+            editor_argv=(editor_value or "/usr/bin/true",),
+            open_with_target=open_with_target if open_with_target is not None else False,
+        )
+    else:
+        preview = existing
+    detected_models = discover_installed_models()
+    preview = _browser_preview_config(preview, detected_models)
+    real_targets = tuple(
+        target
+        for target in preview.model_targets
+        if next(item for item in preview.endpoints if item.name == target.endpoint).adapter
+        != "deterministic"
+    )
+    real_target_names = {target.name for target in real_targets}
+    default_profile = next(
+        (profile for profile in preview.profiles if profile.name == "default"), None
+    )
+    enabled_names: list[str] = []
+    for target in real_targets:
+        endpoint = next(item for item in preview.endpoints if item.name == target.endpoint)
+        if endpoint.adapter in {"codex_cli", "claude_cli"}:
+            enabled_names.append(target.name)
+        elif existing is not None and target.name in {
+            item.name for item in existing.model_targets if item.enabled
+        }:
+            enabled_names.append(target.name)
+    enabled = tuple(enabled_names)
+    selected = create_model_target if create_model_target in set(enabled) else (
+        next(iter(enabled), "")
+    )
+    reviewer = _profile_target(default_profile, "reviewer", "critic", selected)
+    verifier = _profile_target(default_profile, "verifier", "adjudicator", selected)
+    researcher = _profile_target(default_profile, "researcher", "planner", selected)
+    browser_home = os.fspath(requested_home)
+    browser_workpad = os.fspath(resolved_workpad)
+    model_options = tuple(
+        {
+            "id": target.name,
+            "label": _model_target_label(target, preview),
+            "description": _browser_model_description(target, preview, detected_models),
+            "kind": "api"
+            if next(item for item in preview.endpoints if item.name == target.endpoint).adapter
+            in {"openai_api", "openrouter_api", "anthropic_api"}
+            else "cli",
+        }
+        for target in real_targets
+    )
+    openai_api_env, openai_api_model = _browser_provider_values(existing, "openai")
+    openrouter_api_env, openrouter_api_model = _browser_provider_values(existing, "openrouter")
+    provider_status = _browser_provider_status(existing)
+
+    def probe_setup_target(target_name: str, draft: SetupDraft) -> Mapping[str, object]:
+        provider_credentials, provider_endpoints, provider_targets = _browser_provider_config(
+            preview, draft
+        )
+        # A previously disabled target must be probeable before setup can
+        # re-enable it. The probe is an explicit readiness action; it does not
+        # persist this temporary enablement.
+        provider_targets = _enable_probe_target(provider_targets, target_name)
+        probe_config = build_config(
+            home_root=preview.home_root,
+            workpad_root=preview.workpad_root,
+            editor_argv=preview.editor_argv,
+            open_with_target=preview.open_with_target,
+            credentials=provider_credentials,
+            endpoints=provider_endpoints,
+            model_targets=provider_targets,
+            profiles=preview.profiles,
+        )
+        return probe_target_readiness(probe_config, target_name).__dict__
+
+    def apply_setup(draft: SetupDraft) -> Mapping[str, object]:
+        resolved_editor = resolve_editor_argv(
+            draft.editor,
+            existing.editor_argv[1:] if existing is not None else (),
+        )
+        provider_credentials, provider_endpoints, provider_targets = _browser_provider_config(
+            preview, draft
+        )
+        target_by_name = {target.name: target for target in provider_targets}
+        enabled_names = set(draft.enabled_model_targets)
+        role_targets = {
+            "reviewer": draft.reviewer_model_target,
+            "verifier": draft.verifier_model_target,
+            "researcher": draft.researcher_model_target,
+            "gig_creator": draft.selected_model_target,
+        }
+        if not enabled_names:
+            raise ValueError("enable at least one usable model before applying setup")
+        missing = sorted(
+            name for name in (*enabled_names, *role_targets.values()) if name not in target_by_name
+        )
+        if missing:
+            raise ValueError(
+                "selected model is not configured or usable: " + ", ".join(dict.fromkeys(missing))
+            )
+        if any(name not in enabled_names for name in role_targets.values()):
+            raise ValueError("reviewer, verifier, researcher, and Gig creation defaults must be enabled")
+        verified_names = set(draft.verified_model_targets)
+        unverified = sorted(
+            name
+            for name in (*enabled_names, *role_targets.values())
+            if name not in verified_names
+        )
+        if unverified:
+            raise ValueError(
+                "run Check readiness before applying setup for: "
+                + ", ".join(dict.fromkeys(unverified))
+            )
+        provider_targets = tuple(
+            replace(target, enabled=target.name in enabled_names)
+            for target in provider_targets
+        )
+        profiles = list(existing.profiles if existing is not None else preview.profiles)
+        default = Profile(
+            name="default",
+            planner=draft.selected_model_target,
+            critic=draft.reviewer_model_target,
+            adjudicator=draft.verifier_model_target,
+            reviewer=draft.reviewer_model_target,
+            verifier=draft.verifier_model_target,
+            researcher=draft.researcher_model_target,
+            gig_creator=draft.selected_model_target,
+        )
+        replaced = False
+        for index, profile in enumerate(profiles):
+            if profile.name == "default":
+                profiles[index] = default
+                replaced = True
+                break
+        if not replaced:
+            profiles.append(default)
+        config = build_config(
+            home_root=Path(draft.home_root).expanduser().resolve(strict=False),
+            workpad_root=Path(draft.workpad_root).expanduser().resolve(strict=False),
+            editor_argv=resolved_editor,
+            open_with_target=draft.open_with_target,
+            credentials=provider_credentials,
+            endpoints=provider_endpoints,
+            model_targets=provider_targets,
+            profiles=tuple(profiles),
+        )
+        result = run_setup(config)
+        return {
+            "home_root": os.fspath(result.config.home_root),
+            "workpad_root": os.fspath(result.config.workpad_root),
+            "config_changed": result.config_changed,
+            "standard_pack_changed": result.pack_changed,
+            "selected_model": _model_target_label(
+                next(item for item in result.config.model_targets if item.name == draft.selected_model_target),
+                result.config,
+            ),
+        }
+
+    server = SetupHTTPServer(
+        SetupDraft(
+            home_root=browser_home,
+            workpad_root=browser_workpad,
+            editor=editor_value,
+            open_with_target=(
+                open_with_target
+                if open_with_target is not None
+                else existing.open_with_target
+                if existing is not None
+                else False
+            ),
+            selected_model_target=selected,
+            openai_api_env=openai_api_env,
+            openai_api_model=openai_api_model,
+            openrouter_api_env=openrouter_api_env,
+            openrouter_api_model=openrouter_api_model,
+            enabled_model_targets=enabled,
+            reviewer_model_target=reviewer,
+            verifier_model_target=verifier,
+            researcher_model_target=researcher,
+        ),
+        model_options=model_options,
+        detected_models=detected_models,
+        provider_status=provider_status,
+        on_apply=apply_setup,
+        on_probe=probe_setup_target,
+    ).start()
+    try:
+        click.echo(f"GigAI local setup: {server.url}", err=True)
+        if open_browser:
+            webbrowser.open(server.url, new=2)
+        result = server.wait()
+    finally:
+        server.close()
+    if result is None:
+        raise click.ClickException("setup was cancelled or expired; no changes were applied")
+    if as_json:
+        click.echo(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo("GigAI setup complete; configuration updated.")
+        click.echo(f"Authoritative workpad root: {result['workpad_root']}")
+
+
+def _model_target_label(target: ModelTarget, config) -> str:
+    endpoint = next(item for item in config.endpoints if item.name == target.endpoint)
+    if endpoint.adapter == "deterministic":
+        return "Offline demo mode"
+    if endpoint.adapter == "openrouter_api":
+        return "OpenRouter API"
+    if endpoint.adapter == "openai_api":
+        return "OpenAI API"
+    if endpoint.adapter == "codex_cli":
+        return "Codex CLI"
+    if endpoint.adapter == "claude_cli":
+        return "Claude CLI"
+    return "Configured model"
+
+
+def _browser_preview_config(config, detected_models):
+    """Add selectable provider candidates without reading credentials or invoking models."""
+
+    credentials = list(config.credentials)
+    endpoints = list(config.endpoints)
+    targets = list(config.model_targets)
+    endpoint_names = {item.name for item in endpoints}
+    target_names = {item.name for item in targets}
+    credential_names = {item.name for item in credentials}
+
+    api_defaults = (
+        ("openai", "openai_api", "openai-api", "OPENAI_API_KEY", "gpt-4.1-mini"),
+        ("openrouter", "openrouter_api", "openrouter-api", "OPENROUTER_API_KEY", "openai/gpt-4o-mini"),
+    )
+    for provider, adapter, credential_name, environment_name, model in api_defaults:
+        if credential_name not in credential_names:
+            credentials.append(CredentialReference(credential_name, "environment", environment_name))
+        if provider not in endpoint_names:
+            endpoints.append(Endpoint(provider, adapter, credential=credential_name))
+        if f"{provider}-default" not in target_names:
+            targets.append(ModelTarget(f"{provider}-default", provider, model, ("text",), 512))
+
+    for detected in detected_models:
+        if detected.executable is None or detected.name in endpoint_names:
+            continue
+        adapter = f"{detected.name}_cli"
+        target_name = f"{detected.name}-default"
+        endpoints.append(Endpoint(detected.name, adapter))
+        if target_name not in target_names:
+            targets.append(ModelTarget(target_name, detected.name, "default", ("text",), 512))
+
+    return build_config(
+        home_root=config.home_root,
+        workpad_root=config.workpad_root,
+        editor_argv=config.editor_argv,
+        open_with_target=config.open_with_target,
+        credentials=tuple(credentials),
+        endpoints=tuple(endpoints),
+        model_targets=tuple(targets),
+        profiles=config.profiles,
+    )
+
+
+def _browser_provider_values(config, provider: str) -> tuple[str, str]:
+    if config is None:
+        defaults = {
+            "openai": ("", "gpt-4.1-mini"),
+            "openrouter": ("", "openai/gpt-4o-mini"),
+        }
+        return defaults.get(provider, ("", ""))
+    endpoint = next((item for item in config.endpoints if item.name == provider), None)
+    if endpoint is None or endpoint.credential is None:
+        return "", ""
+    credential = next((item for item in config.credentials if item.name == endpoint.credential), None)
+    target = next((item for item in config.model_targets if item.endpoint == provider), None)
+    return (
+        credential.reference if credential is not None and credential.kind == "environment" else "",
+        target.model if target is not None else "",
+    )
+
+
+def _browser_provider_status(config) -> dict[str, str]:
+    status: dict[str, str] = {}
+    labels = {"openai": "OpenAI", "openrouter": "OpenRouter"}
+    for provider in labels:
+        endpoint = next((item for item in config.endpoints if item.name == provider), None) if config else None
+        credential = (
+            next((item for item in config.credentials if item.name == endpoint.credential), None)
+            if config and endpoint and endpoint.credential
+            else None
+        )
+        if endpoint is None or credential is None:
+            status[labels[provider]] = "Not configured"
+            continue
+        try:
+            available = reference_is_available(credential)
+        except ValueError:
+            available = False
+        status[labels[provider]] = (
+            "Configured"
+            if available is True
+            else "Reference saved — value unavailable"
+        )
+    return status
+
+
+def _browser_provider_config(config, draft: SetupDraft):
+    """Apply browser-provided environment references without accepting secret values."""
+
+    credentials = list(config.credentials)
+    endpoints = list(config.endpoints)
+    targets = list(config.model_targets)
+    providers = (
+        ("openai", "openai_api", "openai-api", draft.openai_api_env, draft.openai_api_model, "gpt-4.1-mini"),
+        ("openrouter", "openrouter_api", "openrouter-api", draft.openrouter_api_env, draft.openrouter_api_model, "openai/gpt-4o-mini"),
+    )
+    for provider, adapter, credential_name, environment_name, model, default_model in providers:
+        credentials = [item for item in credentials if item.name != credential_name]
+        endpoints = [item for item in endpoints if item.name != provider]
+        targets = [item for item in targets if item.name != f"{provider}-default"]
+        if not environment_name:
+            continue
+        credentials.append(CredentialReference(credential_name, "environment", environment_name))
+        endpoints.append(Endpoint(provider, adapter, credential=credential_name))
+        targets.append(ModelTarget(f"{provider}-default", provider, model or default_model, ("text",), 512))
+    return tuple(credentials), tuple(endpoints), tuple(targets)
+
+
+def _enable_probe_target(
+    targets: tuple[ModelTarget, ...], target_name: str
+) -> tuple[ModelTarget, ...]:
+    """Temporarily enable one target so setup can verify a disabled target."""
+
+    return tuple(
+        replace(target, enabled=True) if target.name == target_name else target
+        for target in targets
+    )
+
+
+def _profile_target(profile, role: str, legacy_role: str, fallback: str) -> str:
+    if profile is None:
+        return fallback
+    return getattr(profile, role) or getattr(profile, legacy_role) or fallback
+
+
+def _model_target_description(target: ModelTarget, config) -> str:
+    endpoint = next(item for item in config.endpoints if item.name == target.endpoint)
+    if endpoint.adapter == "deterministic":
+        return "Local deterministic fixture; no network or provider credentials. Use only for demos and contract checks."
+    if endpoint.adapter == "codex_cli":
+        return "Provider-default Codex model; authentication remains owned by the installed CLI."
+    if endpoint.adapter == "claude_cli":
+        if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+            return (
+                "Claude CLI; CLAUDE_CODE_OAUTH_TOKEN is available for the bounded GigAI process."
+            )
+        return (
+            "Claude CLI detected, but GigAI needs CLAUDE_CODE_OAUTH_TOKEN for its bounded process. "
+            "Run claude setup-token, export it, then reopen setup."
+        )
+    readiness = resolve_target_readiness(config, target.name)
+    return f"Model {target.model}; readiness={readiness.readiness}. Credential values are never read during setup."
+
+
+def _browser_model_description(
+    target: ModelTarget, config, detected_models: tuple[DetectedModel, ...]
+) -> str:
+    description = _model_target_description(target, config)
+    endpoint = next(item for item in config.endpoints if item.name == target.endpoint)
+    if endpoint.adapter in {"codex_cli", "claude_cli"}:
+        detected = next((item for item in detected_models if item.name == endpoint.name), None)
+        if detected is not None and detected.version:
+            description += f" Installed version: {detected.version}."
+        elif detected is not None:
+            description += " Version could not be confirmed yet."
+    return description
 
 
 @cli.command("doctor")
@@ -1910,13 +2380,20 @@ def open_command(
 def _default_create_model_target(config) -> str:
     """Resolve the setup-selected create target from the default profile."""
 
-    target_names = {target.name for target in config.model_targets}
+    target_names = {target.name for target in config.model_targets if target.enabled}
     for profile in config.profiles:
-        if profile.name == "default" and profile.planner in target_names:
-            return profile.planner
+        if profile.name != "default":
+            continue
+        candidate = profile.gig_creator or profile.planner
+        if candidate in target_names:
+            return candidate
     if "offline-default" in target_names:
         return "offline-default"
-    return config.model_targets[0].name
+    if not target_names:
+        raise click.ClickException(
+            "no enabled model is configured; run 'gigai setup' and choose a usable model"
+        )
+    return sorted(target_names)[0]
 
 
 def _parse_credential_reference(value: str) -> CredentialReference:

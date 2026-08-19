@@ -13,7 +13,7 @@ declare an alpha or public release.
 G19 -> G20 -> G21
 G20 -> G23
 G23 -> G24 (exploratory 0.1.4 UAT)
-G22 -> G26 + G27-contract -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G29 -> G25
+G22 -> G26 + G27-contract -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G30 -> G31 -> G32 -> G25
 ```
 
 | Goal | Outcome | Depends on | Initial state |
@@ -24,8 +24,11 @@ G22 -> G26 + G27-contract -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G29 -
 | [G24](G24-human-uat-and-dogfooding.md) | Exploratory 0.1.4 UAT and dogfooding record | G18, G19, G20, G21, G22, G23, G26 | Historical exploratory gate; superseded by G29 |
 | [G26](G26-model-facilitated-gig-builder.md) | Model-facilitated Gig definition, adaptive clarification, and proposal research | G18, G22, S18-02, G24 findings | Active — amendment accepted, implementation underway |
 | [G28](G28-v0.1.5-readiness.md) | v0.1.5 evaluation, role-registry, and browser-first create readiness | G26, G27 contract, S27-EVAL, S27-ROLE, S27-CREATE | Complete — candidate evidence accepted |
-| [G27](G27-adaptive-gig-discovery-and-pre-proposal-research.md) | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G28 | Complete — runtime and machine evidence accepted; G29 owns human UAT |
-| [G29](G29-v0.1.5-human-uat-and-dogfooding.md) | Full human UAT and dogfooding against the released v0.1.5 product | G27, G28, G24 findings | Proposed for review |
+| [G27](G27-adaptive-gig-discovery-and-pre-proposal-research.md) | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G28 | Complete — runtime and machine evidence accepted; G31 owns human UAT |
+| [G29](G29-v0.1.5-human-uat-and-dogfooding.md) | Historical v0.1.5 UAT and dogfooding record | G27, G28, G24 findings | Superseded by G31 before v0.1.6 |
+| [G30](G30-cli-model-adapters-and-browser-setup-onboarding.md) | Real Codex/Claude adapters, API onboarding, folder access, multi-model setup, and browser-first Gig creation | G18, G26, G27, G28, S18-02 | Complete — evidence accepted; handed to G31 |
+| [G31](G31-v0.1.6-readiness-and-uat.md) | v0.1.6 release readiness and human UAT | G30, G27, G28, G12 | Active — release-candidate verification underway |
+| [G32](G32-post-0.1.6-public-capabilities-and-command-surface.md) | Post-v0.1.6 public README, command sheet, and capability documentation | Published v0.1.6, G31 | Proposed for review |
 
 G20 must preserve G19's explicit target-effect authority and the existing
 workpad journal/active-version authority. G21 must not be activated merely
@@ -67,7 +70,7 @@ G26 addresses the create-flow finding that the current interview can jump from
 one operator answer to approval without a genuine model-backed proposal-build
 phase. GigAI remains the facilitator and authority boundary; the selected model
 asks domain-specific questions and performs bounded proposal research. G26 must
-land before G29's final UAT pass and before G25 alpha-readiness review.
+land before G31's final UAT pass and before G25 alpha-readiness review.
 
 G27 makes the browser interview the actual Gig-definition canvas. It gives the
 model a truthful capability inventory, allows a bounded pre-proposal research
@@ -80,8 +83,13 @@ browser-first setup/create contract needed before implementation. G28 owns
 their v0.1.5 implementation and candidate evidence; G27 runtime work begins
 after G28 is accepted.
 
-Before G29's final human UAT pass, the v0.1.5 readiness gate must close
+Before G31's final human UAT pass, the v0.1.6 readiness gate must close
 [TD-0006](../../tech-debt/TD-0006-evaluation-taxonomy-and-behavioral-evals.md),
 [TD-0007](../../tech-debt/TD-0007-central-role-registry.md), and
 [TD-0008](../../tech-debt/TD-0008-browser-first-create-and-model-setup.md).
 These are release-readiness debt items, not new proposal or version authority.
+G30 owns the missing real CLI adapters, supported provider onboarding, native
+folder access, multi-model setup with machine-wide reviewer/verifier/researcher
+defaults, and remaining HTMX/Gig-creation usability work. Gig-specific workflow
+roles belong to the Gig definition, not global setup. G31 supersedes the
+unfinished v0.1.5 UAT path and owns the v0.1.6 release-candidate UAT.

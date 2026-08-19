@@ -1,319 +1,211 @@
 # GigAI
 
-GigAI is a contract-first exploration of a local, user-controlled runtime for
-turning goals into reviewable, finite execution graphs.
+GigAI is an open-source, local-first tool for turning repeatable work into
+Gigs that can be run, reviewed, verified, and improved with user-controlled
+runtime agents.
 
-> **Status: pre-alpha contracts and executable research.** The installed
-> distribution implements local `setup`, offline `doctor`, idempotent target
-> `init`, the offline proposal lifecycle (`create`, `feedback`, `revise`,
-> `approve`, and `reject`), and read/open operations over private workpads.
-> It does not run a scheduler or provide a production execution runtime.
-> The package also exposes versioned pre-release serialized contracts and
-> canonical identity primitives. Their immutable release regime begins at
-> GigAI's deliberately declared first public release.
-> Commands beyond the implemented surface remain planned interfaces, not
-> product behavior.
+## The problem
 
-## Why this exists
+AI tools are useful until the model, prompt, skill, or provider changes. A
+provider can quietly change or nerf the current model, and a workflow that
+worked last week can produce weaker results today. It is also difficult to
+answer basic questions such as:
 
-Agent systems often blur three different decisions: what should happen, who
-approved it, and what is authorized to execute. GigAI keeps them separate:
+- What did each model do?
+- What evidence did it use?
+- Who reviewed the result?
+- What changed between Runs?
+- Can the workflow be repeated on another machine?
 
-~~~text
-create or improve -> non-executable proposal
-operator approval -> immutable Gig version
-run               -> authority for one execution
-~~~
+GigAI makes the workflow itself explicit instead of treating one model response
+as the whole system.
 
-A Gig is a finite, user-owned Goal Graph. Its private workpad is authoritative;
-indexes are rebuildable; provider calls are explicit exposure; and imported user
-content is hashed as exact bytes rather than silently normalized.
+## What is a Gig?
 
-## What is implemented
+A Gig is a repeatable set of Goals with stable instructions, changing inputs,
+and verifiable, reviewable results.
 
-- Eight versioned JSON Schema Draft 2020-12 contracts.
-- One production implementation of restricted canonical JSON, owned-text
-  bytes, exact imported-byte digests, prefixed UUIDv4 IDs, and explicit version
-  selection.
-- One installed `gigai` command exposing truthful package help and version,
-  idempotent local setup, structured offline diagnostics, target binding, the
-  non-executable proposal lifecycle, and offline read/open operations.
-- A strict versioned `config.toml` containing structured editor argv,
-  credential references rather than values, one deterministic offline
-  endpoint and target, one default profile, and the authoritative workpad
-  mount.
-- An immutable content-addressed standard pack and fixture-backed offline
-  adapter. Setup and doctor prove atomic replacement and real two-process
-  exclusion on the configured mount without network or token use.
-- A strict path-free `.gigai/project.toml` binding for Git targets, one
-  idempotent `/.gigai/` local exclude entry, and a versioned private
-  `registry.sqlite` that owns canonical target and workpad locators. The exact
-  v1 registry migrates transactionally to v2 after retaining a private,
-  validated v1 backup. Explicit non-Git targets are registry-only and receive
-  no implicit target tree.
-- An internal caller-ID-only workpad primitive that atomically publishes an
-  empty, unborn, local-only Git repository under the configured mount. It sets
-  repository-local identity and ownership markers, configures no remote, and
-  creates no Gig proposal, semantic file, commit, or active selection.
-- One offline proposal lifecycle that allocates a Gig, provisions its private
-  workpad, records semantic local-Git handoffs, and may approve an immutable
-  version without starting a Run.
-- Installed `gigs`, `proposals`, `status`, `show`, `history`, `plan`, `workpad
-  path`, and `open` commands over explicit or active registered workpads.
-  `state.sqlite` is rebuilt from committed journal authority when needed.
-- A reusable black-box scenario harness for isolated homes, target and workpad
-  manifests, Git state, subprocess recording, and fail-closed effect checks.
-- Exact-byte golden vectors that the production implementation must preserve.
-- Executable evidence for schema instances, graph semantics, canonicalization,
-  concurrent journal sequencing, and bounded Phase 0 feasibility questions.
-- A source suite covering canonical bytes, CLI/process isolation, setup,
-  binding, workpads, journal recovery, proposal lifecycle, contract validators,
-  model-port boundaries, and rebuildable index semantics.
-- A wheel-level verifier that proves the exact eight schema resources and their
-  SHA-256 identities survived packaging.
+For example, `tailor-resume-for-a-job` keeps the resume workflow stable while
+the job posting, target role, and user preferences change between Runs.
 
-The [V14 implementation plan](docs/architecture/v14-implementation-plan.md)
-defines the implemented contract baseline. The [V15 forward roadmap](docs/architecture/v15-roadmap.md)
-defines the next product direction: reusable Gigs, review/evaluation loops,
-proposal-time capability inspection, and staged execution. The [command sheet](docs/reference/command-sheet.md)
-contains both the implemented surface and planned design; this README and
-installed help state what works today. The
-[cheat sheet](docs/reference/cheat-sheet.md) is the copy-paste guide for the
-current installation and local workflow. The [external changelog](CHANGELOG.md)
-records verified operator-facing capabilities; the [internal changelog](docs/development/changelog-internal.md)
-records the cross-goal implementation history.
+Each Gig starts with a built-in review-verify-fix loop. You can use that loop,
+customize it, or define a different loop for your own Gig. GigAI does not treat
+a model response as approval, execution authority, or proof of correctness.
 
-## Install the published release
+## What GigAI enables
 
-GigAI's first production pre-alpha release is `0.1.3`. Once it is published, install
-the exact reviewed release on a clean macOS or Linux machine without cloning
-this repository:
+### Set up GigAI once
 
-~~~bash
-uv tool install "gigai==0.1.3"
-gigai --version
-gigai --help
-~~~
+Run:
 
-Choose every update deliberately by replacing the pinned version after reading
-its release notes; GigAI does not self-update:
-
-~~~bash
-uv tool install --reinstall "gigai==0.1.3"
-~~~
-
-## Verify the source evidence
-
-Python 3.11 or newer is required. Compatibility is continuously tested rather
-than capped without evidence; see
-[ADR 0001](docs/adr/0001-python-version-range.md).
-
-~~~bash
-uv sync --extra test
-uv run pytest
-~~~
-
-All configured source tests must pass.
-
-## Configure, diagnose, bind, and inspect existing workpads
-
-GigAI v1 currently supports macOS and Linux. Interactive setup reviews the
-selected machine-state directory, authoritative workpad mount, and structured
-editor command before applying anything:
-
-~~~bash
+```bash
 gigai setup
+```
+
+GigAI opens a local, token-protected browser setup flow. It walks through five
+small decisions and shows the configuration before applying it.
+
+1. **Workspace** — choose where GigAI keeps its private machine state. GigAI
+   derives the private workpad folder underneath that location. The target
+   repository is not moved and no project files are uploaded.
+2. **Access** — choose whether this installation may use local CLI models, API
+   providers, or both. This is a machine boundary, not a Gig definition.
+3. **Models** — review the models GigAI can actually see, including installed
+   Codex and Claude CLIs. A readiness check must succeed before a model can be
+   enabled. API providers use environment-variable references; GigAI stores the
+   variable name, never the secret value. Claude’s bounded process can use an
+   explicitly exported `CLAUDE_CODE_OAUTH_TOKEN`. Create one with
+   `claude setup-token`; see [Claude authentication](https://code.claude.com/docs/en/authentication#generate-a-long-lived-token).
+4. **Roles** — assign machine defaults for reviewer, verifier, researcher, and
+   Gig creation. These are starting defaults only. A Gig can define or override
+   its own workflow roles later.
+5. **Ready** — review the selected workspace, access boundary, enabled models,
+   and role assignments. Setup changes are applied only after explicit
+   confirmation and can be rerun without silently replacing an existing home.
+
+Setup also detects a local editor for opening private workpads later. It does
+not define a Gig, approve a proposal, run work, or modify a target repository.
+
+After setup, diagnose the local installation with:
+
+```bash
 gigai doctor
-gigai doctor --json
-~~~
+```
 
-For automation, `gigai setup --non-interactive` accepts explicit `--home`,
-`--workpad-root`, `--editor`, and repeated `--editor-arg` values. Credential
-configuration accepts references such as
-`--credential-ref provider=environment:PROVIDER_API_TOKEN`; it never accepts
-or copies the referenced value. Run `gigai setup --help` for the complete
-current contract.
+`doctor` checks configuration, paths, editor resolution, installed adapters,
+and local storage health without making provider calls.
 
-After setup, bind the current Git repository without changing tracked content:
+### Create a Gig through an adaptive interview
 
-~~~bash
-cd /path/to/repository
-gigai init
-gigai init --json
-~~~
+```bash
+gigai create tailor-resume-for-a-job
+```
 
-Git init writes only the ignored `.gigai/project.toml` binding and the
-user-local registry, while adding one `/.gigai/` entry to
-`.git/info/exclude`. Existing dirty status and file bytes are preserved. An
-explicit non-Git directory is supported without creating `.gigai` inside it:
+Gig creation opens a local browser session. The user describes the desired
+work, adds optional local context, and answers only the follow-up questions
+needed to define the Gig. Approval creates a proposal; it does not silently
+run work or modify the target.
 
-~~~bash
-gigai init --target /path/to/non-git-directory
-~~~
+### Run repeatable work
 
-`init` does not create a Gig, workpad, journal, or remote. The offline
-`create` lifecycle owns Gig-ID allocation and invokes G05's private substrate;
-there is deliberately no standalone public provision or activate command.
+A Gig separates its stable definition from Run-specific inputs. The same Gig
+can therefore be used with a different job posting, topic, company, repository,
+or dataset without rewriting the workflow.
 
-Create and review a non-executable proposal locally:
+### Review and verify results
 
-~~~bash
-gigai create research-gigai
-gigai feedback <proposal-id> --text "clarify the verification"
-gigai revise <proposal-id> --change "clarify the verification"
-gigai approve <proposal-id>
-~~~
+GigAI is designed to make model work inspectable:
 
-Creation, feedback, revision, approval, and rejection write only the private
-workpad journal. Approval starts no Run and no target mutation.
+- model and role selection are explicit;
+- provider calls use bounded process or API boundaries;
+- automatic fallback and hidden retries are not assumed;
+- findings, feedback, adjudication, and addressed results remain inspectable;
+- previous Gig versions and Run history remain available for comparison.
 
-The current offline read/open surface is:
+### Keep work local and portable
 
-~~~bash
-gigai workpad path <gig-id>
-gigai open <gig-id>
-gigai open <gig-id> --with-target
-gigai open --target
-gigai gigs --json
-gigai proposals <gig-id> --json
-gigai status <gig-id> --json
-gigai history <gig-id> --json
-gigai plan <gig-id> --json
-~~~
+GigAI keeps private workpads, proposals, journals, and Gig state under the
+operator-selected local home. A portable Gig carries its definition, version
+identity, references, and capability requirements—not copied secrets or opaque
+installed tool bytes.
 
-Without an explicit Gig ID, `workpad path` and `open` resolve the active private
-workpad. They return typed `no_active_gig` only when the bound target has no
-active Gig.
+On another machine, the required capabilities can be resolved and installed
+locally, then verified against the Gig's pinned references. This makes a Gig
+reinstallable rather than tied to one machine's incidental state.
 
-## Canonical identity API
+## Under construction
 
-The shipped [gigai.canonical](src/gigai/canonical.py) module is the only product
-implementation of canonical rendering and SHA-256 identity. Its API keeps
-owned and imported bytes visibly separate:
+GigAI's foundations are usable, but the complete agent workbench is still being
+built. The main pieces under construction are:
 
-~~~python
-from gigai.canonical import (
-    canonical_json_bytes,
-    canonical_json_digest,
-    canonicalize_owned_text,
-    digest_imported_bytes,
-)
-~~~
+- **Gig creation lifecycle** — a dedicated browser flow for discovering a Gig,
+  researching its direction, displaying the proposal, collecting feedback,
+  revising it, and reaching explicit approval.
+- **Gig improvement lifecycle** — a separate browser flow for proposing
+  evidence-backed changes to an existing Gig from completed Runs, feedback,
+  and review results.
+- **Multi-model review and verification** — assigning models to planner,
+  researcher, reviewer, verifier, and adjudicator roles during Gig creation and
+  execution, with disagreement treated as useful evidence rather than hidden
+  consensus.
+- **Observability** — making it easy to see what each model did, which evidence
+  it used, what changed between Runs, and why a result passed, failed, or was
+  blocked.
+- **Evaluation layers** — keeping unit tests, integration tests, installed
+  end-to-end checks, and behavioral evaluations distinct while reporting how a
+  Gig actually performs.
+- **Extensible roles and capabilities** — replacing scattered role names with
+  centrally validated role definitions that Gigs can extend without changing
+  the machine-wide defaults.
+- **Broader portable execution** — reinstalling the required capabilities and
+  running a Gig consistently across machines without copying secrets or opaque
+  local state.
+- **Release and human acceptance hardening** — repeated upgrade, reinstall,
+  UAT, and dogfooding cycles before making alpha-level claims.
 
-`canonicalize_owned_text()` applies GigAI's UTF-8/LF/final-newline contract.
-`digest_imported_bytes()` accepts bytes only and hashes them exactly as read;
-it never performs implicit decoding, encoding, or normalization. The same
-module owns canonical front matter, prefixed UUIDv4 IDs, and explicit active or
-requested Gig-version resolution.
+## Example Gigs
 
-## Verify the built artifact
+These are representative workflows a user can create and tailor to their own
+needs.
 
-The wheel verifier is deliberately separate from the source test suite. Tests
-are not shipped in the wheel.
+### `tailor-resume-for-a-job`
 
-~~~bash
-rm -rf dist
-uv build
-uv venv --python 3.11 .wheel-venv
-version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
-set -- "dist/gigai-${version}-"*.whl
-if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
-  echo "expected exactly one built GigAI wheel for version ${version}" >&2
-  exit 1
-fi
-uv pip install --python .wheel-venv/bin/python "$1"
-.wheel-venv/bin/python tools/verify_installed_schemas.py
-.wheel-venv/bin/python tools/verify_installed_canonical.py
-.wheel-venv/bin/python tools/verify_installed_cli.py
-.wheel-venv/bin/python tools/verify_installed_g03.py
-.wheel-venv/bin/python tools/verify_installed_g04.py
-.wheel-venv/bin/python tools/verify_installed_g05.py
-.wheel-venv/bin/python tools/verify_installed_g06.py
-.wheel-venv/bin/python tools/verify_installed_g07.py
-.wheel-venv/bin/python tools/verify_installed_g08.py
-.wheel-venv/bin/python tools/verify_installed_g09.py
-.wheel-venv/bin/python tools/verify_installed_g11.py
-~~~
+Given a resume and a job posting, the Gig can build a responsibility and
+qualification matrix, identify what matters for the role, and produce a
+tailored resume, cover letter, or both. The original resume remains unchanged.
 
-Expected result:
+The same idea can be personalized:
 
-~~~text
-verified 8 installed GigAI schemas
-verified installed GigAI canonical identity API
-verified installed GigAI CLI: help, version, setup, doctor, init, create, feedback, revise, approve, reject, gigs, proposals, status, show, history, plan, workpad path, check, and open only
-verified installed GigAI G03 setup, idempotency, pack, and offline doctor
-verified installed GigAI G04 Git and non-Git target binding
-verified installed GigAI G05 private unborn workpad and read/open surface
-verified installed GigAI G06 journal locking and recovery
-verified installed GigAI G07 contract validators
-verified installed GigAI G08 offline proposal lifecycle
-verified installed GigAI G09 rebuildable index and read commands
-verified installed GigAI G11 model invocation foundation
-~~~
+```bash
+gigai create tailor-joe-resume
+```
 
-The lockfile is committed. CI and release verification use uv with
-`--locked`. A standards-based fallback remains available:
+Joe can describe his experience, preferred tone, target industries, and the
+outputs he wants. The Gig definition remains reusable while each job becomes a
+new Run input.
 
-~~~bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[test]"
-python -m pytest
-~~~
+### `explain-a-topic`
 
-## Repository map
+The Gig asks what the user wants to understand, how much context they already
+have, and what kind of explanation would help. A history lesson, technical
+briefing, or study guide can each become a different Run without changing the
+underlying teaching workflow. 
 
-| Path | Purpose | Shipped |
-|---|---|---|
-| src/gigai/cli.py | Installed setup, diagnostics, binding, offline lifecycle, read, and open surface | yes |
-| src/gigai/canonical.py | Sole canonical byte, digest, ID, and version implementation | yes |
-| src/gigai/config.py | Strict versioned typed machine configuration | yes |
-| src/gigai/setup.py | Idempotent setup orchestration and mount preflight | yes |
-| src/gigai/diagnostics.py | Structured offline installation and mount checks | yes |
-| src/gigai/project_binding.py | Strict path-free Git target binding contract | yes |
-| src/gigai/registry.py | Strict v2 private project/workpad registry and v1 migration | yes |
-| src/gigai/target_binding.py | Git/non-Git identity, reconciliation, and init effects | yes |
-| src/gigai/workpad.py | Caller-ID-only private Git substrate, resolution, active authority, and editor boundary | yes |
-| src/gigai/adapters/ | Deterministic fixture-backed offline adapter | yes |
-| src/gigai/data/ | Immutable built-in standard-pack resources | yes |
-| src/gigai/schemas/ | Single canonical source for versioned serialized contracts | yes |
-| tests/scenarios/ | Installed-process isolation and observation harness | no |
-| research/contract_spike/ | Executable contract and concurrency proof | no |
-| research/phase0_spike/ | Bounded feasibility evidence | no |
-| research/experiments/ | Supporting experiments and sanitized fixtures | no |
-| docs/architecture/ | Approved product and authority design | no |
-| docs/reference/ | Planned operator-facing command contract | no |
-| docs/research/ | Research records and maturity boundaries | no |
-| tools/ | Maintained repository and artifact verification | no |
+### `analyze-a-public-company`
 
-The [schema README](src/gigai/schemas/README.md) documents canonical bytes,
-identifiers, version selection, journal ordering, and validation beyond JSON
-Schema.
+The Gig can be defined to gather public information, organize a fundamental
+analysis, identify missing evidence, and send the result through the
+review-verify-fix loop before presenting it.
 
-## Non-negotiable boundaries
+### `implement-backend`
 
-- Proposals do not execute and cannot approve themselves.
-- Approval creates an immutable version and starts no run.
-- A run invocation grants authority for exactly one run.
-- Workpads remain local and are never published by GigAI.
-- SQLite is rebuildable; committed workpad records are authoritative.
-- GigAI has no hosted history, background sync, or telemetry service.
-- Provider and tool calls are explicit user-authorized exposure.
+A repository-focused Gig can define the implementation boundaries, inspect the
+selected code, ask for missing requirements, propose a change, and require
+review and verification before any target effect is authorized.
 
-## Roadmap
+## Where GigAI is going
 
-The completed Phase 1 graph and bounded G13 Run are recorded in the
-[development evidence](docs/development/evidence/). The next product work
-follows the candidate graph in the [V15 forward roadmap](docs/architecture/v15-roadmap.md);
-its goals will be materialized only after their contracts are reviewed.
-Product modules enter src/gigai/ only through an explicit implementation goal
-and acceptance tests. The installed entry point exposes only behavior that
-exists; planned command names are not shipped as placeholders for appearances.
+The core direction is a durable unit of work loop rather than a single model call:
 
-## Contributing and security
+- multiple models can contribute different roles during Gig creation and Runs;
+- reviewer and verifier roles can challenge one another with explicit evidence;
+- operators can inspect what Codex, Claude, or an API model contributed;
+- completed Runs can provide evidence for carefully gated Gig improvements;
+- portable Gig definitions can be reinstalled and verified across machines.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) before changing contracts or research
-evidence. Report vulnerabilities according to [SECURITY.md](SECURITY.md).
-Participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+GigAI is open source and still evolving. The useful distinction is always kept
+visible: a capability that is implemented and verified, a capability being
+tested locally, and a future capability are not presented as the same thing.
 
-Licensed under the [Apache License 2.0](LICENSE).
+## Install
+
+```bash
+uv tool install gigai
+gigai --version
+gigai setup
+```
+
+For the detailed command reference, see the
+[command sheet](docs/reference/command-sheet.md). The
+[external changelog](CHANGELOG.md) records operator-facing capabilities, while
+the repository's deeper development notes remain in the `docs/` directory.

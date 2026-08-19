@@ -84,13 +84,14 @@ def main() -> int:
 
         def send(question_id: str, value: object) -> None:
             snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            event = question_id if question_id == "build" else "answer"
             payload = {
-                "event": "answer",
-                "question_id": question_id,
-                "value": value,
+                "event": event,
                 "revision": snapshot["revision"],
                 "sequence": len(snapshot["events"]) + 1,
             }
+            if event == "answer":
+                payload.update({"question_id": question_id, "value": value})
             with urlopen(
                 Request(
                     endpoint,
@@ -106,10 +107,40 @@ def main() -> int:
         reference_id = json.loads(snapshot_path.read_text(encoding="utf-8"))["references"][0]["reference_id"]
         send("scope", "Create an installed-wheel proposal.")
         send("references", [reference_id])
-        send("effect", "write_workpad")
-        send("privacy", "local_only")
-        send("capability", "none")
-        send("operator-confirmation", True)
+
+        def fixture_value(question: dict[str, object]) -> object:
+            question_id = str(question["question_id"])
+            if question_id == "effect":
+                return "write_workpad"
+            if question_id == "privacy":
+                return "local_only"
+            if question_id == "capability":
+                return "none"
+            if question["answer_type"] == "confirmation":
+                return True
+            options = question.get("options", [])
+            if question["answer_type"] == "multiselect":
+                return [options[0]] if options else []
+            if question["answer_type"] == "choice":
+                return options[0] if options else "fixture-choice"
+            return "Installed replay fixture answer."
+
+        for _ in range(8):
+            snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            answered = {item["question_id"] for item in snapshot["answers"]}
+            required = [
+                item
+                for item in snapshot["questions"]
+                if item["required"] and item["question_id"] not in answered
+            ]
+            if not required:
+                break
+            for question in required:
+                send(str(question["question_id"]), fixture_value(question))
+        else:
+            raise SystemExit("installed G22 question flow did not converge")
+
+        send("build", None)
         snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
         approval = {
             "event": "approve",

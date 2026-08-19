@@ -12,9 +12,10 @@ authority for the contracts already implemented and for the boundaries that
 V15 must preserve.
 
 **Current roadmap gate:** G13 through G23 are complete and independently
-evidenced. G24 records exploratory 0.1.4 UAT; G29 is the full post-0.1.5
-human UAT and dogfooding gate; G25 is the later release-lane alpha-readiness
-candidate. Later
+evidenced. G24 records exploratory 0.1.4 UAT; G29 records the historical
+0.1.5 UAT path; G30 is the real CLI/setup implementation gate; G31 is the
+full post-0.1.6 human UAT and release-readiness gate; G25 is the later
+release-lane alpha-readiness candidate. Later
 candidates remain planning-only until their individual goal contracts are
 reviewed and approved.
 G19 remains bounded by its accepted contract and does not authorize broader
@@ -370,9 +371,9 @@ G13 -> G14 -> G15 -> G16
            G16 + S16-EVAL + G18 + G22 -> G19 -> G20 -> G21
            G17 + G19 + G20 + G22 -> G23
            G22 + G18 + S18-02 -> G26 + G27-contract
-             -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G29 -> G25
+             -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G30 -> G31 -> G32 -> G25
            G23 + G24 -> G29
-           G12 + G21 + G23 + G29 + G26 -> G25
+           G12 + G21 + G23 + G31 + G32 + G26 -> G25
 ```
 
 The graph is intentionally provisional. The arrows express planning
@@ -401,8 +402,11 @@ dependencies, not live status fields or authorization to begin.
 | G26 | Model-facilitated Gig builder, adaptive clarification, and bounded proposal research | G18, G22, S18-02 |
 | G28 | v0.1.5 evaluation, role-registry, and browser-first create readiness | G26, G27 contract, S27-EVAL, S27-ROLE, S27-CREATE |
 | G27 | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G28 |
-| G29 | Full human UAT and dogfooding against the released v0.1.5 product | G27, G28, G24 findings |
-| G25 | Alpha release readiness and final repository cleanup | G12, G21, G23, G29, G26 |
+| G29 | Historical v0.1.5 UAT and dogfooding record | G27, G28, G24 findings |
+| G30 | Real Codex/Claude adapters, API onboarding, folder access, multi-model setup, and browser-first Gig creation | G18, G26, G27, G28, S18-02 |
+| G31 | v0.1.6 release readiness and human UAT | G30, G27, G28, G12 |
+| G32 | Post-v0.1.6 public README, command sheet, and capability documentation | Published v0.1.6, G31 |
+| G25 | Alpha release readiness and final repository cleanup | G12, G21, G23, G31, G32, G26 |
 
 S16-EVAL is the hard review-loop quality gate for G18 and G19. G22 may cite
 its evidence only when G22 actually invokes or evaluates the Review Loop;
@@ -411,9 +415,14 @@ independent of G21: neither depends on the other. G24 is an exploratory
 0.1.4 UAT record, not a release declaration; it produces local-only findings
 about interaction quality, artifact shape, installation, and operator
 workflows. G27 makes the builder a genuine pre-proposal discovery canvas with
-a five-question ceiling and bounded research plan. G29 is the full human
-acceptance gate for the released v0.1.5 product. G25 owns the later
-release-lane alpha decision.
+a five-question ceiling and bounded research plan. G29 remains the historical
+v0.1.5 UAT record. G30 owns the real CLI adapters, provider onboarding, native
+folder access, multi-model setup with machine-wide reviewer/verifier/researcher
+defaults, and remaining HTMX/Gig-creation work. Gig-specific workflow roles
+belong to the Gig definition, not global setup. G31 is the full v0.1.6 release-
+candidate human acceptance gate. G32 owns the post-release public capability
+and command-surface documentation pass. G25 owns the later release-lane alpha
+decision.
 
 ### Phase 2 — Proposal creation and interaction
 
@@ -698,7 +707,7 @@ labeled as such.
 
 G24 does not change schemas, add runtime authority, publish a package, or
 declare alpha readiness. It is an exploratory record from the narrower 0.1.4
-surface; full acceptance is deferred to G29 after v0.1.5.
+surface; the replacement full acceptance gate is G31 after v0.1.6.
 
 #### G26 — Model-facilitated Gig builder and proposal research
 
@@ -728,15 +737,16 @@ approval, and version authority in the existing lifecycle.
 G27 applies the same discovery shape to G20 improvement by supplying bounded,
 provenance-tagged Run summaries and cited evidence. It does not grant arbitrary
 web access, target authority, provider support, or a second improvement gate.
-G27 is complete at the runtime and machine-evidence boundary before G29's
-final UAT pass; it does not declare an alpha release.
+G27 is complete at the runtime and machine-evidence boundary before G30's
+implementation and G31's final UAT pass; it does not declare an alpha release.
 
 ### S27-EVAL, S27-ROLE, and S27-CREATE — v0.1.5 prerequisite spikes
 
 These spikes define the evaluation taxonomy/behavioral-eval framework, the
 namespaced role registry, and the browser-first setup/create flow. They are
 research and contract-design records, not runtime Goals. G28 implements their
-accepted decisions and produces the v0.1.5 candidate before G29 human UAT.
+accepted decisions and produced the v0.1.5 candidate; G30 extends that
+foundation before the v0.1.6 human UAT.
 
 ### G28 — v0.1.5 Product Readiness Foundation
 
@@ -747,23 +757,52 @@ role registry; and a truthful setup/model-selection path where
 release-candidate goal, not an alpha declaration. G27 runtime work follows G28
 because adaptive discovery must be evaluated on a usable product foundation.
 
-Before that UAT pass, the v0.1.5 product-readiness gate must close the
+Before the replacement UAT pass, the v0.1.6 product-readiness gate must close
 evaluation taxonomy/behavioral-eval debt, the central namespaced role registry,
-and the browser-first setup/create path. G29 should evaluate the resulting
-candidate, not the current implementation-plumbing release.
+the browser-first setup/create path, real CLI adapters, provider onboarding,
+and folder access. G31 evaluates the resulting candidate, not the current
+implementation-plumbing release.
 
 #### G29 — v0.1.5 human UAT and dogfooding
 
-G29 is the full human acceptance gate after the v0.1.5 candidate is released.
+G29 is the historical human acceptance gate for the v0.1.5 candidate.
 It exercises installation, setup/model selection, adaptive Gig definition,
 optional references, durable SQLite/workpad/journal state, revision/rejection/
 approval, improve context, reinstall/reopen, and representative workflows such
 as `tailor-resume-for-job` and review-and-verify. Raw UAT material remains
 outside Git; only a sanitized summary and terminal handoff may be committed.
 
+#### G30 — CLI model adapters and browser setup onboarding
+
+G30 turns the detected local Codex and Claude executables into real bounded
+model-port targets, adds supported API-provider onboarding, and completes the
+folder-access and HTMX/setup usability work needed for an ordinary operator
+flow. Setup enables a model roster and assigns machine-wide reviewer,
+verifier, researcher, and Gig-creation defaults; it does not define a Gig.
+Gig-specific workflows such as `review-verify-fix-loop` own their roles at the
+Gig level through `gigai update`. Detection, configuration, usability, and
+selection remain distinct states; G30 does not ship a disabled card as support
+evidence or expose offline fixtures as a normal model choice.
+
+#### G31 — v0.1.6 readiness and human UAT
+
+G31 is the release-candidate gate after G30. It owns fresh-install and upgrade
+proofs, real CLI/API configuration, setup/create/recovery UAT, sanitized
+behavioral evidence, and the owner-controlled exact-tag v0.1.6 release
+decision. It does not declare alpha; G25 retains that release-lane decision.
+
+#### G32 — Post-v0.1.6 public capabilities and command surface
+
+G32 begins only after the v0.1.6 tag is published. It refreshes the GitHub and
+PyPI README, the public command sheet, and the operator-facing capability
+description from the installed release rather than from unreleased planning
+work. It keeps internal schemas, evidence machinery, test commands, and goal
+graphs out of the public package surface. G32 does not add runtime behavior or
+declare alpha readiness.
+
 #### G25 — Alpha release readiness and final repository cleanup
 
-Prepare a true alpha candidate after G29 and its G21/G23 prerequisites are
+Prepare a true alpha candidate after G31 and its G21/G23 prerequisites are
 accepted, while reusing
 G12's release-lane mechanics. G25 owns the final support-surface freeze,
 roadmap/README/internal-changelog reconciliation, release-candidate artifact

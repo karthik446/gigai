@@ -14,6 +14,12 @@ class ModelInvocationError(RuntimeError):
     code = "model_invocation_failed"
 
 
+class ModelAuthenticationRequired(ModelInvocationError):
+    """The provider transport works but its owned authentication is missing."""
+
+    code = "model_authentication_required"
+
+
 class CapabilityMismatchError(ModelInvocationError):
     code = "model_capability_mismatch"
 
@@ -111,6 +117,7 @@ __all__ = [
     "InvocationRequest",
     "InvocationResult",
     "ModelInvocationError",
+    "ModelAuthenticationRequired",
     "ModelInvocationCancelled",
     "ModelInvocationPort",
     "NormalizedUsage",
