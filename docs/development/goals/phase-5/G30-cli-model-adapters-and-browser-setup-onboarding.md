@@ -120,6 +120,8 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
    setup flow, plain-language labels, contextual Gig-definition explanation,
    adaptive follow-up behavior, proposal-build/review states, and no
    implementation flags required for ordinary use.
+8. Provide an explicitly opt-in local UAT test for named real CLI targets; the
+   normal test suite must remain provider-free.
 
 ## In scope
 
@@ -210,10 +212,14 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
     `tailor-resume-for-job` and `review-verify-fix-loop`. It does not lead with
     schema counts, schema filenames, internal evidence directories, goal
     numbering, or implementation-history detail.
+17. An opt-in `g30_live` UAT test runs readiness probes for explicitly named
+    configured local targets, reports authentication failures distinctly, and
+    remains skipped unless the operator enables it explicitly; ordinary CI never
+    invokes a provider.
 
 ## Verification and evidence
 
-Evidence belongs under `docs/development/evidence/phase-5/G30/` and includes the accepted contract decision, the accepted browser setup interaction record, sanitized installed CLI version/probe results, adapter conformance and mutation reports, setup/create browser captures for each access branch, credential-boundary fixtures, folder-selection fixtures, installed-wheel replay, package-README rendering/content checks, completion audit, and terminal handoff. The direct operator-shell Claude probe is recorded separately as a partial checkpoint in `claude-direct-probe.md`; it does not substitute for a successful invocation through GigAI's model port.
+Evidence belongs under `docs/development/evidence/phase-5/G30/` and includes the accepted contract decision, the accepted browser setup interaction record, sanitized installed CLI version/probe results, adapter conformance and mutation reports, setup/create browser captures for each access branch, credential-boundary fixtures, folder-selection fixtures, installed-wheel replay, package-README rendering/content checks, the opt-in local UAT result, completion audit, and terminal handoff. The direct operator-shell Claude probe is recorded separately as a partial checkpoint in `claude-direct-probe.md`; it does not substitute for a successful invocation through GigAI's model port. The UAT instructions live in `uat-runbook.md`.
 
 ## Stop boundary
 

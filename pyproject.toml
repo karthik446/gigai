@@ -45,6 +45,9 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers -p no:cacheprovider"
+markers = [
+  "g30_live: opt-in local provider UAT; skipped unless GIGAI_G30_UAT=1",
+]
 testpaths = [
   "tests",
   "research/contract_spike/tests",
