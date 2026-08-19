@@ -28,6 +28,9 @@ input[type="text"] { box-sizing: border-box; width: 100%; margin-top: 7px; borde
 .target-copy span { margin: 4px 0 0; }
 .target-option.selected .model-option { border-color: #3b6eea; background: #f5f8ff; box-shadow: 0 0 0 3px #3b6eea1c; }
 .target-option .provider-status { flex: 0 0 auto; }
+.probe-button { margin: 7px 0 0 34px; border: 1px solid #9bb7f5; border-radius: 8px; padding: 7px 10px; color: #1d4ed8; background: #fff; font-size: .82rem; cursor: pointer; }
+.probe-button:hover { background: #f5f8ff; }
+.probe-button:disabled { cursor: wait; opacity: .65; }
 .api-inline { display: none; margin: -1px 0 0 34px; padding: 10px 12px 2px; border: 1px solid #dbe2ef; border-top: 0; border-radius: 0 0 10px 10px; background: #f8fbff; }
 .api-inline.expanded { display: block; }
 .api-inline p { margin: 0 0 8px; color: #526079; font-size: .82rem; }

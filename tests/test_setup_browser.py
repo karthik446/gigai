@@ -13,6 +13,7 @@ from gigai.setup_interview import SetupDraft, SetupHTTPServer
 
 def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
     applied: list[SetupDraft] = []
+    probed: list[tuple[str, SetupDraft]] = []
     server = SetupHTTPServer(
         SetupDraft(
             "/tmp/gigai",
@@ -44,6 +45,8 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
         ),
         folder_chooser=lambda: "/tmp/chosen-storage",
         on_apply=lambda draft: applied.append(draft) or {"status": "ok"},
+        on_probe=lambda target, draft: probed.append((target, draft))
+        or {"target_name": target, "readiness": "usable"},
     ).start()
     try:
         with urlopen(server.url, timeout=2) as response:
@@ -75,6 +78,7 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
         assert "Codex" in body
         assert "openai_api_env" in body
         assert "GigAI stores only the environment-variable name" in body
+        assert "data-probe='codex-default'" in body
 
         with urlopen(
             Request(
@@ -96,6 +100,7 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
             "open_with_target": True,
             "selected_model_target": "codex-default",
             "enabled_model_targets": ["codex-default"],
+            "verified_model_targets": ["codex-default"],
             "reviewer_model_target": "codex-default",
             "verifier_model_target": "codex-default",
             "researcher_model_target": "codex-default",
@@ -104,6 +109,21 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
             "openrouter_api_env": "",
             "openrouter_api_model": "",
         }
+        probe_payload = {**payload, "event": "probe", "target_name": "codex-default"}
+        with urlopen(
+            Request(
+                server.url,
+                data=json.dumps(probe_payload).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            ),
+            timeout=2,
+        ) as response:
+            assert json.loads(response.read()) == {
+                "result": {"readiness": "usable", "target_name": "codex-default"},
+                "status": "probed",
+            }
+        assert probed and probed[0][0] == "codex-default"
         with urlopen(
             Request(
                 server.url,
@@ -129,7 +149,8 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
                 "codex-default",
                 "codex-default",
                 "codex-default",
-            )
+                ("codex-default",),
+                )
         ]
     finally:
         server.close()
@@ -165,6 +186,7 @@ def test_setup_command_opens_browser_flow_and_applies_only_after_event(tmp_path:
             "open_with_target": False,
             "selected_model_target": "openai-default",
             "enabled_model_targets": ["openai-default"],
+            "verified_model_targets": ["openai-default"],
             "reviewer_model_target": "openai-default",
             "verifier_model_target": "openai-default",
             "researcher_model_target": "openai-default",

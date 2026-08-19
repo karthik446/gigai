@@ -35,6 +35,7 @@ class SetupDraft:
     reviewer_model_target: str = ""
     verifier_model_target: str = ""
     researcher_model_target: str = ""
+    verified_model_targets: tuple[str, ...] = ()
 
 
 class SetupHTTPServer:
@@ -47,6 +48,7 @@ class SetupHTTPServer:
         model_options: tuple[Mapping[str, str], ...],
         detected_models: tuple[DetectedModel, ...],
         on_apply: Callable[[SetupDraft], Mapping[str, object]],
+        on_probe: Callable[[str, SetupDraft], Mapping[str, object]] | None = None,
         provider_status: Mapping[str, str] | None = None,
         folder_chooser: Callable[[], str | None] | None = None,
         host: str = "127.0.0.1",
@@ -61,6 +63,7 @@ class SetupHTTPServer:
         self.detected_models = detected_models
         self.provider_status = dict(provider_status or {})
         self.on_apply = on_apply
+        self.on_probe = on_probe
         self.folder_chooser = folder_chooser or choose_local_folder
         self.lifetime_seconds = lifetime_seconds
         self.token = secrets.token_urlsafe(24)
@@ -128,8 +131,9 @@ class SetupHTTPServer:
                         else:
                             self._json(200, {"status": "selected", "path": chosen})
                         return
-                    if payload.get("event") != "apply":
-                        raise SetupInterviewError("setup requires an apply event")
+                    event = payload.get("event")
+                    if event not in {"apply", "probe"}:
+                        raise SetupInterviewError("setup requires an apply or probe event")
                     draft = SetupDraft(
                         home_root=_required_text(payload, "home_root"),
                         workpad_root=_required_text(payload, "workpad_root"),
@@ -144,7 +148,15 @@ class SetupHTTPServer:
                         reviewer_model_target=_optional_text(payload, "reviewer_model_target"),
                         verifier_model_target=_optional_text(payload, "verifier_model_target"),
                         researcher_model_target=_optional_text(payload, "researcher_model_target"),
+                        verified_model_targets=_text_array(payload, "verified_model_targets"),
                     )
+                    if event == "probe":
+                        if owner.on_probe is None:
+                            raise SetupInterviewError("readiness probes are unavailable")
+                        target_name = _required_text(payload, "target_name")
+                        result = owner.on_probe(target_name, draft)
+                        self._json(200, {"status": "probed", "result": dict(result)})
+                        return
                     with owner._lock:
                         owner.result = owner.on_apply(draft)
                         owner.draft = draft
@@ -230,7 +242,9 @@ class SetupHTTPServer:
             )
 
         roster_html = "".join(
-            "<div class='target-option' data-target-kind='"
+            "<div class='target-option' data-verified='"
+            + ("true" if item["id"] in self.draft.verified_model_targets else "false")
+            + "' data-target-kind='"
             + html.escape(target_kind(item))
             + "' data-target-id='"
             + html.escape(str(item["id"]))
@@ -243,8 +257,21 @@ class SetupHTTPServer:
             + "</strong><span>"
             + html.escape(str(item["description"]))
             + "</span></span><span class='provider-status'>"
-            + ("Ready" if not _model_option_disabled(item["id"], self.draft) else "Needs setup")
+            + (
+                "Verified"
+                if item["id"] in self.draft.verified_model_targets
+                else "Check readiness"
+                if not _model_option_disabled(item["id"], self.draft)
+                else "Needs setup"
+            )
             + "</span></label>"
+            + (
+                "<button type='button' class='probe-button' data-probe='"
+                + html.escape(str(item["id"]))
+                + "'>Check readiness</button>"
+                if self.on_probe is not None
+                else ""
+            )
             + api_fields(item)
             + "</div>"
             for item in self.model_options
@@ -326,7 +353,7 @@ class SetupHTTPServer:
             + "> Open workpads with their target later</label></form><p class='footer'>This page is local-only, loopback-bound, token-protected, and expires automatically.</p></main>"
             + "<script>const form=document.querySelector('#setup');const choose=document.querySelector('#choose-folder');const initialAccess='"
             + initial_access
-            + "';let access=initialAccess;const accessLabels={cli:'CLI only',api:'API only',both:'CLI and API'};function screen(name){for(const item of form.querySelectorAll('[data-step]'))item.classList.toggle('active',item.dataset.step===name);for(const item of form.querySelectorAll('[data-step-indicator]')){const order=['workspace','access','models','roles','ready'];const current=order.indexOf(name);const index=order.indexOf(item.dataset.stepIndicator);item.classList.toggle('active',index===current);item.classList.toggle('done',index>=0&&index<current);}if(name==='ready')summary();}function refresh(){for(const card of form.querySelectorAll('.target-option')){const visible=access==='both'||card.dataset.targetKind===access;card.hidden=!visible;const input=card.querySelector('.target-toggle');card.classList.toggle('selected',Boolean(input&&input.checked));const inline=card.querySelector('.api-inline');if(inline)inline.classList.toggle('expanded',Boolean(input&&input.checked));}for(const input of form.querySelectorAll('.target-toggle')){if(input.dataset.targetId==='openai-default'||input.value==='openai-default'||input.value==='openrouter-default'){const field=input.value==='openai-default'?form.openai_api_env:form.openrouter_api_env;const ready=Boolean(field&&field.value.trim());input.disabled=!ready;if(!ready)input.checked=false;}}const enabled=new Set([...form.querySelectorAll('.target-toggle:checked')].map(item=>item.value));for(const select of form.querySelectorAll('select')){for(const option of select.options){option.disabled=!enabled.has(option.value);}}}function summary(){const enabled=[...form.querySelectorAll('.target-toggle:checked')].map(input=>input.closest('.target-option').querySelector('strong').textContent);const roles=[...form.querySelectorAll('.role-grid select')].map(select=>select.closest('.field').firstChild.textContent.trim()+': '+select.value);form.querySelector('[data-summary]').innerHTML='<div class=\"summary-row\"><strong>Workspace</strong><span>'+form.home_root.value+'</span></div><div class=\"summary-row\"><strong>Access</strong><span>'+accessLabels[access]+'</span></div><div class=\"summary-row\"><strong>Models</strong><span>'+ (enabled.join(', ')||'None selected')+'</span></div><div class=\"summary-row\"><strong>Role defaults</strong><span>'+roles.join(' · ')+'</span></div>';}for(const input of form.querySelectorAll('[data-access]'))input.addEventListener('change',()=>{access=input.value;refresh();});for(const input of form.querySelectorAll('.target-toggle'))input.addEventListener('change',refresh);for(const input of form.querySelectorAll('[data-api-env]'))input.addEventListener('input',refresh);for(const button of form.querySelectorAll('[data-next]'))button.addEventListener('click',()=>{refresh();screen(button.dataset.next);});for(const button of form.querySelectorAll('[data-back]'))button.addEventListener('click',()=>screen(button.dataset.back));choose.addEventListener('click',async()=>{const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'choose_folder'})});const b=await r.json();if(!r.ok){alert(b.error||'Folder chooser unavailable');}else if(b.status==='selected'){form.home_root.value=b.path;form.workpad_root.value=b.path.replace(/[\\/]$/,'')+'/workpads';}});form.addEventListener('submit',async e=>{e.preventDefault();refresh();const enabled=[...form.querySelectorAll('.target-toggle:checked')].map(item=>item.value);const selected=form.querySelector('select[name=selected_model_target]');const p={event:'apply',home_root:form.home_root.value,workpad_root:form.workpad_root.value,editor:form.editor.value,open_with_target:form.open_with_target.checked,selected_model_target:selected&&selected.value,reviewer_model_target:form.reviewer_model_target.value,verifier_model_target:form.verifier_model_target.value,researcher_model_target:form.researcher_model_target.value,enabled_model_targets:enabled,openai_api_env:form.openai_api_env.value,openai_api_model:form.openai_api_model.value,openrouter_api_env:form.openrouter_api_env.value,openrouter_api_model:form.openrouter_api_model.value};const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});if(!r.ok){const b=await r.json();alert(b.error||'Setup could not be applied');}else{document.body.innerHTML='<main class=\"shell\"><header><h1>GigAI setup complete</h1><p class=\"intro\">Configuration saved. You can close this tab.</p></header></main>';}});refresh();screen('workspace');</script>"
+            + "';let access=initialAccess;const accessLabels={cli:'CLI only',api:'API only',both:'CLI and API'};function verified(){return new Set([...form.querySelectorAll('.target-option')].filter(card=>card.dataset.verified==='true').map(card=>card.dataset.targetId));}function screen(name){for(const item of form.querySelectorAll('[data-step]'))item.classList.toggle('active',item.dataset.step===name);for(const item of form.querySelectorAll('[data-step-indicator]')){const order=['workspace','access','models','roles','ready'];const current=order.indexOf(name);const index=order.indexOf(item.dataset.stepIndicator);item.classList.toggle('active',index===current);item.classList.toggle('done',index>=0&&index<current);}if(name==='ready')summary();}function refresh(){const checkedVerified=verified();for(const card of form.querySelectorAll('.target-option')){const visible=access==='both'||card.dataset.targetKind===access;card.hidden=!visible;const input=card.querySelector('.target-toggle');card.classList.toggle('selected',Boolean(input&&input.checked));const inline=card.querySelector('.api-inline');if(inline)inline.classList.toggle('expanded',Boolean(input&&input.checked));const status=card.querySelector('.provider-status');if(status&&!_model_option_disabled_placeholder(card))status.textContent=card.dataset.verified==='true'?'Verified':'Check readiness';}for(const input of form.querySelectorAll('.target-toggle')){if(input.value==='openai-default'||input.value==='openrouter-default'){const field=input.value==='openai-default'?form.openai_api_env:form.openrouter_api_env;const ready=Boolean(field&&field.value.trim());input.disabled=!ready;if(!ready)input.checked=false;}}const enabled=new Set([...form.querySelectorAll('.target-toggle:checked')].map(item=>item.value));for(const select of form.querySelectorAll('select')){for(const option of select.options){option.disabled=!enabled.has(option.value)||!checkedVerified.has(option.value);}}}function _model_option_disabled_placeholder(card){const input=card.querySelector('.target-toggle');return input&&input.disabled;}function summary(){const enabled=[...form.querySelectorAll('.target-toggle:checked')].map(input=>input.closest('.target-option').querySelector('strong').textContent);const verifiedModels=[...verified()].map(id=>id);const roles=[...form.querySelectorAll('.role-grid select')].map(select=>select.closest('.field').firstChild.textContent.trim()+': '+select.value);form.querySelector('[data-summary]').innerHTML='<div class=\"summary-row\"><strong>Workspace</strong><span>'+form.home_root.value+'</span></div><div class=\"summary-row\"><strong>Access</strong><span>'+accessLabels[access]+'</span></div><div class=\"summary-row\"><strong>Models</strong><span>'+ (enabled.join(', ')||'None selected')+'</span></div><div class=\"summary-row\"><strong>Verified</strong><span>'+ (verifiedModels.join(', ')||'None yet')+'</span></div><div class=\"summary-row\"><strong>Role defaults</strong><span>'+roles.join(' · ')+'</span></div>';}async function probe(button){button.disabled=true;button.textContent='Checking…';const p={event:'probe',target_name:button.dataset.probe,openai_api_env:form.openai_api_env.value,openai_api_model:form.openai_api_model.value,openrouter_api_env:form.openrouter_api_env.value,openrouter_api_model:form.openrouter_api_model.value,verified_model_targets:[...verified()]};const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});const b=await r.json();button.disabled=false;if(!r.ok||!b.result||b.result.readiness!=='usable'){button.textContent='Check readiness';alert((b.result&&b.result.reason)||b.error||'Readiness check failed');return;}const card=button.closest('.target-option');card.dataset.verified='true';button.textContent='Verified';refresh();}for(const input of form.querySelectorAll('[data-access]'))input.addEventListener('change',()=>{access=input.value;refresh();});for(const input of form.querySelectorAll('.target-toggle'))input.addEventListener('change',refresh);for(const input of form.querySelectorAll('[data-api-env]'))input.addEventListener('input',()=>{const card=input.closest('.target-option');if(card){card.dataset.verified='false';const button=card.querySelector('[data-probe]');if(button)button.textContent='Check readiness';}refresh();});for(const button of form.querySelectorAll('[data-probe]'))button.addEventListener('click',()=>probe(button));for(const button of form.querySelectorAll('[data-next]'))button.addEventListener('click',()=>{refresh();screen(button.dataset.next);});for(const button of form.querySelectorAll('[data-back]'))button.addEventListener('click',()=>screen(button.dataset.back));choose.addEventListener('click',async()=>{const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'choose_folder'})});const b=await r.json();if(!r.ok){alert(b.error||'Folder chooser unavailable');}else if(b.status==='selected'){form.home_root.value=b.path;form.workpad_root.value=b.path.replace(/[\\/]$/,'')+'/workpads';}});form.addEventListener('submit',async e=>{e.preventDefault();refresh();const enabled=[...form.querySelectorAll('.target-toggle:checked')].map(item=>item.value);const selected=form.querySelector('select[name=selected_model_target]');const p={event:'apply',home_root:form.home_root.value,workpad_root:form.workpad_root.value,editor:form.editor.value,open_with_target:form.open_with_target.checked,selected_model_target:selected&&selected.value,reviewer_model_target:form.reviewer_model_target.value,verifier_model_target:form.verifier_model_target.value,researcher_model_target:form.researcher_model_target.value,enabled_model_targets:enabled,verified_model_targets:[...verified()],openai_api_env:form.openai_api_env.value,openai_api_model:form.openai_api_model.value,openrouter_api_env:form.openrouter_api_env.value,openrouter_api_model:form.openrouter_api_model.value};const r=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});if(!r.ok){const b=await r.json();alert(b.error||'Setup could not be applied');}else{document.body.innerHTML='<main class=\"shell\"><header><h1>GigAI setup complete</h1><p class=\"intro\">Configuration saved. You can close this tab.</p></header></main>';}});refresh();screen('workspace');</script>"
         ).encode()
         return body
 

@@ -745,6 +745,22 @@ def _run_browser_setup(
     openrouter_api_env, openrouter_api_model = _browser_provider_values(existing, "openrouter")
     provider_status = _browser_provider_status(existing)
 
+    def probe_setup_target(target_name: str, draft: SetupDraft) -> Mapping[str, object]:
+        provider_credentials, provider_endpoints, provider_targets = _browser_provider_config(
+            preview, draft
+        )
+        probe_config = build_config(
+            home_root=preview.home_root,
+            workpad_root=preview.workpad_root,
+            editor_argv=preview.editor_argv,
+            open_with_target=preview.open_with_target,
+            credentials=provider_credentials,
+            endpoints=provider_endpoints,
+            model_targets=provider_targets,
+            profiles=preview.profiles,
+        )
+        return probe_target_readiness(probe_config, target_name).__dict__
+
     def apply_setup(draft: SetupDraft) -> Mapping[str, object]:
         resolved_editor = resolve_editor_argv(
             draft.editor,
@@ -772,6 +788,17 @@ def _run_browser_setup(
             )
         if any(name not in enabled_names for name in role_targets.values()):
             raise ValueError("reviewer, verifier, researcher, and Gig creation defaults must be enabled")
+        verified_names = set(draft.verified_model_targets)
+        unverified = sorted(
+            name
+            for name in (*enabled_names, *role_targets.values())
+            if name not in verified_names
+        )
+        if unverified:
+            raise ValueError(
+                "run Check readiness before applying setup for: "
+                + ", ".join(dict.fromkeys(unverified))
+            )
         provider_targets = tuple(
             replace(target, enabled=target.name in enabled_names)
             for target in provider_targets
@@ -843,6 +870,7 @@ def _run_browser_setup(
         detected_models=detected_models,
         provider_status=provider_status,
         on_apply=apply_setup,
+        on_probe=probe_setup_target,
     ).start()
     try:
         click.echo(f"GigAI local setup: {server.url}", err=True)
