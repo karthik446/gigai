@@ -339,6 +339,11 @@ target. It is excluded from CI and offline scenarios, is bounded by the target
 budget policy, and emits only redacted, share-safe evidence. It is not a claim
 that every configured provider has passed a live gate.
 
+`models --probe <target>` is the equivalent focused readiness action when the
+operator wants the result alongside model discovery. Ordinary `models` and
+setup discovery never invoke a provider; configured non-deterministic targets
+remain `configured` until an explicit probe succeeds.
+
 `preview` cannot prove every arbitrary Python path. `rehearse` is authoritative
 only for its selected fixture case. Neither grants execution authority.
 Goal identity always resolves inside the selected Gig version. Labels such as
@@ -550,7 +555,8 @@ gigai preview [<gig-id>] [--version <version>] [--goal <goal-id>] [inputs...]
 gigai rehearse <gig-id> --goal <goal-id> --case <name> [--version <version>]
 gigai eval <gig-id> --goal <goal-id> [--suite <name>] [--version <version>]
 
-gigai models [--endpoint <name>] [--search <text>] [--refresh]
+gigai models [--json]
+gigai models --probe <target> [--json]
 gigai profiles
 gigai tokens [<run-id>] [--json]
 gigai costs [<run-id>] [--json]

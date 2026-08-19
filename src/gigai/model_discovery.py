@@ -10,6 +10,7 @@ import tempfile
 from typing import Callable
 
 from .adapters.factory import AdapterFactoryError, resolve_model_adapter
+from .adapters.port import ModelInvocationError
 from .adapters.process import allowed_environment
 from .config import GigAIConfig
 from .model_targets import ModelTargetResolutionError
@@ -83,7 +84,12 @@ def _probe_version(executable: str) -> str | None:
 
 
 def resolve_target_readiness(config: GigAIConfig, target_name: str) -> ModelReadiness:
-    """Resolve a configured target and classify it without making a model call."""
+    """Resolve a configured target without making a provider/model call.
+
+    A constructed adapter proves only that the typed configuration is usable
+    by the factory.  It does not prove provider authentication or command
+    compatibility; that distinction belongs to :func:`probe_target_readiness`.
+    """
 
     try:
         binding = resolve_model_adapter(config, target_name)
@@ -91,20 +97,62 @@ def resolve_target_readiness(config: GigAIConfig, target_name: str) -> ModelRead
         return ModelReadiness(target_name, None, None, None, "unavailable", str(exc))
     except AdapterFactoryError as exc:
         return ModelReadiness(target_name, None, None, None, "unsupported", str(exc))
+    except ModelInvocationError as exc:
+        return ModelReadiness(target_name, None, None, None, "unavailable", str(exc))
     endpoint = binding.current.endpoint
     return ModelReadiness(
         target_name=target_name,
         endpoint_name=endpoint.name,
         model=binding.current.target.model,
         adapter=endpoint.adapter,
-        readiness="usable",
-        reason=None,
+        readiness="usable" if endpoint.adapter == "deterministic" else "configured",
+        reason=(
+            None
+            if endpoint.adapter == "deterministic"
+            else "explicit readiness probe required before provider invocation"
+        ),
     )
+
+
+def probe_target_readiness(config: GigAIConfig, target_name: str) -> ModelReadiness:
+    """Run one explicit bounded readiness invocation for a configured target.
+
+    Callers must expose this as an opt-in action.  This function may resolve a
+    provider credential and may incur provider cost; ordinary discovery and
+    setup rendering must call ``resolve_target_readiness`` instead.
+    """
+
+    try:
+        binding = resolve_model_adapter(config, target_name)
+        endpoint = binding.current.endpoint
+        prompt = (
+            "doctor-probe"
+            if endpoint.adapter == "deterministic"
+            else "Return exactly READY as a readiness check. Do not use tools or modify files."
+        )
+        result = binding.port.invoke(
+            binding.request(role="live-diagnostic", prompt=prompt)
+        )
+        if result.status != "success" or not result.output_text.strip():
+            raise ModelInvocationError("readiness probe returned no successful text")
+        return ModelReadiness(
+            target_name=target_name,
+            endpoint_name=endpoint.name,
+            model=binding.current.target.model,
+            adapter=endpoint.adapter,
+            readiness="usable",
+            reason=None,
+        )
+    except AdapterFactoryError as exc:
+        return ModelReadiness(target_name, None, None, None, "unsupported", str(exc))
+    except (ModelInvocationError, ModelTargetResolutionError, ValueError) as exc:
+        return ModelReadiness(target_name, None, None, None, "unavailable", str(exc))
 
 
 __all__ = [
     "DetectedModel",
     "ModelReadiness",
     "discover_installed_models",
+    "probe_target_readiness",
     "resolve_target_readiness",
 ]

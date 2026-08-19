@@ -42,7 +42,11 @@ from .lifecycle import (
     stage_improvement_manifest,
     start_interview,
 )
-from .model_discovery import discover_installed_models, resolve_target_readiness
+from .model_discovery import (
+    discover_installed_models,
+    probe_target_readiness,
+    resolve_target_readiness,
+)
 from .proposal_interview import InterviewHTTPServer, block_session, request_revision
 from .occurrence import (
     OccurrenceError,
@@ -104,13 +108,19 @@ def cli(context: click.Context) -> None:
     help="GigAI machine-state directory (default: GIGAI_HOME or ~/.gigai).",
 )
 @click.option("--json", "as_json", is_flag=True)
-def models_command(home_value: Path | None, as_json: bool) -> None:
-    """Show detected local model CLIs and configured target readiness."""
+@click.option(
+    "--probe",
+    "probe_target",
+    metavar="TARGET",
+    help="Explicitly run one bounded readiness invocation for TARGET.",
+)
+def models_command(home_value: Path | None, as_json: bool, probe_target: str | None) -> None:
+    """Show model discovery; optionally run one explicit readiness probe."""
 
     try:
         home = home_value or default_home_root()
         config = load_config(home)
-        payload = {
+        payload: dict[str, object] = {
             "detected": [
                 {
                     "name": item.name,
@@ -124,8 +134,12 @@ def models_command(home_value: Path | None, as_json: bool) -> None:
                 for item in config.model_targets
             ],
         }
+        if probe_target is not None:
+            payload["probe"] = probe_target_readiness(config, probe_target).__dict__
         if as_json:
             click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+            if probe_target is not None and payload["probe"]["readiness"] != "usable":
+                raise click.exceptions.Exit(1)
             return
         for item in payload["detected"]:
             location = f" ({item['executable']})" if item["executable"] else ""
@@ -135,6 +149,14 @@ def models_command(home_value: Path | None, as_json: bool) -> None:
                 f"target {item['target_name']}: {item['readiness']} "
                 f"({item['adapter'] or 'unresolved'} / {item['model'] or 'unknown'})"
             )
+        if probe_target is not None:
+            probe = payload["probe"]
+            click.echo(
+                f"probe target {probe['target_name']}: {probe['readiness']} "
+                f"({probe['adapter'] or 'unresolved'} / {probe['model'] or 'unknown'})"
+            )
+            if probe["readiness"] != "usable":
+                raise click.exceptions.Exit(1)
     except (ConfigurationError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
 
