@@ -1,6 +1,6 @@
 # G30 — CLI Model Adapters and Browser Setup Onboarding
 
-- Status: Active — implementation underway
+- Status: Complete — evidence accepted; handed to G31
 - Type: Release-blocking implementation goal for the v0.1.6 candidate
 - Depends on: G18 adapter/evidence boundaries, G26 builder lifecycle, G27 discovery contract, G28 setup/create foundation, and accepted S18-02 process policy
 - Unblocks: G31 v0.1.6 readiness and human UAT

@@ -371,9 +371,9 @@ G13 -> G14 -> G15 -> G16
            G16 + S16-EVAL + G18 + G22 -> G19 -> G20 -> G21
            G17 + G19 + G20 + G22 -> G23
            G22 + G18 + S18-02 -> G26 + G27-contract
-             -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G30 -> G31 -> G25
+             -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G30 -> G31 -> G32 -> G25
            G23 + G24 -> G29
-           G12 + G21 + G23 + G31 + G26 -> G25
+           G12 + G21 + G23 + G31 + G32 + G26 -> G25
 ```
 
 The graph is intentionally provisional. The arrows express planning
@@ -405,7 +405,8 @@ dependencies, not live status fields or authorization to begin.
 | G29 | Historical v0.1.5 UAT and dogfooding record | G27, G28, G24 findings |
 | G30 | Real Codex/Claude adapters, API onboarding, folder access, multi-model setup, and browser-first Gig creation | G18, G26, G27, G28, S18-02 |
 | G31 | v0.1.6 release readiness and human UAT | G30, G27, G28, G12 |
-| G25 | Alpha release readiness and final repository cleanup | G12, G21, G23, G31, G26 |
+| G32 | Post-v0.1.6 public README, command sheet, and capability documentation | Published v0.1.6, G31 |
+| G25 | Alpha release readiness and final repository cleanup | G12, G21, G23, G31, G32, G26 |
 
 S16-EVAL is the hard review-loop quality gate for G18 and G19. G22 may cite
 its evidence only when G22 actually invokes or evaluates the Review Loop;
@@ -419,7 +420,8 @@ v0.1.5 UAT record. G30 owns the real CLI adapters, provider onboarding, native
 folder access, multi-model setup with machine-wide reviewer/verifier/researcher
 defaults, and remaining HTMX/Gig-creation work. Gig-specific workflow roles
 belong to the Gig definition, not global setup. G31 is the full v0.1.6 release-
-candidate human acceptance gate. G25 owns the later release-lane alpha
+candidate human acceptance gate. G32 owns the post-release public capability
+and command-surface documentation pass. G25 owns the later release-lane alpha
 decision.
 
 ### Phase 2 — Proposal creation and interaction
@@ -788,6 +790,15 @@ G31 is the release-candidate gate after G30. It owns fresh-install and upgrade
 proofs, real CLI/API configuration, setup/create/recovery UAT, sanitized
 behavioral evidence, and the owner-controlled exact-tag v0.1.6 release
 decision. It does not declare alpha; G25 retains that release-lane decision.
+
+#### G32 — Post-v0.1.6 public capabilities and command surface
+
+G32 begins only after the v0.1.6 tag is published. It refreshes the GitHub and
+PyPI README, the public command sheet, and the operator-facing capability
+description from the installed release rather than from unreleased planning
+work. It keeps internal schemas, evidence machinery, test commands, and goal
+graphs out of the public package surface. G32 does not add runtime behavior or
+declare alpha readiness.
 
 #### G25 — Alpha release readiness and final repository cleanup
 

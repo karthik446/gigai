@@ -1,8 +1,8 @@
 # G30 — CLI adapter and setup contract decision
 
-- Status: Proposed for review
-- Scope: implementation contract for G30; no provider support claim until the
-  real invocation evidence and completion audit are accepted
+- Status: Accepted
+- Scope: accepted implementation contract for G30; support claims are limited
+  to the bounded CLI paths and evidence recorded below
 - Depends on: accepted S18-02 process policy, G18 model-invocation/model-
   exchange resources, G26 builder lifecycle, G27 discovery contract, and G28
   setup/create evidence
@@ -39,11 +39,9 @@ and invocation checks.
 
 The operator also completed a direct Claude `-p --output-format json` readiness
 probe in the normal authenticated shell. The sanitized result is recorded in
-[`claude-direct-probe.md`](claude-direct-probe.md). This confirms the installed
-CLI surface and provider-owned authentication, but remains partial evidence:
-the same command under GigAI's restricted child boundary currently reports
-`authentication_required`, so this record remains proposed until the model-port
-invocation path is proven.
+[`claude-direct-probe.md`](claude-direct-probe.md). The later bounded GigAI
+probe used an explicitly exported `CLAUDE_CODE_OAUTH_TOKEN` and completed
+successfully; the token value is not part of the evidence.
 
 ## Endpoint and target representation
 
@@ -191,5 +189,5 @@ new home folder is never silently selected for an existing installation.
   stale-session behavior; and
 - fresh-wheel installed replay from an isolated environment.
 
-Until those artifacts exist, this record remains proposed and G30 must not
-describe Codex or Claude as shipped support.
+The completion audit and terminal handoff record the verified boundaries and
+the remaining release-lane work. G30 does not declare alpha readiness.

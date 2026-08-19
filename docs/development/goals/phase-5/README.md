@@ -13,7 +13,7 @@ declare an alpha or public release.
 G19 -> G20 -> G21
 G20 -> G23
 G23 -> G24 (exploratory 0.1.4 UAT)
-G22 -> G26 + G27-contract -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G30 -> G31 -> G25
+G22 -> G26 + G27-contract -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G30 -> G31 -> G32 -> G25
 ```
 
 | Goal | Outcome | Depends on | Initial state |
@@ -26,8 +26,9 @@ G22 -> G26 + G27-contract -> S27-EVAL/S27-ROLE/S27-CREATE -> G28 -> G27 -> G30 -
 | [G28](G28-v0.1.5-readiness.md) | v0.1.5 evaluation, role-registry, and browser-first create readiness | G26, G27 contract, S27-EVAL, S27-ROLE, S27-CREATE | Complete — candidate evidence accepted |
 | [G27](G27-adaptive-gig-discovery-and-pre-proposal-research.md) | Adaptive Gig discovery, bounded pre-proposal research, and model-selected direction questions | G20, G22, G26, G28 | Complete — runtime and machine evidence accepted; G31 owns human UAT |
 | [G29](G29-v0.1.5-human-uat-and-dogfooding.md) | Historical v0.1.5 UAT and dogfooding record | G27, G28, G24 findings | Superseded by G31 before v0.1.6 |
-| [G30](G30-cli-model-adapters-and-browser-setup-onboarding.md) | Real Codex/Claude adapters, API onboarding, folder access, multi-model setup, and browser-first Gig creation | G18, G26, G27, G28, S18-02 | Active — implementation underway |
-| [G31](G31-v0.1.6-readiness-and-uat.md) | v0.1.6 release readiness and human UAT | G30, G27, G28, G12 | Proposed for review |
+| [G30](G30-cli-model-adapters-and-browser-setup-onboarding.md) | Real Codex/Claude adapters, API onboarding, folder access, multi-model setup, and browser-first Gig creation | G18, G26, G27, G28, S18-02 | Complete — evidence accepted; handed to G31 |
+| [G31](G31-v0.1.6-readiness-and-uat.md) | v0.1.6 release readiness and human UAT | G30, G27, G28, G12 | Active — release-candidate verification underway |
+| [G32](G32-post-0.1.6-public-capabilities-and-command-surface.md) | Post-v0.1.6 public README, command sheet, and capability documentation | Published v0.1.6, G31 | Proposed for review |
 
 G20 must preserve G19's explicit target-effect authority and the existing
 workpad journal/active-version authority. G21 must not be activated merely
