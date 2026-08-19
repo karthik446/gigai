@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
@@ -46,6 +47,11 @@ class ClaudeCLIAdapter:
                 prompt=request.prompt,
                 cwd=Path(directory),
                 timeout_seconds=self._timeout_seconds,
+                extra_environment_names=(
+                    ("CLAUDE_CODE_OAUTH_TOKEN",)
+                    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+                    else ()
+                ),
             )
         text, model, usage = _parse_claude_json(output.stdout, request.model)
         return InvocationResult(

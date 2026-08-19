@@ -7,8 +7,42 @@ import sys
 from urllib.request import Request, urlopen
 
 from gigai.model_discovery import DetectedModel
-from gigai.config import load_config
+from gigai.config import Endpoint, ModelTarget, Profile, load_config
+from gigai.cli import _enable_probe_target, _model_target_description
+from gigai.setup import build_config
 from gigai.setup_interview import SetupDraft, SetupHTTPServer
+
+
+def test_setup_probe_temporarily_enables_a_previously_disabled_target() -> None:
+    target = ModelTarget(
+        "claude-default", "claude", "default", ("text",), 512, enabled=False
+    )
+
+    probed = _enable_probe_target((target,), "claude-default")
+
+    assert target.enabled is False
+    assert probed == (ModelTarget(
+        "claude-default", "claude", "default", ("text",), 512, enabled=True
+    ),)
+
+
+def test_setup_explains_claude_token_requirement(monkeypatch) -> None:
+    config = build_config(
+        home_root=Path("/tmp/gigai"),
+        workpad_root=Path("/tmp/gigai/workpads"),
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(Endpoint("claude", "claude_cli"),),
+        model_targets=(ModelTarget("claude-default", "claude", "default", ("text",), 512),),
+        profiles=(Profile("default", "claude-default", "claude-default", "claude-default"),),
+    )
+    target = config.model_targets[0]
+
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    assert "claude setup-token" in _model_target_description(target, config)
+
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-oauth-token")
+    assert "CLAUDE_CODE_OAUTH_TOKEN is available" in _model_target_description(target, config)
 
 
 def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
@@ -178,6 +212,10 @@ def test_setup_command_opens_browser_flow_and_applies_only_after_event(tmp_path:
         line = process.stderr.readline().strip()
         assert line.startswith("GigAI local setup: http://127.0.0.1:")
         url = line.split(": ", 1)[1]
+        with urlopen(url, timeout=5) as response:
+            body = response.read().decode()
+        assert str(home) in body
+        assert str(home / "workpads") in body
         payload = {
             "event": "apply",
             "home_root": str(home),

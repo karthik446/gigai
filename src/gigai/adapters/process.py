@@ -40,13 +40,18 @@ _ENVIRONMENT_ALLOWLIST = (
 )
 
 
-def allowed_environment(environment: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Build the explicit child environment; credential variables are excluded."""
+def allowed_environment(
+    environment: Mapping[str, str] | None = None,
+    *,
+    extra_names: Sequence[str] = (),
+) -> dict[str, str]:
+    """Build the explicit child environment with narrowly named extras."""
 
     source = environment or os.environ
+    names = (*_ENVIRONMENT_ALLOWLIST, *extra_names)
     return {
         name: value
-        for name in _ENVIRONMENT_ALLOWLIST
+        for name in names
         if isinstance(value := source.get(name), str) and "\0" not in value
     }
 
@@ -58,6 +63,7 @@ def run_json_process(
     cwd: Path,
     timeout_seconds: float,
     environment: Mapping[str, str] | None = None,
+    extra_environment_names: Sequence[str] = (),
 ) -> ProcessOutput:
     """Run one explicit process and fail closed on timeout or cancellation."""
 
@@ -73,7 +79,7 @@ def run_json_process(
     process = subprocess.Popen(
         tuple(argv),
         cwd=cwd,
-        env=allowed_environment(environment),
+        env=allowed_environment(environment, extra_names=extra_environment_names),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

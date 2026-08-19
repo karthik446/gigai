@@ -102,7 +102,7 @@ Before runtime adapter work, reconcile accepted S18-02 process policy with real 
 
 1. Endpoint and model-target representation for a CLI executable, selected model, detected version, and provider-owned authentication.
 2. Codex `exec --json` and Claude `-p --output-format json` envelopes, including default-model behavior and version drift handling.
-3. Explicit working-directory, stdin, argv, timeout, cancellation, and environment inheritance rules. No shell strings, inherited credential values, automatic fallback, retry, or target mutation are allowed.
+3. Explicit working-directory, stdin, argv, timeout, cancellation, and environment inheritance rules. No shell strings, broad inherited credential values, automatic fallback, retry, or target mutation are allowed. Claude's optional `CLAUDE_CODE_OAUTH_TOKEN` handoff is explicit, transient, and scoped to the Claude child only.
 4. Whether existing model-invocation/model-exchange resources represent CLI terminal and replay fields without semantic overload; any amendment is additive and preserves prior resource bytes and hashes.
 5. Credential onboarding semantics: environment references first, and a protected local `.env` option only if atomic write, restrictive permissions, runtime loading, redaction, and recovery are specified.
 
@@ -114,7 +114,7 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
 2. Add real local probes for the installed CLIs, plus fake-process tests for timeout, malformed output, credential non-inheritance, cancellation, and no-fallback behavior.
 3. Extend setup to display OpenAI, OpenRouter, Codex, and Claude with truthful status, allow multiple usable models to be enabled, and collect separate default assignments for reviewer, verifier, researcher, and Gig creation.
 4. Add native local-folder selection on supported hosts, derive the private workpad folder from the chosen GigAI home, and retain an absolute-path fallback.
-5. Add supported API-provider onboarding through credential references. Raw values must never enter config, manifests, logs, or browser responses.
+5. Add supported API-provider onboarding through credential references. Raw values must never enter config, manifests, logs, or browser responses. Claude setup must explain and detect the optional `claude setup-token` environment handoff without storing its value.
 6. Keep Anthropic API visible as disabled until its adapter contract is accepted; do not represent planned support as configured support. Offline/demo fixtures remain internal developer and contract-test paths, not a normal operator model choice.
 7. Refresh the HTMX setup/create surfaces with the accepted one-question-at-a-time
    setup flow, plain-language labels, contextual Gig-definition explanation,
@@ -164,7 +164,7 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
 2. `detected` means an executable was found without invoking it. `configured` means GigAI has a typed endpoint/target. `usable` requires readiness and authentication availability. A failed probe must classify provider-owned authentication as the explicit `authentication_required` reason, not as a missing or incompatible executable. `selected` means the operator chose it as the current default; these states cannot be inferred from one another.
 3. Setup may enable multiple usable model targets, but each default role assignment names one explicitly configured target. No role silently falls back to another target.
 4. Setup-level role defaults are machine configuration only. A Gig definition may override or extend its own workflow roles through the existing Gig lifecycle; setup cannot create or mutate a Gig definition.
-5. CLI child processes receive an explicit environment allowlist. GigAI credential values never enter argv, stdin, records, or logs.
+5. CLI child processes receive an explicit environment allowlist. GigAI credential values never enter argv, stdin, records, or logs. The only credential exception is the explicitly named `CLAUDE_CODE_OAUTH_TOKEN`, passed transiently to Claude when present; it is never persisted or included in generic environment inheritance.
 6. CLI invocations run in an explicitly selected, non-target work directory unless the accepted contract proves a narrower read-only target context.
 7. A CLI terminal result is normalized through the existing model port and model-invocation record. It cannot create a proposal, Run, target effect, or active-version transition by itself.
 8. Setup folder selection changes ownership only after explicit operator submission and successful atomic configuration publication.
@@ -180,7 +180,7 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
 ## Acceptance criteria
 
 1. The contract-impact/contract-amendment decision is accepted and cites S18-02, G18, G26, G27, and G28 evidence.
-2. Installed Codex and Claude binaries are discovered read-only with version evidence; unsupported states and missing provider authentication fail closed with distinct classifications.
+2. Installed Codex and Claude binaries are discovered read-only with version evidence; unsupported states and missing provider authentication fail closed with distinct classifications. Claude setup reports whether `CLAUDE_CODE_OAUTH_TOKEN` is available and explains `claude setup-token` when it is absent.
 3. A real Codex invocation and a real Claude invocation complete through the model port using explicit non-interactive commands and sanitized replay records; no target mutation occurs.
 4. Fake-process and mutation tests kill argv, shell, cwd, environment, timeout, cancellation, malformed-output, retry, and fallback guards.
 5. Setup lets an operator choose a storage folder, derives workpads, preserves existing state, and never silently moves an existing home.

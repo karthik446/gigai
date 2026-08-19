@@ -75,6 +75,34 @@ def test_claude_adapter_parses_json_result(tmp_path: Path) -> None:
     assert result.cost_status == "provider_reported"
 
 
+def test_claude_adapter_passes_explicit_oauth_token_to_child_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-oauth-token")
+    executable = _script(
+        tmp_path,
+        'import json, os; assert os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") == "synthetic-oauth-token"; print(json.dumps({"type": "result", "subtype": "success", "result": "claude-token-ok", "model": "claude-test"}))',
+    )
+
+    result = ClaudeCLIAdapter(executable=str(executable)).invoke(_request())
+
+    assert result.output_text == "claude-token-ok"
+
+
+def test_claude_adapter_does_not_add_oauth_token_when_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    executable = _script(
+        tmp_path,
+        'import json, os; assert "CLAUDE_CODE_OAUTH_TOKEN" not in os.environ; print(json.dumps({"type": "result", "subtype": "success", "result": "claude-no-token", "model": "claude-test"}))',
+    )
+
+    result = ClaudeCLIAdapter(executable=str(executable)).invoke(_request())
+
+    assert result.output_text == "claude-no-token"
+
+
 def test_cli_adapter_rejects_malformed_output(tmp_path: Path) -> None:
     executable = _script(tmp_path, 'print("not-json")')
 

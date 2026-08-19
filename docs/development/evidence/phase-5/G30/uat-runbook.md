@@ -15,6 +15,20 @@ in CI.
 
 From the GigAI checkout, after `gigai setup` has configured the local targets:
 
+For Claude CLI in a bounded GigAI process, create the token with
+`claude setup-token` and export it only in the shell running setup/UAT. Do not
+paste it into GigAI or commit it:
+
+```sh
+read -r -s 'CLAUDE_CODE_OAUTH_TOKEN?Paste Claude setup token: '
+export CLAUDE_CODE_OAUTH_TOKEN
+uv run gigai setup
+```
+
+Setup reports whether the variable is present; its value is never displayed or
+stored. Keep the variable exported through the readiness probe and unset it
+after UAT.
+
 ```sh
 GIGAI_G30_UAT=1 \
 GIGAI_G30_TARGETS=codex-default,claude-default \

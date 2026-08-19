@@ -727,8 +727,8 @@ def _run_browser_setup(
     reviewer = _profile_target(default_profile, "reviewer", "critic", selected)
     verifier = _profile_target(default_profile, "verifier", "adjudicator", selected)
     researcher = _profile_target(default_profile, "researcher", "planner", selected)
-    browser_home = "" if existing is None and home_value is None else os.fspath(requested_home)
-    browser_workpad = "" if existing is None and workpad_root is None else os.fspath(resolved_workpad)
+    browser_home = os.fspath(requested_home)
+    browser_workpad = os.fspath(resolved_workpad)
     model_options = tuple(
         {
             "id": target.name,
@@ -749,6 +749,10 @@ def _run_browser_setup(
         provider_credentials, provider_endpoints, provider_targets = _browser_provider_config(
             preview, draft
         )
+        # A previously disabled target must be probeable before setup can
+        # re-enable it. The probe is an explicit readiness action; it does not
+        # persist this temporary enablement.
+        provider_targets = _enable_probe_target(provider_targets, target_name)
         probe_config = build_config(
             home_root=preview.home_root,
             workpad_root=preview.workpad_root,
@@ -1011,6 +1015,17 @@ def _browser_provider_config(config, draft: SetupDraft):
     return tuple(credentials), tuple(endpoints), tuple(targets)
 
 
+def _enable_probe_target(
+    targets: tuple[ModelTarget, ...], target_name: str
+) -> tuple[ModelTarget, ...]:
+    """Temporarily enable one target so setup can verify a disabled target."""
+
+    return tuple(
+        replace(target, enabled=True) if target.name == target_name else target
+        for target in targets
+    )
+
+
 def _profile_target(profile, role: str, legacy_role: str, fallback: str) -> str:
     if profile is None:
         return fallback
@@ -1024,7 +1039,14 @@ def _model_target_description(target: ModelTarget, config) -> str:
     if endpoint.adapter == "codex_cli":
         return "Provider-default Codex model; authentication remains owned by the installed CLI."
     if endpoint.adapter == "claude_cli":
-        return "Provider-default Claude model; authentication remains owned by the installed CLI."
+        if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+            return (
+                "Claude CLI; CLAUDE_CODE_OAUTH_TOKEN is available for the bounded GigAI process."
+            )
+        return (
+            "Claude CLI detected, but GigAI needs CLAUDE_CODE_OAUTH_TOKEN for its bounded process. "
+            "Run claude setup-token, export it, then reopen setup."
+        )
     readiness = resolve_target_readiness(config, target.name)
     return f"Model {target.model}; readiness={readiness.readiness}. Credential values are never read during setup."
 

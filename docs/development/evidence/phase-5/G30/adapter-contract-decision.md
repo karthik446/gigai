@@ -71,9 +71,13 @@ only if the configuration contract is amended; the first implementation uses
 PATH resolution and refuses a missing executable.
 
 CLI endpoints do not use GigAI `CredentialReference` values. Authentication
-belongs to the provider-owned CLI session/configuration or operating-system
-credential store. GigAI does not run login commands, write auth files, or copy
-API/OAuth values into its config, records, prompts, or browser responses.
+normally belongs to the provider-owned CLI session/configuration or operating-
+system credential store. For bounded Claude child processes that cannot see the
+interactive login context, GigAI may use the explicitly named
+`CLAUDE_CODE_OAUTH_TOKEN` environment variable when present. The value is read
+only at invocation time, passed only to Claude, and never copied into config,
+records, prompts, logs, or browser responses. GigAI does not run login commands
+or write auth files.
 
 ## State meanings
 
@@ -104,8 +108,9 @@ Both adapters follow S18-02 and share a process runner with these invariants:
    value is placed in stdin or argv.
 4. The environment is an explicit allowlist containing ordinary process
    settings and the provider CLI's non-secret home/config location. GigAI API
-   credential variables are excluded. The allowlist is tested by injecting a
-   synthetic secret and proving the child cannot see it.
+   credential variables are excluded. `CLAUDE_CODE_OAUTH_TOKEN` is an explicit
+   Claude-only exception when present, and is tested for transient handoff and
+   absence when unset. No other credential variable crosses the boundary.
 5. The parent captures stdout and stderr separately, enforces one timeout, and
    terminates the child on timeout or cancellation. There is no retry,
    fallback, race, or background process.
