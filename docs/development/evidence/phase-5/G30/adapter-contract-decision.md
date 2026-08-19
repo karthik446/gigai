@@ -75,6 +75,9 @@ The setup and discovery surfaces use these distinct states:
 - `configured`: a typed endpoint and model target exist in GigAI config.
 - `usable`: the executable version probe succeeds and a bounded readiness
   invocation succeeds with provider-owned authentication.
+- `authentication_required`: the executable and command surface respond, but
+  the provider-owned CLI session is not authenticated. This is a configured,
+  recoverable state; it is not an unsupported adapter or missing executable.
 - `selected`: the operator chose that configured usable target as the default.
 
 No state is inferred from another state. In particular, detection never makes

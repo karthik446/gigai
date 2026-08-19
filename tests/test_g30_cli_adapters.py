@@ -9,7 +9,11 @@ import pytest
 
 from gigai.adapters.claude_cli import ClaudeCLIAdapter
 from gigai.adapters.codex_cli import CodexCLIAdapter
-from gigai.adapters.port import InvocationRequest, ModelInvocationError
+from gigai.adapters.port import (
+    InvocationRequest,
+    ModelAuthenticationRequired,
+    ModelInvocationError,
+)
 from gigai.config import CredentialReference, Endpoint, ModelTarget, Profile
 from gigai.model_targets import ModelTargetResolutionError, resolve_model_target
 from gigai.setup import build_config
@@ -75,6 +79,16 @@ def test_cli_adapter_rejects_malformed_output(tmp_path: Path) -> None:
     executable = _script(tmp_path, 'print("not-json")')
 
     with pytest.raises(ModelInvocationError, match="malformed"):
+        ClaudeCLIAdapter(executable=str(executable)).invoke(_request())
+
+
+def test_cli_adapter_classifies_structured_authentication_failure(tmp_path: Path) -> None:
+    executable = _script(
+        tmp_path,
+        'import json; print(json.dumps({"is_error": True, "result": "Not logged in · Please run /login"})); raise SystemExit(1)',
+    )
+
+    with pytest.raises(ModelAuthenticationRequired, match="authentication_required"):
         ClaudeCLIAdapter(executable=str(executable)).invoke(_request())
 
 

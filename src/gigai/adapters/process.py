@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 import signal
 import subprocess
 from typing import Mapping, Sequence
 
-from .port import ModelInvocationCancelled, ModelInvocationError
+from .port import (
+    ModelAuthenticationRequired,
+    ModelInvocationCancelled,
+    ModelInvocationError,
+)
 
 
 @dataclass(frozen=True)
@@ -89,6 +94,7 @@ def run_json_process(
 
     result = ProcessOutput(stdout=stdout, stderr=stderr, returncode=process.returncode)
     if result.returncode != 0:
+        _raise_structured_authentication_failure(result)
         raise ModelInvocationError(_safe_failure(result))
     return result
 
@@ -105,6 +111,29 @@ def _terminate_process_group(process: subprocess.Popen[str], *, force: bool) -> 
 def _safe_failure(output: ProcessOutput) -> str:
     detail = output.stderr.strip().splitlines()[0] if output.stderr.strip() else "no stderr"
     return f"CLI model process failed with exit code {output.returncode}: {detail[:240]}"
+
+
+def _raise_structured_authentication_failure(output: ProcessOutput) -> None:
+    """Preserve a provider-owned auth category when it reports JSON on stdout."""
+
+    for line in reversed(output.stdout.splitlines()):
+        try:
+            payload = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if type(payload) is not dict or payload.get("is_error") is not True:
+            continue
+        result = payload.get("result")
+        if not isinstance(result, str):
+            continue
+        lowered = result.lower()
+        if any(
+            marker in lowered
+            for marker in ("not logged in", "authentication", "unauthorized", "login")
+        ):
+            raise ModelAuthenticationRequired(
+                "authentication_required: " + result.strip()[:240]
+            )
 
 
 __all__ = ["ProcessOutput", "allowed_environment", "run_json_process"]

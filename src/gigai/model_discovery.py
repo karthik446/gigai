@@ -10,7 +10,7 @@ import tempfile
 from typing import Callable
 
 from .adapters.factory import AdapterFactoryError, resolve_model_adapter
-from .adapters.port import ModelInvocationError
+from .adapters.port import ModelAuthenticationRequired, ModelInvocationError
 from .adapters.process import allowed_environment
 from .config import GigAIConfig
 from .model_targets import ModelTargetResolutionError
@@ -142,6 +142,15 @@ def probe_target_readiness(config: GigAIConfig, target_name: str) -> ModelReadin
             adapter=endpoint.adapter,
             readiness="usable",
             reason=None,
+        )
+    except ModelAuthenticationRequired as exc:
+        return ModelReadiness(
+            target_name=target_name,
+            endpoint_name=endpoint.name,
+            model=binding.current.target.model,
+            adapter=endpoint.adapter,
+            readiness="configured",
+            reason=str(exc),
         )
     except AdapterFactoryError as exc:
         return ModelReadiness(target_name, None, None, None, "unsupported", str(exc))

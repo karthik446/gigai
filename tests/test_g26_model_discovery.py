@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from gigai.adapters.port import InvocationResult, NormalizedUsage, ModelInvocationError
+from gigai.adapters.port import (
+    InvocationResult,
+    ModelAuthenticationRequired,
+    NormalizedUsage,
+    ModelInvocationError,
+)
 from gigai.model_discovery import (
     discover_installed_models,
     probe_target_readiness,
@@ -152,6 +157,35 @@ def test_explicit_provider_probe_fails_closed(tmp_path, monkeypatch) -> None:
 
     assert readiness.readiness == "unavailable"
     assert readiness.reason == "provider authentication unavailable"
+
+
+def test_explicit_provider_probe_classifies_missing_authentication(tmp_path, monkeypatch) -> None:
+    class FakePort:
+        def invoke(self, request):
+            raise ModelAuthenticationRequired(
+                "authentication_required: Not logged in; run /login"
+            )
+
+    binding = SimpleNamespace(
+        current=SimpleNamespace(
+            endpoint=Endpoint("claude", "claude_cli"),
+            target=ModelTarget("claude-default", "claude", "default", ("text",), 32),
+        ),
+        port=FakePort(),
+        request=lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr("gigai.model_discovery.resolve_model_adapter", lambda *_: binding)
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+    )
+
+    readiness = probe_target_readiness(config, "claude-default")
+
+    assert readiness.readiness == "configured"
+    assert readiness.reason.startswith("authentication_required:")
 
 
 def test_unknown_target_is_unavailable(tmp_path) -> None:

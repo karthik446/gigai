@@ -130,7 +130,7 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
 
 1. Setup may record an enabled model roster, model preferences, and machine-wide
    role defaults; only the model adapter factory may authorize an invocation.
-2. `detected` means an executable was found without invoking it. `configured` means GigAI has a typed endpoint/target. `usable` requires readiness and authentication availability. `selected` means the operator chose it as the current default; these states cannot be inferred from one another.
+2. `detected` means an executable was found without invoking it. `configured` means GigAI has a typed endpoint/target. `usable` requires readiness and authentication availability. A failed probe must classify provider-owned authentication as the explicit `authentication_required` reason, not as a missing or incompatible executable. `selected` means the operator chose it as the current default; these states cannot be inferred from one another.
 3. Setup may enable multiple usable model targets, but each default role assignment names one explicitly configured target. No role silently falls back to another target.
 4. Setup-level role defaults are machine configuration only. A Gig definition may override or extend its own workflow roles through the existing Gig lifecycle; setup cannot create or mutate a Gig definition.
 5. CLI child processes receive an explicit environment allowlist. GigAI credential values never enter argv, stdin, records, or logs.
@@ -149,7 +149,7 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
 ## Acceptance criteria
 
 1. The contract-impact/contract-amendment decision is accepted and cites S18-02, G18, G26, G27, and G28 evidence.
-2. Installed Codex and Claude binaries are discovered read-only with version evidence; unsupported or unauthenticated states fail closed.
+2. Installed Codex and Claude binaries are discovered read-only with version evidence; unsupported states and missing provider authentication fail closed with distinct classifications.
 3. A real Codex invocation and a real Claude invocation complete through the model port using explicit non-interactive commands and sanitized replay records; no target mutation occurs.
 4. Fake-process and mutation tests kill argv, shell, cwd, environment, timeout, cancellation, malformed-output, retry, and fallback guards.
 5. Setup lets an operator choose a storage folder, derives workpads, preserves existing state, and never silently moves an existing home.
