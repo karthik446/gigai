@@ -37,6 +37,14 @@ These values are local probe evidence, not a portability guarantee. A later
 installation may report a different version and must pass the same readiness
 and invocation checks.
 
+The operator also completed a direct Claude `-p --output-format json` readiness
+probe in the normal authenticated shell. The sanitized result is recorded in
+[`claude-direct-probe.md`](claude-direct-probe.md). This confirms the installed
+CLI surface and provider-owned authentication, but remains partial evidence:
+the same command under GigAI's restricted child boundary currently reports
+`authentication_required`, so this record remains proposed until the model-port
+invocation path is proven.
+
 ## Endpoint and target representation
 
 The existing typed configuration is extended only by admitting two endpoint

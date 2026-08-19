@@ -67,6 +67,35 @@ available without competing with the primary question. The standalone UX
 prototype used to settle this direction is a local design artifact only; runtime
 evidence must prove the behavior independently.
 
+## Current implementation and evidence checkpoint
+
+The following G30 slices are implemented and committed:
+
+- browser-first setup with workspace, access-boundary, multi-model, role-default,
+  and ready-summary steps;
+- explicit readiness probes, including truthful `detected`, `configured`,
+  `usable`, and `authentication_required` classifications;
+- bounded Codex and Claude process adapters with explicit argv, private working
+  directories, restricted environments, timeout/cancellation handling, and
+  structured failure parsing;
+- API-provider configuration fields, native folder selection, and setup
+  persistence/idempotence coverage; and
+- operator-facing package README requirements recorded as a release gate.
+
+The current local evidence has an important split:
+
+- Codex's explicit GigAI readiness probe is `usable`.
+- A direct operator-shell Claude `-p --output-format json` probe returned a
+  successful structured `READY` result; this is recorded in
+  `docs/development/evidence/phase-5/G30/claude-direct-probe.md`.
+- The same Claude surface under GigAI's restricted child environment reports
+  `authentication_required`, so Claude has not yet met the through-the-model-port
+  support criterion. This is an authentication-context boundary to resolve, not
+  a missing executable or an unsupported command surface.
+
+Consequently, acceptance criteria 2 and 3 remain open pending a safe provider
+authentication-context decision and a real invocation through GigAI's model port.
+
 ## Contract gate
 
 Before runtime adapter work, reconcile accepted S18-02 process policy with real Codex CLI and Claude Code invocations. The contract decision must settle:
@@ -184,7 +213,7 @@ The accepted decision must distinguish `detected`, `configured`, `usable`, and `
 
 ## Verification and evidence
 
-Evidence belongs under `docs/development/evidence/phase-5/G30/` and includes the accepted contract decision, the accepted browser setup interaction record, sanitized installed CLI version/probe results, adapter conformance and mutation reports, setup/create browser captures for each access branch, credential-boundary fixtures, folder-selection fixtures, installed-wheel replay, package-README rendering/content checks, completion audit, and terminal handoff.
+Evidence belongs under `docs/development/evidence/phase-5/G30/` and includes the accepted contract decision, the accepted browser setup interaction record, sanitized installed CLI version/probe results, adapter conformance and mutation reports, setup/create browser captures for each access branch, credential-boundary fixtures, folder-selection fixtures, installed-wheel replay, package-README rendering/content checks, completion audit, and terminal handoff. The direct operator-shell Claude probe is recorded separately as a partial checkpoint in `claude-direct-probe.md`; it does not substitute for a successful invocation through GigAI's model port.
 
 ## Stop boundary
 
