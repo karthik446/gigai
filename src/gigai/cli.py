@@ -25,6 +25,7 @@ from .comparison import ComparisonError, compare_occurrences
 from .diagnostics import render_report_json, run_doctor, run_live_doctor
 from .evaluation import EvaluationError, load_manifest, score_behavior, write_report
 from .index import JournalIndexError, JournalProjection, read_index
+from .invocation import InvocationValidationError, load_invocation_bytes
 from .lifecycle import (
     LifecycleError,
     approve_interview_session,
@@ -44,6 +45,8 @@ from .lifecycle import (
 )
 from .model_discovery import (
     discover_installed_models,
+    discover_runtime_snapshot,
+    persist_discovery_snapshot,
     probe_target_readiness,
     resolve_target_readiness,
 )
@@ -95,9 +98,24 @@ def cli(context: click.Context) -> None:
         raise click.UsageError(
             "Choose 'setup', 'doctor', 'init', 'create', 'improve', 'feedback', 'revise', "
             "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
-            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', 'models', 'eval', or 'open'; "
+            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', 'models', 'invoke', 'eval', or 'open'; "
             "use --help for details."
         )
+
+
+def _raise_cli_error(message: str, *, as_json: bool, code: str) -> None:
+    """Emit one stable diagnostic shape for machine-readable CLI failures."""
+
+    if as_json:
+        click.echo(
+            json.dumps(
+                {"status": "error", "error": {"code": code, "message": message}},
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        raise click.exceptions.Exit(1)
+    raise click.ClickException(message)
 
 
 @cli.command("models")
@@ -114,28 +132,93 @@ def cli(context: click.Context) -> None:
     metavar="TARGET",
     help="Explicitly run one bounded readiness invocation for TARGET.",
 )
-def models_command(home_value: Path | None, as_json: bool, probe_target: str | None) -> None:
+@click.option(
+    "--refresh",
+    is_flag=True,
+    help="Capture a fresh local runtime discovery snapshot.",
+)
+def models_command(
+    home_value: Path | None,
+    as_json: bool,
+    probe_target: str | None,
+    refresh: bool,
+) -> None:
     """Show model discovery; optionally run one explicit readiness probe."""
 
     try:
         home = home_value or default_home_root()
         config = load_config(home)
+        snapshot = discover_runtime_snapshot(
+            refresh_reason="explicit_refresh" if refresh else "models"
+        )
+        snapshot_path = persist_discovery_snapshot(home, snapshot)
+        runtime_executables = {
+            item.name: str(item.executable)
+            for item in snapshot.models
+            if item.executable is not None
+        }
+        default_profile = next(
+            (profile for profile in config.profiles if profile.name == "default"),
+            None,
+        )
+
+        def configured_target_payload(target: ModelTarget) -> dict[str, object]:
+            readiness = resolve_target_readiness(
+                config,
+                target.name,
+                executable_overrides=runtime_executables,
+            )
+            selected_roles = tuple(
+                role
+                for role in (
+                    "planner",
+                    "critic",
+                    "adjudicator",
+                    "reviewer",
+                    "verifier",
+                    "researcher",
+                    "gig_creator",
+                )
+                if default_profile is not None
+                and getattr(default_profile, role) == target.name
+            )
+            states = tuple(readiness.states)
+            if selected_roles and "selected" not in states:
+                states = (*states, "selected")
+            return {
+                **readiness.__dict__,
+                "states": states,
+                "selected_roles": selected_roles,
+            }
+
         payload: dict[str, object] = {
+            "snapshot": {
+                **snapshot.to_dict(),
+                "path": str(snapshot_path),
+            },
             "detected": [
                 {
                     "name": item.name,
                     "executable": str(item.executable) if item.executable else None,
                     "readiness": item.readiness,
+                    "version": item.version,
+                    "resolution": item.resolution,
+                    "path_source": item.path_source,
+                    "failure_code": item.failure_code,
                 }
-                for item in discover_installed_models()
+                for item in snapshot.models
             ],
             "configured": [
-                resolve_target_readiness(config, item.name).__dict__
+                configured_target_payload(item)
                 for item in config.model_targets
             ],
         }
         if probe_target is not None:
-            payload["probe"] = probe_target_readiness(config, probe_target).__dict__
+            payload["probe"] = probe_target_readiness(
+                config,
+                probe_target,
+                executable_overrides=runtime_executables,
+            ).__dict__
         if as_json:
             click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
             if probe_target is not None and payload["probe"]["readiness"] != "usable":
@@ -159,6 +242,36 @@ def models_command(home_value: Path | None, as_json: bool, probe_target: str | N
                 raise click.exceptions.Exit(1)
     except (ConfigurationError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
+
+
+@cli.command("invoke")
+@click.option(
+    "--input",
+    "input_path",
+    type=click.Path(path_type=Path, dir_okay=False),
+    help="Read one explicit agent invocation envelope from this JSON file; otherwise read stdin.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit the normalized envelope as JSON.")
+def invoke_command(input_path: Path | None, as_json: bool) -> None:
+    """Validate one explicit agent envelope without creating GigAI authority."""
+
+    try:
+        data = input_path.read_bytes() if input_path is not None else sys.stdin.buffer.read()
+        invocation = load_invocation_bytes(data)
+    except (InvocationValidationError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {
+        "status": "accepted",
+        "authority_created": False,
+        "invocation": invocation.to_dict(),
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(
+            f"Accepted {invocation.command} invocation {invocation.invocation_id}; "
+            "no GigAI authority was created."
+        )
 
 
 @cli.group("eval")
@@ -219,7 +332,7 @@ def eval_behavior_command(manifest: Path, observations: Path, split: str, output
     "--non-interactive", is_flag=True, help="Refuse prompts and use explicit options."
 )
 @click.option(
-    "--terminal", is_flag=True, help="Use the legacy terminal prompts instead of the browser setup."
+    "--terminal", is_flag=True, help="Use terminal prompts for setup."
 )
 @click.option(
     "--home",
@@ -291,7 +404,13 @@ def eval_behavior_command(manifest: Path, observations: Path, split: str, output
 @click.option(
     "--json", "as_json", is_flag=True, help="Emit a stable machine-readable summary."
 )
-@click.option("--open/--no-open", "open_browser", default=True, help="Open the local setup page in the browser.")
+@click.option(
+    "--open/--no-open",
+    "open_browser",
+    default=False,
+    hidden=True,
+    help="Deprecated compatibility option; setup is terminal-native.",
+)
 def setup_command(
     non_interactive: bool,
     terminal: bool,
@@ -310,26 +429,9 @@ def setup_command(
     as_json: bool,
     open_browser: bool,
 ) -> None:
-    """Open browser-first setup, or update config non-interactively."""
+    """Run terminal setup, or update config non-interactively."""
 
     _require_supported_platform()
-    if not non_interactive and not terminal:
-        _run_browser_setup(
-            home_value=home_value,
-            workpad_root=workpad_root,
-            editor=editor,
-            open_with_target=open_with_target,
-            create_model_target=create_model_target,
-            credential_ref=credential_ref,
-            clear_credentials=clear_credentials,
-            endpoint_spec=endpoint_spec,
-            model_target_spec=model_target_spec,
-            target_output_limit_spec=target_output_limit_spec,
-            target_reasoning_effort_spec=target_reasoning_effort_spec,
-            as_json=as_json,
-            open_browser=open_browser,
-        )
-        return
     requested_home = (
         (home_value or default_home_root()).expanduser().resolve(strict=False)
     )
@@ -341,22 +443,25 @@ def setup_command(
             try:
                 existing, _ = migrate_config(requested_home)
             except ConfigurationError:
-                raise click.ClickException(str(exc)) from exc
+                _raise_cli_error(str(exc), as_json=as_json, code="setup_configuration_invalid")
 
     if non_interactive:
         resolved_workpad = workpad_root or (
             existing.workpad_root if existing else default_workpad_root(requested_home)
         )
-        resolved_editor = resolve_editor_argv(
-            editor or (existing.editor_argv[0] if existing else None),
-            (
-                editor_arg
-                if editor is not None or editor_arg
-                else existing.editor_argv[1:]
-                if existing
-                else ()
-            ),
-        )
+        try:
+            resolved_editor = resolve_editor_argv(
+                editor or (existing.editor_argv[0] if existing else None),
+                (
+                    editor_arg
+                    if editor is not None or editor_arg
+                    else existing.editor_argv[1:]
+                    if existing
+                    else ()
+                ),
+            )
+        except ValueError as exc:
+            _raise_cli_error(str(exc), as_json=as_json, code="setup_editor_invalid")
         resolved_open = (
             open_with_target
             if open_with_target is not None
@@ -364,7 +469,7 @@ def setup_command(
             if existing
             else False
         )
-    elif terminal:
+    else:
         requested_home = (
             Path(
                 click.prompt(
@@ -383,7 +488,11 @@ def setup_command(
                 try:
                     existing, _ = migrate_config(requested_home)
                 except ConfigurationError:
-                    raise click.ClickException(str(exc)) from exc
+                    _raise_cli_error(
+                        str(exc),
+                        as_json=as_json,
+                        code="setup_configuration_invalid",
+                    )
         default_workpad = workpad_root or (
             existing.workpad_root if existing else default_workpad_root(requested_home)
         )
@@ -403,27 +512,33 @@ def setup_command(
                 "EDITOR"
             )
             if configured_environment_editor:
-                environment_editor = resolve_editor_argv(None)
+                try:
+                    environment_editor = resolve_editor_argv(None)
+                except ValueError as exc:
+                    _raise_cli_error(str(exc), as_json=as_json, code="setup_editor_invalid")
                 default_editor = environment_editor[0]
                 environment_editor_args = environment_editor[1:]
         if default_editor is None:
             detected_editor = detect_editor_argv()
             if detected_editor is not None:
                 default_editor = detected_editor[0]
-        resolved_editor = resolve_editor_argv(
-            click.prompt(
-                "Editor program (used to open workpads)",
-                default=default_editor,
-                show_default=True,
-            ),
-            (
-                editor_arg
-                if editor is not None or editor_arg
-                else existing.editor_argv[1:]
-                if existing
-                else environment_editor_args
-            ),
-        )
+        try:
+            resolved_editor = resolve_editor_argv(
+                click.prompt(
+                    "Editor program (used to open workpads)",
+                    default=default_editor,
+                    show_default=True,
+                ),
+                (
+                    editor_arg
+                    if editor is not None or editor_arg
+                    else existing.editor_argv[1:]
+                    if existing
+                    else environment_editor_args
+                ),
+            )
+        except ValueError as exc:
+            _raise_cli_error(str(exc), as_json=as_json, code="setup_editor_invalid")
         resolved_open = click.confirm(
             "Open workpads with their target later?",
             default=(
@@ -435,6 +550,12 @@ def setup_command(
             ),
         )
 
+    discovery_snapshot = discover_runtime_snapshot(refresh_reason="setup")
+    runtime_executables = {
+        item.name: str(item.executable)
+        for item in discovery_snapshot.models
+        if item.executable is not None
+    }
     try:
         if clear_credentials and credential_ref:
             raise ValueError(
@@ -475,6 +596,33 @@ def setup_command(
                 ),
             )
         )
+        endpoint_names = {endpoint.name for endpoint in existing_endpoints}
+        target_names = {target.name for target in existing_targets}
+        discovered_endpoints = list(existing_endpoints)
+        discovered_targets = list(existing_targets)
+        for detected in discovery_snapshot.models:
+            if detected.executable is None:
+                continue
+            endpoint_name = detected.name
+            target_name = f"{detected.name}-default"
+            if endpoint_name not in endpoint_names:
+                discovered_endpoints.append(
+                    Endpoint(name=endpoint_name, adapter=f"{detected.name}_cli")
+                )
+                endpoint_names.add(endpoint_name)
+            if target_name not in target_names:
+                discovered_targets.append(
+                    ModelTarget(
+                        name=target_name,
+                        endpoint=endpoint_name,
+                        model="default",
+                        capabilities=("text",),
+                        max_output_tokens=512,
+                    )
+                )
+                target_names.add(target_name)
+        existing_endpoints = tuple(discovered_endpoints)
+        existing_targets = tuple(discovered_targets)
         existing_target_names = {item.name for item in existing_targets}
         added_target_names = {item.name for item in target_specs}
         unknown_limits = set(output_limits) - existing_target_names - added_target_names
@@ -581,7 +729,11 @@ def setup_command(
             click.echo(f"  Credential references: {json.dumps(credential_summary)}")
             click.secho("  Gig creation choices:", bold=True)
             for candidate in targets:
-                readiness = resolve_target_readiness(preview_config, candidate.name)
+                readiness = resolve_target_readiness(
+                    preview_config,
+                    candidate.name,
+                    executable_overrides=runtime_executables,
+                )
                 endpoint = next(item for item in endpoints if item.name == candidate.endpoint)
                 mode = (
                     "deterministic fixture"
@@ -592,14 +744,14 @@ def setup_command(
                 click.echo(
                     f"    - {candidate.name}: {mode}; readiness={readiness.readiness}{selected}"
                 )
-            detected = discover_installed_models()
-            for item in detected:
+            for item in discovery_snapshot.models:
                 if item.executable:
+                    version = f" version={item.version}" if item.version else ""
                     click.echo(
-                        f"    - {item.name}: detected; readiness=unsupported "
-                        "(no GigAI adapter; not invoked)"
+                        f"    - {item.name}: {item.readiness}; resolution={item.resolution};"
+                        f" path_source={item.path_source}{version}"
                     )
-            if not any(item.executable for item in detected):
+            if not any(item.executable for item in discovery_snapshot.models):
                 click.echo("    - codex/claude: not detected; no local CLI candidate")
             click.echo(
                 "  Built-in local mode: no network or provider credentials "
@@ -621,8 +773,9 @@ def setup_command(
             profiles=profiles,
         )
         result = run_setup(config)
+        persist_discovery_snapshot(result.config.home_root, discovery_snapshot)
     except (ConfigurationError, OSError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        _raise_cli_error(str(exc), as_json=as_json, code="setup_invalid")
 
     payload = {
         "schema_version": result.config.schema_version,
@@ -682,7 +835,7 @@ def _run_browser_setup(
             try:
                 existing, _ = migrate_config(requested_home)
             except ConfigurationError:
-                raise click.ClickException(str(exc)) from exc
+                _raise_cli_error(str(exc), as_json=as_json, code="setup_configuration_invalid")
 
     detected_editor = detect_editor_argv()
     existing_editor = existing.editor_argv[0] if existing else None
@@ -1182,39 +1335,15 @@ def init_command(target: Path | None, home_value: Path | None, as_json: bool) ->
     help="Override the setup-selected model target for this invocation.",
 )
 @click.option(
-    "--request",
-    "request_value",
-    help="Free-form request presented to the local proposal interview.",
-)
-@click.option(
-    "--reference",
-    "reference_values",
-    multiple=True,
+    "--invocation",
+    "invocation_path",
     type=click.Path(path_type=Path, dir_okay=False),
-    help="Explicit local reference; repeat for each selected candidate.",
+    help="Explicit agent invocation envelope containing the proposal input.",
 )
 @click.option(
     "--offline",
     is_flag=True,
-    help="Use the legacy deterministic proposal fixture instead of the local interview.",
-)
-@click.option(
-    "--allow-provider-network",
-    is_flag=True,
-    help="Allow a configured remote model target to ask questions and build the draft.",
-)
-@click.option(
-    "--max-rounds",
-    type=click.IntRange(min=1, max=1024),
-    default=3,
-    show_default=True,
-    help="Maximum clarification rounds for the local interview.",
-)
-@click.option(
-    "--open/--no-open",
-    "open_browser",
-    default=True,
-    help="Open the loopback interview in the configured browser.",
+    help="Use the deterministic local fixture instead of an agent proposal envelope.",
 )
 @click.option(
     "--json", "as_json", is_flag=True, help="Emit a stable path-safe result summary."
@@ -1225,19 +1354,22 @@ def create_command(
     target_value: Path | None,
     home_value: Path | None,
     model_target: str | None,
-    request_value: str | None,
-    reference_values: tuple[Path, ...],
+    invocation_path: Path | None,
     offline: bool,
-    allow_provider_network: bool,
-    max_rounds: int,
-    open_browser: bool,
     as_json: bool,
 ) -> None:
-    """Create a local deliberative proposal interview, or an explicit offline fixture."""
+    """Create a proposal from an explicit agent envelope or offline fixture."""
 
     _require_supported_platform()
     try:
         home = home_value or default_home_root()
+        runtime_snapshot = discover_runtime_snapshot(refresh_reason="create")
+        persist_discovery_snapshot(home, runtime_snapshot)
+        runtime_executables = {
+            item.name: str(item.executable)
+            for item in runtime_snapshot.models
+            if item.executable is not None
+        }
         if offline:
             offline_model_target = model_target or _default_create_model_target(load_config(home))
             result = create_offline(
@@ -1246,205 +1378,71 @@ def create_command(
                 name=name,
                 commission=commission,
                 model_target=offline_model_target,
-                open_editor=open_browser,
+                runtime_executables=runtime_executables,
+                open_editor=False,
             )
         else:
-            config = load_config(home)
-            selected_model_target = model_target or _default_create_model_target(config)
-            selected_endpoint = next(
-                endpoint
-                for endpoint in config.endpoints
-                if endpoint.name
-                == next(target.endpoint for target in config.model_targets if target.name == selected_model_target)
+            if invocation_path is None:
+                raise click.ClickException(
+                    "create requires an explicit --invocation JSON envelope; "
+                    "ordinary conversation is not imported"
+                )
+            invocation = load_invocation_bytes(invocation_path.read_bytes())
+            if invocation.command != "create":
+                raise click.ClickException("create requires an invocation with command=create")
+            envelope_home = invocation.target.get("home")
+            if (
+                envelope_home is not None
+                and Path(envelope_home).expanduser().resolve(strict=False)
+                != home.resolve(strict=False)
+            ):
+                raise click.ClickException(
+                    "invocation target.home does not match the selected GigAI home"
+                )
+            intent = invocation.input.get("intent")
+            if not isinstance(intent, str) or not intent.strip():
+                intent = commission or name
+            proposal_input = invocation.input.get("proposal")
+            model_output = (
+                json.dumps(proposal_input, sort_keys=True, separators=(",", ":"))
+                if isinstance(proposal_input, dict)
+                else intent
             )
-            selected_network_policy = selected_endpoint.adapter != "deterministic"
-            selected_readiness = resolve_target_readiness(config, selected_model_target)
-            capability_summary = {
-                "local_reference_read": "usable",
-                "model_invocation": selected_readiness.readiness,
-                "bounded_research": "usable" if selected_readiness.readiness == "usable" else "unavailable",
-                "proposal_construction": "usable",
-                "approved_run_execution": "unsupported",
-                "target_effect": "unsupported",
-            }
-            started = start_interview(
+            config = load_config(home)
+            requested_models = invocation.requested.get("models", [])
+            selected_model_target = model_target or (
+                requested_models[0]
+                if requested_models
+                else _default_create_model_target(config)
+            )
+            result = create_offline(
                 home_root=home,
                 requested_target=target_value,
                 name=name,
-                request=request_value or commission or name,
-                reference_paths=reference_values,
-                max_rounds=max_rounds,
+                commission=intent,
+                model_target=selected_model_target,
+                model_output=model_output,
+                runtime_executables=runtime_executables,
+                open_editor=False,
             )
-            reference_bytes = dict(started.reference_bytes)
-            recovered_builder = recover_builder_session(start=started)
-            built_proposal_id: str | None = recovered_builder.proposal_id
-            builder_review: dict[str, object] = dict(recovered_builder.review)
-
-            def select_references(session, paths: tuple[str, ...]):
-                updated, selected_ids, labels, selected_bytes = select_interview_references(
-                    home_root=home,
-                    requested_target=target_value,
-                    start=started,
-                    session=session,
-                    paths=paths,
-                )
-                reference_bytes.update(selected_bytes)
-                return updated, selected_ids, labels
-
-            def builder_questions(session):
-                manifest_path = started.workpad / "manifests/gig-discovery-manifest.json"
-                has_direction_questions = any(
-                    item.question_id not in {"scope", "references", "effect", "privacy", "capability"}
-                    and not item.question_id.startswith("clarification-")
-                    for item in session.questions
-                )
-                updated = session
-                if not has_direction_questions and not manifest_path.exists():
-                    updated = generate_model_questions(
-                        config=load_config(home),
-                        model_target=selected_model_target,
-                        session=session,
-                        reference_bytes=reference_bytes,
-                        prompt_name=G27_DISCOVERY_PROMPT,
-                        network_allowed=allow_provider_network or selected_network_policy,
-                    )
-                persist_discovery_manifest(
-                    start=started,
-                    session=updated,
-                    config=load_config(home),
-                    model_target=selected_model_target,
-                    reference_bytes=reference_bytes,
-                )
-                return updated
-
-            def build_proposal(session):
-                nonlocal built_proposal_id
-                built = build_interview_proposal(
-                    home_root=home,
-                    requested_target=target_value,
-                    start=started,
-                    session=session,
-                    model_target=selected_model_target,
-                    reference_bytes=reference_bytes,
-                    network_allowed=allow_provider_network or selected_network_policy,
-                )
-                proposal = json.loads(
-                    (started.workpad / "manifests" / "gig-proposal.json").read_text(
-                        encoding="utf-8"
-                    )
-                )
-                built_proposal_id = str(proposal["proposal_id"])
-                draft_manifest = json.loads(
-                    (started.workpad / "manifests/proposal-draft-manifest.json").read_text(
-                        encoding="utf-8"
-                    )
-                )
-                builder_review.update(draft_manifest.get("research", {}))
-                discovery_manifest = json.loads(
-                    (started.workpad / "manifests/gig-discovery-manifest.json").read_text(
-                        encoding="utf-8"
-                    )
-                )
-                builder_review["stable_definition_fields"] = discovery_manifest.get(
-                    "stable_definition", {}
-                ).get("fields", [])
-                builder_review["run_input_fields"] = discovery_manifest.get(
-                    "run_input_contract", {}
-                ).get("fields", [])
-                builder_review["research_plan"] = discovery_manifest.get(
-                    "research_plan", {}
-                )
-                return built
-
-            def revise_proposal(session):
-                nonlocal built_proposal_id
-                built_proposal_id = None
-                revised = request_revision(session)
-                record_builder_state(
-                    start=started,
-                    session=revised,
-                    state="revised",
-                    terminal_reason=None,
-                    transition="gig_builder_revised",
-                )
-                return revised
-
-            def reject_proposal(session):
-                rejected = block_session(session, "operator_rejected")
-                record_builder_state(
-                    start=started,
-                    session=rejected,
-                    state="rejected",
-                    terminal_reason="operator_rejected",
-                    transition="gig_builder_rejected",
-                )
-                return rejected
-
-            server = InterviewHTTPServer(
-                started.session,
-                on_session=lambda session: persist_interview_session(
-                    workpad=started.workpad,
-                    project_id=started.project_id,
-                    gig_id=started.gig_id,
-                    session=session,
-                ),
-                on_questions=builder_questions,
-                on_reference_paths=select_references,
-                reference_labels={},
-                on_approval=lambda session: approve_interview_session(
-                    home_root=home,
-                    requested_target=target_value,
-                    start=started,
-                    session=session,
-                    existing_proposal_id=built_proposal_id,
-                ),
-                on_build=build_proposal,
-                on_revision=revise_proposal,
-                on_rejection=reject_proposal,
-                builder_review=builder_review,
-                capability_summary=capability_summary,
-                builder_mode=True,
-                builder_ready=recovered_builder.builder_ready,
-            ).start()
-            try:
-                click.echo(f"GigAI local interview: {server.url}", err=True)
-                if open_browser:
-                    webbrowser.open(server.url, new=2)
-                session = server.wait()
-            finally:
-                server.close()
             payload = {
-                "gig_id": started.gig_id,
-                "project_id": started.project_id,
-                "proposal_id": session.proposal_id,
-                "session_id": session.session_id,
-                "status": session.state,
-                "url": server.url,
+                "gig_id": result.gig_id,
+                "project_id": result.project_id,
+                "proposal_id": result.proposal_id,
+                "resumed": result.resumed,
+                "status": "proposed",
+                "authority_created": False,
             }
             if as_json:
                 click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
             else:
                 click.echo(
-                    f"GigAI interview {session.session_id} ended in {session.state}; "
-                    "no Run was started."
+                    f"Gig proposal {result.proposal_id} is ready for operator review; "
+                    "no Gig version or Run was created."
                 )
             return
     except (LifecycleError, WorkpadError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    payload = {
-        "gig_id": result.gig_id,
-        "project_id": result.project_id,
-        "proposal_id": result.proposal_id,
-        "resumed": result.resumed,
-        "status": "proposed",
-    }
-    if as_json:
-        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
-    else:
-        click.echo(
-            f"Gig proposal {result.proposal_id} is ready for operator review; "
-            "no Gig version or Run was created."
-        )
 
 
 @cli.command("improve")
@@ -1664,6 +1662,11 @@ def revise_command(
     "--target", "target_value", type=click.Path(path_type=Path, file_okay=False)
 )
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option(
+    "--capability-manifest-id",
+    default=None,
+    help="Optional approved capability manifest referenced by the proposal.",
+)
 @click.option(
     "--json", "as_json", is_flag=True, help="Emit the sealed version and commit IDs."
 )

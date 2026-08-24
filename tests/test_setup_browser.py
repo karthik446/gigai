@@ -6,9 +6,11 @@ import subprocess
 import sys
 from urllib.request import Request, urlopen
 
+from click.testing import CliRunner
+
 from gigai.model_discovery import DetectedModel
 from gigai.config import Endpoint, ModelTarget, Profile, load_config
-from gigai.cli import _enable_probe_target, _model_target_description
+from gigai.cli import _enable_probe_target, _model_target_description, cli
 from gigai.setup import build_config
 from gigai.setup_interview import SetupDraft, SetupHTTPServer
 
@@ -190,69 +192,15 @@ def test_setup_page_uses_human_model_labels_and_reports_cli_detection() -> None:
         server.close()
 
 
-def test_setup_command_opens_browser_flow_and_applies_only_after_event(tmp_path: Path) -> None:
+def test_setup_command_is_terminal_native_and_applies_after_confirmation(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            "from gigai.cli import cli; cli()",
-            "setup",
-            "--no-open",
-            "--home",
-            str(home),
-        ],
-        cwd=Path(__file__).parents[1],
-        env={**__import__("os").environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")},
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+    result = CliRunner().invoke(
+        cli,
+        ["setup", "--home", str(home), "--editor", "/usr/bin/true"],
+        input="\n\n\nn\n\n\ny\n",
     )
-    try:
-        line = process.stderr.readline().strip()
-        assert line.startswith("GigAI local setup: http://127.0.0.1:")
-        url = line.split(": ", 1)[1]
-        with urlopen(url, timeout=5) as response:
-            body = response.read().decode()
-        assert str(home) in body
-        assert str(home / "workpads") in body
-        payload = {
-            "event": "apply",
-            "home_root": str(home),
-            "workpad_root": str(home / "workpads"),
-            "editor": "/usr/bin/true",
-            "open_with_target": False,
-            "selected_model_target": "openai-default",
-            "enabled_model_targets": ["openai-default"],
-            "verified_model_targets": ["openai-default"],
-            "reviewer_model_target": "openai-default",
-            "verifier_model_target": "openai-default",
-            "researcher_model_target": "openai-default",
-            "openai_api_env": "OPENAI_API_KEY",
-            "openai_api_model": "gpt-test",
-        }
-        with urlopen(
-            Request(
-                url,
-                data=json.dumps(payload).encode(),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            ),
-            timeout=5,
-        ) as response:
-            assert json.loads(response.read())["status"] == "applied"
-        stdout, stderr = process.communicate(timeout=10)
-        assert process.returncode == 0, stderr
-        assert "configuration updated" in stdout
-        assert (home / "config.toml").is_file()
-        config = load_config(home)
-        default = next(profile for profile in config.profiles if profile.name == "default")
-        assert default.reviewer == "openai-default"
-        assert default.verifier == "openai-default"
-        assert default.researcher == "openai-default"
-        assert default.gig_creator == "openai-default"
-        assert next(target for target in config.model_targets if target.name == "openai-default").enabled
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.communicate(timeout=5)
+    assert result.exit_code == 0, result.output
+    assert "local setup" not in result.output.lower()
+    assert "setup complete" in result.output.lower()
+    assert (home / "config.toml").is_file()
+    assert load_config(home).home_root == home.resolve()

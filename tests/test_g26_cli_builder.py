@@ -2,18 +2,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import re
-import subprocess
-import sys
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
 
-from gigai.canonical import parse_json_bytes
+from click.testing import CliRunner
+
+from gigai.cli import cli
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 
 
-def test_create_runs_model_facilitated_build_then_explicit_approval(tmp_path: Path) -> None:
+def test_agent_backed_create_stays_proposal_only_until_cli_approval(tmp_path: Path) -> None:
     home = tmp_path / "home"
     target = tmp_path / "target"
     target.mkdir()
@@ -26,115 +23,74 @@ def test_create_runs_model_facilitated_build_then_explicit_approval(tmp_path: Pa
         )
     )
     initialize_target(home_root=home, requested_target=target)
-    process = subprocess.Popen(
+    envelope = tmp_path / "invocation.json"
+    envelope.write_text(
+        json.dumps(
+            {
+                "protocol_version": "1",
+                "invocation_id": "inv_g26-cli-builder",
+                "trigger": "gigai:",
+                "actor": {"kind": "agent", "id": "claude", "session_id": "g26-test"},
+                "command": "create",
+                "target": {"home": str(home), "project": "g26-project"},
+                "input": {
+                    "intent": "Review this repository.",
+                    "proposal": {
+                        "summary": "A bounded repository review proposal",
+                        "effect": "read_local",
+                    },
+                },
+                "requested": {
+                    "roles": ["gig_creator"],
+                    "models": [],
+                    "capabilities": ["local_reference_read"],
+                },
+                "consent": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    created = CliRunner().invoke(
+        cli,
         [
-            sys.executable,
-            "-c",
-            "from gigai.cli import cli; cli()",
             "create",
             "builder-proof",
             "--home",
             str(home),
             "--target",
             str(target),
-            "--no-open",
+            "--invocation",
+            str(envelope),
             "--json",
         ],
-        env={**__import__("os").environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")},
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
     )
-    try:
-        line = process.stderr.readline().strip()
-        match = re.fullmatch(r"GigAI local interview: (http://127\.0\.0\.1:\d+/session/[A-Za-z0-9_-]+)", line)
-        assert match is not None, line
-        session_url = match.group(1)
-        endpoint = f"{session_url}/events"
-        snapshot_path = next((tmp_path / "workpads").rglob("manifests/proposal-interview.json"))
 
-        def send(event: str, **values: object) -> dict[str, object]:
-            current = parse_json_bytes(snapshot_path.read_bytes())
-            payload = {
-                "event": event,
-                "revision": current["revision"],
-                "sequence": len(current["events"]) + 1,
-                **values,
-            }
-            try:
-                with urlopen(
-                    Request(
-                        endpoint,
-                        data=json.dumps(payload).encode(),
-                        headers={"Content-Type": "application/json"},
-                        method="POST",
-                    ),
-                    timeout=5,
-                ) as response:
-                    return json.loads(response.read())
-            except HTTPError as error:
-                raise AssertionError(error.read().decode()) from error
+    assert created.exit_code == 0, created.output
+    proposal = json.loads(created.output)
+    assert proposal["status"] == "proposed"
+    assert proposal["authority_created"] is False
 
-        send("answer", question_id="scope", value="Review this repository")
-        snapshot = parse_json_bytes(snapshot_path.read_bytes())
-        desired_outputs = next(
-            item for item in snapshot["questions"] if item["question_id"] == "desired-outputs"
-        )
-        assert desired_outputs["provenance"].startswith("model://")
-        send("answer", question_id="desired-outputs", value=["comparison"])
-        snapshot = parse_json_bytes(snapshot_path.read_bytes())
-        changing_context = next(
-            item for item in snapshot["questions"] if item["question_id"] == "changing-context"
-        )
-        assert changing_context["provenance"].startswith("model://")
-        send("answer", question_id="changing-context", value="The repository changes between Runs")
-        send("build")
-        with urlopen(session_url, timeout=5) as response:
-            review_html = response.read().decode()
-        assert "A local Gig proposal assembled" in review_html
-        assert "The operator will review" in review_html
-        assert "Available capabilities" in review_html
-        assert "<strong>Target effect</strong>: unsupported" in review_html
-        assert "Reusable Gig definition" in review_html
-        assert "Changing Run inputs" in review_html
-        assert "Research boundary" in review_html
-        workpad = next((tmp_path / "workpads").rglob("manifests/gig-proposal.json")).parent.parent
-        assert (workpad / "manifests/proposal-draft-manifest.json").is_file()
-        discovery_manifest = parse_json_bytes(
-            (workpad / "manifests/gig-discovery-manifest.json").read_bytes()
-        )
-        assert discovery_manifest["request_kind"] == "create"
-        assert len(discovery_manifest["question_rounds"][1]["questions"]) == 3
-        assert discovery_manifest["manifest_version"] >= 3
-        assert discovery_manifest["parent_manifest_id"] is not None
-        assert any(
-            path.name.endswith("gig-discovery-manifest-written.txt")
-            for path in (workpad / "handoffs").iterdir()
-        )
-        builder_snapshot = parse_json_bytes((workpad / "manifests/gig-builder-session.json").read_bytes())
-        assert builder_snapshot["state"] == "operator_review"
-        send("approve")
-        stdout, stderr = process.communicate(timeout=20)
-        assert process.returncode == 0, stderr
-        result = json.loads(stdout)
-        assert result["status"] == "approved"
-        assert (workpad / "manifests/active-gig-version.json").is_file()
-        proposal_commits = subprocess.check_output(
-            ["git", "-C", str(workpad), "log", "--format=%H", "--", "manifests/gig-proposal.json"],
-            text=True,
-        ).splitlines()
-        proposal_ids = [
-            json.loads(
-                subprocess.check_output(
-                    ["git", "-C", str(workpad), "show", f"{commit}:manifests/gig-proposal.json"],
-                    text=True,
-                )
-            )["proposal_id"]
-            for commit in proposal_commits
-        ]
-        assert len(proposal_ids) >= 1
-        assert len(set(proposal_ids)) == 1
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.communicate()
+    workpad = next((tmp_path / "workpads").rglob("manifests/gig-proposal.json")).parent.parent
+    proposal_manifest = json.loads(
+        (workpad / "manifests/gig-proposal.json").read_text(encoding="utf-8")
+    )
+    assert proposal_manifest["status"] in {"drafting", "proposed"}
+    assert not (workpad / "manifests/active-gig-version.json").exists()
+
+    approved = CliRunner().invoke(
+        cli,
+        [
+            "approve",
+            proposal["proposal_id"],
+            "--home",
+            str(home),
+            "--target",
+            str(target),
+            "--json",
+        ],
+    )
+
+    assert approved.exit_code == 0, approved.output
+    assert json.loads(approved.output)["status"] == "approved"
+    assert (workpad / "manifests/active-gig-version.json").exists()

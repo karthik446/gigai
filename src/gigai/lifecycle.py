@@ -1305,6 +1305,8 @@ def create_offline(
     name: str,
     commission: str | None = None,
     model_target: str = "offline-default",
+    model_output: str | None = None,
+    runtime_executables: Mapping[str, str] | None = None,
     open_editor: bool = True,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
     observer: CreateObserver | None = None,
@@ -1384,9 +1386,19 @@ def create_offline(
     )
     observer("after_active_selection")
 
-    config = load_config(home)
-    binding = resolve_model_adapter(config, model_target)
-    result = binding.port.invoke(binding.request(role="create", prompt="doctor-probe"))
+    if model_output is None:
+        config = load_config(home)
+        binding = resolve_model_adapter(
+            config,
+            model_target,
+            executable_overrides=runtime_executables,
+        )
+        result = binding.port.invoke(binding.request(role="create", prompt="doctor-probe"))
+        proposal_output = result.output_text
+    else:
+        if not model_output.strip() or "\0" in model_output:
+            raise LifecycleError("agent proposal input must be non-empty and NUL-free")
+        proposal_output = model_output
     proposal_id = _allocate_local_id(EntityPrefix.GIG_PROPOSAL, uuid_factory)
     artifacts = _build_proposal_artifacts(
         gig_id=gig_id,
@@ -1395,7 +1407,7 @@ def create_offline(
         name=name,
         commission=commission,
         model_target=model_target,
-        model_output=result.output_text,
+        model_output=proposal_output,
         uuid_factory=uuid_factory,
     )
     _validate_artifacts(artifacts)

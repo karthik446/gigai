@@ -61,6 +61,7 @@ def test_configured_deterministic_target_is_usable_without_a_model_call(tmp_path
     readiness = resolve_target_readiness(config, "offline-default")
     assert readiness.readiness == "usable"
     assert readiness.adapter == "deterministic"
+    assert readiness.states == ("configured", "compatible", "verified", "usable")
 
 
 def test_configured_provider_is_not_reported_usable_without_an_explicit_probe(
@@ -226,7 +227,7 @@ def test_models_command_probe_is_explicit_and_reports_readiness(tmp_path, monkey
     run_setup(config)
     monkeypatch.setattr(
         "gigai.cli.probe_target_readiness",
-        lambda _config, target: SimpleNamespace(
+        lambda _config, target, **_: SimpleNamespace(
             target_name=target,
             endpoint_name="offline",
             model="fixture-v1",

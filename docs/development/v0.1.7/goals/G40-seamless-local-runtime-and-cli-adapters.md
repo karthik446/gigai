@@ -1,7 +1,8 @@
 # G40 — Seamless Local Runtime and CLI Adapters
 
 **Version:** v0.1.7  
-**Status:** Draft contract; implementation not authorized  
+**Status:** Contract accepted for the active G40 goal; implementation and
+acceptance evidence in progress  
 **Depends on:** S40 complete research finding; S41 complete with ADOPT WITH
 AMENDMENT; v0.1.6 configuration, adapter, lifecycle, journal, workpad,
 capability, and Run authorities  
@@ -64,10 +65,12 @@ The contract is grounded in the current tree:
   already provides explicit argv, `shell=False`, an environment allowlist,
   timeout/cancellation handling, process-group cleanup, and structured
   authentication failure detection. G40 retains and tests this boundary.
-- [`src/gigai/cli.py`](../../../src/gigai/cli.py) currently makes ordinary
-  setup enter the browser path, routes non-offline creation through
-  `InterviewHTTPServer`, and declares an approval function parameter that is
-  absent from its Click options. These are G40 blockers.
+- [`src/gigai/cli.py`](../../../src/gigai/cli.py) is the G40 product-surface
+  seam: setup is terminal-native, detected local CLIs are persisted as typed
+  targets, agent-backed creation requires an explicit invocation envelope, and
+  approval exposes the capability-manifest reference accepted by the lifecycle
+  function. The retired presentation paths remain historical implementation
+  material only where they serve later contracts.
 - [`src/gigai/lifecycle.py`](../../../src/gigai/lifecycle.py) already owns the
   proposal-to-approved-version transition through `approve_offline`. G40
   repairs the CLI boundary so it invokes that authority rather than creating
@@ -103,7 +106,8 @@ accepted in the G40 contract evidence:
 10. the acceptance matrix, fixture strategy, live-provider opt-in boundary,
     and release evidence locations.
 
-No runtime implementation is accepted against an unresolved contract item.
+Runtime implementation remains provisional until each contract item has
+passing evidence in the acceptance matrix below.
 
 ## Product and command contract
 
