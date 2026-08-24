@@ -90,6 +90,20 @@ class DiscoverySnapshot:
             ],
         }
 
+    def to_shareable_dict(self) -> dict[str, object]:
+        """Return report-safe evidence without local filesystem locations."""
+
+        payload = self.to_dict()
+        payload["effective_path"] = "<redacted>" if self.effective_path else None
+        payload["models"] = [
+            {
+                **item,
+                "executable": "<redacted>" if item["executable"] else None,
+            }
+            for item in payload["models"]
+        ]
+        return payload
+
 
 @dataclass(frozen=True)
 class ModelReadiness:
@@ -121,7 +135,7 @@ def discover_installed_models(
         )
         resolution = "path"
         model_path_source = "process"
-        if resolved is None:
+        if resolved is None and which is None:
             fallback = _resolve_bounded_fallback(name)
             if fallback is not None:
                 resolved = str(fallback)

@@ -1,8 +1,8 @@
 # G40 — Seamless Local Runtime and CLI Adapters
 
 **Version:** v0.1.7  
-**Status:** Contract accepted for the active G40 goal; implementation and
-acceptance evidence in progress  
+**Status:** Complete — contract accepted, implementation committed, and
+acceptance evidence recorded  
 **Depends on:** S40 complete research finding; S41 complete with ADOPT WITH
 AMENDMENT; v0.1.6 configuration, adapter, lifecycle, journal, workpad,
 capability, and Run authorities  
@@ -58,9 +58,9 @@ v0.1.6 upgrade and rollback contract is owned by G41.
 The contract is grounded in the current tree:
 
 - [`src/gigai/model_discovery.py`](../../../src/gigai/model_discovery.py)
-  currently checks a fixed `codex`/`claude` catalog through the Python process
-  PATH, performs bounded `--version` probing, and returns ephemeral
-  `DetectedModel` and `ModelReadiness` values.
+  owns the fixed `codex`/`claude` catalog, login-shell PATH hydration, bounded
+  `--version` probing, immutable `DiscoverySnapshot` persistence, and the
+  distinct `DetectedModel` and `ModelReadiness` values.
 - [`src/gigai/adapters/process.py`](../../../src/gigai/adapters/process.py)
   already provides explicit argv, `shell=False`, an environment allowlist,
   timeout/cancellation handling, process-group cleanup, and structured
@@ -209,9 +209,11 @@ user = consent and approval actor
 GigAI = validation, authority, execution, and evidence owner
 ```
 
-Missing or malformed triggers, unsupported fields, missing consent, unknown
-actors, or unauthorized effects fail closed with typed diagnostics. The agent
-cannot approve its own proposal.
+Missing or malformed triggers, unsupported fields, unknown actors, or
+unauthorized effects fail closed with typed diagnostics. Proposal creation is
+non-authoritative and may carry an empty consent list; an effectful `run`
+invocation requires an explicit operator consent record. The agent cannot
+approve its own proposal.
 
 ## Runtime discovery contract
 
@@ -371,6 +373,26 @@ and the acceptance evidence that proves the runtime and documentation agree.
   all fail closed; and
 - agent-backed proposal creation is tested without ambient transcript import or
   a separate presentation state machine.
+
+## Evidence recorded for the current implementation
+
+The current source worktree has these passing evidence runs:
+
+- the focused G40/runtime/CLI/discovery/adapter suite: **41 passed**;
+- the loopback compatibility suite, run with local socket permission:
+  **18 passed**;
+- the installed-scenario suites for G03, G04, and G11, pointed at this
+  source worktree's executable: **25 passed**;
+- the complete repository suite, pointed at this source worktree's executable
+  and run with local socket permission: **623 passed, 1 skipped**;
+- direct isolated UAT: terminal setup, persisted local targets, explicit agent
+  envelope, proposal-only creation, and existing-authority CLI approval; and
+- hydration failure classification, redacted `models --json`, source
+  compilation, and `git diff --check` pass.
+
+The earlier isolated journal-lock failure was a host-level test-run
+interruption; the final full suite passed and it did not exercise or alter the
+G40 runtime seam.
 
 ### Stop conditions
 

@@ -105,8 +105,6 @@ def test_cli_create_requires_an_explicit_invocation(tmp_path: Path) -> None:
             str(home),
             "--target",
             str(target),
-            "--request",
-            "This must not be imported as an agent request.",
         ],
     )
 

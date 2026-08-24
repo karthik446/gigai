@@ -94,6 +94,10 @@ def parse_invocation(payload: Mapping[str, Any]) -> AgentInvocation:
         raise InvocationValidationError("input must be an object")
     requested = _requested(payload.get("requested"))
     consent = _consent(payload.get("consent"))
+    if command == "run" and not consent:
+        raise InvocationValidationError(
+            "run invocation requires an explicit operator consent record"
+        )
     return AgentInvocation(
         protocol_version=protocol_version,
         invocation_id=invocation_id,

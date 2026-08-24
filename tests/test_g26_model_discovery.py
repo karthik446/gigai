@@ -51,6 +51,26 @@ def test_model_discovery_records_bounded_cli_version_evidence(tmp_path: Path) ->
     assert detected[1].version is None
 
 
+def test_model_discovery_uses_only_the_bounded_install_directory_fallback(
+    tmp_path: Path, monkeypatch
+) -> None:
+    install_dir = tmp_path / "bounded-bin"
+    install_dir.mkdir()
+    executable = install_dir / "codex"
+    executable.write_text("#! /bin/sh\nprintf 'fallback-version\\n'\n", encoding="utf-8")
+    executable.chmod(0o755)
+    monkeypatch.setattr(
+        "gigai.model_discovery._BOUNDED_INSTALL_DIRECTORIES", (install_dir,)
+    )
+
+    detected = discover_installed_models(path="")
+
+    assert detected[0].resolution == "install_directory_fallback"
+    assert detected[0].path_source == "fallback"
+    assert detected[0].version == "fallback-version"
+    assert detected[1].readiness == "unavailable"
+
+
 def test_configured_deterministic_target_is_usable_without_a_model_call(tmp_path) -> None:
     config = build_config(
         home_root=tmp_path / "home",

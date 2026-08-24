@@ -151,7 +151,7 @@ def models_command(
         snapshot = discover_runtime_snapshot(
             refresh_reason="explicit_refresh" if refresh else "models"
         )
-        snapshot_path = persist_discovery_snapshot(home, snapshot)
+        persist_discovery_snapshot(home, snapshot)
         runtime_executables = {
             item.name: str(item.executable)
             for item in snapshot.models
@@ -193,13 +193,13 @@ def models_command(
 
         payload: dict[str, object] = {
             "snapshot": {
-                **snapshot.to_dict(),
-                "path": str(snapshot_path),
+                **snapshot.to_shareable_dict(),
+                "path": "<redacted>",
             },
             "detected": [
                 {
                     "name": item.name,
-                    "executable": str(item.executable) if item.executable else None,
+                    "executable": "<redacted>" if item.executable else None,
                     "readiness": item.readiness,
                     "version": item.version,
                     "resolution": item.resolution,

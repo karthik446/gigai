@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import subprocess
 import uuid
 
 import pytest
@@ -13,9 +14,11 @@ from gigai.invocation import InvocationValidationError, parse_invocation
 from gigai.model_discovery import (
     DetectedModel,
     discover_runtime_snapshot,
+    hydrate_login_shell_path,
     persist_discovery_snapshot,
 )
 from gigai.setup import build_config, run_setup
+from gigai.target_binding import initialize_target
 
 
 def _invocation(**overrides: object) -> dict[str, object]:
@@ -53,6 +56,11 @@ def test_invocation_rejects_conversation_and_secret_fields(field: str) -> None:
 def test_invocation_rejects_implicit_trigger() -> None:
     with pytest.raises(InvocationValidationError, match="explicit GigAI trigger"):
         parse_invocation(_invocation(trigger="ordinary conversation"))
+
+
+def test_invocation_requires_operator_consent_for_run() -> None:
+    with pytest.raises(InvocationValidationError, match="operator consent"):
+        parse_invocation(_invocation(command="run"))
 
 
 def test_discovery_snapshot_is_immutable_evidence_and_persisted_atomically(
@@ -117,6 +125,103 @@ def test_models_command_persists_runtime_snapshot_without_provider_call(tmp_path
     assert (home / "snapshots/runtime-discovery").is_dir()
 
 
+def test_models_json_redacts_local_runtime_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot = discover_runtime_snapshot(
+        shell="/bin/sh",
+        uuid_factory=lambda: uuid.UUID("12345678-1234-4234-9234-123456789abc"),
+    )
+    snapshot = snapshot.__class__(
+        **{
+            **snapshot.__dict__,
+            "effective_path": "/Users/private/.local/bin",
+            "models": (
+                DetectedModel(
+                    "codex",
+                    Path("/Users/private/.local/bin/codex"),
+                    "detected",
+                    "codex-cli test",
+                    "path",
+                    "login_shell",
+                    None,
+                ),
+            ),
+        }
+    )
+    monkeypatch.setattr("gigai.cli.discover_runtime_snapshot", lambda **_: snapshot)
+    home = tmp_path / "home"
+    run_setup(
+        build_config(
+            home_root=home,
+            workpad_root=tmp_path / "workpads",
+            editor_argv=("/usr/bin/true",),
+            open_with_target=False,
+        )
+    )
+
+    result = CliRunner().invoke(cli, ["models", "--home", str(home), "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert "/Users/private" not in result.output
+    payload = json.loads(result.output)
+    assert payload["snapshot"]["effective_path"] == "<redacted>"
+    assert payload["snapshot"]["models"][0]["executable"] == "<redacted>"
+    assert payload["detected"][0]["executable"] == "<redacted>"
+
+
+@pytest.mark.parametrize(
+    ("stdout", "stderr", "returncode", "expected"),
+    [
+        ("noise", "", 0, "shell_sentinel_missing"),
+        ("\x1b[2Knoise\x1b[0m", "", 0, "shell_sentinel_missing"),
+        ("\x1e__GIGAI_DISCOVERY_PATH__=\x1e\x1e", "", 0, "shell_path_empty"),
+        (
+            "\x1e__GIGAI_DISCOVERY_PATH__=\x1e/runtime/path\x1e",
+            "",
+            7,
+            "shell_exit:7",
+        ),
+    ],
+)
+def test_login_shell_hydration_classifies_bounded_output_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    stdout: str,
+    stderr: str,
+    returncode: int,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(
+        "gigai.model_discovery.subprocess.run",
+        lambda *args, **kwargs: type(
+            "Completed", (), {"stdout": stdout, "stderr": stderr, "returncode": returncode}
+        )(),
+    )
+
+    path, source, status, reason = hydrate_login_shell_path(shell="/bin/sh")
+
+    assert source == ("login_shell" if expected == "shell_exit:7" else "process")
+    assert status == "failed"
+    assert reason == expected
+    assert path is not None
+
+
+def test_login_shell_hydration_classifies_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def timeout(*args: object, **kwargs: object) -> object:
+        raise subprocess.TimeoutExpired("/bin/sh", 5)
+
+    monkeypatch.setattr("gigai.model_discovery.subprocess.run", timeout)
+
+    path, source, status, reason = hydrate_login_shell_path(shell="/bin/sh")
+
+    assert path is not None
+    assert source == "process"
+    assert status == "failed"
+    assert reason == "shell_timeout"
+
+
 def test_setup_clean_environment_returns_structured_error_without_traceback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -155,6 +260,7 @@ def test_create_requires_and_consumes_explicit_agent_envelope(tmp_path: Path) ->
             open_with_target=False,
         )
     )
+    initialize_target(home_root=home, requested_target=target)
     envelope = tmp_path / "invocation.json"
     envelope.write_text(
         json.dumps(
@@ -188,4 +294,4 @@ def test_create_requires_and_consumes_explicit_agent_envelope(tmp_path: Path) ->
     payload = json.loads(result.output)
     assert payload["status"] == "proposed"
     assert payload["authority_created"] is False
-    assert (home / "registry.json").exists()
+    assert (home / "registry.sqlite").exists()

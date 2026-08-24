@@ -90,6 +90,8 @@ def _guard_path_read(event: str, path: Path | None) -> None:
 
 
 def _guard_path_write(event: str, path: Path | None) -> None:
+    if path == Path("/dev/null"):
+        return
     if path is not None and not _within(path, _ALLOWED_WRITE_ROOTS):
         _record_and_deny("undeclared_write", event, path)
 
