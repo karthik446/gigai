@@ -13,8 +13,38 @@ from .canonical import canonical_json_bytes
 INVOCATION_PROTOCOL_VERSION = "1"
 EXPLICIT_TRIGGERS = ("gigai:", "$gigai", "/gigai", "gigai run")
 ALLOWED_COMMANDS = frozenset({"setup", "models", "doctor", "create", "run"})
+KNOWN_AGENT_IDS = frozenset({"codex", "claude"})
 MAX_ENVELOPE_BYTES = 256 * 1024
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
+_TOP_LEVEL_FIELDS = frozenset(
+    {
+        "protocol_version",
+        "invocation_id",
+        "trigger",
+        "actor",
+        "command",
+        "target",
+        "input",
+        "requested",
+        "consent",
+    }
+)
+_ACTOR_FIELDS = frozenset({"kind", "id", "session_id"})
+_TARGET_FIELDS = frozenset({"home", "project"})
+_INPUT_FIELDS = {
+    "setup": frozenset({"answers"}),
+    "models": frozenset({"probe"}),
+    "doctor": frozenset({"probe"}),
+    "create": frozenset({"intent", "answers", "proposal"}),
+    "run": frozenset({"gig_id", "version", "wait"}),
+}
+_PROPOSAL_FIELDS = frozenset(
+    {"summary", "assumptions", "unresolved_questions", "citations", "effect"}
+)
+_CITATION_FIELDS = frozenset(
+    {"claim_id", "source_kind", "locator", "source_sha256", "verification"}
+)
+_CONSENT_FIELDS = frozenset({"action", "actor"})
 _FORBIDDEN_KEYS = frozenset(
     {
         "conversation",
@@ -74,6 +104,7 @@ def parse_invocation(payload: Mapping[str, Any]) -> AgentInvocation:
     if len(encoded) > MAX_ENVELOPE_BYTES:
         raise InvocationValidationError("invocation envelope exceeds the size limit")
     _reject_forbidden_keys(payload)
+    _reject_unknown_fields(payload, _TOP_LEVEL_FIELDS, "invocation")
 
     protocol_version = _required_string(payload, "protocol_version")
     if protocol_version != INVOCATION_PROTOCOL_VERSION:
@@ -88,16 +119,16 @@ def parse_invocation(payload: Mapping[str, Any]) -> AgentInvocation:
     command = _required_string(payload, "command")
     if command not in ALLOWED_COMMANDS:
         raise InvocationValidationError(f"unsupported invocation command: {command}")
-    target = _string_map(payload.get("target"), "target")
-    input_values = payload.get("input")
-    if not isinstance(input_values, dict):
-        raise InvocationValidationError("input must be an object")
+    target = _string_map(payload.get("target"), "target", _TARGET_FIELDS)
+    input_values = _input(payload.get("input"), command)
     requested = _requested(payload.get("requested"))
     consent = _consent(payload.get("consent"))
     if command == "run" and not consent:
         raise InvocationValidationError(
             "run invocation requires an explicit operator consent record"
         )
+    if command == "run" and any(item["action"] != "run" for item in consent):
+        raise InvocationValidationError("run consent records must authorize run")
     return AgentInvocation(
         protocol_version=protocol_version,
         invocation_id=invocation_id,
@@ -131,17 +162,22 @@ def _required_string(payload: Mapping[str, Any], key: str) -> str:
 
 
 def _actor(value: Any) -> dict[str, str]:
-    actor = _string_map(value, "actor")
+    actor = _string_map(value, "actor", _ACTOR_FIELDS)
     if actor.get("kind") != "agent":
         raise InvocationValidationError("actor.kind must be agent")
     if "id" not in actor or "session_id" not in actor:
         raise InvocationValidationError("actor requires id and session_id")
+    if actor["id"] not in KNOWN_AGENT_IDS:
+        raise InvocationValidationError(f"unknown agent actor: {actor['id']}")
     return actor
 
 
-def _string_map(value: Any, name: str) -> dict[str, str]:
+def _string_map(
+    value: Any, name: str, allowed_fields: frozenset[str]
+) -> dict[str, str]:
     if not isinstance(value, dict):
         raise InvocationValidationError(f"{name} must be an object")
+    _reject_unknown_fields(value, allowed_fields, name)
     result: dict[str, str] = {}
     for key, item in value.items():
         if not isinstance(key, str) or not isinstance(item, str):
@@ -150,6 +186,75 @@ def _string_map(value: Any, name: str) -> dict[str, str]:
             raise InvocationValidationError(f"{name} contains an invalid value")
         result[key] = item
     return result
+
+
+def _input(value: Any, command: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise InvocationValidationError("input must be an object")
+    _reject_unknown_fields(value, _INPUT_FIELDS[command], "input")
+    result = dict(value)
+    if "intent" in result:
+        _bounded_text(result["intent"], "input.intent", 20_000)
+    if "answers" in result:
+        _answers(result["answers"])
+    if "proposal" in result:
+        _proposal(result["proposal"])
+    if "probe" in result:
+        _bounded_text(result["probe"], "input.probe", 255)
+    if "gig_id" in result:
+        _bounded_text(result["gig_id"], "input.gig_id", 255)
+    if "version" in result and (
+        type(result["version"]) is not int or result["version"] < 1
+    ):
+        raise InvocationValidationError("input.version must be a positive integer")
+    if "wait" in result and type(result["wait"]) is not bool:
+        raise InvocationValidationError("input.wait must be boolean")
+    return result
+
+
+def _answers(value: Any) -> None:
+    if not isinstance(value, dict):
+        raise InvocationValidationError("input.answers must be an object")
+    for key, item in value.items():
+        if not isinstance(key, str) or not isinstance(item, str):
+            raise InvocationValidationError("input.answers must map strings to strings")
+        _bounded_text(key, "input.answers key", 255)
+        _bounded_text(item, "input.answers value", 20_000)
+
+
+def _proposal(value: Any) -> None:
+    if not isinstance(value, dict):
+        raise InvocationValidationError("input.proposal must be an object")
+    _reject_unknown_fields(value, _PROPOSAL_FIELDS, "input.proposal")
+    if "summary" in value:
+        _bounded_text(value["summary"], "input.proposal.summary", 20_000)
+    if "effect" in value:
+        _bounded_text(value["effect"], "input.proposal.effect", 255)
+    for field in ("assumptions", "unresolved_questions"):
+        if field in value:
+            values = value[field]
+            if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
+                raise InvocationValidationError(f"input.proposal.{field} must be a string list")
+            for item in values:
+                _bounded_text(item, f"input.proposal.{field} item", 20_000)
+    if "citations" in value:
+        citations = value["citations"]
+        if not isinstance(citations, list):
+            raise InvocationValidationError("input.proposal.citations must be a list")
+        for citation in citations:
+            if not isinstance(citation, dict):
+                raise InvocationValidationError("input.proposal citations must be objects")
+            _reject_unknown_fields(citation, _CITATION_FIELDS, "input.proposal.citation")
+            for field in ("claim_id", "source_kind", "locator", "verification"):
+                if field in citation:
+                    _bounded_text(citation[field], f"citation.{field}", 4096)
+            if "source_sha256" in citation and citation["source_sha256"] is not None:
+                _bounded_text(citation["source_sha256"], "citation.source_sha256", 255)
+
+
+def _bounded_text(value: Any, name: str, limit: int) -> None:
+    if not isinstance(value, str) or not value.strip() or "\0" in value or len(value) > limit:
+        raise InvocationValidationError(f"{name} must be bounded text")
 
 
 def _requested(value: Any) -> dict[str, list[str]]:
@@ -178,12 +283,25 @@ def _consent(value: Any) -> tuple[dict[str, Any], ...]:
     for item in value:
         if not isinstance(item, dict):
             raise InvocationValidationError("each consent record must be an object")
+        _reject_unknown_fields(item, _CONSENT_FIELDS, "consent record")
         if not isinstance(item.get("action"), str) or not isinstance(item.get("actor"), dict):
             raise InvocationValidationError("consent requires action and actor")
         if item["actor"].get("kind") != "operator":
             raise InvocationValidationError("consent actor must be operator")
+        if item["actor"].get("id") != "local-user" or set(item["actor"]) != {"kind", "id"}:
+            raise InvocationValidationError("consent actor must be the local operator")
         normalized.append(dict(item))
     return tuple(normalized)
+
+
+def _reject_unknown_fields(
+    value: Mapping[str, Any], allowed: frozenset[str], name: str
+) -> None:
+    unknown = set(value) - allowed
+    if unknown:
+        raise InvocationValidationError(
+            f"{name} contains unsupported fields: {sorted(unknown)}"
+        )
 
 
 def _reject_forbidden_keys(value: Any) -> None:
@@ -204,6 +322,7 @@ __all__ = [
     "ALLOWED_COMMANDS",
     "AgentInvocation",
     "EXPLICIT_TRIGGERS",
+    "KNOWN_AGENT_IDS",
     "InvocationValidationError",
     "INVOCATION_PROTOCOL_VERSION",
     "load_invocation_bytes",

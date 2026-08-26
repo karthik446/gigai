@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 import subprocess
 import uuid
-from typing import Callable
+from typing import Callable, Mapping
 
 from .canonical import (
     EntityPrefix,
@@ -78,6 +78,7 @@ def launch_run(
     version: int | None = None,
     wait: bool = False,
     invocation_argv: tuple[str, ...] = ("gigai", "run"),
+    operator_consent: Mapping[str, object] | None = None,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
     observer: RunObserver | None = None,
 ) -> RunResult:
@@ -113,6 +114,7 @@ def launch_run(
             proposal=proposal,
             target_before=target_before,
             invocation_argv=invocation_argv,
+            operator_consent=operator_consent,
         )
         observer("after_brief_write")
         observer("after_manifest_seal")
@@ -357,6 +359,7 @@ def _prepare_records(
     proposal: dict[str, object],
     target_before: dict[str, object],
     invocation_argv: tuple[str, ...],
+    operator_consent: Mapping[str, object] | None = None,
 ) -> dict[str, bytes]:
     run_dir = f"runs/{run_id}"
     goals = [item for item in graph["goals"] if isinstance(item, dict)]
@@ -378,6 +381,18 @@ def _prepare_records(
 
     source_ref = artifact(
         f"{run_dir}/sealed/offline-capability.json", "application/json", capability
+    )
+    consent_bytes = (
+        canonical_json_bytes(dict(operator_consent))
+        if operator_consent is not None
+        else None
+    )
+    consent_ref = (
+        artifact(
+            f"{run_dir}/operator-consent.json", "application/json", consent_bytes
+        )
+        if consent_bytes is not None
+        else None
     )
     target_ref = artifact(
         f"{run_dir}/target-before.json", "application/json", target_bytes
@@ -442,7 +457,7 @@ def _prepare_records(
         "profile": "default",
         "resolved_models": [],
         "resolved_tools": [],
-        "sealed_sources": [source_ref],
+        "sealed_sources": [source_ref, *([consent_ref] if consent_ref else [])],
         "effects": ["write_workpad"],
         "aggregate_budget": budget,
         "input_canonical_sha256": digest_imported_bytes(graph_bytes),
@@ -494,6 +509,11 @@ def _prepare_records(
         f"{run_dir}/goal-graph.json": graph_bytes,
         f"{run_dir}/target-before.json": target_bytes,
         f"{run_dir}/sealed/offline-capability.json": capability,
+        **(
+            {f"{run_dir}/operator-consent.json": consent_bytes}
+            if consent_bytes is not None
+            else {}
+        ),
         **{
             f"{run_dir}/{goal['contract']['path']}": _git_bytes(
                 resolved.path, "show", f"{authority_commit}:{goal['contract']['path']}"

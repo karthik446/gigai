@@ -1,8 +1,8 @@
 # G40 — Seamless Local Runtime and CLI Adapters
 
 **Version:** v0.1.7  
-**Status:** Complete — contract accepted, implementation committed, and
-acceptance evidence recorded  
+**Status:** Complete — review correction verified; authority and
+invocation-boundary evidence is recorded  
 **Depends on:** S40 complete research finding; S41 complete with ADOPT WITH
 AMENDMENT; v0.1.6 configuration, adapter, lifecycle, journal, workpad,
 capability, and Run authorities  
@@ -163,6 +163,15 @@ contract requires one. The command must:
 It must not start a Run, mutate a target, or accept approval supplied only by
 the invoking agent. A direct library call is not CLI acceptance evidence.
 
+### `gigai run`
+
+The effectful CLI Run path requires one explicit consent source before it can
+allocate a Run: either a consent-bearing `--invocation` envelope with
+`command: run`, or an explicit `--confirm` operator action. GigAI persists the
+normalized operator consent under the Run and references it from the sealed
+Run manifest. An ordinary `gigai run` invocation without either source fails
+before Run allocation.
+
 ### Agent invocation envelope
 
 GigAI accepts agent-driven work only through an explicit trigger:
@@ -196,10 +205,10 @@ The versioned envelope contains only typed fields:
 }
 ```
 
-The final schema must define redaction, size limits, allowed commands,
-identity semantics, target references, and consent records. The envelope must
-not contain raw credentials, ambient repository contents, hidden prompt text,
-or the surrounding transcript.
+The final schema defines redaction, size limits, allowlisted fields and
+commands, known agent identities, target references, and consent records. The
+envelope must not contain raw credentials, ambient repository contents, hidden
+prompt text, or the surrounding transcript.
 
 The actor boundary is normative:
 
@@ -209,11 +218,11 @@ user = consent and approval actor
 GigAI = validation, authority, execution, and evidence owner
 ```
 
-Missing or malformed triggers, unsupported fields, unknown actors, or
-unauthorized effects fail closed with typed diagnostics. Proposal creation is
-non-authoritative and may carry an empty consent list; an effectful `run`
-invocation requires an explicit operator consent record. The agent cannot
-approve its own proposal.
+Missing or malformed triggers, unsupported fields at any envelope level,
+unknown actors, or unauthorized effects fail closed with typed diagnostics.
+Proposal creation is non-authoritative and may carry an empty consent list; an
+effectful `run` invocation requires an explicit operator consent record. The
+agent cannot approve its own proposal.
 
 ## Runtime discovery contract
 
@@ -378,15 +387,17 @@ and the acceptance evidence that proves the runtime and documentation agree.
 
 The current source worktree has these passing evidence runs:
 
-- the focused G40/runtime/CLI/discovery/adapter suite: **41 passed**;
+- the focused G40 correction suite: **27 passed**;
+- the G40 plus Run lifecycle suite: **33 passed**;
 - the loopback compatibility suite, run with local socket permission:
   **18 passed**;
 - the installed-scenario suites for G03, G04, and G11, pointed at this
   source worktree's executable: **25 passed**;
 - the complete repository suite, pointed at this source worktree's executable
-  and run with local socket permission: **623 passed, 1 skipped**;
+  and run with local socket permission: **632 passed, 1 skipped**;
 - direct isolated UAT: terminal setup, persisted local targets, explicit agent
-  envelope, proposal-only creation, and existing-authority CLI approval; and
+  envelope, proposal-only creation, consent-bearing CLI Run, and
+  existing-authority CLI approval; and
 - hydration failure classification, redacted `models --json`, source
   compilation, and `git diff --check` pass.
 

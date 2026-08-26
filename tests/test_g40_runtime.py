@@ -11,6 +11,7 @@ from click.testing import CliRunner
 
 from gigai.cli import cli
 from gigai.invocation import InvocationValidationError, parse_invocation
+from gigai.lifecycle import ApprovalResult, approve_offline, create_offline
 from gigai.model_discovery import (
     DetectedModel,
     discover_runtime_snapshot,
@@ -58,9 +59,40 @@ def test_invocation_rejects_implicit_trigger() -> None:
         parse_invocation(_invocation(trigger="ordinary conversation"))
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"unexpected": "field"},
+        {"actor": {"kind": "agent", "id": "codex", "session_id": "s", "extra": "x"}},
+        {"target": {"home": "/tmp/gigai", "project": "p", "extra": "x"}},
+        {"input": {"intent": "x", "unexpected": "field"}},
+        {"input": {"proposal": {"summary": "x", "unexpected": "field"}}},
+    ],
+)
+def test_invocation_rejects_unsupported_fields(payload: dict[str, object]) -> None:
+    candidate = _invocation()
+    for key, value in payload.items():
+        if isinstance(value, dict) and isinstance(candidate.get(key), dict):
+            candidate[key] = {**candidate[key], **value}  # type: ignore[index]
+        else:
+            candidate.update(payload)
+
+    with pytest.raises(InvocationValidationError, match="unsupported fields"):
+        parse_invocation(candidate)
+
+
+def test_invocation_rejects_unknown_agent_actor() -> None:
+    with pytest.raises(InvocationValidationError, match="unknown agent actor"):
+        parse_invocation(
+            _invocation(
+                actor={"kind": "agent", "id": "unknown", "session_id": "session-1"}
+            )
+        )
+
+
 def test_invocation_requires_operator_consent_for_run() -> None:
     with pytest.raises(InvocationValidationError, match="operator consent"):
-        parse_invocation(_invocation(command="run"))
+        parse_invocation(_invocation(command="run", input={}))
 
 
 def test_discovery_snapshot_is_immutable_evidence_and_persisted_atomically(
@@ -246,6 +278,100 @@ def test_approve_help_exposes_capability_manifest_reference() -> None:
 
     assert result.exit_code == 0, result.output
     assert "--capability-manifest-id" in result.output
+
+
+def test_approve_json_reports_sealed_publication_and_pointer_identities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "gigai.cli.approve_offline",
+        lambda **_: ApprovalResult(
+            "gig_12345678-1234-4234-9234-123456789abc",
+            "gp_12345678-1234-4234-9234-123456789abc",
+            1,
+            "a" * 40,
+            "b" * 40,
+            "gig-v000001",
+        ),
+    )
+
+    result = CliRunner().invoke(cli, ["approve", "gp_test", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["sealed_commit"] == "a" * 40
+    assert payload["publication_commit"] == "b" * 40
+    assert payload["journal_commit"] == "a" * 40
+    assert payload["active_pointer"]["publication_commit"] == "b" * 40
+
+
+def test_run_requires_explicit_consent_before_starting() -> None:
+    result = CliRunner().invoke(cli, ["run", "--home", "/tmp/gigai-test", "--json"])
+
+    assert result.exit_code != 0
+    assert "run requires --confirm or a consent-bearing --invocation envelope" in result.output
+
+
+def test_cli_run_persists_consent_from_agent_envelope(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    target = tmp_path / "target"
+    target.mkdir()
+    run_setup(
+        build_config(
+            home_root=home,
+            workpad_root=tmp_path / "workpads",
+            editor_argv=("/usr/bin/true",),
+            open_with_target=False,
+        )
+    )
+    initialize_target(home_root=home, requested_target=target)
+    created = create_offline(
+        home_root=home,
+        requested_target=target,
+        name="consented-run",
+        open_editor=False,
+    )
+    approve_offline(
+        home_root=home,
+        requested_target=target,
+        proposal_id=created.proposal_id,
+    )
+    envelope = tmp_path / "run-invocation.json"
+    envelope.write_text(
+        json.dumps(
+            _invocation(
+                command="run",
+                target={"home": str(home), "project": "project-1"},
+                input={},
+                consent=[{"action": "run", "actor": {"kind": "operator", "id": "local-user"}}],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "run",
+            created.gig_id,
+            "--home",
+            str(home),
+            "--target",
+            str(target),
+            "--invocation",
+            str(envelope),
+            "--wait",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["status"] == "succeeded"
+    consent_paths = list((tmp_path / "workpads").rglob("operator-consent.json"))
+    assert len(consent_paths) == 1
+    consent_path = consent_paths[0]
+    assert json.loads(consent_path.read_text(encoding="utf-8"))["invocation_id"] == "inv_test-001"
 
 
 def test_create_requires_and_consumes_explicit_agent_envelope(tmp_path: Path) -> None:

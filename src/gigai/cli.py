@@ -1693,6 +1693,12 @@ def approve_command(
         "gig_id": result.gig_id,
         "proposal_id": result.proposal_id,
         "sealed_commit": result.sealed_commit,
+        "publication_commit": result.publication_commit,
+        "journal_commit": result.sealed_commit,
+        "active_pointer": {
+            "path": "manifests/active-gig-version.json",
+            "publication_commit": result.publication_commit,
+        },
         "status": "approved",
         "tag": result.tag,
         "version": result.version,
@@ -1739,6 +1745,18 @@ def reject_command(
 @click.option("--version", type=click.IntRange(min=1))
 @click.option("--wait", is_flag=True)
 @click.option(
+    "--invocation",
+    "invocation_path",
+    type=click.Path(path_type=Path, dir_okay=False),
+    help="Explicit run envelope containing operator consent; mutually exclusive with --confirm.",
+)
+@click.option(
+    "--confirm",
+    "confirmed",
+    is_flag=True,
+    help="Record explicit local-operator consent for this Run.",
+)
+@click.option(
     "--target", "target_value", type=click.Path(path_type=Path, file_okay=False)
 )
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
@@ -1747,6 +1765,8 @@ def run_command(
     gig_id: str | None,
     version: int | None,
     wait: bool,
+    invocation_path: Path | None,
+    confirmed: bool,
     target_value: Path | None,
     home_value: Path | None,
     as_json: bool,
@@ -1755,6 +1775,37 @@ def run_command(
 
     _require_supported_platform()
     try:
+        if invocation_path is not None and confirmed:
+            raise click.ClickException("run accepts either --invocation or --confirm, not both")
+        if invocation_path is not None:
+            invocation = load_invocation_bytes(invocation_path.read_bytes())
+            if invocation.command != "run":
+                raise click.ClickException("run requires an invocation with command=run")
+            selected_home = (home_value or default_home_root()).resolve(strict=False)
+            envelope_home = invocation.target.get("home")
+            if envelope_home is not None and Path(envelope_home).expanduser().resolve(strict=False) != selected_home:
+                raise click.ClickException("invocation target.home does not match the selected GigAI home")
+            operator_consent = {
+                "schema_version": "1.0",
+                "kind": "operator_run_consent",
+                "action": "run",
+                "actor": {"kind": "operator", "id": "local-user"},
+                "source": "agent_invocation",
+                "invocation_id": invocation.invocation_id,
+                "consent": list(invocation.consent),
+            }
+        elif confirmed:
+            operator_consent = {
+                "schema_version": "1.0",
+                "kind": "operator_run_consent",
+                "action": "run",
+                "actor": {"kind": "operator", "id": "local-user"},
+                "source": "cli_confirmation",
+            }
+        else:
+            raise click.ClickException(
+                "run requires --confirm or a consent-bearing --invocation envelope"
+            )
         result = launch_run(
             home_root=home_value or default_home_root(),
             requested_target=target_value,
@@ -1762,8 +1813,9 @@ def run_command(
             version=version,
             wait=wait,
             invocation_argv=tuple(sys.argv),
+            operator_consent=operator_consent,
         )
-    except (RunError, WorkpadError, OSError, ValueError) as exc:
+    except (RunError, WorkpadError, OSError, ValueError, InvocationValidationError) as exc:
         raise click.ClickException(str(exc)) from exc
     payload = {
         "gig_id": result.gig_id,
