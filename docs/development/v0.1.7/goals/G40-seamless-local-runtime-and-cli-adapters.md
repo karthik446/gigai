@@ -165,12 +165,14 @@ the invoking agent. A direct library call is not CLI acceptance evidence.
 
 ### `gigai run`
 
-The effectful CLI Run path requires one explicit consent source before it can
-allocate a Run: either a consent-bearing `--invocation` envelope with
-`command: run`, or an explicit `--confirm` operator action. GigAI persists the
-normalized operator consent under the Run and references it from the sealed
-Run manifest. An ordinary `gigai run` invocation without either source fails
-before Run allocation.
+The effectful CLI Run path requires direct `--confirm` operator consent before
+it can allocate a Run. An optional `--invocation` envelope supplies bounded
+agent intent only; it cannot authorize the Run and its `gig_id`, `version`,
+`wait`, home, and project values must match the CLI-selected and resolved
+values. GigAI resolves that scope, redeems the one-time confirmation before
+Run allocation, and persists the scoped consent under the Run as sealed
+evidence. An ordinary `gigai run` invocation without `--confirm` fails before
+Run allocation.
 
 ### Agent invocation envelope
 
@@ -220,9 +222,10 @@ GigAI = validation, authority, execution, and evidence owner
 
 Missing or malformed triggers, unsupported fields at any envelope level,
 unknown actors, or unauthorized effects fail closed with typed diagnostics.
-Proposal creation is non-authoritative and may carry an empty consent list; an
-effectful `run` invocation requires an explicit operator consent record. The
-agent cannot approve its own proposal.
+Proposal creation is non-authoritative and may carry an empty consent list.
+Agent-provided consent is never accepted for an effectful `run`; the actual
+CLI Run path requires direct `--confirm` operator consent. The agent cannot
+approve its own proposal.
 
 ## Runtime discovery contract
 
@@ -394,9 +397,10 @@ The current source worktree has these passing evidence runs:
 - the installed-scenario suites for G03, G04, and G11, pointed at this
   source worktree's executable: **25 passed**;
 - the complete repository suite, pointed at this source worktree's executable
-  and run with local socket permission: **632 passed, 1 skipped**;
+  and run with local socket permission after the review correction: **634
+  passed, 1 skipped**;
 - direct isolated UAT: terminal setup, persisted local targets, explicit agent
-  envelope, proposal-only creation, consent-bearing CLI Run, and
+  envelope, proposal-only creation, direct-confirmed CLI Run, and
   existing-authority CLI approval; and
 - hydration failure classification, redacted `models --json`, source
   compilation, and `git diff --check` pass.

@@ -91,8 +91,16 @@ def test_invocation_rejects_unknown_agent_actor() -> None:
 
 
 def test_invocation_requires_operator_consent_for_run() -> None:
-    with pytest.raises(InvocationValidationError, match="operator consent"):
-        parse_invocation(_invocation(command="run", input={}))
+    with pytest.raises(InvocationValidationError, match="agent-provided run consent"):
+        parse_invocation(
+            _invocation(
+                command="run",
+                input={"gig_id": "gig_test", "version": 1, "wait": True},
+                consent=[
+                    {"action": "run", "actor": {"kind": "operator", "id": "local-user"}}
+                ],
+            )
+        )
 
 
 def test_discovery_snapshot_is_immutable_evidence_and_persisted_atomically(
@@ -309,7 +317,36 @@ def test_run_requires_explicit_consent_before_starting() -> None:
     result = CliRunner().invoke(cli, ["run", "--home", "/tmp/gigai-test", "--json"])
 
     assert result.exit_code != 0
-    assert "run requires --confirm or a consent-bearing --invocation envelope" in result.output
+    assert "run requires direct --confirm operator consent" in result.output
+
+
+def test_agent_run_envelope_cannot_authorize_mismatched_cli_gig(tmp_path: Path) -> None:
+    envelope = tmp_path / "gigai-run-mismatch.json"
+    envelope.write_text(
+        json.dumps(
+            _invocation(
+                command="run",
+                input={"gig_id": "gig_envelope", "version": 1, "wait": False},
+                consent=[],
+            )
+        ),
+        encoding="utf-8",
+    )
+    result = CliRunner().invoke(
+        cli,
+        [
+                "run",
+                "gig_cli",
+                "--home",
+                "/tmp/gigai",
+                "--invocation",
+            str(envelope),
+            "--confirm",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "does not match invocation input.gig_id" in result.output
 
 
 def test_cli_run_persists_consent_from_agent_envelope(tmp_path: Path) -> None:
@@ -324,7 +361,7 @@ def test_cli_run_persists_consent_from_agent_envelope(tmp_path: Path) -> None:
             open_with_target=False,
         )
     )
-    initialize_target(home_root=home, requested_target=target)
+    binding = initialize_target(home_root=home, requested_target=target)
     created = create_offline(
         home_root=home,
         requested_target=target,
@@ -341,9 +378,9 @@ def test_cli_run_persists_consent_from_agent_envelope(tmp_path: Path) -> None:
         json.dumps(
             _invocation(
                 command="run",
-                target={"home": str(home), "project": "project-1"},
-                input={},
-                consent=[{"action": "run", "actor": {"kind": "operator", "id": "local-user"}}],
+                target={"home": str(home), "project": binding.project_id},
+                input={"gig_id": created.gig_id, "version": 1, "wait": True},
+                consent=[],
             )
         ),
         encoding="utf-8",
@@ -360,6 +397,7 @@ def test_cli_run_persists_consent_from_agent_envelope(tmp_path: Path) -> None:
             str(target),
             "--invocation",
             str(envelope),
+            "--confirm",
             "--wait",
             "--json",
         ],
@@ -371,7 +409,67 @@ def test_cli_run_persists_consent_from_agent_envelope(tmp_path: Path) -> None:
     consent_paths = list((tmp_path / "workpads").rglob("operator-consent.json"))
     assert len(consent_paths) == 1
     consent_path = consent_paths[0]
-    assert json.loads(consent_path.read_text(encoding="utf-8"))["invocation_id"] == "inv_test-001"
+    consent = json.loads(consent_path.read_text(encoding="utf-8"))
+    assert consent["source"] == "direct_cli_confirm"
+    assert consent["invocation_id"] == "inv_test-001"
+    assert consent["redeemed_before_allocation"] is True
+    assert consent["scope"] == {
+        "project_id": binding.project_id,
+        "gig_id": created.gig_id,
+        "gig_version": 1,
+        "target_kind": "non-git",
+        "target_observation_sha256": consent["scope"]["target_observation_sha256"],
+    }
+
+
+def test_repeated_direct_confirmations_redeem_distinct_run_consent_records(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    target = tmp_path / "target"
+    target.mkdir()
+    run_setup(
+        build_config(
+            home_root=home,
+            workpad_root=tmp_path / "workpads",
+            editor_argv=("/usr/bin/true",),
+            open_with_target=False,
+        )
+    )
+    initialize_target(home_root=home, requested_target=target)
+    created = create_offline(
+        home_root=home,
+        requested_target=target,
+        name="replayed-confirmation",
+        open_editor=False,
+    )
+    approve_offline(
+        home_root=home,
+        requested_target=target,
+        proposal_id=created.proposal_id,
+    )
+    args = [
+        "run",
+        created.gig_id,
+        "--home",
+        str(home),
+        "--target",
+        str(target),
+        "--confirm",
+        "--wait",
+        "--json",
+    ]
+
+    first = CliRunner().invoke(cli, args)
+    second = CliRunner().invoke(cli, args)
+
+    assert first.exit_code == second.exit_code == 0
+    records = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (tmp_path / "workpads").rglob("operator-consent.json")
+    ]
+    assert len(records) == 2
+    assert len({record["confirmation_id"] for record in records}) == 2
 
 
 def test_create_requires_and_consumes_explicit_agent_envelope(tmp_path: Path) -> None:

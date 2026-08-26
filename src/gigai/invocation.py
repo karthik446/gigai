@@ -123,12 +123,10 @@ def parse_invocation(payload: Mapping[str, Any]) -> AgentInvocation:
     input_values = _input(payload.get("input"), command)
     requested = _requested(payload.get("requested"))
     consent = _consent(payload.get("consent"))
-    if command == "run" and not consent:
+    if command == "run" and consent:
         raise InvocationValidationError(
-            "run invocation requires an explicit operator consent record"
+            "agent-provided run consent is not accepted; use direct operator confirmation"
         )
-    if command == "run" and any(item["action"] != "run" for item in consent):
-        raise InvocationValidationError("run consent records must authorize run")
     return AgentInvocation(
         protocol_version=protocol_version,
         invocation_id=invocation_id,

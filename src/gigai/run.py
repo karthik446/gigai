@@ -101,6 +101,22 @@ def launch_run(
     proposal = authority["proposal"]
     _validate_authority(resolved, graph, proposal)
     target_before = _target_observation(resolved)
+    redeemed_consent = None
+    if operator_consent is not None:
+        if operator_consent.get("source") != "direct_cli_confirm":
+            raise RunError("Run consent must come from direct local operator confirmation")
+        redeemed_consent = {
+            **dict(operator_consent),
+            "confirmation_id": f"confirm_{uuid_factory()}",
+            "redeemed_before_allocation": True,
+            "scope": {
+                "project_id": resolved.project_id,
+                "gig_id": resolved.gig_id,
+                "gig_version": authority["version"],
+                "target_kind": resolved.target_kind,
+                "target_observation_sha256": target_before["observation_sha256"],
+            },
+        }
     run_id = _allocate_run_id(resolved.path, uuid_factory)
     run_path = resolved.path / "runs" / run_id
     run_path.mkdir(parents=True, mode=0o700)
@@ -114,7 +130,7 @@ def launch_run(
             proposal=proposal,
             target_before=target_before,
             invocation_argv=invocation_argv,
-            operator_consent=operator_consent,
+            operator_consent=redeemed_consent,
         )
         observer("after_brief_write")
         observer("after_manifest_seal")

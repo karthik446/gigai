@@ -1748,7 +1748,7 @@ def reject_command(
     "--invocation",
     "invocation_path",
     type=click.Path(path_type=Path, dir_okay=False),
-    help="Explicit run envelope containing operator consent; mutually exclusive with --confirm.",
+    help="Explicit run envelope whose selected Run must also receive direct --confirm.",
 )
 @click.option(
     "--confirm",
@@ -1775,43 +1775,69 @@ def run_command(
 
     _require_supported_platform()
     try:
-        if invocation_path is not None and confirmed:
-            raise click.ClickException("run accepts either --invocation or --confirm, not both")
+        selected_home = (home_value or default_home_root()).resolve(strict=False)
+        selected_gig_id = gig_id
+        selected_version = version
+        selected_wait = wait
+        invocation = None
         if invocation_path is not None:
             invocation = load_invocation_bytes(invocation_path.read_bytes())
             if invocation.command != "run":
                 raise click.ClickException("run requires an invocation with command=run")
-            selected_home = (home_value or default_home_root()).resolve(strict=False)
+            if not confirmed:
+                raise click.ClickException(
+                    "an agent run envelope requires direct --confirm operator consent"
+                )
             envelope_home = invocation.target.get("home")
-            if envelope_home is not None and Path(envelope_home).expanduser().resolve(strict=False) != selected_home:
+            envelope_project = invocation.target.get("project")
+            if envelope_home is None or envelope_project is None:
+                raise click.ClickException(
+                    "run invocation target requires home and project"
+                )
+            if Path(envelope_home).expanduser().resolve(strict=False) != selected_home:
                 raise click.ClickException("invocation target.home does not match the selected GigAI home")
-            operator_consent = {
-                "schema_version": "1.0",
-                "kind": "operator_run_consent",
-                "action": "run",
-                "actor": {"kind": "operator", "id": "local-user"},
-                "source": "agent_invocation",
-                "invocation_id": invocation.invocation_id,
-                "consent": list(invocation.consent),
-            }
-        elif confirmed:
-            operator_consent = {
-                "schema_version": "1.0",
-                "kind": "operator_run_consent",
-                "action": "run",
-                "actor": {"kind": "operator", "id": "local-user"},
-                "source": "cli_confirmation",
-            }
-        else:
-            raise click.ClickException(
-                "run requires --confirm or a consent-bearing --invocation envelope"
+            invocation_gig_id = invocation.input.get("gig_id")
+            invocation_version = invocation.input.get("version")
+            invocation_wait = invocation.input.get("wait")
+            if not isinstance(invocation_gig_id, str) or not isinstance(invocation_version, int) or not isinstance(invocation_wait, bool):
+                raise click.ClickException(
+                    "run invocation input requires gig_id, version, and wait"
+                )
+            if gig_id is not None and gig_id != invocation_gig_id:
+                raise click.ClickException("CLI gig_id does not match invocation input.gig_id")
+            if version is not None and version != invocation_version:
+                raise click.ClickException("CLI version does not match invocation input.version")
+            if wait != invocation_wait:
+                raise click.ClickException("CLI --wait does not match invocation input.wait")
+            selected_gig_id = invocation_gig_id
+            selected_version = invocation_version
+            selected_wait = invocation_wait
+            resolved = resolve_workpad(
+                home_root=selected_home,
+                requested_target=target_value,
+                gig_id=selected_gig_id,
+                allow_semantic_state=True,
             )
+            if envelope_project != resolved.project_id:
+                raise click.ClickException(
+                    "invocation target.project does not match the resolved project"
+                )
+        if not confirmed:
+            raise click.ClickException("run requires direct --confirm operator consent")
+        operator_consent = {
+            "schema_version": "1.0",
+            "kind": "operator_run_consent",
+            "action": "run",
+            "actor": {"kind": "operator", "id": "local-user"},
+            "source": "direct_cli_confirm",
+            **({"invocation_id": invocation.invocation_id} if invocation else {}),
+        }
         result = launch_run(
-            home_root=home_value or default_home_root(),
+            home_root=selected_home,
             requested_target=target_value,
-            gig_id=gig_id,
-            version=version,
-            wait=wait,
+            gig_id=selected_gig_id,
+            version=selected_version,
+            wait=selected_wait,
             invocation_argv=tuple(sys.argv),
             operator_consent=operator_consent,
         )
