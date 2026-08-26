@@ -165,14 +165,16 @@ the invoking agent. A direct library call is not CLI acceptance evidence.
 
 ### `gigai run`
 
-The effectful CLI Run path requires direct `--confirm` operator consent before
-it can allocate a Run. An optional `--invocation` envelope supplies bounded
-agent intent only; it cannot authorize the Run and its `gig_id`, `version`,
-`wait`, home, and project values must match the CLI-selected and resolved
-values. GigAI resolves that scope, redeems the one-time confirmation before
-Run allocation, and persists the scoped consent under the Run as sealed
-evidence. An ordinary `gigai run` invocation without `--confirm` fails before
-Run allocation.
+Every effectful CLI Run path requires direct `--confirm` operator consent
+before it can allocate a Run, including `gigai run` and
+`gigai occurrence trigger`. An optional `--invocation` envelope supplies
+bounded agent intent only; it cannot authorize the Run and its `gig_id`,
+`version`, `wait`, home, and project values must match the CLI-selected and
+resolved values. GigAI resolves that scope, redeems the one-time confirmation
+before Run allocation, and persists the scoped consent under the Run as sealed
+evidence. Either effectful CLI command without `--confirm` fails before Run
+allocation. Occurrence-trigger consent additionally records the occurrence
+identity while the shared Run path binds the actual resolved scope.
 
 ### Agent invocation envelope
 
@@ -390,14 +392,15 @@ and the acceptance evidence that proves the runtime and documentation agree.
 
 The current source worktree has these passing evidence runs:
 
-- the focused G40 correction suite: **27 passed**;
+- the focused G40 correction suite, including occurrence-trigger consent:
+  **31 passed**;
 - the G40 plus Run lifecycle suite: **33 passed**;
 - the loopback compatibility suite, run with local socket permission:
   **18 passed**;
 - the installed-scenario suites for G03, G04, and G11, pointed at this
   source worktree's executable: **25 passed**;
 - the complete repository suite, pointed at this source worktree's executable
-  and run with local socket permission after the review correction: **634
+  and run with local socket permission after the review correction: **636
   passed, 1 skipped**;
 - direct isolated UAT: terminal setup, persisted local targets, explicit agent
   envelope, proposal-only creation, direct-confirmed CLI Run, and

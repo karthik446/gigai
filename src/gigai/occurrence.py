@@ -154,6 +154,7 @@ def trigger_occurrence(
     occurrence_id: str,
     gig_id: str | None = None,
     wait: bool = False,
+    operator_consent: Mapping[str, object] | None = None,
     uuid_factory: UUIDFactory = uuid.uuid4,
     observer: OccurrenceObserver | None = None,
 ) -> OccurrenceResult:
@@ -193,6 +194,7 @@ def trigger_occurrence(
             version=int(record["gig_version"]),
             wait=wait,
             invocation_argv=("gigai", "occurrence", "trigger", occurrence_id),
+            operator_consent=operator_consent,
             uuid_factory=uuid_factory,
             observer=observer,
         )

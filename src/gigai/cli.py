@@ -1952,6 +1952,12 @@ def occurrence_declare_command(
 @click.option("--gig-id")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option(
+    "--confirm",
+    "confirmed",
+    is_flag=True,
+    help="Record explicit local-operator consent for this Run.",
+)
 @click.option("--json", "as_json", is_flag=True)
 def occurrence_trigger_command(
     occurrence_id: str,
@@ -1959,11 +1965,24 @@ def occurrence_trigger_command(
     gig_id: str | None,
     target_value: Path | None,
     home_value: Path | None,
+    confirmed: bool,
     as_json: bool,
 ) -> None:
     """Trigger one declared occurrence through the existing Run path."""
 
     _require_supported_platform()
+    if not confirmed:
+        raise click.ClickException(
+            "occurrence trigger requires direct --confirm operator consent"
+        )
+    operator_consent = {
+        "schema_version": "1.0",
+        "kind": "operator_run_consent",
+        "action": "run",
+        "actor": {"kind": "operator", "id": "local-user"},
+        "source": "direct_cli_confirm",
+        "occurrence_id": occurrence_id,
+    }
     try:
         result = trigger_occurrence(
             home_root=home_value or default_home_root(),
@@ -1971,6 +1990,7 @@ def occurrence_trigger_command(
             gig_id=gig_id,
             occurrence_id=occurrence_id,
             wait=wait,
+            operator_consent=operator_consent,
         )
         payload = _occurrence_payload(result)
     except (OccurrenceError, RunError, WorkpadError, OSError, ValueError) as exc:

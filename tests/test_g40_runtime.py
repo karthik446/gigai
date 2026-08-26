@@ -320,6 +320,51 @@ def test_run_requires_explicit_consent_before_starting() -> None:
     assert "run requires direct --confirm operator consent" in result.output
 
 
+def test_occurrence_trigger_requires_explicit_consent_before_starting() -> None:
+    result = CliRunner().invoke(
+        cli,
+        ["occurrence", "trigger", "occ_test", "--home", "/tmp/gigai-test", "--json"],
+    )
+
+    assert result.exit_code != 0
+    assert "occurrence trigger requires direct --confirm operator consent" in result.output
+
+
+def test_occurrence_trigger_passes_direct_consent_to_run_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_trigger(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("gigai.cli.trigger_occurrence", fake_trigger)
+    monkeypatch.setattr(
+        "gigai.cli._occurrence_payload",
+        lambda _result: {"occurrence_id": "occ_test", "state": "run_prepared"},
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "occurrence",
+            "trigger",
+            "occ_test",
+            "--home",
+            "/tmp/gigai-test",
+            "--confirm",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    consent = captured["operator_consent"]
+    assert isinstance(consent, dict)
+    assert consent["source"] == "direct_cli_confirm"
+    assert consent["occurrence_id"] == "occ_test"
+
+
 def test_agent_run_envelope_cannot_authorize_mismatched_cli_gig(tmp_path: Path) -> None:
     envelope = tmp_path / "gigai-run-mismatch.json"
     envelope.write_text(
