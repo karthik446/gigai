@@ -224,6 +224,7 @@ class ScenarioSpec:
     expected_target_changes: frozenset[str] = frozenset()
     expected_workpad_changes: frozenset[str] = frozenset()
     expected_home_changes: frozenset[str] = frozenset()
+    allowed_target_change_prefixes: tuple[str, ...] = ()
     allowed_home_change_prefixes: tuple[str, ...] = ()
     allowed_subprocesses: tuple[Path, ...] = ()
     extra_env: tuple[tuple[str, str], ...] = ()
@@ -351,6 +352,16 @@ class ScenarioHarness:
                     if any(
                         path == prefix or path.startswith(prefix + "/")
                         for prefix in allowed_prefixes
+                    )
+                }
+                actual_changes = actual_changes - allowed
+            if root_name == "target":
+                allowed = {
+                    path
+                    for path in actual_changes
+                    if any(
+                        path == prefix or path.startswith(prefix + "/")
+                        for prefix in spec.allowed_target_change_prefixes
                     )
                 }
                 actual_changes = actual_changes - allowed

@@ -47,6 +47,7 @@ SCHEMA_NAMES = (
     "model-invocation.schema.json",
     "proposal-interview.schema.json",
     "proposal-draft-manifest.schema.json",
+    "gig-package.schema.json",
     "report.schema.json",
     "review-bundle.schema.json",
     "review-contract.schema.json",

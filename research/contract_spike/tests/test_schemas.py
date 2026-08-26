@@ -25,6 +25,7 @@ EXPECTED_SCHEMA_NAMES = {
     "gig-builder-session.schema.json",
     "gig-comparison.schema.json",
     "gig-discovery-manifest.schema.json",
+    "gig-package.schema.json",
     "gig-occurrence.schema.json",
     "gig-proposal.schema.json",
     "goal-graph.schema.json",
@@ -1069,6 +1070,14 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "urn:gigai:schema:gig-builder-session:1": builder_session,
         "urn:gigai:schema:proposal-draft-manifest:1": draft_manifest,
         "urn:gigai:schema:gig-discovery-manifest:1": discovery_manifest,
+        "urn:gigai:schema:gig-package:1": {
+            "schema_version": "1.0",
+            "package_id": "package_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "package_version": 1,
+            "project_scope": "repository",
+            "content_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "files": [],
+        },
         "urn:gigai:schema:role-reference:1": role_reference,
     }
 
@@ -1110,7 +1119,7 @@ class SerializedContractTests(unittest.TestCase):
         )
 
     def test_all_schema_documents_are_valid_draft_2020_12(self) -> None:
-        self.assertEqual(len(self.schemas), 31)
+        self.assertEqual(len(self.schemas), 32)
         for schema_id, schema in self.schemas.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)

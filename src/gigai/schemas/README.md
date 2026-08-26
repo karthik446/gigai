@@ -35,6 +35,8 @@ bounded research planning, and the stable Gig/Run-input distinction.
 The G28 role-registry amendment adds `role-reference.schema.json` as the
 thirty-first resource for namespaced, versioned role references that grant no
 capability or authority.
+The G41 package-boundary amendment adds `gig-package.schema.json` as the
+thirty-second resource for portable project-local package manifests.
 
 ## Production identity API
 

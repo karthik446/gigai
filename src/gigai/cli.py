@@ -50,6 +50,13 @@ from .model_discovery import (
     probe_target_readiness,
     resolve_target_readiness,
 )
+from .package import (
+    PackageError,
+    initialize_project_package,
+    inspect_package,
+    install_package,
+    upgrade_installation,
+)
 from .proposal_interview import InterviewHTTPServer, block_session, request_revision
 from .occurrence import (
     OccurrenceError,
@@ -1279,37 +1286,159 @@ def doctor_command(
 @click.option(
     "--json", "as_json", is_flag=True, help="Emit a path-free result summary."
 )
-def init_command(target: Path | None, home_value: Path | None, as_json: bool) -> None:
-    """Bind one target without creating a Gig, workpad, journal, or remote."""
+@click.option(
+    "--adopt-package",
+    is_flag=True,
+    help="Adopt one already-tracked, validated portable package.",
+)
+@click.option(
+    "--confirm",
+    "confirmed",
+    is_flag=True,
+    help="Confirm package adoption when --adopt-package is used.",
+)
+def init_command(
+    target: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+    adopt_package: bool,
+    confirmed: bool,
+) -> None:
+    """Initialize or reconcile the project-local portable package boundary."""
 
     _require_supported_platform()
     try:
-        result = initialize_target(
+        result = initialize_project_package(
             home_root=(home_value or default_home_root()),
             requested_target=target,
+            adopt_package=adopt_package,
+            confirmed=confirmed,
         )
-    except (TargetBindingError, OSError) as exc:
+    except (PackageError, TargetBindingError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     payload = {
         "binding_created": result.binding_created,
         "exclude_changed": result.exclude_changed,
+        "package_digest": result.package_digest,
+        "package_id": result.package_id,
         "project_id": result.project_id,
         "reconciled": result.reconciled,
         "registry_changed": result.registry_changed,
         "target_kind": result.target_kind,
-        "workpad_locator": f"registry:{result.project_id}",
+        "adopted": result.adopted,
     }
     if as_json:
         click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     else:
-        disposition = "created" if result.binding_created else "confirmed"
+        disposition = "adopted" if result.adopted else ("created" if result.binding_created else "confirmed")
         click.echo(
-            f"GigAI target binding {disposition}: {result.project_id} "
-            f"({result.target_kind})."
+            f"GigAI project package {disposition}: {result.package_id} "
+            f"for {result.project_id} ({result.target_kind})."
         )
         if result.reconciled:
             click.echo("Derived registry or exclude state was reconciled.")
+
+
+@cli.group("package")
+def package_group() -> None:
+    """Inspect and install portable project-local packages."""
+
+
+@package_group.command("inspect")
+@click.argument("package_path", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def package_inspect_command(package_path: Path, as_json: bool) -> None:
+    """Validate one package and report its portable identity."""
+
+    try:
+        result = inspect_package(package_path)
+    except PackageError as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {
+        "package_id": result.package_id,
+        "package_version": result.package_version,
+        "content_digest": result.content_digest,
+        "files": list(result.files),
+        "valid": True,
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Package {result.package_id} is valid ({result.content_digest}).")
+
+
+@package_group.command("install")
+@click.argument("package_path", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", required=True, type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def package_install_command(
+    package_path: Path, target: Path, home_value: Path | None, as_json: bool
+) -> None:
+    """Install portable bytes without importing project or Gig authority."""
+
+    try:
+        result = install_package(
+            home_root=home_value or default_home_root(),
+            requested_target=target,
+            source_package=package_path,
+        )
+    except PackageError as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {
+        "package_id": result.package_id,
+        "package_digest": result.package_digest,
+        "package_root": ".gigai/packages/" + result.package_id,
+        "installation_status": result.status,
+        "authority_imported": False,
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Installed package {result.package_id} ({result.status}).")
+
+
+@cli.command("upgrade")
+@click.option(
+    "--target",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="Target directory whose project package boundary should be upgraded.",
+)
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option(
+    "--confirm",
+    "confirmed",
+    is_flag=True,
+    help="Confirm the v0.1.6-to-v0.1.7 migration.",
+)
+@click.option("--json", "as_json", is_flag=True)
+def upgrade_command(
+    target: Path | None, home_value: Path | None, confirmed: bool, as_json: bool
+) -> None:
+    """Migrate a supported v0.1.6 installation and project boundary."""
+
+    try:
+        result = upgrade_installation(
+            home_root=home_value or default_home_root(),
+            requested_target=target,
+            confirmed=confirmed,
+        )
+    except PackageError as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {
+        "migration": "v0.1.6-to-v0.1.7",
+        "status": "completed",
+        "package_id": result.package.package_id,
+        "package_digest": result.package.package_digest,
+        "source_config_digest": result.source_config_digest,
+        "destination_config_digest": result.destination_config_digest,
+        "registry_preserved": result.registry_preserved,
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Upgrade completed with package {result.package.package_id}.")
 
 
 @cli.command("create")

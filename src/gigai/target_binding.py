@@ -279,6 +279,7 @@ def initialize_target(
     home_root: Path,
     requested_target: Path | None,
     cwd: Path | None = None,
+    allow_tracked_portable: bool = False,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> TargetBindingResult:
     """Bind one target without creating a workpad or touching tracked content."""
@@ -302,6 +303,7 @@ def initialize_target(
             return _initialize_git_target(
                 home=home,
                 target=target,
+                allow_tracked_portable=allow_tracked_portable,
                 uuid_factory=uuid_factory,
             )
         return _initialize_non_git_target(
@@ -319,16 +321,17 @@ def _initialize_git_target(
     *,
     home: Path,
     target: ResolvedTarget,
+    allow_tracked_portable: bool,
     uuid_factory: Callable[[], uuid.UUID],
 ) -> TargetBindingResult:
     status_before = _git_bytes(
         target.root, "status", "--porcelain=v1", "-z", "--untracked-files=all"
     )
-    _preflight_git_target(home, target.root)
+    _preflight_git_target(home, target.root, allow_tracked_portable=allow_tracked_portable)
     lock_path = _git_path(target.root, INIT_LOCK_NAME)
     with TargetInitLock(lock_path):
         assert_target_identity_stable(target)
-        _preflight_git_target(home, target.root)
+        _preflight_git_target(home, target.root, allow_tracked_portable=allow_tracked_portable)
         existing_binding = _optional_binding(target.root)
         registry, registry_created = open_project_registry(home, create=True)
         try:
@@ -465,22 +468,32 @@ def _initialize_non_git_target(
         raise TargetBindingError(str(exc)) from exc
 
 
-def _preflight_git_target(home: Path, root: Path) -> None:
+def _preflight_git_target(
+    home: Path, root: Path, *, allow_tracked_portable: bool = False
+) -> None:
     tracked = _git_bytes(root, "ls-files", "-z", "--", BINDING_DIRECTORY)
     if tracked:
-        raise TrackedBindingError(
-            "tracked .gigai content is refused; resolve it explicitly before init"
+        tracked_paths = tuple(
+            item.decode("utf-8") for item in tracked.split(b"\0") if item
         )
+        if not allow_tracked_portable or any(
+            not path.startswith(f"{BINDING_DIRECTORY}/packages/")
+            for path in tracked_paths
+        ):
+            raise TrackedBindingError(
+                "tracked .gigai content is refused; resolve it explicitly before init"
+            )
     directory = root / BINDING_DIRECTORY
     if directory.is_symlink():
         raise ConflictingBindingError("target .gigai path must not be a symlink")
     if directory.exists() and not directory.is_dir():
         raise ConflictingBindingError("target .gigai path is not a directory")
     if directory.is_dir():
+        allowed = {binding_path(root).name, "packages"}
         unexpected = sorted(
             path.name
             for path in directory.iterdir()
-            if path.name != binding_path(root).name
+            if path.name not in allowed
         )
         if unexpected:
             raise ConflictingBindingError(
@@ -532,6 +545,8 @@ def _ensure_exclude_entry(root: Path) -> bool:
     before = path.read_bytes() if path.exists() else b""
     lines = before.splitlines()
     count = sum(line == EXCLUDE_ENTRY.rstrip(b"\n") for line in lines)
+    if count == 0 and b"/.gigai/project.toml" in lines:
+        return False
     if count == 1:
         return False
     if count == 0:

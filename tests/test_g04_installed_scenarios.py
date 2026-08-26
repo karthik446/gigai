@@ -107,6 +107,15 @@ def _git_status(root: Path) -> bytes:
     ).stdout
 
 
+def _without_package_status(status: bytes) -> bytes:
+    entries = [
+        entry
+        for entry in status.split(b"\0")
+        if entry and not entry.startswith(b"?? .gigai/packages/")
+    ]
+    return b"\0".join(entries) + (b"\0" if entries else b"")
+
+
 def test_installed_git_init_has_exact_path_free_delta_and_idempotent_rerun(
     tmp_path: Path, installed_gigai: InstalledGigAI
 ) -> None:
@@ -124,6 +133,7 @@ def test_installed_git_init_has_exact_path_free_delta_and_idempotent_rerun(
             argv=("init", "--json"),
             expected_target_changes=frozenset({".gigai", ".gigai/project.toml"}),
             expected_home_changes=frozenset({"registry.sqlite"}),
+            allowed_target_change_prefixes=(".gigai/packages", "@git"),
             allowed_subprocesses=(_git_executable(),),
         )
     )
@@ -147,8 +157,8 @@ def test_installed_git_init_has_exact_path_free_delta_and_idempotent_rerun(
     assert binding_bytes == (roots.target / ".gigai" / "project.toml").read_bytes()
     assert b"/" not in binding_bytes
     assert exclude_after != exclude_before
-    assert exclude_after.splitlines().count(b"/.gigai/") == 1
-    assert _git_status(roots.target) == status_before
+    assert exclude_after.splitlines().count(b"/.gigai/") == 0
+    assert _without_package_status(_git_status(roots.target)) == status_before
     assert not (roots.target / ".git" / "gigai-init.lock").exists()
     public_evidence = first.stdout + second.stdout
     public_evidence += first.artifact.read_text(encoding="utf-8")
@@ -179,13 +189,14 @@ def test_installed_init_preserves_dirty_python_and_non_python_targets(
             argv=("init", "--json"),
             expected_target_changes=frozenset({".gigai", ".gigai/project.toml"}),
             expected_home_changes=frozenset({"registry.sqlite"}),
+            allowed_target_change_prefixes=(".gigai/packages", "@git"),
             allowed_subprocesses=(_git_executable(),),
         )
     )
 
     assert tracked.read_bytes() == tracked_before
     assert untracked.read_bytes() == untracked_before
-    assert _git_status(roots.target) == status_before
+    assert _without_package_status(_git_status(roots.target)) == status_before
 
 
 def test_installed_explicit_non_git_init_is_registry_only(
@@ -199,7 +210,9 @@ def test_installed_explicit_non_git_init_is_registry_only(
         ScenarioSpec(
             name="non-git-init",
             argv=("init", "--target", os.fspath(roots.target), "--json"),
+            expected_target_changes=frozenset({".gigai"}),
             expected_home_changes=frozenset({"registry.sqlite"}),
+            allowed_target_change_prefixes=(".gigai/packages",),
             allowed_subprocesses=(_git_executable(),),
         )
     )
@@ -207,7 +220,8 @@ def test_installed_explicit_non_git_init_is_registry_only(
     payload = json.loads(result.stdout)
     assert payload["target_kind"] == "non-git"
     assert payload["binding_created"] is False
-    assert not (roots.target / ".gigai").exists()
+    assert not (roots.target / ".gigai" / "project.toml").exists()
+    assert len(tuple((roots.target / ".gigai" / "packages").glob("*/package.json"))) == 1
     records = open_project_registry(roots.home, create=False)[0].records()
     assert len(records) == 1
     assert records[0].target_locator == os.fspath(roots.target.resolve(strict=True))
@@ -476,6 +490,6 @@ def test_two_installed_init_processes_converge_without_lock_or_duplicate(
     assert payloads[0]["project_id"] == payloads[1]["project_id"]
     assert len(open_project_registry(roots.home, create=False)[0].records()) == 1
     exclude = (roots.target / ".git" / "info" / "exclude").read_bytes()
-    assert exclude.splitlines().count(b"/.gigai/") == 1
-    assert _git_status(roots.target) == before
+    assert exclude.splitlines().count(b"/.gigai/") == 0
+    assert _without_package_status(_git_status(roots.target)) == before
     assert not (roots.target / ".git" / "gigai-init.lock").exists()
