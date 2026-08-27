@@ -192,8 +192,11 @@ def initialize_project_package(
     except ConfigurationError as exc:
         raise PackageError(str(exc), code="configuration_invalid") from exc
     target = resolve_target(requested_target)
-    if target.kind == "git" and adopt_package:
-        _validate_adoption_tree(target.root)
+    if target.kind == "git":
+        if adopt_package:
+            _validate_adoption_tree(target.root)
+        else:
+            _validate_existing_packages(target.root)
     lock = (
         TargetInitLock(target.root / ".git" / "gigai-package.lock")
         if target.kind == "git"
@@ -231,7 +234,7 @@ def _initialize_and_prepare(
         binding = initialize_target(
             home_root=home,
             requested_target=requested_target,
-            allow_tracked_portable=adopt_package,
+            allow_tracked_portable=True,
             uuid_factory=uuid_factory,
         )
     except TargetBindingError as exc:
@@ -357,6 +360,7 @@ def upgrade_installation(
     workpad_fingerprint_before = _tree_fingerprint(workpad_root)
     try:
         target = resolve_target(requested_target)
+        gigai_directory_before = (target.root / ".gigai").exists()
         package_roots_before = {
             root.name for root in _package_roots(target.root)
         }
@@ -401,12 +405,53 @@ def upgrade_installation(
             registry_path=registry_path,
             registry_before=registry_before,
             target=target,
+            gigai_directory_before=gigai_directory_before,
             package_roots_before=package_roots_before,
             binding_before=binding_before,
             exclude_path=exclude_path,
             exclude_before=exclude_before,
         )
         raise PackageError(str(exc), code="upgrade_failed") from exc
+    try:
+        return _finalize_upgrade(
+            path=path,
+            migration_root=migration_root,
+            package=package,
+            source_config_digest=source_config_digest,
+            registry_path=registry_path,
+            registry_before=registry_before,
+            registry_fingerprint_before=registry_fingerprint_before,
+            workpad_root=workpad_root,
+            workpad_fingerprint_before=workpad_fingerprint_before,
+        )
+    except (ConfigurationError, OSError, PackageError) as exc:
+        _restore_upgrade_state(
+            config_path=path,
+            config_before=config_before,
+            registry_path=registry_path,
+            registry_before=registry_before,
+            target=target,
+            gigai_directory_before=gigai_directory_before,
+            package_roots_before=package_roots_before,
+            binding_before=binding_before,
+            exclude_path=exclude_path,
+            exclude_before=exclude_before,
+        )
+        raise PackageError(str(exc), code="upgrade_failed") from exc
+
+
+def _finalize_upgrade(
+    *,
+    path: Path,
+    migration_root: Path,
+    package: PackageInitResult,
+    source_config_digest: str,
+    registry_path: Path,
+    registry_before: bytes | None,
+    registry_fingerprint_before: str | None,
+    workpad_root: Path,
+    workpad_fingerprint_before: str | None,
+) -> UpgradeResult:
     config_after = path.read_bytes()
     registry_after = registry_path.read_bytes() if registry_path.exists() else None
     if registry_before is not None and registry_after is None:
@@ -501,6 +546,7 @@ def _restore_upgrade_state(
     registry_path: Path,
     registry_before: bytes | None,
     target: Any,
+    gigai_directory_before: bool,
     package_roots_before: set[str],
     binding_before: bytes | None,
     exclude_path: Path | None,
@@ -529,6 +575,13 @@ def _restore_upgrade_state(
             binding.unlink()
     elif binding.read_bytes() != binding_before:
         _write_atomic(binding, binding_before)
+    gigai_directory = target.root / ".gigai"
+    packages_directory = gigai_directory / "packages"
+    if not gigai_directory_before:
+        if packages_directory.is_dir() and not packages_directory.is_symlink():
+            packages_directory.rmdir()
+        if gigai_directory.is_dir() and not gigai_directory.is_symlink():
+            gigai_directory.rmdir()
     if exclude_path is not None:
         if exclude_before is None:
             if exclude_path.exists():
@@ -632,6 +685,19 @@ def _validate_adoption_tree(root: Path) -> None:
     if len(roots) != 1:
         raise PackageError("package adoption requires exactly one portable package", code="adoption_package_count")
     inspect_package(roots[0])
+
+
+def _validate_existing_packages(root: Path) -> None:
+    """Validate existing portable packages before target-binding mutation."""
+
+    roots = _package_roots(root)
+    if len(roots) > 1:
+        raise PackageError(
+            "project contains multiple portable packages; choose one explicitly",
+            code="package_ambiguous",
+        )
+    if roots:
+        inspect_package(roots[0])
 
 
 def _git_paths(root: Path) -> tuple[str, ...]:

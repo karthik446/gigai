@@ -68,6 +68,21 @@ def test_init_creates_portable_package_and_exact_private_excludes(tmp_path: Path
     assert rerun_payload["exclude_changed"] is False
 
 
+def test_init_is_idempotent_after_portable_package_is_tracked(tmp_path: Path) -> None:
+    home, target = _setup(tmp_path)
+    initial = initialize_project_package(home_root=home, requested_target=target)
+    _git_add(target, initial.package_root.relative_to(target).as_posix())
+
+    result = CliRunner().invoke(
+        cli, ["init", "--home", str(home), "--target", str(target), "--json"]
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["package_id"] == initial.package_id
+    assert payload["reconciled"] is False
+
+
 def test_adopt_package_preserves_existing_v016_binding(tmp_path: Path) -> None:
     home, target = _setup(tmp_path)
     initial = initialize_project_package(
@@ -375,3 +390,44 @@ def test_upgrade_failure_restores_predecessor_authority(
     assert not (home / "registry.sqlite").exists()
     assert not (target / ".gigai").exists()
     assert (home / "local" / "migrations" / "v0.1.6-to-v0.1.7" / "config.toml.v0.1.6.bak").read_bytes() == predecessor
+
+
+def test_upgrade_post_publication_verification_failure_rolls_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, target = _setup(tmp_path)
+    config = home / "config.toml"
+    config.write_text(
+        config.read_text(encoding="utf-8")
+        .replace('schema_version = "2.0"', 'schema_version = "1.0"')
+        .replace('capabilities = ["text"]\n', '')
+        .replace('max_output_tokens = 64\n', ''),
+        encoding="utf-8",
+    )
+    predecessor = config.read_bytes()
+
+    import gigai.package as package_module
+
+    fingerprints = iter(("sha256:before", "sha256:after"))
+    monkeypatch.setattr(
+        package_module,
+        "_tree_fingerprint",
+        lambda _root: next(fingerprints),
+    )
+    result = CliRunner().invoke(
+        cli,
+        [
+            "upgrade",
+            "--home",
+            str(home),
+            "--target",
+            str(target),
+            "--confirm",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert config.read_bytes() == predecessor
+    assert not (home / "registry.sqlite").exists()
+    assert not (target / ".gigai").exists()

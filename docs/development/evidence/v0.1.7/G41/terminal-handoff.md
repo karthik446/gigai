@@ -1,7 +1,7 @@
 # G41 Terminal Handoff
 
-**Status:** Complete  
-**Next consumers:** G42 and G44  
+**Status:** Complete
+**Next consumers:** G42 and G44
 
 G41 leaves v0.1.7 with these accepted inputs:
 

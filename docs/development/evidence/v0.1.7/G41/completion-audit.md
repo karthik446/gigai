@@ -1,8 +1,8 @@
 # G41 Completion Audit
 
-**Goal:** G41 — Project-Local `.gigai/` Package Boundary  
-**Release:** v0.1.7  
-**Outcome:** Complete  
+**Goal:** G41 — Project-Local `.gigai/` Package Boundary
+**Release:** v0.1.7
+**Outcome:** Complete
 
 ## Delivered contract
 
@@ -28,9 +28,10 @@ publication fails.
 
 ## Evidence
 
-- `tests/test_g41_package_boundary.py`: 7 passed, including fresh init,
+- `tests/test_g41_package_boundary.py`: 9 passed, including fresh init,
   exact excludes, adoption, private-content refusal, second-home installation,
-  idempotent upgrade, populated registry/workpad preservation, and rollback.
+  idempotent upgrade after the package is tracked, populated
+  registry/workpad preservation, and rollback before and after publication.
 - `tests/test_g04_installed_scenarios.py`,
   `tests/test_project_registry_and_target_binding.py`, and
   `tests/test_g40_runtime.py`: included in the focused 72-test run; cover
@@ -38,9 +39,17 @@ publication fails.
   concurrent initialization, and existing runtime invariants.
 - `research/contract_spike/tests/test_schemas.py` and the existing schema
   contract suites accept the additive thirty-second package schema resource.
-- Full suite: `643 passed, 1 skipped, 70 subtests passed`.
+- Full suite: `645 passed, 1 skipped, 70 subtests passed`.
 - Source compilation, `git diff --check`, and the focused package/runtime
   validation all pass.
+
+## Review remediation
+
+The follow-up review identified three gaps in the original closeout. They are
+resolved here: normal `gigai init` now validates and accepts its own tracked
+portable package; post-publication upgrade verification failures use the same
+targeted rollback boundary as publication failures; and all G41 Markdown
+artifacts are free of trailing whitespace.
 
 ## Authority and security result
 

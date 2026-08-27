@@ -1,10 +1,10 @@
 # G41 — Project-Local `.gigai/` Package Boundary
 
-**Version:** v0.1.7  
-**Status:** Complete — implementation and closeout evidence accepted  
+**Version:** v0.1.7
+**Status:** Complete — implementation and closeout evidence accepted
 **Depends on:** G40 complete and ratified; existing v0.1.6 configuration,
 registry, target-binding, workpad, journal, proposal/version, capability, and
-Run authorities  
+Run authorities
 **Unblocks:** G42 built-in Gig catalog, G44 clone/create-from, and the
 project-local inputs consumed by later v0.1.7 goals
 
