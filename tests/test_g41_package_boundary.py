@@ -83,6 +83,46 @@ def test_init_is_idempotent_after_portable_package_is_tracked(tmp_path: Path) ->
     assert payload["reconciled"] is False
 
 
+def test_unbound_tracked_package_requires_explicit_adoption(tmp_path: Path) -> None:
+    source_home, target = _setup(tmp_path)
+    initial = initialize_project_package(home_root=source_home, requested_target=target)
+    _git_add(target, initial.package_root.relative_to(target).as_posix())
+    (target / ".gigai" / "project.toml").unlink()
+
+    fresh_home = tmp_path / "fresh-home"
+    fresh_home.mkdir()
+    run_setup(
+        build_config(
+            home_root=fresh_home,
+            workpad_root=tmp_path / "fresh-workpads",
+            editor_argv=("/usr/bin/true",),
+            open_with_target=False,
+        )
+    )
+    plain = CliRunner().invoke(
+        cli, ["init", "--home", str(fresh_home), "--target", str(target)]
+    )
+    assert plain.exit_code != 0
+    assert "explicit --adopt-package --confirm" in plain.output
+    assert not (target / ".gigai" / "project.toml").exists()
+
+    adopted = CliRunner().invoke(
+        cli,
+        [
+            "init",
+            "--home",
+            str(fresh_home),
+            "--target",
+            str(target),
+            "--adopt-package",
+            "--confirm",
+            "--json",
+        ],
+    )
+    assert adopted.exit_code == 0, adopted.output
+    assert json.loads(adopted.output)["adopted"] is True
+
+
 def test_adopt_package_preserves_existing_v016_binding(tmp_path: Path) -> None:
     home, target = _setup(tmp_path)
     initial = initialize_project_package(

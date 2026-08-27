@@ -196,6 +196,12 @@ def initialize_project_package(
         if adopt_package:
             _validate_adoption_tree(target.root)
         else:
+            tracked = _git_paths(target.root)
+            if tracked and not binding_path(target.root).is_file():
+                raise PackageError(
+                    "tracked portable package requires explicit --adopt-package --confirm",
+                    code="adoption_required",
+                )
             _validate_existing_packages(target.root)
     lock = (
         TargetInitLock(target.root / ".git" / "gigai-package.lock")
@@ -234,7 +240,7 @@ def _initialize_and_prepare(
         binding = initialize_target(
             home_root=home,
             requested_target=requested_target,
-            allow_tracked_portable=True,
+            allow_tracked_portable=adopt_package or binding_path(target.root).is_file(),
             uuid_factory=uuid_factory,
         )
     except TargetBindingError as exc:
@@ -701,9 +707,12 @@ def _validate_existing_packages(root: Path) -> None:
 
 
 def _git_paths(root: Path) -> tuple[str, ...]:
+    executable = shutil.which("git")
+    if executable is None:
+        raise PackageError("Git executable is unavailable", code="git_inspection_failed")
     try:
         result = subprocess.run(
-            ["git", "-C", os.fspath(root), "ls-files", "-z", "--", ".gigai"],
+            [executable, "-C", os.fspath(root), "ls-files", "-z", "--", ".gigai"],
             check=True,
             capture_output=True,
             shell=False,
