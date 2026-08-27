@@ -20,6 +20,12 @@ from .config import (
     load_config,
     migrate_config,
 )
+from .catalog import (
+    catalog_entries,
+    get_catalog_entry,
+    materialize_catalog_package,
+    validate_catalog_entry,
+)
 from .credentials import reference_is_available
 from .comparison import ComparisonError, compare_occurrences
 from .diagnostics import render_report_json, run_doctor, run_live_doctor
@@ -80,7 +86,7 @@ from .setup import (
 from .setup_interview import SetupDraft, SetupHTTPServer
 from .registry import open_project_registry
 from .run import RunError, launch_run, read_run_details
-from .target_binding import TargetBindingError, initialize_target
+from .target_binding import TargetBindingError, initialize_target, resolve_target
 from .validators import validate_proposal_workpad
 from .workpad import ResolvedWorkpad, WorkpadError, open_locations, resolve_workpad
 
@@ -1344,6 +1350,98 @@ def init_command(
 @cli.group("package")
 def package_group() -> None:
     """Inspect and install portable project-local packages."""
+
+
+@cli.group("catalog")
+def catalog_group() -> None:
+    """Inspect and explicitly install built-in Gig definitions."""
+
+
+@catalog_group.command("list")
+@click.option("--json", "as_json", is_flag=True)
+def catalog_list_command(as_json: bool) -> None:
+    entries = catalog_entries()
+    payload = [
+        {
+            "catalog_id": entry.catalog_id,
+            "definition_version": entry.definition_version,
+            "title": entry.title,
+            "summary": entry.summary,
+            "package_id": entry.package_id,
+            "entry_content_digest": entry.entry_content_digest,
+        }
+        for entry in entries
+    ]
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        for item in payload:
+            click.echo(f"{item['catalog_id']}@{item['definition_version']} — {item['title']}")
+
+
+@catalog_group.command("inspect")
+@click.argument("catalog_id")
+@click.option("--version", "definition_version", default="1.0", show_default=True)
+@click.option("--json", "as_json", is_flag=True)
+def catalog_inspect_command(catalog_id: str, definition_version: str, as_json: bool) -> None:
+    try:
+        entry = get_catalog_entry(catalog_id, definition_version)
+        validate_catalog_entry(entry)
+    except PackageError as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = dict(entry.entry_metadata())
+    payload.update({"package_id": entry.package_id, "files": sorted(entry.package_files())})
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"{entry.catalog_id}@{entry.definition_version}: {entry.title}")
+        click.echo(entry.summary)
+        click.echo(f"Package {entry.package_id}; {entry.entry_content_digest}")
+
+
+@catalog_group.command("validate")
+@click.argument("catalog_id")
+@click.option("--version", "definition_version", default="1.0", show_default=True)
+@click.option("--json", "as_json", is_flag=True)
+def catalog_validate_command(catalog_id: str, definition_version: str, as_json: bool) -> None:
+    try:
+        entry = get_catalog_entry(catalog_id, definition_version)
+        validate_catalog_entry(entry)
+    except PackageError as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {"catalog_id": entry.catalog_id, "definition_version": entry.definition_version, "valid": True, "authority_changed": False}
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Catalog entry {entry.catalog_id}@{entry.definition_version} is valid.")
+
+
+@catalog_group.command("install")
+@click.argument("catalog_id")
+@click.option("--version", "definition_version", default="1.0", show_default=True)
+@click.option("--target", required=True, type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def catalog_install_command(catalog_id: str, definition_version: str, target: Path, as_json: bool) -> None:
+    try:
+        entry = get_catalog_entry(catalog_id, definition_version)
+        resolved_target = resolve_target(target)
+        result = materialize_catalog_package(entry, resolved_target.root)
+    except (PackageError, TargetBindingError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {
+        "catalog_id": entry.catalog_id,
+        "definition_version": entry.definition_version,
+        "package_id": result.package_id,
+        "package_digest": result.content_digest,
+        "target": resolved_target.kind,
+        "authority_changed": False,
+        "bootstrap_next": "gigai init --adopt-package --confirm",
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Installed catalog package {result.package_id} ({result.content_digest}).")
+        click.echo("Next: gigai init --adopt-package --confirm")
 
 
 @package_group.command("inspect")

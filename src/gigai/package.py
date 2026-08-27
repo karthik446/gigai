@@ -136,7 +136,8 @@ def _reject_symlink_components(path: Path, *, label: str) -> None:
 
 def inspect_package(root: Path) -> PackageInspection:
     candidate = root.expanduser()
-    _reject_symlink_components(candidate, label="package root")
+    if candidate.is_symlink():
+        raise PackageError("package root must not be a symlink", code="symlink_refused")
     package_root_path = candidate.resolve(strict=False)
     if not package_root_path.is_dir():
         raise PackageError("package root must be a regular directory", code="package_root_invalid")

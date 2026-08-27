@@ -353,7 +353,11 @@ def _initialize_git_target(
         result.reconciled
         and status_after == _without_untracked_binding(status_before)
     )
-    if not status_is_exact and not status_is_binding_reconciliation:
+    status_is_portable_hidden = (
+        allow_tracked_portable
+        and status_after == _without_untracked_portable(status_before)
+    )
+    if not status_is_exact and not status_is_binding_reconciliation and not status_is_portable_hidden:
         raise TargetBindingError(
             "machine-readable Git status changed during init; binding was not reported successful"
         )
@@ -569,6 +573,21 @@ def _without_untracked_binding(status: bytes) -> bytes:
     binding_entry = f"?? {BINDING_DIRECTORY}/{BINDING_FILENAME}".encode()
     entries = [entry for entry in status.split(b"\0") if entry]
     kept = [entry for entry in entries if entry != binding_entry]
+    return b"".join(entry + b"\0" for entry in kept)
+
+
+def _without_untracked_portable(status: bytes) -> bytes:
+    """Remove only portable package entries hidden by the legacy root ignore."""
+
+    entries = [entry for entry in status.split(b"\0") if entry]
+    kept = [
+        entry
+        for entry in entries
+        if not (
+            entry.startswith(b"?? .gigai/packages/")
+            and entry.count(b"/") >= 3
+        )
+    ]
     return b"".join(entry + b"\0" for entry in kept)
 
 
