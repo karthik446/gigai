@@ -112,10 +112,26 @@ def package_root(target_root: Path, package_id: str) -> Path:
     return target_root / PACKAGE_DIRECTORY / package_id
 
 
+def _reject_symlink_components(path: Path, *, label: str) -> None:
+    """Reject every symlink component before a path is resolved or created."""
+
+    candidate = path.expanduser()
+    lexical = candidate if candidate.is_absolute() else Path.cwd() / candidate
+    current = Path(lexical.anchor)
+    for component in lexical.parts:
+        if component == lexical.anchor:
+            continue
+        current /= component
+        if current.is_symlink():
+            raise PackageError(
+                f"{label} contains a symlink component",
+                code="symlink_refused",
+            )
+
+
 def inspect_package(root: Path) -> PackageInspection:
     candidate = root.expanduser()
-    if candidate.is_symlink():
-        raise PackageError("package root must not be a symlink", code="symlink_refused")
+    _reject_symlink_components(candidate, label="package root")
     package_root_path = candidate.resolve(strict=False)
     if not package_root_path.is_dir():
         raise PackageError("package root must be a regular directory", code="package_root_invalid")
@@ -196,8 +212,7 @@ def export_package(*, source_package: Path, destination: Path) -> PackageExportR
     inspection = inspect_package(source_package)
     source = inspection.package_root
     destination_candidate = destination.expanduser()
-    if destination_candidate.exists() and destination_candidate.is_symlink():
-        raise PackageError("export destination must not be a symlink", code="symlink_refused")
+    _reject_symlink_components(destination_candidate, label="export destination")
     destination_path = destination_candidate.resolve(strict=False)
     try:
         destination_path.relative_to(source)

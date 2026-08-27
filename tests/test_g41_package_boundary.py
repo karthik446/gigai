@@ -268,6 +268,22 @@ def test_package_export_refuses_directory_identity_mismatch(tmp_path: Path) -> N
         export_package(source_package=mismatched, destination=tmp_path / "unused")
 
 
+def test_package_export_refuses_symlinked_parent(tmp_path: Path) -> None:
+    home, target = _setup(tmp_path / "source")
+    source = initialize_project_package(home_root=home, requested_target=target)
+    real_parent = tmp_path / "real-export"
+    real_parent.mkdir()
+    symlink_parent = tmp_path / "export"
+    symlink_parent.symlink_to(real_parent, target_is_directory=True)
+
+    with pytest.raises(PackageError, match="symlink component"):
+        export_package(
+            source_package=source.package_root,
+            destination=symlink_parent / source.package_id,
+        )
+    assert not (real_parent / source.package_id).exists()
+
+
 def test_package_install_refuses_configuration_for_a_different_home(tmp_path: Path) -> None:
     source_home, source_target = _setup(tmp_path / "source")
     source = initialize_project_package(
