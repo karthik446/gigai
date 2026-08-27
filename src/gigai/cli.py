@@ -1435,13 +1435,17 @@ def catalog_install_command(catalog_id: str, definition_version: str, target: Pa
         "package_digest": result.content_digest,
         "target": resolved_target.kind,
         "authority_changed": False,
-        "bootstrap_next": "gigai init --adopt-package --confirm",
+        "bootstrap_next": (
+            "gigai init --adopt-package --confirm"
+            if resolved_target.kind == "git"
+            else "gigai init"
+        ),
     }
     if as_json:
         click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     else:
         click.echo(f"Installed catalog package {result.package_id} ({result.content_digest}).")
-        click.echo("Next: gigai init --adopt-package --confirm")
+        click.echo(f"Next: {payload['bootstrap_next']}")
 
 
 @package_group.command("inspect")
