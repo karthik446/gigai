@@ -121,6 +121,11 @@ def _reject_symlink_components(path: Path, *, label: str) -> None:
     for component in lexical.parts:
         if component == lexical.anchor:
             continue
+        if component in {".", ".."}:
+            raise PackageError(
+                f"{label} contains a traversal component",
+                code="path_escape",
+            )
         current /= component
         if current.is_symlink():
             raise PackageError(

@@ -17,9 +17,9 @@ whole-directory Git exclude to the exact private-path rules. Adoption requires
 `--adopt-package --confirm`, allows one valid ignored project binding beside a
 fully portable tracked package, and refuses tracked private, unknown, mixed, or
 conflicting content. The cutover is re-read and verified after publication.
-Package inspection rejects symlink roots and components, directory/manifest
-identity mismatch, executable material, oversized files, unsafe command
-directories, and inventory/digest mismatch.
+Package inspection rejects symlink roots and components, traversal components,
+directory/manifest identity mismatch, executable material, oversized files,
+unsafe command directories, and inventory/digest mismatch.
 
 `gigai package export` copies only validated portable bytes, refuses conflicting
 or unsafe destinations, and is idempotent for an equivalent destination.
@@ -33,10 +33,10 @@ fails.
 
 ## Evidence
 
-- `tests/test_g41_package_boundary.py`: 14 passed, including fresh init,
+- `tests/test_g41_package_boundary.py`: 15 passed, including fresh init,
   exact excludes, adoption, private-content refusal, second-home installation,
-  export validation/idempotence, symlinked-parent and package identity refusal,
-  home-binding refusal,
+  export validation/idempotence, symlinked-parent/traversal and package identity
+  refusal, home-binding refusal,
   idempotent upgrade after the package is tracked, populated
   registry/workpad/private-home preservation, rollback before and after
   publication, and refusal of unbound tracked packages without explicit
@@ -48,7 +48,7 @@ fails.
   concurrent initialization, and existing runtime invariants.
 - `research/contract_spike/tests/test_schemas.py` and the existing schema
   contract suites accept the additive thirty-second package schema resource.
-- Full suite: `650 passed, 1 skipped, 70 subtests passed`.
+- Full suite: `651 passed, 1 skipped, 70 subtests passed`.
 - Source compilation, `git diff --check`, and the focused package/runtime
   validation all pass.
 
@@ -59,8 +59,8 @@ resolved here: normal `gigai init` accepts its own tracked portable package
 only when an existing project binding is present; an unbound tracked package
 requires explicit adoption; post-publication upgrade verification failures use
 the same targeted rollback boundary as publication failures; package export and
-destination identity, including symlinked parent rejection, are validated; and
-all G41 Markdown artifacts are free of trailing whitespace.
+destination identity, including symlinked-parent and traversal rejection, are
+validated; and all G41 Markdown artifacts are free of trailing whitespace.
 
 The installed-scenario guard also required the package Git inspection to use a
 resolved executable path, rather than a literal command name; that boundary is
