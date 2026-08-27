@@ -52,6 +52,7 @@ from .model_discovery import (
 )
 from .package import (
     PackageError,
+    export_package,
     initialize_project_package,
     inspect_package,
     install_package,
@@ -1397,6 +1398,30 @@ def package_install_command(
         click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     else:
         click.echo(f"Installed package {result.package_id} ({result.status}).")
+
+
+@package_group.command("export")
+@click.argument("package_path", type=click.Path(path_type=Path, file_okay=False))
+@click.argument("destination", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def package_export_command(package_path: Path, destination: Path, as_json: bool) -> None:
+    """Export validated portable bytes without project or Gig authority."""
+
+    try:
+        result = export_package(source_package=package_path, destination=destination)
+    except PackageError as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {
+        "package_id": result.package_id,
+        "package_digest": result.package_digest,
+        "destination": result.destination.name,
+        "export_status": result.status,
+        "authority_imported": False,
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Exported package {result.package_id} ({result.status}).")
 
 
 @cli.command("upgrade")

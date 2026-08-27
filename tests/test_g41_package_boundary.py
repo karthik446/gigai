@@ -8,7 +8,7 @@ from click.testing import CliRunner
 import pytest
 
 from gigai.cli import cli
-from gigai.package import initialize_project_package
+from gigai.package import PackageError, export_package, initialize_project_package, install_package
 from gigai.registry import ProjectRecord, WorkpadRecord, open_project_registry
 from gigai.setup import build_config, run_setup
 
@@ -226,6 +226,71 @@ def test_second_home_install_preserves_package_identity_without_authority(
     assert record["content_digest"] == source.package_digest
 
 
+def test_package_export_is_validated_idempotent_and_authority_free(tmp_path: Path) -> None:
+    home, target = _setup(tmp_path / "source")
+    source = initialize_project_package(home_root=home, requested_target=target)
+    destination = tmp_path / "exported" / source.package_id
+
+    first = CliRunner().invoke(
+        cli,
+        [
+            "package",
+            "export",
+            str(source.package_root),
+            str(destination),
+            "--json",
+        ],
+    )
+
+    assert first.exit_code == 0, first.output
+    first_payload = json.loads(first.output)
+    assert first_payload["package_id"] == source.package_id
+    assert first_payload["package_digest"] == source.package_digest
+    assert first_payload["export_status"] == "exported"
+    assert first_payload["authority_imported"] is False
+
+    second = export_package(source_package=source.package_root, destination=destination)
+    assert second.status == "existing"
+    assert second.package_id == source.package_id
+    assert not (destination / "project.toml").exists()
+
+
+def test_package_export_refuses_directory_identity_mismatch(tmp_path: Path) -> None:
+    home, target = _setup(tmp_path / "source")
+    source = initialize_project_package(home_root=home, requested_target=target)
+    mismatched = tmp_path / "mismatched"
+    mismatched.mkdir()
+    for item in source.package_root.iterdir():
+        if item.is_file():
+            (mismatched / item.name).write_bytes(item.read_bytes())
+
+    with pytest.raises(PackageError, match="directory name does not match"):
+        export_package(source_package=mismatched, destination=tmp_path / "unused")
+
+
+def test_package_install_refuses_configuration_for_a_different_home(tmp_path: Path) -> None:
+    source_home, source_target = _setup(tmp_path / "source")
+    source = initialize_project_package(
+        home_root=source_home, requested_target=source_target
+    )
+    destination_home, destination_target = _setup(tmp_path / "destination")
+    config = destination_home / "config.toml"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            f'home_root = "{destination_home}"',
+            f'home_root = "{source_home}"',
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PackageError, match="different GigAI home"):
+        install_package(
+            home_root=destination_home,
+            requested_target=destination_target,
+            source_package=source.package_root,
+        )
+
+
 def test_upgrade_migrates_v016_config_keeps_backup_and_is_idempotent(
     tmp_path: Path,
 ) -> None:
@@ -311,6 +376,9 @@ def test_upgrade_preserves_populated_registry_and_workpad_evidence(
     workpad = tmp_path / "workpads" / "projects" / initial.project_id / "gigs" / gig_id
     workpad.mkdir(parents=True)
     (workpad / "journal.jsonl").write_text('{"sequence":1}\n', encoding="utf-8")
+    capability_state = home / "capabilities" / "installed.json"
+    capability_state.parent.mkdir(parents=True, exist_ok=True)
+    capability_state.write_text('{"capability":"text"}\n', encoding="utf-8")
     registry, _ = open_project_registry(home, create=False)
     with registry.transaction() as transaction:
         transaction.insert_workpad(
@@ -376,6 +444,8 @@ content_digest = "sha256:test"
     migration_record = json.loads(migration.read_text(encoding="utf-8"))
     assert migration_record["registry_fingerprint"]
     assert migration_record["workpad_fingerprint"]
+    assert migration_record["private_home_fingerprint"]
+    assert capability_state.read_text(encoding="utf-8") == '{"capability":"text"}\n'
     migrated, _ = open_project_registry(home, create=False)
     assert migrated.records() == (
         ProjectRecord(

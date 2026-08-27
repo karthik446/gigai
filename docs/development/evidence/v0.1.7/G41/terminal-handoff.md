@@ -11,10 +11,12 @@ G41 leaves v0.1.7 with these accepted inputs:
 - `local/`, `runs/`, `cache/`, `snapshots/`, and `locks/` remain private;
 - `gigai init --adopt-package --confirm` is the only tracked-package adoption
   path;
+- `gigai package export` copies validated portable bytes without importing
+  project or Gig authority;
 - package installation preserves package identity while creating only a fresh
   private installation record; and
 - v0.1.6 upgrade recovery preserves predecessor configuration, registry,
-  workpad, journal, and authority evidence.
+  workpad, journal, capability, and private-home authority evidence.
 
 G42 must consume the package validator and normal approval authority. It must
 not place credentials, private Run history, executable hooks, or automatic

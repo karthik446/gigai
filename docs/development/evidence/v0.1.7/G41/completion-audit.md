@@ -16,23 +16,30 @@ or Run authority.
 whole-directory Git exclude to the exact private-path rules. Adoption requires
 `--adopt-package --confirm`, allows one valid ignored project binding beside a
 fully portable tracked package, and refuses tracked private, unknown, mixed, or
-conflicting content. Package inspection rejects symlinks, executable material,
-oversized files, unsafe command directories, and inventory/digest mismatch.
+conflicting content. The cutover is re-read and verified after publication.
+Package inspection rejects symlink roots, directory/manifest identity mismatch,
+executable material, oversized files, unsafe command directories, and
+inventory/digest mismatch.
 
-`gigai package install` copies only validated portable bytes, reconciles the
-Git package boundary, and writes one idempotent private installation record.
-`gigai upgrade --confirm` creates a private predecessor configuration backup,
-migrates configuration, fingerprints logical registry and workpad evidence,
-preserves populated authority, and restores predecessor state if package
-publication fails.
+`gigai package export` copies only validated portable bytes, refuses conflicting
+or unsafe destinations, and is idempotent for an equivalent destination.
+`gigai package install` validates the destination home configuration before
+copying, reconciles the Git package boundary, and writes one idempotent private
+installation record. `gigai upgrade --confirm` creates a private predecessor
+configuration backup, migrates configuration, fingerprints logical registry,
+workpad, and existing private-home evidence, preserves populated authority, and
+restores predecessor state if publication or post-publication verification
+fails.
 
 ## Evidence
 
-- `tests/test_g41_package_boundary.py`: 10 passed, including fresh init,
+- `tests/test_g41_package_boundary.py`: 13 passed, including fresh init,
   exact excludes, adoption, private-content refusal, second-home installation,
+  export validation/idempotence, package identity and home-binding refusal,
   idempotent upgrade after the package is tracked, populated
-  registry/workpad preservation, rollback before and after publication, and
-  refusal of unbound tracked packages without explicit adoption.
+  registry/workpad/private-home preservation, rollback before and after
+  publication, and refusal of unbound tracked packages without explicit
+  adoption.
 - `tests/test_g04_installed_scenarios.py`,
   `tests/test_project_registry_and_target_binding.py`, and
   `tests/test_g40_runtime.py`: included in the focused 72-test run; cover
@@ -40,22 +47,25 @@ publication fails.
   concurrent initialization, and existing runtime invariants.
 - `research/contract_spike/tests/test_schemas.py` and the existing schema
   contract suites accept the additive thirty-second package schema resource.
-- Full suite: `646 passed, 1 skipped, 70 subtests passed`.
+- Full suite: `649 passed, 1 skipped, 70 subtests passed`.
 - Source compilation, `git diff --check`, and the focused package/runtime
   validation all pass.
 
 ## Review remediation
 
-The follow-up reviews identified four gaps in the original closeout. They are
+The follow-up reviews identified five gaps in the original closeout. They are
 resolved here: normal `gigai init` accepts its own tracked portable package
 only when an existing project binding is present; an unbound tracked package
 requires explicit adoption; post-publication upgrade verification failures use
-the same targeted rollback boundary as publication failures; and all G41
-Markdown artifacts are free of trailing whitespace.
+the same targeted rollback boundary as publication failures; package export and
+destination identity are validated; and all G41 Markdown artifacts are free of
+trailing whitespace.
 
 The installed-scenario guard also required the package Git inspection to use a
 resolved executable path, rather than a literal command name; that boundary is
-now covered by the complete suite.
+now covered by the complete suite. Upgrade preservation additionally verifies
+the configured home identity and hashes existing private-home evidence without
+recording its contents.
 
 ## Authority and security result
 

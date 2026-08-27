@@ -303,11 +303,14 @@ The current G41 implementation exposes the boundary through:
   already-tracked portable package while preserving one valid ignored binding;
 - `gigai package inspect`, which validates package schema, inventory, modes,
   symlinks, and content digest;
+- `gigai package export`, which copies only validated portable bytes and is
+  idempotent for an equivalent destination package;
 - `gigai package install`, which copies only validated portable bytes and writes
-  one idempotent private installation record; and
+  one idempotent private installation record without importing the source
+  home configuration; and
 - `gigai upgrade --confirm`, which creates a private v0.1.6 recovery copy,
-  migrates configuration, preserves logical registry/workpad identities, and
-  publishes the project package boundary.
+  migrates configuration, preserves logical registry/workpad/private-home
+  identities, and publishes the project package boundary.
 
 These commands do not create a Gig, approve a proposal, select an active
 version, install a capability, start a Run, execute package material, or

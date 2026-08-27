@@ -92,6 +92,14 @@ class PackageInstallResult:
 
 
 @dataclass(frozen=True)
+class PackageExportResult:
+    package_id: str
+    package_digest: str
+    destination: Path
+    status: str
+
+
+@dataclass(frozen=True)
 class UpgradeResult:
     package: PackageInitResult
     migration_record: Path
@@ -105,8 +113,11 @@ def package_root(target_root: Path, package_id: str) -> Path:
 
 
 def inspect_package(root: Path) -> PackageInspection:
-    package_root_path = root.expanduser().resolve(strict=False)
-    if not package_root_path.is_dir() or package_root_path.is_symlink():
+    candidate = root.expanduser()
+    if candidate.is_symlink():
+        raise PackageError("package root must not be a symlink", code="symlink_refused")
+    package_root_path = candidate.resolve(strict=False)
+    if not package_root_path.is_dir():
         raise PackageError("package root must be a regular directory", code="package_root_invalid")
     manifest_path = package_root_path / PACKAGE_MANIFEST
     if manifest_path.is_symlink() or not manifest_path.is_file():
@@ -131,6 +142,11 @@ def inspect_package(root: Path) -> PackageInspection:
         )
     except (KeyError, ValueError) as exc:
         raise PackageError("package_id is not canonical", code="package_identity_invalid") from exc
+    if package_root_path.name != package_id:
+        raise PackageError(
+            "package directory name does not match package_id",
+            code="package_identity_invalid",
+        )
 
     expected_files: list[dict[str, object]] = []
     for path in sorted(package_root_path.rglob("*")):
@@ -171,6 +187,45 @@ def inspect_package(root: Path) -> PackageInspection:
         manifest=manifest,
         content_digest=content_digest,
         files=tuple(item["path"] for item in expected_files),
+    )
+
+
+def export_package(*, source_package: Path, destination: Path) -> PackageExportResult:
+    """Copy one validated portable package without importing authority."""
+
+    inspection = inspect_package(source_package)
+    source = inspection.package_root
+    destination_candidate = destination.expanduser()
+    if destination_candidate.exists() and destination_candidate.is_symlink():
+        raise PackageError("export destination must not be a symlink", code="symlink_refused")
+    destination_path = destination_candidate.resolve(strict=False)
+    try:
+        destination_path.relative_to(source)
+    except ValueError:
+        pass
+    else:
+        raise PackageError("export destination cannot be inside its source package", code="path_escape")
+    if destination_path.exists():
+        existing = inspect_package(destination_path)
+        if existing.content_digest != inspection.content_digest:
+            raise PackageError(
+                "export destination contains a different package",
+                code="package_conflict",
+            )
+        return PackageExportResult(
+            package_id=inspection.package_id,
+            package_digest=inspection.content_digest,
+            destination=destination_path,
+            status="existing",
+        )
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    _copy_package(source, destination_path)
+    inspect_package(destination_path)
+    return PackageExportResult(
+        package_id=inspection.package_id,
+        package_digest=inspection.content_digest,
+        destination=destination_path,
+        status="exported",
     )
 
 
@@ -299,10 +354,16 @@ def install_package(
 ) -> PackageInstallResult:
     """Install validated portable bytes without importing project authority."""
 
+    resolved_home = home_root.expanduser().resolve(strict=False)
     try:
-        config = load_config(home_root.expanduser().resolve(strict=False))
+        config = load_config(resolved_home)
     except ConfigurationError as exc:
         raise PackageError(str(exc), code="configuration_invalid") from exc
+    if config.home_root.resolve(strict=False) != resolved_home:
+        raise PackageError(
+            "configuration belongs to a different GigAI home",
+            code="configuration_home_conflict",
+        )
     inspection = inspect_package(source_package)
     target = resolve_target(requested_target)
     if target.kind == "git":
@@ -364,6 +425,7 @@ def upgrade_installation(
     version = _config_version(config_before)
     workpad_root = _configured_workpad_root(config_before)
     workpad_fingerprint_before = _tree_fingerprint(workpad_root)
+    private_home_fingerprint_before = _private_home_fingerprint(home)
     try:
         target = resolve_target(requested_target)
         gigai_directory_before = (target.root / ".gigai").exists()
@@ -429,6 +491,7 @@ def upgrade_installation(
             registry_fingerprint_before=registry_fingerprint_before,
             workpad_root=workpad_root,
             workpad_fingerprint_before=workpad_fingerprint_before,
+            private_home_fingerprint_before=private_home_fingerprint_before,
         )
     except (ConfigurationError, OSError, PackageError) as exc:
         _restore_upgrade_state(
@@ -457,6 +520,7 @@ def _finalize_upgrade(
     registry_fingerprint_before: str | None,
     workpad_root: Path,
     workpad_fingerprint_before: str | None,
+    private_home_fingerprint_before: str | None,
 ) -> UpgradeResult:
     config_after = path.read_bytes()
     registry_after = registry_path.read_bytes() if registry_path.exists() else None
@@ -464,6 +528,7 @@ def _finalize_upgrade(
         raise PackageError("registry disappeared during upgrade", code="preservation_failed")
     registry_fingerprint_after = _registry_fingerprint(registry_path)
     workpad_fingerprint_after = _tree_fingerprint(workpad_root)
+    private_home_fingerprint_after = _private_home_fingerprint(path.parent)
     if registry_before is not None and registry_fingerprint_before != registry_fingerprint_after:
         raise PackageError(
             "registry identities or authority links changed during upgrade",
@@ -472,6 +537,11 @@ def _finalize_upgrade(
     if workpad_fingerprint_before != workpad_fingerprint_after:
         raise PackageError(
             "workpad identities or journal evidence changed during upgrade",
+            code="preservation_failed",
+        )
+    if private_home_fingerprint_before != private_home_fingerprint_after:
+        raise PackageError(
+            "private home identities or capability state changed during upgrade",
             code="preservation_failed",
         )
     record = {
@@ -485,6 +555,7 @@ def _finalize_upgrade(
         "registry_present_after": registry_after is not None,
         "registry_fingerprint": registry_fingerprint_after,
         "workpad_fingerprint": workpad_fingerprint_after,
+        "private_home_fingerprint": private_home_fingerprint_after,
         "completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
     }
     record_path = migration_root / "migration.json"
@@ -648,6 +719,43 @@ def _tree_fingerprint(root: Path) -> str | None:
     return canonical_json_digest(entries)
 
 
+def _private_home_fingerprint(root: Path) -> str | None:
+    """Hash existing private home files while excluding migration outputs."""
+
+    if not root.exists():
+        return None
+    if root.is_symlink() or not root.is_dir():
+        raise PackageError("GigAI home is not a regular directory", code="preservation_failed")
+    entries: list[dict[str, object]] = []
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if relative in {"config.toml", "registry.sqlite", "registry.sqlite.v1.bak"}:
+            continue
+        if relative == "local/migrations" or relative.startswith("local/migrations/"):
+            continue
+        if path.is_symlink():
+            raise PackageError(
+                f"private home inventory refuses symlink: {relative}",
+                code="preservation_failed",
+            )
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise PackageError(
+                f"private home inventory refuses unsupported file: {relative}",
+                code="preservation_failed",
+            )
+        data = path.read_bytes()
+        entries.append(
+            {
+                "path": relative,
+                "content_sha256": digest_imported_bytes(data),
+                "size_bytes": len(data),
+            }
+        )
+    return canonical_json_digest(entries)
+
+
 def _config_version(data: bytes) -> str:
     try:
         payload = tomllib.loads(data.decode("utf-8"))
@@ -740,8 +848,11 @@ def _cutover_git_exclude(root: Path) -> bool:
     for line in lines:
         if line.rstrip(b"\r\n") == ROOT_EXCLUDE_LINE.rstrip(b"\n"):
             if not replaced:
-                output.extend(PRIVATE_EXCLUDE_LINES)
-                seen_private.update(private)
+                for private_line in PRIVATE_EXCLUDE_LINES:
+                    key = private_line.rstrip(b"\r\n")
+                    if key not in seen_private:
+                        output.append(private_line)
+                        seen_private.add(key)
                 replaced = True
             continue
         key = line.rstrip(b"\r\n")
@@ -767,6 +878,13 @@ def _cutover_git_exclude(root: Path) -> bool:
     if after == before:
         return False
     _write_atomic(exclude, after)
+    if exclude.read_bytes() != after:
+        raise PackageError("Git exclude replacement could not be verified", code="exclude_verification_failed")
+    observed_lines = exclude.read_bytes().splitlines()
+    if observed_lines.count(ROOT_EXCLUDE_LINE.rstrip(b"\n")) != 0 or any(
+        observed_lines.count(line.rstrip(b"\n")) != 1 for line in PRIVATE_EXCLUDE_LINES
+    ):
+        raise PackageError("Git exclude replacement is incomplete", code="exclude_verification_failed")
     return True
 
 
@@ -812,9 +930,11 @@ __all__ = [
     "PackageInitResult",
     "PackageInspection",
     "PackageInstallResult",
+    "PackageExportResult",
     "UpgradeResult",
     "initialize_project_package",
     "inspect_package",
+    "export_package",
     "install_package",
     "upgrade_installation",
     "package_root",
