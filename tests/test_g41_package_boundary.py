@@ -8,7 +8,13 @@ from click.testing import CliRunner
 import pytest
 
 from gigai.cli import cli
-from gigai.package import PackageError, export_package, initialize_project_package, install_package
+from gigai.package import (
+    PackageError,
+    export_package,
+    initialize_project_package,
+    inspect_package,
+    install_package,
+)
 from gigai.registry import ProjectRecord, WorkpadRecord, open_project_registry
 from gigai.setup import build_config, run_setup
 
@@ -298,6 +304,16 @@ def test_package_export_refuses_traversal_to_symlinked_parent(tmp_path: Path) ->
             destination=tmp_path / "missing" / ".." / "export" / source.package_id,
         )
     assert not (real_parent / source.package_id).exists()
+
+
+def test_package_inspection_refuses_symlinked_source_parent(tmp_path: Path) -> None:
+    home, target = _setup(tmp_path / "source")
+    source = initialize_project_package(home_root=home, requested_target=target)
+    alias_parent = tmp_path / "package-alias"
+    alias_parent.symlink_to(source.package_root.parent, target_is_directory=True)
+
+    with pytest.raises(PackageError, match="symlink component"):
+        inspect_package(alias_parent / source.package_id)
 
 
 def test_package_install_refuses_configuration_for_a_different_home(tmp_path: Path) -> None:

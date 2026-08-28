@@ -9,7 +9,12 @@ import uuid
 from typing import Any, Mapping
 
 from .canonical import canonical_json_bytes, canonical_json_digest, digest_imported_bytes
-from .package import PackageError, PackageInspection, inspect_package
+from .package import (
+    PackageError,
+    PackageInspection,
+    _reject_symlink_components,
+    inspect_package,
+)
 
 
 CATALOG_REVISION = "v0.1.7"
@@ -204,6 +209,7 @@ def materialize_catalog_package(entry: CatalogEntry, target_root: Path) -> Packa
 
     validate_catalog_entry(entry)
     destination = target_root / ".gigai" / "packages" / entry.package_id
+    _reject_symlink_components(destination, label="catalog package destination")
     packages_root = destination.parent
     existing_roots = tuple(path for path in packages_root.glob("*") if path.is_dir()) if packages_root.is_dir() else ()
     if existing_roots and destination not in existing_roots:

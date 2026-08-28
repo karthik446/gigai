@@ -126,3 +126,19 @@ def test_catalog_install_refuses_second_package_without_replacement(tmp_path: Pa
     assert second.exit_code != 0
     assert "different package" in second.output
     assert len(list((target / ".gigai" / "packages").iterdir())) == 1
+
+
+def test_catalog_install_refuses_symlinked_project_gigai_directory(tmp_path: Path) -> None:
+    _, target = _target(tmp_path)
+    external = tmp_path / "external"
+    external.mkdir()
+    (target / ".gigai").symlink_to(external, target_is_directory=True)
+
+    result = CliRunner().invoke(
+        cli,
+        ["catalog", "install", "sync-references", "--target", str(target)],
+    )
+
+    assert result.exit_code != 0
+    assert "symlink component" in result.output
+    assert not any(external.iterdir())

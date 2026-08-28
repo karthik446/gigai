@@ -48,6 +48,7 @@ PRIVATE_EXCLUDE_LINES = (
 )
 ROOT_EXCLUDE_LINE = b"/.gigai/\n"
 MAX_PACKAGE_FILE_BYTES = 4 * 1024 * 1024
+SYSTEM_PATH_ALIASES = frozenset({Path("/tmp"), Path("/var")})
 
 
 class PackageError(ValueError):
@@ -127,7 +128,7 @@ def _reject_symlink_components(path: Path, *, label: str) -> None:
                 code="path_escape",
             )
         current /= component
-        if current.is_symlink():
+        if current.is_symlink() and current not in SYSTEM_PATH_ALIASES:
             raise PackageError(
                 f"{label} contains a symlink component",
                 code="symlink_refused",
@@ -136,8 +137,7 @@ def _reject_symlink_components(path: Path, *, label: str) -> None:
 
 def inspect_package(root: Path) -> PackageInspection:
     candidate = root.expanduser()
-    if candidate.is_symlink():
-        raise PackageError("package root must not be a symlink", code="symlink_refused")
+    _reject_symlink_components(candidate, label="package root")
     package_root_path = candidate.resolve(strict=False)
     if not package_root_path.is_dir():
         raise PackageError("package root must be a regular directory", code="package_root_invalid")

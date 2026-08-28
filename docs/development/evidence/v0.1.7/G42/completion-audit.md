@@ -28,15 +28,15 @@ journal/workpad mutation, or Run allocation.
 
 ## Evidence
 
-- `tests/test_g42_catalog.py`: 4 passed, covering deterministic package IDs,
+- `tests/test_g42_catalog.py`: 5 passed, covering deterministic package IDs,
   offline list/inspect/validate, bootstrap adoption, authority-free output,
-  and second-package refusal.
-- `tests/test_g41_package_boundary.py`: 15 passed; G41 package boundary and
-  migration invariants remain green.
+  second-package refusal, and symlinked target refusal.
+- `tests/test_g41_package_boundary.py`: 16 passed; G41 package boundary,
+  source-path symlink defense, and migration invariants remain green.
 - Schema compatibility and canonical ownership checks pass without changing
   the frozen 32-resource schema inventory.
-- Focused combined verification: `48 passed, 63 subtests passed`.
-- Full suite: `655 passed, 1 skipped, 70 subtests passed`.
+- Focused combined verification: `21 passed` for G42/G41.
+- Full suite: `657 passed, 1 skipped, 70 subtests passed`.
 - Source compilation, tracked and untracked documentation whitespace checks,
   and Git diff checks pass.
 
