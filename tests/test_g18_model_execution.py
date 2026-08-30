@@ -5,7 +5,7 @@ import uuid
 
 from gigai.adapters.factory import ModelAdapterBinding, resolve_model_adapter
 from gigai.adapters.port import InvocationResult, ModelInvocationCancelled, ModelInvocationError, NormalizedUsage
-from gigai.canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes
+from gigai.canonical import digest_imported_bytes, parse_json_bytes
 from gigai.config import CredentialReference, Endpoint, ModelTarget
 from gigai.lifecycle import approve_offline, create_offline
 from gigai.model_execution import InvocationBudget, InvocationPolicy, SelectedReference, run_model_invocation

@@ -93,6 +93,28 @@ class WorkpadRecord:
     workpad_locator: str
 
 
+@dataclass(frozen=True)
+class RegistryListingDiagnostic:
+    """Share-safe diagnostic emitted while isolating one bad registry row."""
+
+    code: str
+    message: str
+    row_ordinal: int
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "code": self.code,
+            "severity": "warning",
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
+class WorkpadListing:
+    records: tuple[WorkpadRecord, ...]
+    diagnostics: tuple[RegistryListingDiagnostic, ...]
+
+
 class RegistryTransaction:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
@@ -205,6 +227,22 @@ class ProjectRegistry:
     def __init__(self, path: Path) -> None:
         self.path = path
 
+    def find_project(self, project_id: str) -> ProjectRecord | None:
+        """Read one project row without opening a write transaction."""
+
+        connection = _connect(self.path)
+        try:
+            row = connection.execute(
+                "SELECT project_id, target_locator, target_kind "
+                "FROM projects WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+            return _record(row)
+        except sqlite3.DatabaseError as exc:
+            raise RegistryCorruptError(f"registry read failed: {exc}") from exc
+        finally:
+            connection.close()
+
     @contextmanager
     def transaction(self) -> Iterator[RegistryTransaction]:
         connection = _connect(self.path)
@@ -238,22 +276,57 @@ class ProjectRegistry:
         finally:
             connection.close()
 
-    def workpad_records(self) -> tuple[WorkpadRecord, ...]:
+    def list_workpad_records(self, project_id: str | None = None) -> WorkpadListing:
+        """Read workpad rows while isolating invalid row values.
+
+        This is intentionally separate from ``workpad_records``.  Lifecycle
+        callers retain the strict all-or-nothing read, while a display-only
+        listing can omit one malformed row without reconstructing authority
+        from the filesystem.
+        """
+
         connection = _connect(self.path)
         try:
-            rows = connection.execute(
-                "SELECT gig_id, project_id, workpad_locator FROM workpads "
-                "ORDER BY project_id, gig_id"
-            ).fetchall()
-            return tuple(
-                record
-                for row in rows
-                if (record := _workpad_record(row)) is not None
-            )
+            if project_id is None:
+                cursor = connection.execute(
+                    "SELECT gig_id, project_id, workpad_locator FROM workpads "
+                    "ORDER BY project_id, gig_id, workpad_locator"
+                )
+            else:
+                cursor = connection.execute(
+                    "SELECT gig_id, project_id, workpad_locator FROM workpads "
+                    "WHERE project_id = ? ORDER BY project_id, gig_id, workpad_locator",
+                    (project_id,),
+                )
+            records: list[WorkpadRecord] = []
+            diagnostics: list[RegistryListingDiagnostic] = []
+            for ordinal, row in enumerate(cursor.fetchall()):
+                try:
+                    record = _workpad_record(row)
+                except RegistryCorruptError:
+                    diagnostics.append(
+                        RegistryListingDiagnostic(
+                            "registry_row_invalid",
+                            "one registry workpad row was omitted because its identity or locator is invalid",
+                            ordinal,
+                        )
+                    )
+                    continue
+                if record is not None:
+                    records.append(record)
+            return WorkpadListing(tuple(records), tuple(diagnostics))
         except sqlite3.DatabaseError as exc:
             raise RegistryCorruptError(f"registry read failed: {exc}") from exc
         finally:
             connection.close()
+
+    def workpad_records(self) -> tuple[WorkpadRecord, ...]:
+        """Read all workpad rows strictly for lifecycle callers."""
+
+        listing = self.list_workpad_records()
+        if listing.diagnostics:
+            raise RegistryCorruptError(listing.diagnostics[0].message)
+        return listing.records
 
 
 def registry_path(home_root: Path) -> Path:
@@ -269,6 +342,7 @@ def open_project_registry(
     *,
     create: bool,
     migration_observer: MigrationObserver | None = None,
+    tolerate_invalid_rows: bool = False,
 ) -> tuple[ProjectRegistry, bool]:
     path = registry_path(home_root)
     created = False
@@ -282,7 +356,7 @@ def open_project_registry(
     # initial validation as well as the migration itself, rather than locking
     # only after an opener has already observed v1.
     with _migration_lock(path):
-        version = _validate_registry(path)
+        version = _validate_registry(path, tolerate_invalid_rows=tolerate_invalid_rows)
         if version == REGISTRY_V1_SCHEMA_VERSION:
             _migrate_registry_v1_to_v2(
                 path,
@@ -333,7 +407,7 @@ def _create_registry_atomic(path: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _validate_registry(path: Path) -> int:
+def _validate_registry(path: Path, *, tolerate_invalid_rows: bool = False) -> int:
     if path.is_symlink():
         raise RegistryCorruptError("registry path must not be a symlink")
     try:
@@ -368,7 +442,11 @@ def _validate_registry(path: Path) -> int:
                     f"{REGISTRY_SCHEMA_VERSION} or migratable predecessor "
                     f"{REGISTRY_V1_SCHEMA_VERSION}; no migration was attempted"
                 )
-            _validate_schema(connection, version=int(actual))
+            _validate_schema(
+                connection,
+                version=int(actual),
+                tolerate_invalid_rows=tolerate_invalid_rows,
+            )
             return int(actual)
         finally:
             connection.close()
@@ -378,7 +456,12 @@ def _validate_registry(path: Path) -> int:
         raise RegistryCorruptError(f"registry is unreadable: {exc}") from exc
 
 
-def _validate_schema(connection: sqlite3.Connection, *, version: int) -> None:
+def _validate_schema(
+    connection: sqlite3.Connection,
+    *,
+    version: int,
+    tolerate_invalid_rows: bool = False,
+) -> None:
     expected_definitions = {"projects": PROJECT_TABLE_SQL}
     if version == REGISTRY_SCHEMA_VERSION:
         expected_definitions.update(
@@ -421,7 +504,11 @@ def _validate_schema(connection: sqlite3.Connection, *, version: int) -> None:
     for row in connection.execute(
         "SELECT project_id, target_locator, target_kind FROM projects"
     ):
-        _record(row)
+        try:
+            _record(row)
+        except RegistryCorruptError:
+            if not tolerate_invalid_rows:
+                raise
 
     if version == REGISTRY_SCHEMA_VERSION:
         _validate_columns(
@@ -462,7 +549,11 @@ def _validate_schema(connection: sqlite3.Connection, *, version: int) -> None:
         for row in connection.execute(
             "SELECT gig_id, project_id, workpad_locator FROM workpads"
         ):
-            _workpad_record(row)
+            try:
+                _workpad_record(row)
+            except RegistryCorruptError:
+                if not tolerate_invalid_rows:
+                    raise
         for project_id, gig_id in connection.execute(
             "SELECT project_id, gig_id FROM active_workpads"
         ):
@@ -470,9 +561,10 @@ def _validate_schema(connection: sqlite3.Connection, *, version: int) -> None:
                 validate_entity_id(str(project_id), expected_prefix=EntityPrefix.PROJECT)
                 validate_entity_id(str(gig_id), expected_prefix=EntityPrefix.GIG)
             except InvalidIdentifierError as exc:
-                raise RegistryCorruptError(
-                    "registry contains an invalid active project or Gig ID"
-                ) from exc
+                if not tolerate_invalid_rows:
+                    raise RegistryCorruptError(
+                        "registry contains an invalid active project or Gig ID"
+                    ) from exc
 
     foreign_key_failures = tuple(connection.execute("PRAGMA foreign_key_check"))
     if foreign_key_failures:
@@ -776,7 +868,9 @@ __all__ = [
     "PROJECT_TABLE_SQL",
     "ProjectRecord",
     "ProjectRegistry",
+    "RegistryListingDiagnostic",
     "WorkpadRecord",
+    "WorkpadListing",
     "REGISTRY_APPLICATION_ID",
     "REGISTRY_BACKUP_FILENAME",
     "REGISTRY_FILENAME",

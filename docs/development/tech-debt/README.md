@@ -18,6 +18,7 @@ recorded in the item and the relevant change is reviewed.
 | [TD-0007](TD-0007-central-role-registry.md) | Central namespaced role registry | Open; v0.1.5 blocker | Model, reference, and executor roles are unconstrained strings with overlapping namespaces. |
 | [TD-0008](TD-0008-browser-first-create-and-model-setup.md) | Browser-first create and model setup | Open; v0.1.5 blocker | `gigai create tailor-resume-for-job` is not yet a zero-friction configured-project flow. |
 | [TD-0009](TD-0009-v0.1.5-readiness-gate.md) | v0.1.5 product-readiness gate | Open; release gate | G24 human UAT is gated on evals, role contracts, and the normal setup/create path. |
+| [TD-0010](TD-0010-g40-runtime-aware-first-run-setup.md) | Runtime-aware first-run setup | In verification | Terminal setup now defaults to a detected local runtime and explains fixture mode; fresh human UAT and explicit readiness cases remain. |
 
 ## Operating rules
 

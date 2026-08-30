@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Mapping
 import uuid
 
-from .adapters.factory import AdapterFactoryError, ModelAdapterBinding, resolve_model_adapter
+from .adapters.factory import AdapterFactoryError, resolve_model_adapter
 from .adapters.port import InvocationResult, ModelInvocationCancelled, ModelInvocationError
 from .canonical import (
     EntityPrefix,

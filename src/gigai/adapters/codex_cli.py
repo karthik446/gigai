@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
-from typing import Any, Mapping
+from typing import Mapping
 
 from .capabilities import require_capabilities
 from .port import InvocationRequest, InvocationResult, ModelInvocationError, NormalizedUsage

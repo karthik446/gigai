@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import subprocess
-import sys
 from urllib.request import Request, urlopen
 
 from click.testing import CliRunner

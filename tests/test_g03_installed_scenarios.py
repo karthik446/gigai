@@ -253,7 +253,7 @@ def test_installed_interactive_setup_reviews_effects_before_applying(
     )
 
     assert "Authoritative workpad root" in result.stdout
-    assert "Editor argv:" in result.stdout
+    assert "Editor:" in result.stdout
     assert "Apply this setup?" in result.stdout
     assert result.exit_code == 0
 

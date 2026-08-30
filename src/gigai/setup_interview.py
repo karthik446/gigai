@@ -207,8 +207,6 @@ class SetupHTTPServer:
             self._thread = None
 
     def _render_html(self) -> bytes:
-        configured_labels = {str(item["label"]) for item in self.model_options}
-
         def target_kind(item: Mapping[str, str]) -> str:
             return str(item.get("kind", "cli"))
 

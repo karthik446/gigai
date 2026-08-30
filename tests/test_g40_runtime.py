@@ -3,13 +3,20 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 import uuid
 
 import pytest
 from click.testing import CliRunner
 
-from gigai.cli import cli
+from gigai.cli import (
+    _display_local_path,
+    _display_runtime_version,
+    _select_terminal_create_target,
+    _setup_text_prompt,
+    cli,
+)
 from gigai.invocation import InvocationValidationError, parse_invocation
 from gigai.lifecycle import ApprovalResult, approve_offline, create_offline
 from gigai.model_discovery import (
@@ -18,6 +25,7 @@ from gigai.model_discovery import (
     hydrate_login_shell_path,
     persist_discovery_snapshot,
 )
+from gigai.config import load_config
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 
@@ -163,6 +171,120 @@ def test_models_command_persists_runtime_snapshot_without_provider_call(tmp_path
     assert configured["states"][-1] == "selected"
     assert "usable" in configured["states"]
     assert (home / "snapshots/runtime-discovery").is_dir()
+
+
+def test_terminal_setup_prefers_detected_codex_without_model_selection_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    snapshot = SimpleNamespace(
+        models=(
+            DetectedModel(
+                "codex",
+                Path("/runtime/bin/codex"),
+                "detected",
+                "codex 1.2.3",
+                "path",
+                "login_shell",
+                None,
+            ),
+            DetectedModel("claude", None, "unavailable", failure_code="executable_not_found"),
+        )
+    )
+    monkeypatch.setattr("gigai.cli.discover_runtime_snapshot", lambda **_: snapshot)
+    monkeypatch.setattr("gigai.cli.persist_discovery_snapshot", lambda *_: home / "snapshot.json")
+
+    result = CliRunner().invoke(
+        cli,
+        ["setup", "--home", str(home), "--editor", "/usr/bin/true"],
+        input="\n\n\nn\ny\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Model for Gig creation" not in result.output
+    assert "Runtime: Codex CLI · v1.2.3" in result.output
+    assert "Select Gig creation runtime" not in result.output
+    assert "Credential references" not in result.output
+    assert "readiness=" not in result.output
+    profile = next(item for item in load_config(home).profiles if item.name == "default")
+    assert profile.planner == "codex-default"
+
+
+def test_terminal_runtime_selector_uses_arrow_and_space(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeQuestion:
+        def ask(self) -> list[str]:
+            return ["claude-default"]
+
+    def checkbox(*args, **kwargs):
+        captured.update(kwargs)
+        return FakeQuestion()
+
+    monkeypatch.setattr("gigai.cli.questionary.checkbox", checkbox)
+
+    selected = _select_terminal_create_target(
+        options=(
+            ("codex-default", "Codex CLI · v0.151.0", "Detected"),
+            ("claude-default", "Claude Code · v2.1.251", "Detected"),
+            ("offline-default", "Offline fixture", "Tests only"),
+        ),
+        default="codex-default",
+        is_tty=True,
+    )
+
+    assert selected == "claude-default"
+    assert captured["instruction"] == "(↑/↓ move · Space chooses · Enter continues)"
+    assert [choice.value for choice in captured["choices"]] == [
+        "codex-default",
+        "claude-default",
+        "offline-default",
+    ]
+    assert [choice.title for choice in captured["choices"]] == [
+        "Codex CLI · v0.151.0",
+        "Claude Code · v2.1.251",
+        "Offline fixture",
+    ]
+
+
+def test_display_local_path_abbreviates_the_operator_home() -> None:
+    assert _display_local_path(
+        Path("/Users/example/.local/bin/claude"), home=Path("/Users/example")
+    ) == "~/.local/bin/claude"
+    assert _display_local_path(
+        Path("/opt/homebrew/bin/codex"), home=Path("/Users/example")
+    ) == "/opt/homebrew/bin/codex"
+
+
+def test_display_runtime_version_uses_a_short_version_tag() -> None:
+    assert _display_runtime_version("codex-cli 0.151.0") == "v0.151.0"
+    assert _display_runtime_version("2.1.251 (Claude Code)") == "v2.1.251"
+
+
+def test_setup_text_prompt_makes_the_editable_field_visible(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeQuestion:
+        def ask(self) -> str:
+            return ""
+
+    def text(*args, **kwargs):
+        captured.update(kwargs)
+        return FakeQuestion()
+
+    monkeypatch.setattr("gigai.cli.questionary.text", text)
+
+    answer = _setup_text_prompt(
+        "GigAI home", default="~/.gigai", is_tty=True
+    )
+
+    assert answer == "~/.gigai"
+    assert captured["default"] == ""
+    assert captured["instruction"] == "\n  default (~/.gigai): Type path to change\n"
 
 
 def test_models_json_redacts_local_runtime_paths(

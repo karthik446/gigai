@@ -211,11 +211,17 @@ def resolve_bound_project(
     home_root: Path,
     requested_target: Path | None,
     cwd: Path | None = None,
+    tolerate_invalid_registry_rows: bool = False,
 ) -> BoundProject:
     """Resolve one existing target binding without selecting a Gig."""
 
     home, _config = _load_owned_config(home_root)
-    return _resolve_bound_project(home, requested_target, cwd=cwd)
+    return _resolve_bound_project(
+        home,
+        requested_target,
+        cwd=cwd,
+        tolerate_invalid_registry_rows=tolerate_invalid_registry_rows,
+    )
 
 
 def resolve_workpad(
@@ -533,6 +539,7 @@ def _resolve_bound_project(
     requested_target: Path | None,
     *,
     cwd: Path | None,
+    tolerate_invalid_registry_rows: bool = False,
 ) -> BoundProject:
     try:
         try:
@@ -546,7 +553,11 @@ def _resolve_bound_project(
             if requested_target is not None:
                 raise
             current = (cwd or Path.cwd()).resolve(strict=True)
-            registry, _ = open_project_registry(home, create=False)
+            registry, _ = open_project_registry(
+                home,
+                create=False,
+                tolerate_invalid_rows=tolerate_invalid_registry_rows,
+            )
             with registry.transaction() as transaction:
                 record = transaction.find_target(current)
             if record is None or record.target_kind != "non-git":
@@ -557,7 +568,11 @@ def _resolve_bound_project(
                 root=current,
                 kind="non-git",
             )
-        registry, _ = open_project_registry(home, create=False)
+        registry, _ = open_project_registry(
+            home,
+            create=False,
+            tolerate_invalid_rows=tolerate_invalid_registry_rows,
+        )
         with registry.transaction() as transaction:
             record = transaction.find_target(target.root)
         if record is None:

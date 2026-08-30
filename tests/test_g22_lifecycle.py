@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -10,10 +9,9 @@ import uuid
 
 import pytest
 
-from gigai.canonical import canonical_json_bytes, parse_json_bytes
+from gigai.canonical import parse_json_bytes
 from gigai.lifecycle import LifecycleError, persist_interview_session, start_interview
-from gigai.proposal_interview import answer_question, session_record
-from gigai.registry import open_project_registry
+from gigai.proposal_interview import answer_question
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 from gigai.validators import validate_serialized_contract

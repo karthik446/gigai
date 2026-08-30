@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import json
 import sqlite3
-from typing import Any, Iterable, Mapping
+from typing import Mapping
 
 
 STATES = {"questions_pending", "clarification_required", "proposal_ready", "approved", "blocked"}

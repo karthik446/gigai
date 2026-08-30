@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Mapping
 import uuid
 
 from .canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes
@@ -320,7 +320,7 @@ def run_review_loop(
     blocked_before_address = (
         feedback_decision != "accepted" or unresolved_disagreement
     )
-    report_bytes = _render_report(
+    _render_report(
         workpad,
         report_id,
         bundle_id,

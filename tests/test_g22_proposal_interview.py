@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from http.client import HTTPResponse
 import json
 from pathlib import Path
 import sqlite3

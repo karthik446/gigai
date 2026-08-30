@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
 import sys
 from dataclasses import replace
 import webbrowser
 
 import click
+import questionary
 
 from .config import (
     ConfigurationError,
@@ -31,25 +33,23 @@ from .comparison import ComparisonError, compare_occurrences
 from .diagnostics import render_report_json, run_doctor, run_live_doctor
 from .evaluation import EvaluationError, load_manifest, score_behavior, write_report
 from .index import JournalIndexError, JournalProjection, read_index
+from .listing import GigListingError, list_gigs
 from .invocation import InvocationValidationError, load_invocation_bytes
 from .lifecycle import (
     LifecycleError,
     approve_interview_session,
     approve_offline,
-    build_interview_proposal,
     create_offline,
     persist_interview_session,
     persist_discovery_manifest,
     record_feedback,
-    record_builder_state,
-    recover_builder_session,
     reject_offline,
     revise_offline,
-    select_interview_references,
     stage_improvement_manifest,
     start_interview,
 )
 from .model_discovery import (
+    DetectedModel,
     discover_installed_models,
     discover_runtime_snapshot,
     persist_discovery_snapshot,
@@ -64,7 +64,7 @@ from .package import (
     install_package,
     upgrade_installation,
 )
-from .proposal_interview import InterviewHTTPServer, block_session, request_revision
+from .proposal_interview import InterviewHTTPServer
 from .occurrence import (
     OccurrenceError,
     close_occurrence,
@@ -84,9 +84,8 @@ from .setup import (
     run_setup,
 )
 from .setup_interview import SetupDraft, SetupHTTPServer
-from .registry import open_project_registry
 from .run import RunError, launch_run, read_run_details
-from .target_binding import TargetBindingError, initialize_target, resolve_target
+from .target_binding import TargetBindingError, resolve_target
 from .validators import validate_proposal_workpad
 from .workpad import ResolvedWorkpad, WorkpadError, open_locations, resolve_workpad
 
@@ -486,8 +485,9 @@ def setup_command(
     else:
         requested_home = (
             Path(
-                click.prompt(
-                    "GigAI home", default=os.fspath(requested_home), show_default=True
+                _setup_text_prompt(
+                    "GigAI home",
+                    default=_display_local_path(requested_home),
                 )
             )
             .expanduser()
@@ -512,8 +512,9 @@ def setup_command(
         )
         resolved_workpad = (
             Path(
-                click.prompt(
-                    "Authoritative workpad root", default=os.fspath(default_workpad)
+                _setup_text_prompt(
+                    "Authoritative workpad root",
+                    default=_display_local_path(default_workpad),
                 )
             )
             .expanduser()
@@ -538,10 +539,9 @@ def setup_command(
                 default_editor = detected_editor[0]
         try:
             resolved_editor = resolve_editor_argv(
-                click.prompt(
+                _setup_text_prompt(
                     "Editor program (used to open workpads)",
-                    default=default_editor,
-                    show_default=True,
+                    default=default_editor or "",
                 ),
                 (
                     editor_arg
@@ -553,7 +553,7 @@ def setup_command(
             )
         except ValueError as exc:
             _raise_cli_error(str(exc), as_json=as_json, code="setup_editor_invalid")
-        resolved_open = click.confirm(
+        resolved_open = _setup_confirm(
             "Open workpads with their target later?",
             default=(
                 open_with_target
@@ -565,11 +565,6 @@ def setup_command(
         )
 
     discovery_snapshot = discover_runtime_snapshot(refresh_reason="setup")
-    runtime_executables = {
-        item.name: str(item.executable)
-        for item in discovery_snapshot.models
-        if item.executable is not None
-    }
     try:
         if clear_credentials and credential_ref:
             raise ValueError(
@@ -673,20 +668,46 @@ def setup_command(
                 for profile in (existing.profiles if existing is not None else ())
                 if profile.name == "default"
             ),
-            "offline-default",
+            None,
         )
-        selected_create_target = create_model_target or saved_create_target
-        if not non_interactive and create_model_target is None:
-            selected_create_target = click.prompt(
-                "Model for Gig creation",
-                type=click.Choice(target_names),
-                default=saved_create_target if saved_create_target in target_names else target_names[0],
-                show_default=True,
-            )
+        detected_create_target = next(
+            (
+                f"{provider}-default"
+                for provider in ("codex", "claude")
+                if any(
+                    item.name == provider and item.executable is not None
+                    for item in discovery_snapshot.models
+                )
+                and f"{provider}-default" in target_names
+            ),
+            None,
+        )
+        # Terminal setup should work from the runtime already present on the
+        # machine.  Preserve an existing explicit profile and keep scripted
+        # setup deterministic; otherwise a first-run terminal setup prefers a
+        # detected local CLI over the tests-only fixture.
+        setup_default_target = (
+            saved_create_target
+            if saved_create_target in target_names
+            else detected_create_target
+            if not non_interactive and detected_create_target is not None
+            else "offline-default"
+        )
+        selected_create_target = create_model_target or setup_default_target
         if selected_create_target not in target_names:
             raise ValueError(
                 f"create model target {selected_create_target!r} is not configured; "
                 f"choose one of {sorted(target_names)}"
+            )
+        runtime_options = _terminal_runtime_options(
+            targets=targets,
+            endpoints=endpoints,
+            detected_models=discovery_snapshot.models,
+        )
+        if not non_interactive and create_model_target is None:
+            selected_create_target = _select_terminal_create_target(
+                options=runtime_options,
+                default=selected_create_target,
             )
         current_profiles = existing.profiles if existing is not None else None
         if current_profiles is None:
@@ -720,61 +741,27 @@ def setup_command(
                 )
             profiles = tuple(profiles_list)
         if not non_interactive:
-            credential_summary = [
-                {"name": item.name, "kind": item.kind} for item in credentials
-            ]
-            preview_config = build_config(
-                home_root=requested_home,
-                workpad_root=resolved_workpad,
-                editor_argv=resolved_editor,
-                open_with_target=resolved_open,
-                credentials=credentials,
-                endpoints=endpoints,
-                model_targets=targets,
-                profiles=profiles,
-            )
-            click.secho("\nGigAI setup review", bold=True, fg="cyan")
-            click.echo(f"  GigAI home: {requested_home}")
-            click.echo(f"  Workpad storage: {resolved_workpad}")
+            click.secho("\nGigAI setup", bold=True, fg="cyan")
             click.echo(
-                f"  Editor argv: {json.dumps(resolved_editor)} "
-                "(program used to open workpads)"
+                "  GigAI home: "
+                + click.style(_display_local_path(requested_home), fg="bright_black")
             )
-            click.echo(f"  Credential references: {json.dumps(credential_summary)}")
-            click.secho("  Gig creation choices:", bold=True)
-            for candidate in targets:
-                readiness = resolve_target_readiness(
-                    preview_config,
-                    candidate.name,
-                    executable_overrides=runtime_executables,
-                )
-                endpoint = next(item for item in endpoints if item.name == candidate.endpoint)
-                mode = (
-                    "deterministic fixture"
-                    if endpoint.adapter == "deterministic"
-                    else "configured API"
-                )
-                selected = " [selected]" if candidate.name == selected_create_target else ""
-                click.echo(
-                    f"    - {candidate.name}: {mode}; readiness={readiness.readiness}{selected}"
-                )
-            for item in discovery_snapshot.models:
-                if item.executable:
-                    version = f" version={item.version}" if item.version else ""
-                    click.echo(
-                        f"    - {item.name}: {item.readiness}; resolution={item.resolution};"
-                        f" path_source={item.path_source}{version}"
-                    )
-            if not any(item.executable for item in discovery_snapshot.models):
-                click.echo("    - codex/claude: not detected; no local CLI candidate")
             click.echo(
-                "  Built-in local mode: no network or provider credentials "
-                "(offline-default / fixture-v1)"
+                "  Workpad storage: "
+                + click.style(_display_local_path(resolved_workpad), fg="bright_black")
             )
-            click.echo("  Profile: default")
-            click.echo("  Standard pack: standard version 1")
+            click.echo(
+                "  Editor: " + click.style(resolved_editor[0], fg="bright_black")
+            )
+            selected_option = next(
+                item for item in runtime_options if item[0] == selected_create_target
+            )
+            click.secho("  Runtime:", bold=True, nl=False)
+            click.echo(
+                " " + click.style(selected_option[1], fg="green", bold=True)
+            )
             click.secho("\nThese are machine-local changes. Nothing will be written to a target repository.", dim=True)
-            if not click.confirm("Apply this setup?", default=True):
+            if not _setup_confirm("Apply this setup?", default=True):
                 raise click.Abort()
         config = build_config(
             home_root=requested_home,
@@ -806,7 +793,10 @@ def setup_command(
     else:
         changed = "updated" if result.config_changed else "unchanged"
         click.echo(f"GigAI setup complete; configuration {changed}.")
-        click.echo(f"Authoritative workpad root: {result.config.workpad_root}")
+        click.echo(
+            "Authoritative workpad root: "
+            + _display_local_path(result.config.workpad_root)
+        )
 
 
 def _run_browser_setup(
@@ -874,7 +864,6 @@ def _run_browser_setup(
         if next(item for item in preview.endpoints if item.name == target.endpoint).adapter
         != "deterministic"
     )
-    real_target_names = {target.name for target in real_targets}
     default_profile = next(
         (profile for profile in preview.profiles if profile.name == "default"), None
     )
@@ -1057,6 +1046,159 @@ def _run_browser_setup(
     else:
         click.echo("GigAI setup complete; configuration updated.")
         click.echo(f"Authoritative workpad root: {result['workpad_root']}")
+
+
+def _terminal_runtime_options(
+    *,
+    targets: tuple[ModelTarget, ...],
+    endpoints: tuple[Endpoint, ...],
+    detected_models: tuple[object, ...],
+) -> tuple[tuple[str, str, str], ...]:
+    """Render one operator-facing runtime choice per configured target."""
+
+    endpoints_by_name = {item.name: item for item in endpoints}
+    detected_by_name = {getattr(item, "name"): item for item in detected_models}
+
+    def priority(target: ModelTarget) -> tuple[int, str]:
+        adapter = endpoints_by_name[target.endpoint].adapter
+        if adapter == "codex_cli":
+            return (0, target.name)
+        if adapter == "claude_cli":
+            return (1, target.name)
+        if adapter == "deterministic":
+            return (3, target.name)
+        return (2, target.name)
+
+    options: list[tuple[str, str, str]] = []
+    for target in sorted(targets, key=priority):
+        endpoint = endpoints_by_name[target.endpoint]
+        if endpoint.adapter == "deterministic":
+            label = "Offline fixture"
+            description = "Tests only · no model call"
+        elif endpoint.adapter in {"codex_cli", "claude_cli"}:
+            provider = endpoint.name
+            detected = detected_by_name.get(provider)
+            runtime_name = "Codex CLI" if provider == "codex" else "Claude Code"
+            version = getattr(detected, "version", None)
+            version_suffix = f" · {_display_runtime_version(version)}" if version else ""
+            label = runtime_name + version_suffix
+            if getattr(detected, "executable", None) is None:
+                description = "Configured, but not detected on this shell"
+            else:
+                description = (
+                    f"Detected at {_display_local_path(detected.executable)}"
+                )
+        else:
+            label = f"{endpoint.name} API"
+            description = f"Configured target · {target.model}"
+        options.append((target.name, label, description))
+    return tuple(options)
+
+
+def _display_local_path(value: Path, *, home: Path | None = None) -> str:
+    """Show a local path without needlessly exposing the operator's home prefix."""
+
+    # This is presentation only. Do not resolve: `/opt/homebrew/bin/codex` is
+    # the useful operator-facing path, while its resolved Node-module target is
+    # noisy and exposes implementation detail.
+    expanded_value = value.expanduser()
+    expanded_home = (home or Path.home()).expanduser()
+    try:
+        relative = expanded_value.relative_to(expanded_home)
+    except ValueError:
+        return os.fspath(expanded_value)
+    return "~" if relative == Path(".") else f"~/{relative}"
+
+
+def _display_runtime_version(value: str) -> str:
+    """Render a provider version as a short operator-facing tag."""
+
+    for token in value.replace("(", " ").replace(")", " ").split():
+        normalized = token.removeprefix("v")
+        if normalized and normalized[0].isdigit():
+            return f"v{normalized}"
+    return value
+
+
+def _setup_prompt_style() -> questionary.Style:
+    return questionary.Style(
+        [
+            ("qmark", "fg:#35c9ff bold"),
+            ("question", "fg:#35c9ff bold"),
+            ("answer", "fg:#43d17a bold"),
+            ("instruction", "fg:#7f8a99 italic"),
+            ("pointer", "fg:#35c9ff bold"),
+            ("checkbox", "fg:#b8c0cc"),
+            ("selected", "fg:#43d17a bold"),
+            ("highlighted", "fg:#ffffff bold"),
+            ("text", "fg:#b8c0cc"),
+            ("validation-toolbar", "fg:#ffcc66"),
+        ]
+    )
+
+
+def _setup_text_prompt(
+    label: str, *, default: str, is_tty: bool | None = None
+) -> str:
+    if is_tty is None:
+        is_tty = sys.stdin.isatty()
+    if not is_tty:
+        return click.prompt(label, default=default, show_default=True)
+    answer = questionary.text(
+        label + ":",
+        default="",
+        qmark="◆",
+        style=_setup_prompt_style(),
+        instruction=f"\n  default ({default}): Type path to change\n",
+    ).ask()
+    if answer is None:
+        raise click.Abort()
+    return answer or default
+
+
+def _setup_confirm(label: str, *, default: bool) -> bool:
+    if not sys.stdin.isatty():
+        return click.confirm(label, default=default)
+    answer = questionary.confirm(
+        label,
+        default=default,
+        qmark="◆",
+        style=_setup_prompt_style(),
+    ).ask()
+    if answer is None:
+        raise click.Abort()
+    return answer
+
+
+def _select_terminal_create_target(
+    *, options: tuple[tuple[str, str, str], ...], default: str, is_tty: bool | None = None
+) -> str:
+    """Use Questionary's styled terminal picker for one creation runtime."""
+
+    if is_tty is None:
+        is_tty = sys.stdin.isatty()
+    if not is_tty:
+        return default
+
+    def one_runtime(values: list[str]) -> bool | str:
+        return True if len(values) == 1 else "Choose exactly one Gig creation runtime."
+
+    answer = questionary.checkbox(
+        "Select Gig creation runtime",
+        choices=[
+            questionary.Choice(title=label, value=name, description=description)
+            for name, label, description in options
+        ],
+        initial_choice=default,
+        validate=one_runtime,
+        qmark="◆",
+        pointer="›",
+        instruction="(↑/↓ move · Space chooses · Enter continues)",
+        style=_setup_prompt_style(),
+    ).ask()
+    if answer is None:
+        raise click.Abort()
+    return answer[0]
 
 
 def _model_target_label(target: ModelTarget, config) -> str:
@@ -2422,30 +2564,67 @@ def _projection_options(command):
 
 
 @cli.command("gigs")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
-def gigs_command(home_value: Path | None, as_json: bool) -> None:
-    """List registered Gig identities without reading credentials or the network."""
+@click.option("--all", "all_projects", is_flag=True, help="List Gigs from all registered projects.")
+def gigs_command(
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+    all_projects: bool,
+) -> None:
+    """List registered Gigs for the bound project without writing workpad state."""
 
     _require_supported_platform()
     try:
-        registry, _ = open_project_registry(
-            (home_value or default_home_root()).expanduser().resolve(strict=False),
-            create=False,
+        result = list_gigs(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            all_projects=all_projects,
         )
-        payload = [
-            {"gig_id": item.gig_id, "project_id": item.project_id}
-            for item in registry.workpad_records()
-        ]
-    except (OSError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+    except GigListingError as exc:
+        if as_json:
+            click.echo(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "error": {"code": exc.code, "message": str(exc)},
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            raise click.exceptions.Exit(1)
+        raise click.ClickException(f"{exc.code}: {exc}") from exc
+    payload = result.as_dict()
     if as_json:
         click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
-    elif payload:
-        for item in payload:
-            click.echo(f"{item['gig_id']} {item['project_id']}")
+        return
+    scope = payload["scope"]
+    assert isinstance(scope, dict)
+    if scope["kind"] == "all":
+        click.echo("All projects")
+        click.echo("PROJECT  TITLE  STATUS  VERSION")
+        for item in payload["entries"]:
+            assert isinstance(item, dict)
+            click.echo(
+                f"{item['project_label']}  {item['title']}  {item['status']}  {item['version']}"
+            )
     else:
+        click.echo(f"Project: {scope['label']}")
+        click.echo("TITLE  STATUS  VERSION")
+        for item in payload["entries"]:
+            assert isinstance(item, dict)
+            click.echo(f"{item['title']}  {item['status']}  {item['version']}")
+    if not payload["entries"]:
         click.echo("No registered Gigs.")
+    for diagnostic in payload["diagnostics"]:
+        assert isinstance(diagnostic, dict)
+        click.echo(
+            f"Warning [{diagnostic['code']}]: {diagnostic['message']}",
+            err=True,
+        )
 
 
 @cli.command("proposals")

@@ -20,7 +20,6 @@ from gigai.config import (
     CredentialReference,
     Endpoint,
     ModelTarget,
-    Profile,
     config_path,
     load_config,
     migrate_config,

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import uuid
-from typing import Any, Callable
+from typing import Callable
 
 from .canonical import (
     EntityPrefix,

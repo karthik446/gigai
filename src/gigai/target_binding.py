@@ -27,7 +27,6 @@ from .project_binding import (
 )
 from .registry import (
     ProjectRecord,
-    RegistryConflictError,
     RegistryError,
     RegistryTransaction,
     open_project_registry,

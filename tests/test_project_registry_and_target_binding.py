@@ -11,7 +11,6 @@ import pytest
 from gigai.project_binding import (
     BINDING_SCHEMA_VERSION,
     MalformedProjectBindingError,
-    ProjectBinding,
     UnsupportedProjectBindingVersionError,
     load_project_binding,
     new_project_binding,

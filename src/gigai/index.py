@@ -58,11 +58,14 @@ def rebuild_index(*, workpad: Path, project_id: str, gig_id: str) -> JournalProj
 
 
 def _authoritative_projection(
-    *, root: Path, project_id: str, gig_id: str
+    *, root: Path, project_id: str, gig_id: str,
+    tolerate_manifest_errors: bool = False,
+    require_clean: bool = True,
 ) -> JournalProjection:
     """Replay committed journal authority into one deterministic projection."""
 
-    _require_clean_authority(root)
+    if require_clean:
+        _require_clean_authority(root)
     commits = tuple(
         line
         for line in _git(root, "rev-list", "--reverse", "HEAD").splitlines()
@@ -106,8 +109,18 @@ def _authoritative_projection(
         )
         expected_sequence += 1
     head = commits[-1]
-    proposal = _json_at(root, head, "manifests/gig-proposal.json")
-    active_version = _json_at(root, head, "manifests/active-gig-version.json")
+    proposal = _json_at(
+        root,
+        head,
+        "manifests/gig-proposal.json",
+        tolerate_invalid=tolerate_manifest_errors,
+    )
+    active_version = _json_at(
+        root,
+        head,
+        "manifests/active-gig-version.json",
+        tolerate_invalid=tolerate_manifest_errors,
+    )
     return JournalProjection(
         project_id, gig_id, head, tuple(entries), proposal, active_version
     )
@@ -130,6 +143,21 @@ def read_index(*, workpad: Path, project_id: str, gig_id: str) -> JournalProject
     if not matches_authority:
         _write_projection(root / "state.sqlite", authoritative)
     return authoritative
+
+
+def read_authoritative_index(
+    *, workpad: Path, project_id: str, gig_id: str,
+    tolerate_manifest_errors: bool = False,
+) -> JournalProjection:
+    """Read committed journal/manifests without touching the disposable index."""
+
+    return _authoritative_projection(
+        root=_root(workpad),
+        project_id=project_id,
+        gig_id=gig_id,
+        tolerate_manifest_errors=tolerate_manifest_errors,
+        require_clean=False,
+    )
 
 
 def _write_projection(path: Path, projection: JournalProjection) -> None:
@@ -243,12 +271,25 @@ def _read_projection(path: Path) -> JournalProjection:
     )
 
 
-def _json_at(root: Path, commit: str, path: str) -> dict[str, object] | None:
+def _json_at(
+    root: Path,
+    commit: str,
+    path: str,
+    *,
+    tolerate_invalid: bool = False,
+) -> dict[str, object] | None:
     result = _git_process(root, "show", f"{commit}:{path}", check=False)
     if result.returncode != 0:
         return None
-    payload = parse_json_bytes(result.stdout.encode("utf-8"))
+    try:
+        payload = parse_json_bytes(result.stdout.encode("utf-8"))
+    except (TypeError, ValueError):
+        if tolerate_invalid:
+            return None
+        raise JournalIndexError(f"authoritative {path} is not valid JSON") from None
     if not isinstance(payload, dict):
+        if tolerate_invalid:
+            return None
         raise JournalIndexError(f"authoritative {path} is not an object")
     return payload
 
@@ -293,4 +334,10 @@ def _git_process(
     return result
 
 
-__all__ = ["JournalIndexError", "JournalProjection", "read_index", "rebuild_index"]
+__all__ = [
+    "JournalIndexError",
+    "JournalProjection",
+    "read_authoritative_index",
+    "read_index",
+    "rebuild_index",
+]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import importlib
 import io
 import json
