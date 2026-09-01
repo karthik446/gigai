@@ -6,6 +6,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from gigai.cli import cli
+from gigai.config import Endpoint, ModelTarget, Profile
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 
@@ -20,6 +21,18 @@ def test_agent_backed_create_stays_proposal_only_until_cli_approval(tmp_path: Pa
             workpad_root=tmp_path / "workpads",
             editor_argv=("/usr/bin/true",),
             open_with_target=False,
+            endpoints=(Endpoint("codex", "codex_cli"),),
+            model_targets=(
+                ModelTarget("codex-default", "codex", "default", ("text",), 512),
+            ),
+            profiles=(
+                Profile(
+                    "default",
+                    "codex-default",
+                    "codex-default",
+                    "codex-default",
+                ),
+            ),
         )
     )
     initialize_target(home_root=home, requested_target=target)
@@ -42,7 +55,7 @@ def test_agent_backed_create_stays_proposal_only_until_cli_approval(tmp_path: Pa
                 },
                 "requested": {
                     "roles": ["gig_creator"],
-                    "models": [],
+                    "models": ["codex-default"],
                     "capabilities": ["local_reference_read"],
                 },
                 "consent": [],

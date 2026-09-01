@@ -327,7 +327,7 @@ def _initialize_git_target(
         target.root, "status", "--porcelain=v1", "-z", "--untracked-files=all"
     )
     _preflight_git_target(home, target.root, allow_tracked_portable=allow_tracked_portable)
-    lock_path = _git_path(target.root, INIT_LOCK_NAME)
+    lock_path = git_path(target.root, INIT_LOCK_NAME)
     with TargetInitLock(lock_path):
         assert_target_identity_stable(target)
         _preflight_git_target(home, target.root, allow_tracked_portable=allow_tracked_portable)
@@ -623,10 +623,12 @@ def _write_bytes_atomic(path: Path, payload: bytes) -> None:
 
 
 def _exclude_path(root: Path) -> Path:
-    return _git_path(root, "info/exclude")
+    return git_path(root, "info/exclude")
 
 
-def _git_path(root: Path, name: str) -> Path:
+def git_path(root: Path, name: str) -> Path:
+    """Resolve a path in Git metadata, including linked worktree metadata."""
+
     result = _git(root, "rev-parse", "--git-path", name)
     path = Path(result.stdout.strip())
     if not path.is_absolute():

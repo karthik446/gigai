@@ -120,9 +120,13 @@ def list_gigs(
     except WorkpadError as exc:
         if "not bound" in str(exc):
             code = "gigs_target_unbound" if requested_target is not None else "gigs_project_unbound"
+            message = (
+                f"{exc}. Run `gigai init --target PATH`, then retry this command."
+            )
         else:
             code = "registry_unavailable"
-        raise GigListingError(code, str(exc)) from exc
+            message = str(exc)
+        raise GigListingError(code, message) from exc
     except RegistryError as exc:
         raise GigListingError("registry_unavailable", str(exc)) from exc
     except ConfigurationError as exc:

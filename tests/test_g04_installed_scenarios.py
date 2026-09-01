@@ -22,6 +22,18 @@ from tests.scenarios import (
 )
 
 
+_SETUP_REMOTE_MODEL_ARGS = (
+    "--credential-ref",
+    "provider=environment:GIGAI_PROVIDER_TOKEN",
+    "--endpoint",
+    "remote=openai_api:provider:https://api.example.test",
+    "--model-target",
+    "remote=remote:gpt-test",
+    "--create-model-target",
+    "remote",
+)
+
+
 @pytest.fixture
 def installed_gigai() -> InstalledGigAI:
     return InstalledGigAI.current()
@@ -83,6 +95,7 @@ def _setup(
                 "--editor",
                 "/usr/bin/true",
                 "--json",
+                *_SETUP_REMOTE_MODEL_ARGS,
             ),
             expected_home_changes=_fresh_setup_changes(),
             allowed_subprocesses=(_python_executable(installed_gigai),),

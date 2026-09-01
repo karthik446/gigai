@@ -68,6 +68,8 @@ def test_installed_offline_doctor_uses_factory_without_network_or_secret_access(
                 "cheap=openai:gpt-test",
                 "--target-output-limit",
                 "cheap=8",
+                "--create-model-target",
+                "cheap",
                 "--json",
             ),
             expected_home_changes=_fresh_home_changes(),
@@ -87,7 +89,8 @@ def test_installed_offline_doctor_uses_factory_without_network_or_secret_access(
     payload = json.loads(doctor.stdout)
     assert payload["scope"] == "installation"
     assert payload["overall_status"] == "PASS"
-    assert {check["id"] for check in payload["checks"]} >= {"adapter.offline", "credential.openai"}
+    assert "credential.openai" in {check["id"] for check in payload["checks"]}
+    assert "adapter.offline" not in {check["id"] for check in payload["checks"]}
     assert doctor.guard_events == ()
     combined = setup.stdout + doctor.stdout + setup.artifact.read_text(encoding="utf-8")
     combined += doctor.artifact.read_text(encoding="utf-8")

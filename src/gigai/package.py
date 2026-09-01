@@ -29,6 +29,7 @@ from .project_binding import binding_path, load_project_binding
 from .target_binding import (
     TargetBindingError,
     TargetInitLock,
+    git_path,
     initialize_target,
     resolve_target,
 )
@@ -279,7 +280,7 @@ def initialize_project_package(
                 )
             _validate_existing_packages(target.root)
     lock = (
-        TargetInitLock(target.root / ".git" / "gigai-package.lock")
+        TargetInitLock(git_path(target.root, "gigai-package.lock"))
         if target.kind == "git"
         else None
     )
@@ -457,11 +458,7 @@ def upgrade_installation(
             if binding_path(target.root).is_file()
             else None
         )
-        exclude_path = (
-            target.root / ".git" / "info" / "exclude"
-            if target.kind == "git"
-            else None
-        )
+        exclude_path = git_path(target.root, "info/exclude") if target.kind == "git" else None
         exclude_before = (
             exclude_path.read_bytes()
             if exclude_path is not None and exclude_path.is_file()
@@ -852,7 +849,7 @@ def _git_paths(root: Path) -> tuple[str, ...]:
 
 
 def _cutover_git_exclude(root: Path) -> bool:
-    exclude = root / ".git" / "info" / "exclude"
+    exclude = git_path(root, "info/exclude")
     before = exclude.read_bytes() if exclude.exists() else b""
     lines = before.splitlines(keepends=True)
     root_matches = [line for line in lines if line.rstrip(b"\r\n") == ROOT_EXCLUDE_LINE.rstrip(b"\n")]

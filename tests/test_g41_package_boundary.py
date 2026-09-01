@@ -74,6 +74,70 @@ def test_init_creates_portable_package_and_exact_private_excludes(tmp_path: Path
     assert rerun_payload["exclude_changed"] is False
 
 
+def test_init_supports_linked_git_worktree_metadata(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    source = tmp_path / "source"
+    linked = tmp_path / "linked"
+    subprocess.run(
+        ["git", "init", "--quiet", "--initial-branch=main", source], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(source), "config", "user.name", "GigAI Tests"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(source), "config", "user.email", "tests@gigai.invalid"],
+        check=True,
+    )
+    (source / "README.md").write_text("linked worktree\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(source), "add", "README.md"], check=True)
+    subprocess.run(
+        ["git", "-C", str(source), "commit", "--quiet", "-m", "initial"],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(source),
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "linked",
+            str(linked),
+            "main",
+        ],
+        check=True,
+    )
+    run_setup(
+        build_config(
+            home_root=home,
+            workpad_root=tmp_path / "workpads",
+            editor_argv=("/usr/bin/true",),
+            open_with_target=False,
+        )
+    )
+
+    result = CliRunner().invoke(
+        cli, ["init", "--home", str(home), "--target", str(linked), "--json"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (linked / ".git").is_file()
+    package = linked / ".gigai" / "packages" / json.loads(result.output)["package_id"]
+    assert (package / "package.json").is_file()
+    exclude = subprocess.run(
+        ["git", "-C", str(linked), "rev-parse", "--git-path", "info/exclude"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert Path(exclude).is_file()
+    assert b"/.gigai/" not in Path(exclude).read_bytes().splitlines()
+
+
 def test_init_is_idempotent_after_portable_package_is_tracked(tmp_path: Path) -> None:
     home, target = _setup(tmp_path)
     initial = initialize_project_package(home_root=home, requested_target=target)

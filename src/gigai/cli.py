@@ -109,11 +109,16 @@ def cli(context: click.Context) -> None:
 
     if context.invoked_subcommand is None:
         raise click.UsageError(
-            "Choose 'setup', 'doctor', 'init', 'create', 'improve', 'feedback', 'revise', "
+            "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', "
             "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
-            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', 'models', 'invoke', 'eval', or 'open'; "
+            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', 'models', 'invoke', or 'open'; "
             "use --help for details."
         )
+
+
+@cli.group("internal", hidden=True)
+def internal_group() -> None:
+    """Developer-only commands retained outside the public CLI surface."""
 
 
 def _raise_cli_error(message: str, *, as_json: bool, code: str) -> None:
@@ -174,14 +179,72 @@ def models_command(
             (profile for profile in config.profiles if profile.name == "default"),
             None,
         )
+        endpoints = {item.name: item for item in config.endpoints}
+        detected = {item.name: item for item in snapshot.models}
+        public_targets = tuple(
+            target
+            for target in config.model_targets
+            if endpoints.get(target.endpoint) is not None
+            and endpoints[target.endpoint].adapter != "deterministic"
+        )
 
-        def configured_target_payload(target: ModelTarget) -> dict[str, object]:
-            readiness = resolve_target_readiness(
-                config,
-                target.name,
-                executable_overrides=runtime_executables,
-            )
-            selected_roles = tuple(
+        def target_projection(
+            target: ModelTarget,
+            readiness,
+        ) -> dict[str, object]:
+            endpoint = endpoints.get(target.endpoint)
+            adapter = endpoint.adapter if endpoint is not None else None
+            label = _model_target_label(target, config)
+            states = list(getattr(readiness, "states", ()))
+            credential_status = "not_required"
+            next_action = ""
+            primary_state = readiness.readiness
+            if adapter in {"codex_cli", "claude_cli"}:
+                runtime = detected.get(endpoint.name if endpoint else "")
+                if runtime is not None and runtime.executable is not None:
+                    if "detected" not in states:
+                        states.insert(0, "detected")
+                    if "compatible" not in states:
+                        states.append("compatible")
+                    next_action = f"Run `gigai models --probe {target.name}` to verify readiness."
+                else:
+                    next_action = (
+                        f"Install {label} or refresh discovery with `gigai models --refresh`."
+                    )
+            elif adapter in {"openai_api", "openrouter_api", "anthropic_api"}:
+                credential = (
+                    next(
+                        (
+                            item
+                            for item in config.credentials
+                            if endpoint is not None and item.name == endpoint.credential
+                        ),
+                        None,
+                    )
+                    if endpoint is not None
+                    else None
+                )
+                available = None
+                if credential is not None:
+                    try:
+                        available = reference_is_available(credential)
+                    except ValueError:
+                        available = False
+                if credential is None or available is False or available is None:
+                    primary_state = "credential_reference_missing"
+                    credential_status = "missing_or_unusable"
+                    if "credential_reference_missing" not in states:
+                        states.append("credential_reference_missing")
+                    next_action = (
+                        "Set the configured external credential reference, then run "
+                        "`gigai models --refresh`."
+                    )
+                else:
+                    credential_status = "available"
+                    if "compatible" not in states:
+                        states.append("compatible")
+                    next_action = f"Run `gigai models --probe {target.name}` to verify readiness."
+            if selected_roles := tuple(
                 role
                 for role in (
                     "planner",
@@ -194,15 +257,26 @@ def models_command(
                 )
                 if default_profile is not None
                 and getattr(default_profile, role) == target.name
-            )
-            states = tuple(readiness.states)
-            if selected_roles and "selected" not in states:
-                states = (*states, "selected")
+            ):
+                if "selected" not in states:
+                    states.append("selected")
             return {
                 **readiness.__dict__,
-                "states": states,
+                "display_label": label,
+                "state": primary_state,
+                "states": tuple(dict.fromkeys(states)),
                 "selected_roles": selected_roles,
+                "credential_status": credential_status,
+                "next_action": next_action,
             }
+
+        def configured_target_payload(target: ModelTarget) -> dict[str, object]:
+            readiness = resolve_target_readiness(
+                config,
+                target.name,
+                executable_overrides=runtime_executables,
+            )
+            return target_projection(target, readiness)
 
         payload: dict[str, object] = {
             "snapshot": {
@@ -212,8 +286,12 @@ def models_command(
             "detected": [
                 {
                     "name": item.name,
+                    "display_label": (
+                        "Codex CLI" if item.name == "codex" else "Claude Code"
+                    ),
                     "executable": "<redacted>" if item.executable else None,
                     "readiness": item.readiness,
+                    "state": "detected" if item.executable else "not_detected",
                     "version": item.version,
                     "resolution": item.resolution,
                     "path_source": item.path_source,
@@ -223,37 +301,98 @@ def models_command(
             ],
             "configured": [
                 configured_target_payload(item)
-                for item in config.model_targets
+                for item in public_targets
             ],
         }
+        configured_providers = {
+            {
+                "openai_api": "openai",
+                "openrouter_api": "openrouter",
+            }.get(endpoints[item.endpoint].adapter)
+            for item in public_targets
+            if endpoints.get(item.endpoint) is not None
+        }
+        payload["not_configured"] = [
+            {
+                "provider": provider,
+                "display_label": label,
+                "state": "not_configured",
+                "next_action": (
+                    f"Configure a credential reference and target for {label} with `gigai setup`."
+                ),
+            }
+            for provider, label in (("openai", "OpenAI API"), ("openrouter", "OpenRouter API"))
+            if provider not in configured_providers
+        ]
         if probe_target is not None:
-            payload["probe"] = probe_target_readiness(
-                config,
-                probe_target,
-                executable_overrides=runtime_executables,
-            ).__dict__
+            configured_target = next(
+                (item for item in public_targets if item.name == probe_target),
+                None,
+            )
+            hidden_target = next(
+                (item for item in config.model_targets if item.name == probe_target),
+                None,
+            )
+            if hidden_target is not None and configured_target is None:
+                _raise_cli_error(
+                    "the requested model target is not available through the public CLI",
+                    as_json=as_json,
+                    code="model_target_not_public",
+                )
+            configured_projection = (
+                configured_target_payload(configured_target)
+                if configured_target is not None
+                else None
+            )
+            if configured_projection is not None and configured_projection["state"] == "credential_reference_missing":
+                payload["probe"] = {
+                    **configured_projection,
+                    "reason": "credential reference is missing or unusable; no probe was attempted",
+                }
+            else:
+                probed = probe_target_readiness(
+                    config,
+                    probe_target,
+                    executable_overrides=runtime_executables,
+                )
+                payload["probe"] = (
+                    target_projection(configured_target, probed)
+                    if configured_target is not None
+                    else {
+                        **probed.__dict__,
+                        "display_label": "Requested model target",
+                        "state": probed.readiness,
+                        "next_action": "Configure this target with `gigai setup`.",
+                    }
+                )
         if as_json:
             click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
             if probe_target is not None and payload["probe"]["readiness"] != "usable":
                 raise click.exceptions.Exit(1)
             return
         for item in payload["detected"]:
-            location = f" ({item['executable']})" if item["executable"] else ""
-            click.echo(f"{item['name']}: {item['readiness']}{location}")
+            version = f" · v{item['version']}" if item["version"] else ""
+            click.echo(f"{item['display_label']}{version}: {item['state']}")
         for item in payload["configured"]:
             click.echo(
-                f"target {item['target_name']}: {item['readiness']} "
-                f"({item['adapter'] or 'unresolved'} / {item['model'] or 'unknown'})"
+                f"{item['display_label']}: {item['state']} — {item['next_action']}"
             )
+        for item in payload["not_configured"]:
+            click.echo(f"{item['display_label']}: {item['state']} — {item['next_action']}")
         if probe_target is not None:
             probe = payload["probe"]
             click.echo(
-                f"probe target {probe['target_name']}: {probe['readiness']} "
-                f"({probe['adapter'] or 'unresolved'} / {probe['model'] or 'unknown'})"
+                f"Probe {probe['display_label']}: {probe['state']}"
             )
-            if probe["readiness"] != "usable":
+            if probe["state"] != "usable":
                 raise click.exceptions.Exit(1)
-    except (ConfigurationError, OSError, ValueError) as exc:
+    except ConfigurationError:
+        _raise_cli_error(
+            "GigAI is not configured. Run `gigai setup` before checking models.",
+            as_json=as_json,
+            code="models_not_configured",
+        )
+    except (OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
 
 
@@ -287,7 +426,7 @@ def invoke_command(input_path: Path | None, as_json: bool) -> None:
         )
 
 
-@cli.group("eval")
+@internal_group.group("eval")
 def eval_group() -> None:
     """Validate and run explicit GigAI evaluation contracts."""
 
@@ -586,24 +725,22 @@ def setup_command(
             _parse_model_target_spec(value, output_limits, reasoning_efforts)
             for value in model_target_spec
         )
-        existing_endpoints = (
-            existing.endpoints
-            if existing is not None
-            else (Endpoint(name="offline", adapter="deterministic"),)
+        existing_endpoints = existing.endpoints if existing is not None else ()
+        existing_targets = existing.model_targets if existing is not None else ()
+        deterministic_endpoint_names = {
+            endpoint.name
+            for endpoint in existing_endpoints
+            if endpoint.adapter == "deterministic"
+        }
+        existing_endpoints = tuple(
+            endpoint
+            for endpoint in existing_endpoints
+            if endpoint.name not in deterministic_endpoint_names
         )
-        existing_targets = (
-            existing.model_targets
-            if existing is not None
-            else (
-                ModelTarget(
-                    name="offline-default",
-                    endpoint="offline",
-                    model="fixture-v1",
-                    capabilities=("text",),
-                    max_output_tokens=64,
-                    reasoning_effort=None,
-                ),
-            )
+        existing_targets = tuple(
+            target
+            for target in existing_targets
+            if target.endpoint not in deterministic_endpoint_names
         )
         endpoint_names = {endpoint.name for endpoint in existing_endpoints}
         target_names = {target.name for target in existing_targets}
@@ -658,9 +795,25 @@ def setup_command(
                 else target
                 for target in existing_targets
             )
-            + target_specs
         )
-        endpoints = (*existing_endpoints, *endpoint_specs)
+        endpoint_by_name = {endpoint.name: endpoint for endpoint in existing_endpoints}
+        for endpoint in endpoint_specs:
+            previous = endpoint_by_name.get(endpoint.name)
+            if previous is not None and previous != endpoint:
+                raise ValueError(
+                    f"endpoint {endpoint.name!r} is already configured differently"
+                )
+            endpoint_by_name[endpoint.name] = endpoint
+        endpoints = tuple(endpoint_by_name.values())
+        target_by_name = {target.name: target for target in targets}
+        for target in target_specs:
+            previous = target_by_name.get(target.name)
+            if previous is not None and previous != target:
+                raise ValueError(
+                    f"model target {target.name!r} is already configured differently"
+                )
+            target_by_name[target.name] = target
+        targets = tuple(target_by_name.values())
         target_names = tuple(target.name for target in targets)
         saved_create_target = next(
             (
@@ -683,17 +836,20 @@ def setup_command(
             None,
         )
         # Terminal setup should work from the runtime already present on the
-        # machine.  Preserve an existing explicit profile and keep scripted
-        # setup deterministic; otherwise a first-run terminal setup prefers a
-        # detected local CLI over the tests-only fixture.
+        # machine. Never create or select a deterministic fixture as a default.
         setup_default_target = (
             saved_create_target
             if saved_create_target in target_names
             else detected_create_target
-            if not non_interactive and detected_create_target is not None
-            else "offline-default"
+            if detected_create_target is not None
+            else None
         )
         selected_create_target = create_model_target or setup_default_target
+        if selected_create_target is None:
+            raise ValueError(
+                "no usable model runtime is configured; install or configure Codex, "
+                "Claude, or an API target, then rerun `gigai setup`"
+            )
         if selected_create_target not in target_names:
             raise ValueError(
                 f"create model target {selected_create_target!r} is not configured; "
@@ -715,8 +871,8 @@ def setup_command(
                 Profile(
                     name="default",
                     planner=selected_create_target,
-                    critic="offline-default",
-                    adjudicator="offline-default",
+                    critic=selected_create_target,
+                    adjudicator=selected_create_target,
                 ),
             )
         else:
@@ -725,7 +881,20 @@ def setup_command(
             for profile in current_profiles:
                 if profile.name == "default":
                     profiles_list.append(
-                        replace(profile, planner=selected_create_target)
+                        replace(
+                            profile,
+                            planner=selected_create_target,
+                            critic=(
+                                selected_create_target
+                                if profile.critic not in target_names
+                                else profile.critic
+                            ),
+                            adjudicator=(
+                                selected_create_target
+                                if profile.adjudicator not in target_names
+                                else profile.adjudicator
+                            ),
+                        )
                     )
                     replaced_default = True
                 else:
@@ -735,8 +904,8 @@ def setup_command(
                     Profile(
                         name="default",
                         planner=selected_create_target,
-                        critic="offline-default",
-                        adjudicator="offline-default",
+                        critic=selected_create_target,
+                        adjudicator=selected_create_target,
                     )
                 )
             profiles = tuple(profiles_list)
@@ -759,6 +928,10 @@ def setup_command(
             click.secho("  Runtime:", bold=True, nl=False)
             click.echo(
                 " " + click.style(selected_option[1], fg="green", bold=True)
+            )
+            click.echo(
+                "  API providers: optional reference-only configuration; "
+                "see `gigai setup --help` for supported forms."
             )
             click.secho("\nThese are machine-local changes. Nothing will be written to a target repository.", dim=True)
             if not _setup_confirm("Apply this setup?", default=True):
@@ -1073,8 +1246,7 @@ def _terminal_runtime_options(
     for target in sorted(targets, key=priority):
         endpoint = endpoints_by_name[target.endpoint]
         if endpoint.adapter == "deterministic":
-            label = "Offline fixture"
-            description = "Tests only · no model call"
+            continue
         elif endpoint.adapter in {"codex_cli", "claude_cli"}:
             provider = endpoint.name
             detected = detected_by_name.get(provider)
@@ -1204,7 +1376,7 @@ def _select_terminal_create_target(
 def _model_target_label(target: ModelTarget, config) -> str:
     endpoint = next(item for item in config.endpoints if item.name == target.endpoint)
     if endpoint.adapter == "deterministic":
-        return "Offline demo mode"
+        return "Deterministic test adapter"
     if endpoint.adapter == "openrouter_api":
         return "OpenRouter API"
     if endpoint.adapter == "openai_api":
@@ -1212,7 +1384,7 @@ def _model_target_label(target: ModelTarget, config) -> str:
     if endpoint.adapter == "codex_cli":
         return "Codex CLI"
     if endpoint.adapter == "claude_cli":
-        return "Claude CLI"
+        return "Claude Code"
     return "Configured model"
 
 
@@ -1739,11 +1911,6 @@ def upgrade_command(
     help="Explicit agent invocation envelope containing the proposal input.",
 )
 @click.option(
-    "--offline",
-    is_flag=True,
-    help="Use the deterministic local fixture instead of an agent proposal envelope.",
-)
-@click.option(
     "--json", "as_json", is_flag=True, help="Emit a stable path-safe result summary."
 )
 def create_command(
@@ -1753,10 +1920,9 @@ def create_command(
     home_value: Path | None,
     model_target: str | None,
     invocation_path: Path | None,
-    offline: bool,
     as_json: bool,
 ) -> None:
-    """Create a proposal from an explicit agent envelope or offline fixture."""
+    """Create a proposal from an explicit agent invocation envelope."""
 
     _require_supported_platform()
     try:
@@ -1768,88 +1934,76 @@ def create_command(
             for item in runtime_snapshot.models
             if item.executable is not None
         }
-        if offline:
-            offline_model_target = model_target or _default_create_model_target(load_config(home))
-            result = create_offline(
-                home_root=home,
-                requested_target=target_value,
-                name=name,
-                commission=commission,
-                model_target=offline_model_target,
-                runtime_executables=runtime_executables,
-                open_editor=False,
+        if invocation_path is None:
+            raise click.ClickException(
+                "create requires an explicit --invocation JSON envelope; "
+                "ordinary conversation is not imported"
             )
+        invocation = load_invocation_bytes(invocation_path.read_bytes())
+        if invocation.command != "create":
+            raise click.ClickException("create requires an invocation with command=create")
+        envelope_home = invocation.target.get("home")
+        if (
+            envelope_home is not None
+            and Path(envelope_home).expanduser().resolve(strict=False)
+            != home.resolve(strict=False)
+        ):
+            raise click.ClickException(
+                "invocation target.home does not match the selected GigAI home"
+            )
+        intent = invocation.input.get("intent")
+        if not isinstance(intent, str) or not intent.strip():
+            intent = commission or name
+        proposal_input = invocation.input.get("proposal")
+        model_output = (
+            json.dumps(proposal_input, sort_keys=True, separators=(",", ":"))
+            if isinstance(proposal_input, dict)
+            else intent
+        )
+        config = load_config(home)
+        requested_models = invocation.requested.get("models", [])
+        selected_model_target = model_target or (
+            requested_models[0]
+            if requested_models
+            else _default_create_model_target(config)
+        )
+        result = create_offline(
+            home_root=home,
+            requested_target=target_value,
+            name=name,
+            commission=intent,
+            model_target=selected_model_target,
+            model_output=model_output,
+            runtime_executables=runtime_executables,
+            open_editor=False,
+        )
+        payload = {
+            "gig_id": result.gig_id,
+            "project_id": result.project_id,
+            "proposal_id": result.proposal_id,
+            "resumed": result.resumed,
+            "status": "proposed",
+            "authority_created": False,
+        }
+        if as_json:
+            click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
         else:
-            if invocation_path is None:
-                raise click.ClickException(
-                    "create requires an explicit --invocation JSON envelope; "
-                    "ordinary conversation is not imported"
-                )
-            invocation = load_invocation_bytes(invocation_path.read_bytes())
-            if invocation.command != "create":
-                raise click.ClickException("create requires an invocation with command=create")
-            envelope_home = invocation.target.get("home")
-            if (
-                envelope_home is not None
-                and Path(envelope_home).expanduser().resolve(strict=False)
-                != home.resolve(strict=False)
-            ):
-                raise click.ClickException(
-                    "invocation target.home does not match the selected GigAI home"
-                )
-            intent = invocation.input.get("intent")
-            if not isinstance(intent, str) or not intent.strip():
-                intent = commission or name
-            proposal_input = invocation.input.get("proposal")
-            model_output = (
-                json.dumps(proposal_input, sort_keys=True, separators=(",", ":"))
-                if isinstance(proposal_input, dict)
-                else intent
+            click.echo(
+                f"Gig proposal {result.proposal_id} is ready for operator review; "
+                "no Gig version or Run was created."
             )
-            config = load_config(home)
-            requested_models = invocation.requested.get("models", [])
-            selected_model_target = model_target or (
-                requested_models[0]
-                if requested_models
-                else _default_create_model_target(config)
-            )
-            result = create_offline(
-                home_root=home,
-                requested_target=target_value,
-                name=name,
-                commission=intent,
-                model_target=selected_model_target,
-                model_output=model_output,
-                runtime_executables=runtime_executables,
-                open_editor=False,
-            )
-            payload = {
-                "gig_id": result.gig_id,
-                "project_id": result.project_id,
-                "proposal_id": result.proposal_id,
-                "resumed": result.resumed,
-                "status": "proposed",
-                "authority_created": False,
-            }
-            if as_json:
-                click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
-            else:
-                click.echo(
-                    f"Gig proposal {result.proposal_id} is ready for operator review; "
-                    "no Gig version or Run was created."
-                )
-            return
+        return
     except (LifecycleError, WorkpadError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
 
 
-@cli.command("improve")
+@internal_group.command("improve")
 @click.argument("manifest", type=click.Path(path_type=Path, dir_okay=False))
 @click.option("--request", "request_value", required=True, help="Human-readable improvement request.")
 @click.option("--reference", "reference_values", multiple=True, type=click.Path(path_type=Path, dir_okay=False), required=True, help="Explicit local evidence reference; repeat as needed.")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
-@click.option("--model-target", default="offline-default", show_default=True)
+@click.option("--model-target")
 @click.option("--max-rounds", type=click.IntRange(min=1, max=1024), default=3, show_default=True)
 @click.option("--open/--no-open", "open_browser", default=True)
 @click.option("--json", "as_json", is_flag=True)
@@ -1859,7 +2013,7 @@ def improve_command(
     reference_values: tuple[Path, ...],
     target_value: Path | None,
     home_value: Path | None,
-    model_target: str,
+    model_target: str | None,
     max_rounds: int,
     open_browser: bool,
     as_json: bool,
@@ -1885,13 +2039,14 @@ def improve_command(
         )
         improve_reference_bytes = dict(started.reference_bytes)
         improve_config = load_config(home)
+        selected_model_target = model_target or _default_create_model_target(improve_config)
 
         def improve_questions(session):
             if (started.workpad / "manifests/gig-discovery-manifest.json").exists():
                 return session
             updated = generate_model_questions(
                 config=improve_config,
-                model_target=model_target,
+                model_target=selected_model_target,
                 session=session,
                 reference_bytes=improve_reference_bytes,
                 prompt_name=G27_DISCOVERY_PROMPT,
@@ -1900,12 +2055,12 @@ def improve_command(
                 start=started,
                 session=updated,
                 config=improve_config,
-                model_target=model_target,
+                model_target=selected_model_target,
                 reference_bytes=improve_reference_bytes,
             )
             return updated
 
-        improve_readiness = resolve_target_readiness(improve_config, model_target)
+        improve_readiness = resolve_target_readiness(improve_config, selected_model_target)
         improve_capabilities = {
             "local_reference_read": "usable",
             "model_invocation": improve_readiness.readiness,
@@ -2552,6 +2707,48 @@ def _read_projection(
     )
 
 
+def _friendly_workflow_message(exc: BaseException) -> tuple[str, str]:
+    message = str(exc)
+    if "target is not bound to a GigAI project" in message:
+        return (
+            "project_unbound",
+            "This target is not initialized for GigAI. Run `gigai init --target PATH`, "
+            "then retry this command.",
+        )
+    if "registry" in message.lower() and any(
+        marker in message.lower() for marker in ("not found", "missing", "does not exist")
+    ):
+        return (
+            "project_unbound",
+            "This target is not initialized for GigAI. Run `gigai init --target PATH`, "
+            "then retry this command.",
+        )
+    if "no_active_gig" in message:
+        return (
+            "no_active_gig",
+            "no_active_gig: This project has no selected active Gig. Run `gigai gigs` to inspect "
+            "registered Gigs or provide a Gig ID.",
+        )
+    if "no committed proposal" in message:
+        return (
+            "proposal_missing",
+            "This Gig has no committed proposal. Run `gigai create NAME --target PATH` "
+            "to create one.",
+        )
+    if "target path is unavailable" in message:
+        return (
+            "target_unavailable",
+            "The target path is unavailable. Provide an existing project with "
+            "`--target PATH`, then run `gigai init --target PATH`.",
+        )
+    return (getattr(exc, "code", "cli_workflow_error"), message)
+
+
+def _raise_projection_error(exc: BaseException, *, as_json: bool) -> None:
+    code, message = _friendly_workflow_message(exc)
+    _raise_cli_error(message, as_json=as_json, code=code)
+
+
 def _projection_options(command):
     command = click.argument("gig_id", required=False)(command)
     command = click.option(
@@ -2643,12 +2840,14 @@ def proposals_command(
             home_value=home_value, target_value=target_value, gig_id=gig_id
         )
     except (JournalIndexError, WorkpadError, OSError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        _raise_projection_error(exc, as_json=as_json)
     payload = projection.proposal
     if as_json:
         click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     elif payload is None:
-        click.echo("No committed proposal.")
+        click.echo(
+            "No committed proposal. Next: run `gigai create NAME --target PATH`."
+        )
     else:
         click.echo(f"{payload['proposal_id']} {payload['status']} {payload['name']}")
 
@@ -2669,7 +2868,7 @@ def status_command(
             home_value=home_value, target_value=target_value, gig_id=gig_id
         )
     except (JournalIndexError, WorkpadError, OSError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        _raise_projection_error(exc, as_json=as_json)
     proposal = projection.proposal or {}
     active = projection.active_version or {}
     payload = {
@@ -2682,10 +2881,16 @@ def status_command(
     if as_json:
         click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     else:
-        click.echo(
-            f"{payload['gig_id']}: proposal={payload['proposal_status']} "
-            f"active_version={payload['active_version']}"
-        )
+        if payload["proposal_status"] is None:
+            click.echo(
+                f"{payload['gig_id']}: no committed proposal. Next: run "
+                "`gigai create NAME --target PATH`."
+            )
+        else:
+            click.echo(
+                f"{payload['gig_id']}: proposal={payload['proposal_status']} "
+                f"active_version={payload['active_version']}"
+            )
 
 
 @cli.command("show")
@@ -2704,7 +2909,7 @@ def show_command(
             home_value=home_value, target_value=target_value, gig_id=gig_id
         )
     except (JournalIndexError, WorkpadError, OSError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        _raise_projection_error(exc, as_json=as_json)
     if as_json:
         click.echo(
             json.dumps(projection.as_dict(), sort_keys=True, separators=(",", ":"))
@@ -2732,7 +2937,7 @@ def history_command(
             home_value=home_value, target_value=target_value, gig_id=gig_id
         )
     except (JournalIndexError, WorkpadError, OSError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        _raise_projection_error(exc, as_json=as_json)
     if as_json:
         click.echo(
             json.dumps(list(projection.entries), sort_keys=True, separators=(",", ":"))
@@ -2760,10 +2965,13 @@ def plan_command(
             home_value=home_value, target_value=target_value, gig_id=gig_id
         )
     except (JournalIndexError, WorkpadError, OSError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        _raise_projection_error(exc, as_json=as_json)
     proposal = projection.proposal
     if proposal is None:
-        raise click.ClickException("no committed proposal supplies a Goal Graph")
+        _raise_projection_error(
+            WorkpadError("no committed proposal supplies a Goal Graph"),
+            as_json=as_json,
+        )
     authority = "approved" if projection.active_version is not None else "proposed"
     payload = {"authority": authority, "goal_graph": proposal["goal_graph"]}
     if as_json:
@@ -2807,7 +3015,7 @@ def workpad_path_command(
             gig_id=gig_id,
         )
     except (WorkpadError, OSError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        _raise_projection_error(exc, as_json=False)
     click.echo(os.fspath(resolved.path))
 
 
@@ -2845,7 +3053,7 @@ def check_command(
             allow_semantic_state=True,
         )
     except (WorkpadError, OSError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        _raise_projection_error(exc, as_json=as_json)
     report = validate_proposal_workpad(resolved.path)
     if as_json:
         click.echo(json.dumps(report.as_dict(), sort_keys=True, separators=(",", ":")))
@@ -2904,7 +3112,7 @@ def open_command(
             allow_semantic_state=True,
         )
     except (WorkpadError, OSError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        _raise_projection_error(exc, as_json=False)
     if result.opened_workpad and result.opened_target:
         click.echo("Opened the registered workpad and bound target.")
     elif result.opened_workpad:
@@ -2916,18 +3124,24 @@ def open_command(
 def _default_create_model_target(config) -> str:
     """Resolve the setup-selected create target from the default profile."""
 
-    target_names = {target.name for target in config.model_targets if target.enabled}
+    endpoints = {endpoint.name: endpoint for endpoint in config.endpoints}
+    target_names = {
+        target.name
+        for target in config.model_targets
+        if target.enabled
+        and endpoints.get(target.endpoint) is not None
+        and endpoints[target.endpoint].adapter != "deterministic"
+    }
     for profile in config.profiles:
         if profile.name != "default":
             continue
         candidate = profile.gig_creator or profile.planner
         if candidate in target_names:
             return candidate
-    if "offline-default" in target_names:
-        return "offline-default"
     if not target_names:
         raise click.ClickException(
-            "no enabled model is configured; run 'gigai setup' and choose a usable model"
+            "no usable model runtime is configured; run `gigai setup` and choose "
+            "Codex, Claude, or an API target"
         )
     return sorted(target_names)[0]
 

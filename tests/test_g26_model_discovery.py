@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -231,12 +232,13 @@ def test_models_command_reports_configured_target_without_secret_values(tmp_path
     run_setup(config)
     result = CliRunner().invoke(cli, ["models", "--home", str(home), "--json"])
     assert result.exit_code == 0, result.output
-    assert '"target_name":"offline-default"' in result.output
-    assert "fixture-v1" in result.output
-    assert "credential" not in result.output
+    payload = json.loads(result.output)
+    assert payload["configured"] == []
+    assert "offline-default" not in result.output
+    assert "fixture-v1" not in result.output
 
 
-def test_models_command_probe_is_explicit_and_reports_readiness(tmp_path, monkeypatch) -> None:
+def test_models_command_rejects_test_only_target_probe(tmp_path) -> None:
     home = tmp_path / "home"
     config = build_config(
         home_root=home,
@@ -245,21 +247,10 @@ def test_models_command_probe_is_explicit_and_reports_readiness(tmp_path, monkey
         open_with_target=False,
     )
     run_setup(config)
-    monkeypatch.setattr(
-        "gigai.cli.probe_target_readiness",
-        lambda _config, target, **_: SimpleNamespace(
-            target_name=target,
-            endpoint_name="offline",
-            model="fixture-v1",
-            adapter="deterministic",
-            readiness="usable",
-            reason=None,
-        ),
-    )
-
     result = CliRunner().invoke(
         cli, ["models", "--home", str(home), "--probe", "offline-default", "--json"]
     )
 
-    assert result.exit_code == 0, result.output
-    assert '"probe":{"adapter":"deterministic"' in result.output
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["error"]["code"] == "model_target_not_public"

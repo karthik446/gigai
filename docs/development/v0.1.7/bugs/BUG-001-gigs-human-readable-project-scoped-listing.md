@@ -4,6 +4,12 @@
 
 **Affected command:** `gigai gigs` (including `uv run gigai gigs`)
 
+## Bug summary
+
+`gigai gigs` shows a global dump of opaque internal IDs instead of the
+human-readable Gigs for the project the operator is working in. It gives no
+useful name, state, or project context and makes old records look actionable.
+
 ## UAT observation
 
 After running machine setup and entering a project workflow, the operator ran:

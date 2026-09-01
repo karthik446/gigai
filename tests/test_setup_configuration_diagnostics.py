@@ -171,7 +171,6 @@ def test_doctor_is_offline_structured_and_warns_without_reading_secret(
         "path.home",
         "path.workpad",
         "editor.resolved",
-        "adapter.offline",
         "mount.atomic_replace",
         "mount.interprocess_lock",
     } <= ids

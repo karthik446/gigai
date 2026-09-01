@@ -6,6 +6,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from gigai.cli import cli
+from gigai.config import Endpoint, ModelTarget, Profile
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 
@@ -22,7 +23,11 @@ def _invocation(home: Path) -> dict[str, object]:
             "intent": "Create a bounded CLI proposal.",
             "proposal": {"summary": "Review repository changes"},
         },
-        "requested": {"roles": ["gig_creator"], "models": [], "capabilities": []},
+        "requested": {
+            "roles": ["gig_creator"],
+            "models": ["codex-default"],
+            "capabilities": [],
+        },
         "consent": [],
     }
 
@@ -37,6 +42,18 @@ def test_cli_create_and_approve_use_explicit_agent_envelope(tmp_path: Path) -> N
             workpad_root=tmp_path / "workpads",
             editor_argv=("/usr/bin/true",),
             open_with_target=False,
+            endpoints=(Endpoint("codex", "codex_cli"),),
+            model_targets=(
+                ModelTarget("codex-default", "codex", "default", ("text",), 512),
+            ),
+            profiles=(
+                Profile(
+                    "default",
+                    "codex-default",
+                    "codex-default",
+                    "codex-default",
+                ),
+            ),
         )
     )
     initialize_target(home_root=home, requested_target=target)

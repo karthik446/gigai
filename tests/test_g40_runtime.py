@@ -165,11 +165,8 @@ def test_models_command_persists_runtime_snapshot_without_provider_call(tmp_path
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["snapshot"]["refresh_reason"] == "explicit_refresh"
-    configured = next(
-        item for item in payload["configured"] if item["target_name"] == "offline-default"
-    )
-    assert configured["states"][-1] == "selected"
-    assert "usable" in configured["states"]
+    assert payload["configured"] == []
+    assert "offline-default" not in result.output
     assert (home / "snapshots/runtime-discovery").is_dir()
 
 
