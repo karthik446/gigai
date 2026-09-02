@@ -13,14 +13,15 @@ EXPECTED_SHA256 = {
     "active-gig-version.schema.json": "634af1729f4dbfe1f8564fd9d31b6c5cb8c56a2e1c7b80393e59ae877f76f5e1",
     "capability-installation.schema.json": "c21641988e728cd94a8617a994ec1e3f5ffa9ae38ca020a2f7406916d6d083c0",
     "capability-manifest.schema.json": "17844fd06a4a905ebcd12cff9994c86ad83dfd941e774ff539beb6e4429ec4cd",
-    "common.schema.json": "825a15da8f61348cc16afe315c2aca0e3218c78c0bf0f93394f74fe78cb7b53a",
+    "common.schema.json": "9b872c605c49cafbe25cfe5b9ea295d4d8c7b8cc0eab1d0eb1d65f09da59a0e4",
     "feedback.schema.json": "c89cda74feb86d34448a3e8afbfcded2554e3c077622ecfaa64e525951502461",
     "finding.schema.json": "4444e0cfec3a32bb83b016172331072a369afb2699b093ad670dc36dfbcdd8f7",
     "gig-builder-session.schema.json": "40e8042c69c33cf8fb763ff9a3074e9118c40d7c5e2711e6c23497a86b16b247",
     "gig-discovery-manifest.schema.json": "6a3618eed54963d85e42a68bd28976f291e4003a00f8aa9291066229b5870ca8",
+    "gig-package.schema.json": "921e2a481cdb61103f91cad6045e860a432101af50cf3a5b14e4108d8eda4e04",
     "gig-proposal.schema.json": "515f16368059c7d8d4bf88cb47d8fc0df63afc50a51e13c8c75601c013f134b3",
     "goal-graph.schema.json": "669115492bfed52f4738cb9cbbac626a10f80f6965da3d1f70eb20e4c2e264cf",
-    "handoff-frontmatter.schema.json": "de27d69529ae7cce07063fb67dcecc48aff79012ef72c66f3ed077367b9bd09e",
+    "handoff-frontmatter.schema.json": "126e608ed9e9bfdcf2fb7fad1514005f8ca886fdfaf30522d93234a02d3a8247",
     "improvement-manifest.schema.json": "7055101d0a11cdb8aa1563056c0f22a655b7088fdd41f51997e655af3e505e71",
     "learning-record.schema.json": "ffc112c25fb0984d09d076b25756b162f64b042675ec62cebca93c38a77de608",
     "gig-comparison.schema.json": "3e1c281fcf9c8fb79076073a2104151f7fc445eded2e31eee8439fff95c038be",
@@ -29,16 +30,18 @@ EXPECTED_SHA256 = {
     "model-invocation.schema.json": "756ca9eb7a746e3f0b6700b028c4807ed98050e15df29d182aeed73335e51bd6",
     "proposal-interview.schema.json": "980ce753e050f8cb953957075b2f2c7591aaf88c8f0aa7088a622ca5c7d6a8da",
     "proposal-draft-manifest.schema.json": "cbc0fc6d3cafbdea3bafad0002302839dc3b7b08a2f98e6214728e3aacfa1a1a",
-    "report.schema.json": "dc012ee13f66d45e3bdaab857c82a152a66be46cf98a8d50ffd21a4e581cac8c",
+    "report.schema.json": "e4f952561b484d49376ae39e279f197b67527405f38e673d21bc5c655cba48d4",
     "review-bundle.schema.json": "ab60331eaf6095aa2c70690592f1b66769012aa6973a03e6cb4a1d36f904b531",
     "review-contract.schema.json": "d7cc23e267ce07e071138e62c65accba9fc0b64ff967880fa05bf5cc5a4626f1",
     "run-brief-frontmatter.schema.json": "481118d7c49f97d00c389f8f4d4216cc1baf6ff96e8c16c3343006ad019369e3",
     "run-details.schema.json": "c2388d917e08cfcc0860ecd3a20b389be4f434aadde6b21ffa18ee4d6457111f",
     "run-manifest.schema.json": "a14126ac4943e71980371eb215fbc191434cfb0fb2f2761259a0faabb36af24f",
-    "review-loop.schema.json": "e7fc84e0bcca32a97e3a0aca1367af512384ef40b747a2aa13558baf20fd2a2b",
+    "run-plan.schema.json": "0c3ba1cc9c6095e0468dc3b7476878d1ee55bf579b0ddc8fd46b1f7d82d3b1cb",
+    "review-loop.schema.json": "8d87e00d4b16e4c535ce7c9645a5a9ef8a34f2ddc480b6616dcebba5e903f90b",
     "role-reference.schema.json": "dd29599c5d494480c6e9e52df2ebd815fdbc4bb9ccee897ef96d660376cc50a7",
     "target-effect.schema.json": "ccdee728551d5e43958ca1faa0bdf923cc986d080678c89209864464212e1f42",
     "trace.schema.json": "d1b5a8970e26b753fbbb8275cd30321a3fe0bc2bb56c4443c6d6306b42ca29ef",
+    "verification-record.schema.json": "2a02f52a8fadcf8be2d525c4bb20e9bb48e5b029928bb6b0ffce791d749c3070",
 }
 
 
@@ -67,7 +70,7 @@ def main() -> int:
                 f"expected {expected_digest}, got {actual_digest}"
             )
 
-    print("verified 31 installed GigAI schemas")
+    print("verified 34 installed GigAI schemas")
     return 0
 
 

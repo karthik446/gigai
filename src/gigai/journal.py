@@ -55,6 +55,8 @@ TRANSITIONS = frozenset(
         "gig_proposal_approved",
         "gig_proposal_rejected",
         "run_started",
+        "run_review_loop_materialized",
+        "run_plan_sealed",
         "goal_started",
         "goal_completed",
         "goal_failed",

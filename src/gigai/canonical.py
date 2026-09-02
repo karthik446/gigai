@@ -31,7 +31,7 @@ SAFE_INTEGER_MAX = 9_007_199_254_740_991
 ID_COLLISION_RETRIES = 3
 MEMBER_NAME = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 ENTITY_ID = re.compile(
-    r"^(?P<prefix>project|gig|gp|graph|goal|edge|run|handoff|inv|learning|improve_manifest|draft_manifest|occurrence|comparison|package)_"
+    r"^(?P<prefix>project|gig|gp|graph|goal|edge|run|run_plan|handoff|inv|learning|improve_manifest|draft_manifest|occurrence|comparison|package)_"
     r"(?P<uuid>[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12})$"
 )
@@ -105,6 +105,7 @@ class EntityPrefix(StrEnum):
     GOAL = "goal"
     EDGE = "edge"
     RUN = "run"
+    RUN_PLAN = "run_plan"
     HANDOFF = "handoff"
     INVOCATION = "inv"
     LEARNING = "learning"
@@ -249,6 +250,17 @@ def digest_imported_bytes(data: bytes) -> str:
             "imported content must be bytes; text encoding is not implicit"
         )
     return _sha256_digest(data)
+
+
+def derive_deterministic_id(prefix: str, value: Any) -> str:
+    """Derive a canonical UUIDv4-shaped ID from a canonical JSON value."""
+
+    if type(prefix) is not str or not re.fullmatch(r"[a-z][a-z0-9_]*", prefix):
+        raise InvalidIdentifierError("identifier prefix is invalid")
+    raw = bytearray(hashlib.sha256(canonical_json_bytes(value)).digest()[:16])
+    raw[6] = (raw[6] & 0x0F) | 0x40
+    raw[8] = (raw[8] & 0x3F) | 0x80
+    return f"{prefix}_{uuid.UUID(bytes=bytes(raw))}"
 
 
 def render_json_front_matter(metadata: dict[str, Any], body: str) -> bytes:

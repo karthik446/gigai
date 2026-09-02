@@ -42,10 +42,12 @@ EXPECTED_SCHEMA_NAMES = {
     "run-brief-frontmatter.schema.json",
     "run-details.schema.json",
     "run-manifest.schema.json",
+    "run-plan.schema.json",
     "review-loop.schema.json",
     "role-reference.schema.json",
     "target-effect.schema.json",
     "trace.schema.json",
+    "verification-record.schema.json",
 }
 
 PROJECT_ID = "project_11111111-1111-4111-8111-111111111111"
@@ -1040,12 +1042,62 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "id": "proposal-questioner",
         "version": 1,
     }
+    plan_input = artifact("runs/run-777/review/evidence/sealed-input.json")
+    run_plan = {
+        "schema_version": "1.0",
+        "run_plan_id": "run_plan_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "plan_version": 1,
+        "state": "sealed",
+        "gig_id": GIG_ID,
+        "gig_version": 1,
+        "journal_commit": COMMIT,
+        "project_id": PROJECT_ID,
+        "workpad_locator": f"registry:{PROJECT_ID}",
+        "goal_graph": graph_ref,
+        "review_contract": artifact("runs/run-777/review-contract.json"),
+        "classification": {"task_class": "document_review", "artifact_class": "text", "confidence": "high", "classifier_version": "fixture-1", "considered_inputs": [plan_input], "reason": "fixture input", "override": None},
+        "profile": {"profile_id": "focused", "profile_version": 1, "selection": "deterministic", "opt_in": None, "usage_unreported_policy": "block_before_call"},
+        "phases": [
+            {"phase": "review", "sequence": 1, "required": True, "participant_ids": ["participant_reviewer"], "input_refs": [plan_input], "output_kinds": ["finding"], "stopping_rule": "one pass", "state": "planned", "not_required_reason": None},
+            {"phase": "verify", "sequence": 2, "required": True, "participant_ids": ["participant_verifier"], "input_refs": [plan_input], "output_kinds": ["verification-record"], "stopping_rule": "one pass", "state": "planned", "not_required_reason": None},
+            {"phase": "adjudicate", "sequence": 3, "required": False, "participant_ids": [], "input_refs": [plan_input], "output_kinds": ["adjudication"], "stopping_rule": "zero loops", "state": "not_required", "not_required_reason": "focused fixture"},
+            {"phase": "resolve", "sequence": 4, "required": True, "participant_ids": [], "input_refs": [plan_input], "output_kinds": ["report"], "stopping_rule": "deterministic", "state": "planned", "not_required_reason": None},
+        ],
+        "participants": [
+            {"participant_id": "participant_reviewer", "roles": ["reviewer"], "model_target_id": "offline-default", "target_configuration_ref": artifact("targets/reviewer.json"), "provider_id": "offline", "discovery_ref": artifact("discovery.json"), "independence_group": "REVIEW", "assignment_reason": "fixture", "target_reuse_disclosure": None},
+            {"participant_id": "participant_verifier", "roles": ["verifier"], "model_target_id": "offline-default", "target_configuration_ref": artifact("targets/verifier.json"), "provider_id": "offline", "discovery_ref": artifact("discovery.json"), "independence_group": "VERIFY", "assignment_reason": "fixture", "target_reuse_disclosure": "Target reuse disclosed in fixture."},
+        ],
+        "inputs": [{"input_id": "input_a", "role": "primary", "record_ref": plan_input, "snapshot_ref": plan_input}],
+        "capabilities": {"manifest": None, "required_capability_ids": ["gigai.offline"]},
+        "effects": ["write_workpad"],
+        "budget": {"max_model_calls": 2, "max_tool_calls": 0, "max_tokens": 8000, "max_cost": "0.50", "currency": "USD", "max_wall_time_ms": 300000, "max_parallel_goals": 1},
+        "policy_sha256": ZERO_DIGEST,
+        "discovery_snapshot_refs": [ZERO_DIGEST],
+        "sealed_sources": [plan_input],
+        "created_at": NOW,
+        "sealed_at": NOW,
+        "sealed_by": actor(),
+    }
+    verification_record = {
+        "schema_version": "1.0",
+        "verification_id": "verification_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "run_id": RUN_ID,
+        "gig_id": GIG_ID,
+        "bundle_id": "bundle_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "contract_id": "contract_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "verifier_participant_id": "participant_verifier",
+        "verifier_target_id": "offline-default",
+        "source_finding_ids": ["finding_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"],
+        "outcomes": [{"finding_id": "finding_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "status": "unverified", "evidence_refs": [plan_input], "reason": "fixture verification"}],
+        "created_at": NOW,
+    }
     return {
         "urn:gigai:schema:gig-proposal:1": proposal,
         "urn:gigai:schema:active-gig-version:1": active,
         "urn:gigai:schema:goal-graph:1": goal_graph(),
         "urn:gigai:schema:run-brief-frontmatter:1": brief,
         "urn:gigai:schema:run-manifest:1": manifest,
+        "urn:gigai:schema:run-plan:1": run_plan,
         "urn:gigai:schema:run-details:1": details,
         "urn:gigai:schema:handoff-frontmatter:1": handoff,
         "urn:gigai:schema:review-bundle:1": bundle,
@@ -1054,6 +1106,7 @@ def valid_instances() -> dict[str, dict[str, Any]]:
         "urn:gigai:schema:feedback:1": feedback,
         "urn:gigai:schema:adjudication:1": adjudication,
         "urn:gigai:schema:trace:1": trace,
+        "urn:gigai:schema:verification-record:1": verification_record,
         "urn:gigai:schema:report:1": report,
         "urn:gigai:schema:review-loop:1": loop,
         "urn:gigai:schema:addressed-artifact:1": addressed,
@@ -1119,7 +1172,7 @@ class SerializedContractTests(unittest.TestCase):
         )
 
     def test_all_schema_documents_are_valid_draft_2020_12(self) -> None:
-        self.assertEqual(len(self.schemas), 32)
+        self.assertEqual(len(self.schemas), 34)
         for schema_id, schema in self.schemas.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)

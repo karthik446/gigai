@@ -462,6 +462,7 @@ def _validate_workpad_repository(
                 "scratch",
                 "state.sqlite",
                 "runs",
+                "run-plans",
                 "addressed",
                 "feedback",
                 "findings",

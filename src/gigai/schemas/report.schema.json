@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "report_id", "report_version", "created_at", "bundle_id", "contract_id", "trace_ids", "finding_ids", "feedback_ids", "adjudication_ids", "status", "machine_report_sha256", "human_report"],
   "properties": {
-    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "schema_version": {"type": "string", "enum": ["1.0", "1.1"]},
     "report_id": {"$ref": "#/$defs/report_id"},
     "report_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
     "created_at": {"type": "string", "format": "date-time"},
@@ -16,6 +16,7 @@
     "finding_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/finding_id"}},
     "feedback_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/feedback_id"}},
     "adjudication_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/adjudication_id"}},
+    "verification_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:gigai:schema:common:1#/$defs/verification_id"}},
     "status": {"type": "string", "enum": ["complete", "blocked", "requires_operator", "incomplete"]},
     "machine_report_sha256": {"$ref": "#/$defs/sha256", "description": "SHA-256 of the canonical machine report object with this field omitted."},
     "human_report": {"$ref": "#/$defs/artifact_ref"}

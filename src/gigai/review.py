@@ -66,6 +66,11 @@ def _safe_path(root: Path, relative: object) -> Path | None:
     if not isinstance(relative, str) or not _SAFE_RELATIVE.fullmatch(relative):
         return None
     candidate = root / relative
+    current = root
+    for component in Path(relative).parts:
+        current /= component
+        if current.is_symlink():
+            return None
     try:
         candidate.resolve(strict=False).relative_to(root.resolve(strict=False))
     except ValueError:
@@ -673,6 +678,7 @@ def validate_report_artifact(root: Path, report_bytes: bytes) -> ValidationRepor
                         "Report human artifact size does not match",
                     )
                 )
+    findings.extend(_verification_findings(root, payload.get("verification_ids", ()), payload))
     return _merge_findings(report, ValidationReport(tuple(findings)))
 
 
@@ -687,9 +693,10 @@ def validate_review_loop_artifacts(root: Path, loop_bytes: bytes) -> ValidationR
     if not isinstance(loop, Mapping):
         return report
     findings: list[ValidationFinding] = []
+    findings.extend(_verification_findings(root, loop.get("verification_ids", ()), loop))
     for index, artifact_id in enumerate(loop.get("addressed_artifact_ids", [])):
-        path = root / "addressed" / f"{artifact_id}.json"
-        if path.is_symlink() or not path.is_file():
+        path = _safe_path(root, f"addressed/{artifact_id}.json") if isinstance(artifact_id, str) else None
+        if path is None or path.is_symlink() or not path.is_file():
             findings.append(_path_error(f"addressed_artifact_ids/{index}", "missing_addressed_artifact", "loop references a missing addressed artifact"))
             continue
         artifact_bytes = path.read_bytes()
@@ -704,6 +711,51 @@ def validate_review_loop_artifacts(root: Path, loop_bytes: bytes) -> ValidationR
                 if artifact.get(field) != loop.get(field):
                     findings.append(_path_error(f"addressed/{artifact_id}/{field}", "addressed_parent_mismatch", f"addressed artifact {field} does not match loop"))
     return _merge_findings(report, ValidationReport(tuple(findings)))
+
+
+def _verification_findings(root: Path, verification_ids: object, parent: Mapping[str, object]) -> list[ValidationFinding]:
+    """Replay-check G43 verification records and all evidence references."""
+    if not isinstance(verification_ids, list):
+        return []
+    findings: list[ValidationFinding] = []
+    finding_ids = set(parent.get("finding_ids", ())) if isinstance(parent.get("finding_ids"), list) else set()
+    for index, verification_id in enumerate(verification_ids):
+        if not isinstance(verification_id, str):
+            continue
+        path = _safe_path(root, f"review/verification/{verification_id}.json")
+        if path is None or path.is_symlink() or not path.is_file():
+            findings.append(_path_error(f"verification_ids/{index}", "missing_verification_record", "verification record is missing or redirected"))
+            continue
+        data = path.read_bytes()
+        report = validate_serialized_contract("verification-record.schema.json", data)
+        findings.extend(report.findings)
+        try:
+            record = parse_json_bytes(data)
+        except CanonicalizationError:
+            continue
+        if not isinstance(record, Mapping):
+            continue
+        for field in ("run_id", "gig_id", "bundle_id", "contract_id"):
+            if field in parent and record.get(field) != parent.get(field):
+                findings.append(_path_error(f"verification_ids/{index}/{field}", "verification_parent_mismatch", "verification record does not match its enclosing artifact"))
+        if finding_ids and set(record.get("source_finding_ids", ())) - finding_ids:
+            findings.append(_path_error(f"verification_ids/{index}/source_finding_ids", "verification_finding_missing", "verification record names a finding outside the enclosing loop"))
+        for outcome_index, outcome in enumerate(record.get("outcomes", ())):
+            if not isinstance(outcome, Mapping):
+                continue
+            if finding_ids and outcome.get("finding_id") not in finding_ids:
+                findings.append(_path_error(f"verification_ids/{index}/outcomes/{outcome_index}/finding_id", "verification_finding_missing", "verification outcome names a finding outside the enclosing loop"))
+            for evidence_index, evidence in enumerate(outcome.get("evidence_refs", ())):
+                if not isinstance(evidence, Mapping):
+                    continue
+                evidence_path = _safe_path(root, evidence.get("path"))
+                if evidence_path is None or evidence_path.is_symlink() or not evidence_path.is_file():
+                    findings.append(_path_error(f"verification_ids/{index}/outcomes/{outcome_index}/evidence_refs/{evidence_index}", "missing_verification_evidence", "verification evidence is missing or unsafe"))
+                    continue
+                evidence_bytes = evidence_path.read_bytes()
+                if digest_imported_bytes(evidence_bytes) != evidence.get("content_sha256") or len(evidence_bytes) != evidence.get("size_bytes"):
+                    findings.append(_path_error(f"verification_ids/{index}/outcomes/{outcome_index}/evidence_refs/{evidence_index}", "verification_evidence_mismatch", "verification evidence digest or size does not match"))
+    return findings
 
 
 def redact_text(text: str, secrets: tuple[str, ...]) -> str:

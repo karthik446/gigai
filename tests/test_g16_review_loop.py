@@ -26,24 +26,25 @@ from gigai.validators import SCHEMA_NAMES
 _G15_SCHEMA_DIGESTS = {
     "adjudication.schema.json": "9b6d3f489dcff15b510e4c041be5bcef0afcd10d6e9d584a21ef79c9842f49fe",
     "active-gig-version.schema.json": "634af1729f4dbfe1f8564fd9d31b6c5cb8c56a2e1c7b80393e59ae877f76f5e1",
-    "common.schema.json": "825a15da8f61348cc16afe315c2aca0e3218c78c0bf0f93394f74fe78cb7b53a",
+    "common.schema.json": "9b872c605c49cafbe25cfe5b9ea295d4d8c7b8cc0eab1d0eb1d65f09da59a0e4",
     "feedback.schema.json": "c89cda74feb86d34448a3e8afbfcded2554e3c077622ecfaa64e525951502461",
     "finding.schema.json": "4444e0cfec3a32bb83b016172331072a369afb2699b093ad670dc36dfbcdd8f7",
     "gig-proposal.schema.json": "515f16368059c7d8d4bf88cb47d8fc0df63afc50a51e13c8c75601c013f134b3",
     "goal-graph.schema.json": "669115492bfed52f4738cb9cbbac626a10f80f6965da3d1f70eb20e4c2e264cf",
-    "handoff-frontmatter.schema.json": "de27d69529ae7cce07063fb67dcecc48aff79012ef72c66f3ed077367b9bd09e",
-    "report.schema.json": "dc012ee13f66d45e3bdaab857c82a152a66be46cf98a8d50ffd21a4e581cac8c",
+    "handoff-frontmatter.schema.json": "126e608ed9e9bfdcf2fb7fad1514005f8ca886fdfaf30522d93234a02d3a8247",
+    "report.schema.json": "e4f952561b484d49376ae39e279f197b67527405f38e673d21bc5c655cba48d4",
     "review-bundle.schema.json": "ab60331eaf6095aa2c70690592f1b66769012aa6973a03e6cb4a1d36f904b531",
     "review-contract.schema.json": "d7cc23e267ce07e071138e62c65accba9fc0b64ff967880fa05bf5cc5a4626f1",
     "run-brief-frontmatter.schema.json": "481118d7c49f97d00c389f8f4d4216cc1baf6ff96e8c16c3343006ad019369e3",
     "run-details.schema.json": "c2388d917e08cfcc0860ecd3a20b389be4f434aadde6b21ffa18ee4d6457111f",
     "run-manifest.schema.json": "a14126ac4943e71980371eb215fbc191434cfb0fb2f2761259a0faabb36af24f",
+    "review-loop.schema.json": "8d87e00d4b16e4c535ce7c9645a5a9ef8a34f2ddc480b6616dcebba5e903f90b",
     "trace.schema.json": "d1b5a8970e26b753fbbb8275cd30321a3fe0bc2bb56c4443c6d6306b42ca29ef",
 }
 
 
 def test_g16_additive_schema_inventory_preserves_g15_baseline() -> None:
-    assert len(SCHEMA_NAMES) == 32
+    assert len(SCHEMA_NAMES) == 34
     root = Path(__file__).parents[1] / "src/gigai/schemas"
     for name, expected in _G15_SCHEMA_DIGESTS.items():
         assert hashlib.sha256((root / name).read_bytes()).hexdigest() == expected

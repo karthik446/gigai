@@ -51,6 +51,8 @@ SCHEMA_NAMES = (
     "report.schema.json",
     "review-bundle.schema.json",
     "review-contract.schema.json",
+    "run-plan.schema.json",
+    "verification-record.schema.json",
     "run-brief-frontmatter.schema.json",
     "run-details.schema.json",
     "run-manifest.schema.json",

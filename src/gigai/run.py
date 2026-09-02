@@ -20,6 +20,7 @@ from typing import Callable, Mapping
 from .canonical import (
     EntityPrefix,
     canonical_json_bytes,
+    derive_deterministic_id,
     digest_imported_bytes,
     digest_owned_text,
     generate_entity_id,
@@ -27,8 +28,11 @@ from .canonical import (
     parse_json_front_matter,
     validate_entity_id,
 )
+from .config import load_config
 from .index import read_index
 from .journal import JournalArtifact, JournalEntry, record_transition
+from .model_discovery import resolve_target_readiness
+from .model_targets import resolve_model_target
 from .validators import validate_goal_graph, validate_serialized_contract
 from .workpad import ResolvedWorkpad, resolve_workpad
 
@@ -79,6 +83,7 @@ def launch_run(
     wait: bool = False,
     invocation_argv: tuple[str, ...] = ("gigai", "run"),
     operator_consent: Mapping[str, object] | None = None,
+    run_plan_id: str | None = None,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
     observer: RunObserver | None = None,
 ) -> RunResult:
@@ -91,6 +96,22 @@ def launch_run(
         gig_id=gig_id,
         allow_semantic_state=True,
     )
+    selected_plan = None
+    if run_plan_id is not None:
+        from .run_plan import RunPlanError, read_run_plan
+
+        try:
+            # Read and digest all sealed plan sources before consulting the
+            # journal projection, so a tamper refusal remains deterministic
+            # even when the workpad is consequently divergent.
+            selected_plan = read_run_plan(
+                home_root=home_root,
+                requested_target=requested_target,
+                gig_id=resolved.gig_id,
+                run_plan_id=run_plan_id,
+            )
+        except RunPlanError as exc:
+            raise RunError(f"{exc.code}: {exc}") from exc
     projection = read_index(
         workpad=resolved.path,
         project_id=resolved.project_id,
@@ -101,10 +122,30 @@ def launch_run(
     proposal = authority["proposal"]
     _validate_authority(resolved, graph, proposal)
     target_before = _target_observation(resolved)
+    run_plan_ref: dict[str, object] | None = None
+    if run_plan_id is not None:
+        assert selected_plan is not None
+        _validate_plan_handoff(
+            resolved=resolved,
+            plan=selected_plan.plan,
+            plan_id=run_plan_id,
+            plan_digest=selected_plan.content_sha256,
+            gig_version=authority["version"],
+            graph=graph,
+            config=load_config(home_root),
+        )
+        plan_bytes = (resolved.path / "run-plans" / run_plan_id / "run-plan.json").read_bytes()
+        run_plan_ref = {
+            "path": f"run-plans/{run_plan_id}/run-plan.json",
+            "content_sha256": digest_imported_bytes(plan_bytes),
+            "media_type": "application/json",
+            "size_bytes": len(plan_bytes),
+        }
+        if operator_consent is None:
+            raise RunError("run_plan_consent_mismatch: Run Plan handoff requires direct --confirm consent")
     redeemed_consent = None
     if operator_consent is not None:
-        if operator_consent.get("source") != "direct_cli_confirm":
-            raise RunError("Run consent must come from direct local operator confirmation")
+        _validate_operator_consent(operator_consent)
         redeemed_consent = {
             **dict(operator_consent),
             "confirmation_id": f"confirm_{uuid_factory()}",
@@ -115,6 +156,14 @@ def launch_run(
                 "gig_version": authority["version"],
                 "target_kind": resolved.target_kind,
                 "target_observation_sha256": target_before["observation_sha256"],
+                **(
+                    {
+                        "run_plan_id": run_plan_id,
+                        "run_plan_content_sha256": run_plan_ref["content_sha256"],
+                    }
+                    if run_plan_ref is not None
+                    else {}
+                ),
             },
         }
     run_id = _allocate_run_id(resolved.path, uuid_factory)
@@ -131,6 +180,7 @@ def launch_run(
             target_before=target_before,
             invocation_argv=invocation_argv,
             operator_consent=redeemed_consent,
+            run_plan_ref=run_plan_ref,
         )
         observer("after_brief_write")
         observer("after_manifest_seal")
@@ -159,6 +209,18 @@ def launch_run(
             observer=observer,
         )
         observer("after_run_started_commit")
+        if selected_plan is not None:
+            _materialize_run_review_bridge(
+                resolved=resolved,
+                run_id=run_id,
+                plan=selected_plan.plan,
+                plan_id=run_plan_id,
+                plan_digest=run_plan_ref["content_sha256"] if run_plan_ref else None,
+                gig_version=authority["version"],
+                manifest_digest=manifest_digest,
+                parent_handoff_id=started.handoff_id,
+                observer=observer,
+            )
         process = multiprocessing.get_context("spawn").Process(
             target=_worker_entry,
             args=(
@@ -365,6 +427,159 @@ def _validate_authority(
         raise RunError("approved Goal Graph has duplicate Goals")
 
 
+def _validate_plan_handoff(
+    *,
+    resolved: ResolvedWorkpad,
+    plan: Mapping[str, object],
+    plan_id: str,
+    plan_digest: str,
+    gig_version: int,
+    graph: dict[str, object],
+    config: object,
+) -> None:
+    """Refuse changed plan evidence before a Run ID can be allocated."""
+
+    if (
+        plan.get("state") != "sealed"
+        or plan.get("run_plan_id") != plan_id
+        or plan.get("project_id") != resolved.project_id
+        or plan.get("gig_id") != resolved.gig_id
+        or plan.get("gig_version") != gig_version
+    ):
+        raise RunError("run_plan_authority_refused: plan is not sealed for this approved Gig")
+    if plan.get("journal_commit") is not None and plan.get("journal_commit") != _authority_commit_for_plan(plan, resolved, gig_version):
+        raise RunError("run_plan_authority_refused: plan is pinned to a different approved authority commit")
+    graph_ref = plan.get("goal_graph")
+    if not isinstance(graph_ref, dict) or graph_ref.get("content_sha256") != digest_imported_bytes(canonical_json_bytes(graph)):
+        raise RunError("run_plan_input_mismatch: plan does not pin the approved Goal Graph")
+    plan_path = resolved.path / "run-plans" / plan_id / "run-plan.json"
+    _reject_symlinked_components(resolved.path, plan_path, "run_plan_input_mismatch: plan path contains a symlinked component")
+    if plan_path.is_symlink() or digest_imported_bytes(plan_path.read_bytes()) != plan_digest:
+        raise RunError("run_plan_digest_mismatch: plan bytes changed after sealing")
+    from .run_plan import _identity_projection
+    if derive_deterministic_id("run_plan", _identity_projection(plan)) != plan_id:
+        raise RunError("run_plan_digest_mismatch: plan identity does not match its sealed projection")
+    sources = plan.get("sealed_sources")
+    if not isinstance(sources, list) or not sources:
+        raise RunError("run_plan_invalid: plan has no sealed sources")
+    source_pairs: set[tuple[object, object]] = set()
+    source_data: dict[str, bytes] = {}
+    for source in sources:
+        if not isinstance(source, dict):
+            raise RunError("run_plan_invalid: plan source is malformed")
+        relative = source.get("path")
+        expected = source.get("content_sha256")
+        if not isinstance(relative, str) or not isinstance(expected, str):
+            raise RunError("run_plan_invalid: plan source is malformed")
+        pair = (relative, expected)
+        if pair in source_pairs:
+            raise RunError("run_plan_invalid: plan contains duplicate sealed sources")
+        source_pairs.add(pair)
+        candidate = resolved.path / relative
+        if Path(relative).is_absolute() or "\\" in relative or ".." in Path(relative).parts:
+            raise RunError("run_plan_input_mismatch: plan source path is unsafe")
+        try:
+            _reject_symlinked_components(resolved.path, candidate, "run_plan_input_mismatch: plan source path contains a symlinked component")
+            candidate.resolve(strict=False).relative_to(resolved.path.resolve())
+        except ValueError as exc:
+            raise RunError("run_plan_input_mismatch: plan source escapes the workpad") from exc
+        if candidate.is_symlink() or not candidate.is_file() or digest_imported_bytes(candidate.read_bytes()) != expected:
+            raise RunError("run_plan_input_mismatch: sealed plan source changed or is unavailable")
+        source_data[relative] = candidate.read_bytes()
+    graph_ref = plan.get("goal_graph")
+    contract_ref = plan.get("review_contract")
+    if not isinstance(graph_ref, Mapping) or graph_ref.get("path") != "manifests/goal-graph.json" or source_data.get(graph_ref.get("path")) is None:
+        raise RunError("run_plan_authority_refused: plan Goal Graph reference is not authoritative")
+    if not isinstance(contract_ref, Mapping) or source_data.get(contract_ref.get("path")) is None:
+        raise RunError("run_plan_invalid: plan review contract is not sealed")
+    discovery_refs = plan.get("discovery_snapshot_refs")
+    if not isinstance(discovery_refs, list) or not discovery_refs:
+        raise RunError("run_plan_invalid: plan discovery identity is missing")
+    discovery_sources = [source_data[path] for path in source_data if path.endswith("/discovery.json")]
+    from .run_plan import _discovery_identity_digest
+    if not any(_discovery_identity_digest(data) in discovery_refs for data in discovery_sources):
+        raise RunError("run_plan_input_mismatch: discovery snapshot identity changed")
+    participants = plan.get("participants", [])
+    for participant in participants:
+        if not isinstance(participant, Mapping):
+            raise RunError("run_plan_invalid: participant is malformed")
+        target_name = participant.get("model_target_id")
+        if not isinstance(target_name, str):
+            raise RunError("run_plan_invalid: participant target is malformed")
+        readiness = resolve_target_readiness(config, target_name)
+        if readiness.readiness != "usable":
+            raise RunError("run_plan_authority_refused: assigned target is no longer usable")
+        target_ref = participant.get("target_configuration_ref")
+        try:
+            current_target = resolve_model_target(config, target_name)
+            current_target_bytes = canonical_json_bytes({
+                "schema_version": "1.0", "target_id": target_name,
+                "endpoint": current_target.endpoint.name, "adapter": current_target.endpoint.adapter,
+                "model": current_target.target.model, "capabilities": list(current_target.target.capabilities),
+                "readiness": "usable",
+            })
+        except (RuntimeError, ValueError) as exc:
+            raise RunError("run_plan_authority_refused: assigned target cannot be resolved") from exc
+        if not isinstance(target_ref, Mapping) or target_ref.get("content_sha256") != digest_imported_bytes(current_target_bytes) or participant.get("provider_id") != current_target.endpoint.name:
+            raise RunError("run_plan_authority_refused: assigned target configuration changed")
+        for field in ("target_configuration_ref", "discovery_ref"):
+            reference = participant.get(field)
+            if not isinstance(reference, Mapping) or reference.get("path") not in source_data:
+                raise RunError("run_plan_input_mismatch: participant evidence reference is not sealed")
+    for item in plan.get("inputs", ()):
+        if not isinstance(item, Mapping):
+            raise RunError("run_plan_invalid: input is malformed")
+        record_ref = item.get("record_ref")
+        snapshot_ref = item.get("snapshot_ref")
+        if not isinstance(record_ref, Mapping) or not isinstance(snapshot_ref, Mapping) or record_ref.get("path") not in source_data or snapshot_ref.get("path") not in source_data:
+            raise RunError("run_plan_input_mismatch: input evidence reference is not sealed")
+    for run_manifest in (resolved.path / "runs").glob("run_*/run-manifest.json"):
+        if run_manifest.is_symlink() or not run_manifest.is_file():
+            continue
+        try:
+            manifest = parse_json_bytes(run_manifest.read_bytes())
+        except Exception:
+            continue
+        if isinstance(manifest, dict) and any(
+            isinstance(item, dict)
+            and item.get("path") == f"run-plans/{plan_id}/run-plan.json"
+            and item.get("content_sha256") == plan_digest
+            for item in manifest.get("sealed_sources", [])
+        ):
+            raise RunError("run_plan_already_handed_off: sealed plan already has a Run")
+
+
+def _reject_symlinked_components(root: Path, candidate: Path, message: str) -> None:
+    """Reject symlinked parents as well as a symlink leaf for authority paths."""
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError as exc:
+        raise RunError(message) from exc
+    current = root
+    for component in relative.parts:
+        current /= component
+        if current.is_symlink():
+            raise RunError(message)
+
+
+def _authority_commit_for_plan(plan: Mapping[str, object], resolved: ResolvedWorkpad, gig_version: int) -> str | None:
+    """Resolve the immutable tag again for a pinned plan commitment."""
+    tag_result = _git(resolved.path, "rev-parse", "--verify", f"gig-v{gig_version:06d}", check=False)
+    return tag_result.stdout.strip() if tag_result.returncode == 0 else None
+
+
+def _validate_operator_consent(consent: Mapping[str, object]) -> None:
+    """Validate the caller envelope before server-side scope synthesis."""
+    allowed = {"schema_version", "kind", "action", "actor", "source", "invocation_id", "occurrence_id"}
+    if set(consent) - allowed or consent.get("source") != "direct_cli_confirm":
+        raise RunError("Run consent must come from direct local operator confirmation")
+    if consent.get("schema_version") != "1.0" or consent.get("kind") != "operator_run_consent" or consent.get("action") != "run":
+        raise RunError("Run consent envelope is invalid")
+    actor = consent.get("actor")
+    if not isinstance(actor, Mapping) or actor.get("kind") != "operator" or actor.get("id") != "local-user" or set(actor) - {"kind", "id"}:
+        raise RunError("Run consent actor is invalid")
+
+
 def _prepare_records(
     *,
     resolved: ResolvedWorkpad,
@@ -376,6 +591,7 @@ def _prepare_records(
     target_before: dict[str, object],
     invocation_argv: tuple[str, ...],
     operator_consent: Mapping[str, object] | None = None,
+    run_plan_ref: dict[str, object] | None = None,
 ) -> dict[str, bytes]:
     run_dir = f"runs/{run_id}"
     goals = [item for item in graph["goals"] if isinstance(item, dict)]
@@ -473,7 +689,7 @@ def _prepare_records(
         "profile": "default",
         "resolved_models": [],
         "resolved_tools": [],
-        "sealed_sources": [source_ref, *([consent_ref] if consent_ref else [])],
+        "sealed_sources": [source_ref, *([run_plan_ref] if run_plan_ref else []), *([consent_ref] if consent_ref else [])],
         "effects": ["write_workpad"],
         "aggregate_budget": budget,
         "input_canonical_sha256": digest_imported_bytes(graph_bytes),
@@ -537,6 +753,164 @@ def _prepare_records(
             for goal in goals
         },
     }
+
+
+def _materialize_run_review_bridge(
+    *,
+    resolved: ResolvedWorkpad,
+    run_id: str,
+    plan: Mapping[str, object],
+    plan_id: str,
+    plan_digest: object,
+    gig_version: int,
+    manifest_digest: str,
+    parent_handoff_id: str,
+    observer: RunObserver,
+) -> JournalEntry:
+    """Create the initial G43 review records only after ``run_started``."""
+    contract_ref = plan.get("review_contract")
+    if not isinstance(contract_ref, Mapping) or not isinstance(contract_ref.get("path"), str):
+        raise RunError("run_plan_invalid: review contract reference is unavailable")
+    contract_path = resolved.path / str(contract_ref["path"])
+    if contract_path.is_symlink() or not contract_path.is_file():
+        raise RunError("run_plan_input_mismatch: review contract source is unavailable")
+    contract = parse_json_bytes(contract_path.read_bytes())
+    if not isinstance(contract, Mapping) or not isinstance(contract.get("contract_id"), str):
+        raise RunError("run_plan_invalid: review contract is malformed")
+    contract_id = str(contract["contract_id"])
+    participants = [item for item in plan.get("participants", ()) if isinstance(item, Mapping)]
+    reviewers = [item for item in participants if "reviewer" in item.get("roles", ())]
+    verifiers = [item for item in participants if "verifier" in item.get("roles", ())]
+    if not reviewers or not verifiers:
+        raise RunError("run_plan_invalid: review bridge requires reviewer and verifier participants")
+    now = _now()
+    bundle_id = derive_deterministic_id("bundle", {"run_id": run_id, "plan_id": plan_id, "contract_id": contract_id})
+    loop_id = derive_deterministic_id("loop", {"run_id": run_id, "bundle_id": bundle_id, "contract_id": contract_id})
+    trace_id = derive_deterministic_id("trace", {"run_id": run_id, "loop_id": loop_id})
+    report_id = derive_deterministic_id("report", {"run_id": run_id, "loop_id": loop_id})
+    evidence_payload = canonical_json_bytes({
+        "run_id": run_id,
+        "run_plan_id": plan_id,
+        "run_plan_content_sha256": plan_digest,
+        "sealed_sources": plan.get("sealed_sources", []),
+    })
+    evidence_local = "review/evidence/sealed-input.json"
+    evidence_full = f"runs/{run_id}/{evidence_local}"
+    evidence_ref = _artifact_ref(evidence_local, "application/json", evidence_payload)
+    reference_id = derive_deterministic_id("ref", {"run_id": run_id, "kind": "sealed-input"})
+    bundle = {
+        "schema_version": "1.0", "bundle_id": bundle_id, "bundle_version": 1, "created_at": now,
+        "created_by": {"kind": "gigai", "id": "g43-bridge", "model_target": None}, "name": "sealed-run-review",
+        "question": "Are the sealed Run inputs consistent with the approved Gig requirements?",
+        "references": [{"reference_id": reference_id, "role": "primary", "kind": "other", "path": evidence_local,
+                        "media_type": "application/json", "content_sha256": evidence_ref["content_sha256"], "canonical_sha256": evidence_ref["content_sha256"],
+                        "size_bytes": evidence_ref["size_bytes"], "provenance": {"source_kind": "generated", "locator": f"run-plan:{plan_id}", "acquired_at": now, "acquisition_method": "g43-run-bridge", "source_revision": None},
+                        "sensitivity": "restricted", "redaction_status": "approved_local_only"}],
+        "tool_requirements": None, "redaction_policy": {"mode": "local_only", "allowed_reference_ids": [reference_id], "policy_version": "g43-1", "detector_version": None},
+    }
+    bundle_bytes = canonical_json_bytes(bundle)
+    finding_ids = [
+        derive_deterministic_id("finding", {"run_id": run_id, "participant_id": item["participant_id"]})
+        for item in reviewers
+    ]
+    finding_records: list[tuple[str, bytes, str]] = []
+    for finding_id, participant in zip(finding_ids, reviewers, strict=True):
+        evaluator = {"evaluator_id": "evaluator_g43", "evaluator_version": "g43-1", "stage": "deterministic"}
+        finding = {
+            "schema_version": "1.0", "finding_id": finding_id, "finding_version": 1,
+            "criterion_id": "criterion_requirements", "status": "open", "severity": "info",
+            "title": "Run-scoped review is ready for evaluator execution",
+            "description": "The sealed Run Plan has been handed to Run authority; provider-backed review remains pending.",
+            "evidence": [{"reference_id": reference_id, "content_sha256": evidence_ref["content_sha256"], "locator": "sealed_sources", "quote": None}],
+            "evaluator": evaluator, "source_evaluators": [evaluator], "trace_id": trace_id,
+            "confidence": "1.0", "disagreement": {"present": False, "peer_finding_ids": [], "summary": None}, "created_at": now,
+        }
+        data = canonical_json_bytes(finding)
+        finding_records.append((f"runs/{run_id}/review/findings/{finding_id}/v1-open.json", data, finding_id))
+    trace_payload = canonical_json_bytes({"run_id": run_id, "finding_ids": finding_ids, "plan_id": plan_id})
+    trace = {
+        "schema_version": "1.0", "trace_id": trace_id, "trace_version": 1, "created_at": now,
+        "bundle_id": bundle_id, "contract_id": contract_id, "run_id": run_id, "goal_id": None, "invocation_id": None,
+        "events": [{"sequence": 1, "kind": "review_bridge_materialized", "payload_sha256": digest_imported_bytes(trace_payload), "evaluator_id": None}],
+        "redaction_policy": "local_only", "variable_fields": ["created_at"],
+    }
+    trace_bytes = canonical_json_bytes(trace)
+    verification_ids: list[str] = []
+    verification_records: list[tuple[str, bytes]] = []
+    for verifier in verifiers:
+        verification_id = derive_deterministic_id("verification", {"run_id": run_id, "participant_id": verifier["participant_id"]})
+        verification_ids.append(verification_id)
+        outcomes = [{"finding_id": finding_id, "status": "unverified", "evidence_refs": [evidence_ref], "reason": "Verification is pending provider-backed execution."} for finding_id in finding_ids]
+        record = {
+            "schema_version": "1.0", "verification_id": verification_id, "run_id": run_id, "gig_id": resolved.gig_id,
+            "bundle_id": bundle_id, "contract_id": contract_id, "verifier_participant_id": verifier["participant_id"],
+            "verifier_target_id": verifier["model_target_id"], "source_finding_ids": finding_ids, "outcomes": outcomes, "created_at": now,
+        }
+        verification_records.append((f"runs/{run_id}/review/verification/{verification_id}.json", canonical_json_bytes(record)))
+    adjudication_ids: list[str] = []
+    adjudication_records: list[tuple[str, bytes]] = []
+    adjudicate_required = any(item.get("phase") == "adjudicate" and item.get("required") for item in plan.get("phases", ()) if isinstance(item, Mapping))
+    if adjudicate_required:
+        adjudication_id = derive_deterministic_id("adjudication", {"run_id": run_id, "loop_id": loop_id})
+        adjudication_ids.append(adjudication_id)
+        adjudication = {
+            "schema_version": "1.0", "adjudication_id": adjudication_id, "adjudication_version": 1, "created_at": now,
+            "actor": {"kind": "gigai", "id": "g43-bridge", "model_target": None},
+            "decisions": [{"finding_id": finding_id, "decision": "deferred", "rationale": "Adjudication is pending independent evaluator evidence."} for finding_id in finding_ids],
+        }
+        adjudication_records.append((f"runs/{run_id}/review/adjudications/{adjudication_id}.json", canonical_json_bytes(adjudication)))
+    report_base = {
+        "schema_version": "1.1", "report_id": report_id, "report_version": 1, "created_at": now,
+        "bundle_id": bundle_id, "contract_id": contract_id, "trace_ids": [trace_id], "finding_ids": finding_ids,
+        "feedback_ids": [], "adjudication_ids": adjudication_ids, "verification_ids": verification_ids,
+        "status": "incomplete",
+        "human_report": _artifact_ref(f"review/reports/{report_id}.md", "text/markdown", canonicalize_evidence(f"# Review {loop_id}\n\nProvider-backed review and verification are pending.\n")),
+    }
+    report_base["machine_report_sha256"] = digest_imported_bytes(canonical_json_bytes(report_base))
+    report_bytes = canonical_json_bytes(report_base)
+    human_bytes = canonicalize_evidence(f"# Review {loop_id}\n\nProvider-backed review and verification are pending.\n")
+    loop = {
+        "schema_version": "1.1", "loop_id": loop_id, "loop_version": 1, "run_id": run_id, "gig_id": resolved.gig_id,
+        "bundle_id": bundle_id, "contract_id": contract_id, "state": "reviewing", "cycle_cap": 1, "cycle_count": 0,
+        "stage_sequence": [{"state": "reviewing", "sequence": 1}], "finding_ids": finding_ids, "report_ids": [report_id],
+        "feedback_ids": [], "adjudication_ids": adjudication_ids, "trace_ids": [trace_id], "verification_ids": verification_ids,
+        "addressed_artifact_ids": [], "created_at": now, "updated_at": now,
+    }
+    loop_bytes = canonical_json_bytes(loop)
+    records: list[JournalArtifact] = [
+        JournalArtifact(evidence_full, evidence_payload),
+        JournalArtifact(f"runs/{run_id}/review/bundle.json", bundle_bytes),
+        *[JournalArtifact(path, data) for path, data, _finding_id in finding_records],
+        JournalArtifact(f"runs/{run_id}/review/traces/{trace_id}.json", trace_bytes),
+        *[JournalArtifact(path, data) for path, data in verification_records],
+        *[JournalArtifact(path, data) for path, data in adjudication_records],
+        JournalArtifact(f"runs/{run_id}/review/reports/{report_id}.json", report_bytes),
+        JournalArtifact(f"runs/{run_id}/review/reports/{report_id}.md", human_bytes),
+        JournalArtifact(f"runs/{run_id}/review/review-loop.json", loop_bytes),
+    ]
+    schemas = (
+        ("review-bundle.schema.json", [bundle_bytes]),
+        ("finding.schema.json", [data for _path, data, _id in finding_records]),
+        ("trace.schema.json", [trace_bytes]),
+        ("verification-record.schema.json", [data for _path, data in verification_records]),
+        ("adjudication.schema.json", [data for _path, data in adjudication_records]),
+        ("report.schema.json", [report_bytes]),
+        ("review-loop.schema.json", [loop_bytes]),
+    )
+    for schema_name, payloads in schemas:
+        for payload in payloads:
+            report = validate_serialized_contract(schema_name, payload)
+            if not report.valid:
+                raise RunError("run_review_bridge_invalid: " + ",".join(item.code for item in report.findings))
+    return record_transition(
+        workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id,
+        handoff_id=_new_id(EntityPrefix.HANDOFF, uuid.uuid4), transition="run_review_loop_materialized",
+        body=f"Run {run_id} materialized its G43 review loop and verification bridge.", artifacts=tuple(records),
+        front_matter={"gig_version": gig_version, "run_id": run_id, "goal_graph_sha256": None, "source_manifest_sha256": manifest_digest,
+                      "outcome": "SEALED", "actor": {"kind": "gigai", "id": "g43-bridge", "model_target": None},
+                      "parent_handoff_ids": [parent_handoff_id], "evidence": [_artifact_ref(path, "text/markdown" if path.endswith(".md") else "application/json", data) for path, data in [(item.path, item.content) for item in records]]},
+        observer=observer,
+    )
 
 
 def _execute_deterministic(

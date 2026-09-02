@@ -37,6 +37,9 @@ thirty-first resource for namespaced, versioned role references that grant no
 capability or authority.
 The G41 package-boundary amendment adds `gig-package.schema.json` as the
 thirty-second resource for portable project-local package manifests.
+The G43 amendment adds `run-plan.schema.json` and
+`verification-record.schema.json`. A sealed Run Plan is immutable preparation
+evidence; it is not Run, approval, or active-version authority.
 
 ## Production identity API
 
@@ -68,6 +71,10 @@ No other product module implements canonical rendering or SHA-256 identity.
 - `run-brief-frontmatter.schema.json` defines the JSON front matter embedded in
   `run-brief.md`.
 - `run-manifest.schema.json` defines the sealed authority for one Run.
+- `run-plan.schema.json` defines immutable, content-addressed preparation for
+  a bounded review Run and is consumed only by fresh direct Run consent.
+- `verification-record.schema.json` preserves per-finding verification without
+  overwriting review findings.
 - `run-details.schema.json` defines the small materialized Run status/result
   record.
 - `handoff-frontmatter.schema.json` defines the JSON front matter embedded in

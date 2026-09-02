@@ -85,6 +85,7 @@ from .setup import (
 )
 from .setup_interview import SetupDraft, SetupHTTPServer
 from .run import RunError, launch_run, read_run_details
+from .run_plan import RunPlanError, create_run_plan, list_run_plans, read_run_plan
 from .target_binding import TargetBindingError, resolve_target
 from .validators import validate_proposal_workpad
 from .workpad import ResolvedWorkpad, WorkpadError, open_locations, resolve_workpad
@@ -111,7 +112,7 @@ def cli(context: click.Context) -> None:
         raise click.UsageError(
             "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', "
             "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
-            "'plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', 'models', 'invoke', or 'open'; "
+            "'plan', 'run-plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', 'models', 'invoke', or 'open'; "
             "use --help for details."
         )
 
@@ -2293,9 +2294,104 @@ def reject_command(
     )
 
 
+def _run_plan_payload(result) -> dict[str, object]:
+    plan = result.plan
+    return {
+        "run_plan_id": result.run_plan_id,
+        "content_sha256": result.content_sha256,
+        "state": plan["state"],
+        "gig_id": plan["gig_id"],
+        "gig_version": plan["gig_version"],
+        "classification": plan["classification"],
+        "profile": plan["profile"],
+        "phases": plan["phases"],
+        "participants": plan["participants"],
+        "budget": plan["budget"],
+        "sealed_sources": plan["sealed_sources"],
+    }
+
+
+def _run_plan_error(exc: Exception, *, as_json: bool) -> None:
+    code = getattr(exc, "code", "run_plan_invalid")
+    if as_json:
+        click.echo(json.dumps({"ok": False, "error": {"code": code, "message": str(exc), "retryable": False, "invocation_id": None}}, sort_keys=True, separators=(",", ":")))
+        raise click.exceptions.Exit(1)
+    raise click.ClickException(f"{code}: {exc}")
+
+
+@cli.group("run-plan")
+def run_plan_group() -> None:
+    """Create and inspect sealed, bounded review preparation evidence."""
+
+
+@run_plan_group.command("create")
+@click.option("--gig", "gig_id")
+@click.option("--version", type=click.IntRange(min=1))
+@click.option("--class", "task_class", type=click.Choice(["planning", "research", "fact_check", "document_review", "code_review", "comparison"]))
+@click.option("--artifact-class", type=click.Choice(["text", "code", "structured_data", "mixed", "unknown"]))
+@click.option("--profile", "profile_id", type=click.Choice(["focused", "standard", "deep", "var"]))
+@click.option("--input", "input_paths", type=click.Path(path_type=Path, dir_okay=False), multiple=True, required=True)
+@click.option("--reason", "override_reason")
+@click.option("--profile-opt-in-reason")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def run_plan_create_command(gig_id: str | None, version: int | None, task_class: str | None, artifact_class: str | None, profile_id: str | None, input_paths: tuple[Path, ...], override_reason: str | None, profile_opt_in_reason: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Seal one immutable plan; this command never allocates a Run."""
+    try:
+        result = create_run_plan(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id, version=version, task_class=task_class, artifact_class=artifact_class, profile_id=profile_id, input_paths=input_paths, override_reason=override_reason, profile_opt_in_reason=profile_opt_in_reason)
+    except (RunPlanError, RunError, WorkpadError, OSError, ValueError) as exc:
+        _run_plan_error(exc, as_json=as_json)
+        return
+    payload = {"ok": True, "plan": _run_plan_payload(result), "diagnostics": []}
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Sealed Run Plan {result.run_plan_id}; no Run was allocated.")
+
+
+@run_plan_group.command("list")
+@click.option("--gig", "gig_id")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def run_plan_list_command(gig_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    try:
+        plans = list_run_plans(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id)
+    except (RunPlanError, WorkpadError, OSError, ValueError) as exc:
+        _run_plan_error(exc, as_json=as_json)
+        return
+    payload = {"ok": True, "plans": [_run_plan_payload(item) for item in plans], "diagnostics": []}
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        for item in plans:
+            click.echo(f"{item.run_plan_id} {item.plan['state']} {item.plan['profile']['profile_id']}@{item.plan['profile']['profile_version']}")
+
+
+@run_plan_group.command("show")
+@click.argument("run_plan_id")
+@click.option("--gig", "gig_id")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def run_plan_show_command(run_plan_id: str, gig_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    try:
+        result = read_run_plan(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id, run_plan_id=run_plan_id)
+    except (RunPlanError, WorkpadError, OSError, ValueError) as exc:
+        _run_plan_error(exc, as_json=as_json)
+        return
+    payload = {"ok": True, "plan": _run_plan_payload(result), "diagnostics": []}
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Run Plan {result.run_plan_id} {result.plan['state']} for {result.plan['gig_id']}.")
+
+
 @cli.command("run")
 @click.argument("gig_id", required=False)
 @click.option("--version", type=click.IntRange(min=1))
+@click.option("--plan", "run_plan_id", help="Consume one exact sealed Run Plan with fresh --confirm consent.")
 @click.option("--wait", is_flag=True)
 @click.option(
     "--invocation",
@@ -2317,6 +2413,7 @@ def reject_command(
 def run_command(
     gig_id: str | None,
     version: int | None,
+    run_plan_id: str | None,
     wait: bool,
     invocation_path: Path | None,
     confirmed: bool,
@@ -2393,6 +2490,7 @@ def run_command(
             wait=selected_wait,
             invocation_argv=tuple(sys.argv),
             operator_consent=operator_consent,
+            run_plan_id=run_plan_id,
         )
     except (RunError, WorkpadError, OSError, ValueError, InvocationValidationError) as exc:
         raise click.ClickException(str(exc)) from exc

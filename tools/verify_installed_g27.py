@@ -15,8 +15,8 @@ from gigai.validators import SCHEMA_NAMES, validate_serialized_contract
 
 
 def main() -> int:
-    if len(SCHEMA_NAMES) != 31:
-        raise SystemExit(f"installed G27 schema inventory is {len(SCHEMA_NAMES)}, expected 31")
+    if len(SCHEMA_NAMES) != 34:
+        raise SystemExit(f"installed G27 schema inventory is {len(SCHEMA_NAMES)}, expected 34")
     with tempfile.TemporaryDirectory(prefix="gigai-g27-installed-") as directory:
         root = Path(directory)
         home = root / "home"
