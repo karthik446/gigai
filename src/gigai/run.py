@@ -84,6 +84,7 @@ def launch_run(
     invocation_argv: tuple[str, ...] = ("gigai", "run"),
     operator_consent: Mapping[str, object] | None = None,
     run_plan_id: str | None = None,
+    execute_provider_review: bool = False,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
     observer: RunObserver | None = None,
 ) -> RunResult:
@@ -160,6 +161,7 @@ def launch_run(
                     {
                         "run_plan_id": run_plan_id,
                         "run_plan_content_sha256": run_plan_ref["content_sha256"],
+                        "provider_review_requested": execute_provider_review,
                     }
                     if run_plan_ref is not None
                     else {}
@@ -221,6 +223,16 @@ def launch_run(
                 parent_handoff_id=started.handoff_id,
                 observer=observer,
             )
+            if execute_provider_review:
+                from .provider_review import execute_provider_review as _execute_provider_review
+
+                _execute_provider_review(
+                    home_root=home_root,
+                    requested_target=requested_target,
+                    gig_id=resolved.gig_id,
+                    run_id=run_id,
+                    run_plan_id=run_plan_id,
+                )
         process = multiprocessing.get_context("spawn").Process(
             target=_worker_entry,
             args=(

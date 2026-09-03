@@ -86,6 +86,7 @@ from .setup import (
 from .setup_interview import SetupDraft, SetupHTTPServer
 from .run import RunError, launch_run, read_run_details
 from .run_plan import RunPlanError, create_run_plan, list_run_plans, read_run_plan
+from .provider_review import ProviderReviewError
 from .target_binding import TargetBindingError, resolve_target
 from .validators import validate_proposal_workpad
 from .workpad import ResolvedWorkpad, WorkpadError, open_locations, resolve_workpad
@@ -2331,15 +2332,18 @@ def run_plan_group() -> None:
 @click.option("--artifact-class", type=click.Choice(["text", "code", "structured_data", "mixed", "unknown"]))
 @click.option("--profile", "profile_id", type=click.Choice(["focused", "standard", "deep", "var"]))
 @click.option("--input", "input_paths", type=click.Path(path_type=Path, dir_okay=False), multiple=True, required=True)
+@click.option("--reviewer-target", "reviewer_targets", multiple=True, help="Seal one target per reviewer, in participant order.")
+@click.option("--verifier-target", "verifier_targets", multiple=True, help="Seal one target per verifier, in participant order.")
+@click.option("--adjudicator-target", "adjudicator_targets", multiple=True, help="Seal one target per adjudicator, in participant order.")
 @click.option("--reason", "override_reason")
 @click.option("--profile-opt-in-reason")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
-def run_plan_create_command(gig_id: str | None, version: int | None, task_class: str | None, artifact_class: str | None, profile_id: str | None, input_paths: tuple[Path, ...], override_reason: str | None, profile_opt_in_reason: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+def run_plan_create_command(gig_id: str | None, version: int | None, task_class: str | None, artifact_class: str | None, profile_id: str | None, input_paths: tuple[Path, ...], reviewer_targets: tuple[str, ...], verifier_targets: tuple[str, ...], adjudicator_targets: tuple[str, ...], override_reason: str | None, profile_opt_in_reason: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     """Seal one immutable plan; this command never allocates a Run."""
     try:
-        result = create_run_plan(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id, version=version, task_class=task_class, artifact_class=artifact_class, profile_id=profile_id, input_paths=input_paths, override_reason=override_reason, profile_opt_in_reason=profile_opt_in_reason)
+        result = create_run_plan(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id, version=version, task_class=task_class, artifact_class=artifact_class, profile_id=profile_id, input_paths=input_paths, override_reason=override_reason, profile_opt_in_reason=profile_opt_in_reason, reviewer_targets=reviewer_targets, verifier_targets=verifier_targets, adjudicator_targets=adjudicator_targets)
     except (RunPlanError, RunError, WorkpadError, OSError, ValueError) as exc:
         _run_plan_error(exc, as_json=as_json)
         return
@@ -2394,6 +2398,12 @@ def run_plan_show_command(run_plan_id: str, gig_id: str | None, target_value: Pa
 @click.option("--plan", "run_plan_id", help="Consume one exact sealed Run Plan with fresh --confirm consent.")
 @click.option("--wait", is_flag=True)
 @click.option(
+    "--execute-review",
+    "execute_provider_review",
+    is_flag=True,
+    help="Execute the sealed provider-backed document-review participants as part of this confirmed Run.",
+)
+@click.option(
     "--invocation",
     "invocation_path",
     type=click.Path(path_type=Path, dir_okay=False),
@@ -2415,6 +2425,7 @@ def run_command(
     version: int | None,
     run_plan_id: str | None,
     wait: bool,
+    execute_provider_review: bool,
     invocation_path: Path | None,
     confirmed: bool,
     target_value: Path | None,
@@ -2474,6 +2485,8 @@ def run_command(
                 )
         if not confirmed:
             raise click.ClickException("run requires direct --confirm operator consent")
+        if execute_provider_review and run_plan_id is None:
+            raise click.ClickException("--execute-review requires one sealed --plan")
         operator_consent = {
             "schema_version": "1.0",
             "kind": "operator_run_consent",
@@ -2491,8 +2504,9 @@ def run_command(
             invocation_argv=tuple(sys.argv),
             operator_consent=operator_consent,
             run_plan_id=run_plan_id,
+            execute_provider_review=execute_provider_review,
         )
-    except (RunError, WorkpadError, OSError, ValueError, InvocationValidationError) as exc:
+    except (RunError, ProviderReviewError, WorkpadError, OSError, ValueError, InvocationValidationError) as exc:
         raise click.ClickException(str(exc)) from exc
     payload = {
         "gig_id": result.gig_id,

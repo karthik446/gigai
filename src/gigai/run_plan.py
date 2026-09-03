@@ -352,7 +352,7 @@ def list_run_plans(*, home_root: Path, requested_target: Path | None, gig_id: st
     return tuple(results)
 
 
-def create_run_plan(*, home_root: Path, requested_target: Path | None, gig_id: str | None = None, version: int | None = None, task_class: str | None = None, artifact_class: str | None = None, profile_id: str | None = None, input_paths: Iterable[Path] = (), override_reason: str | None = None, profile_opt_in_reason: str | None = None) -> RunPlanResult:
+def create_run_plan(*, home_root: Path, requested_target: Path | None, gig_id: str | None = None, version: int | None = None, task_class: str | None = None, artifact_class: str | None = None, profile_id: str | None = None, input_paths: Iterable[Path] = (), override_reason: str | None = None, profile_opt_in_reason: str | None = None, reviewer_targets: Iterable[str] = (), verifier_targets: Iterable[str] = (), adjudicator_targets: Iterable[str] = ()) -> RunPlanResult:
     resolved = resolve_workpad(home_root=home_root, requested_target=requested_target, gig_id=gig_id, allow_semantic_state=True)
     try:
         authority = _resolve_authority(resolved, __import__("gigai.index", fromlist=["read_index"]).read_index(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id), version)
@@ -391,10 +391,36 @@ def create_run_plan(*, home_root: Path, requested_target: Path | None, gig_id: s
     snapshot = discover_runtime_snapshot(refresh_reason="run_plan_create")
     snapshot_bytes = canonical_json_bytes(snapshot.to_shareable_dict())
     profile = _PROFILES[selected_profile]
+    explicit_targets = {
+        "reviewer": tuple(reviewer_targets),
+        "verifier": tuple(verifier_targets),
+        "adjudicator": tuple(adjudicator_targets),
+    }
+    expected_by_role = {
+        role: sum(1 for roles in profile["roles"] if role in roles)
+        for role in ("reviewer", "verifier", "adjudicator")
+    }
+    for role, supplied in explicit_targets.items():
+        if supplied and len(supplied) != expected_by_role[role]:
+            raise RunPlanError(
+                "participant_target_count_invalid",
+                f"{selected_profile}@1 requires exactly {expected_by_role[role]} --{role}-target value(s)",
+            )
+        if not expected_by_role[role] and supplied:
+            raise RunPlanError(
+                "participant_target_count_invalid",
+                f"{selected_profile}@1 has no {role} participant",
+            )
+    target_offsets = {role: 0 for role in explicit_targets}
     assignment_specs: list[tuple[str, tuple[str, ...], str]] = []
     for index, roles in enumerate(profile["roles"], start=1):
         role = roles[0]
-        target_name = _target_name(default_profile, role)
+        supplied = explicit_targets[role]
+        if supplied:
+            target_name = supplied[target_offsets[role]]
+            target_offsets[role] += 1
+        else:
+            target_name = _target_name(default_profile, role)
         readiness = resolve_target_readiness(config, target_name)
         if readiness.readiness != "usable":
             raise RunPlanError("target_not_usable", f"target {target_name!r} is not usable for {role}")

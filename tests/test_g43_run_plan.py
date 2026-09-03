@@ -7,6 +7,7 @@ import uuid
 from click.testing import CliRunner
 
 from gigai.cli import cli
+from gigai.config import Endpoint, ModelTarget, Profile
 from gigai.lifecycle import approve_offline, create_offline
 from gigai.review import validate_finding, validate_report_artifact, validate_review_bundle, validate_review_loop_artifacts, validate_trace
 from gigai.run_plan import create_run_plan, read_run_plan
@@ -47,6 +48,46 @@ def test_run_plan_seals_idempotently_and_is_readable(tmp_path: Path) -> None:
     assert shown.exit_code == 0, shown.output
     assert json.loads(listed.output)["plans"][0]["run_plan_id"] == first.run_plan_id
     assert json.loads(shown.output)["plan"]["content_sha256"] == first.content_sha256
+
+
+def test_standard_plan_seals_explicit_distinct_participant_targets(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    target = tmp_path / "target"
+    target.mkdir()
+    targets = tuple(
+        ModelTarget(name=name, endpoint="offline", model="fixture-v1", capabilities=("text",), max_output_tokens=4096)
+        for name in ("claude-review", "codex-luna-review", "codex-verify", "claude-adjudicate")
+    )
+    run_setup(build_config(
+        home_root=home,
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(Endpoint(name="offline", adapter="deterministic"),),
+        model_targets=targets,
+        profiles=(Profile(name="default", planner="claude-review", critic="claude-review", adjudicator="claude-adjudicate"),),
+    ))
+    initialize_target(home_root=home, requested_target=target)
+    created = create_offline(home_root=home, requested_target=target, name="explicit-review-targets", model_target="claude-review", open_editor=False)
+    approve_offline(home_root=home, requested_target=target, proposal_id=created.proposal_id)
+    source = tmp_path / "input.md"
+    source.write_text("# explicit input\n", encoding="utf-8")
+
+    plan = create_run_plan(
+        home_root=home,
+        requested_target=target,
+        gig_id=created.gig_id,
+        profile_id="standard",
+        input_paths=(source,),
+        reviewer_targets=("claude-review", "codex-luna-review"),
+        verifier_targets=("codex-verify",),
+        adjudicator_targets=("claude-adjudicate",),
+    )
+
+    assert [item["model_target_id"] for item in plan.plan["participants"]] == [
+        "claude-review", "codex-luna-review", "codex-verify", "claude-adjudicate",
+    ]
+    assert plan.plan["participants"][0]["target_reuse_disclosure"] is None
 
 
 def test_plan_run_requires_fresh_consent_and_pins_plan_in_manifest(tmp_path: Path) -> None:
