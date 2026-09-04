@@ -24,6 +24,13 @@ evaluation vocabulary. It grants no graph access by itself. Each graph narrows
 the shared policy and declares its own inputs, outputs, sources, effects,
 budget, review, and evaluation.
 
+The shared privacy ceiling distinguishes two participant classes: an
+unrestricted research participant may receive only an operator-approved public
+brief and can supply only non-authoritative suggestions; a private-sensitive
+reference may enter only a separately proven restricted adapter path. The Gig
+does not make a private Tailor reference ambient input to Find, and local-only
+Find requirements are applied by GigAI rather than sent to a participant.
+
 ## Graph boundary and handoff
 
 `tailor-application` reads selected private résumé evidence and one sealed

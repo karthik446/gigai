@@ -69,6 +69,12 @@ own reviewed policy and consent details.
 The registry remains the project/workpad binding authority. G41 continues to
 own the portable `.gigai/packages/` boundary; G45 material is never added to a
 portable package, catalog entry, Git-tracked package file, or package export.
+
+G45 creates private records; it does not grant model-disclosure authority. A
+private-sensitive G45 reference or input is forbidden from an unrestricted
+research participant brief. The authority-focused S43.3 path may use only a
+separately sealed public derivative; a Tailor Run that needs the private source
+requires the restricted-adapter proof defined by G46.1.
 The authoritative workpad stores these snapshots privately with owner-only
 permissions.
 
