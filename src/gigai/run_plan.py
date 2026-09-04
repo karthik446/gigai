@@ -13,7 +13,11 @@ from typing import Iterable, Mapping
 from .canonical import canonical_json_bytes, derive_deterministic_id, digest_imported_bytes, parse_json_bytes
 from .config import load_config
 from .journal import JournalArtifact, record_transition
-from .model_discovery import discover_runtime_snapshot, resolve_target_readiness
+from .model_discovery import (
+    discover_runtime_snapshot,
+    recorded_target_readiness,
+    resolve_target_readiness,
+)
 from .model_targets import resolve_model_target
 from .run import RunError, _resolve_authority, _validate_authority
 from .validators import ValidationFinding, ValidationReport, validate_serialized_contract
@@ -119,6 +123,15 @@ def _target_name(profile: object, role: str) -> str:
         if isinstance(candidate, str) and candidate:
             return candidate
     raise RunPlanError("target_not_usable", f"default profile has no target for {role}")
+
+
+def _readiness_for_sealing(home_root: Path, config, target_name: str):
+    current = resolve_target_readiness(config, target_name)
+    if current.readiness == "usable":
+        return current
+    if current.readiness not in {"configured"}:
+        return current
+    return recorded_target_readiness(home_root, config, target_name) or current
 
 
 def _profile_budget(profile_id: str) -> dict[str, object]:
@@ -421,9 +434,12 @@ def create_run_plan(*, home_root: Path, requested_target: Path | None, gig_id: s
             target_offsets[role] += 1
         else:
             target_name = _target_name(default_profile, role)
-        readiness = resolve_target_readiness(config, target_name)
+        readiness = _readiness_for_sealing(home_root, config, target_name)
         if readiness.readiness != "usable":
-            raise RunPlanError("target_not_usable", f"target {target_name!r} is not usable for {role}")
+            raise RunPlanError(
+                "target_not_usable",
+                f"target {target_name!r} is not usable for {role}; run `gigai models --probe {target_name}` first",
+            )
         assignment_specs.append((f"participant_p{index}", roles, target_name))
     target_records: list[tuple[str, tuple[str, ...], str, bytes, object]] = []
     for participant_id, roles, target_name in assignment_specs:

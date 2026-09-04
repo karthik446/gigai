@@ -53,6 +53,7 @@ from .model_discovery import (
     discover_installed_models,
     discover_runtime_snapshot,
     persist_discovery_snapshot,
+    persist_target_readiness,
     probe_target_readiness,
     resolve_target_readiness,
 )
@@ -357,6 +358,11 @@ def models_command(
                     probe_target,
                     executable_overrides=runtime_executables,
                 )
+                # An unknown target still has a useful diagnostic projection,
+                # but it has no configured identity that a readiness proof can
+                # safely bind to.
+                if configured_target is not None:
+                    persist_target_readiness(home, config, probed)
                 payload["probe"] = (
                     target_projection(configured_target, probed)
                     if configured_target is not None

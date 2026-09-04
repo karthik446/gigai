@@ -31,7 +31,7 @@ from .canonical import (
 from .config import load_config
 from .index import read_index
 from .journal import JournalArtifact, JournalEntry, record_transition
-from .model_discovery import resolve_target_readiness
+from .model_discovery import recorded_target_readiness, resolve_target_readiness
 from .model_targets import resolve_model_target
 from .validators import validate_goal_graph, validate_serialized_contract
 from .workpad import ResolvedWorkpad, resolve_workpad
@@ -519,6 +519,8 @@ def _validate_plan_handoff(
         if not isinstance(target_name, str):
             raise RunError("run_plan_invalid: participant target is malformed")
         readiness = resolve_target_readiness(config, target_name)
+        if readiness.readiness == "configured":
+            readiness = recorded_target_readiness(config.home_root, config, target_name) or readiness
         if readiness.readiness != "usable":
             raise RunError("run_plan_authority_refused: assigned target is no longer usable")
         target_ref = participant.get("target_configuration_ref")

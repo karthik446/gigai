@@ -13,7 +13,7 @@ from .canonical import canonical_json_bytes, digest_imported_bytes, parse_json_b
 from .config import load_config
 from .journal import JournalArtifact, record_transition
 from .model_execution import InvocationBudget, InvocationPolicy, SelectedReference, run_model_invocation
-from .model_discovery import resolve_target_readiness
+from .model_discovery import recorded_target_readiness, resolve_target_readiness
 from .model_targets import resolve_model_target
 from .review import validate_adjudication, validate_finding, validate_review_loop
 from .run_plan import RunPlanError, _target_record, read_run_plan
@@ -71,7 +71,7 @@ def execute_provider_review(*, home_root: Path, requested_target: Path | None, g
     references, input_artifacts = _sealed_text_inputs(resolved.path, plan, run_id, run_plan_id)
     config = load_config(home_root)
     participants = [item for item in plan.get("participants", []) if isinstance(item, Mapping)]
-    _require_current_targets(config, resolved.path, participants)
+    _require_current_targets(home_root, config, resolved.path, participants)
     budget_raw = plan.get("budget")
     if not isinstance(budget_raw, Mapping):
         raise ProviderReviewError("provider_review_plan_invalid", "sealed plan has no budget")
@@ -281,7 +281,7 @@ def _sealed_text_inputs(workpad: Path, plan: Mapping[str, object], run_id: str, 
     return tuple(refs), artifacts
 
 
-def _require_current_targets(config, workpad: Path, participants: list[Mapping[str, object]]) -> None:
+def _require_current_targets(home_root: Path, config, workpad: Path, participants: list[Mapping[str, object]]) -> None:
     for participant in participants:
         target = _string(participant.get("model_target_id"), "participant target")
         ref = participant.get("target_configuration_ref")
@@ -295,6 +295,8 @@ def _require_current_targets(config, workpad: Path, participants: list[Mapping[s
             readiness = resolve_target_readiness(config, target)
         except Exception as exc:
             raise ProviderReviewError("provider_review_target_unavailable", f"selected target {target!r} is unavailable") from exc
+        if readiness.readiness == "configured":
+            readiness = recorded_target_readiness(home_root, config, target) or readiness
         if digest_imported_bytes(current) != ref.get("content_sha256") or readiness.readiness != "usable":
             raise ProviderReviewError("provider_review_target_mismatch", f"selected target {target!r} changed or is not usable")
 

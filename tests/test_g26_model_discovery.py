@@ -11,11 +11,14 @@ from gigai.adapters.port import (
     ModelInvocationError,
 )
 from gigai.model_discovery import (
+    ModelReadiness,
     discover_installed_models,
+    persist_target_readiness,
     probe_target_readiness,
+    recorded_target_readiness,
     resolve_target_readiness,
 )
-from gigai.config import Endpoint, ModelTarget
+from gigai.config import Endpoint, ModelTarget, Profile
 from gigai.setup import build_config
 from click.testing import CliRunner
 from gigai.cli import cli
@@ -154,6 +157,37 @@ def test_explicit_provider_probe_promotes_target_to_usable(tmp_path, monkeypatch
     assert calls == ["Return exactly READY as a readiness check. Do not use tools or modify files."]
 
 
+def test_persisted_probe_is_bound_to_the_exact_target_configuration(tmp_path) -> None:
+    home = tmp_path / "home"
+    config = build_config(
+        home_root=home,
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(Endpoint("codex", "codex_cli"),),
+        model_targets=(ModelTarget("codex-luna", "codex", "gpt-5.6-luna", ("text",), 512),),
+        profiles=(Profile("default", "codex-luna", "codex-luna", "codex-luna"),),
+    )
+    persist_target_readiness(
+        home,
+        config,
+        ModelReadiness("codex-luna", "codex", "gpt-5.6-luna", "codex_cli", "usable", None),
+    )
+
+    assert recorded_target_readiness(home, config, "codex-luna").readiness == "usable"  # type: ignore[union-attr]
+
+    changed = build_config(
+        home_root=home,
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(Endpoint("codex", "codex_cli"),),
+        model_targets=(ModelTarget("codex-luna", "codex", "gpt-5.6-terra", ("text",), 512),),
+        profiles=(Profile("default", "codex-luna", "codex-luna", "codex-luna"),),
+    )
+    assert recorded_target_readiness(home, changed, "codex-luna") is None
+
+
 def test_explicit_provider_probe_fails_closed(tmp_path, monkeypatch) -> None:
     class FakePort:
         def invoke(self, request):
@@ -254,3 +288,23 @@ def test_models_command_rejects_test_only_target_probe(tmp_path) -> None:
     assert result.exit_code == 1, result.output
     payload = json.loads(result.output)
     assert payload["error"]["code"] == "model_target_not_public"
+
+
+def test_models_command_reports_an_unknown_probe_without_persisting_it(tmp_path) -> None:
+    home = tmp_path / "home"
+    config = build_config(
+        home_root=home,
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+    )
+    run_setup(config)
+
+    result = CliRunner().invoke(
+        cli, ["models", "--home", str(home), "--probe", "not-a-target", "--json"]
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["probe"]["target_name"] == "not-a-target"
+    assert not (home / "snapshots" / "model-readiness").exists()

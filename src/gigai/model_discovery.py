@@ -17,7 +17,7 @@ from typing import Callable, Mapping
 from .adapters.factory import AdapterFactoryError, resolve_model_adapter
 from .adapters.port import ModelAuthenticationRequired, ModelInvocationError
 from .adapters.process import allowed_environment
-from .canonical import canonical_json_bytes, digest_imported_bytes
+from .canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes
 from .config import GigAIConfig
 from .model_targets import ModelTargetResolutionError
 
@@ -272,6 +272,101 @@ def persist_discovery_snapshot(home_root: Path, snapshot: DiscoverySnapshot) -> 
     return destination
 
 
+def target_configuration_digest(config: GigAIConfig, target_name: str) -> str:
+    """Return the exact target/endpoint identity that a readiness proof binds."""
+
+    target = next((item for item in config.model_targets if item.name == target_name), None)
+    if target is None:
+        raise ModelTargetResolutionError(f"unknown model target {target_name!r}")
+    endpoint = next((item for item in config.endpoints if item.name == target.endpoint), None)
+    if endpoint is None:
+        raise ModelTargetResolutionError(
+            f"model target {target_name!r} references missing endpoint {target.endpoint!r}"
+        )
+    return digest_imported_bytes(canonical_json_bytes({
+        "endpoint": {
+            "name": endpoint.name,
+            "adapter": endpoint.adapter,
+            "credential": endpoint.credential,
+            "base_url": endpoint.base_url,
+        },
+        "target": {
+            "name": target.name,
+            "endpoint": target.endpoint,
+            "model": target.model,
+            "capabilities": list(target.capabilities),
+            "max_output_tokens": target.max_output_tokens,
+            "reasoning_effort": target.reasoning_effort,
+            "enabled": target.enabled,
+        },
+    }))
+
+
+def persist_target_readiness(
+    home_root: Path,
+    config: GigAIConfig,
+    readiness: ModelReadiness,
+) -> Path:
+    """Persist one private explicit probe result bound to current target config.
+
+    A readiness record is evidence, not configuration authority.  It becomes
+    unusable automatically when any sealed target/endpoint field changes.
+    """
+
+    target_digest = target_configuration_digest(config, readiness.target_name)
+    directory = home_root / "snapshots" / "model-readiness"
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = canonical_json_bytes({
+        "schema_version": "1.0",
+        "target_name": readiness.target_name,
+        "target_configuration_sha256": target_digest,
+        "readiness": readiness.readiness,
+        "reason": readiness.reason,
+        "recorded_at": _timestamp(None),
+    })
+    destination = directory / f"{readiness.target_name}-{target_digest.removeprefix('sha256:')}.json"
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    temporary.write_bytes(payload)
+    os.replace(temporary, destination)
+    return destination
+
+
+def recorded_target_readiness(
+    home_root: Path,
+    config: GigAIConfig,
+    target_name: str,
+) -> ModelReadiness | None:
+    """Read a usable explicit probe bound to the current target configuration."""
+
+    try:
+        target_digest = target_configuration_digest(config, target_name)
+    except ModelTargetResolutionError:
+        return None
+    path = home_root / "snapshots" / "model-readiness" / f"{target_name}-{target_digest.removeprefix('sha256:')}.json"
+    try:
+        payload = parse_json_bytes(path.read_bytes())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    if (
+        payload.get("schema_version") != "1.0"
+        or payload.get("target_name") != target_name
+        or payload.get("target_configuration_sha256") != target_digest
+        or payload.get("readiness") != "usable"
+    ):
+        return None
+    return ModelReadiness(
+        target_name=target_name,
+        endpoint_name=None,
+        model=None,
+        adapter=None,
+        readiness="usable",
+        reason=None,
+        states=("configured", "explicit_probe", "usable"),
+    )
+
+
 def _resolve_bounded_fallback(name: str) -> Path | None:
     for directory in _BOUNDED_INSTALL_DIRECTORIES:
         candidate = directory.expanduser() / name
@@ -430,6 +525,9 @@ __all__ = [
     "discover_installed_models",
     "hydrate_login_shell_path",
     "persist_discovery_snapshot",
+    "persist_target_readiness",
     "probe_target_readiness",
+    "recorded_target_readiness",
     "resolve_target_readiness",
+    "target_configuration_digest",
 ]
