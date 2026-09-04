@@ -121,8 +121,9 @@ fixtures to prove all of the following:
   succeeds only on an exact marker return; distinct sentinel instructions in
   every forbidden host root must not change that return. Evidence records the resolved
   executable/adapter identity and version, safe environment names, execution
-  root facts, marker digest, authentication-proof reference, and GigAI-observed
-  accounting—never a credential or host path. Failure by either adapter is
+  root facts, expected/returned marker digests with exact match,
+  authentication-proof reference, and GigAI-observed accounting—never a
+  credential or host path. Failure by either adapter is
   Narrow or Reject, not Adopt. The proof uses
   `urn:gigai:schema:participant-authentication-channel-proof:1`, binds the
   exact target/adapter executable digest and version, records a non-secret
@@ -134,9 +135,11 @@ fixtures to prove all of the following:
 - `marker_evidence` is a matching successful
   `urn:gigai:schema:marker-probe-record:1` record. Its strict fields retain
   direct-confirmation evidence, target/configuration/executable identities,
-  marker digest, reservation, actual/reconciled usage, terminal state,
-  timestamps, and stable refusal codes, but no credential, host path, raw
-  prompt, raw marker, or provider output.
+  operator actor/session identity, expected/returned marker digests with exact
+  match, reservation, actual/reconciled usage, terminal state, timestamps, and
+  stable refusal codes, but no credential, host path, raw prompt, raw marker,
+  or provider output. Missing confirmation is a stable CLI refusal and creates
+  no marker record.
 - A marker probe is a provider call even though it is not a research Run. It
   runs only from direct operator command
   `gigai models --probe TARGET --s43-public-marker --max-tokens N --max-cost-usd C --confirm`.
