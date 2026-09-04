@@ -2,7 +2,8 @@
 
 **Version:** v0.1.7
 **Status:** Proposed — contract defined; not activated
-**Depends on:** G43.2, G44, and G45
+**Depends on:** G43.2, G44, and G45; its v2 Find increment additionally
+depends on completed G43.3 and G45.2
 **Delivers:** private Job Search Lifecycle Gig v1 and explicitly approved v2
 
 ## Outcome
@@ -27,9 +28,9 @@ budget, review, and evaluation.
 
 `tailor-application` reads selected private résumé evidence and one sealed
 job-description input. `find-jobs-for-requirements` reads one explicitly
-supplied requirements profile and one approved G45.2 Exa research policy. Its
-assigned Codex and Claude research roles may direct bounded, mediated Exa
-queries within the sealed Plan; tailoring may not perform research reads.
+supplied requirements profile and one approved G45.2 Exa research policy. Only
+the closed G43.3 research roles may request its mediated actions within a
+sealed Plan; tailoring may not perform research reads.
 
 The only v0.1.7 graph handoff is explicit:
 
@@ -46,10 +47,12 @@ ambient input. A user may instead paste/import a job description through G45.
 
 The Tailor pack evaluates factuality, source preservation, material-requirement
 coverage, gap disclosure, output validity, and operator usefulness. The Find
-pack evaluates research-policy compliance, role-separated query evidence,
-citation/snapshot provenance completeness, freshness, lead normalization,
-within-Run deduplication, requirement-grounded relevance explanations, no-match
-behavior, and honest source/provider failure.
+pack owns job-domain field disclosure, relevance, independent-corroboration and
+promotion rules, freshness interpretation, terminal-result algebra, and
+operator usefulness. It evaluates G45.2 structural evidence for policy
+compliance, citation/snapshot provenance completeness, normalization, and
+within-Run deduplication; structural evidence alone does not become a surfaced
+or selectable lead.
 
 No Tailor result proves Find quality and no Find ranking result proves tailored
 document factuality. Both packs freeze their development/held-out split,

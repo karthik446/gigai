@@ -22,6 +22,32 @@ For the Job Search Lifecycle UAT, it can render:
 - a Tailor report with selected lead-binding/input identity, source evidence,
   factuality/gap status, and output artifacts.
 
+## Determinism, redaction, and source labels
+
+`report-projection.schema.json` has schema ID
+`urn:gigai:schema:report-projection:1`. Every projection records `renderer_id`,
+`renderer_version`, `projection_schema_version`, the exact authoritative source
+artifact references/digests, and a canonical projection digest. The source list
+is ordered by artifact path then digest; candidates/promotions are ordered by
+their stable IDs; diagnostics are ordered by stable diagnostic code then event
+sequence. No rebuild-time timestamp, random ID, locale-dependent formatting,
+or filesystem enumeration order appears in the canonical body.
+
+For the same renderer ID/version and authoritative inputs, JSON, Markdown, and
+HTML canonical bytes must rebuild byte-for-byte identically using UTF-8 and LF
+line endings. A display-only `rendered_at` value, when needed, lives outside the
+canonical artifact and is excluded from its digest. A changed renderer or schema
+version creates a new projection identity rather than silently changing a prior
+report.
+
+A Find projection exposes a source only as `source_label` with a normalized
+HTTPS host and an optional bounded title. It may include a private-local
+`display_url` only when it is the policy-validated canonical HTTPS origin/path
+with query/fragment/credentials stripped; it is never fetched during rendering.
+The raw provider URL remains a private evidence artifact. Committed evidence
+contains neither `display_url` nor `source_label`, only the permitted sanitized
+IDs/digests/counts from G45.2.
+
 ## Boundary
 
 All projections are derived from authoritative journal/workpad/Plan/Run
@@ -35,10 +61,12 @@ consent, or lifecycle surface.
 
 ## Acceptance evidence
 
-Tests and UAT prove that reports rebuild identically from a completed
+Tests and UAT prove byte-identical canonical rebuilds from a completed
 foreground Run, distinguish v1/v2 and selected graphs, preserve raw-private
-artifact redaction, disclose source/read failure honestly, and link an explicit
-lead-input binding without claiming an automatic journey. CLI/JSON/Markdown/HTML
+artifact redaction, disclose research/read failure honestly, and link an
+explicit lead-input binding without claiming an automatic journey. They cover
+renderer-version change, ordering mutation, timestamp exclusion, URL-label
+normalization/redaction, and missing optional HTML. CLI/JSON/Markdown/HTML
 projections remain read-only and tolerate missing optional HTML without changing
 authoritative Run state.
 

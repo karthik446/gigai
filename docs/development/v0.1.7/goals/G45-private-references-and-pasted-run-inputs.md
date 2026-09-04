@@ -35,7 +35,7 @@ research/reference objective is complete. Repository classification, reference
 sync, URL/network sources, and research reporting remain later explicitly
 reviewed G45 increments. G45.2 separately owns bounded Exa-backed agent
 research, immutable citation/lead snapshots, and lead-to-input binding; this
-G45.1 path remains local only.
+G45 path remains local only.
 
 ## First delivery boundary
 
