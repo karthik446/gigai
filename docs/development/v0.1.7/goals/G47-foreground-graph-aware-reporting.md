@@ -15,9 +15,10 @@ becoming a second authority or starting any work.
 
 For the Job Search Lifecycle UAT, it can render:
 
-- a Find report with source policy, query-preview digest, as-of/retrieval time,
-  result/no-match/failure state, lead count, deduplication evidence, and safe
-  lead summaries; and
+- a Find report with Exa research policy, sealed query brief, each bounded
+  Codex/Claude research action, provider usage, citation/snapshot provenance,
+  as-of/retrieval time, result/no-match/failure state, lead count,
+  deduplication evidence, and safe lead summaries; and
 - a Tailor report with selected lead-binding/input identity, source evidence,
   factuality/gap status, and output artifacts.
 

@@ -8,9 +8,9 @@
 ## Outcome
 
 G46 defines one private `job-search-lifecycle` Gig whose v0.1.7 commission is
-strictly *manual job discovery and application tailoring*. “Lifecycle” does
-not mean interview scheduling, outreach, application submission, recurring
-execution, or application-pipeline automation.
+strictly *operator-started agent job research and application tailoring*.
+“Lifecycle” does not mean interview scheduling, outreach, application
+submission, recurring execution, or application-pipeline automation.
 
 ```text
 v1: tailor-application
@@ -27,8 +27,9 @@ budget, review, and evaluation.
 
 `tailor-application` reads selected private résumé evidence and one sealed
 job-description input. `find-jobs-for-requirements` reads one explicitly
-supplied requirements profile and one approved G45.2 source-registry entry. It
-may perform its bounded network read; tailoring may not.
+supplied requirements profile and one approved G45.2 Exa research policy. Its
+assigned Codex and Claude research roles may direct bounded, mediated Exa
+queries within the sealed Plan; tailoring may not perform research reads.
 
 The only v0.1.7 graph handoff is explicit:
 
@@ -45,9 +46,10 @@ ambient input. A user may instead paste/import a job description through G45.
 
 The Tailor pack evaluates factuality, source preservation, material-requirement
 coverage, gap disclosure, output validity, and operator usefulness. The Find
-pack evaluates source-policy compliance, snapshot/provenance completeness,
-freshness, lead normalization, within-Run deduplication, requirement-grounded
-relevance explanations, no-match behavior, and honest source failure.
+pack evaluates research-policy compliance, role-separated query evidence,
+citation/snapshot provenance completeness, freshness, lead normalization,
+within-Run deduplication, requirement-grounded relevance explanations, no-match
+behavior, and honest source/provider failure.
 
 No Tailor result proves Find quality and no Find ranking result proves tailored
 document factuality. Both packs freeze their development/held-out split,
@@ -65,7 +67,8 @@ states. Scheduled tailoring and application submission remain off by default.
 
 ## Stop conditions
 
-Stop if discovery fetches an undeclared source, tailoring receives a lead
-without an explicit binding, either graph inherits the other graph's effect or
-provider permission, a graph's evaluation evidence is borrowed by the other,
-or lifecycle wording is used to imply unimplemented automation.
+Stop if research occurs outside the sealed Exa policy or budget, tailoring
+receives a lead without an explicit binding, either graph inherits the other
+graph's effect or provider permission, a graph's evaluation evidence is
+borrowed by the other, or lifecycle wording is used to imply unimplemented
+automation.

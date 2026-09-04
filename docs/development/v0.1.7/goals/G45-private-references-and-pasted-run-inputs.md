@@ -33,8 +33,9 @@ allocate a Run, or turn a local file into portable package material.
 This is the first G45 delivery contract, not a claim that the broader G45
 research/reference objective is complete. Repository classification, reference
 sync, URL/network sources, and research reporting remain later explicitly
-reviewed G45 increments. G45.2 separately owns the first bounded public
-job-source read and lead-to-input binding; this G45.1 path remains local only.
+reviewed G45 increments. G45.2 separately owns bounded Exa-backed agent
+research, immutable citation/lead snapshots, and lead-to-input binding; this
+G45.1 path remains local only.
 
 ## First delivery boundary
 
