@@ -125,9 +125,19 @@ fixtures to prove all of the following:
   accounting—never a credential or host path. Failure by either adapter is
   Narrow or Reject, not Adopt. The proof uses
   `urn:gigai:schema:participant-authentication-channel-proof:1`, binds the
-  exact participant/target/adapter executable digest and version, records
-  `home_xdg_inheritance: false`, and expires; its reference and digest must be
-  sealed in every later `run-plan:2` that names that participant.
+  exact target/adapter executable digest and version, records a non-secret
+  authentication-channel configuration reference/digest,
+  `home_xdg_inheritance: false`, and expires. It is reusable target/adapter/
+  channel evidence; each later `run-plan:2` separately seals
+  `{ participant_id, proof_ref }` and validates the current configuration
+  digest before consent.
+- A marker probe is a provider call even though it is not a research Run. It
+  runs only from direct operator command
+  `gigai models --probe TARGET --s43-public-marker --max-tokens N --max-cost-usd C --confirm`.
+  GigAI generates the non-secret marker after confirmation, reserves the finite
+  model-call/token/cost budget before invoking the adapter, and reconciles
+  actual usage. Plan construction, Plan display, and consent preview can read
+  a proof but cannot silently invoke or refresh a probe.
 - Suggestions that spoof a Run/Plan/participant/action ID, URL, citation,
   provider result, role, or action ordinal cannot write or influence an
   authoritative request, citation, candidate, lead, evidence record, or
