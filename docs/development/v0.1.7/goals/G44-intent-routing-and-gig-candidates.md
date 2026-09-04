@@ -2,9 +2,9 @@
 
 **Version:** v0.1.7
 **Status:** Proposed — first dogfood review input
-**Depends on:** G40–G43 complete and ratified; G43.1 for provider-backed
+**Depends on:** G43.2 complete and ratified; G43.1 for provider-backed
 document-review dogfood
-**Unblocks:** G45/G46.1 and later user-authored local Gigs
+**Unblocks:** G45, G46 Job Search Lifecycle, and later user-authored local Gigs
 
 ## Outcome
 
@@ -14,7 +14,7 @@ of four bounded outcomes:
 
 ```text
 explicit request
-  -> existing approved Gig Run
+  -> existing approved Gig Graph selection
   -> one-off local result
   -> private Gig candidate
   -> private revision candidate for an approved Gig
@@ -36,8 +36,9 @@ prompt while routing.
 
 The router emits exactly one of:
 
-- `existing_gig`: one approved Gig/version satisfies the request and all
-  mandatory Run inputs are supplied or can be requested individually;
+- `existing_gig`: one approved Gig/version and one named graph satisfy the
+  request; G44 emits G43.2's typed `g44_routed` graph-selection record and
+  reports only that graph's mandatory missing inputs;
 - `one_off`: the request is bounded but there is no safe reuse claim;
 - `gig_candidate`: the operator explicitly asked to create a Gig, or declared
   durable inputs, reusable output, recurring execution, evaluation, or
@@ -48,8 +49,10 @@ The router emits exactly one of:
   change effect, privacy, data source, or active-Gig authority.
 
 The router records its rule/version, candidate routes considered, safe reason,
-and only labels/IDs/digests. It does not persist the request text unless the
-operator has explicitly selected one-off or candidate workpad creation.
+and only labels/IDs/digests in G43.2's graph-selection-record schema. It does
+not persist the request text unless the operator has explicitly selected one-off
+or candidate workpad creation. A selection record is not Run authority; a Plan
+must seal it and direct Run consent remains required.
 
 ## Candidate workspace
 
@@ -93,13 +96,13 @@ or supply a bounded override. Missing safety-critical information produces
 
 ## Existing-Gig and revision behavior
 
-For an approved product-research Gig, `gigai run product-research --url URL`
-routes directly to a Run when `url` is its sole required input. A request such
-as `gigai create a product research Gig` creates a candidate because it asks
-for reusable software rather than one execution. A request to add price-history
-analysis to a named Gig creates a revision candidate linked to that exact
-approved version; it does not alter the active Gig or reuse prior Run data as
-new input.
+For an approved Job Search Lifecycle Gig, a request to tailor an explicit job
+description emits `tailor-application`; a request to find jobs from an explicit
+requirements profile emits `find-jobs-for-requirements`. If both graphs could
+safely apply, the router returns `needs_operator_input`; it does not choose a
+graph. A request to add job discovery to a named tailoring-only Gig creates an
+`add_graph` revision candidate linked to that exact approved version; it does
+not alter the active Gig or reuse prior Run data as new input.
 
 Revision candidates must declare compatibility impact, added/removed inputs or
 effects, evaluation cases affected, and a comparison plan. Only a fresh
@@ -122,12 +125,15 @@ The first G44 delivery proves, with deterministic fixtures and G43.1's public
 contract dogfood:
 
 1. an existing Gig request with complete inputs returns `existing_gig` and asks
-   zero questions;
+   zero questions and a valid G43.2 graph-selection record;
 2. a request with exactly one missing required input asks exactly that input;
-3. an explicit create request produces a private candidate, not a Gig or Run;
-4. ambiguous route/effect/privacy choices stop at `needs_operator_input`;
-5. a revision candidate cannot modify an active version or historic Run; and
-6. all human/JSON output redacts raw request text unless candidate creation was
+3. a Job Search Lifecycle request routes tailoring and discovery to their
+   distinct graph IDs, while an ambiguous two-graph request stops at
+   `needs_operator_input`;
+4. an explicit create request produces a private candidate, not a Gig or Run;
+5. ambiguous route/effect/privacy choices stop at `needs_operator_input`;
+6. a revision candidate cannot modify an active version or historic Run; and
+7. all human/JSON output redacts raw request text unless candidate creation was
    explicitly selected.
 
 ## Out of scope
