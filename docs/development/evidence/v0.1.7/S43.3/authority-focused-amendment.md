@@ -131,6 +131,12 @@ fixtures to prove all of the following:
   channel evidence; each later `run-plan:2` separately seals
   `{ participant_id, proof_ref }` and validates the current configuration
   digest before consent.
+- `marker_evidence` is a matching successful
+  `urn:gigai:schema:marker-probe-record:1` record. Its strict fields retain
+  direct-confirmation evidence, target/configuration/executable identities,
+  marker digest, reservation, actual/reconciled usage, terminal state,
+  timestamps, and stable refusal codes, but no credential, host path, raw
+  prompt, raw marker, or provider output.
 - A marker probe is a provider call even though it is not a research Run. It
   runs only from direct operator command
   `gigai models --probe TARGET --s43-public-marker --max-tokens N --max-cost-usd C --confirm`.
@@ -138,6 +144,11 @@ fixtures to prove all of the following:
   model-call/token/cost budget before invoking the adapter, and reconciles
   actual usage. Plan construction, Plan display, and consent preview can read
   a proof but cannot silently invoke or refresh a probe.
+- Immediately before every participant invocation, GigAI revalidates target,
+  current executable/adapter digest, current channel-configuration digest,
+  matching successful marker record, and expiry. A post-consent mismatch fails
+  before prompt assembly or process launch and cannot trigger an implicit probe
+  or proof refresh.
 - Suggestions that spoof a Run/Plan/participant/action ID, URL, citation,
   provider result, role, or action ordinal cannot write or influence an
   authoritative request, citation, candidate, lead, evidence record, or
