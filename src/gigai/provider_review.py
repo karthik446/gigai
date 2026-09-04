@@ -68,7 +68,7 @@ def execute_provider_review(*, home_root: Path, requested_target: Path | None, g
     if root.exists() or root.is_symlink():
         raise ProviderReviewError("provider_review_conflict", "provider review directory already exists without a terminal result")
 
-    references, input_artifacts = _sealed_text_inputs(resolved.path, plan, run_id, run_plan_id)
+    references, input_artifacts, reference_roles = _sealed_text_inputs(resolved.path, plan, run_id, run_plan_id)
     config = load_config(home_root)
     participants = [item for item in plan.get("participants", []) if isinstance(item, Mapping)]
     _require_current_targets(home_root, config, resolved.path, participants)
@@ -104,7 +104,7 @@ def execute_provider_review(*, home_root: Path, requested_target: Path | None, g
             goal_id=_uuid_id("goal"),
             model_target=target,
             role="reviewer",
-            prompt=_review_prompt(contract, participant),
+            prompt=_review_prompt(contract, participant, reference_roles),
             references=references,
             selected_reference_ids=tuple(item.reference_id for item in references),
             policy=policy,
@@ -114,7 +114,7 @@ def execute_provider_review(*, home_root: Path, requested_target: Path | None, g
         if execution.result is None or execution.record.get("outcome") != "succeeded":
             reviewer_failed = True
             continue
-        parsed_findings, invalid = _parse_findings(execution.result.output_text, contract, references, trace_id, participant)
+        parsed_findings, invalid = _parse_findings(execution.result.output_text, contract, references, reference_roles, trace_id, participant)
         if invalid:
             reviewer_failed = True
             continue
@@ -136,7 +136,7 @@ def execute_provider_review(*, home_root: Path, requested_target: Path | None, g
                 goal_id=_uuid_id("goal"),
                 model_target=target,
                 role="verifier",
-                prompt=_verify_prompt(findings),
+                prompt=_verify_prompt(findings, reference_roles),
                 references=references,
                 selected_reference_ids=tuple(item.reference_id for item in references),
                 policy=policy,
@@ -206,6 +206,7 @@ def execute_provider_review(*, home_root: Path, requested_target: Path | None, g
         adjudications=adjudications,
         invocation_ids=[str(call.record["invocation_id"]) for call in (*reviewer_calls, *verifier_calls, *adjudicator_calls)],
         references=references,
+        reference_roles=reference_roles,
         input_artifacts=input_artifacts,
         input_payloads={item.path: item.content for item in references},
         status=status,
@@ -252,9 +253,10 @@ def _require_direct_run_consent(run_root: Path, run_plan_id: str, plan_digest: s
         raise ProviderReviewError("provider_review_consent_mismatch", "Run consent does not bind this exact sealed review plan")
 
 
-def _sealed_text_inputs(workpad: Path, plan: Mapping[str, object], run_id: str, plan_id: str) -> tuple[tuple[SelectedReference, ...], list[dict[str, object]]]:
+def _sealed_text_inputs(workpad: Path, plan: Mapping[str, object], run_id: str, plan_id: str) -> tuple[tuple[SelectedReference, ...], list[dict[str, object]], dict[str, str]]:
     refs: list[SelectedReference] = []
     artifacts: list[dict[str, object]] = []
+    roles: dict[str, str] = {}
     for index, item in enumerate(plan.get("inputs", []), start=1):
         if not isinstance(item, Mapping) or not isinstance(item.get("snapshot_ref"), Mapping):
             raise ProviderReviewError("provider_review_plan_invalid", "Run Plan input is malformed")
@@ -276,9 +278,11 @@ def _sealed_text_inputs(workpad: Path, plan: Mapping[str, object], run_id: str, 
         relative = f"runs/{run_id}/provider-reviews/{plan_id}/inputs/input_{index}.txt"
         refs.append(SelectedReference(reference_id, relative, data, str(ref["content_sha256"]), str(media)))
         artifacts.append({"path": relative, "content_sha256": digest_imported_bytes(data), "media_type": str(media), "size_bytes": len(data)})
+        role = item.get("role")
+        roles[reference_id] = str(role) if isinstance(role, str) else "primary"
     if not refs:
         raise ProviderReviewError("provider_review_not_eligible", "provider review needs at least one sealed text input")
-    return tuple(refs), artifacts
+    return tuple(refs), artifacts, roles
 
 
 def _require_current_targets(home_root: Path, config, workpad: Path, participants: list[Mapping[str, object]]) -> None:
@@ -325,23 +329,45 @@ def _read_contract(workpad: Path, plan: Mapping[str, object]) -> Mapping[str, ob
     return payload
 
 
-def _review_prompt(contract: Mapping[str, object], participant: Mapping[str, object]) -> str:
+def _review_prompt(contract: Mapping[str, object], participant: Mapping[str, object], reference_roles: Mapping[str, str]) -> str:
     criteria = contract.get("criteria", [])
+    role_lines = "\n".join(
+        f"- {'Review subject' if role == 'review_subject' else 'Requirements baseline' if role == 'requirements_baseline' else role}: reference_id={reference_id}"
+        for reference_id, role in sorted(reference_roles.items())
+    )
+    typed_closure = set(reference_roles.values()) == {"review_subject", "requirements_baseline"}
+    output_shape = (
+        "For criterion_requirements, each finding must instead contain an `evidence` array with exactly two objects "
+        "(reference_id and locator): one citing the Requirements baseline and one citing the Review subject. "
+        if typed_closure
+        else ""
+    )
     return (
         "You are one independent document reviewer. Review only the supplied sealed references. "
         "Do not use outside knowledge or propose file edits. Return strict JSON with a top-level `findings` array. "
         "Each finding must contain criterion_id, severity (info|low|medium|high|critical), title, description, "
         "reference_id, locator, and confidence (a string from 0 to 1). If no issue exists, return {\"findings\":[]}.\n"
+        + output_shape
+        + "Sealed reference roles:\n"
+        + role_lines
+        + "\n"
         f"Question: {contract.get('question')}\nCriteria: {json.dumps(criteria, sort_keys=True)}\n"
         f"Participant: {participant.get('participant_id')}"
     )
 
 
-def _verify_prompt(findings: list[dict[str, object]]) -> str:
+def _verify_prompt(findings: list[dict[str, object]], reference_roles: Mapping[str, str]) -> str:
+    role_lines = "\n".join(
+        f"- {'Review subject' if role == 'review_subject' else 'Requirements baseline' if role == 'requirements_baseline' else role}: reference_id={reference_id}"
+        for reference_id, role in sorted(reference_roles.items())
+    )
     return (
         "You are an independent verifier. Check the supplied sealed references and these proposed findings. "
         "Return strict JSON with `outcomes`, one object per finding: finding_id, status "
         "(verified|contradicted|unverified|blocked), and reason. Do not use outside knowledge.\n"
+        "Sealed reference roles:\n"
+        + role_lines
+        + "\n"
         + json.dumps(findings, sort_keys=True, separators=(",", ":"))
     )
 
@@ -355,13 +381,14 @@ def _adjudicate_prompt(findings: list[dict[str, object]], verifications: list[di
     )
 
 
-def _parse_findings(output: str, contract: Mapping[str, object], references: tuple[SelectedReference, ...], trace_id: str, participant: Mapping[str, object]) -> tuple[list[dict[str, object]], bool]:
+def _parse_findings(output: str, contract: Mapping[str, object], references: tuple[SelectedReference, ...], reference_roles: Mapping[str, str], trace_id: str, participant: Mapping[str, object]) -> tuple[list[dict[str, object]], bool]:
     payload = _json_object(output)
     raw = payload.get("findings") if isinstance(payload, Mapping) else None
     if not isinstance(raw, list):
         return [], True
     criteria = {item.get("criterion_id") for item in contract.get("criteria", []) if isinstance(item, Mapping)}
     refs = {item.reference_id: item for item in references}
+    typed_closure = set(reference_roles.values()) == {"review_subject", "requirements_baseline"}
     evaluator = {"evaluator_id": "evaluator_g43", "evaluator_version": "g43.1", "stage": "model"}
     findings: list[dict[str, object]] = []
     invalid = len(raw) > 20
@@ -370,11 +397,39 @@ def _parse_findings(output: str, contract: Mapping[str, object], references: tup
             invalid = True
             continue
         criterion = item.get("criterion_id")
-        reference_id = item.get("reference_id")
-        locator = item.get("locator")
-        if criterion not in criteria or reference_id not in refs or not isinstance(locator, str) or not locator.strip():
+        if criterion not in criteria:
             invalid = True
             continue
+        evidence: list[dict[str, object]] = []
+        if typed_closure and criterion == "criterion_requirements":
+            raw_evidence = item.get("evidence")
+            if not isinstance(raw_evidence, list) or len(raw_evidence) != 2:
+                invalid = True
+                continue
+            evidence_roles: set[str] = set()
+            valid_evidence = True
+            for candidate in raw_evidence:
+                if not isinstance(candidate, Mapping):
+                    valid_evidence = False
+                    break
+                reference_id = candidate.get("reference_id")
+                locator = candidate.get("locator")
+                role = reference_roles.get(reference_id) if isinstance(reference_id, str) else None
+                if reference_id not in refs or role not in {"review_subject", "requirements_baseline"} or role in evidence_roles or not isinstance(locator, str) or not locator.strip():
+                    valid_evidence = False
+                    break
+                evidence_roles.add(role)
+                evidence.append({"reference_id": reference_id, "content_sha256": refs[reference_id].content_sha256, "locator": locator, "quote": None})
+            if not valid_evidence or evidence_roles != {"review_subject", "requirements_baseline"}:
+                invalid = True
+                continue
+        else:
+            reference_id = item.get("reference_id")
+            locator = item.get("locator")
+            if reference_id not in refs or not isinstance(locator, str) or not locator.strip():
+                invalid = True
+                continue
+            evidence.append({"reference_id": reference_id, "content_sha256": refs[reference_id].content_sha256, "locator": locator, "quote": None})
         severity = item.get("severity") if item.get("severity") in {"info", "low", "medium", "high", "critical"} else "medium"
         confidence = item.get("confidence") if isinstance(item.get("confidence"), str) and _confidence(item["confidence"]) else "0.5"
         finding = {
@@ -382,7 +437,7 @@ def _parse_findings(output: str, contract: Mapping[str, object], references: tup
             "criterion_id": criterion, "status": "open", "severity": severity,
             "title": _limited(item.get("title"), 500, "Untitled review finding"),
             "description": _limited(item.get("description"), 20000, "Model reported a review concern without a description."),
-            "evidence": [{"reference_id": reference_id, "content_sha256": refs[reference_id].content_sha256, "locator": locator, "quote": None}],
+            "evidence": evidence,
             "evaluator": evaluator, "source_evaluators": [evaluator], "trace_id": trace_id,
             "confidence": confidence, "disagreement": {"present": False, "peer_finding_ids": [], "summary": None}, "created_at": _now(),
         }
@@ -438,14 +493,14 @@ def _adjudication_record(execution, adjudicator: Mapping[str, object], findings:
     return record, invalid
 
 
-def _terminal_artifacts(*, root_relative: str, now: str, run_id: str, gig_id: str, run_plan_id: str, bundle_id: str, contract_id: str, trace_id: str, findings: list[dict[str, object]], verifications: list[dict[str, object]], adjudications: list[dict[str, object]], invocation_ids: list[str], references: tuple[SelectedReference, ...], input_artifacts: list[dict[str, object]], input_payloads: Mapping[str, bytes], status: str) -> tuple[dict[str, bytes], dict[str, object]]:
+def _terminal_artifacts(*, root_relative: str, now: str, run_id: str, gig_id: str, run_plan_id: str, bundle_id: str, contract_id: str, trace_id: str, findings: list[dict[str, object]], verifications: list[dict[str, object]], adjudications: list[dict[str, object]], invocation_ids: list[str], references: tuple[SelectedReference, ...], reference_roles: Mapping[str, str], input_artifacts: list[dict[str, object]], input_payloads: Mapping[str, bytes], status: str) -> tuple[dict[str, bytes], dict[str, object]]:
     artifacts: dict[str, bytes] = {}
     for ref in input_artifacts:
         path = ref["path"]
         if not isinstance(path, str) or path not in input_payloads:
             raise ProviderReviewError("provider_review_input_mismatch", "provider review input bytes are unavailable")
         artifacts[path] = input_payloads[path]
-    bundle = _bundle_payload(bundle_id, now, references)
+    bundle = _bundle_payload(bundle_id, now, references, reference_roles)
     artifacts[f"{root_relative}/review/bundle.json"] = canonical_json_bytes(bundle)
     trace = {"schema_version": "1.0", "trace_id": trace_id, "trace_version": 1, "created_at": now, "bundle_id": bundle_id, "contract_id": contract_id, "run_id": run_id, "goal_id": None, "invocation_id": None, "events": [{"sequence": 1, "kind": "provider_review_completed", "payload_sha256": digest_imported_bytes(canonical_json_bytes({"run_plan_id": run_plan_id, "invocation_ids": invocation_ids})), "evaluator_id": "evaluator_g43"}], "redaction_policy": "g43.1-explicit-sealed-inputs", "variable_fields": ["created_at"]}
     trace_path = f"{root_relative}/review/traces/{trace_id}.json"
@@ -524,14 +579,14 @@ def _read_replay(path: Path, run_id: str, plan_id: str) -> ProviderReviewResult:
     return ProviderReviewResult(run_id, plan_id, _string(payload.get("status"), "provider review status"), int(payload.get("finding_count", 0)), _string(payload.get("report_path"), "provider review report"), True)
 
 
-def _bundle_payload(bundle_id: str, now: str, references: tuple[SelectedReference, ...]) -> dict[str, object]:
+def _bundle_payload(bundle_id: str, now: str, references: tuple[SelectedReference, ...], reference_roles: Mapping[str, str]) -> dict[str, object]:
     return {
         "schema_version": "1.0", "bundle_id": bundle_id, "bundle_version": 1, "created_at": now,
         "created_by": {"kind": "gigai", "id": "g43.1-provider-review", "model_target": None},
         "name": "provider-review", "question": "Review the sealed inputs against the approved Gig requirements.",
         "references": [
             {
-                "reference_id": item.reference_id, "role": "primary", "kind": "other", "path": f"inputs/{Path(item.path).name}",
+                "reference_id": item.reference_id, "role": reference_roles.get(item.reference_id, "primary"), "kind": "other", "path": f"inputs/{Path(item.path).name}",
                 "media_type": item.media_type, "content_sha256": item.content_sha256,
                 "canonical_sha256": item.content_sha256, "size_bytes": len(item.content),
                 "provenance": {"source_kind": "generated", "locator": "sealed-run-plan-input", "acquired_at": now, "acquisition_method": "g43.1-provider-review", "source_revision": None},

@@ -463,6 +463,7 @@ def _validate_workpad_repository(
                 "state.sqlite",
                 "runs",
                 "run-plans",
+                "review-inputs",
                 "addressed",
                 "feedback",
                 "findings",

@@ -40,6 +40,9 @@ thirty-second resource for portable project-local package manifests.
 The G43 amendment adds `run-plan.schema.json` and
 `verification-record.schema.json`. A sealed Run Plan is immutable preparation
 evidence; it is not Run, approval, or active-version authority.
+The G43.1 amendment adds `review-input-record.schema.json` and
+`requirements-baseline-approval.schema.json` for separately sealed review
+subjects and direct-operator-approved requirements baselines.
 
 ## Production identity API
 
@@ -75,6 +78,10 @@ No other product module implements canonical rendering or SHA-256 identity.
   a bounded review Run and is consumed only by fresh direct Run consent.
 - `verification-record.schema.json` preserves per-finding verification without
   overwriting review findings.
+- `review-input-record.schema.json` defines one typed review subject or
+  requirements-baseline binding without changing Run Plan v1.
+- `requirements-baseline-approval.schema.json` records the operator's
+  digest-bound approval of a requirements-baseline snapshot.
 - `run-details.schema.json` defines the small materialized Run status/result
   record.
 - `handoff-frontmatter.schema.json` defines the JSON front matter embedded in

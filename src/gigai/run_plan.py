@@ -8,11 +8,11 @@ import mimetypes
 from pathlib import Path
 import shutil
 import uuid
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping
 
 from .canonical import canonical_json_bytes, derive_deterministic_id, digest_imported_bytes, parse_json_bytes
 from .config import load_config
-from .journal import JournalArtifact, record_transition
+from .journal import JournalArtifact, _git as _journal_git, record_transition
 from .model_discovery import (
     discover_runtime_snapshot,
     recorded_target_readiness,
@@ -41,6 +41,28 @@ class RunPlanResult:
     created: bool
 
 
+@dataclass(frozen=True)
+class BaselineApprovalResult:
+    """One direct-operator approval of exact requirements-baseline bytes."""
+
+    approval_id: str
+    content_sha256: str
+    approval: dict[str, object]
+    workpad: Path
+
+
+@dataclass(frozen=True)
+class _TypedReviewInputs:
+    """Precomputed G43.1 closure-review sources and their durable records."""
+
+    inputs: tuple[dict[str, object], ...]
+    snapshot_refs: tuple[dict[str, object], ...]
+    record_refs: tuple[dict[str, object], ...]
+    approval_ref: dict[str, object]
+    extra_sealed_refs: tuple[dict[str, object], ...]
+    artifacts: tuple[JournalArtifact, ...]
+
+
 _PROFILES: dict[str, dict[str, object]] = {
     "focused": {"roles": (("reviewer", "verifier"),), "calls": 2, "tokens": 8000, "cost": "0.50", "wall": 300000, "review": 1, "verify": 1, "adjudicate": 0},
     "standard": {"roles": (("reviewer",), ("reviewer",), ("verifier",), ("adjudicator",)), "calls": 12, "tokens": 30000, "cost": "3.00", "wall": 600000, "review": 2, "verify": 1, "adjudicate": 1},
@@ -58,6 +80,375 @@ def _now() -> str:
 
 def _artifact(path: str, data: bytes, media_type: str = "application/json") -> dict[str, object]:
     return {"path": path, "content_sha256": digest_imported_bytes(data), "media_type": media_type, "size_bytes": len(data)}
+
+
+def _safe_uuid_suffix(value: str, prefix: str, *, code: str) -> str:
+    try:
+        if not value.startswith(prefix):
+            raise ValueError
+        raw = value.removeprefix(prefix)
+        parsed = uuid.UUID(raw)
+        if parsed.version != 4 or str(parsed) != raw:
+            raise ValueError
+    except (ValueError, AttributeError):
+        raise RunPlanError(code, "approval ID must be canonical") from None
+    return value
+
+
+def _safe_approval_id(value: str) -> str:
+    return _safe_uuid_suffix(
+        value,
+        "requirements_baseline_approval_",
+        code="requirements_baseline_approval_missing",
+    )
+
+
+def _text_artifact(source: Path, *, error_code: str, label: str) -> tuple[bytes, str]:
+    if source.is_symlink() or not source.is_file():
+        raise RunPlanError(error_code, f"{label} must be one explicit regular text file")
+    try:
+        data = source.read_bytes()
+    except OSError as exc:
+        raise RunPlanError(error_code, f"{label} is unavailable") from exc
+    media = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+    if media not in {"text/plain", "text/markdown"}:
+        raise RunPlanError(error_code, f"{label} must be plain text or Markdown")
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RunPlanError(error_code, f"{label} must be valid UTF-8") from exc
+    return data, media
+
+
+def _safe_ref_data(
+    root: Path,
+    reference: object,
+    *,
+    code: str,
+    message: str,
+    changed_code: str | None = None,
+) -> tuple[dict[str, object], bytes]:
+    if not isinstance(reference, Mapping):
+        raise RunPlanError(code, message)
+    path_value = reference.get("path")
+    digest = reference.get("content_sha256")
+    size = reference.get("size_bytes")
+    if not isinstance(path_value, str) or not isinstance(digest, str) or type(size) is not int:
+        raise RunPlanError(code, message)
+    candidate = root / path_value
+    if Path(path_value).is_absolute() or "\\" in path_value or ".." in Path(path_value).parts:
+        raise RunPlanError(code, message)
+    try:
+        _reject_symlink_components(root, candidate)
+    except RunPlanError as exc:
+        raise RunPlanError(code, message) from exc
+    if candidate.is_symlink() or not candidate.is_file():
+        raise RunPlanError(code, message)
+    try:
+        data = candidate.read_bytes()
+    except OSError as exc:
+        raise RunPlanError(code, message) from exc
+    if digest_imported_bytes(data) != digest or len(data) != size:
+        raise RunPlanError(changed_code or code, message)
+    return dict(reference), data
+
+
+def _is_sealed_reference(plan: Mapping[str, object], reference: Mapping[str, object]) -> bool:
+    sources = plan.get("sealed_sources")
+    if not isinstance(sources, list):
+        return False
+    return any(
+        isinstance(item, Mapping)
+        and item.get("path") == reference.get("path")
+        and item.get("content_sha256") == reference.get("content_sha256")
+        and item.get("media_type") == reference.get("media_type")
+        and item.get("size_bytes") == reference.get("size_bytes")
+        for item in sources
+    )
+
+
+def _journaled_baseline_approval(workpad: Path, approval_path: str) -> bool:
+    """A hand-written receipt is never an operator approval.
+
+    The approval command writes the receipt through the private journal.  A
+    plan reader checks the committed path history so an agent or Plan builder
+    cannot manufacture an approval-shaped JSON artifact beside a plan.
+    """
+
+    result = _journal_git(workpad, "log", "--format=%s", "--", approval_path, check=False)
+    return any(
+        line.strip() == "journal: requirements baseline approved"
+        for line in result.stdout.splitlines()
+    )
+
+
+def _read_baseline_approval_ref(
+    resolved: ResolvedWorkpad,
+    approval_ref: object,
+    *,
+    missing_code: str = "requirements_baseline_approval_missing",
+) -> tuple[dict[str, object], dict[str, object], bytes]:
+    reference, data = _safe_ref_data(
+        resolved.path,
+        approval_ref,
+        code=missing_code,
+        message="requirements baseline approval is missing or changed",
+    )
+    if not validate_serialized_contract("requirements-baseline-approval.schema.json", data).valid:
+        raise RunPlanError("requirements_baseline_approval_invalid", "requirements baseline approval is invalid")
+    approval = parse_json_bytes(data)
+    if not isinstance(approval, dict):
+        raise RunPlanError("requirements_baseline_approval_invalid", "requirements baseline approval is invalid")
+    approval_id = approval.get("approval_id")
+    if not isinstance(approval_id, str):
+        raise RunPlanError("requirements_baseline_approval_invalid", "requirements baseline approval is invalid")
+    _safe_approval_id(approval_id)
+    expected_path = f"review-inputs/requirements-baseline-approvals/{approval_id}/approval.json"
+    if reference.get("path") != expected_path:
+        raise RunPlanError("requirements_baseline_approval_invalid", "requirements baseline approval path is invalid")
+    if approval.get("project_id") != resolved.project_id or approval.get("gig_id") != resolved.gig_id:
+        raise RunPlanError("requirements_baseline_approval_invalid", "requirements baseline approval belongs to another project or Gig")
+    if not _journaled_baseline_approval(resolved.path, expected_path):
+        raise RunPlanError("requirements_baseline_approval_invalid", "requirements baseline approval was not directly journaled")
+    baseline_ref, _baseline = _safe_ref_data(
+        resolved.path,
+        approval.get("baseline_snapshot_ref"),
+        code="requirements_baseline_missing",
+        message="approved requirements baseline is missing or changed",
+        changed_code="requirements_baseline_changed",
+    )
+    if baseline_ref.get("media_type") not in {"text/plain", "text/markdown"}:
+        raise RunPlanError("requirements_baseline_invalid", "approved requirements baseline must be text or Markdown")
+    try:
+        _baseline.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RunPlanError("requirements_baseline_invalid", "approved requirements baseline must be valid UTF-8") from exc
+    return approval, reference, data
+
+
+def approve_requirements_baseline(
+    *,
+    home_root: Path,
+    requested_target: Path | None,
+    baseline_path: Path,
+    gig_id: str | None = None,
+    direct_operator_confirmed: bool = False,
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> BaselineApprovalResult:
+    """Freeze one public text baseline after direct local operator confirmation."""
+
+    if not direct_operator_confirmed:
+        raise RunPlanError(
+            "requirements_baseline_confirmation_required",
+            "baseline approval requires direct --confirm confirmation",
+        )
+    resolved = resolve_workpad(
+        home_root=home_root,
+        requested_target=requested_target,
+        gig_id=gig_id,
+        allow_semantic_state=True,
+    )
+    data, media = _text_artifact(
+        baseline_path,
+        error_code="requirements_baseline_invalid",
+        label="requirements baseline",
+    )
+    approval_id = f"requirements_baseline_approval_{uuid_factory()}"
+    _safe_approval_id(approval_id)
+    base = f"review-inputs/requirements-baseline-approvals/{approval_id}"
+    snapshot_ref = _artifact(f"{base}/baseline.bin", data, media)
+    approval = {
+        "schema_version": "1.0",
+        "approval_id": approval_id,
+        "project_id": resolved.project_id,
+        "gig_id": resolved.gig_id,
+        "baseline_snapshot_ref": snapshot_ref,
+        "approved_by": {"kind": "operator", "id": "local-user", "model_target": None},
+        "approved_at": _now(),
+    }
+    approval_bytes = canonical_json_bytes(approval)
+    if not validate_serialized_contract("requirements-baseline-approval.schema.json", approval_bytes).valid:
+        raise RunPlanError("requirements_baseline_approval_invalid", "constructed requirements baseline approval is invalid")
+    approval_ref = _artifact(f"{base}/approval.json", approval_bytes)
+    record_transition(
+        workpad=resolved.path,
+        project_id=resolved.project_id,
+        gig_id=resolved.gig_id,
+        handoff_id=f"handoff_{uuid_factory()}",
+        transition="requirements_baseline_approved",
+        body=f"Requirements baseline {approval_id} was directly approved for sealed provider review.",
+        artifacts=(
+            JournalArtifact(str(snapshot_ref["path"]), data),
+            JournalArtifact(str(approval_ref["path"]), approval_bytes),
+        ),
+        front_matter={
+            "actor": {"kind": "operator", "id": "local-user", "model_target": None},
+            "outcome": "APPROVED",
+            "evidence": [snapshot_ref, approval_ref],
+        },
+    )
+    return BaselineApprovalResult(approval_id, str(approval_ref["content_sha256"]), approval, resolved.path)
+
+
+def _typed_role_inputs(plan: Mapping[str, object]) -> dict[str, Mapping[str, object]] | None:
+    inputs = plan.get("inputs")
+    if not isinstance(inputs, list):
+        return None
+    typed = [item for item in inputs if isinstance(item, Mapping) and item.get("role") in {"review_subject", "requirements_baseline"}]
+    if not typed:
+        return None
+    if len(inputs) != 2 or len(typed) != 2:
+        raise RunPlanError("review_input_roles_invalid", "closure review requires exactly one subject and one requirements baseline")
+    by_role: dict[str, Mapping[str, object]] = {}
+    for item in typed:
+        role = item.get("role")
+        if not isinstance(role, str) or role in by_role:
+            raise RunPlanError("review_input_roles_invalid", "closure review requires exactly one subject and one requirements baseline")
+        by_role[role] = item
+    if set(by_role) != {"review_subject", "requirements_baseline"}:
+        raise RunPlanError("review_input_roles_invalid", "closure review requires exactly one subject and one requirements baseline")
+    return by_role
+
+
+def _typed_review_inputs(
+    *,
+    resolved: ResolvedWorkpad,
+    home_root: Path,
+    requested_target: Path | None,
+    review_subject: Path,
+    approval_id: str,
+    re_review_of: str | None,
+) -> _TypedReviewInputs:
+    """Build records for the G43.1 closure path without granting approval."""
+
+    subject_data, subject_media = _text_artifact(
+        review_subject,
+        error_code="review_input_roles_invalid",
+        label="review subject",
+    )
+    approval, approval_ref, _approval_bytes = _read_baseline_approval_ref(
+        resolved,
+        _approval_reference_for_id(resolved, approval_id),
+    )
+    baseline_ref = approval.get("baseline_snapshot_ref")
+    baseline_ref, baseline_data = _safe_ref_data(
+        resolved.path,
+        baseline_ref,
+        code="requirements_baseline_missing",
+        message="approved requirements baseline is missing or changed",
+        changed_code="requirements_baseline_changed",
+    )
+    if digest_imported_bytes(subject_data) == baseline_ref.get("content_sha256"):
+        raise RunPlanError("review_input_roles_invalid", "review subject and requirements baseline must be distinct snapshots")
+    subject_digest = digest_imported_bytes(subject_data)
+    subject_snapshot_ref = _artifact(
+        f"review-inputs/review-subjects/{subject_digest.removeprefix('sha256:')}.bin",
+        subject_data,
+        subject_media,
+    )
+    re_review: dict[str, object] | None = None
+    extra_sealed_refs: tuple[dict[str, object], ...] = ()
+    if re_review_of is not None:
+        original = read_run_plan(
+            home_root=home_root,
+            requested_target=requested_target,
+            gig_id=resolved.gig_id,
+            run_plan_id=re_review_of,
+        )
+        original_roles = _typed_role_inputs(original.plan)
+        if original_roles is None:
+            raise RunPlanError("review_input_roles_invalid", "re-review original plan is not a typed closure review")
+        original_baseline = original_roles["requirements_baseline"].get("snapshot_ref")
+        if not isinstance(original_baseline, Mapping) or original_baseline.get("content_sha256") != baseline_ref.get("content_sha256"):
+            raise RunPlanError("requirements_baseline_changed", "re-review requires the original approved baseline bytes")
+        original_path = f"run-plans/{original.run_plan_id}/run-plan.json"
+        original_ref = _artifact(original_path, (resolved.path / original_path).read_bytes())
+        re_review = {
+            "original_run_plan_ref": original_ref,
+            "original_run_plan_sha256": original.content_sha256,
+        }
+        extra_sealed_refs = (original_ref,)
+
+    subject_id = derive_deterministic_id(
+        "review_input",
+        {"role": "review_subject", "snapshot_sha256": subject_snapshot_ref["content_sha256"]},
+    )
+    baseline_id = derive_deterministic_id(
+        "review_input",
+        {
+            "role": "requirements_baseline",
+            "snapshot_sha256": baseline_ref["content_sha256"],
+            "approval_sha256": approval_ref["content_sha256"],
+            "re_review_of": re_review,
+        },
+    )
+    subject_record = {
+        "schema_version": "1.0",
+        "review_input_id": subject_id,
+        "role": "review_subject",
+        "snapshot_ref": subject_snapshot_ref,
+        "approval_ref": None,
+        "re_review_of": None,
+    }
+    baseline_record = {
+        "schema_version": "1.0",
+        "review_input_id": baseline_id,
+        "role": "requirements_baseline",
+        "snapshot_ref": baseline_ref,
+        "approval_ref": approval_ref,
+        "re_review_of": re_review,
+    }
+    subject_record_bytes = canonical_json_bytes(subject_record)
+    baseline_record_bytes = canonical_json_bytes(baseline_record)
+    for record in (subject_record_bytes, baseline_record_bytes):
+        if not validate_serialized_contract("review-input-record.schema.json", record).valid:
+            raise RunPlanError("review_input_roles_invalid", "constructed review input record is invalid")
+    subject_record_ref = _artifact(
+        f"review-inputs/review-input-records/{subject_id}.json", subject_record_bytes
+    )
+    baseline_record_ref = _artifact(
+        f"review-inputs/review-input-records/{baseline_id}.json", baseline_record_bytes
+    )
+    inputs = (
+        {
+            "input_id": "input_review_subject",
+            "role": "review_subject",
+            "record_ref": subject_record_ref,
+            "snapshot_ref": subject_snapshot_ref,
+        },
+        {
+            "input_id": "input_requirements_baseline",
+            "role": "requirements_baseline",
+            "record_ref": baseline_record_ref,
+            "snapshot_ref": baseline_ref,
+        },
+    )
+    return _TypedReviewInputs(
+        inputs=inputs,
+        snapshot_refs=(subject_snapshot_ref, baseline_ref),
+        record_refs=(subject_record_ref, baseline_record_ref),
+        approval_ref=approval_ref,
+        extra_sealed_refs=extra_sealed_refs,
+        artifacts=(
+            JournalArtifact(str(subject_snapshot_ref["path"]), subject_data),
+            JournalArtifact(str(subject_record_ref["path"]), subject_record_bytes),
+            JournalArtifact(str(baseline_record_ref["path"]), baseline_record_bytes),
+        ),
+    )
+
+
+def _approval_reference_for_id(resolved: ResolvedWorkpad, approval_id: str) -> dict[str, object]:
+    _safe_approval_id(approval_id)
+    path = f"review-inputs/requirements-baseline-approvals/{approval_id}/approval.json"
+    candidate = resolved.path / path
+    try:
+        _reject_symlink_components(resolved.path, candidate)
+    except RunPlanError as exc:
+        raise RunPlanError("requirements_baseline_approval_missing", "requirements baseline approval is missing") from exc
+    if candidate.is_symlink() or not candidate.is_file():
+        raise RunPlanError("requirements_baseline_approval_missing", "requirements baseline approval is missing")
+    data = candidate.read_bytes()
+    return _artifact(path, data)
 
 
 def _safe_plan_id(value: str) -> str:
@@ -115,6 +506,105 @@ def _verify_plan_sources(resolved: ResolvedWorkpad, plan: Mapping[str, object]) 
             raise RunPlanError("run_plan_input_mismatch", "sealed Run Plan source changed or is unavailable") from exc
         if digest_imported_bytes(data) != expected or len(data) != source.get("size_bytes"):
             raise RunPlanError("run_plan_input_mismatch", "sealed Run Plan source changed or is unavailable")
+
+
+def _validate_g431_typed_inputs(resolved: ResolvedWorkpad, plan: Mapping[str, object]) -> None:
+    """Validate the optional, strict two-role G43.1 closure-review envelope."""
+
+    roles = _typed_role_inputs(plan)
+    if roles is None:
+        return
+    subject = roles["review_subject"]
+    baseline = roles["requirements_baseline"]
+    for input_record in (subject, baseline):
+        record_ref = input_record.get("record_ref")
+        snapshot_ref = input_record.get("snapshot_ref")
+        if not isinstance(record_ref, Mapping) or not isinstance(snapshot_ref, Mapping):
+            raise RunPlanError("review_input_roles_invalid", "typed review input is malformed")
+        if not _is_sealed_reference(plan, record_ref) or not _is_sealed_reference(plan, snapshot_ref):
+            raise RunPlanError("review_input_not_sealed", "typed review input records and snapshots must be sealed")
+    subject_record_ref, subject_record_bytes = _safe_ref_data(
+        resolved.path,
+        subject.get("record_ref"),
+        code="review_input_not_sealed",
+        message="review subject record is unavailable or changed",
+    )
+    baseline_record_ref, baseline_record_bytes = _safe_ref_data(
+        resolved.path,
+        baseline.get("record_ref"),
+        code="review_input_not_sealed",
+        message="requirements baseline record is unavailable or changed",
+    )
+    if not validate_serialized_contract("review-input-record.schema.json", subject_record_bytes).valid or not validate_serialized_contract("review-input-record.schema.json", baseline_record_bytes).valid:
+        raise RunPlanError("review_input_roles_invalid", "typed review input record is invalid")
+    subject_record = parse_json_bytes(subject_record_bytes)
+    baseline_record = parse_json_bytes(baseline_record_bytes)
+    if not isinstance(subject_record, Mapping) or not isinstance(baseline_record, Mapping):
+        raise RunPlanError("review_input_roles_invalid", "typed review input record is invalid")
+    if subject_record.get("role") != "review_subject" or baseline_record.get("role") != "requirements_baseline":
+        raise RunPlanError("review_input_roles_invalid", "typed review input record roles do not match the Plan")
+    if subject_record.get("snapshot_ref") != subject.get("snapshot_ref") or baseline_record.get("snapshot_ref") != baseline.get("snapshot_ref"):
+        raise RunPlanError("review_input_roles_invalid", "typed review input record snapshots do not match the Plan")
+    if subject_record.get("approval_ref") is not None or subject_record.get("re_review_of") is not None:
+        raise RunPlanError("review_input_roles_invalid", "review subject cannot carry baseline approval or re-review authority")
+    approval_ref = baseline_record.get("approval_ref")
+    if not isinstance(approval_ref, Mapping):
+        raise RunPlanError("requirements_baseline_approval_missing", "requirements baseline record has no approval")
+    if not _is_sealed_reference(plan, approval_ref):
+        raise RunPlanError("review_input_not_sealed", "requirements baseline approval must be sealed")
+    approval, actual_approval_ref, _approval_bytes = _read_baseline_approval_ref(resolved, approval_ref)
+    if actual_approval_ref != dict(approval_ref):
+        raise RunPlanError("requirements_baseline_approval_invalid", "requirements baseline approval reference changed")
+    baseline_snapshot_ref = baseline.get("snapshot_ref")
+    if not isinstance(baseline_snapshot_ref, Mapping):
+        raise RunPlanError("requirements_baseline_missing", "requirements baseline snapshot is missing")
+    expected_baseline_ref = approval.get("baseline_snapshot_ref")
+    if expected_baseline_ref != baseline_snapshot_ref:
+        raise RunPlanError("requirements_baseline_changed", "requirements baseline bytes do not match their approval")
+    _safe_ref_data(
+        resolved.path,
+        subject.get("snapshot_ref"),
+        code="review_input_not_sealed",
+        message="review subject snapshot is unavailable or changed",
+    )
+    _safe_ref_data(
+        resolved.path,
+        baseline_snapshot_ref,
+        code="requirements_baseline_missing",
+        message="requirements baseline snapshot is unavailable or changed",
+        changed_code="requirements_baseline_changed",
+    )
+    if subject.get("snapshot_ref", {}).get("content_sha256") == baseline_snapshot_ref.get("content_sha256"):
+        raise RunPlanError("review_input_roles_invalid", "review subject and requirements baseline must be distinct snapshots")
+    re_review = baseline_record.get("re_review_of")
+    if re_review is None:
+        return
+    if not isinstance(re_review, Mapping):
+        raise RunPlanError("review_input_roles_invalid", "re-review binding is invalid")
+    original_ref = re_review.get("original_run_plan_ref")
+    expected_digest = re_review.get("original_run_plan_sha256")
+    if not isinstance(original_ref, Mapping) or not isinstance(expected_digest, str):
+        raise RunPlanError("review_input_roles_invalid", "re-review binding is invalid")
+    if original_ref.get("content_sha256") != expected_digest or not _is_sealed_reference(plan, original_ref):
+        raise RunPlanError("review_input_not_sealed", "re-review original Plan must be a sealed source")
+    _original_ref, original_bytes = _safe_ref_data(
+        resolved.path,
+        original_ref,
+        code="review_input_not_sealed",
+        message="re-review original Plan is unavailable or changed",
+    )
+    original_validation = validate_run_plan(original_bytes)
+    if not original_validation.valid:
+        raise RunPlanError("review_input_roles_invalid", "re-review original Plan is invalid")
+    original = parse_json_bytes(original_bytes)
+    if not isinstance(original, Mapping) or original.get("project_id") != resolved.project_id or original.get("gig_id") != resolved.gig_id:
+        raise RunPlanError("review_input_roles_invalid", "re-review original Plan belongs to another project or Gig")
+    original_roles = _typed_role_inputs(original)
+    if original_roles is None:
+        raise RunPlanError("review_input_roles_invalid", "re-review original Plan is not a typed closure review")
+    original_baseline = original_roles["requirements_baseline"].get("snapshot_ref")
+    if not isinstance(original_baseline, Mapping) or original_baseline.get("content_sha256") != baseline_snapshot_ref.get("content_sha256"):
+        raise RunPlanError("requirements_baseline_changed", "re-review requirements baseline changed")
 
 
 def _target_name(profile: object, role: str) -> str:
@@ -220,14 +710,16 @@ def _identity_projection(plan: Mapping[str, object]) -> dict[str, object]:
     }
 
 
-def _review_contract(contract_id: str, now: str) -> bytes:
+def _review_contract(contract_id: str, now: str, *, typed_closure: bool = False) -> bytes:
+    reference_roles = ["review_subject", "requirements_baseline"] if typed_closure else ["primary"]
+    required_evidence = reference_roles if typed_closure else ["sealed-input"]
     return canonical_json_bytes({
         "schema_version": "1.0", "contract_id": contract_id, "contract_version": 1,
         "created_at": now, "created_by": {"kind": "gigai", "id": "g43-planner", "model_target": None},
         "name": "sealed-run-review", "question": "Review the sealed declared inputs against the approved Gig requirements.",
-        "reference_roles": ["primary"], "criteria": [{"criterion_id": "criterion_requirements", "description": "Declared inputs and approved requirements are reconciled.", "severity": "high", "required_evidence": ["sealed-input"], "citation_requirement": "required", "evaluator_ids": ["evaluator_g43"]}],
+        "reference_roles": reference_roles, "criteria": [{"criterion_id": "criterion_requirements", "description": "The review subject is reconciled against the operator-approved requirements baseline.", "severity": "high", "required_evidence": required_evidence, "citation_requirement": "required", "evaluator_ids": ["evaluator_g43"]}],
         "severity_model": {"levels": ["info", "low", "medium", "high", "critical"], "ordering": ["info", "low", "medium", "high", "critical"]},
-        "evidence_requirements": ["sealed-input"], "output_shape": {"machine_media_type": "application/json", "human_media_type": "text/markdown", "required_sections": ["findings"]},
+        "evidence_requirements": required_evidence, "output_shape": {"machine_media_type": "application/json", "human_media_type": "text/markdown", "required_sections": ["findings"]},
         "clarification_policy": "block_run", "cycle_cap": 1, "escalation_policy": "operator", "allowed_effects": ["write_workpad"],
         "evaluator_plan": [{"evaluator_id": "evaluator_g43", "evaluator_version": "1", "stage": "model"}],
         "redaction_policy": {"mode": "local_only", "policy_version": "g43-1", "detector_version": None},
@@ -298,6 +790,10 @@ def _validate_plan_semantics(plan: Mapping[str, object]) -> ValidationReport:
         pairs = [(item.get("path"), item.get("content_sha256")) for item in sources if isinstance(item, Mapping)]
         if len(pairs) != len(set(pairs)):
             findings.append(ValidationFinding("sealed_sources", "run_plan_invalid", "sealed source path and digest pairs must be unique"))
+    try:
+        _typed_role_inputs(plan)
+    except RunPlanError as exc:
+        findings.append(ValidationFinding("inputs", exc.code, str(exc)))
     sealed = plan.get("state") in _TERMINAL_STATES
     if sealed != (plan.get("sealed_at") is not None and plan.get("sealed_by") is not None):
         findings.append(ValidationFinding("sealed_at", "run_plan_invalid", "sealed plans require both seal time and sealing actor"))
@@ -345,6 +841,7 @@ def read_run_plan(*, home_root: Path, requested_target: Path | None, run_plan_id
     plan = parse_json_bytes(data)
     if not isinstance(plan, dict) or plan.get("project_id") != resolved.project_id or plan.get("gig_id") != resolved.gig_id:
         raise RunPlanError("run_plan_authority_refused", "Run Plan does not belong to the resolved project and Gig")
+    _validate_g431_typed_inputs(resolved, plan)
     _verify_plan_sources(resolved, plan)
     return RunPlanResult(run_plan_id, digest_imported_bytes(data), plan, resolved.path, False)
 
@@ -365,7 +862,7 @@ def list_run_plans(*, home_root: Path, requested_target: Path | None, gig_id: st
     return tuple(results)
 
 
-def create_run_plan(*, home_root: Path, requested_target: Path | None, gig_id: str | None = None, version: int | None = None, task_class: str | None = None, artifact_class: str | None = None, profile_id: str | None = None, input_paths: Iterable[Path] = (), override_reason: str | None = None, profile_opt_in_reason: str | None = None, reviewer_targets: Iterable[str] = (), verifier_targets: Iterable[str] = (), adjudicator_targets: Iterable[str] = ()) -> RunPlanResult:
+def create_run_plan(*, home_root: Path, requested_target: Path | None, gig_id: str | None = None, version: int | None = None, task_class: str | None = None, artifact_class: str | None = None, profile_id: str | None = None, input_paths: Iterable[Path] = (), review_subject: Path | None = None, requirements_baseline_approval_id: str | None = None, re_review_of: str | None = None, override_reason: str | None = None, profile_opt_in_reason: str | None = None, reviewer_targets: Iterable[str] = (), verifier_targets: Iterable[str] = (), adjudicator_targets: Iterable[str] = ()) -> RunPlanResult:
     resolved = resolve_workpad(home_root=home_root, requested_target=requested_target, gig_id=gig_id, allow_semantic_state=True)
     try:
         authority = _resolve_authority(resolved, __import__("gigai.index", fromlist=["read_index"]).read_index(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id), version)
@@ -373,7 +870,14 @@ def create_run_plan(*, home_root: Path, requested_target: Path | None, gig_id: s
     except RunError as exc:
         raise RunPlanError("run_plan_authority_refused", str(exc)) from exc
     inputs_raw = tuple(input_paths)
-    if not inputs_raw:
+    typed_closure = review_subject is not None or requirements_baseline_approval_id is not None or re_review_of is not None
+    if typed_closure:
+        if inputs_raw or review_subject is None or requirements_baseline_approval_id is None:
+            raise RunPlanError(
+                "review_input_roles_invalid",
+                "typed closure review requires --review-subject and --requirements-baseline-approval, not --input",
+            )
+    elif not inputs_raw:
         raise RunPlanError("classification_ambiguous", "run-plan create requires at least one explicit --input artifact")
     if len(inputs_raw) > 16:
         raise RunPlanError("run_plan_invalid", "a Run Plan may contain at most sixteen explicit inputs")
@@ -391,12 +895,25 @@ def create_run_plan(*, home_root: Path, requested_target: Path | None, gig_id: s
         raise RunPlanError("profile_opt_in_required", "deep and var require --profile-opt-in-reason")
     now = _now()
     input_bytes: list[tuple[str, bytes, str]] = []
-    for index, source in enumerate(inputs_raw):
-        if source.is_symlink() or not source.is_file():
-            raise RunPlanError("run_plan_input_mismatch", "each input must be a regular explicit file")
-        data = source.read_bytes()
-        media = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
-        input_bytes.append((f"input_{chr(ord('a') + index)}", data, media))
+    if not typed_closure:
+        for index, source in enumerate(inputs_raw):
+            if source.is_symlink() or not source.is_file():
+                raise RunPlanError("run_plan_input_mismatch", "each input must be a regular explicit file")
+            data = source.read_bytes()
+            media = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+            input_bytes.append((f"input_{chr(ord('a') + index)}", data, media))
+    typed_inputs = (
+        _typed_review_inputs(
+            resolved=resolved,
+            home_root=home_root,
+            requested_target=requested_target,
+            review_subject=review_subject,
+            approval_id=requirements_baseline_approval_id,
+            re_review_of=re_review_of,
+        )
+        if typed_closure and review_subject is not None and requirements_baseline_approval_id is not None
+        else None
+    )
     config = load_config(home_root)
     default_profile = next((item for item in config.profiles if item.name == "default"), None)
     if default_profile is None:
@@ -451,7 +968,11 @@ def create_run_plan(*, home_root: Path, requested_target: Path | None, gig_id: s
         target_records.append((participant_id, roles, target_name, target_data, resolved_target))
     contract_id = derive_deterministic_id("contract", {"gig": resolved.gig_id, "version": authority["version"], "kind": "g43"})
     proposal_created_at = authority["proposal"].get("created_at") if isinstance(authority["proposal"], dict) else None
-    contract_bytes = _review_contract(contract_id, proposal_created_at if isinstance(proposal_created_at, str) else "2026-01-01T00:00:00Z")
+    contract_bytes = _review_contract(
+        contract_id,
+        proposal_created_at if isinstance(proposal_created_at, str) else "2026-01-01T00:00:00Z",
+        typed_closure=typed_inputs is not None,
+    )
     if not validate_serialized_contract("review-contract.schema.json", contract_bytes).valid:
         raise RunPlanError("run_plan_invalid", "derived review contract failed validation")
     # Compute identity from every authority-, routing-, input-, and budget-bearing
@@ -468,7 +989,11 @@ def create_run_plan(*, home_root: Path, requested_target: Path | None, gig_id: s
         "usage_unreported_policy": "block_before_call", "opt_in_reason": profile_opt_in_reason,
         "phases": ["review", "verify", "adjudicate", "resolve"],
         "participants": [{"participant_id": participant_id, "roles": list(roles), "target": target, "target_configuration_sha256": digest_imported_bytes(target_data), "target_reuse_disclosure": _target_reuse_disclosure(selected_profile, target_records)} for participant_id, roles, target, target_data, _ in target_records],
-        "input_refs": [digest_imported_bytes(data) for _, data, _ in input_bytes],
+        "input_refs": (
+            [ref["content_sha256"] for ref in typed_inputs.record_refs]
+            if typed_inputs is not None
+            else [digest_imported_bytes(data) for _, data, _ in input_bytes]
+        ),
         "capability_ids": capability_ids, "effects": ["write_workpad"],
         "budget": _profile_budget(selected_profile), "policy_sha256": digest_imported_bytes(contract_bytes),
         "discovery_snapshot_refs": [_discovery_identity_digest(snapshot_bytes)],
@@ -479,7 +1004,19 @@ def create_run_plan(*, home_root: Path, requested_target: Path | None, gig_id: s
         existing = read_run_plan(home_root=home_root, requested_target=requested_target, run_plan_id=run_plan_id, gig_id=resolved.gig_id)
         return RunPlanResult(run_plan_id, existing.content_sha256, existing.plan, resolved.path, False)
     base = f"run-plans/{run_plan_id}"
-    input_refs = [_artifact(f"{base}/inputs/{input_id}.bin", data, media) for input_id, data, media in input_bytes]
+    input_refs = (
+        list(typed_inputs.snapshot_refs)
+        if typed_inputs is not None
+        else [_artifact(f"{base}/inputs/{input_id}.bin", data, media) for input_id, data, media in input_bytes]
+    )
+    plan_inputs = (
+        list(typed_inputs.inputs)
+        if typed_inputs is not None
+        else [
+            {"input_id": input_id, "role": "primary", "record_ref": ref, "snapshot_ref": ref}
+            for (input_id, _data, _media), ref in zip(input_bytes, input_refs, strict=True)
+        ]
+    )
     discovery_ref = _artifact(f"{base}/discovery.json", snapshot_bytes)
     contract_ref = _artifact(f"{base}/review-contract.json", contract_bytes)
     graph_bytes = canonical_json_bytes(authority["graph"])
@@ -505,12 +1042,25 @@ def create_run_plan(*, home_root: Path, requested_target: Path | None, gig_id: s
     active = __import__("gigai.index", fromlist=["read_index"]).read_index(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id).active_version
     if isinstance(active, dict) and isinstance(active.get("capability_manifest"), dict):
         capability_ref = active["capability_manifest"]
-    plan = {"schema_version": "1.0", "run_plan_id": run_plan_id, "plan_version": 1, "state": "sealed", "gig_id": resolved.gig_id, "gig_version": authority["version"], "journal_commit": authority["commit"], "project_id": resolved.project_id, "workpad_locator": f"registry:{resolved.project_id}", "goal_graph": graph_ref, "review_contract": contract_ref, "classification": {"task_class": selected_task, "artifact_class": selected_artifact, "confidence": "high", "classifier_version": "g43-deterministic-1", "considered_inputs": input_refs, "reason": "explicit declared inputs have a bounded deterministic classification", "override": override}, "profile": {"profile_id": selected_profile, "profile_version": 1, "selection": "operator" if profile_id else "deterministic", "opt_in": opt_in, "usage_unreported_policy": "block_before_call"}, "phases": phases, "participants": participants, "inputs": [{"input_id": input_id, "role": "primary", "record_ref": ref, "snapshot_ref": ref} for (input_id, _data, _media), ref in zip(input_bytes, input_refs, strict=True)], "capabilities": {"manifest": capability_ref, "required_capability_ids": capability_ids}, "effects": ["write_workpad"], "budget": projection["budget"], "policy_sha256": projection["policy_sha256"], "discovery_snapshot_refs": projection["discovery_snapshot_refs"], "sealed_sources": [graph_ref, contract_ref, discovery_ref, *input_refs, *target_refs, *([capability_ref] if capability_ref else [])], "created_at": now, "sealed_at": now, "sealed_by": {"kind": "operator", "id": "local-user", "model_target": None}}
+    typed_sealed_sources = (
+        [*typed_inputs.record_refs, typed_inputs.approval_ref, *typed_inputs.extra_sealed_refs]
+        if typed_inputs is not None
+        else []
+    )
+    plan = {"schema_version": "1.0", "run_plan_id": run_plan_id, "plan_version": 1, "state": "sealed", "gig_id": resolved.gig_id, "gig_version": authority["version"], "journal_commit": authority["commit"], "project_id": resolved.project_id, "workpad_locator": f"registry:{resolved.project_id}", "goal_graph": graph_ref, "review_contract": contract_ref, "classification": {"task_class": selected_task, "artifact_class": selected_artifact, "confidence": "high", "classifier_version": "g43-deterministic-1", "considered_inputs": input_refs, "reason": "explicit declared inputs have a bounded deterministic classification", "override": override}, "profile": {"profile_id": selected_profile, "profile_version": 1, "selection": "operator" if profile_id else "deterministic", "opt_in": opt_in, "usage_unreported_policy": "block_before_call"}, "phases": phases, "participants": participants, "inputs": plan_inputs, "capabilities": {"manifest": capability_ref, "required_capability_ids": capability_ids}, "effects": ["write_workpad"], "budget": projection["budget"], "policy_sha256": projection["policy_sha256"], "discovery_snapshot_refs": projection["discovery_snapshot_refs"], "sealed_sources": [graph_ref, contract_ref, discovery_ref, *input_refs, *typed_sealed_sources, *target_refs, *([capability_ref] if capability_ref else [])], "created_at": now, "sealed_at": now, "sealed_by": {"kind": "operator", "id": "local-user", "model_target": None}}
     plan_bytes = canonical_json_bytes(plan)
     validation = validate_run_plan(plan_bytes)
     if not validation.valid:
         raise RunPlanError("run_plan_invalid", "; ".join(item.message for item in validation.findings))
-    artifacts = (JournalArtifact(f"{base}/run-plan.json", plan_bytes), JournalArtifact(str(contract_ref["path"]), contract_bytes), JournalArtifact(str(discovery_ref["path"]), snapshot_bytes), *(JournalArtifact(str(ref["path"]), data) for (_id, data, _media), ref in zip(input_bytes, input_refs, strict=True)), *target_artifacts)
+    generic_input_artifacts = (
+        tuple(
+            JournalArtifact(str(ref["path"]), data)
+            for (_id, data, _media), ref in zip(input_bytes, input_refs, strict=True)
+        )
+        if typed_inputs is None
+        else ()
+    )
+    artifacts = (JournalArtifact(f"{base}/run-plan.json", plan_bytes), JournalArtifact(str(contract_ref["path"]), contract_bytes), JournalArtifact(str(discovery_ref["path"]), snapshot_bytes), *generic_input_artifacts, *(typed_inputs.artifacts if typed_inputs is not None else ()), *target_artifacts)
     plan_dir = resolved.path / "run-plans" / run_plan_id
     try:
         record_transition(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, handoff_id=derive_deterministic_id("handoff", {"run_plan_id": run_plan_id, "digest": digest_imported_bytes(plan_bytes)}), transition="run_plan_sealed", body=f"Run Plan {run_plan_id} sealed; no Run was allocated.", artifacts=artifacts, front_matter={"gig_version": authority["version"], "run_plan_id": run_plan_id, "run_plan_sha256": digest_imported_bytes(plan_bytes), "outcome": "SEALED", "actor": {"kind": "operator", "id": "local-user", "model_target": None}})

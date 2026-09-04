@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:requirements-baseline-approval:1",
+  "title": "GigAI operator-approved provider-review requirements baseline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "approval_id", "project_id", "gig_id", "baseline_snapshot_ref", "approved_by", "approved_at"],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "approval_id": {"type": "string", "pattern": "^requirements_baseline_approval_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "baseline_snapshot_ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "approved_by": {"$ref": "#/$defs/operator_actor"},
+    "approved_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "operator_actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "model_target"],
+      "properties": {
+        "kind": {"const": "operator"},
+        "id": {"type": "string", "minLength": 1, "maxLength": 255},
+        "model_target": {"type": "null"}
+      }
+    }
+  }
+}

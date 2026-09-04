@@ -2337,7 +2337,10 @@ def run_plan_group() -> None:
 @click.option("--class", "task_class", type=click.Choice(["planning", "research", "fact_check", "document_review", "code_review", "comparison"]))
 @click.option("--artifact-class", type=click.Choice(["text", "code", "structured_data", "mixed", "unknown"]))
 @click.option("--profile", "profile_id", type=click.Choice(["focused", "standard", "deep", "var"]))
-@click.option("--input", "input_paths", type=click.Path(path_type=Path, dir_okay=False), multiple=True, required=True)
+@click.option("--input", "input_paths", type=click.Path(path_type=Path, dir_okay=False), multiple=True)
+@click.option("--review-subject", type=click.Path(path_type=Path, dir_okay=False), help="One explicit closure-review subject; requires --requirements-baseline-approval.")
+@click.option("--requirements-baseline-approval", help="Use one separately direct-operator-approved requirements baseline receipt.")
+@click.option("--re-review-of", help="Bind a closure re-review to one original typed Run Plan.")
 @click.option("--reviewer-target", "reviewer_targets", multiple=True, help="Seal one target per reviewer, in participant order.")
 @click.option("--verifier-target", "verifier_targets", multiple=True, help="Seal one target per verifier, in participant order.")
 @click.option("--adjudicator-target", "adjudicator_targets", multiple=True, help="Seal one target per adjudicator, in participant order.")
@@ -2346,10 +2349,10 @@ def run_plan_group() -> None:
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
-def run_plan_create_command(gig_id: str | None, version: int | None, task_class: str | None, artifact_class: str | None, profile_id: str | None, input_paths: tuple[Path, ...], reviewer_targets: tuple[str, ...], verifier_targets: tuple[str, ...], adjudicator_targets: tuple[str, ...], override_reason: str | None, profile_opt_in_reason: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+def run_plan_create_command(gig_id: str | None, version: int | None, task_class: str | None, artifact_class: str | None, profile_id: str | None, input_paths: tuple[Path, ...], review_subject: Path | None, requirements_baseline_approval: str | None, re_review_of: str | None, reviewer_targets: tuple[str, ...], verifier_targets: tuple[str, ...], adjudicator_targets: tuple[str, ...], override_reason: str | None, profile_opt_in_reason: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     """Seal one immutable plan; this command never allocates a Run."""
     try:
-        result = create_run_plan(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id, version=version, task_class=task_class, artifact_class=artifact_class, profile_id=profile_id, input_paths=input_paths, override_reason=override_reason, profile_opt_in_reason=profile_opt_in_reason, reviewer_targets=reviewer_targets, verifier_targets=verifier_targets, adjudicator_targets=adjudicator_targets)
+        result = create_run_plan(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id, version=version, task_class=task_class, artifact_class=artifact_class, profile_id=profile_id, input_paths=input_paths, review_subject=review_subject, requirements_baseline_approval_id=requirements_baseline_approval, re_review_of=re_review_of, override_reason=override_reason, profile_opt_in_reason=profile_opt_in_reason, reviewer_targets=reviewer_targets, verifier_targets=verifier_targets, adjudicator_targets=adjudicator_targets)
     except (RunPlanError, RunError, WorkpadError, OSError, ValueError) as exc:
         _run_plan_error(exc, as_json=as_json)
         return
@@ -2358,6 +2361,35 @@ def run_plan_create_command(gig_id: str | None, version: int | None, task_class:
         click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     else:
         click.echo(f"Sealed Run Plan {result.run_plan_id}; no Run was allocated.")
+
+
+@run_plan_group.command("approve-baseline")
+@click.option("--gig", "gig_id")
+@click.option("--input", "baseline_path", type=click.Path(path_type=Path, dir_okay=False), required=True)
+@click.option("--confirm", is_flag=True, help="Directly approve these exact baseline bytes for later review-plan use.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def run_plan_approve_baseline_command(gig_id: str | None, baseline_path: Path, confirm: bool, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Directly approve one frozen requirements baseline; this never seals a Run Plan."""
+    from .run_plan import approve_requirements_baseline
+
+    try:
+        result = approve_requirements_baseline(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            gig_id=gig_id,
+            baseline_path=baseline_path,
+            direct_operator_confirmed=confirm,
+        )
+    except (RunPlanError, RunError, WorkpadError, OSError, ValueError) as exc:
+        _run_plan_error(exc, as_json=as_json)
+        return
+    payload = {"ok": True, "approval": {"approval_id": result.approval_id, "content_sha256": result.content_sha256}, "diagnostics": []}
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Approved requirements baseline {result.approval_id}; no Run Plan was sealed.")
 
 
 @run_plan_group.command("list")

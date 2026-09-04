@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:review-input-record:1",
+  "title": "GigAI typed provider-review input record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_input_id", "role", "snapshot_ref", "approval_ref", "re_review_of"],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "review_input_id": {"type": "string", "pattern": "^review_input_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "role": {"type": "string", "enum": ["review_subject", "requirements_baseline"]},
+    "snapshot_ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "approval_ref": {"oneOf": [{"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}, {"type": "null"}]},
+    "re_review_of": {"oneOf": [{"$ref": "#/$defs/re_review_of"}, {"type": "null"}]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"role": {"const": "review_subject"}}},
+      "then": {"properties": {"approval_ref": {"type": "null"}, "re_review_of": {"type": "null"}}}
+    },
+    {
+      "if": {"properties": {"role": {"const": "requirements_baseline"}}},
+      "then": {"properties": {"approval_ref": {"type": "object"}}}
+    }
+  ],
+  "$defs": {
+    "re_review_of": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["original_run_plan_ref", "original_run_plan_sha256"],
+      "properties": {
+        "original_run_plan_ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        "original_run_plan_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}
+      }
+    }
+  }
+}
