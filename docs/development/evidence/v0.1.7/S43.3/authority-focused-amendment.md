@@ -145,8 +145,11 @@ fixtures to prove all of the following:
   `gigai models --probe TARGET --s43-public-marker --max-tokens N --max-cost-usd C --confirm`.
   GigAI generates the non-secret marker after confirmation, reserves the finite
   model-call/token/cost budget before invoking the adapter, and reconciles
-  actual usage. Plan construction, Plan display, and consent preview can read
-  a proof but cannot silently invoke or refresh a probe.
+  actual usage using only the schema's valid terminal state/code pair. Missing
+  confirmation and non-positive, non-finite, or unreservable limits are stable
+  CLI refusals before probe-ID/reservation/record creation. Plan construction,
+  Plan display, and consent preview can read a proof but cannot silently invoke
+  or refresh a probe.
 - Immediately before every participant invocation, GigAI revalidates target,
   current executable/adapter digest, current channel-configuration digest,
   matching successful marker record, and expiry. A post-consent mismatch fails
