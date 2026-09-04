@@ -111,8 +111,23 @@ fixtures to prove all of the following:
 - Each adapter launch receives a fresh execution root and no inherited home,
   `CODEX_HOME`/XDG configuration, worktree, instruction, memory, cache, or credential
   path. Canary files in each forbidden host location and fake-adapter launch
-  inspection prove that only the sealed public brief reaches the participant
-  context; a CLI that requires inherited configuration narrows or rejects.
+  inspection prove that GigAI supplies only the sealed public brief and fresh
+  execution root; a CLI that requires inherited configuration narrows or
+  rejects.
+- Fake adapters prove the GigAI wrapper only. In addition, each exact configured
+  Codex CLI and Claude Code adapter must complete one bounded public marker
+  invocation using the isolated launch and its separately proven authentication
+  channel. The deterministic prompt contains only a fresh non-secret marker and
+  succeeds only on an exact marker return; distinct sentinel instructions in
+  every forbidden host root must not change that return. Evidence records the resolved
+  executable/adapter identity and version, safe environment names, execution
+  root facts, marker digest, authentication-proof reference, and GigAI-observed
+  accounting—never a credential or host path. Failure by either adapter is
+  Narrow or Reject, not Adopt. The proof uses
+  `urn:gigai:schema:participant-authentication-channel-proof:1`, binds the
+  exact participant/target/adapter executable digest and version, records
+  `home_xdg_inheritance: false`, and expires; its reference and digest must be
+  sealed in every later `run-plan:2` that names that participant.
 - Suggestions that spoof a Run/Plan/participant/action ID, URL, citation,
   provider result, role, or action ordinal cannot write or influence an
   authoritative request, citation, candidate, lead, evidence record, or
@@ -140,7 +155,9 @@ fixtures to prove all of the following:
 ## Decision rule
 
 - **Adopt:** every authority, disclosure, suggestion-rejection, broker, and
-  accounting proof above passes for both configured participant adapters.
+  accounting proof above passes for both configured participant adapters,
+  including each exact adapter's bounded public marker invocation through a
+  separately proven isolated authentication channel.
 - **Narrow:** identify the failing adapter or disclosure class and define the
   smaller participant set or public-only profile. It cannot authorize private
   input for an unrestricted participant.
