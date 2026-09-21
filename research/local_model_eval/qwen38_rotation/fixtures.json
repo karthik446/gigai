@@ -1,0 +1,63 @@
+{
+  "model": "qwen3.8:latest",
+  "rubric_version": "rotation-review-v1",
+  "cases": [
+    {
+      "id": "clean_review",
+      "prompt": "Review the supplied synthetic artifact for correctness. Return JSON with exactly these keys: verdict (pass or fail), findings (array of objects with severity, claim, evidence_ids, rationale), unsupported_claims (array of strings), and followup_question (string or null). Cite only the supplied evidence IDs and do not invent facts.",
+      "fixture": {
+        "artifact_kind": "scout_discovery_review",
+        "artifact": "The posting lists Denver, hybrid, senior, and a salary of 120000 USD annual. The review records each field as supported by the captured posting.",
+        "evidence": [
+          {"id": "S1", "kind": "posting_capture", "text": "Example Labs; Denver; hybrid; senior; 120000 USD annual."},
+          {"id": "S2", "kind": "review_receipt", "text": "Independent reviewer confirmed the captured fields."}
+        ],
+        "expected_defects": []
+      },
+      "rubric": {
+        "required_verdict": "pass",
+        "allowed_evidence": ["S1", "S2"],
+        "forbid_unsupported_claims": true
+      }
+    },
+    {
+      "id": "unsupported_posting_claim",
+      "prompt": "Review the supplied synthetic artifact for unsupported candidate claims. Return JSON with exactly these keys: verdict (pass or fail), findings (array of objects with severity, claim, evidence_ids, rationale), unsupported_claims (array of strings), and followup_question (string or null). A claim is supported only when the evidence explicitly supports it; cite only supplied evidence IDs and do not invent facts.",
+      "fixture": {
+        "artifact_kind": "scout_discovery_review",
+        "artifact": "The posting says the role involves Kubernetes. The candidate summary says: 5 years of production Kubernetes ownership.",
+        "evidence": [
+          {"id": "S3", "kind": "posting_capture", "text": "Example Labs seeks experience with Kubernetes."},
+          {"id": "S4", "kind": "candidate_evidence", "text": "No Kubernetes duration, ownership, or production record is supplied."}
+        ],
+        "expected_defects": ["unsupported_duration_and_ownership_claim"]
+      },
+      "rubric": {
+        "required_verdict": "fail",
+        "required_defect": "unsupported_duration_and_ownership_claim",
+        "allowed_evidence": ["S3", "S4"],
+        "forbid_posting_as_candidate_evidence": true,
+        "require_followup": true
+      }
+    },
+    {
+      "id": "finalized_not_applied",
+      "prompt": "Review the supplied synthetic lifecycle artifact for state accuracy. Return JSON with exactly these keys: verdict (pass or fail), findings (array of objects with severity, claim, evidence_ids, rationale), unsupported_claims (array of strings), and followup_question (string or null). Distinguish finalized document state from applied state; cite only supplied evidence IDs and do not invent an application event.",
+      "fixture": {
+        "artifact_kind": "scout_application_state",
+        "artifact": "A resume revision is finalized for Example Labs. The lifecycle record says applied=false and contains no submission event.",
+        "evidence": [
+          {"id": "S5", "kind": "resume_revision", "text": "Resume revision resume-17 is finalized."},
+          {"id": "S6", "kind": "lifecycle_record", "text": "application_event: absent; applied: false."}
+        ],
+        "expected_defects": ["finalized_must_not_be_marked_applied"]
+      },
+      "rubric": {
+        "required_verdict": "pass",
+        "required_finding": "finalized_must_not_be_marked_applied",
+        "allowed_evidence": ["S5", "S6"],
+        "forbid_applied_claim": true
+      }
+    }
+  ]
+}

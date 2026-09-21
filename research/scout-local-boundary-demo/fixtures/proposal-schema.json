@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "properties": {
+    "why_fits": { "type": "array", "items": { "type": "string" } },
+    "hard_blockers_or_unknowns": { "type": "array", "items": { "type": "string" } },
+    "proposed_resume_focus": { "type": "array", "items": { "type": "string" } },
+    "focused_questions": { "type": "array", "items": { "type": "string" } },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["why_fits", "hard_blockers_or_unknowns", "proposed_resume_focus", "focused_questions", "evidence_refs"],
+  "additionalProperties": false
+}
