@@ -10,7 +10,8 @@ document-review dogfood
 
 G44 makes GigAI start from an operator's intent rather than forcing every
 request into a Gig-creation interview. It routes one explicit request to one
-of four bounded outcomes:
+of four bounded work routes, or asks for operator input when no safe choice
+can be made:
 
 ```text
 explicit request
@@ -18,6 +19,7 @@ explicit request
   -> one-off local result
   -> private Gig candidate
   -> private revision candidate for an approved Gig
+  -> needs operator input
 ```
 
 An existing Gig Run asks only for required inputs that are absent or invalid.
@@ -31,15 +33,17 @@ The operator's explicit command and selected Gig/version take precedence over
 all routing heuristics. Otherwise the router uses only the typed request text,
 explicit attachments, project-local package metadata, and safe summaries of
 approved Gig input/output contracts. It may not search ambient files, inspect
-conversation history, invoke a provider, fetch a URL, or create a provider
-prompt while routing.
+conversation history or the clipboard, invoke a provider, fetch a URL, use a
+browser or tool, cause a target effect, or create a provider prompt while
+routing.
 
 The router emits exactly one of:
 
 - `existing_gig`: one approved Gig/version and one named graph satisfy the
   request; G44 emits G43.2's typed `g44_routed` graph-selection record and
   reports only that graph's mandatory missing inputs;
-- `one_off`: the request is bounded but there is no safe reuse claim;
+- `one_off`: the request is bounded but there is no safe reuse claim; this
+  result creates no candidate, Gig, Run, or durable request-text record;
 - `gig_candidate`: the operator explicitly asked to create a Gig, or declared
   durable inputs, reusable output, recurring execution, evaluation, or
   configurable behavior;
@@ -50,9 +54,11 @@ The router emits exactly one of:
 
 The router records its rule/version, candidate routes considered, safe reason,
 and only labels/IDs/digests in G43.2's graph-selection-record schema. It does
-not persist the request text unless the operator has explicitly selected one-off
-or candidate workpad creation. A selection record is not Run authority; a Plan
-must seal it and direct Run consent remains required.
+not persist the request text for an `existing_gig`, `one_off`, or
+`needs_operator_input` result. Only separately and explicitly selected candidate
+workpad creation may retain request text within the private candidate boundary;
+explicit selection of `one_off` does not permit retention. A selection record
+is not Run authority; a Plan must seal it and direct Run consent remains required.
 
 ## Candidate workspace
 
@@ -132,9 +138,14 @@ contract dogfood:
    `needs_operator_input`;
 4. an explicit create request produces a private candidate, not a Gig or Run;
 5. ambiguous route/effect/privacy choices stop at `needs_operator_input`;
-6. a revision candidate cannot modify an active version or historic Run; and
+6. a revision candidate cannot modify an active version or historic Run;
 7. all human/JSON output redacts raw request text unless candidate creation was
-   explicitly selected.
+   explicitly selected;
+8. a `one_off` result creates no candidate, Gig, Run, or durable request-text
+   record, including when the operator explicitly selects that route; and
+9. routing neither reads ambient files, conversation history, or the clipboard
+   nor invokes providers, fetches URLs, uses browsers/tools, creates provider
+   prompts, or causes target effects.
 
 ## Out of scope
 

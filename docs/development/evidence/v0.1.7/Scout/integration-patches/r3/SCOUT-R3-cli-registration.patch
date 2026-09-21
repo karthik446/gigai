@@ -1,0 +1,35 @@
+diff --git a/src/gigai/cli.py b/src/gigai/cli.py
+--- a/src/gigai/cli.py
++++ b/src/gigai/cli.py
+@@
+ from .application_cli import application_group
++from .scout_report_cli import report_group
+@@
+ cli.add_command(application_group)
++cli.add_command(report_group)
+diff --git a/src/gigai/data/scout/gig.py b/src/gigai/data/scout/gig.py
+--- a/src/gigai/data/scout/gig.py
++++ b/src/gigai/data/scout/gig.py
+@@
+     commands.add_parser("context", help="read the payload-free current Scout context")
++
++    report_command = commands.add_parser(
++        "report", help="generate or inspect the journal-derived local Scout report"
++    )
++    report_command.add_argument("report_command", choices=("generate", "status"))
+@@
+     if args.command == "context":
+@@
+         }
++    if args.command == "report":
++        from gigai.scout_report import publish_report, read_current_report
++        if args.report_command == "generate":
++            return {"schema_version": "1.0", "operation": "report", "result": publish_report(resolved=resolved)}
++        return {"schema_version": "1.0", "operation": "report-status", "result": read_current_report(resolved=resolved)}
+
+R3 returns this patch instead of changing shared `cli.py` or copied `gig.py`.
+The integration owner must reconcile the exact surrounding context and add the
+new standalone report group to the supported command inventory. No new schema
+is introduced by R3, so no schema-registry or SHA256SUMS registration is
+requested. Source inventory should include the new installed Python modules and
+the existing copied UI assets according to the owner's versioning path.
