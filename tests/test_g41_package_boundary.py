@@ -46,7 +46,7 @@ def test_init_creates_portable_package_and_exact_private_excludes(tmp_path: Path
     home, target = _setup(tmp_path)
 
     result = CliRunner().invoke(
-        cli, ["init", "--home", str(home), "--target", str(target), "--json"]
+        cli, ["init", "--home", str(home), "--target", str(target), "--username", "synthetic-user", "--json"]
     )
 
     assert result.exit_code == 0, result.output
@@ -66,7 +66,7 @@ def test_init_creates_portable_package_and_exact_private_excludes(tmp_path: Path
         assert exclude.splitlines().count(entry) == 1
 
     rerun = CliRunner().invoke(
-        cli, ["init", "--home", str(home), "--target", str(target), "--json"]
+        cli, ["init", "--home", str(home), "--target", str(target), "--username", "synthetic-user", "--json"]
     )
     assert rerun.exit_code == 0, rerun.output
     rerun_payload = json.loads(rerun.output)
@@ -121,7 +121,7 @@ def test_init_supports_linked_git_worktree_metadata(tmp_path: Path) -> None:
     )
 
     result = CliRunner().invoke(
-        cli, ["init", "--home", str(home), "--target", str(linked), "--json"]
+        cli, ["init", "--home", str(home), "--target", str(linked), "--username", "synthetic-user", "--json"]
     )
 
     assert result.exit_code == 0, result.output
@@ -144,7 +144,7 @@ def test_init_is_idempotent_after_portable_package_is_tracked(tmp_path: Path) ->
     _git_add(target, initial.package_root.relative_to(target).as_posix())
 
     result = CliRunner().invoke(
-        cli, ["init", "--home", str(home), "--target", str(target), "--json"]
+        cli, ["init", "--home", str(home), "--target", str(target), "--username", "synthetic-user", "--json"]
     )
 
     assert result.exit_code == 0, result.output
@@ -170,7 +170,7 @@ def test_unbound_tracked_package_requires_explicit_adoption(tmp_path: Path) -> N
         )
     )
     plain = CliRunner().invoke(
-        cli, ["init", "--home", str(fresh_home), "--target", str(target)]
+        cli, ["init", "--home", str(fresh_home), "--target", str(target), "--username", "synthetic-user"]
     )
     assert plain.exit_code != 0
     assert "explicit --adopt-package --confirm" in plain.output
@@ -184,6 +184,8 @@ def test_unbound_tracked_package_requires_explicit_adoption(tmp_path: Path) -> N
             str(fresh_home),
             "--target",
             str(target),
+            "--username",
+            "synthetic-user",
             "--adopt-package",
             "--confirm",
             "--json",
@@ -212,6 +214,8 @@ def test_adopt_package_preserves_existing_v016_binding(tmp_path: Path) -> None:
             str(home),
             "--target",
             str(target),
+            "--username",
+            "synthetic-user",
             "--adopt-package",
             "--confirm",
             "--json",
@@ -247,6 +251,8 @@ def test_adopt_package_refuses_tracked_private_content(tmp_path: Path) -> None:
             str(home),
             "--target",
             str(target),
+            "--username",
+            "synthetic-user",
             "--adopt-package",
             "--confirm",
         ],

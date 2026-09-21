@@ -1,0 +1,19 @@
+{
+  "$id": "urn:gigai:scout:document-revision:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SCOUT document revision v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["revision_version", "opportunity", "document_kind", "record_id", "revision_id", "content_sha256", "source_lineage", "checks", "parent_revision_id"],
+  "properties": {
+    "revision_version": {"const": "scout-document-revision:1"},
+    "opportunity": {"type": "object", "additionalProperties": false, "required": ["opportunity_id", "snapshot_id"], "properties": {"opportunity_id": {"type": "string", "pattern": "^opportunity_[0-9a-f]{32}$"}, "snapshot_id": {"type": "string", "pattern": "^snapshot_[0-9a-f]{32}$"}}},
+    "document_kind": {"enum": ["resume", "cover_letter"]},
+    "record_id": {"type": "string", "pattern": "^record_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "revision_id": {"type": "string", "pattern": "^revision_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "content_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "source_lineage": {"type": "array", "maxItems": 64, "items": {"type": "object", "additionalProperties": false, "required": ["source_id", "content_sha256", "identity"], "properties": {"source_id": {"type": "string"}, "content_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "identity": {"type": "object"}}}},
+    "checks": {"type": "object"},
+    "parent_revision_id": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^revision_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}]}
+  }
+}

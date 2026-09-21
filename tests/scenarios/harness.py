@@ -356,13 +356,26 @@ class ScenarioHarness:
                 }
                 actual_changes = actual_changes - allowed
             if root_name == "target":
+                if spec.argv and spec.argv[0] == "init":
+                    # Username-aware default initialization journals its
+                    # recoverable batch under these private target roots.
+                    allowed_prefixes = (*spec.allowed_target_change_prefixes, ".gigai/local", ".gigai/locks")
+                else:
+                    allowed_prefixes = spec.allowed_target_change_prefixes
                 allowed = {
                     path
                     for path in actual_changes
                     if any(
                         path == prefix or path.startswith(prefix + "/")
-                        for prefix in spec.allowed_target_change_prefixes
+                        for prefix in allowed_prefixes
                     )
+                }
+                actual_changes = actual_changes - allowed
+            if root_name == "workpad" and spec.argv and spec.argv[0] == "init":
+                allowed = {
+                    path
+                    for path in actual_changes
+                    if path == "projects" or path.startswith("projects/")
                 }
                 actual_changes = actual_changes - allowed
             if actual_changes != expected_changes:
@@ -449,11 +462,7 @@ class ScenarioHarness:
             "GIGAI_HARNESS_ALLOWED_EXECUTABLES": json.dumps(
                 [
                     os.fspath(path.resolve())
-                    for path in (
-                        (*spec.allowed_subprocesses, Path("/bin/sh"))
-                        if spec.argv and spec.argv[0] in {"setup", "models", "create"}
-                        else spec.allowed_subprocesses
-                    )
+                    for path in self._allowed_subprocesses(spec)
                 ]
             ),
             "GIGAI_HARNESS_GUARD_LOG": os.fspath(guard_log),
@@ -470,6 +479,18 @@ class ScenarioHarness:
                 raise ValueError(f"scenario cannot override harness-owned environment key {key!r}")
             environment[key] = value
         return environment
+
+    def _allowed_subprocesses(self, spec: ScenarioSpec) -> tuple[Path, ...]:
+        allowed = spec.allowed_subprocesses
+        if spec.argv and spec.argv[0] in {"setup", "models", "create"}:
+            allowed = (*allowed, Path("/bin/sh"))
+        if spec.argv and spec.argv[0] == "init":
+            # Default-instance materialization uses the installed interpreter
+            # to run the copied local scaffold; permit only that exact runtime.
+            interpreter = self.command.executable.parent / "python"
+            if interpreter.exists():
+                allowed = (*allowed, interpreter)
+        return allowed
 
     def _write_artifact(self, result: ScenarioResult, spec: ScenarioSpec) -> None:
         payload = asdict(result)

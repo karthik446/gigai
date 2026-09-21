@@ -30,8 +30,27 @@ from .catalog import (
 )
 from .credentials import reference_is_available
 from .comparison import ComparisonError, compare_occurrences
+from .runtime_comparison import (
+    RuntimeComparisonError,
+    comparison_status,
+    render_comparison_markdown,
+    resume_comparison,
+    run_comparison,
+    show_comparison,
+)
 from .diagnostics import render_report_json, run_doctor, run_live_doctor
+from .default_init import DefaultInitError, initialize_defaults
 from .evaluation import EvaluationError, load_manifest, score_behavior, write_report
+from .external_cli import external_group
+from .capability_cli import capability_group
+from .native_records_cli import native_record_group
+from .application_cli import application_group
+from .scout_report_cli import report_group
+from .scout_documents_cli import document_group
+from .scout_answer_cli import answer_group
+from .scout_acquisition_cli import acquisition_group
+from .scout_interview_cli import interview_group
+from .private_transfer_cli import transfer_group
 from .index import JournalIndexError, JournalProjection, read_index
 from .listing import GigListingError, list_gigs
 from .invocation import InvocationValidationError, load_invocation_bytes
@@ -47,6 +66,9 @@ from .lifecycle import (
     revise_offline,
     stage_improvement_manifest,
     start_interview,
+    propose_first_graph_set_offline,
+    propose_graph_set_offline,
+    validate_pending_proposal_workpad,
 )
 from .model_discovery import (
     DetectedModel,
@@ -60,7 +82,6 @@ from .model_discovery import (
 from .package import (
     PackageError,
     export_package,
-    initialize_project_package,
     inspect_package,
     install_package,
     upgrade_installation,
@@ -85,11 +106,20 @@ from .setup import (
     run_setup,
 )
 from .setup_interview import SetupDraft, SetupHTTPServer
-from .run import RunError, launch_run, read_run_details
+from .run import ProposalRunRequest, TailorRunRequest, RunError, launch_run, read_run_details
 from .run_plan import RunPlanError, create_run_plan, list_run_plans, read_run_plan
-from .provider_review import ProviderReviewError
+from .provider_review import ProviderReviewError, close_provider_review_no_fix_required
+from .private_records import (
+    PrivateRecordError,
+    create_record,
+    import_reference,
+    import_run_input,
+    list_imports,
+    migrate_workpad_layout,
+    read_import,
+    read_record,
+)
 from .target_binding import TargetBindingError, resolve_target
-from .validators import validate_proposal_workpad
 from .workpad import ResolvedWorkpad, WorkpadError, open_locations, resolve_workpad
 
 
@@ -114,7 +144,7 @@ def cli(context: click.Context) -> None:
         raise click.UsageError(
             "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', "
             "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
-            "'plan', 'run-plan', 'run', 'run-details', 'occurrence', 'workpad', 'check', 'models', 'invoke', or 'open'; "
+            "'plan', 'graph-set', 'run-plan', 'run', 'proposal', 'tailor', 'comparison', 'scout-interview', 'scout-transfer', 'scout-documents', 'scout-answer', 'run-details', 'occurrence', 'workpad', 'capability', 'check', 'models', 'invoke', or 'open'; "
             "use --help for details."
         )
 
@@ -137,6 +167,185 @@ def _raise_cli_error(message: str, *, as_json: bool, code: str) -> None:
         )
         raise click.exceptions.Exit(1)
     raise click.ClickException(message)
+
+
+def _private_error(exc: PrivateRecordError, *, as_json: bool) -> None:
+    _raise_cli_error(str(exc), as_json=as_json, code=exc.code)
+
+
+@cli.group("layout")
+def layout_group() -> None:
+    """Explicitly inspect or migrate the private workpad layout."""
+
+
+@layout_group.command("migrate")
+@click.option("--gig", "gig_id", required=True)
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def layout_migrate_command(gig_id: str, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Migrate one existing clean workpad to the authenticated v2 layout."""
+    try:
+        resolved = resolve_workpad(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id, allow_semantic_state=True)
+        commit = migrate_workpad_layout(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id)
+    except (PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "workpad_layout_migration_refused"))
+        return
+    payload = {"ok": True, "gig_id": gig_id, "layout_version": 2, "journal_commit": commit}
+    click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")) if as_json else f"Migrated {gig_id} to workpad layout v2.")
+
+
+@cli.group("reference")
+def reference_group() -> None:
+    """Import and inspect immutable private G45 references."""
+
+
+@reference_group.command("add")
+@click.option("--kind", required=True, type=click.Choice(["resume", "project_evidence", "role_history", "cover_letter"]))
+@click.option("--file", "source", required=True, type=click.Path(path_type=Path, dir_okay=False))
+@click.option("--label")
+@click.option("--operation-key")
+@click.option("--gig")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def reference_add_command(kind: str, source: Path, label: str | None, operation_key: str | None, gig: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    try:
+        result = import_reference(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig, kind=kind, source=source, label=label, operation_key=operation_key)
+    except (PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "reference_source_unsafe"))
+        return
+    payload = {"ok": True, "reference_id": result.item_id, "created": result.created, "record": {key:value for key,value in result.record.items() if key != "snapshot"}}
+    click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")) if as_json else f"Imported reference {result.item_id}; no provider or Run was started.")
+
+
+@reference_group.command("list")
+@click.option("--gig")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def reference_list_command(gig: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    try:
+        records = list_imports(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig, family="reference")
+    except (PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "reference_not_found"))
+        return
+    click.echo(json.dumps({"ok":True,"references":records}, sort_keys=True, separators=(",", ":")) if as_json else "\n".join(str(item["reference_id"]) for item in records))
+
+
+@reference_group.command("show")
+@click.argument("reference_id")
+@click.option("--gig")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def reference_show_command(reference_id: str, gig: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    try:
+        record = read_import(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig, family="reference", item_id=reference_id)
+    except (PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "reference_not_found"))
+        return
+    click.echo(json.dumps({"ok":True,"reference":record}, sort_keys=True, separators=(",", ":")) if as_json else str(record["reference_id"]))
+
+
+@cli.group("run-input")
+def run_input_group() -> None:
+    """Import and inspect immutable pasted private Run inputs."""
+
+
+@run_input_group.command("add")
+@click.option("--kind", default="job_description", type=click.Choice(["job_description"]))
+@click.option("--file", "source", type=click.Path(path_type=Path, dir_okay=False))
+@click.option("--stdin", "from_stdin", is_flag=True)
+@click.option("--label", default="pasted-job-description")
+@click.option("--operation-key")
+@click.option("--gig")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def run_input_add_command(kind: str, source: Path | None, from_stdin: bool, label: str, operation_key: str | None, gig: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    if (source is None) == (not from_stdin):
+        _raise_cli_error("choose exactly one of --file or --stdin", as_json=as_json, code="run_input_source_unsafe")
+        return
+    try:
+        if source is not None:
+            from .private_records import _safe_text_file
+            data, media, _basename = _safe_text_file(source, limit=262144, code_prefix="run_input")
+        else:
+            data, media = sys.stdin.buffer.read(262145), "text/plain"
+            if len(data) > 262144:
+                raise PrivateRecordError("run_input_too_large", "Run input exceeds the private import limit")
+        result = import_run_input(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig, data=data, label=label, media_type=media, operation_key=operation_key)
+    except (PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "run_input_source_unsafe"))
+        return
+    payload = {"ok": True, "run_input_id": result.item_id, "created": result.created, "record": {key:value for key,value in result.record.items() if key != "snapshot"}}
+    click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")) if as_json else f"Imported Run input {result.item_id}; no provider or Run was started.")
+
+
+@run_input_group.command("show")
+@click.argument("run_input_id")
+@click.option("--gig")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def run_input_show_command(run_input_id: str, gig: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    try:
+        record = read_import(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig, family="run_input", item_id=run_input_id)
+    except (PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "run_input_not_found"))
+        return
+    click.echo(json.dumps({"ok":True,"run_input":record}, sort_keys=True, separators=(",", ":")) if as_json else str(record["run_input_id"]))
+
+
+@cli.group("record")
+def record_group() -> None:
+    """Create scoped private revision wrappers and explicit content reads."""
+
+
+@record_group.command("create")
+@click.option("--kind", required=True, type=click.Choice(["profile_preferences", "experience_qa", "imported_reference", "supplied_source", "selected_conversation"]))
+@click.option("--content-family", required=True, type=click.Choice(["g45_reference", "g45_run_input"]))
+@click.option("--content-id", required=True)
+@click.option("--operation-key", required=True)
+@click.option("--record-id")
+@click.option("--parent-revision")
+@click.option("--origin", default="imported", type=click.Choice(["user_reported", "imported", "inferred", "agent_supplied"]))
+@click.option("--gig")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def record_create_command(kind: str, content_family: str, content_id: str, operation_key: str, record_id: str | None, parent_revision: str | None, origin: str, gig: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    try:
+        result = create_record(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig, kind=kind, content_family=content_family, content_id=content_id, actor={"kind":"operator","id":"local-user"}, origin=origin, operation_key=operation_key, record_id=record_id, parent_revision=parent_revision)
+    except (PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "private_record_invalid"))
+        return
+    payload = {"ok":True,"record_id":result.record_id,"revision_id":result.revision_id,"created":result.created}
+    click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")) if as_json else f"Committed record revision {result.revision_id}; no provider disclosure occurred.")
+
+
+@record_group.command("read")
+@click.option("--id", "record_id", required=True)
+@click.option("--revision", "revision_id")
+@click.option("--content", "include_content", is_flag=True)
+@click.option("--gig")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def record_read_command(record_id: str, revision_id: str | None, include_content: bool, gig: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    try:
+        payload = read_record(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig, record_id=record_id, revision_id=revision_id, content=include_content)
+    except (PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "private_record_not_found"))
+        return
+    if include_content:
+        content = payload.pop("content")
+        assert isinstance(content, bytes)
+        # The sole explicit payload-read path writes only the requested bytes.
+        sys.stdout.buffer.write(content)
+    else:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")) if as_json else f"{payload['record_id']} {payload['revision_id']} {payload['kind']}")
 
 
 @cli.command("models")
@@ -487,6 +696,137 @@ def eval_behavior_command(manifest: Path, observations: Path, split: str, output
         raise click.exceptions.Exit(1)
 
 
+@cli.group("comparison")
+def comparison_group() -> None:
+    """Run or inspect an explicit synthetic execution-setup comparison."""
+
+
+@comparison_group.command("start")
+@click.option("--gig", "gig_id", required=True, help="Approved Gig whose selected authority is pinned.")
+@click.option("--local-target", required=True, help="Explicit configured Ollama target.")
+@click.option("--luna-target", required=True, help="Explicit configured Codex/Luna target.")
+@click.option("--graph", "graph_selector", help="Approved Graph Set selector when the Gig has multiple graphs.")
+@click.option("--pack", "pack_path", type=click.Path(path_type=Path, dir_okay=False), help="Synthetic Gig-owned evaluation pack; defaults to the installed pack.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--wait/--no-wait", default=True, help="Wait for both attempts to terminalize.")
+@click.option("--retry-failed", is_flag=True, help="Retry explicitly retryable invocation failures once and preserve prior errors.")
+@click.option("--confirm", is_flag=True, help="Direct operator confirmation for this synthetic comparison.")
+@click.option("--json", "as_json", is_flag=True)
+def comparison_start_command(
+    gig_id: str,
+    local_target: str,
+    luna_target: str,
+    graph_selector: str | None,
+    pack_path: Path | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    wait: bool,
+    retry_failed: bool,
+    confirm: bool,
+    as_json: bool,
+) -> None:
+    """Run the same frozen synthetic cases through two named setups."""
+    if not confirm:
+        _raise_cli_error("comparison requires direct --confirm operator consent", as_json=as_json, code="comparison_consent_required")
+        return
+    home = home_value or default_home_root()
+    try:
+        config = load_config(home)
+        result = run_comparison(
+            home_root=home,
+            requested_target=target_value,
+            gig_id=gig_id,
+            config=config,
+            local_target=local_target,
+            luna_target=luna_target,
+            operator_consent={"action": "runtime_comparison", "actor": {"kind": "operator", "id": "local-user"}},
+            pack_path=pack_path,
+            graph_selector=graph_selector,
+            retry_failed=retry_failed,
+            wait=wait,
+        )
+    except (RuntimeComparisonError, ConfigurationError, WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "comparison_failed"))
+        return
+    if as_json:
+        click.echo(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(render_comparison_markdown(result), nl=False)
+
+
+comparison_group.add_command(comparison_start_command, name="run")
+
+
+@comparison_group.command("show")
+@click.argument("comparison_id")
+@click.option("--gig", "gig_id", required=True)
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def comparison_show_command(comparison_id: str, gig_id: str, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Read one journal-authenticated comparison without rerunning it."""
+    try:
+        result = show_comparison(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id, comparison_id=comparison_id)
+    except (RuntimeComparisonError, WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "comparison_not_found"))
+        return
+    if as_json:
+        click.echo(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(render_comparison_markdown(result), nl=False)
+
+
+@comparison_group.command("status")
+@click.argument("comparison_id")
+@click.option("--gig", "gig_id", required=True)
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def comparison_status_command(comparison_id: str, gig_id: str, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Read authenticated attempt and per-case checkpoint status."""
+    try:
+        result = comparison_status(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id, comparison_id=comparison_id)
+    except (RuntimeComparisonError, WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "comparison_not_found"))
+        return
+    click.echo(json.dumps(result, sort_keys=True, separators=(",", ":")) if as_json else json.dumps(result, indent=2, sort_keys=True))
+
+
+@comparison_group.command("resume")
+@click.argument("comparison_id")
+@click.option("--gig", "gig_id", required=True)
+@click.option("--local-target", required=True, help="The original configured Ollama target.")
+@click.option("--luna-target", required=True, help="The original configured Codex/Luna target.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--retry-failed", is_flag=True, help="Explicitly retry terminal failed cases; successful cases are never rerun.")
+@click.option("--confirm", is_flag=True, help="Direct operator confirmation for this synthetic comparison resume.")
+@click.option("--json", "as_json", is_flag=True)
+def comparison_resume_command(comparison_id: str, gig_id: str, local_target: str, luna_target: str, target_value: Path | None, home_value: Path | None, retry_failed: bool, confirm: bool, as_json: bool) -> None:
+    """Resume a prior interrupted comparison without rerunning terminal cases."""
+    if not confirm:
+        _raise_cli_error("comparison resume requires direct --confirm operator consent", as_json=as_json, code="comparison_consent_required")
+        return
+    home = home_value or default_home_root()
+    try:
+        result = resume_comparison(
+            home_root=home,
+            requested_target=target_value,
+            gig_id=gig_id,
+            config=load_config(home),
+            comparison_id=comparison_id,
+            local_target=local_target,
+            luna_target=luna_target,
+            operator_consent={"action": "runtime_comparison", "actor": {"kind": "operator", "id": "local-user"}},
+            retry_failed=retry_failed,
+        )
+    except (RuntimeComparisonError, ConfigurationError, WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "comparison_resume_failed"))
+        return
+    click.echo(json.dumps(result, sort_keys=True, separators=(",", ":")) if as_json else render_comparison_markdown(result))
+
+
 @cli.command("setup")
 @click.option(
     "--non-interactive", is_flag=True, help="Refuse prompts and use explicit options."
@@ -533,15 +873,15 @@ def eval_behavior_command(manifest: Path, observations: Path, split: str, output
     "--endpoint",
     "endpoint_spec",
     multiple=True,
-    metavar="NAME=ADAPTER:CREDENTIAL[:HTTPS_BASE_URL]",
-    help="Add a remote endpoint by credential reference name, never a credential value.",
+    metavar="NAME=ADAPTER:CREDENTIAL[:HTTPS_BASE_URL] | NAME=ollama_local:LOOPBACK_URL",
+    help="Add a remote endpoint by credential reference, or an explicit loopback Ollama endpoint; never a credential value.",
 )
 @click.option(
     "--model-target",
     "model_target_spec",
     multiple=True,
-    metavar="NAME=ENDPOINT:MODEL",
-    help="Add a text model target resolved through a configured endpoint.",
+    metavar="NAME=ENDPOINT:MODEL[@sha256:DIGEST]",
+    help="Add a text model target; local Ollama targets require an explicit model digest.",
 )
 @click.option(
     "--create-model-target",
@@ -822,6 +1162,12 @@ def setup_command(
                 )
             target_by_name[target.name] = target
         targets = tuple(target_by_name.values())
+        for target in targets:
+            endpoint = endpoint_by_name.get(target.endpoint)
+            if endpoint is not None and endpoint.adapter == "ollama_local" and not target.model_digest:
+                raise ValueError(
+                    f"ollama_local model target {target.name!r} requires an explicit model digest"
+                )
         target_names = tuple(target.name for target in targets)
         saved_create_target = next(
             (
@@ -1626,46 +1972,71 @@ def doctor_command(
     is_flag=True,
     help="Confirm package adoption when --adopt-package is used.",
 )
+@click.option(
+    "--username",
+    help="Saved workspace-owner display name; required outside an interactive terminal.",
+)
 def init_command(
     target: Path | None,
     home_value: Path | None,
     as_json: bool,
     adopt_package: bool,
     confirmed: bool,
+    username: str | None,
 ) -> None:
-    """Initialize or reconcile the project-local portable package boundary."""
+    """Initialize the package boundary and recoverable default instances."""
 
     _require_supported_platform()
+    if username is None and sys.stdin.isatty():
+        username = click.prompt("Username", type=str)
     try:
-        result = initialize_project_package(
+        result = initialize_defaults(
             home_root=(home_value or default_home_root()),
             requested_target=target,
+            username=username,
             adopt_package=adopt_package,
             confirmed=confirmed,
         )
-    except (PackageError, TargetBindingError, OSError) as exc:
-        raise click.ClickException(str(exc)) from exc
+    except (DefaultInitError, PackageError, TargetBindingError, OSError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "init_refused"))
+        return
 
+    package = result.package
     payload = {
-        "binding_created": result.binding_created,
-        "exclude_changed": result.exclude_changed,
-        "package_digest": result.package_digest,
-        "package_id": result.package_id,
-        "project_id": result.project_id,
-        "reconciled": result.reconciled,
-        "registry_changed": result.registry_changed,
-        "target_kind": result.target_kind,
-        "adopted": result.adopted,
+        "binding_created": package.binding_created,
+        "exclude_changed": package.exclude_changed,
+        "package_digest": package.package_digest,
+        "package_id": package.package_id,
+        "project_id": package.project_id,
+        "reconciled": package.reconciled,
+        "registry_changed": package.registry_changed,
+        "target_kind": package.target_kind,
+        "adopted": package.adopted,
+        "owner_id": result.owner_id,
+        "username": result.username,
+        "instances": [
+            {
+                "template_id": row.template_id,
+                "gig_id": row.gig_id,
+                "status": row.status,
+                "proposal_id": row.proposal_id,
+                "approval_state": row.approval_state,
+                "next_action": row.next_action,
+            }
+            for row in result.instances
+        ],
+        "scout_status": result.scout_status,
+        "setup_steps": list(result.setup_steps),
     }
     if as_json:
         click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     else:
-        disposition = "adopted" if result.adopted else ("created" if result.binding_created else "confirmed")
-        click.echo(
-            f"GigAI project package {disposition}: {result.package_id} "
-            f"for {result.project_id} ({result.target_kind})."
-        )
-        if result.reconciled:
+        disposition = "adopted" if package.adopted else ("created" if package.binding_created else "confirmed")
+        click.echo(f"GigAI project package {disposition}: {package.package_id} for {package.project_id} ({package.target_kind}).")
+        click.echo(f"Owner {result.username} has {len(result.instances)} bound default instance(s); Scout source and proposal preparation remain pending.")
+        if result.setup_steps:
+            click.echo("Registry setup steps: " + ", ".join(result.setup_steps))
+        if package.reconciled:
             click.echo("Derived registry or exclude state was reconciled.")
 
 
@@ -2228,6 +2599,7 @@ def revise_command(
     default=None,
     help="Optional approved capability manifest referenced by the proposal.",
 )
+@click.option("--gig", "gig_id", help="Explicit Gig to approve without changing active selection.")
 @click.option(
     "--json", "as_json", is_flag=True, help="Emit the sealed version and commit IDs."
 )
@@ -2236,6 +2608,7 @@ def approve_command(
     target_value: Path | None,
     home_value: Path | None,
     capability_manifest_id: str | None,
+    gig_id: str | None,
     as_json: bool,
 ) -> None:
     """Seal one pending proposal as an offline approved Gig version."""
@@ -2247,6 +2620,7 @@ def approve_command(
             requested_target=target_value,
             proposal_id=proposal_id,
             capability_manifest_id=capability_manifest_id,
+            gig_id=gig_id,
         )
     except (LifecycleError, WorkpadError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -2281,8 +2655,13 @@ def approve_command(
     "--target", "target_value", type=click.Path(path_type=Path, file_okay=False)
 )
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--gig", "gig_id", help="Explicit Gig whose pending proposal is rejected.")
 def reject_command(
-    proposal_id: str, reason: str, target_value: Path | None, home_value: Path | None
+    proposal_id: str,
+    reason: str,
+    target_value: Path | None,
+    home_value: Path | None,
+    gig_id: str | None,
 ) -> None:
     """Reject one pending proposal without creating an executable Gig version."""
 
@@ -2293,6 +2672,7 @@ def reject_command(
             requested_target=target_value,
             proposal_id=proposal_id,
             reason=reason,
+            gig_id=gig_id,
         )
     except (LifecycleError, WorkpadError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -2326,14 +2706,108 @@ def _run_plan_error(exc: Exception, *, as_json: bool) -> None:
     raise click.ClickException(f"{code}: {exc}")
 
 
+@cli.group("graph-set")
+def graph_set_group() -> None:
+    """Stage and inspect bounded Graph Set proposal authority."""
+
+
+@graph_set_group.command("propose")
+@click.option("--definition", "definition_path", type=click.Path(path_type=Path, dir_okay=False), required=True, help="Local JSON Graph Set definition and its relative member artifacts.")
+@click.option("--gig", "gig_id", help="Explicit Gig to amend, or to receive a first Graph Set proposal.")
+@click.option("--first", "first_proposal", is_flag=True, help="Stage the first pending Graph Set for a provisioned Gig.")
+@click.option("--commission", help="Optional replacement commission text for this pending amendment.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def graph_set_propose_command(
+    definition_path: Path,
+    gig_id: str | None,
+    first_proposal: bool,
+    commission: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Atomically stage a v2 Graph Set; this command never approves or runs it."""
+    try:
+        if first_proposal:
+            if commission is not None:
+                raise LifecycleError("first Graph Set commission belongs in its sealed definition")
+            if gig_id is None:
+                raise LifecycleError("first Graph Set proposal requires --gig")
+            result = propose_first_graph_set_offline(
+                home_root=home_value or default_home_root(),
+                requested_target=target_value,
+                definition_path=definition_path,
+                gig_id=gig_id,
+            )
+        else:
+            result = propose_graph_set_offline(
+                home_root=home_value or default_home_root(),
+                requested_target=target_value,
+                definition_path=definition_path,
+                gig_id=gig_id,
+                commission=commission,
+            )
+    except (LifecycleError, WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code="graph_set_proposal_refused")
+        return
+    payload = {
+        "ok": True, "gig_id": result.gig_id, "proposal_id": result.proposal_id,
+        "status": "proposed",
+        "next_action": f"gigai approve {result.proposal_id} --gig {result.gig_id}",
+        "diagnostics": [],
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(
+            f"Staged Graph Set proposal {result.proposal_id}; direct "
+            f"`gigai approve {result.proposal_id} --gig {result.gig_id}` is required."
+        )
+
+
 @cli.group("run-plan")
 def run_plan_group() -> None:
     """Create and inspect sealed, bounded review preparation evidence."""
 
 
+@cli.group("provider-review")
+def provider_review_group() -> None:
+    """Inspectably close an already completed provider-backed document review."""
+
+
+@provider_review_group.command("closeout")
+@click.option("--run", "run_id", required=True, help="Existing clean provider-review Run ID.")
+@click.option("--plan", "run_plan_id", required=True, help="Exact sealed Run Plan consumed by that Run.")
+@click.option("--gig", "gig_id")
+@click.option("--confirm", is_flag=True, help="Directly record no-fix-required for this exact clean review evidence.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def provider_review_closeout_command(run_id: str, run_plan_id: str, gig_id: str | None, confirm: bool, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Record a direct operator decision; it is never approval or Run authority."""
+    try:
+        result = close_provider_review_no_fix_required(
+            home_root=home_value or default_home_root(), requested_target=target_value,
+            gig_id=gig_id, run_id=run_id, run_plan_id=run_plan_id,
+            direct_operator_confirmed=confirm,
+        )
+    except (ProviderReviewError, RunPlanError, WorkpadError, OSError, ValueError) as exc:
+        _run_plan_error(exc, as_json=as_json)
+        return
+    payload = {"ok": True, "closeout": {"closeout_id": result.closeout_id, "run_id": result.run_id, "run_plan_id": result.run_plan_id, "receipt_path": result.receipt_path, "replayed": result.replayed}, "diagnostics": []}
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Recorded no-fix-required closeout {result.closeout_id}; it grants no new Run or approval authority.")
+
+
 @run_plan_group.command("create")
 @click.option("--gig", "gig_id")
 @click.option("--version", type=click.IntRange(min=1))
+@click.option("--graph", "graph_selector", help="One approved semantic graph selector or alias.")
+@click.option("--selection-record", help="One exact sealed G44 selection record already journaled in this Gig.")
 @click.option("--class", "task_class", type=click.Choice(["planning", "research", "fact_check", "document_review", "code_review", "comparison"]))
 @click.option("--artifact-class", type=click.Choice(["text", "code", "structured_data", "mixed", "unknown"]))
 @click.option("--profile", "profile_id", type=click.Choice(["focused", "standard", "deep", "var"]))
@@ -2349,10 +2823,10 @@ def run_plan_group() -> None:
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
-def run_plan_create_command(gig_id: str | None, version: int | None, task_class: str | None, artifact_class: str | None, profile_id: str | None, input_paths: tuple[Path, ...], review_subject: Path | None, requirements_baseline_approval: str | None, re_review_of: str | None, reviewer_targets: tuple[str, ...], verifier_targets: tuple[str, ...], adjudicator_targets: tuple[str, ...], override_reason: str | None, profile_opt_in_reason: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+def run_plan_create_command(gig_id: str | None, version: int | None, graph_selector: str | None, selection_record: str | None, task_class: str | None, artifact_class: str | None, profile_id: str | None, input_paths: tuple[Path, ...], review_subject: Path | None, requirements_baseline_approval: str | None, re_review_of: str | None, reviewer_targets: tuple[str, ...], verifier_targets: tuple[str, ...], adjudicator_targets: tuple[str, ...], override_reason: str | None, profile_opt_in_reason: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     """Seal one immutable plan; this command never allocates a Run."""
     try:
-        result = create_run_plan(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id, version=version, task_class=task_class, artifact_class=artifact_class, profile_id=profile_id, input_paths=input_paths, review_subject=review_subject, requirements_baseline_approval_id=requirements_baseline_approval, re_review_of=re_review_of, override_reason=override_reason, profile_opt_in_reason=profile_opt_in_reason, reviewer_targets=reviewer_targets, verifier_targets=verifier_targets, adjudicator_targets=adjudicator_targets)
+        result = create_run_plan(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id, version=version, graph_selector=graph_selector, selection_record_id=selection_record, task_class=task_class, artifact_class=artifact_class, profile_id=profile_id, input_paths=input_paths, review_subject=review_subject, requirements_baseline_approval_id=requirements_baseline_approval, re_review_of=re_review_of, override_reason=override_reason, profile_opt_in_reason=profile_opt_in_reason, reviewer_targets=reviewer_targets, verifier_targets=verifier_targets, adjudicator_targets=adjudicator_targets)
     except (RunPlanError, RunError, WorkpadError, OSError, ValueError) as exc:
         _run_plan_error(exc, as_json=as_json)
         return
@@ -2556,6 +3030,135 @@ def run_command(
         click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     else:
         click.echo(f"Run {result.run_id} {result.status} for {result.gig_id}.")
+
+
+@cli.command("proposal")
+@click.argument("gig_id", required=False)
+@click.option("--model-target", required=True, help="Named configured local Ollama target.")
+@click.option("--posting-selector", required=True, help="Canonical JSON discovery-posting selector.")
+@click.option("--private-selector", multiple=True, required=True, help="Canonical JSON private source selector with explicit purpose; repeat per source.")
+@click.option("--wait", is_flag=True)
+@click.option("--confirm", "confirmed", is_flag=True, help="Record direct local consent for this private assessment.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def proposal_command(
+    gig_id: str | None,
+    model_target: str,
+    posting_selector: str,
+    private_selector: tuple[str, ...],
+    wait: bool,
+    confirmed: bool,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Assess one authenticated posting with explicitly selected private revisions.
+
+    This command records a proposal assessment only; it never Tailors,
+    applies, submits, or exports a document. Selectors are host authority
+    handles and cannot carry posting/private bytes.
+    """
+    _require_supported_platform()
+    if not confirmed:
+        raise click.ClickException("proposal requires direct --confirm operator consent")
+    try:
+        try:
+            posting = json.loads(posting_selector)
+            private = tuple(json.loads(item) for item in private_selector)
+        except json.JSONDecodeError as exc:
+            raise RunError("proposal input selectors must be canonical JSON") from exc
+        if not isinstance(posting, dict) or not private or not all(isinstance(item, dict) for item in private):
+            raise RunError("proposal input selectors must be JSON objects")
+        result = launch_run(
+            home_root=home_value or default_home_root(),
+            requested_target=target_value,
+            gig_id=gig_id,
+            wait=wait,
+            invocation_argv=tuple(sys.argv),
+            operator_consent={
+                "schema_version": "1.0", "kind": "operator_run_consent", "action": "run",
+                "actor": {"kind": "operator", "id": "local-user"}, "source": "direct_cli_confirm",
+            },
+            proposal_execution=ProposalRunRequest(
+                graph_selector="proposal-assessment", model_target=model_target,
+                posting_selector=posting, private_selectors=private,
+            ),
+        )
+    except (RunError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {"gig_id": result.gig_id, "gig_version": result.gig_version, "run_id": result.run_id, "status": result.status}
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Proposal Run {result.run_id} {result.status} for {result.gig_id}.")
+
+
+@cli.command("tailor")
+@click.argument("gig_id", required=False)
+@click.option("--model-target", required=True, help="Named configured local Ollama target.")
+@click.option("--posting-selector", required=True, help="Canonical JSON discovery-posting selector.")
+@click.option("--private-selector", multiple=True, required=True, help="Canonical JSON private source selector with explicit purpose.")
+@click.option("--answer-selector", multiple=True, help="Canonical JSON saved answer selector; repeat per selected revision.")
+@click.option("--output", "outputs", multiple=True, type=click.Choice(["resume", "cover_letter"]), default=("resume",))
+@click.option("--proposal-record")
+@click.option("--proposal-revision")
+@click.option("--wait", is_flag=True)
+@click.option("--confirm", "confirmed", is_flag=True, help="Record direct local consent for this private Tailor run.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def tailor_command(
+    gig_id: str | None,
+    model_target: str,
+    posting_selector: str,
+    private_selector: tuple[str, ...],
+    answer_selector: tuple[str, ...],
+    outputs: tuple[str, ...],
+    proposal_record: str | None,
+    proposal_revision: str | None,
+    wait: bool,
+    confirmed: bool,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Generate explicitly requested private documents; never apply or submit."""
+    _require_supported_platform()
+    if not confirmed:
+        raise click.ClickException("tailor requires direct --confirm operator consent")
+    if (proposal_record is None) != (proposal_revision is None):
+        raise click.ClickException("--proposal-record and --proposal-revision must be supplied together")
+    try:
+        try:
+            posting = json.loads(posting_selector)
+            private = tuple(json.loads(item) for item in private_selector)
+            answers = tuple(json.loads(item) for item in answer_selector)
+        except json.JSONDecodeError as exc:
+            raise RunError("Tailor input selectors must be canonical JSON") from exc
+        if not isinstance(posting, dict) or not private or not all(isinstance(item, dict) for item in (*private, *answers)):
+            raise RunError("Tailor input selectors must be JSON objects")
+        result = launch_run(
+            home_root=home_value or default_home_root(), requested_target=target_value,
+            gig_id=gig_id, wait=wait, invocation_argv=tuple(sys.argv),
+            operator_consent={"schema_version": "1.0", "kind": "operator_run_consent", "action": "run", "actor": {"kind": "operator", "id": "local-user"}, "source": "direct_cli_confirm"},
+            tailor_execution=TailorRunRequest(
+                graph_selector="tailor-application", model_target=model_target,
+                posting_selector=posting, private_selectors=private,
+                answer_selectors=answers, requested_outputs=outputs,
+                proposal_selector=(
+                    {"record_id": proposal_record, "revision_id": proposal_revision}
+                    if proposal_record is not None else None
+                ),
+            ),
+        )
+    except (RunError, WorkpadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {"gig_id": result.gig_id, "gig_version": result.gig_version, "run_id": result.run_id, "status": result.status}
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"Tailor Run {result.run_id} {result.status} for {result.gig_id}.")
 
 
 @cli.command("run-details")
@@ -3204,7 +3807,7 @@ def check_command(
         )
     except (WorkpadError, OSError) as exc:
         _raise_projection_error(exc, as_json=as_json)
-    report = validate_proposal_workpad(resolved.path)
+    report = validate_pending_proposal_workpad(resolved.path)
     if as_json:
         click.echo(json.dumps(report.as_dict(), sort_keys=True, separators=(",", ":")))
     elif report.valid:
@@ -3313,11 +3916,27 @@ def _parse_credential_reference(value: str) -> CredentialReference:
 def _parse_endpoint_spec(value: str) -> Endpoint:
     try:
         name, remainder = value.split("=", 1)
-        adapter, credential, *base_url = remainder.split(":", 2)
     except ValueError as exc:
         raise click.BadParameter(
             "endpoints use NAME=openai_api:CREDENTIAL or "
             "NAME=openrouter_api:CREDENTIAL[:HTTPS_BASE_URL]"
+        ) from exc
+    if not name or not remainder:
+        raise click.BadParameter("endpoint components must not be empty")
+    if remainder.startswith("ollama_local:"):
+        base_url = remainder[len("ollama_local:") :]
+        if not base_url.startswith("http://127.0.0.1:") or not base_url.rsplit(":", 1)[-1].isdigit():
+            raise click.BadParameter(
+                "ollama_local endpoints require an explicit http://127.0.0.1:PORT URL"
+            )
+        return Endpoint(name=name, adapter="ollama_local", base_url=base_url)
+    try:
+        adapter, credential, *base_url = remainder.split(":", 2)
+    except ValueError as exc:
+        raise click.BadParameter(
+            "endpoints use NAME=openai_api:CREDENTIAL, "
+            "NAME=openrouter_api:CREDENTIAL[:HTTPS_BASE_URL], or "
+            "NAME=ollama_local:http://127.0.0.1:PORT"
         ) from exc
     if not name or not adapter or not credential or len(base_url) > 1:
         raise click.BadParameter("endpoint components must not be empty")
@@ -3375,6 +3994,18 @@ def _parse_model_target_spec(
         raise click.BadParameter("model targets use NAME=ENDPOINT:MODEL") from exc
     if not name or not endpoint or not model:
         raise click.BadParameter("model target components must not be empty")
+    model_digest = None
+    if "@" in model:
+        model, model_digest = model.rsplit("@", 1)
+        if (
+            not model
+            or not model_digest.startswith("sha256:")
+            or len(model_digest) != 71
+            or any(char not in "0123456789abcdef" for char in model_digest[7:])
+        ):
+            raise click.BadParameter(
+                "local model digests use @sha256:<64 lowercase hex digits>"
+            )
     maximum = output_limits.get(name, 4096)
     return ModelTarget(
         name=name,
@@ -3383,6 +4014,7 @@ def _parse_model_target_spec(
         capabilities=("text",),
         max_output_tokens=maximum,
         reasoning_effort=reasoning_efforts.get(name),
+        model_digest=model_digest,
     )
 
 
@@ -3391,3 +4023,19 @@ def _require_supported_platform() -> None:
         raise click.ClickException(
             "unsupported_platform: GigAI v1 requires macOS or Linux"
         )
+
+
+cli.add_command(external_group)
+cli.add_command(capability_group)
+cli.add_command(application_group)
+cli.add_command(report_group)
+cli.add_command(document_group)
+cli.add_command(answer_group)
+cli.add_command(acquisition_group)
+cli.add_command(acquisition_group, name="scout-import")
+cli.add_command(interview_group)
+cli.add_command(transfer_group)
+# Keep existing G45 wrapper create/read behavior while exposing native CRUD.
+# Registering this independently named group as "record" would silently replace
+# the existing Click group and break its accepted command surface.
+record_group.add_command(native_record_group, name="native")

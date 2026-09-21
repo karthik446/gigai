@@ -332,7 +332,9 @@ def _initialize_git_target(
         assert_target_identity_stable(target)
         _preflight_git_target(home, target.root, allow_tracked_portable=allow_tracked_portable)
         existing_binding = _optional_binding(target.root)
-        registry, registry_created = open_project_registry(home, create=True)
+        registry, registry_created = open_project_registry(
+            home, create=True, allow_migration=True
+        )
         try:
             with registry.transaction() as transaction:
                 result = _bind_git_transaction(
@@ -429,7 +431,9 @@ def _initialize_non_git_target(
     uuid_factory: Callable[[], uuid.UUID],
 ) -> TargetBindingResult:
     assert_target_identity_stable(target)
-    registry, registry_created = open_project_registry(home, create=True)
+    registry, registry_created = open_project_registry(
+        home, create=True, allow_migration=True
+    )
     try:
         with registry.transaction() as transaction:
             assert_target_identity_stable(target)
@@ -492,7 +496,8 @@ def _preflight_git_target(
     if directory.exists() and not directory.is_dir():
         raise ConflictingBindingError("target .gigai path is not a directory")
     if directory.is_dir():
-        allowed = {binding_path(root).name, "packages"}
+        supplemental_private_roots = {"local", "locks"}
+        allowed = {binding_path(root).name, "packages", *supplemental_private_roots}
         unexpected = sorted(
             path.name
             for path in directory.iterdir()
@@ -506,7 +511,41 @@ def _preflight_git_target(
         if project_path.is_symlink():
             raise ConflictingBindingError("project.toml must not be a symlink")
         if project_path.exists():
-            load_project_binding(root)
+            binding = load_project_binding(root)
+        else:
+            binding = None
+        present_private_roots = [
+            directory / name for name in supplemental_private_roots if (directory / name).exists()
+        ]
+        if present_private_roots:
+            if binding is None:
+                raise ConflictingBindingError(
+                    "private init state requires an existing validated project binding"
+                )
+            registry, _created = open_project_registry(home, create=False)
+            record = registry.find_project(binding.project_id)
+            if record is None or record.target_kind != "git":
+                raise ConflictingBindingError(
+                    "private init state requires the bound project registry record"
+                )
+            try:
+                matches_target = os.path.samefile(Path(record.target_locator), root)
+            except OSError:
+                matches_target = False
+            if not matches_target:
+                raise ConflictingBindingError(
+                    "private init state belongs to a different registered target"
+                )
+            with registry.transaction() as transaction:
+                if transaction.find_workspace_owner(binding.project_id) is None:
+                    raise ConflictingBindingError(
+                        "private init state requires a saved workspace owner"
+                    )
+            for private_root in present_private_roots:
+                if private_root.is_symlink() or not private_root.is_dir():
+                    raise ConflictingBindingError(
+                        f"private init root {private_root.name} must be a non-symlink directory"
+                    )
     root_mode = stat.S_IMODE(root.stat().st_mode)
     if root_mode & 0o222 == 0:
         raise TargetPermissionError(f"target root is read-only: {root}")

@@ -80,9 +80,21 @@ def main() -> None:
             raise SystemExit(
                 "installed G09 projection did not report proposed authority"
             )
+        gigs = json.loads(
+            _run(
+                "gigs",
+                "--target",
+                os.fspath(target),
+                "--home",
+                os.fspath(home),
+                "--json",
+            )
+        )
         if (
-            json.loads(_run("gigs", "--home", os.fspath(home), "--json"))[0]["gig_id"]
-            != created.gig_id
+            not isinstance(gigs, dict)
+            or gigs.get("scope", {}).get("kind") != "project"
+            or [entry.get("gig_id") for entry in gigs.get("entries", [])]
+            != [created.gig_id]
         ):
             raise SystemExit("installed G09 gigs omitted the created Gig")
     print("verified installed GigAI G09 rebuildable index and read commands")

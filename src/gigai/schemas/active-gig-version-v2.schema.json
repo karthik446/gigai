@@ -1,0 +1,5 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"urn:gigai:schema:active-gig-version-v2:1","title":"GigAI active multi-graph Gig version","type":"object","additionalProperties":false,
+  "required":["schema_version","gig_id","active_version","approved_proposal_id","graph_set","journal_commit","journal_tag","approved_at","approved_by"],
+  "properties":{"schema_version":{"$ref":"urn:gigai:schema:common:1#/$defs/schema_version"},"gig_id":{"$ref":"urn:gigai:schema:common:1#/$defs/gig_id"},"active_version":{"$ref":"urn:gigai:schema:common:1#/$defs/positive_version"},"approved_proposal_id":{"$ref":"urn:gigai:schema:common:1#/$defs/gig_proposal_id"},"graph_set":{"$ref":"urn:gigai:schema:common:1#/$defs/artifact_ref"},"capability_manifest":{"$ref":"urn:gigai:schema:common:1#/$defs/artifact_ref"},"journal_commit":{"type":"string","pattern":"^[0-9a-f]{40,64}$"},"journal_tag":{"type":"string","pattern":"^gig-v[0-9]{6}$"},"approved_at":{"type":"string","format":"date-time"},"approved_by":{"$ref":"urn:gigai:schema:common:1#/$defs/actor"}}
+}

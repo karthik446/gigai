@@ -71,10 +71,10 @@ def test_index_rebuild_is_disposable_deterministic_and_idempotent(
     )
     assert rebuilt.as_dict() == first.as_dict()
     (created.workpad / "state.sqlite").write_bytes(b"not a SQLite database")
-    repaired = read_index(
-        workpad=created.workpad, project_id=created.project_id, gig_id=created.gig_id
-    )
-    assert repaired.as_dict() == first.as_dict()
+    with pytest.raises(JournalIndexError, match="malformed"):
+        read_index(
+            workpad=created.workpad, project_id=created.project_id, gig_id=created.gig_id
+        )
 
 
 def test_index_repair_temp_stays_inside_allowed_scratch_surface(

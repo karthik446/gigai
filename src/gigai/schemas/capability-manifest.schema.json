@@ -53,7 +53,8 @@
         "compatibility": {"$ref": "#/$defs/compatibility"},
         "security_review": {"$ref": "#/$defs/security_review"},
         "alternatives": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/alternative"}},
-        "options": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/option"}}
+        "options": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/option"}},
+        "tool_binding": {"$ref": "#/$defs/tool_binding"}
       }
     },
     "source_constraints": {
@@ -116,6 +117,47 @@
         "ordinal": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "decision": {"type": "string", "enum": ["pending", "approved", "refused"]}
       }
+    },
+    "tool_inventory_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content_sha256", "media_type", "size_bytes"],
+      "properties": {
+        "path": {"oneOf": [{"const": "gig.py"}, {"type": "string", "pattern": "^tools/cap_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$"}]},
+        "content_sha256": {"$ref": "#/$defs/sha256"},
+        "media_type": {"type": "string", "enum": ["text/x-python", "application/schema+json"]},
+        "size_bytes": {"type": "integer", "minimum": 1, "maximum": 262144}
+      }
+    },
+    "tool_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_path", "inventory", "inventory_sha256", "operations", "effects"],
+      "properties": {
+        "entry_path": {"type": "string", "pattern": "^tools/cap_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$"},
+        "inventory": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/tool_inventory_item"}},
+        "inventory_sha256": {"$ref": "#/$defs/sha256"},
+        "operations": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["record_create", "record_update", "record_archive"]}},
+        "effects": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"const": "write_workpad"}},
+        "wrapper_ref": {"$ref": "#/$defs/tool_inventory_item"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "inventory": {
+                "contains": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {"path": {"const": "gig.py"}}
+                }
+              }
+            },
+            "required": ["inventory"]
+          },
+          "then": {"required": ["wrapper_ref"]}
+        }
+      ]
     }
   }
 }

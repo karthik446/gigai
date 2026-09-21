@@ -2,23 +2,17 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
-import re
-import subprocess
 import sys
+import subprocess
 import tempfile
 
 from gigai.roles import RoleReference, resolve_role
 from gigai.validators import SCHEMA_NAMES
-
-
-def _digest(value: object) -> str:
-    return "sha256:" + hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from installed_schema_expectations import EXPECTED_LEGACY_SCHEMA_NAMES
 
 
 def _run(command: list[str], *, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -29,8 +23,11 @@ def _run(command: list[str], *, env: dict[str, str]) -> subprocess.CompletedProc
 
 
 def main() -> int:
-    if len(SCHEMA_NAMES) != 34:
-        raise SystemExit(f"installed G28 schema inventory is {len(SCHEMA_NAMES)}, expected 34")
+    if tuple(SCHEMA_NAMES) != EXPECTED_LEGACY_SCHEMA_NAMES:
+        raise SystemExit(
+            "installed G28 schema identity mismatch: "
+            f"expected={EXPECTED_LEGACY_SCHEMA_NAMES!r}, actual={tuple(SCHEMA_NAMES)!r}"
+        )
     if "role-reference.schema.json" not in SCHEMA_NAMES:
         raise SystemExit("installed role-reference schema is missing")
     registered = resolve_role(
@@ -64,81 +61,84 @@ def main() -> int:
                 str(workpads),
                 "--editor",
                 "/usr/bin/true",
+                "--credential-ref",
+                "provider=environment:GIGAI_PROVIDER_TOKEN",
+                "--endpoint",
+                "remote=openai_api:provider:https://api.example.test",
+                "--model-target",
+                "remote=remote:gpt-test",
+                "--create-model-target",
+                "remote",
                 "--json",
             ],
             env=environment,
         )
         if json.loads(setup.stdout)["schema_version"] != "2.0":
             raise SystemExit("installed setup did not write the current configuration")
-        _run([str(executable), "init", "--home", str(home), "--target", str(target), "--json"], env=environment)
-        config_text = (home / "config.toml").read_text(encoding="utf-8")
-        if 'planner = "offline-default"' not in config_text:
-            raise SystemExit("installed setup did not persist the create model selection")
-
-        manifest = {
-            "schema_version": "1.0",
-            "kind": "behavior_manifest",
-            "corpus_id": "installed-g28",
-            "corpus_version": "1",
-            "contamination": {"rule": "tuning_never_certifies_final"},
-            "cases": [
-                {
-                    "case_id": "installed-create",
-                    "case_version": "1",
-                    "split": "final_held_out_acceptance",
-                    "labels": ["positive"],
-                    "expected": ["browser_launched"],
-                    "forbidden": ["target_mutated", "run_created"],
-                }
-            ],
-        }
-        manifest_path = root / "manifest.json"
-        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-        observations = {
-            "schema_version": "1.0",
-            "manifest_digest": _digest(manifest),
-            "solver": {"kind": "installed_fixture", "id": "g28-installed", "version": "1"},
-            "contamination_check": "clean",
-            "tuning_cutoff": "installed-g28",
-            "cases": [{"case_id": "installed-create", "observed": ["browser_launched"]}],
-        }
-        observations_path = root / "observations.json"
-        observations_path.write_text(json.dumps(observations), encoding="utf-8")
-        report = _run(
+        _run(
             [
                 str(executable),
-                "eval",
-                "behavior",
-                "--manifest",
-                str(manifest_path),
-                "--observations",
-                str(observations_path),
-                "--split",
-                "final_held_out_acceptance",
+                "init",
+                "--home",
+                str(home),
+                "--target",
+                str(target),
+                "--username",
+                "installed-verifier",
+                "--json",
             ],
             env=environment,
         )
-        if json.loads(report.stdout)["candidate_judge_scored"] is not False:
-            raise SystemExit("installed eval report overclaimed candidate judge quality")
+        config_text = (home / "config.toml").read_text(encoding="utf-8")
+        if 'planner = "remote"' not in config_text:
+            raise SystemExit("installed setup did not persist the create model selection")
 
-        process = subprocess.Popen(
-            # Suppress only the operating-system browser handoff in this
-            # headless replay; the HTMX server and session still launch.
-            [str(executable), "create", "installed-g28", "--home", str(home), "--no-open", "--json"],
-            cwd=target,
-            env=environment,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+        invocation_path = root / "invocation.json"
+        invocation_path.write_text(
+            json.dumps(
+                {
+                    "protocol_version": "1",
+                    "invocation_id": "inv_g28-installed",
+                    "trigger": "$gigai",
+                    "actor": {
+                        "kind": "agent",
+                        "id": "codex",
+                        "session_id": "g28-test",
+                    },
+                    "command": "create",
+                    "target": {"home": str(home), "project": "g28-project"},
+                    "input": {
+                        "intent": "Create a bounded installed proposal.",
+                        "proposal": {"summary": "Inspect the fixture repository."},
+                    },
+                    "requested": {
+                        "roles": ["gig_creator"],
+                        "models": ["remote"],
+                        "capabilities": [],
+                    },
+                    "consent": [],
+                }
+            ),
+            encoding="utf-8",
         )
-        try:
-            assert process.stderr is not None
-            line = process.stderr.readline().strip()
-            if re.fullmatch(r"GigAI local interview: http://127\.0\.0\.1:\d+/session/[A-Za-z0-9_-]+", line) is None:
-                raise SystemExit(f"installed create did not launch HTMX: {line!r}")
-        finally:
-            process.kill()
-            process.communicate(timeout=10)
+        created = _run(
+            [
+                str(executable),
+                "create",
+                "installed-g28",
+                "--home",
+                str(home),
+                "--target",
+                str(target),
+                "--invocation",
+                str(invocation_path),
+                "--json",
+            ],
+            env=environment,
+        )
+        payload = json.loads(created.stdout)
+        if payload["status"] != "proposed" or payload["authority_created"] is not False:
+            raise SystemExit("installed create did not preserve the proposal-only boundary")
     print("verified installed GigAI G28 evaluation, roles, setup, and browser-first create")
     return 0
 

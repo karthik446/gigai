@@ -6,12 +6,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
 from pathlib import Path
+import re
 from typing import Mapping
 import uuid
 
-from .canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes, validate_entity_id, EntityPrefix
+from .canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes, parse_json_front_matter, validate_entity_id, EntityPrefix
 from .config import load_config
-from .journal import JournalArtifact, record_transition
+from .journal import JournalArtifact, JournalConflictError, _git as _journal_git, record_transition
 from .model_execution import InvocationBudget, InvocationPolicy, SelectedReference, run_model_invocation
 from .model_discovery import recorded_target_readiness, resolve_target_readiness
 from .model_targets import resolve_model_target
@@ -39,6 +40,93 @@ class ProviderReviewResult:
     replayed: bool
 
 
+@dataclass(frozen=True)
+class ProviderReviewCloseoutResult:
+    """One non-authorizing, direct-operator clean-review closeout receipt."""
+
+    closeout_id: str
+    run_id: str
+    run_plan_id: str
+    receipt_path: str
+    replayed: bool
+
+
+def close_provider_review_no_fix_required(*, home_root: Path, requested_target: Path | None, gig_id: str | None, run_id: str, run_plan_id: str, direct_operator_confirmed: bool) -> ProviderReviewCloseoutResult:
+    """Record the sole supported clean G43.1 closeout; it grants no new authority."""
+
+    if not direct_operator_confirmed:
+        raise ProviderReviewError("provider_review_closeout_confirmation_required", "no-fix closeout requires direct --confirm confirmation")
+    try:
+        validate_entity_id(run_id, expected_prefix=EntityPrefix.RUN)
+        resolved = resolve_workpad(home_root=home_root, requested_target=requested_target, gig_id=gig_id, allow_semantic_state=True)
+        sealed = read_run_plan(home_root=home_root, requested_target=requested_target, gig_id=resolved.gig_id, run_plan_id=run_plan_id)
+    except (RunPlanError, WorkpadError, OSError, ValueError) as exc:
+        raise ProviderReviewError(getattr(exc, "code", "provider_review_closeout_invalid"), str(exc)) from exc
+    reviewer_ids = _require_standard_typed_closure_plan(sealed.plan)
+    _require_direct_run_consent(resolved.path, run_id, run_plan_id, sealed.content_sha256)
+    _require_run_plan_binding(resolved.path, resolved.gig_id, run_id, run_plan_id, sealed.content_sha256)
+    base = f"runs/{run_id}/provider-reviews/{run_plan_id}"
+    evidence = _authenticated_clean_evidence(resolved.path, base, run_id, run_plan_id, resolved.gig_id, sealed.plan)
+    evidence["reviewer_participant_ids"] = reviewer_ids
+    receipt_path = f"{base}/closeout/no-fix-required.json"
+    existing = resolved.path / receipt_path
+    if existing.exists() or existing.is_symlink():
+        return _read_closeout_replay(resolved.path, receipt_path, run_id, run_plan_id, sealed.content_sha256, resolved.project_id, resolved.gig_id, evidence)
+    receipt = {
+        "schema_version": "1.0",
+        "closeout_id": _uuid_id("provider_review_closeout"),
+        "project_id": resolved.project_id,
+        "gig_id": resolved.gig_id,
+        "run_id": run_id,
+        "run_plan_id": run_plan_id,
+        "run_plan_content_sha256": sealed.content_sha256,
+        "result_ref": evidence["result_ref"],
+        "report_ref": evidence["report_ref"],
+        "review_loop_ref": evidence["review_loop_ref"],
+        "reviewer_participant_ids": evidence["reviewer_participant_ids"],
+        "decision": "no_fix_required",
+        "confirmed_by": {"kind": "operator", "id": "local-user", "model_target": None},
+        "confirmed_at": _now(),
+    }
+    receipt_bytes = canonical_json_bytes(receipt)
+    if not validate_serialized_contract("provider-review-closeout-receipt.schema.json", receipt_bytes).valid:
+        raise ProviderReviewError("provider_review_closeout_invalid", "constructed no-fix closeout receipt failed schema validation")
+    try:
+        record_transition(
+            workpad=resolved.path,
+            project_id=resolved.project_id,
+            gig_id=resolved.gig_id,
+            handoff_id=_uuid_id("handoff"),
+            transition="provider_review_no_fix_required",
+            body=f"Provider review {run_id}/{run_plan_id} was directly confirmed as no fix required.",
+            artifacts=(JournalArtifact(receipt_path, receipt_bytes),),
+            front_matter={
+                "gig_version": sealed.plan["gig_version"], "run_id": run_id,
+                "outcome": "COMPLETE", "actor": {"kind": "operator", "id": "local-user", "model_target": None},
+                "evidence": [evidence["result_ref"], evidence["report_ref"], evidence["review_loop_ref"]],
+            },
+            allow_artifact_replacement=False,
+        )
+    except JournalConflictError as exc:
+        # Another caller may have published this exact closeout after our
+        # initial read. The journal lock has been released; authenticate its
+        # receipt instead of either overwriting it or failing an identical retry.
+        if existing.exists() or existing.is_symlink():
+            current_evidence = _authenticated_clean_evidence(
+                resolved.path, base, run_id, run_plan_id, resolved.gig_id, sealed.plan
+            )
+            current_evidence["reviewer_participant_ids"] = reviewer_ids
+            return _read_closeout_replay(
+                resolved.path, receipt_path, run_id, run_plan_id,
+                sealed.content_sha256, resolved.project_id, resolved.gig_id,
+                current_evidence,
+            )
+        raise ProviderReviewError("provider_review_closeout_journal_failed", str(exc)) from exc
+    except Exception as exc:
+        raise ProviderReviewError("provider_review_closeout_journal_failed", str(exc)) from exc
+    return ProviderReviewCloseoutResult(str(receipt["closeout_id"]), run_id, run_plan_id, receipt_path, False)
+
+
 def execute_provider_review(*, home_root: Path, requested_target: Path | None, gig_id: str | None, run_id: str, run_plan_id: str) -> ProviderReviewResult:
     """Execute one explicitly selected, sealed G43 review pass.
 
@@ -60,7 +148,7 @@ def execute_provider_review(*, home_root: Path, requested_target: Path | None, g
     plan = sealed.plan
     _require_eligible_plan(plan)
     run_root = resolved.path / "runs" / run_id
-    _require_direct_run_consent(run_root, run_plan_id, sealed.content_sha256)
+    _require_direct_run_consent(resolved.path, run_id, run_plan_id, sealed.content_sha256)
     root = run_root / "provider-reviews" / run_plan_id
     result_path = root / "result.json"
     if result_path.exists() and not result_path.is_symlink():
@@ -205,6 +293,7 @@ def execute_provider_review(*, home_root: Path, requested_target: Path | None, g
         verifications=verifications,
         adjudications=adjudications,
         invocation_ids=[str(call.record["invocation_id"]) for call in (*reviewer_calls, *verifier_calls, *adjudicator_calls)],
+        reviewer_invocations=[{"participant_id": str(participant["participant_id"]), "invocation_id": str(call.record["invocation_id"])} for participant, call in zip((item for item in participants if "reviewer" in item.get("roles", [])), reviewer_calls, strict=True)],
         references=references,
         reference_roles=reference_roles,
         input_artifacts=input_artifacts,
@@ -240,17 +329,223 @@ def _require_eligible_plan(plan: Mapping[str, object]) -> None:
         raise ProviderReviewError("provider_review_not_eligible", "provider review requires one to six explicit sealed inputs")
 
 
-def _require_direct_run_consent(run_root: Path, run_plan_id: str, plan_digest: str) -> None:
-    path = run_root / "operator-consent.json"
+def _require_direct_run_consent(workpad: Path, run_id: str, run_plan_id: str, plan_digest: str) -> None:
+    try:
+        path, data = _safe_existing_artifact(workpad, f"runs/{run_id}/operator-consent.json")
+    except ProviderReviewError as exc:
+        if exc.code == "provider_review_closeout_evidence_missing":
+            raise ProviderReviewError("provider_review_consent_missing", "provider review requires the Run's direct --confirm consent") from exc
+        raise
     if path.is_symlink() or not path.is_file():
         raise ProviderReviewError("provider_review_consent_missing", "provider review requires the Run's direct --confirm consent")
     try:
-        consent = parse_json_bytes(path.read_bytes())
+        consent = parse_json_bytes(data)
     except Exception as exc:
         raise ProviderReviewError("provider_review_consent_missing", "Run consent is unreadable") from exc
     scope = consent.get("scope") if isinstance(consent, Mapping) else None
     if not isinstance(scope, Mapping) or consent.get("source") != "direct_cli_confirm" or scope.get("run_plan_id") != run_plan_id or scope.get("run_plan_content_sha256") != plan_digest or scope.get("provider_review_requested") is not True:
         raise ProviderReviewError("provider_review_consent_mismatch", "Run consent does not bind this exact sealed review plan")
+
+
+def _require_standard_typed_closure_plan(plan: Mapping[str, object]) -> list[str]:
+    """Keep the no-fix decision narrower than the general review executor."""
+
+    profile = plan.get("profile")
+    inputs = plan.get("inputs")
+    participants = plan.get("participants")
+    if not isinstance(profile, Mapping) or profile.get("profile_id") != "standard":
+        raise ProviderReviewError("provider_review_closeout_not_eligible", "no-fix closeout requires the standard review profile")
+    if not isinstance(inputs, list) or {item.get("role") for item in inputs if isinstance(item, Mapping)} != {"review_subject", "requirements_baseline"}:
+        raise ProviderReviewError("provider_review_closeout_not_eligible", "no-fix closeout requires the typed G43.1 subject and baseline inputs")
+    reviewers = [item for item in participants or [] if isinstance(item, Mapping) and "reviewer" in item.get("roles", [])]
+    ids = [item.get("participant_id") for item in reviewers]
+    groups = [item.get("independence_group") for item in reviewers]
+    if len(reviewers) != 2 or any(not isinstance(value, str) or not value for value in ids) or len(set(ids)) != 2 or any(not isinstance(value, str) or not value for value in groups) or len(set(groups)) != 2:
+        raise ProviderReviewError("provider_review_closeout_not_eligible", "no-fix closeout requires two distinct independent reviewers")
+    return [str(value) for value in ids]
+
+
+def _require_run_plan_binding(workpad: Path, gig_id: str, run_id: str, plan_id: str, plan_digest: str) -> None:
+    """A consent-shaped file cannot substitute a Run's sealed-plan bridge."""
+
+    relative = f"runs/{run_id}/review/evidence/sealed-input.json"
+    _path, data = _safe_existing_artifact(workpad, relative)
+    try:
+        bridge = parse_json_bytes(data)
+    except Exception as exc:
+        raise ProviderReviewError("provider_review_closeout_run_mismatch", "Run review bridge is unreadable") from exc
+    if not isinstance(bridge, Mapping) or bridge.get("run_id") != run_id or bridge.get("run_plan_id") != plan_id or bridge.get("run_plan_content_sha256") != plan_digest:
+        raise ProviderReviewError("provider_review_closeout_run_mismatch", "Run does not bind this exact sealed review Plan")
+    _require_exact_journal_artifact(workpad, relative, data, gig_id, run_id, "run_review_loop_materialized", "g43-bridge")
+
+
+def _safe_existing_artifact(workpad: Path, relative: str) -> tuple[Path, bytes]:
+    path = _safe_artifact_path(workpad, relative)
+    if path.is_symlink() or not path.is_file():
+        raise ProviderReviewError("provider_review_closeout_evidence_missing", "provider review terminal evidence is unavailable")
+    try:
+        return path, path.read_bytes()
+    except OSError as exc:
+        raise ProviderReviewError("provider_review_closeout_evidence_missing", "provider review terminal evidence is unavailable") from exc
+
+
+def _artifact_ref(relative: str, data: bytes, media_type: str = "application/json") -> dict[str, object]:
+    return {"path": relative, "content_sha256": digest_imported_bytes(data), "media_type": media_type, "size_bytes": len(data)}
+
+
+def _authenticated_clean_evidence(workpad: Path, base: str, run_id: str, plan_id: str, gig_id: str, plan: Mapping[str, object]) -> dict[str, object]:
+    """Read zero-finding terminal evidence only when its producer journaled it."""
+
+    paths = {"result": f"{base}/result.json", "report": f"{base}/report.json", "loop": f"{base}/review-loop.json"}
+    raw = {name: _safe_existing_artifact(workpad, relative)[1] for name, relative in paths.items()}
+    try:
+        result = parse_json_bytes(raw["result"])
+        report = parse_json_bytes(raw["report"])
+        loop = parse_json_bytes(raw["loop"])
+    except Exception as exc:
+        raise ProviderReviewError("provider_review_closeout_evidence_invalid", "provider review terminal evidence is unreadable") from exc
+    if not isinstance(result, Mapping) or result.get("run_id") != run_id or result.get("run_plan_id") != plan_id or result.get("status") != "complete" or result.get("finding_count") != 0:
+        raise ProviderReviewError("provider_review_closeout_not_clean", "provider review result is not a clean terminal result for this Run and Plan")
+    if not isinstance(report, Mapping) or not validate_serialized_contract("report.schema.json", raw["report"]).valid or report.get("status") != "complete" or report.get("finding_ids") != []:
+        raise ProviderReviewError("provider_review_closeout_not_clean", "provider review report is not a schema-valid zero-finding completion")
+    if not isinstance(loop, Mapping) or not validate_review_loop(raw["loop"]).valid or loop.get("run_id") != run_id or loop.get("gig_id") != gig_id or loop.get("state") != "complete" or loop.get("finding_ids") != []:
+        raise ProviderReviewError("provider_review_closeout_not_clean", "provider review loop is not a schema-valid zero-finding completion")
+    _require_authenticated_reviewer_invocations(workpad, result, plan, gig_id, run_id)
+    _require_terminal_artifacts_journaled(workpad, tuple(paths.values()), raw, gig_id, run_id)
+    return {
+        "result_ref": _artifact_ref(paths["result"], raw["result"]),
+        "report_ref": _artifact_ref(paths["report"], raw["report"]),
+        "review_loop_ref": _artifact_ref(paths["loop"], raw["loop"]),
+        "reviewer_participant_ids": [],  # replaced from the sealed Plan before receipt construction
+    }
+
+
+def _require_authenticated_reviewer_invocations(workpad: Path, result: Mapping[str, object], plan: Mapping[str, object], gig_id: str, run_id: str) -> None:
+    expected = {
+        str(item.get("participant_id")): str(item.get("model_target_id"))
+        for item in plan.get("participants", [])
+        if isinstance(item, Mapping) and "reviewer" in item.get("roles", [])
+    }
+    observed = result.get("reviewer_invocations")
+    if not isinstance(observed, list) or len(observed) != len(expected):
+        raise ProviderReviewError("provider_review_closeout_invocation_invalid", "terminal review result lacks one invocation for each sealed reviewer")
+    seen: set[str] = set()
+    for item in observed:
+        if not isinstance(item, Mapping) or not isinstance(item.get("participant_id"), str) or not isinstance(item.get("invocation_id"), str):
+            raise ProviderReviewError("provider_review_closeout_invocation_invalid", "terminal reviewer invocation identity is malformed")
+        participant_id = item["participant_id"]
+        invocation_id = item["invocation_id"]
+        if participant_id not in expected or participant_id in seen:
+            raise ProviderReviewError("provider_review_closeout_invocation_invalid", "terminal reviewer invocation identities do not match the sealed Plan")
+        seen.add(participant_id)
+        relative = f"runs/{run_id}/model-invocations/{invocation_id}/record.json"
+        _path, data = _safe_existing_artifact(workpad, relative)
+        try:
+            record = parse_json_bytes(data)
+        except Exception as exc:
+            raise ProviderReviewError("provider_review_closeout_invocation_invalid", "reviewer invocation record is unreadable") from exc
+        if not isinstance(record, Mapping) or not validate_serialized_contract("model-invocation.schema.json", data).valid or record.get("run_id") != run_id or record.get("invocation_id") != invocation_id or record.get("role") != "reviewer" or record.get("configured_selector") != expected[participant_id] or record.get("outcome") != "succeeded":
+            raise ProviderReviewError("provider_review_closeout_invocation_invalid", "reviewer invocation record does not bind the sealed reviewer")
+        _require_exact_journal_artifact(workpad, relative, data, gig_id, run_id, "goal_completed", "g18-model-execution")
+        request = record.get("request")
+        if not isinstance(request, Mapping):
+            raise ProviderReviewError("provider_review_closeout_invocation_invalid", "reviewer invocation request evidence is malformed")
+        _require_invocation_ref(workpad, request.get("request_artifact"), gig_id, run_id)
+        extensions = record.get("extensions")
+        response_refs = [item.get("value") for item in extensions if isinstance(item, Mapping) and item.get("namespace") == "gigai.g18" and item.get("name") == "response_artifact"] if isinstance(extensions, list) else []
+        if len(response_refs) != 1:
+            raise ProviderReviewError("provider_review_closeout_invocation_invalid", "successful reviewer invocation lacks exactly one response artifact")
+        _require_invocation_ref(workpad, response_refs[0], gig_id, run_id)
+    if seen != set(expected):
+        raise ProviderReviewError("provider_review_closeout_invocation_invalid", "not every sealed reviewer has authenticated successful invocation evidence")
+
+
+def _require_invocation_ref(workpad: Path, reference: object, gig_id: str, run_id: str) -> None:
+    if not isinstance(reference, Mapping) or not isinstance(reference.get("path"), str) or not isinstance(reference.get("content_sha256"), str) or type(reference.get("size_bytes")) is not int:
+        raise ProviderReviewError("provider_review_closeout_invocation_invalid", "invocation artifact reference is malformed")
+    relative = reference["path"]
+    _path, data = _safe_existing_artifact(workpad, relative)
+    if digest_imported_bytes(data) != reference["content_sha256"] or len(data) != reference["size_bytes"]:
+        raise ProviderReviewError("provider_review_closeout_invocation_invalid", "invocation artifact bytes changed")
+    _require_exact_journal_artifact(workpad, relative, data, gig_id, run_id, "goal_completed", "g18-model-execution")
+
+
+def _require_terminal_artifacts_journaled(workpad: Path, paths: tuple[str, ...], raw: Mapping[str, bytes], gig_id: str, run_id: str) -> None:
+    """Require the exact bytes in one authenticated G43.1 terminal handoff."""
+
+    commits = _journal_git(workpad, "log", "--format=%H", "--", *paths, check=False).stdout.splitlines()
+    for commit in commits:
+        changed = set(_journal_git(workpad, "show", "--format=", "--name-only", commit).stdout.splitlines())
+        if not set(paths).issubset(changed):
+            continue
+        if any(_journal_git(workpad, "show", f"{commit}:{path}", check=False).stdout.encode("utf-8") != raw[name] for name, path in zip(("result", "report", "loop"), paths, strict=True)):
+            continue
+        handoffs = [path for path in changed if path.startswith("handoffs/") and path.endswith(".txt")]
+        for handoff in handoffs:
+            shown = _journal_git(workpad, "show", f"{commit}:{handoff}", check=False)
+            if shown.returncode != 0:
+                continue
+            try:
+                metadata, _body = parse_json_front_matter(shown.stdout.encode("utf-8"))
+            except Exception:
+                continue
+            actor = metadata.get("actor")
+            if metadata.get("transition") == "goal_completed" and metadata.get("gig_id") == gig_id and metadata.get("run_id") == run_id and metadata.get("outcome") == "COMPLETE" and isinstance(actor, Mapping) and actor.get("kind") == "gigai" and actor.get("id") == "g43.1-provider-review":
+                return
+    raise ProviderReviewError("provider_review_closeout_evidence_unjournaled", "provider review terminal artifacts are not authenticated G43.1 journal evidence")
+
+
+def _require_exact_journal_artifact(workpad: Path, relative: str, data: bytes, gig_id: str, run_id: str, transition: str, actor_id: str) -> None:
+    for commit in _journal_git(workpad, "log", "--format=%H", "--", relative, check=False).stdout.splitlines():
+        shown = _journal_git(workpad, "show", f"{commit}:{relative}", check=False)
+        if shown.returncode != 0 or shown.stdout.encode("utf-8") != data:
+            continue
+        for handoff in _journal_git(workpad, "show", "--format=", "--name-only", commit).stdout.splitlines():
+            if not handoff.startswith("handoffs/"):
+                continue
+            candidate = _journal_git(workpad, "show", f"{commit}:{handoff}", check=False)
+            try:
+                metadata, _body = parse_json_front_matter(candidate.stdout.encode("utf-8"))
+            except Exception:
+                continue
+            actor = metadata.get("actor")
+            if metadata.get("transition") == transition and metadata.get("gig_id") == gig_id and metadata.get("run_id") == run_id and isinstance(actor, Mapping) and actor.get("kind") == "gigai" and actor.get("id") == actor_id:
+                return
+    raise ProviderReviewError("provider_review_closeout_run_unjournaled", "Run-to-Plan binding is not authenticated journal evidence")
+
+
+def _read_closeout_replay(workpad: Path, receipt_path: str, run_id: str, plan_id: str, plan_digest: str, project_id: str, gig_id: str, evidence: Mapping[str, object]) -> ProviderReviewCloseoutResult:
+    path, data = _safe_existing_artifact(workpad, receipt_path)
+    if not validate_serialized_contract("provider-review-closeout-receipt.schema.json", data).valid:
+        raise ProviderReviewError("provider_review_closeout_conflict", "existing closeout receipt is invalid")
+    receipt = parse_json_bytes(data)
+    expected = {"project_id": project_id, "gig_id": gig_id, "run_id": run_id, "run_plan_id": plan_id, "run_plan_content_sha256": plan_digest, "decision": "no_fix_required", "result_ref": evidence["result_ref"], "report_ref": evidence["report_ref"], "review_loop_ref": evidence["review_loop_ref"], "reviewer_participant_ids": evidence["reviewer_participant_ids"]}
+    if not isinstance(receipt, Mapping) or any(receipt.get(key) != value for key, value in expected.items()) or not _journaled_closeout(workpad, receipt_path, data, gig_id, run_id):
+        raise ProviderReviewError("provider_review_closeout_conflict", "existing closeout receipt does not bind this exact clean review")
+    closeout_id = receipt.get("closeout_id")
+    if not isinstance(closeout_id, str):
+        raise ProviderReviewError("provider_review_closeout_conflict", "existing closeout receipt is invalid")
+    return ProviderReviewCloseoutResult(closeout_id, run_id, plan_id, receipt_path, True)
+
+
+def _journaled_closeout(workpad: Path, receipt_path: str, receipt_bytes: bytes, gig_id: str, run_id: str) -> bool:
+    commits = _journal_git(workpad, "log", "--format=%H", "--", receipt_path, check=False).stdout.splitlines()
+    for commit in commits:
+        committed = _journal_git(workpad, "show", f"{commit}:{receipt_path}", check=False)
+        if committed.returncode != 0 or committed.stdout.encode("utf-8") != receipt_bytes:
+            continue
+        for handoff in _journal_git(workpad, "show", "--format=", "--name-only", commit).stdout.splitlines():
+            if not handoff.startswith("handoffs/"):
+                continue
+            shown = _journal_git(workpad, "show", f"{commit}:{handoff}", check=False)
+            try:
+                metadata, _body = parse_json_front_matter(shown.stdout.encode("utf-8"))
+            except Exception:
+                continue
+            actor = metadata.get("actor")
+            if metadata.get("transition") == "provider_review_no_fix_required" and metadata.get("gig_id") == gig_id and metadata.get("run_id") == run_id and isinstance(actor, Mapping) and actor.get("kind") == "operator" and actor.get("id") == "local-user":
+                return True
+    return False
 
 
 def _sealed_text_inputs(workpad: Path, plan: Mapping[str, object], run_id: str, plan_id: str) -> tuple[tuple[SelectedReference, ...], list[dict[str, object]], dict[str, str]]:
@@ -344,7 +639,9 @@ def _review_prompt(contract: Mapping[str, object], participant: Mapping[str, obj
     )
     return (
         "You are one independent document reviewer. Review only the supplied sealed references. "
-        "Do not use outside knowledge or propose file edits. Return strict JSON with a top-level `findings` array. "
+        "Do not use outside knowledge or propose file edits. Return strict JSON: your entire response must be exactly one JSON object "
+        "with a top-level `findings` array: no Markdown fences, no prose, no headings, or commentary before or after it. "
+        "Do not emit any second JSON value. "
         "Each finding must contain criterion_id, severity (info|low|medium|high|critical), title, description, "
         "reference_id, locator, and confidence (a string from 0 to 1). If no issue exists, return {\"findings\":[]}.\n"
         + output_shape
@@ -363,8 +660,9 @@ def _verify_prompt(findings: list[dict[str, object]], reference_roles: Mapping[s
     )
     return (
         "You are an independent verifier. Check the supplied sealed references and these proposed findings. "
-        "Return strict JSON with `outcomes`, one object per finding: finding_id, status "
+        "Return strict JSON: your entire response must be exactly one JSON object with `outcomes`, one object per finding: finding_id, status "
         "(verified|contradicted|unverified|blocked), and reason. Do not use outside knowledge.\n"
+        "Emit no Markdown fences, no prose, no headings, and no commentary before or after the JSON object. Do not emit a second JSON value.\n"
         "Sealed reference roles:\n"
         + role_lines
         + "\n"
@@ -375,8 +673,10 @@ def _verify_prompt(findings: list[dict[str, object]], reference_roles: Mapping[s
 def _adjudicate_prompt(findings: list[dict[str, object]], verifications: list[dict[str, object]]) -> str:
     return (
         "You are the sealed adjudicator. Decide each proposed finding using only the supplied sealed references, "
-        "the findings, and verifier records. Return strict JSON with `decisions`, one object per finding: "
-        "finding_id, decision (accepted|rejected|deferred|unanswerable), and rationale. Do not use outside knowledge.\n"
+        "the findings, and verifier records. Return strict JSON: your entire response must be exactly one JSON object with `decisions`, "
+        "one object per finding: finding_id, decision (accepted|rejected|deferred|unanswerable), and rationale. "
+        "Do not use outside knowledge. Emit no Markdown fences, no prose, no headings, and no commentary before or after the JSON object, "
+        "and do not emit a second JSON value.\n"
         + json.dumps({"findings": findings, "verifications": verifications}, sort_keys=True, separators=(",", ":"))
     )
 
@@ -493,7 +793,7 @@ def _adjudication_record(execution, adjudicator: Mapping[str, object], findings:
     return record, invalid
 
 
-def _terminal_artifacts(*, root_relative: str, now: str, run_id: str, gig_id: str, run_plan_id: str, bundle_id: str, contract_id: str, trace_id: str, findings: list[dict[str, object]], verifications: list[dict[str, object]], adjudications: list[dict[str, object]], invocation_ids: list[str], references: tuple[SelectedReference, ...], reference_roles: Mapping[str, str], input_artifacts: list[dict[str, object]], input_payloads: Mapping[str, bytes], status: str) -> tuple[dict[str, bytes], dict[str, object]]:
+def _terminal_artifacts(*, root_relative: str, now: str, run_id: str, gig_id: str, run_plan_id: str, bundle_id: str, contract_id: str, trace_id: str, findings: list[dict[str, object]], verifications: list[dict[str, object]], adjudications: list[dict[str, object]], invocation_ids: list[str], reviewer_invocations: list[dict[str, str]], references: tuple[SelectedReference, ...], reference_roles: Mapping[str, str], input_artifacts: list[dict[str, object]], input_payloads: Mapping[str, bytes], status: str) -> tuple[dict[str, bytes], dict[str, object]]:
     artifacts: dict[str, bytes] = {}
     for ref in input_artifacts:
         path = ref["path"]
@@ -541,7 +841,7 @@ def _terminal_artifacts(*, root_relative: str, now: str, run_id: str, gig_id: st
         stages.append({"state": "blocked", "sequence": 3})
     loop = {"schema_version": "1.1", "loop_id": _uuid_id("loop"), "loop_version": 1, "run_id": run_id, "gig_id": gig_id, "bundle_id": bundle_id, "contract_id": contract_id, "state": terminal_state, "cycle_cap": 1, "cycle_count": 1, "stage_sequence": stages, "finding_ids": finding_ids, "report_ids": [report_id], "feedback_ids": [], "adjudication_ids": adjudication_ids, "trace_ids": [trace_id], "verification_ids": verification_ids, "addressed_artifact_ids": [], "terminal_decision": {"state": terminal_state, "reason": "provider review completed" if status == "complete" else "one or more provider participants failed or returned invalid output", "next_action": "apply an explicit fix and create a fresh Run Plan" if finding_ids else None}, "created_at": now, "updated_at": now}
     artifacts[f"{root_relative}/review-loop.json"] = canonical_json_bytes(loop)
-    result = {"schema_version": "1.0", "run_id": run_id, "run_plan_id": run_plan_id, "status": status, "finding_count": len(findings), "report_path": human_path}
+    result = {"schema_version": "1.0", "run_id": run_id, "run_plan_id": run_plan_id, "status": status, "finding_count": len(findings), "reviewer_invocations": reviewer_invocations, "report_path": human_path}
     artifacts[f"{root_relative}/result.json"] = canonical_json_bytes(result)
     return artifacts, result
 
@@ -624,16 +924,121 @@ def _safe_artifact_path(root: Path, relative: object) -> Path:
     return candidate
 
 
-def _json_object(value: str) -> Mapping[str, object]:
-    text = value.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else ""
-        text = text.rsplit("```", 1)[0]
+_MAX_PROVIDER_RESPONSE_CHARS = 1_000_000
+_MAX_JSON_NESTING = 128
+_FENCE_LINE = re.compile(r"(?m)^[ \t]*```(?P<info>[A-Za-z0-9_-]*)[ \t]*(?:\r?\n|$)")
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, item in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON member name: {key!r}")
+        result[key] = item
+    return result
+
+
+def _reject_nonstandard_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _within_json_nesting_bound(candidate: str) -> bool:
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in candidate:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            depth += 1
+            if depth > _MAX_JSON_NESTING:
+                return False
+        elif char in "}]":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0 and not in_string
+
+
+def _has_valid_unicode(value: object) -> bool:
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, str):
+            try:
+                current.encode("utf-8", errors="strict")
+            except UnicodeEncodeError:
+                return False
+        elif isinstance(current, Mapping):
+            pending.extend(current.keys())
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
+    return True
+
+
+def _parse_framed_json_object(text: str) -> Mapping[str, object] | None:
+    """Parse one bounded provider JSON object without changing provider bytes.
+
+    The framing exception is intentionally narrow: one complete Markdown code
+    fence may contain the object, with ordinary prose around it. Any other
+    candidate payload, fence, duplicate key, array, or trailing JSON is rejected.
+    """
+
+    if not text or len(text) > _MAX_PROVIDER_RESPONSE_CHARS:
+        return None
     try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, Mapping) else {}
+        text.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        return None
+
+    def parse_object(candidate: str) -> Mapping[str, object] | None:
+        if not _within_json_nesting_bound(candidate):
+            return None
+        try:
+            parsed = json.loads(
+                candidate,
+                object_pairs_hook=_reject_duplicate_json_keys,
+                parse_constant=_reject_nonstandard_json_constant,
+            )
+        except (RecursionError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+        return parsed if isinstance(parsed, Mapping) and _has_valid_unicode(parsed) else None
+
+    raw = parse_object(text.strip())
+    if raw is not None:
+        return raw
+
+    markers = list(_FENCE_LINE.finditer(text))
+    if len(markers) != 2:
+        return None
+    opening, closing = markers
+    if opening.group("info") not in {"", "json"} or closing.group("info"):
+        return None
+    payload = text[opening.end() : closing.start()].strip()
+    framed = parse_object(payload)
+    if framed is None:
+        return None
+
+    # Any JSON delimiters or extra fence token in surrounding prose make the
+    # framing ambiguous, even when those bytes do not form valid JSON.
+    surrounding = text[: opening.start()] + text[closing.end() :]
+    if any(delimiter in surrounding for delimiter in "{}[]") or "```" in surrounding:
+        return None
+    return framed
+
+
+def _json_object(value: str) -> Mapping[str, object]:
+    parsed = _parse_framed_json_object(value)
+    return parsed if parsed is not None else {}
 
 
 def _confidence(value: str) -> bool:
@@ -668,4 +1073,10 @@ def _now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-__all__ = ["ProviderReviewError", "ProviderReviewResult", "execute_provider_review"]
+__all__ = [
+    "ProviderReviewCloseoutResult",
+    "ProviderReviewError",
+    "ProviderReviewResult",
+    "close_provider_review_no_fix_required",
+    "execute_provider_review",
+]

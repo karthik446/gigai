@@ -230,12 +230,17 @@ def reconcile_occurrence(
     run_id = record.get("run_id")
     if not isinstance(run_id, str):
         raise OccurrenceError("prepared occurrence has no Run identity")
-    details = read_run_details(
-        home_root=home_root,
-        requested_target=requested_target,
-        gig_id=resolved.gig_id,
-        run_id=run_id,
-    )
+    try:
+        details = read_run_details(
+            home_root=home_root,
+            requested_target=requested_target,
+            gig_id=resolved.gig_id,
+            run_id=run_id,
+        )
+    except RunError as exc:
+        if str(exc).startswith("run_details_reconciliation_required:"):
+            return _result(resolved, record)
+        raise
     status = details.get("status")
     if status in {"preparing", "running"}:
         return _result(resolved, record)

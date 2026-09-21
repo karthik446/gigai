@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:native-record-content:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "scope", "payload"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"enum": ["profile_preferences", "experience_qa", "imported_reference", "supplied_source", "selected_conversation"]},
+    "scope": {"$ref": "#/$defs/scope"},
+    "payload": {"type": "object"}
+  },
+  "allOf": [
+    {"if": {"properties": {"kind": {"const": "profile_preferences"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/profile"}}}},
+    {"if": {"properties": {"kind": {"const": "experience_qa"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/experience"}}}},
+    {"if": {"properties": {"kind": {"const": "imported_reference"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/imported_reference"}}}},
+    {"if": {"properties": {"kind": {"const": "supplied_source"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/supplied_source"}}}},
+    {"if": {"properties": {"kind": {"const": "selected_conversation"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/conversation"}}}}
+  ],
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "small_text": {"type": "string", "minLength": 1, "maxLength": 16384},
+    "artifact_ref": {"type": "object", "additionalProperties": false, "required": ["path", "content_sha256", "media_type", "size_bytes"], "properties": {"path": {"type": "string", "pattern": "^(references|run-inputs|records|docs)/[^\\\\]+(?:/[^\\\\]+)*$", "maxLength": 512}, "content_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "media_type": {"type": "string", "minLength": 1, "maxLength": 120}, "size_bytes": {"type": "integer", "minimum": 0}}},
+    "provenance": {"type": "object", "additionalProperties": false, "required": ["kind", "source_refs"], "properties": {"kind": {"enum": ["user_reported", "imported", "inferred"]}, "source_refs": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/artifact_ref"}}}},
+    "scope": {"oneOf": [
+      {"type": "object", "additionalProperties": false, "required": ["mode", "task_context_id", "base"], "properties": {"mode": {"const": "saved_default"}, "task_context_id": {"const": null}, "base": {"const": null}}},
+      {"type": "object", "additionalProperties": false, "required": ["mode", "task_context_id", "base"], "properties": {"mode": {"const": "run_override"}, "task_context_id": {"type": "string", "pattern": "^task_context_[0-9a-f-]{36}$"}, "base": {"type": "object", "additionalProperties": false, "required": ["record_id", "revision_id"], "properties": {"record_id": {"type": "string", "pattern": "^record_[0-9a-f-]{36}$"}, "revision_id": {"type": "string", "pattern": "^revision_[0-9a-f-]{36}$"}}}}}
+    ]},
+    "fact": {"type": "object", "additionalProperties": false, "required": ["state", "value", "context", "provenance", "conflict_refs"], "properties": {"state": {"enum": ["known", "unknown", "declined", "conflicting"]}, "value": {"type": ["string", "boolean", "null"], "maxLength": 256}, "context": {"type": ["string", "null"], "maxLength": 512}, "provenance": {"$ref": "#/$defs/provenance"}, "conflict_refs": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/artifact_ref"}}}},
+    "profile": {"type": "object", "additionalProperties": false, "required": ["hard_constraints", "soft_priorities", "sponsorship_need", "employer_sponsorship", "eligibility"], "properties": {"hard_constraints": {"type": "object", "additionalProperties": false, "required": ["geography", "work_mode", "seniority", "employment_type", "compensation"], "properties": {"geography": {"$ref": "#/$defs/fact"}, "work_mode": {"$ref": "#/$defs/fact"}, "seniority": {"$ref": "#/$defs/fact"}, "employment_type": {"$ref": "#/$defs/fact"}, "compensation": {"$ref": "#/$defs/fact"}}}, "soft_priorities": {"type": "object", "maxProperties": 5, "additionalProperties": {"$ref": "#/$defs/fact"}}, "sponsorship_need": {"$ref": "#/$defs/fact"}, "employer_sponsorship": {"$ref": "#/$defs/fact"}, "eligibility": {"$ref": "#/$defs/fact"}}},
+    "experience_question": {"type": "object", "additionalProperties": false, "required": ["question_id", "prompt", "state", "answer", "provenance"], "properties": {"question_id": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$"}, "prompt": {"$ref": "#/$defs/nonempty"}, "state": {"enum": ["missing", "answered", "declined", "not_applicable"]}, "answer": {"type": ["string", "null"], "maxLength": 16384}, "provenance": {"oneOf": [{"$ref": "#/$defs/provenance"}, {"const": null}]}}},
+    "experience": {"type": "object", "additionalProperties": false, "required": ["questions"], "properties": {"questions": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/experience_question"}}}},
+    "imported_reference": {"type": "object", "additionalProperties": false, "required": ["refs", "provenance"], "properties": {"refs": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/artifact_ref"}}, "provenance": {"$ref": "#/$defs/provenance"}}},
+    "source_item": {"type": "object", "additionalProperties": false, "required": ["source_kind", "label", "status", "artifact_refs", "provenance"], "properties": {"source_kind": {"enum": ["resume", "project_evidence", "role_history", "cover_letter", "job_description", "supporting_artifact"]}, "label": {"type": "string", "minLength": 1, "maxLength": 120}, "status": {"enum": ["reported", "captured", "independently_verified"]}, "artifact_refs": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/artifact_ref"}}, "verification_ref": {"oneOf": [{"$ref": "#/$defs/artifact_ref"}, {"const": null}]}, "provenance": {"$ref": "#/$defs/provenance"}}},
+    "supplied_source": {"type": "object", "additionalProperties": false, "required": ["sources"], "properties": {"sources": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/source_item"}}}},
+    "conversation": {"type": "object", "additionalProperties": false, "required": ["mode", "text", "source"], "properties": {"mode": {"enum": ["excerpt", "summary"]}, "text": {"$ref": "#/$defs/small_text"}, "source": {"type": "object", "additionalProperties": false, "required": ["source_kind", "label", "selection_note", "message_ids", "session_reference"], "properties": {"source_kind": {"enum": ["supplied_text", "declared_session_reference"]}, "label": {"type": "string", "minLength": 1, "maxLength": 120}, "selection_note": {"type": ["string", "null"], "maxLength": 4096}, "message_ids": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 128}}, "session_reference": {"type": ["string", "null"], "maxLength": 512}}}}}
+  }
+}

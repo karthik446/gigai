@@ -1,0 +1,13 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"urn:gigai:schema:workpad-layout:2",
+  "title":"GigAI workpad layout v2",
+  "type":"object","additionalProperties":false,
+  "required":["schema_version","layout_version","project_id","gig_id","ignore_sha256"],
+  "properties":{
+    "schema_version":{"const":"2.0"},"layout_version":{"const":2},
+    "project_id":{"$ref":"urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id":{"$ref":"urn:gigai:schema:common:1#/$defs/gig_id"},
+    "ignore_sha256":{"$ref":"urn:gigai:schema:common:1#/$defs/sha256"}
+  }
+}

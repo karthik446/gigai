@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:scout-proposal-discovery-job:1",
+  "type": "object", "additionalProperties": false,
+  "required": ["opportunity_id", "snapshot_id", "acquisition_state", "source_kind", "public_source", "provenance"],
+  "properties": {
+    "opportunity_id": {"type": "string", "pattern": "^opportunity_[0-9a-f]{32}$"},
+    "snapshot_id": {"type": "string", "pattern": "^snapshot_[0-9a-f]{32}$"},
+    "acquisition_state": {"enum": ["considered", "uncertain", "excluded"]},
+    "source_kind": {"enum": ["agent_discovered", "user_provided"]},
+    "title": {"type": ["string", "null"]}, "employer": {"type": ["string", "null"]},
+    "public_source": {"type": "object"}, "provenance": {"type": "object"}
+  }
+}

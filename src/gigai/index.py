@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import sqlite3
 import subprocess
-import tempfile
+import time
+from typing import Iterator
 
 from .canonical import canonical_json_bytes, parse_json_bytes, parse_json_front_matter
 
@@ -53,7 +55,8 @@ def rebuild_index(*, workpad: Path, project_id: str, gig_id: str) -> JournalProj
     projection = _authoritative_projection(
         root=root, project_id=project_id, gig_id=gig_id
     )
-    _write_projection(root / "state.sqlite", projection)
+    with database_lock(root):
+        _write_projection(root / "state.sqlite", projection)
     return projection
 
 
@@ -133,15 +136,16 @@ def read_index(*, workpad: Path, project_id: str, gig_id: str) -> JournalProject
     authoritative = _authoritative_projection(
         root=root, project_id=project_id, gig_id=gig_id
     )
-    try:
-        projection = _read_projection(root / "state.sqlite")
-        matches_authority = canonical_json_bytes(
-            projection.as_dict()
-        ) == canonical_json_bytes(authoritative.as_dict())
-    except (JournalIndexError, OSError, sqlite3.Error, ValueError):
-        matches_authority = False
-    if not matches_authority:
-        _write_projection(root / "state.sqlite", authoritative)
+    with database_lock(root):
+        try:
+            projection = _read_projection(root / "state.sqlite")
+            matches_authority = canonical_json_bytes(
+                projection.as_dict()
+            ) == canonical_json_bytes(authoritative.as_dict())
+        except (JournalIndexError, OSError, sqlite3.Error, ValueError):
+            matches_authority = False
+        if not matches_authority:
+            _write_projection(root / "state.sqlite", authoritative)
     return authoritative
 
 
@@ -161,45 +165,44 @@ def read_authoritative_index(
 
 
 def _write_projection(path: Path, projection: JournalProjection) -> None:
+    """Replace only managed rows in the existing database inode.
+
+    Long-lived G22 HTTP connections keep referring to this inode.  The common
+    lock serializes them with this transaction, so an index rebuild cannot
+    orphan a successful trace write on a replaced temporary database.
+    """
     interview_events = _read_interview_events(path)
-    scratch = path.parent / "scratch"
-    if scratch.is_symlink() or (scratch.exists() and not scratch.is_dir()):
-        raise JournalIndexError("index scratch surface is unavailable")
-    scratch.mkdir(mode=0o700, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=scratch
-    )
-    os.close(descriptor)
-    temporary = Path(temporary_name)
+    _read_scout_tables(path)
+    if path.is_symlink():
+        raise JournalIndexError("index is redirected")
     try:
-        connection = sqlite3.connect(temporary)
+        connection = sqlite3.connect(path)
         try:
-            connection.execute("PRAGMA journal_mode=DELETE")
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DROP TABLE IF EXISTS projection")
             connection.execute("CREATE TABLE projection (payload BLOB NOT NULL)")
             connection.execute(
                 "INSERT INTO projection(payload) VALUES (?)",
                 (canonical_json_bytes(projection.as_dict()),),
             )
-            if interview_events is not None:
-                connection.execute(
-                    "CREATE TABLE interview_events ("
-                    "session_id TEXT NOT NULL, sequence INTEGER NOT NULL, "
-                    "event TEXT NOT NULL, state TEXT NOT NULL, "
-                    "payload_sha256 TEXT NOT NULL, occurred_at TEXT NOT NULL, "
-                    "PRIMARY KEY(session_id, sequence))"
-                )
-                connection.executemany(
-                    "INSERT INTO interview_events "
-                    "(session_id, sequence, event, state, payload_sha256, occurred_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    interview_events,
-                )
+            # Existing trace rows remain in-place.  The read above validates
+            # the schema before any managed Scout mutation begins.
+            del interview_events
             connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
         finally:
             connection.close()
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    except sqlite3.Error as exc:
+        raise JournalIndexError("state database cannot be transactionally rebuilt") from exc
+
+
+def validate_state_database(path: Path) -> None:
+    """Refuse malformed/unknown shared state before any Scout-table writer."""
+
+    _read_interview_events(path)
+    _read_scout_tables(path)
 
 
 def _read_interview_events(
@@ -212,20 +215,22 @@ def _read_interview_events(
     but a recognized trace table must never be silently discarded.
     """
 
-    if path.is_symlink() or not path.is_file():
+    if path.is_symlink():
+        raise JournalIndexError("state database is redirected")
+    if not path.exists():
         return None
     try:
         connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    except sqlite3.Error:
-        return None
+    except sqlite3.Error as exc:
+        raise JournalIndexError("state database is malformed") from exc
     try:
         try:
             table = connection.execute(
                 "SELECT name FROM sqlite_master "
                 "WHERE type = 'table' AND name = 'interview_events'"
             ).fetchone()
-        except sqlite3.DatabaseError:
-            return None
+        except sqlite3.DatabaseError as exc:
+            raise JournalIndexError("state database is malformed") from exc
         if table is None:
             return None
         columns = tuple(
@@ -240,6 +245,81 @@ def _read_interview_events(
         ).fetchall()
     finally:
         connection.close()
+
+
+def _read_scout_tables(path: Path) -> list[tuple[str, str, list[tuple[object, object]]]]:
+    """Preserve only the closed SCOUT-03 projection family across rebuilds."""
+
+    if path.is_symlink():
+        raise JournalIndexError("state database is redirected")
+    if not path.exists():
+        return []
+    try:
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error as exc:
+        raise JournalIndexError("state database is malformed") from exc
+    try:
+        try:
+            objects = connection.execute(
+                "SELECT type, name, tbl_name FROM sqlite_master "
+                "WHERE name NOT LIKE 'sqlite_autoindex_%'"
+            ).fetchall()
+        except sqlite3.DatabaseError as exc:
+            raise JournalIndexError("state database is malformed") from exc
+        unexpected_objects = [
+            item for item in objects
+            if item[0] != "table" or item[1] not in {
+                "projection", "interview_events", "scout_records", "scout_operations", "scout_meta"
+            }
+        ]
+        if unexpected_objects:
+            raise JournalIndexError("state database has unsupported executable objects")
+        names = {item[1] for item in objects}
+        allowed = {"projection", "interview_events", "scout_records", "scout_operations", "scout_meta"}
+        unknown = names - allowed
+        if unknown:
+            raise JournalIndexError("state database has unsupported tables")
+        result = []
+        for name in ("scout_records", "scout_operations", "scout_meta"):
+            if name not in names:
+                continue
+            columns = tuple(row[1] for row in connection.execute(f"PRAGMA table_info({name})"))
+            if columns != ("key", "payload"):
+                raise JournalIndexError("Scout projection table schema is invalid")
+            rows = connection.execute(f"SELECT key, payload FROM {name} ORDER BY key").fetchall()
+            result.append((name, f"CREATE TABLE {name} (key TEXT PRIMARY KEY, payload BLOB NOT NULL)", rows))
+        return result
+    finally:
+        connection.close()
+
+
+@contextmanager
+def database_lock(root: Path, timeout_seconds: float = 10.0) -> Iterator[None]:
+    """Serialize projection rebuilds and G22 trace writes after journal publication.
+
+    Lock order is journal writer lock first, then this database lock.  Code that
+    only writes the G22 projection takes this lock alone and never takes the
+    journal lock, avoiding an inverse lock order.
+    """
+
+    if os.name != "posix":
+        raise JournalIndexError("interprocess database locking requires POSIX flock")
+    import fcntl
+    path = root / ".git" / "gigai-state.lock"
+    deadline = time.monotonic() + timeout_seconds
+    with path.open("a+b") as stream:
+        while True:
+            try:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise JournalIndexError("state database lock is unavailable") from None
+                time.sleep(0.01)
+        try:
+            yield
+        finally:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 def _read_projection(path: Path) -> JournalProjection:
@@ -337,7 +417,9 @@ def _git_process(
 __all__ = [
     "JournalIndexError",
     "JournalProjection",
+    "database_lock",
     "read_authoritative_index",
     "read_index",
     "rebuild_index",
+    "validate_state_database",
 ]

@@ -256,8 +256,12 @@ def _read_entry(
 
     proposal_bytes = _git_file(path, projection.head, "manifests/gig-proposal.json")
     active_bytes = _git_file(path, projection.head, "manifests/active-gig-version.json")
-    proposal = _valid_manifest(proposal_bytes, "gig-proposal.schema.json")
-    active = _valid_manifest(active_bytes, "active-gig-version.schema.json")
+    proposal, _proposal_schema = _valid_manifest_versioned(
+        proposal_bytes, "gig-proposal.schema.json", "gig-proposal-v2.schema.json"
+    )
+    active, active_schema = _valid_manifest_versioned(
+        active_bytes, "active-gig-version.schema.json", "active-gig-version-v2.schema.json"
+    )
     proposal_invalid = proposal_bytes is not None and (
         proposal is None
         or proposal.get("gig_id") != record.gig_id
@@ -275,7 +279,7 @@ def _read_entry(
     elif proposal is not None and isinstance(proposal.get("name"), str) and proposal["name"].strip():
         title = proposal["name"].strip()
     pointer_valid, historical_proposal = _valid_active_pointer(
-        path, active, record
+        path, active, record, active_schema=active_schema
     )
     if active is not None and not pointer_valid and not active_invalid:
         diagnostics.append(GigListingDiagnostic("active_version_metadata_invalid", "active version metadata is invalid"))
@@ -346,10 +350,26 @@ def _valid_manifest(raw: bytes | None, schema: str) -> dict[str, Any] | None:
     return payload
 
 
+def _valid_manifest_versioned(
+    raw: bytes | None, *schemas: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Accept only an explicitly supported manifest family for read-only display."""
+
+    for schema in schemas:
+        payload = _valid_manifest(raw, schema)
+        if payload is not None:
+            return payload, schema
+    return None, None
+
+
 def _valid_active_pointer(
-    workpad: Path, active: dict[str, Any] | None, record: WorkpadRecord
+    workpad: Path,
+    active: dict[str, Any] | None,
+    record: WorkpadRecord,
+    *,
+    active_schema: str | None,
 ) -> tuple[bool, dict[str, Any] | None]:
-    if active is None:
+    if active is None or active_schema is None:
         return False, None
     if active.get("gig_id") != record.gig_id:
         return False, None
@@ -358,7 +378,12 @@ def _valid_active_pointer(
     if not isinstance(commit, str) or not isinstance(approved_id, str):
         return False, None
     raw = _git_file(workpad, commit, "manifests/gig-proposal.json")
-    proposal = _valid_manifest(raw, "gig-proposal.schema.json")
+    proposal = _valid_manifest(
+        raw,
+        "gig-proposal-v2.schema.json"
+        if active_schema == "active-gig-version-v2.schema.json"
+        else "gig-proposal.schema.json",
+    )
     if proposal is None or proposal.get("proposal_id") != approved_id:
         return False, proposal
     if proposal.get("gig_id") != record.gig_id or proposal.get("project_id") != record.project_id:

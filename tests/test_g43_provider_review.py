@@ -8,6 +8,7 @@ import uuid
 from click.testing import CliRunner
 
 from gigai.adapters.port import InvocationResult, NormalizedUsage
+from gigai.adapters.factory import ModelAdapterBinding
 from gigai.cli import cli
 from gigai.lifecycle import approve_offline, create_offline
 from gigai.model_execution import ModelInvocationExecution
@@ -23,6 +24,7 @@ from gigai.run_plan import (
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 from gigai.workpad import resolve_workpad
+from gigai.model_targets import resolve_model_target
 
 
 def _fixture(tmp_path: Path) -> tuple[Path, Path, str, Path]:
@@ -288,3 +290,85 @@ def test_typed_closure_re_review_requires_the_identical_baseline_digest(tmp_path
         assert exc.code == "requirements_baseline_changed"
     else:
         raise AssertionError("changed baseline was accepted for a re-review")
+
+
+def test_direct_no_fix_closeout_requires_authenticated_clean_standard_evidence_and_replays(tmp_path: Path, monkeypatch) -> None:
+    home, target, gig_id, source = _fixture(tmp_path)
+    baseline = tmp_path / "requirements.md"
+    baseline.write_text("# Requirements\n\nKeep scope explicit.\n", encoding="utf-8")
+    approval = approve_requirements_baseline(home_root=home, requested_target=target, gig_id=gig_id, baseline_path=baseline, direct_operator_confirmed=True)
+    plan = create_run_plan(home_root=home, requested_target=target, gig_id=gig_id, review_subject=source, requirements_baseline_approval_id=approval.approval_id, profile_id="standard")
+    foreign_subject = tmp_path / "foreign.md"
+    foreign_subject.write_text("# Different contract\n", encoding="utf-8")
+    foreign_plan = create_run_plan(home_root=home, requested_target=target, gig_id=gig_id, review_subject=foreign_subject, requirements_baseline_approval_id=approval.approval_id, profile_id="standard")
+
+    calls: list[str] = []
+    class FakeAdapter:
+        def invoke(self, request):
+            calls.append(request.role)
+            return InvocationResult("success", '{"findings":[]}', "fixture", {}, NormalizedUsage(1, 1, 2), "provider_reported")
+
+    def fake_resolve(config, target_name):
+        return ModelAdapterBinding(resolve_model_target(config, target_name), FakeAdapter())
+
+    monkeypatch.setattr("gigai.model_execution.resolve_model_adapter", fake_resolve)
+    run = CliRunner().invoke(cli, ["run", "--plan", plan.run_plan_id, "--execute-review", "--confirm", "--wait", "--home", str(home), "--target", str(target), "--json"])
+    assert run.exit_code == 0, run.output
+    assert calls == ["reviewer", "reviewer"]
+    run_id = json.loads(run.output)["run_id"]
+    command = ["provider-review", "closeout", "--run", run_id, "--plan", plan.run_plan_id, "--gig", gig_id, "--home", str(home), "--target", str(target), "--json"]
+    missing_confirmation = CliRunner().invoke(cli, command)
+    assert missing_confirmation.exit_code != 0
+    assert "provider_review_closeout_confirmation_required" in missing_confirmation.output
+    foreign = CliRunner().invoke(cli, ["provider-review", "closeout", "--run", run_id, "--plan", foreign_plan.run_plan_id, "--gig", gig_id, "--confirm", "--home", str(home), "--target", str(target), "--json"])
+    assert foreign.exit_code != 0
+    assert "provider_review_consent_mismatch" in foreign.output
+
+    closed = CliRunner().invoke(cli, [*command, "--confirm"])
+    assert closed.exit_code == 0, closed.output
+    payload = json.loads(closed.output)
+    assert payload["closeout"]["replayed"] is False
+    receipt_path = plan.workpad / payload["closeout"]["receipt_path"]
+    receipt_bytes = receipt_path.read_bytes()
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["decision"] == "no_fix_required"
+    assert receipt["reviewer_participant_ids"] == ["participant_p1", "participant_p2"]
+    assert not {"approval_id", "baseline_snapshot_ref", "state", "operator_consent", "run_manifest"}.intersection(receipt)
+
+    replay = CliRunner().invoke(cli, [*command, "--confirm"])
+    assert replay.exit_code == 0, replay.output
+    assert json.loads(replay.output)["closeout"]["replayed"] is True
+
+    receipt["confirmed_at"] = "2030-01-01T00:00:00Z"
+    receipt_path.write_bytes(canonical_json_bytes(receipt))
+    forged = CliRunner().invoke(cli, [*command, "--confirm"])
+    assert forged.exit_code != 0
+    assert "provider_review_closeout_conflict" in forged.output
+    receipt_path.write_bytes(receipt_bytes)
+
+    report_path = plan.workpad / "runs" / run_id / "provider-reviews" / plan.run_plan_id / "report.json"
+    report_path.write_bytes(b"{}")
+    tampered = CliRunner().invoke(cli, [*command, "--confirm"])
+    assert tampered.exit_code != 0
+    assert "provider_review_closeout_not_clean" in tampered.output
+
+
+def test_no_fix_closeout_refuses_finding_bearing_evidence(tmp_path: Path, monkeypatch) -> None:
+    home, target, gig_id, source = _fixture(tmp_path)
+    baseline = tmp_path / "requirements.md"
+    baseline.write_text("# Requirements\n\nKeep scope explicit.\n", encoding="utf-8")
+    approval = approve_requirements_baseline(home_root=home, requested_target=target, gig_id=gig_id, baseline_path=baseline, direct_operator_confirmed=True)
+    plan = create_run_plan(home_root=home, requested_target=target, gig_id=gig_id, review_subject=source, requirements_baseline_approval_id=approval.approval_id, profile_id="standard")
+
+    def fake_invocation(**kwargs):
+        refs = kwargs["selected_reference_ids"]
+        output = json.dumps({"findings": [{"criterion_id": "criterion_requirements", "severity": "low", "title": "Missing", "description": "Missing requirement.", "evidence": [{"reference_id": refs[0], "locator": "line 1"}, {"reference_id": refs[1], "locator": "line 1"}], "confidence": "0.8"}]})
+        return ModelInvocationExecution(record={"outcome": "succeeded", "invocation_id": f"inv_{uuid.uuid4()}"}, result=InvocationResult("success", output, "fixture", {}, NormalizedUsage(1, 1, 2), "provider_reported"), journal_entry=None)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("gigai.provider_review.run_model_invocation", fake_invocation)
+    run = CliRunner().invoke(cli, ["run", "--plan", plan.run_plan_id, "--execute-review", "--confirm", "--wait", "--home", str(home), "--target", str(target), "--json"])
+    assert run.exit_code == 0, run.output
+    run_id = json.loads(run.output)["run_id"]
+    refused = CliRunner().invoke(cli, ["provider-review", "closeout", "--run", run_id, "--plan", plan.run_plan_id, "--gig", gig_id, "--confirm", "--home", str(home), "--target", str(target), "--json"])
+    assert refused.exit_code != 0
+    assert "provider_review_closeout_not_clean" in refused.output

@@ -1,0 +1,15 @@
+{
+  "$id": "urn:gigai:scout:document-selection:2",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SCOUT final document selection v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["selection_version", "opportunity", "documents", "selected_by", "source_run"],
+  "properties": {
+    "selection_version": {"const": "scout-document-selection:2"},
+    "opportunity": {"type": "object", "additionalProperties": false, "required": ["opportunity_id", "snapshot_id"], "properties": {"opportunity_id": {"type": "string", "pattern": "^opportunity_[0-9a-f]{32}$"}, "snapshot_id": {"type": "string", "pattern": "^snapshot_[0-9a-f]{32}$"}}},
+    "documents": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "object", "additionalProperties": false, "required": ["document_kind", "record_id", "revision_id", "content_sha256"], "properties": {"document_kind": {"enum": ["resume", "cover_letter"]}, "record_id": {"type": "string", "pattern": "^record_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}, "revision_id": {"type": "string", "pattern": "^revision_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}, "content_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}}},
+    "selected_by": {"type": "object", "additionalProperties": false, "required": ["kind", "id"], "properties": {"kind": {"const": "operator"}, "id": {"type": "string", "minLength": 1, "maxLength": 128}}},
+    "source_run": {"type": "object", "additionalProperties": false, "required": ["authority", "run_id", "goal_id", "invocation_id", "output_sha256"], "properties": {"authority": {"const": "tailor_run"}, "run_id": {"type": "string", "pattern": "^run_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}, "goal_id": {"type": "string", "pattern": "^goal_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}, "invocation_id": {"type": "string", "pattern": "^inv_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}, "output_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}}
+  }
+}

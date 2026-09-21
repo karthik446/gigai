@@ -103,6 +103,8 @@ def test_catalog_install_bootstraps_then_g41_adopts_without_authority_import(
             str(home),
             "--target",
             str(target),
+            "--username",
+            "synthetic-user",
             "--adopt-package",
             "--confirm",
             "--json",

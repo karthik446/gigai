@@ -143,7 +143,7 @@ def test_installed_git_init_has_exact_path_free_delta_and_idempotent_rerun(
     first = harness.run(
         ScenarioSpec(
             name="git-init",
-            argv=("init", "--json"),
+            argv=("init", "--username", "installed-scenario", "--json"),
             expected_target_changes=frozenset({".gigai", ".gigai/project.toml"}),
             expected_home_changes=frozenset({"registry.sqlite"}),
             allowed_target_change_prefixes=(".gigai/packages", "@git"),
@@ -155,7 +155,7 @@ def test_installed_git_init_has_exact_path_free_delta_and_idempotent_rerun(
     second = harness.run(
         ScenarioSpec(
             name="git-init-rerun",
-            argv=("init", "--json"),
+            argv=("init", "--username", "installed-scenario", "--json"),
             allowed_subprocesses=(_git_executable(),),
         )
     )
@@ -199,7 +199,7 @@ def test_installed_init_preserves_dirty_python_and_non_python_targets(
     harness.run(
         ScenarioSpec(
             name=f"dirty-{kind}-init",
-            argv=("init", "--json"),
+            argv=("init", "--username", "installed-scenario", "--json"),
             expected_target_changes=frozenset({".gigai", ".gigai/project.toml"}),
             expected_home_changes=frozenset({"registry.sqlite"}),
             allowed_target_change_prefixes=(".gigai/packages", "@git"),
@@ -222,7 +222,14 @@ def test_installed_explicit_non_git_init_is_registry_only(
     result = harness.run(
         ScenarioSpec(
             name="non-git-init",
-            argv=("init", "--target", os.fspath(roots.target), "--json"),
+            argv=(
+                "init",
+                "--target",
+                os.fspath(roots.target),
+                "--username",
+                "installed-scenario",
+                "--json",
+            ),
             expected_target_changes=frozenset({".gigai"}),
             expected_home_changes=frozenset({"registry.sqlite"}),
             allowed_target_change_prefixes=(".gigai/packages",),
@@ -248,12 +255,13 @@ def test_installed_init_requires_valid_setup_before_any_target_mutation(
     result = ScenarioHarness(installed_gigai.command, roots).run(
         ScenarioSpec(
             name="missing-config-init",
-            argv=("init", "--json"),
+            argv=("init", "--username", "installed-scenario", "--json"),
             expected_exit_codes=frozenset({1}),
+            allowed_subprocesses=(_git_executable(),),
         )
     )
 
-    assert "run 'gigai setup'" in result.stderr
+    assert "run 'gigai setup'" in result.stderr + result.stdout
     assert not (roots.target / ".gigai").exists()
     assert not (roots.home / "registry.sqlite").exists()
 
@@ -270,12 +278,13 @@ def test_installed_init_refuses_invalid_config_before_target_or_registry_mutatio
     result = harness.run(
         ScenarioSpec(
             name="invalid-config-init",
-            argv=("init", "--json"),
+            argv=("init", "--username", "installed-scenario", "--json"),
             expected_exit_codes=frozenset({1}),
+            allowed_subprocesses=(_git_executable(),),
         )
     )
 
-    assert "not valid UTF-8 TOML" in result.stderr
+    assert "not valid UTF-8 TOML" in result.stderr + result.stdout
     assert not (roots.target / ".gigai").exists()
     assert not (roots.home / "registry.sqlite").exists()
 
@@ -289,12 +298,23 @@ def test_installed_git_init_refuses_invalid_target_state_without_replacement(
     harness = ScenarioHarness(installed_gigai.command, roots)
     _setup(harness, roots, installed_gigai, name=f"target-{failure}-setup")
     binding = roots.target / ".gigai" / "project.toml"
-    if failure in {"tracked", "malformed"}:
+    if failure == "tracked":
+        binding.parent.joinpath("local").mkdir(parents=True)
+        binding.parent.joinpath("local", "default-init.json").write_text(
+            "{}\n", encoding="utf-8"
+        )
+    elif failure == "malformed":
         binding.parent.mkdir()
         binding.write_text("not = [valid toml", encoding="utf-8")
     if failure == "tracked":
         subprocess.run(
-            [os.fspath(_git_executable()), "-C", os.fspath(roots.target), "add", ".gigai"],
+            [
+                os.fspath(_git_executable()),
+                "-C",
+                os.fspath(roots.target),
+                "add",
+                ".gigai/local/default-init.json",
+            ],
             capture_output=True,
             check=True,
             shell=False,
@@ -306,7 +326,7 @@ def test_installed_git_init_refuses_invalid_target_state_without_replacement(
         result = harness.run(
             ScenarioSpec(
                 name=f"target-{failure}-init",
-                argv=("init", "--json"),
+                argv=("init", "--username", "installed-scenario", "--json"),
                 expected_exit_codes=frozenset({1}),
                 allowed_subprocesses=(_git_executable(),),
             )
@@ -316,11 +336,11 @@ def test_installed_git_init_refuses_invalid_target_state_without_replacement(
             roots.target.chmod(original_mode)
 
     expected = {
-        "tracked": "tracked .gigai content is refused",
+        "tracked": "adoption_required",
         "malformed": "not valid UTF-8 TOML",
         "read-only": "target root is read-only",
     }[failure]
-    assert expected in result.stderr
+    assert expected in result.stderr + result.stdout
     assert not (roots.home / "registry.sqlite").exists()
 
 
@@ -333,7 +353,7 @@ def test_installed_default_non_git_and_broken_alias_fail_without_registry(
     implicit = harness.run(
         ScenarioSpec(
             name="implicit-non-git",
-            argv=("init", "--json"),
+            argv=("init", "--username", "installed-scenario", "--json"),
             expected_exit_codes=frozenset({1}),
             allowed_subprocesses=(_git_executable(),),
         )
@@ -343,13 +363,20 @@ def test_installed_default_non_git_and_broken_alias_fail_without_registry(
     broken_result = harness.run(
         ScenarioSpec(
             name="broken-alias",
-            argv=("init", "--target", os.fspath(broken), "--json"),
+            argv=(
+                "init",
+                "--target",
+                os.fspath(broken),
+                "--username",
+                "installed-scenario",
+                "--json",
+            ),
             expected_exit_codes=frozenset({1}),
         )
     )
 
-    assert "use --target" in implicit.stderr
-    assert "broken alias" in broken_result.stderr
+    assert "use --target" in implicit.stderr + implicit.stdout
+    assert "broken alias" in broken_result.stderr + broken_result.stdout
     assert not (roots.home / "registry.sqlite").exists()
 
 
@@ -380,6 +407,8 @@ def test_installed_tmp_and_private_tmp_spellings_converge(
                     "init",
                     "--target",
                     spelling,
+                    "--username",
+                    "installed-scenario",
                     "--json",
                 ],
                 cwd=roots.target,
@@ -449,17 +478,17 @@ def test_installed_init_fails_closed_on_registry_corruption_or_version(
     try:
         result = harness.run(
             ScenarioSpec(
-                name=f"registry-{failure}-init",
-                argv=("init", "--json"),
-                expected_exit_codes=frozenset({1}),
-                allowed_subprocesses=(_git_executable(),),
+            name=f"registry-{failure}-init",
+            argv=("init", "--username", "installed-scenario", "--json"),
+            expected_exit_codes=frozenset({1}),
+            allowed_subprocesses=(_git_executable(),),
             )
         )
     finally:
         if failure == "read-only":
             registry.chmod(0o600)
 
-    assert expected in result.stderr
+    assert expected in result.stderr + result.stdout
     assert "Traceback" not in result.stderr
     assert not (roots.target / ".gigai").exists()
 
@@ -483,7 +512,13 @@ def test_two_installed_init_processes_converge_without_lock_or_duplicate(
         "GIT_OPTIONAL_LOCKS": "0",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
-    argv = [os.fspath(installed_gigai.command.executable), "init", "--json"]
+    argv = [
+        os.fspath(installed_gigai.command.executable),
+        "init",
+        "--username",
+        "installed-scenario",
+        "--json",
+    ]
     before = _git_status(roots.target)
     processes = [
         subprocess.Popen(

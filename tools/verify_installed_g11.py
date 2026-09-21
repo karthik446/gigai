@@ -68,6 +68,8 @@ def main() -> None:
             "cheap=openai:gpt-test",
             "--target-output-limit",
             "cheap=8",
+            "--create-model-target",
+            "cheap",
             "--json",
             env=env,
         )

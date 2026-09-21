@@ -25,6 +25,7 @@ from .canonical import (
     validate_entity_id,
 )
 from .config import ConfigurationError, config_path, load_config, migrate_config
+from .package_privacy import private_package_provenance
 from .project_binding import binding_path, load_project_binding
 from .target_binding import (
     TargetBindingError,
@@ -140,14 +141,21 @@ def inspect_package(root: Path) -> PackageInspection:
     _reject_symlink_components(candidate, label="package root")
     package_root_path = candidate.resolve(strict=False)
     if not package_root_path.is_dir():
-        raise PackageError("package root must be a regular directory", code="package_root_invalid")
+        raise PackageError(
+            "package root must be a regular directory", code="package_root_invalid"
+        )
     manifest_path = package_root_path / PACKAGE_MANIFEST
     if manifest_path.is_symlink() or not manifest_path.is_file():
-        raise PackageError("package manifest is missing or is not a regular file", code="manifest_missing")
+        raise PackageError(
+            "package manifest is missing or is not a regular file",
+            code="manifest_missing",
+        )
     try:
         manifest_bytes = manifest_path.read_bytes()
     except OSError as exc:
-        raise PackageError(f"package manifest is unreadable: {exc}", code="manifest_unreadable") from exc
+        raise PackageError(
+            f"package manifest is unreadable: {exc}", code="manifest_unreadable"
+        ) from exc
     report = validate_serialized_contract("gig-package.schema.json", manifest_bytes)
     if not report.valid:
         raise PackageError(
@@ -157,13 +165,17 @@ def inspect_package(root: Path) -> PackageInspection:
         )
     manifest = parse_json_bytes(manifest_bytes)
     if not isinstance(manifest, Mapping):
-        raise PackageError("package manifest must be an object", code="manifest_invalid")
+        raise PackageError(
+            "package manifest must be an object", code="manifest_invalid"
+        )
     try:
         package_id = validate_entity_id(
             str(manifest["package_id"]), expected_prefix=EntityPrefix.PACKAGE
         )
     except (KeyError, ValueError) as exc:
-        raise PackageError("package_id is not canonical", code="package_identity_invalid") from exc
+        raise PackageError(
+            "package_id is not canonical", code="package_identity_invalid"
+        ) from exc
     if package_root_path.name != package_id:
         raise PackageError(
             "package directory name does not match package_id",
@@ -176,19 +188,36 @@ def inspect_package(root: Path) -> PackageInspection:
         if relative == PACKAGE_MANIFEST:
             continue
         if path.is_symlink():
-            raise PackageError(f"package contains symlink: {relative}", code="symlink_refused")
+            raise PackageError(
+                f"package contains symlink: {relative}", code="symlink_refused"
+            )
         if path.is_dir():
             continue
         if not path.is_file():
-            raise PackageError(f"package contains unsupported file: {relative}", code="file_type_refused")
+            raise PackageError(
+                f"package contains unsupported file: {relative}",
+                code="file_type_refused",
+            )
         if Path(relative).parts[0] in {"hooks", "install", "scripts"}:
-            raise PackageError(f"package command material is refused: {relative}", code="hook_refused")
+            raise PackageError(
+                f"package command material is refused: {relative}", code="hook_refused"
+            )
         mode = stat.S_IMODE(path.stat().st_mode)
         if mode & 0o111:
-            raise PackageError(f"executable package material is refused: {relative}", code="executable_refused")
+            raise PackageError(
+                f"executable package material is refused: {relative}",
+                code="executable_refused",
+            )
         data = path.read_bytes()
         if len(data) > MAX_PACKAGE_FILE_BYTES:
-            raise PackageError(f"package file is too large: {relative}", code="file_too_large")
+            raise PackageError(
+                f"package file is too large: {relative}", code="file_too_large"
+            )
+        if private_package_provenance(relative, data):
+            raise PackageError(
+                "package contains recognizable private provenance",
+                code="private_provenance_refused",
+            )
         expected_files.append(
             {
                 "path": relative,
@@ -198,10 +227,16 @@ def inspect_package(root: Path) -> PackageInspection:
         )
     listed = manifest["files"]
     if not isinstance(listed, list) or listed != expected_files:
-        raise PackageError("package manifest file inventory does not match package bytes", code="content_inventory_mismatch")
+        raise PackageError(
+            "package manifest file inventory does not match package bytes",
+            code="content_inventory_mismatch",
+        )
     content_digest = canonical_json_digest(expected_files)
     if manifest["content_digest"] != content_digest:
-        raise PackageError("package content digest does not match its inventory", code="content_digest_mismatch")
+        raise PackageError(
+            "package content digest does not match its inventory",
+            code="content_digest_mismatch",
+        )
     return PackageInspection(
         package_id=package_id,
         package_version=int(manifest["package_version"]),
@@ -225,7 +260,9 @@ def export_package(*, source_package: Path, destination: Path) -> PackageExportR
     except ValueError:
         pass
     else:
-        raise PackageError("export destination cannot be inside its source package", code="path_escape")
+        raise PackageError(
+            "export destination cannot be inside its source package", code="path_escape"
+        )
     if destination_path.exists():
         existing = inspect_package(destination_path)
         if existing.content_digest != inspection.content_digest:
@@ -261,7 +298,9 @@ def initialize_project_package(
     """Bind a target, cut over ignores, and establish one portable package."""
 
     if adopt_package and not confirmed:
-        raise PackageError("package adoption requires direct --confirm", code="confirmation_required")
+        raise PackageError(
+            "package adoption requires direct --confirm", code="confirmation_required"
+        )
     home = home_root.expanduser().resolve(strict=False)
     try:
         load_config(home)
@@ -328,7 +367,10 @@ def _initialize_and_prepare(
     inspections = tuple(inspect_package(root) for root in roots)
     if adopt_package:
         if len(inspections) != 1:
-            raise PackageError("package adoption requires exactly one portable package", code="adoption_package_count")
+            raise PackageError(
+                "package adoption requires exactly one portable package",
+                code="adoption_package_count",
+            )
         inspection = inspections[0]
         adopted = True
     elif inspections:
@@ -337,7 +379,9 @@ def _initialize_and_prepare(
     else:
         package_id = generate_entity_id(
             EntityPrefix.PACKAGE,
-            is_persisted=lambda candidate: (target.root / PACKAGE_DIRECTORY / candidate).exists(),
+            is_persisted=lambda candidate: (
+                target.root / PACKAGE_DIRECTORY / candidate
+            ).exists(),
             uuid_factory=uuid_factory,
         )
         root = package_root(target.root, package_id)
@@ -393,14 +437,19 @@ def install_package(
     if destination.exists():
         existing = inspect_package(destination)
         if existing.content_digest != inspection.content_digest:
-            raise PackageError("destination package identity has a different digest", code="package_conflict")
+            raise PackageError(
+                "destination package identity has a different digest",
+                code="package_conflict",
+            )
     else:
         destination.parent.mkdir(parents=True, exist_ok=True)
         _copy_package(inspection.package_root, destination)
         inspect_package(destination)
     record_dir = config.home_root / "local" / "package-installations"
     record_dir.mkdir(parents=True, exist_ok=True)
-    record_path = record_dir / f"{inspection.package_id}-{inspection.content_digest[7:]}.json"
+    record_path = (
+        record_dir / f"{inspection.package_id}-{inspection.content_digest[7:]}.json"
+    )
     record = {
         "schema_version": "1.0",
         "package_id": inspection.package_id,
@@ -414,7 +463,9 @@ def install_package(
     if record_path.exists():
         existing = parse_json_bytes(record_path.read_bytes())
         if existing != record:
-            record["installed_at"] = existing.get("installed_at", record["installed_at"])
+            record["installed_at"] = existing.get(
+                "installed_at", record["installed_at"]
+            )
             _write_atomic(record_path, canonical_json_bytes(record))
     else:
         _write_atomic(record_path, canonical_json_bytes(record))
@@ -436,11 +487,15 @@ def upgrade_installation(
     """Migrate a supported predecessor and publish the project package boundary."""
 
     if not confirmed:
-        raise PackageError("upgrade requires direct --confirm", code="confirmation_required")
+        raise PackageError(
+            "upgrade requires direct --confirm", code="confirmation_required"
+        )
     home = home_root.expanduser().resolve(strict=False)
     path = config_path(home)
     if not path.is_file():
-        raise PackageError("configuration is missing; run 'gigai setup'", code="configuration_missing")
+        raise PackageError(
+            "configuration is missing; run 'gigai setup'", code="configuration_missing"
+        )
     config_before = path.read_bytes()
     source_config_digest = digest_imported_bytes(config_before)
     version = _config_version(config_before)
@@ -450,15 +505,15 @@ def upgrade_installation(
     try:
         target = resolve_target(requested_target)
         gigai_directory_before = (target.root / ".gigai").exists()
-        package_roots_before = {
-            root.name for root in _package_roots(target.root)
-        }
+        package_roots_before = {root.name for root in _package_roots(target.root)}
         binding_before = (
             binding_path(target.root).read_bytes()
             if binding_path(target.root).is_file()
             else None
         )
-        exclude_path = git_path(target.root, "info/exclude") if target.kind == "git" else None
+        exclude_path = (
+            git_path(target.root, "info/exclude") if target.kind == "git" else None
+        )
         exclude_before = (
             exclude_path.read_bytes()
             if exclude_path is not None and exclude_path.is_file()
@@ -471,7 +526,9 @@ def upgrade_installation(
     if version == "1.0":
         if backup.exists():
             if backup.read_bytes() != config_before:
-                raise PackageError("v0.1.6 configuration backup conflicts", code="backup_conflict")
+                raise PackageError(
+                    "v0.1.6 configuration backup conflicts", code="backup_conflict"
+                )
         else:
             _write_atomic(backup, config_before)
     registry_path = home / "registry.sqlite"
@@ -542,11 +599,16 @@ def _finalize_upgrade(
     config_after = path.read_bytes()
     registry_after = registry_path.read_bytes() if registry_path.exists() else None
     if registry_before is not None and registry_after is None:
-        raise PackageError("registry disappeared during upgrade", code="preservation_failed")
+        raise PackageError(
+            "registry disappeared during upgrade", code="preservation_failed"
+        )
     registry_fingerprint_after = _registry_fingerprint(registry_path)
     workpad_fingerprint_after = _tree_fingerprint(workpad_root)
     private_home_fingerprint_after = _private_home_fingerprint(path.parent)
-    if registry_before is not None and registry_fingerprint_before != registry_fingerprint_after:
+    if (
+        registry_before is not None
+        and registry_fingerprint_before != registry_fingerprint_after
+    ):
         raise PackageError(
             "registry identities or authority links changed during upgrade",
             code="preservation_failed",
@@ -578,8 +640,14 @@ def _finalize_upgrade(
     record_path = migration_root / "migration.json"
     if record_path.exists():
         existing = parse_json_bytes(record_path.read_bytes())
-        if not isinstance(existing, Mapping) or existing.get("package_id") != package.package_id:
-            raise PackageError("migration record conflicts with existing package", code="migration_conflict")
+        if (
+            not isinstance(existing, Mapping)
+            or existing.get("package_id") != package.package_id
+        ):
+            raise PackageError(
+                "migration record conflicts with existing package",
+                code="migration_conflict",
+            )
         record = dict(existing)
         record["package_digest"] = package.package_digest
         record["registry_present_after"] = registry_after is not None
@@ -619,15 +687,26 @@ def _registry_fingerprint(path: Path) -> str | None:
         }
         records: dict[str, list[list[object]]] = {}
         for table, query in (
-            ("projects", "SELECT project_id, target_locator, target_kind FROM projects ORDER BY project_id"),
-            ("workpads", "SELECT gig_id, project_id, workpad_locator FROM workpads ORDER BY project_id, gig_id"),
-            ("active_workpads", "SELECT project_id, gig_id FROM active_workpads ORDER BY project_id, gig_id"),
+            (
+                "projects",
+                "SELECT project_id, target_locator, target_kind FROM projects ORDER BY project_id",
+            ),
+            (
+                "workpads",
+                "SELECT gig_id, project_id, workpad_locator FROM workpads ORDER BY project_id, gig_id",
+            ),
+            (
+                "active_workpads",
+                "SELECT project_id, gig_id FROM active_workpads ORDER BY project_id, gig_id",
+            ),
         ):
             if table in tables:
                 records[table] = [list(row) for row in connection.execute(query)]
         return canonical_json_digest(records)
     except (OSError, sqlite3.DatabaseError) as exc:
-        raise PackageError(f"registry preservation inventory failed: {exc}", code="preservation_failed") from exc
+        raise PackageError(
+            f"registry preservation inventory failed: {exc}", code="preservation_failed"
+        ) from exc
     finally:
         if connection is not None:
             connection.close()
@@ -690,13 +769,21 @@ def _configured_workpad_root(data: bytes) -> Path:
         paths = payload.get("paths")
         if not isinstance(paths, Mapping):
             paths = payload.get("configuration", {}).get("paths")
-        if not isinstance(paths, Mapping) or not isinstance(paths.get("workpad_root"), str):
+        if not isinstance(paths, Mapping) or not isinstance(
+            paths.get("workpad_root"), str
+        ):
             raise ValueError
         root = Path(paths["workpad_root"]).expanduser()
         if not root.is_absolute():
             raise ValueError
         return root.resolve(strict=False)
-    except (UnicodeError, tomllib.TOMLDecodeError, TypeError, ValueError, AttributeError) as exc:
+    except (
+        UnicodeError,
+        tomllib.TOMLDecodeError,
+        TypeError,
+        ValueError,
+        AttributeError,
+    ) as exc:
         raise PackageError(
             "configuration workpad root cannot be inventoried",
             code="preservation_failed",
@@ -709,7 +796,9 @@ def _tree_fingerprint(root: Path) -> str | None:
     if not root.exists():
         return None
     if root.is_symlink() or not root.is_dir():
-        raise PackageError("workpad root is not a regular directory", code="preservation_failed")
+        raise PackageError(
+            "workpad root is not a regular directory", code="preservation_failed"
+        )
     entries: list[dict[str, object]] = []
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root).as_posix()
@@ -742,7 +831,9 @@ def _private_home_fingerprint(root: Path) -> str | None:
     if not root.exists():
         return None
     if root.is_symlink() or not root.is_dir():
-        raise PackageError("GigAI home is not a regular directory", code="preservation_failed")
+        raise PackageError(
+            "GigAI home is not a regular directory", code="preservation_failed"
+        )
     entries: list[dict[str, object]] = []
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root).as_posix()
@@ -778,9 +869,14 @@ def _config_version(data: bytes) -> str:
         payload = tomllib.loads(data.decode("utf-8"))
         version = payload.get("schema_version")
     except (UnicodeError, tomllib.TOMLDecodeError) as exc:
-        raise PackageError("configuration predecessor is malformed", code="configuration_malformed") from exc
+        raise PackageError(
+            "configuration predecessor is malformed", code="configuration_malformed"
+        ) from exc
     if not isinstance(version, str):
-        raise PackageError("configuration schema version is missing", code="configuration_version_missing")
+        raise PackageError(
+            "configuration schema version is missing",
+            code="configuration_version_missing",
+        )
     return version
 
 
@@ -789,11 +885,15 @@ def _package_roots(target_root: Path) -> tuple[Path, ...]:
     if not parent.exists():
         return ()
     if parent.is_symlink() or not parent.is_dir():
-        raise PackageError("portable package directory is invalid", code="package_directory_invalid")
+        raise PackageError(
+            "portable package directory is invalid", code="package_directory_invalid"
+        )
     roots = []
     for child in sorted(parent.iterdir()):
         if child.is_symlink() or not child.is_dir():
-            raise PackageError(f"unexpected package entry: {child.name}", code="package_entry_invalid")
+            raise PackageError(
+                f"unexpected package entry: {child.name}", code="package_entry_invalid"
+            )
         roots.append(child)
     return tuple(roots)
 
@@ -814,7 +914,10 @@ def _validate_adoption_tree(root: Path) -> None:
             raise PackageError(str(exc), code="binding_invalid") from exc
     roots = _package_roots(root)
     if len(roots) != 1:
-        raise PackageError("package adoption requires exactly one portable package", code="adoption_package_count")
+        raise PackageError(
+            "package adoption requires exactly one portable package",
+            code="adoption_package_count",
+        )
     inspect_package(roots[0])
 
 
@@ -834,17 +937,25 @@ def _validate_existing_packages(root: Path) -> None:
 def _git_paths(root: Path) -> tuple[str, ...]:
     executable = shutil.which("git")
     if executable is None:
-        raise PackageError("Git executable is unavailable", code="git_inspection_failed")
+        raise PackageError(
+            "Git executable is unavailable", code="git_inspection_failed"
+        )
     try:
         result = subprocess.run(
             [executable, "-C", os.fspath(root), "ls-files", "-z", "--", ".gigai"],
             check=True,
             capture_output=True,
             shell=False,
-            env={**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"},
+            env={
+                **os.environ,
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_NOSYSTEM": "1",
+            },
         )
     except (OSError, subprocess.CalledProcessError) as exc:
-        raise PackageError("could not inspect tracked .gigai content", code="git_inspection_failed") from exc
+        raise PackageError(
+            "could not inspect tracked .gigai content", code="git_inspection_failed"
+        ) from exc
     return tuple(item.decode("utf-8") for item in result.stdout.split(b"\0") if item)
 
 
@@ -852,13 +963,18 @@ def _cutover_git_exclude(root: Path) -> bool:
     exclude = git_path(root, "info/exclude")
     before = exclude.read_bytes() if exclude.exists() else b""
     lines = before.splitlines(keepends=True)
-    root_matches = [line for line in lines if line.rstrip(b"\r\n") == ROOT_EXCLUDE_LINE.rstrip(b"\n")]
+    root_matches = [
+        line
+        for line in lines
+        if line.rstrip(b"\r\n") == ROOT_EXCLUDE_LINE.rstrip(b"\n")
+    ]
     if len(root_matches) > 1:
-        raise PackageError("Git exclude has duplicate v0.1.6 whole-directory rules", code="exclude_ambiguous")
+        raise PackageError(
+            "Git exclude has duplicate v0.1.6 whole-directory rules",
+            code="exclude_ambiguous",
+        )
     private = {line.rstrip(b"\r\n") for line in PRIVATE_EXCLUDE_LINES}
-    private_by_key = {
-        line.rstrip(b"\r\n"): line for line in PRIVATE_EXCLUDE_LINES
-    }
+    private_by_key = {line.rstrip(b"\r\n"): line for line in PRIVATE_EXCLUDE_LINES}
     output: list[bytes] = []
     replaced = False
     seen_private: set[bytes] = set()
@@ -889,40 +1005,78 @@ def _cutover_git_exclude(root: Path) -> bool:
                 output.append(line)
                 seen_private.add(key)
     else:
-        missing = [line for line in PRIVATE_EXCLUDE_LINES if line.rstrip(b"\r\n") not in seen_private]
+        missing = [
+            line
+            for line in PRIVATE_EXCLUDE_LINES
+            if line.rstrip(b"\r\n") not in seen_private
+        ]
         output.extend(missing)
     after = b"".join(output)
     if after == before:
         return False
     _write_atomic(exclude, after)
     if exclude.read_bytes() != after:
-        raise PackageError("Git exclude replacement could not be verified", code="exclude_verification_failed")
+        raise PackageError(
+            "Git exclude replacement could not be verified",
+            code="exclude_verification_failed",
+        )
     observed_lines = exclude.read_bytes().splitlines()
     if observed_lines.count(ROOT_EXCLUDE_LINE.rstrip(b"\n")) != 0 or any(
         observed_lines.count(line.rstrip(b"\n")) != 1 for line in PRIVATE_EXCLUDE_LINES
     ):
-        raise PackageError("Git exclude replacement is incomplete", code="exclude_verification_failed")
+        raise PackageError(
+            "Git exclude replacement is incomplete", code="exclude_verification_failed"
+        )
     return True
 
 
 def _copy_package(source: Path, destination: Path) -> None:
-    destination.mkdir(parents=True, exist_ok=False)
-    for item in source.rglob("*"):
-        relative = item.relative_to(source)
-        target = destination / relative
-        if item.is_symlink() or (item.is_file() and stat.S_IMODE(item.stat().st_mode) & 0o111):
-            shutil.rmtree(destination, ignore_errors=True)
-            raise PackageError("package copy encountered unsafe material", code="package_copy_refused")
-        if item.is_dir():
-            target.mkdir(parents=True, exist_ok=True)
-        else:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(item, target)
+    """Stage an inspected package so failed provenance checks never publish it."""
+
+    source_inspection = inspect_package(source)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    stage_parent = Path(
+        tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent)
+    )
+    staged = stage_parent / destination.name
+    try:
+        staged.mkdir()
+        for item in source.rglob("*"):
+            relative = item.relative_to(source)
+            target = staged / relative
+            if item.is_symlink() or (
+                item.is_file() and stat.S_IMODE(item.stat().st_mode) & 0o111
+            ):
+                raise PackageError(
+                    "package copy encountered unsafe material",
+                    code="package_copy_refused",
+                )
+            if item.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(item, target)
+        staged_inspection = inspect_package(staged)
+        if staged_inspection.content_digest != source_inspection.content_digest:
+            raise PackageError(
+                "package bytes changed while being copied",
+                code="package_copy_refused",
+            )
+        if destination.exists():
+            raise PackageError(
+                "package destination appeared while copying",
+                code="package_conflict",
+            )
+        os.replace(staged, destination)
+    finally:
+        shutil.rmtree(stage_parent, ignore_errors=True)
 
 
 def _write_atomic(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "wb") as stream:

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:scout-proposal-revision:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "record_id", "revision_id", "project_id", "gig_id", "state", "opportunity", "assessment", "input_revisions", "answer_associations", "invocation", "method", "sealed_journal_head", "created_at"],
+  "properties": {
+    "schema_version": {"const": "scout-proposal-revision:1"},
+    "record_id": {"type": "string", "pattern": "^record_[0-9a-f-]{36}$"},
+    "revision_id": {"type": "string", "pattern": "^revision_[0-9a-f-]{36}$"},
+    "project_id": {"type": "string", "minLength": 1}, "gig_id": {"type": "string", "minLength": 1},
+    "state": {"const": "active"}, "sealed_journal_head": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "opportunity": {"type": "object", "additionalProperties": false, "required": ["family", "opportunity_id", "snapshot_id", "run_ref", "receipt_ref", "checkpoint_ref", "posting_ref"], "properties": {"family": {"const": "scout_discovery_posting"}, "opportunity_id": {"type": "string", "pattern": "^opportunity_[0-9a-f]{32}$"}, "snapshot_id": {"type": "string", "pattern": "^snapshot_[0-9a-f]{32}$"}, "run_ref": {"$ref": "#/$defs/artifact_ref"}, "receipt_ref": {"$ref": "#/$defs/artifact_ref"}, "checkpoint_ref": {"$ref": "#/$defs/artifact_ref"}, "posting_ref": {"type": "object", "additionalProperties": false, "required": ["artifact_id", "ref"], "properties": {"artifact_id": {"type": "string", "minLength": 1}, "ref": {"$ref": "#/$defs/artifact_ref"}}}}},
+    "assessment": {"type": "object", "additionalProperties": false, "required": ["status", "proposal", "content_sha256"], "properties": {"status": {"const": "complete"}, "proposal": {"type": "object"}, "content_sha256": {"$ref": "#/$defs/digest"}}},
+    "input_revisions": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "additionalProperties": false, "required": ["record_id", "revision_id", "purpose", "content_sha256", "source_ref"], "properties": {"record_id": {"type": "string", "pattern": "^record_[0-9a-f-]{36}$"}, "revision_id": {"type": "string", "pattern": "^revision_[0-9a-f-]{36}$"}, "purpose": {"enum": ["preferences", "experience", "answer"]}, "content_sha256": {"$ref": "#/$defs/digest"}, "source_ref": {"$ref": "#/$defs/artifact_ref"}}}},
+    "answer_associations": {"type": "array", "maxItems": 12, "items": {"type": "object", "additionalProperties": false, "required": ["record_id", "revision_id", "question_ids", "purpose", "content_sha256"], "properties": {"record_id": {"type": "string", "pattern": "^record_[0-9a-f-]{36}$"}, "revision_id": {"type": "string", "pattern": "^revision_[0-9a-f-]{36}$"}, "question_ids": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"type": "string"}}, "purpose": {"const": "answer"}, "content_sha256": {"$ref": "#/$defs/digest"}}}},
+    "invocation": {"type": "object", "additionalProperties": false, "required": ["run_id", "goal_id", "invocation_id", "record_sha256"], "properties": {"run_id": {"type": "string", "pattern": "^run_[0-9a-f-]{36}$"}, "goal_id": {"type": "string", "pattern": "^goal_[0-9a-f-]{36}$"}, "invocation_id": {"type": "string", "minLength": 1}, "record_sha256": {"$ref": "#/$defs/digest"}}},
+    "method": {"type": "object", "additionalProperties": false, "required": ["kind", "target", "configured_digest"], "properties": {"kind": {"const": "ollama_local"}, "target": {"type": "string", "minLength": 1}, "configured_digest": {"$ref": "#/$defs/digest"}}}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "artifact_ref": {"type": "object", "additionalProperties": false, "required": ["path", "content_sha256", "media_type", "size_bytes"], "properties": {"path": {"type": "string", "minLength": 1}, "content_sha256": {"$ref": "#/$defs/digest"}, "media_type": {"type": "string", "minLength": 1}, "size_bytes": {"type": "integer", "minimum": 0, "maximum": 524288}}}
+  }
+}

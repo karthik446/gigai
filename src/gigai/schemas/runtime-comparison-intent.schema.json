@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:runtime-comparison-intent:1",
+  "title": "GigAI runtime comparison execution intent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "comparison_id", "project_id", "gig_id", "gig_version", "graph_selector", "authority", "pack", "setups", "attempts", "created_at"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "runtime_comparison_intent"},
+    "comparison_id": {"type": "string", "pattern": "^comparison_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "gig_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "graph_selector": {"type": ["string", "null"]},
+    "authority": {"type": "object", "additionalProperties": false, "required": ["journal_commit", "graph_id", "goal_id", "pack_sha256", "consent"], "properties": {"journal_commit": {"type": "string", "minLength": 1}, "graph_id": {"type": "string"}, "goal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"}, "pack_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}, "consent": {"type": "object"}}},
+    "pack": {"type": "object", "additionalProperties": false, "required": ["pack_id", "pack_version", "content_sha256"], "properties": {"pack_id": {"type": "string"}, "pack_version": {"type": "string"}, "content_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}}},
+    "setups": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "object", "additionalProperties": false, "required": ["setup_id", "target_name", "expected_adapter", "settings", "configured_identity"], "properties": {"setup_id": {"type": "string"}, "target_name": {"type": "string"}, "expected_adapter": {"enum": ["ollama_local", "codex_cli"]}, "settings": {"type": "object"}, "configured_identity": {"type": "object", "additionalProperties": false, "required": ["adapter", "endpoint", "model", "model_digest"], "properties": {"adapter": {"type": "string"}, "endpoint": {"type": "string"}, "model": {"type": "string"}, "model_digest": {"type": ["string", "null"]}}}}}},
+    "attempts": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "object", "additionalProperties": false, "required": ["setup_id", "run_id"], "properties": {"setup_id": {"type": "string"}, "run_id": {"$ref": "urn:gigai:schema:common:1#/$defs/run_id"}}}},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

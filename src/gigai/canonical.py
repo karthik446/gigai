@@ -31,7 +31,7 @@ SAFE_INTEGER_MAX = 9_007_199_254_740_991
 ID_COLLISION_RETRIES = 3
 MEMBER_NAME = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 ENTITY_ID = re.compile(
-    r"^(?P<prefix>project|gig|gp|graph|goal|edge|run|run_plan|handoff|inv|learning|improve_manifest|draft_manifest|occurrence|comparison|package)_"
+    r"^(?P<prefix>project|gig|gp|graph|graph_set|graph_selection|goal|edge|run|run_plan|handoff|inv|learning|improve_manifest|draft_manifest|occurrence|comparison|package|ref|input|record|revision|operation|layout|checkpoint|receipt|task_context)_"
     r"(?P<uuid>[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12})$"
 )
@@ -102,6 +102,8 @@ class EntityPrefix(StrEnum):
     GIG = "gig"
     GIG_PROPOSAL = "gp"
     GRAPH = "graph"
+    GRAPH_SET = "graph_set"
+    GRAPH_SELECTION = "graph_selection"
     GOAL = "goal"
     EDGE = "edge"
     RUN = "run"
@@ -115,6 +117,15 @@ class EntityPrefix(StrEnum):
     OCCURRENCE = "occurrence"
     COMPARISON = "comparison"
     PACKAGE = "package"
+    REFERENCE = "ref"
+    RUN_INPUT = "input"
+    RECORD = "record"
+    REVISION = "revision"
+    OPERATION = "operation"
+    LAYOUT = "layout"
+    CHECKPOINT = "checkpoint"
+    RECEIPT = "receipt"
+    TASK_CONTEXT = "task_context"
 
 
 def _validate_canonical_value(

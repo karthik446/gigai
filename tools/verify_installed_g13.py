@@ -59,6 +59,7 @@ def main() -> None:
                 os.fspath(target),
                 "--home",
                 os.fspath(home),
+                "--confirm",
                 "--wait",
                 "--json",
             ],

@@ -33,6 +33,22 @@ from .target_binding import (
 
 
 WORKPAD_GITIGNORE = b"/objects/\n/scratch/\n/state.sqlite\n"
+# v2 is intentionally exact.  It is a layout declaration, not a trust grant:
+# callers still validate every root, component, and inventoried artifact.
+WORKPAD_V2_GITIGNORE = (
+    b"/objects/\n/scratch/\n/state.sqlite\n/state.sqlite-journal\n"
+    b"/state.sqlite-wal\n/state.sqlite-shm\n/indexes/\n/reports/scout/\n"
+    b"/README.md\n/CHANGELOG.md\n/gig.py\n/tools/\n/goalgraphs/\n/ui/\n"
+)
+WORKPAD_LAYOUT_PATH = "manifests/workpad-layout.json"
+_V2_ROOTS = frozenset({
+    "README.md", "CHANGELOG.md", "gig.py", "tools", "goalgraphs", "ui",
+    "docs", "references", "run-inputs", "records", "indexes", "reports",
+    "runs", "run-plans", "review-inputs", "manifests", "handoffs", "scratch",
+    "state.sqlite", "graph-selections", "addressed", "feedback", "findings",
+    "review", "traces", "occurrences", "comparisons", "decisions", "goals",
+    "gig.md",
+})
 WORKPAD_GIT_USER_NAME = "GigAI Journal"
 WORKPAD_GIT_USER_EMAIL = "local@gigai.invalid"
 PROVISION_FAILPOINTS = ("after_staging", "after_publish", "after_registry")
@@ -101,8 +117,14 @@ def provision_workpad(
     project_id: str,
     gig_id: str,
     provision_observer: ProvisionObserver | None = None,
+    reconcile_existing_journal: bool = False,
 ) -> ProvisionedWorkpad:
-    """Publish an empty Git substrate for caller-owned canonical IDs."""
+    """Publish an empty Git substrate for caller-owned canonical IDs.
+
+    ``reconcile_existing_journal`` is for a caller resuming its own pinned
+    journaled creation transaction; it never permits arbitrary unrecognized
+    workpad roots.
+    """
 
     project_id = _canonical_id(project_id, EntityPrefix.PROJECT)
     gig_id = _canonical_id(gig_id, EntityPrefix.GIG)
@@ -123,7 +145,12 @@ def provision_workpad(
     reconciled = False
     published = False
     if destination.exists() or destination.is_symlink():
-        _validate_workpad_repository(destination, project_id, gig_id)
+        _validate_workpad_repository(
+            destination,
+            project_id,
+            gig_id,
+            allow_journal=reconcile_existing_journal,
+        )
         reconciled = True
     else:
         staged = _find_staged_workpad(parent, gig_id, project_id)
@@ -447,9 +474,11 @@ def _validate_workpad_repository(
         )
     entries = {path.name for path in root.iterdir()}
     allowed = {".git", ".gitignore"}
+    layout_version = workpad_layout_version(root, project_id=project_id, gig_id=gig_id)
     if allow_journal:
         allowed.add("handoffs")
         allowed.add("scratch")
+        allowed.add("manifests")
     if allow_semantic_state:
         allowed.update(
             {
@@ -462,7 +491,8 @@ def _validate_workpad_repository(
                 "scratch",
                 "state.sqlite",
                 "runs",
-                "run-plans",
+                    "run-plans",
+                    "graph-selections",
                 "review-inputs",
                 "addressed",
                 "feedback",
@@ -474,6 +504,8 @@ def _validate_workpad_repository(
                     "comparisons",
             }
         )
+    if layout_version == 2:
+        allowed.update(_V2_ROOTS)
     if not {".git", ".gitignore"}.issubset(entries) or not entries <= allowed:
         unexpected = sorted(entries - allowed)
         detail = f": {', '.join(unexpected)}" if unexpected else ""
@@ -487,8 +519,9 @@ def _validate_workpad_repository(
     if handoffs.exists() and (handoffs.is_symlink() or not handoffs.is_dir()):
         raise WorkpadConflictError("workpad handoff directory is redirected or invalid")
     ignore = root / ".gitignore"
-    if ignore.is_symlink() or ignore.read_bytes() != WORKPAD_GITIGNORE:
-        raise WorkpadConflictError("workpad ignore rules differ from the G05 contract")
+    expected_ignore = WORKPAD_V2_GITIGNORE if layout_version == 2 else WORKPAD_GITIGNORE
+    if ignore.is_symlink() or ignore.read_bytes() != expected_ignore:
+        raise WorkpadConflictError("workpad ignore rules differ from the declared layout contract")
     inside = _git(root, "rev-parse", "--is-inside-work-tree", check=False)
     if inside.returncode != 0 or inside.stdout.strip() != "true":
         raise WorkpadConflictError("workpad is not a local Git repository")
@@ -512,6 +545,75 @@ def _validate_workpad_repository(
         and _git(root, "rev-parse", "--verify", "HEAD", check=False).returncode == 0
     ):
         raise WorkpadConflictError("G05 workpad must remain unborn without a commit")
+
+
+def workpad_layout_version(root: Path, *, project_id: str, gig_id: str) -> int:
+    """Return the admitted layout version without treating an unknown marker as v1."""
+
+    marker = root / WORKPAD_LAYOUT_PATH
+    if marker.is_symlink():
+        raise WorkpadConflictError("workpad layout marker is redirected")
+    if not marker.exists():
+        return 1
+    if not marker.is_file():
+        raise WorkpadConflictError("workpad layout marker is invalid")
+    try:
+        from .canonical import parse_json_bytes, parse_json_front_matter
+
+        # A shaped working-tree marker is not authority.  Resolve its one
+        # immutable publisher and use the committed bytes for admission.
+        publishers = [
+            line for line in _git(root, "log", "--format=%H", "--", WORKPAD_LAYOUT_PATH, check=False).stdout.splitlines()
+            if line
+        ]
+        if len(publishers) != 1:
+            raise ValueError
+        commit = publishers[0]
+        changed = _git(root, "show", "--format=", "--name-only", commit).stdout.splitlines()
+        handoffs = [item for item in changed if item.startswith("handoffs/") and item.endswith(".txt")]
+        if len(handoffs) != 1 or WORKPAD_LAYOUT_PATH not in changed or ".gitignore" not in changed:
+            raise ValueError
+        metadata, _body = parse_json_front_matter(
+            _git_bytes(root, "show", f"{commit}:{handoffs[0]}")
+        )
+        marker_bytes = _git_bytes(root, "show", f"{commit}:{WORKPAD_LAYOUT_PATH}")
+        ignore_bytes = _git_bytes(root, "show", f"{commit}:.gitignore")
+        if metadata.get("transition") != "workpad_layout_migrated" or metadata.get("gig_id") != gig_id:
+            raise ValueError
+        references = metadata.get("artifact_refs")
+        if not isinstance(references, list):
+            raise ValueError
+        from .canonical import digest_imported_bytes
+
+        expected_refs = {
+            WORKPAD_LAYOUT_PATH: digest_imported_bytes(marker_bytes),
+            ".gitignore": digest_imported_bytes(ignore_bytes),
+        }
+        if {
+            item.get("path"): item.get("content_sha256")
+            for item in references
+            if isinstance(item, dict)
+        } != expected_refs:
+            raise ValueError
+        if marker.read_bytes() != marker_bytes or (root / ".gitignore").read_bytes() != ignore_bytes:
+            raise ValueError
+        payload = parse_json_bytes(marker_bytes)
+    except (OSError, ValueError) as exc:
+        raise WorkpadConflictError("workpad layout marker is invalid") from exc
+    if not isinstance(payload, dict) or set(payload) != {
+        "schema_version", "layout_version", "project_id", "gig_id", "ignore_sha256"
+    }:
+        raise WorkpadConflictError("workpad layout marker is malformed")
+    if (
+        payload.get("schema_version") != "2.0"
+        or payload.get("layout_version") != 2
+        or payload.get("project_id") != project_id
+        or payload.get("gig_id") != gig_id
+    ):
+        raise WorkpadConflictError("workpad layout marker identity is invalid")
+    if payload.get("ignore_sha256") != digest_imported_bytes(WORKPAD_V2_GITIGNORE):
+        raise WorkpadConflictError("workpad layout marker ignore policy is invalid")
+    return 2
 
 
 def _register_record(home: Path, record: WorkpadRecord) -> bool:
@@ -687,6 +789,27 @@ def _git(
     return completed
 
 
+def _git_bytes(root: Path, *args: str) -> bytes:
+    executable = shutil.which("git")
+    if executable is None:
+        raise WorkpadUnavailableError("Git executable is unavailable")
+    completed = subprocess.run(
+        [executable, "-C", os.fspath(root), *args],
+        env={
+            **os.environ,
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+        },
+        capture_output=True,
+        check=False,
+        shell=False,
+    )
+    if completed.returncode != 0:
+        raise WorkpadConflictError("Git workpad object lookup failed")
+    return completed.stdout
+
+
 __all__ = [
     "BoundProject",
     "EditorInvocationError",
@@ -696,6 +819,8 @@ __all__ = [
     "ProvisionedWorkpad",
     "ResolvedWorkpad",
     "WORKPAD_GITIGNORE",
+    "WORKPAD_V2_GITIGNORE",
+    "WORKPAD_LAYOUT_PATH",
     "WORKPAD_GIT_USER_EMAIL",
     "WORKPAD_GIT_USER_NAME",
     "WorkpadConflictError",
@@ -708,4 +833,5 @@ __all__ = [
     "resolve_bound_project",
     "resolve_workpad",
     "select_active_workpad",
+    "workpad_layout_version",
 ]

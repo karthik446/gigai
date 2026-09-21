@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gigai"
-version = "0.1.6"
+version = "0.1.7"
 description = "Contract-first foundations for a local, user-controlled agent runtime"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -41,13 +41,16 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "gigai.schemas" = ["*.schema.json", "README.md", "SHA256SUMS"]
-"gigai.data" = ["*.json"]
+"gigai.data" = ["*.json", "runtime-comparison-pack-v1.json", "scout/*.md", "scout/goalgraphs/*.md", "scout/ui/*.html", "scout/ui/*.css", "scout/tools/*/*.json"]
 "gigai" = ["static/*.css"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers -p no:cacheprovider"
 markers = [
   "g30_live: opt-in local provider UAT; skipped unless GIGAI_G30_UAT=1",
+  "fast_unit: isolated deterministic unit/contract test with no filesystem, process, network, or mutable-workpad fixture",
+  "integration: test requiring disposable filesystem, persistence, CLI, subprocess, concurrency, or authority-boundary setup",
+  "release: test exercising installed/package/resource or release-boundary behavior",
 ]
 testpaths = [
   "tests",

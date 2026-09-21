@@ -298,6 +298,9 @@ def target_configuration_digest(config: GigAIConfig, target_name: str) -> str:
             "max_output_tokens": target.max_output_tokens,
             "reasoning_effort": target.reasoning_effort,
             "enabled": target.enabled,
+            "model_digest": target.model_digest,
+            "context_tokens": target.context_tokens,
+            "max_response_bytes": target.max_response_bytes,
         },
     }))
 
@@ -438,27 +441,32 @@ def resolve_target_readiness(
         return ModelReadiness(target_name, None, None, None, "unsupported", str(exc), ())
     except ModelInvocationError as exc:
         return ModelReadiness(target_name, None, None, None, "unavailable", str(exc), ())
-    endpoint = binding.current.endpoint
-    return ModelReadiness(
-        target_name=target_name,
-        endpoint_name=endpoint.name,
-        model=binding.current.target.model,
-        adapter=endpoint.adapter,
-        readiness="usable" if endpoint.adapter == "deterministic" else "configured",
-        reason=(
-            None
+    try:
+        endpoint = binding.current.endpoint
+        return ModelReadiness(
+            target_name=target_name,
+            endpoint_name=endpoint.name,
+            model=binding.current.target.model,
+            adapter=endpoint.adapter,
+            readiness="usable" if endpoint.adapter == "deterministic" else "configured",
+            reason=(
+                None
+                if endpoint.adapter == "deterministic"
+                else "explicit readiness probe required before provider invocation"
+            ),
+            states=(
+                "configured",
+                "compatible",
+                "verified",
+                "usable",
+            )
             if endpoint.adapter == "deterministic"
-            else "explicit readiness probe required before provider invocation"
-        ),
-        states=(
-            "configured",
-            "compatible",
-            "verified",
-            "usable",
+            else ("configured",),
         )
-        if endpoint.adapter == "deterministic"
-        else ("configured",),
-    )
+    finally:
+        close = getattr(binding, "close", None)
+        if callable(close):
+            close()
 
 
 def probe_target_readiness(
@@ -487,9 +495,14 @@ def probe_target_readiness(
             if endpoint.adapter == "deterministic"
             else "Return exactly READY as a readiness check. Do not use tools or modify files."
         )
-        result = binding.port.invoke(
-            binding.request(role="live-diagnostic", prompt=prompt)
-        )
+        try:
+            result = binding.port.invoke(
+                binding.request(role="live-diagnostic", prompt=prompt)
+            )
+        finally:
+            close = getattr(binding, "close", None)
+            if callable(close):
+                close()
         if result.status != "success" or not result.output_text.strip():
             raise ModelInvocationError("readiness probe returned no successful text")
         return ModelReadiness(

@@ -88,6 +88,34 @@ def test_claude_adapter_passes_explicit_oauth_token_to_child_only(
     assert result.output_text == "claude-token-ok"
 
 
+@pytest.mark.parametrize("username", ["synthetic-login-user", None])
+def test_claude_adapter_preserves_login_user_without_inheriting_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, username: str | None
+) -> None:
+    if username is None:
+        monkeypatch.delenv("USER", raising=False)
+    else:
+        monkeypatch.setenv("USER", username)
+    monkeypatch.setenv("GIGAI_SYNTHETIC_SECRET", "must-not-cross-process-boundary")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-api-key-must-not-cross")
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    executable = _script(
+        tmp_path,
+        f"""
+import json, os
+assert os.environ.get("USER") == {username!r}
+assert "GIGAI_SYNTHETIC_SECRET" not in os.environ
+assert "ANTHROPIC_API_KEY" not in os.environ
+assert "CLAUDE_CODE_OAUTH_TOKEN" not in os.environ
+print(json.dumps({{"subtype": "success", "result": "claude-login-context-ok"}}))
+""",
+    )
+
+    result = ClaudeCLIAdapter(executable=str(executable)).invoke(_request())
+
+    assert result.output_text == "claude-login-context-ok"
+
+
 def test_claude_adapter_does_not_add_oauth_token_when_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

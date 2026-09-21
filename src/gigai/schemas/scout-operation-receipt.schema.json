@@ -1,0 +1,205 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "urn:gigai:schema:scout-operation-receipt:1",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "schema_version",
+        "operation_id",
+        "project_id",
+        "gig_id",
+        "operation",
+        "operation_key",
+        "payload_sha256",
+        "outcome",
+        "artifact_refs",
+        "created_at"
+    ],
+    "properties": {
+        "schema_version": {
+            "const": "1.0"
+        },
+        "operation_id": {
+            "type": "string",
+            "pattern": "^operation_[0-9a-f-]{36}$"
+        },
+        "project_id": {
+            "$ref": "urn:gigai:schema:common:1#/$defs/project_id"
+        },
+        "gig_id": {
+            "$ref": "urn:gigai:schema:common:1#/$defs/gig_id"
+        },
+        "operation": {
+            "enum": [
+                "reference_add",
+                "run_input_add",
+                "record_create",
+                "record_update",
+                "record_archive"
+            ]
+        },
+        "operation_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,160}$"
+        },
+        "payload_sha256": {
+            "$ref": "urn:gigai:schema:common:1#/$defs/sha256"
+        },
+        "outcome": {
+            "const": "committed"
+        },
+        "artifact_refs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+                "$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"
+            }
+        },
+        "tool_binding": {
+            "$ref": "#/$defs/tool_binding"
+        },
+        "created_at": {
+            "type": "string",
+            "format": "date-time"
+        }
+    },
+    "$defs": {
+        "tool_inventory_item": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "path",
+                "content_sha256",
+                "media_type",
+                "size_bytes"
+            ],
+            "properties": {
+                    "path": {
+                        "oneOf": [
+                            {"const": "gig.py"},
+                            {
+                                "type": "string",
+                                "pattern": "^tools/cap_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$"
+                            }
+                        ]
+                    },
+                "content_sha256": {
+                    "$ref": "urn:gigai:schema:common:1#/$defs/sha256"
+                },
+                "media_type": {
+                    "type": "string",
+                    "enum": [
+                        "text/x-python",
+                        "application/schema+json"
+                    ]
+                },
+                "size_bytes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 262144
+                }
+            }
+        },
+        "tool_binding": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "manifest_ref",
+                "capability_id",
+                "gig_version",
+                "entry_path",
+                "inventory",
+                "inventory_sha256",
+                "operation",
+                "effects",
+                "actor"
+            ],
+            "properties": {
+                "manifest_ref": {
+                    "$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"
+                },
+                "capability_id": {
+                    "type": "string",
+                    "pattern": "^cap_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "gig_version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                },
+                "entry_path": {
+                    "type": "string",
+          "pattern": "^tools/cap_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$"
+                },
+                "inventory": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "items": {
+                        "$ref": "#/$defs/tool_inventory_item"
+                    }
+                },
+                "inventory_sha256": {
+                    "$ref": "urn:gigai:schema:common:1#/$defs/sha256"
+                },
+                "operation": {
+                    "enum": [
+                        "record_create",
+                        "record_update",
+                        "record_archive"
+                    ]
+                },
+                "effects": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                        "const": "write_workpad"
+                    }
+                },
+                "wrapper_ref": {
+                    "$ref": "#/$defs/tool_inventory_item"
+                },
+                "actor": {
+                    "$ref": "#/$defs/tool_actor"
+                }
+            },
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {
+                            "inventory": {
+                                "contains": {
+                                    "type": "object",
+                                    "required": ["path"],
+                                    "properties": {"path": {"const": "gig.py"}}
+                                }
+                            }
+                        },
+                        "required": ["inventory"]
+                    },
+                    "then": {"required": ["wrapper_ref"]}
+                }
+            ]
+        },
+        "tool_actor": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "kind",
+                "id"
+            ],
+            "properties": {
+                "kind": {
+                    "const": "agent"
+                },
+                "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                }
+            }
+        }
+    }
+}

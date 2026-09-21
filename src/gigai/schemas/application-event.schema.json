@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:application-event:1",
+  "type": "object", "additionalProperties": false,
+  "required": ["event_id","project_id","gig_id","opportunity_ref","event_kind","occurred_at","timezone","recorded_at","document_refs","notes","supersedes","request_evidence","requested_event_sha256","operation_key","payload_sha256","actor","schema_version"],
+  "properties": {
+    "schema_version": {"const":"1.0"},
+    "event_id": {"type":"string","pattern":"^event_[0-9a-f-]{36}$"},
+    "project_id": {"$ref":"urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref":"urn:gigai:schema:common:1#/$defs/gig_id"},
+    "opportunity_ref": {"type":"string","minLength":1,"maxLength":240},
+    "event_kind": {"enum":["saved","applied","interview_scheduled","offer_received","rejected","withdrawn"]},
+    "occurred_at": {"type":"string","format":"date-time"}, "timezone":{"type":"string","minLength":1,"maxLength":80},
+    "recorded_at": {"type":"string","format":"date-time"},
+    "document_refs": {"type":"array","maxItems":32,"items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["record_id","revision_id","content_sha256"],"properties":{"record_id":{"type":"string","pattern":"^record_[0-9a-f-]{36}$"},"revision_id":{"type":"string","pattern":"^revision_[0-9a-f-]{36}$"},"content_sha256":{"$ref":"urn:gigai:schema:common:1#/$defs/sha256"},"opportunity_ref":{"type":"string","minLength":1,"maxLength":240}}},{"type":"object","additionalProperties":false,"required":["kind","record_id","revision_id","document_kind","content_sha256","opportunity_ref","snapshot_id","tailor_run_id","tailor_goal_id","tailor_invocation_id"],"properties":{"kind":{"const":"scout_document"},"record_id":{"type":"string","pattern":"^record_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},"revision_id":{"type":"string","pattern":"^revision_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},"document_kind":{"enum":["resume","cover_letter"]},"content_sha256":{"$ref":"urn:gigai:schema:common:1#/$defs/sha256"},"opportunity_ref":{"type":"string","pattern":"^opportunity_[0-9a-f]{32}$"},"snapshot_id":{"type":"string","pattern":"^snapshot_[0-9a-f]{32}$"},"tailor_run_id":{"type":"string","pattern":"^run_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},"tailor_goal_id":{"type":"string","pattern":"^goal_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},"tailor_invocation_id":{"type":"string","pattern":"^inv_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}}}]}} ,
+    "notes": {"type":["string","null"],"maxLength":4000}, "supersedes":{"type":["string","null"],"pattern":"^event_[0-9a-f-]{36}$"},
+    "request_evidence": {"type":"object","additionalProperties":false,"required":["kind","scope_digest","actor","recorded_at"],"properties":{"kind":{"const":"direct_event_command"},"scope_digest":{"$ref":"urn:gigai:schema:common:1#/$defs/sha256"},"actor":{"type":"object","additionalProperties":false,"required":["kind","id"],"properties":{"kind":{"const":"operator"},"id":{"type":"string","minLength":1,"maxLength":120}}},"recorded_at":{"type":"string","format":"date-time"},"command":{"const":"gigai application record"}}},
+    "requested_event_sha256": {"$ref":"urn:gigai:schema:common:1#/$defs/sha256"}, "operation_key":{"type":"string","pattern":"^[A-Za-z0-9._:-]{1,160}$"}, "payload_sha256":{"$ref":"urn:gigai:schema:common:1#/$defs/sha256"},
+    "actor":{"type":"object","additionalProperties":false,"required":["kind","id"],"properties":{"kind":{"const":"operator"},"id":{"type":"string","minLength":1,"maxLength":120}}}
+  }
+}

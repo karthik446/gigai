@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:scout-public-import-progress:1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "batch_id", "project_id", "gig_id", "input_sha256", "input_ref", "progress_revision", "parent_progress_revision", "parent_journal_head", "processed", "next_index", "total", "deadline_seconds", "stop_reason", "considered", "duplicates", "failures", "exclusions"],
+  "properties": {
+    "schema_version": {"const": "scout-public-import-progress:1"},
+    "batch_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "input_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "input_ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "progress_revision": {"type": "string", "pattern": "^revision_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "parent_progress_revision": {"type": ["string", "null"]},
+    "parent_journal_head": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+    "processed": {"type": "integer", "minimum": 0, "maximum": 512},
+    "next_index": {"type": "integer", "minimum": 0, "maximum": 512},
+    "total": {"type": "integer", "minimum": 0, "maximum": 512},
+    "deadline_seconds": {"type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"},
+    "stop_reason": {"enum": ["completed", "deadline"]},
+    "considered": {"type": "array", "items": {"$ref": "#/$defs/outcome"}},
+    "duplicates": {"type": "array", "items": {"$ref": "#/$defs/outcome"}},
+    "failures": {"type": "array", "items": {"$ref": "#/$defs/outcome"}},
+    "exclusions": {"type": "array", "items": {"$ref": "#/$defs/outcome"}}
+  },
+  "$defs": {
+    "outcome": {
+      "type": "object", "additionalProperties": false,
+      "required": ["index", "opportunity_id", "snapshot_id", "source_snapshot", "outcome", "reason"],
+      "properties": {
+        "index": {"type": "integer", "minimum": 0, "maximum": 511},
+        "opportunity_id": {"type": "string", "minLength": 1},
+        "snapshot_id": {"type": "string", "minLength": 1},
+        "source_kind": {"enum": ["agent_discovered", "user_provided"]},
+        "title": {"type": ["string", "null"]}, "employer": {"type": ["string", "null"]},
+        "url": {"type": ["string", "null"]}, "acquisition_state": {"type": "string"},
+        "error": {"type": ["string", "null"]}, "duplicate_of": {"type": ["string", "null"]},
+        "excluded_reason": {"type": ["string", "null"]},
+        "source_snapshot": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "source_kind": {"type": ["string", "null"]}, "locator": {"type": ["string", "null"]},
+            "url": {"type": ["string", "null"]}, "status": {"type": ["string", "null"]},
+            "captured_at": {"type": ["string", "null"]},
+            "content_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+            "media_type": {"type": ["string", "null"]},
+            "size_bytes": {"type": "integer", "minimum": 0}
+          }
+        },
+        "outcome": {"enum": ["considered", "duplicate", "failure", "exclusion"]},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

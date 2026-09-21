@@ -10,6 +10,8 @@ from pathlib import Path
 import sqlite3
 import stat
 import tempfile
+import unicodedata
+import uuid
 from typing import Callable, Iterator
 
 from .canonical import EntityPrefix, InvalidIdentifierError, validate_entity_id
@@ -17,8 +19,10 @@ from .canonical import EntityPrefix, InvalidIdentifierError, validate_entity_id
 
 REGISTRY_FILENAME = "registry.sqlite"
 REGISTRY_BACKUP_FILENAME = "registry.sqlite.v1.bak"
+REGISTRY_V2_BACKUP_FILENAME = "registry.sqlite.v2.bak"
 REGISTRY_V1_SCHEMA_VERSION = 1
-REGISTRY_SCHEMA_VERSION = 2
+REGISTRY_V2_SCHEMA_VERSION = 2
+REGISTRY_SCHEMA_VERSION = 3
 REGISTRY_APPLICATION_ID = 0x47494741
 TARGET_KINDS = frozenset({"git", "non-git"})
 PROJECT_TABLE_SQL = """\
@@ -44,8 +48,32 @@ CREATE TABLE active_workpads (
     FOREIGN KEY (project_id, gig_id) REFERENCES workpads(project_id, gig_id)
 ) WITHOUT ROWID
 """
+WORKSPACE_OWNER_TABLE_SQL = """\
+CREATE TABLE workspace_owners (
+    project_id TEXT PRIMARY KEY NOT NULL,
+    owner_id TEXT NOT NULL UNIQUE,
+    username TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(project_id)
+) WITHOUT ROWID
+"""
+TEMPLATE_INSTANCE_TABLE_SQL = """\
+CREATE TABLE template_instances (
+    project_id TEXT NOT NULL,
+    template_id TEXT NOT NULL,
+    instance_name TEXT NOT NULL CHECK (instance_name = 'default'),
+    gig_id TEXT NOT NULL UNIQUE,
+    package_id TEXT NOT NULL,
+    original_package_digest TEXT NOT NULL,
+    binding_artifact_ref TEXT NOT NULL,
+    binding_sha256 TEXT NOT NULL,
+    journal_commit TEXT NOT NULL,
+    PRIMARY KEY (project_id, template_id, instance_name),
+    FOREIGN KEY (project_id) REFERENCES projects(project_id),
+    FOREIGN KEY (project_id, gig_id) REFERENCES workpads(project_id, gig_id)
+) WITHOUT ROWID
+"""
 EXPECTED_REGISTRY_TABLES = frozenset(
-    {"projects", "workpads", "active_workpads"}
+    {"projects", "workpads", "active_workpads", "workspace_owners", "template_instances"}
 )
 MIGRATION_FAILPOINTS = (
     "before_backup_publish",
@@ -71,6 +99,10 @@ class RegistryVersionError(RegistryError):
     code = "registry_version_unsupported"
 
 
+class RegistryMigrationRequired(RegistryVersionError):
+    code = "registry_migration_required"
+
+
 class RegistryConflictError(RegistryError):
     code = "registry_conflict"
 
@@ -91,6 +123,26 @@ class WorkpadRecord:
     gig_id: str
     project_id: str
     workpad_locator: str
+
+
+@dataclass(frozen=True)
+class WorkspaceOwnerRecord:
+    project_id: str
+    owner_id: str
+    username: str
+
+
+@dataclass(frozen=True)
+class TemplateInstanceRecord:
+    project_id: str
+    template_id: str
+    instance_name: str
+    gig_id: str
+    package_id: str
+    original_package_digest: str
+    binding_artifact_ref: str
+    binding_sha256: str
+    journal_commit: str
 
 
 @dataclass(frozen=True)
@@ -222,6 +274,40 @@ class RegistryTransaction:
             (project_id, gig_id),
         )
 
+    def find_workspace_owner(self, project_id: str) -> WorkspaceOwnerRecord | None:
+        row = self._connection.execute(
+            "SELECT project_id, owner_id, username FROM workspace_owners WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+        return _workspace_owner_record(row)
+
+    def insert_workspace_owner(self, record: WorkspaceOwnerRecord) -> None:
+        _validate_workspace_owner_record(record)
+        try:
+            self._connection.execute(
+                "INSERT INTO workspace_owners(project_id, owner_id, username) VALUES (?, ?, ?)",
+                (record.project_id, record.owner_id, record.username),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise RegistryConflictError("workspace owner conflicts with an existing project or owner") from exc
+
+    def find_template_instance(self, project_id: str, template_id: str) -> TemplateInstanceRecord | None:
+        row = self._connection.execute(
+            "SELECT project_id, template_id, instance_name, gig_id, package_id, original_package_digest, binding_artifact_ref, binding_sha256, journal_commit FROM template_instances WHERE project_id = ? AND template_id = ? AND instance_name = 'default'",
+            (project_id, template_id),
+        ).fetchone()
+        return _template_instance_record(row)
+
+    def insert_template_instance(self, record: TemplateInstanceRecord) -> None:
+        _validate_template_instance_record(record)
+        try:
+            self._connection.execute(
+                "INSERT INTO template_instances(project_id, template_id, instance_name, gig_id, package_id, original_package_digest, binding_artifact_ref, binding_sha256, journal_commit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (record.project_id, record.template_id, record.instance_name, record.gig_id, record.package_id, record.original_package_digest, record.binding_artifact_ref, record.binding_sha256, record.journal_commit),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise RegistryConflictError("template instance conflicts with an existing default binding") from exc
+
 
 class ProjectRegistry:
     def __init__(self, path: Path) -> None:
@@ -341,6 +427,7 @@ def open_project_registry(
     home_root: Path,
     *,
     create: bool,
+    allow_migration: bool = False,
     migration_observer: MigrationObserver | None = None,
     tolerate_invalid_rows: bool = False,
 ) -> tuple[ProjectRegistry, bool]:
@@ -357,10 +444,22 @@ def open_project_registry(
     # only after an opener has already observed v1.
     with _migration_lock(path):
         version = _validate_registry(path, tolerate_invalid_rows=tolerate_invalid_rows)
+        if version != REGISTRY_SCHEMA_VERSION and not allow_migration:
+            raise RegistryMigrationRequired(
+                "registry migration is required; run gigai init before this read-only operation"
+            )
         if version == REGISTRY_V1_SCHEMA_VERSION:
             _migrate_registry_v1_to_v2(
                 path,
                 registry_backup_path(home_root),
+                migration_observer=migration_observer,
+            )
+            _validate_registry(path)
+            version = REGISTRY_V2_SCHEMA_VERSION
+        if version == REGISTRY_V2_SCHEMA_VERSION:
+            _migrate_registry_v2_to_v3(
+                path,
+                home_root / REGISTRY_V2_BACKUP_FILENAME,
                 migration_observer=migration_observer,
             )
             _validate_registry(path)
@@ -387,6 +486,8 @@ def _create_registry_atomic(path: Path) -> None:
             connection.execute(PROJECT_TABLE_SQL)
             connection.execute(WORKPAD_TABLE_SQL)
             connection.execute(ACTIVE_WORKPAD_TABLE_SQL)
+            connection.execute(WORKSPACE_OWNER_TABLE_SQL)
+            connection.execute(TEMPLATE_INSTANCE_TABLE_SQL)
             connection.execute(f"PRAGMA user_version = {REGISTRY_SCHEMA_VERSION}")
             connection.commit()
         finally:
@@ -436,11 +537,10 @@ def _validate_registry(path: Path, *, tolerate_invalid_rows: bool = False) -> in
             if application_id != (REGISTRY_APPLICATION_ID,):
                 raise RegistryCorruptError("registry application identity is invalid")
             actual = user_version[0] if user_version else None
-            if actual not in {REGISTRY_V1_SCHEMA_VERSION, REGISTRY_SCHEMA_VERSION}:
+            if actual not in {REGISTRY_V1_SCHEMA_VERSION, REGISTRY_V2_SCHEMA_VERSION, REGISTRY_SCHEMA_VERSION}:
                 raise RegistryVersionError(
                     f"registry schema version {actual!r} is unsupported; expected "
-                    f"{REGISTRY_SCHEMA_VERSION} or migratable predecessor "
-                    f"{REGISTRY_V1_SCHEMA_VERSION}; no migration was attempted"
+                f"{REGISTRY_SCHEMA_VERSION} or a migratable predecessor; no migration was attempted"
                 )
             _validate_schema(
                 connection,
@@ -463,11 +563,18 @@ def _validate_schema(
     tolerate_invalid_rows: bool = False,
 ) -> None:
     expected_definitions = {"projects": PROJECT_TABLE_SQL}
-    if version == REGISTRY_SCHEMA_VERSION:
+    if version >= REGISTRY_V2_SCHEMA_VERSION:
         expected_definitions.update(
             {
                 "workpads": WORKPAD_TABLE_SQL,
                 "active_workpads": ACTIVE_WORKPAD_TABLE_SQL,
+            }
+        )
+    if version == REGISTRY_SCHEMA_VERSION:
+        expected_definitions.update(
+            {
+                "workspace_owners": WORKSPACE_OWNER_TABLE_SQL,
+                "template_instances": TEMPLATE_INSTANCE_TABLE_SQL,
             }
         )
     expected_tables = set(expected_definitions)
@@ -510,7 +617,7 @@ def _validate_schema(
             if not tolerate_invalid_rows:
                 raise
 
-    if version == REGISTRY_SCHEMA_VERSION:
+    if version >= REGISTRY_V2_SCHEMA_VERSION:
         _validate_columns(
             connection,
             "workpads",
@@ -565,6 +672,30 @@ def _validate_schema(
                     raise RegistryCorruptError(
                         "registry contains an invalid active project or Gig ID"
                     ) from exc
+
+    if version == REGISTRY_SCHEMA_VERSION:
+        _validate_columns(connection, "workspace_owners", (("project_id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("username", "TEXT", 1, 0)))
+        _require_unique_columns(connection, "workspace_owners", {("owner_id",)})
+        _validate_columns(connection, "template_instances", (("project_id", "TEXT", 1, 1), ("template_id", "TEXT", 1, 2), ("instance_name", "TEXT", 1, 3), ("gig_id", "TEXT", 1, 0), ("package_id", "TEXT", 1, 0), ("original_package_digest", "TEXT", 1, 0), ("binding_artifact_ref", "TEXT", 1, 0), ("binding_sha256", "TEXT", 1, 0), ("journal_commit", "TEXT", 1, 0)))
+        _require_unique_columns(connection, "template_instances", {("gig_id",), ("project_id", "template_id", "instance_name")})
+        for row in connection.execute(
+            "SELECT project_id, owner_id, username FROM workspace_owners"
+        ):
+            try:
+                _workspace_owner_record(row)
+            except RegistryCorruptError:
+                if not tolerate_invalid_rows:
+                    raise
+        for row in connection.execute(
+            "SELECT project_id, template_id, instance_name, gig_id, package_id, "
+            "original_package_digest, binding_artifact_ref, binding_sha256, "
+            "journal_commit FROM template_instances"
+        ):
+            try:
+                _template_instance_record(row)
+            except RegistryCorruptError:
+                if not tolerate_invalid_rows:
+                    raise
 
     foreign_key_failures = tuple(connection.execute("PRAGMA foreign_key_check"))
     if foreign_key_failures:
@@ -656,7 +787,7 @@ def _migrate_registry_v1_to_v2(
         connection.execute("BEGIN EXCLUSIVE")
         version_row = connection.execute("PRAGMA user_version").fetchone()
         version = int(version_row[0]) if version_row else -1
-        if version == REGISTRY_SCHEMA_VERSION:
+        if version == REGISTRY_V2_SCHEMA_VERSION:
             _validate_schema(connection, version=version)
             connection.rollback()
             return
@@ -672,13 +803,72 @@ def _migrate_registry_v1_to_v2(
             connection.execute(ACTIVE_WORKPAD_TABLE_SQL)
             observer("after_active_workpads_table")
             observer("before_version_write")
-            connection.execute(f"PRAGMA user_version = {REGISTRY_SCHEMA_VERSION}")
+            connection.execute(f"PRAGMA user_version = {REGISTRY_V2_SCHEMA_VERSION}")
             observer("before_commit")
             connection.commit()
             observer("after_commit")
         except BaseException:
             connection.rollback()
             raise
+    finally:
+        connection.close()
+
+
+def _migrate_registry_v2_to_v3(
+    path: Path,
+    backup: Path,
+    *,
+    migration_observer: MigrationObserver | None,
+) -> None:
+    """Add private owner/instance cache tables without rewriting v2 rows."""
+    observer = migration_observer or (lambda _step: None)
+    observer("before_v3_backup_publish")
+    if backup.exists():
+        backup_connection = _connect(backup)
+        try:
+            version = int(backup_connection.execute("PRAGMA user_version").fetchone()[0])
+            if version != REGISTRY_V2_SCHEMA_VERSION:
+                raise RegistryCorruptError("v2 registry backup has the wrong schema version")
+            _validate_schema(backup_connection, version=version)
+        finally:
+            backup_connection.close()
+    else:
+        temporary = backup.with_name(f".{backup.name}.{uuid.uuid4().hex}.tmp")
+        source = sqlite3.connect(path)
+        destination = sqlite3.connect(temporary)
+        try:
+            source.backup(destination)
+            destination.commit()
+        finally:
+            destination.close()
+            source.close()
+        os.chmod(temporary, 0o600)
+        try:
+            os.link(temporary, backup)
+        except FileExistsError:
+            temporary.unlink(missing_ok=True)
+            return _migrate_registry_v2_to_v3(
+                path, backup, migration_observer=migration_observer
+            )
+        temporary.unlink(missing_ok=True)
+    connection = _connect(path)
+    try:
+        observer("before_v3_transaction")
+        connection.execute("BEGIN EXCLUSIVE")
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if version == REGISTRY_SCHEMA_VERSION:
+            connection.rollback()
+            return
+        if version != REGISTRY_V2_SCHEMA_VERSION:
+            raise RegistryVersionError("registry version changed during v3 migration")
+        connection.execute(WORKSPACE_OWNER_TABLE_SQL)
+        connection.execute(TEMPLATE_INSTANCE_TABLE_SQL)
+        connection.execute(f"PRAGMA user_version = {REGISTRY_SCHEMA_VERSION}")
+        connection.commit()
+        observer("after_v3_commit")
+    except BaseException:
+        connection.rollback()
+        raise
     finally:
         connection.close()
 
@@ -857,6 +1047,64 @@ def _validate_workpad_record(record: WorkpadRecord) -> None:
         raise RegistryCorruptError("registry contains an invalid workpad locator")
 
 
+def _workspace_owner_record(row: tuple[object, ...] | None) -> WorkspaceOwnerRecord | None:
+    if row is None:
+        return None
+    record = WorkspaceOwnerRecord(*map(str, row))
+    _validate_workspace_owner_record(record)
+    return record
+
+
+def _validate_workspace_owner_record(record: WorkspaceOwnerRecord) -> None:
+    try:
+        validate_entity_id(record.project_id, expected_prefix=EntityPrefix.PROJECT)
+        parsed = uuid.UUID(record.owner_id.removeprefix("owner_"))
+    except (InvalidIdentifierError, ValueError, AttributeError) as exc:
+        raise RegistryCorruptError("registry contains an invalid workspace owner ID") from exc
+    if not record.owner_id.startswith("owner_") or parsed.version != 4:
+        raise RegistryCorruptError("registry contains an invalid workspace owner ID")
+    if not _is_valid_workspace_username(record.username):
+        raise RegistryCorruptError("registry contains an invalid workspace username")
+
+
+def _is_valid_workspace_username(value: str) -> bool:
+    """Keep persisted display metadata aligned with init's narrow control rule."""
+
+    return (
+        value == value.strip()
+        and 1 <= len(value) <= 64
+        and not any(unicodedata.category(character) == "Cc" for character in value)
+    )
+
+
+def _template_instance_record(
+    row: tuple[object, ...] | None,
+) -> TemplateInstanceRecord | None:
+    if row is None:
+        return None
+    record = TemplateInstanceRecord(*map(str, row))
+    _validate_template_instance_record(record)
+    return record
+
+
+def _validate_template_instance_record(record: TemplateInstanceRecord) -> None:
+    try:
+        validate_entity_id(record.project_id, expected_prefix=EntityPrefix.PROJECT)
+        validate_entity_id(record.gig_id, expected_prefix=EntityPrefix.GIG)
+    except InvalidIdentifierError as exc:
+        raise RegistryCorruptError("registry contains an invalid template instance identity") from exc
+    required = (
+        record.template_id,
+        record.package_id,
+        record.original_package_digest,
+        record.binding_artifact_ref,
+        record.binding_sha256,
+        record.journal_commit,
+    )
+    if record.instance_name != "default" or any(not value for value in required):
+        raise RegistryCorruptError("registry contains an invalid template instance binding")
+
+
 def _quote_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
@@ -876,12 +1124,17 @@ __all__ = [
     "REGISTRY_FILENAME",
     "REGISTRY_SCHEMA_VERSION",
     "REGISTRY_V1_SCHEMA_VERSION",
+    "REGISTRY_V2_BACKUP_FILENAME",
+    "REGISTRY_V2_SCHEMA_VERSION",
     "RegistryConflictError",
     "RegistryCorruptError",
     "RegistryError",
+    "RegistryMigrationRequired",
     "RegistryPermissionError",
     "RegistryTransaction",
     "RegistryVersionError",
+    "TemplateInstanceRecord",
+    "WorkspaceOwnerRecord",
     "WORKPAD_TABLE_SQL",
     "open_project_registry",
     "registry_backup_path",

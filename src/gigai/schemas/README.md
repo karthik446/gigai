@@ -1,5 +1,17 @@
 # GigAI v1 serialized contracts
 
+The SCOUT-04 external recording lane adds five separately named strict
+protocol resources: `external-recording-invocation.schema.json`,
+`external-recording-plan.schema.json`, `external-recording-run.schema.json`,
+`external-recording-checkpoint.schema.json` and
+`external-recording-receipt.schema.json`. They do not replace managed Plan/Run
+contracts or confer provider execution authority. Registration and installed
+resource checks are distinct from whole-lifecycle acceptance.
+
+`native-record-content.schema.json` describes SCOUT-03 native content and its
+saved-default/task-override scope. It is the single native content envelope,
+referenced by a journaled private revision, not a second persistence authority.
+
 **Status:** Phase 0 contract baseline
 **Dialect:** JSON Schema Draft 2020-12
 **Identity profile:** RFC 8785 JSON Canonicalization Scheme, restricted as
@@ -43,6 +55,38 @@ evidence; it is not Run, approval, or active-version authority.
 The G43.1 amendment adds `review-input-record.schema.json` and
 `requirements-baseline-approval.schema.json` for separately sealed review
 subjects and direct-operator-approved requirements baselines.
+JSL-01 adds `provider-review-closeout-receipt.schema.json` for a separately
+direct-operator-confirmed clean provider-review closure; the receipt is not
+approval, a Run Plan, Run consent, or new Run authority.
+SCOUT-02 adds seven additive Graph Set resources: `gig-graph-set.schema.json`,
+`graph-selection-record.schema.json`, `graph-selection-record-v2.schema.json`,
+`gig-proposal-v2.schema.json`, `active-gig-version-v2.schema.json`,
+`run-plan-v2.schema.json`, and `run-manifest-v2.schema.json`. They retain the
+v1 bytes and identifiers while adding graph-selected approval, selection, Plan,
+and Run contracts; readers must dispatch explicitly by the supported family.
+SCOUT-03 adds strict private reference, Run-input, revision, layout, and
+operation-receipt resources. They are private-workpad contracts only; none is
+a portable package, provider disclosure grant, managed Plan, or Run authority.
+SCOUT-R4 adds `scout-public-import-input.schema.json` and
+`scout-public-import-progress.schema.json` for immutable, journal-backed
+progress over already-acquired public rows. These records are not discovery
+packets, proposal inputs, private assessments, or provider authority.
+RUNTIME-01 adds `runtime-evaluation-pack.schema.json`,
+`runtime-comparison-attempt.schema.json`, and `runtime-comparison.schema.json`
+for a bounded synthetic execution-setup comparison. Packs are declared by the
+selected Graph Set evaluation contract and criterion evidence is frozen by ID
+and source kind; readers re-authenticate the outer comparison and nested Run
+and case artifacts. They preserve independent Run attempts and deterministic
+source-grounded grading; they do not select a winner, promote a Gig, or
+authorize provider execution. `runtime-comparison-intent.schema.json` freezes a
+pre-execution scope and Run plan so an interrupted comparison can resume the
+same attempts.
+
+SCOUT-R5 adds `scout-interview-preparation.schema.json`,
+`scout-private-transfer-manifest.schema.json`, and
+`scout-definition-export-manifest.schema.json`. These resources are additive
+and versioned; interview and transfer writers validate them before journal
+publication and the main CLI exposes the corresponding service groups.
 
 ## Production identity API
 
@@ -82,6 +126,31 @@ No other product module implements canonical rendering or SHA-256 identity.
   requirements-baseline binding without changing Run Plan v1.
 - `requirements-baseline-approval.schema.json` records the operator's
   digest-bound approval of a requirements-baseline snapshot.
+- `provider-review-closeout-receipt.schema.json` records only a direct
+  operator no-fix-required decision bound to authenticated clean review
+  artifacts; it grants no new authority.
+- `gig-graph-set.schema.json` defines an immutable, approved set of bounded
+  graph descriptors under one Gig version.
+- `graph-selection-record.schema.json` records operator, deterministic, or
+  routed selection of exactly one approved Graph Set member.
+- `graph-selection-record-v2.schema.json` adds an agent-explicit selection
+  provenance slot; acceptance resolves its exact journaled invocation bytes and
+  actor, and it is not Run consent.
+- `gig-proposal-v2.schema.json` and `active-gig-version-v2.schema.json` are the
+  additive proposal and approved-pointer pair for Graph Set versions.
+- `run-plan-v2.schema.json` and `run-manifest-v2.schema.json` retain the v1
+  nested strict contracts while sealing the approved Graph Set, canonical
+  selector, selected Goal Graph, and selection record.
+- `template-instance-binding.schema.json` records a prepared v2 Scout
+  instance's project/Gig identity, source-inventory reference and digest,
+  pending create-proposal reference, unapproved state, and nullable
+  customization/approved-version parent fields; the registry row is only a
+  validated cache of this journaled authority.
+- `reference-record.schema.json` and `run-input-record.schema.json` define
+  canonical immutable G45 text snapshots.
+- `private-record-revision.schema.json` binds a private revision to exactly one
+  canonical imported content source; `workpad-layout.schema.json` and
+  `scout-operation-receipt.schema.json` bind its layout and operation evidence.
 - `run-details.schema.json` defines the small materialized Run status/result
   record.
 - `handoff-frontmatter.schema.json` defines the JSON front matter embedded in
@@ -96,6 +165,11 @@ No other product module implements canonical rendering or SHA-256 identity.
   machine report projection.
 - `model-invocation.schema.json` defines one provider-port invocation,
   terminal outcome, replay fields, usage, and boundary attestation.
+- `model-invocation-v2.schema.json` is an additive local-runtime invocation
+  contract. It preserves `model-invocation:1` and is selected only for records
+  with `schema_version="2.0"`; its strict `local_identity` object pins the
+  configured endpoint/model digest/bounds separately from observed runtime
+  checks. Historical readers continue to validate the v1 resource unchanged.
 - `model-exchange.schema.json` defines bounded Goal-edge handoffs and
   provider comparisons without fallback or winner selection.
 - `proposal-interview.schema.json` defines typed, bounded proposal-interview
