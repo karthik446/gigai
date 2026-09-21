@@ -17,6 +17,7 @@ from gigai.config import Endpoint, ModelTarget, Profile, load_config
 from gigai.journal import JournalArtifact, read_committed_artifact, record_transition
 from gigai.lifecycle import LifecycleError, approve_offline, create_offline, propose_first_graph_set_offline, propose_graph_set_offline
 from gigai.model_execution import ModelInvocationExecution
+from gigai.model_discovery import resolve_target_readiness
 from gigai.private_records import import_run_input, migrate_workpad_layout
 from gigai.runtime_comparison import (
     RuntimeComparisonError,
@@ -35,6 +36,18 @@ from gigai.target_binding import initialize_target
 
 from tests.test_scout02_graph_set_flow import _write_definition
 from tests.test_scout05_first_proposal import _bound_defaults, _write_first_definition
+
+
+@pytest.fixture(autouse=True)
+def configured_comparison_runtime(monkeypatch):
+    # Execution is injected by these tests; readiness must not depend on a
+    # developer's Codex installation. Keep real target/adapter validation.
+    def readiness(config, target_name):
+        return resolve_target_readiness(
+            config, target_name, executable_overrides={"codex": sys.executable}
+        )
+
+    monkeypatch.setattr("gigai.runtime_comparison.resolve_target_readiness", readiness)
 
 
 def test_pack_and_grader_are_frozen_and_source_grounded() -> None:

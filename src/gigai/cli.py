@@ -123,7 +123,20 @@ from .target_binding import TargetBindingError, resolve_target
 from .workpad import ResolvedWorkpad, WorkpadError, open_locations, resolve_workpad
 
 
+class InvocationGroup(click.Group):
+    """Retain the actual CLI arguments, including for embedded Click callers."""
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        ctx.meta["invocation_argv"] = (ctx.info_name or "gigai", *args)
+        return super().parse_args(ctx, args)
+
+
+def _invocation_argv() -> tuple[str, ...]:
+    return click.get_current_context().find_root().meta["invocation_argv"]
+
+
 @click.group(
+    cls=InvocationGroup,
     invoke_without_command=True,
     context_settings={"help_option_names": ["--help"]},
     help=(
@@ -3013,7 +3026,7 @@ def run_command(
             gig_id=selected_gig_id,
             version=selected_version,
             wait=selected_wait,
-            invocation_argv=tuple(sys.argv),
+            invocation_argv=_invocation_argv(),
             operator_consent=operator_consent,
             run_plan_id=run_plan_id,
             execute_provider_review=execute_provider_review,
@@ -3075,7 +3088,7 @@ def proposal_command(
             requested_target=target_value,
             gig_id=gig_id,
             wait=wait,
-            invocation_argv=tuple(sys.argv),
+            invocation_argv=_invocation_argv(),
             operator_consent={
                 "schema_version": "1.0", "kind": "operator_run_consent", "action": "run",
                 "actor": {"kind": "operator", "id": "local-user"}, "source": "direct_cli_confirm",
@@ -3140,7 +3153,7 @@ def tailor_command(
             raise RunError("Tailor input selectors must be JSON objects")
         result = launch_run(
             home_root=home_value or default_home_root(), requested_target=target_value,
-            gig_id=gig_id, wait=wait, invocation_argv=tuple(sys.argv),
+            gig_id=gig_id, wait=wait, invocation_argv=_invocation_argv(),
             operator_consent={"schema_version": "1.0", "kind": "operator_run_consent", "action": "run", "actor": {"kind": "operator", "id": "local-user"}, "source": "direct_cli_confirm"},
             tailor_execution=TailorRunRequest(
                 graph_selector="tailor-application", model_target=model_target,

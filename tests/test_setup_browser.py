@@ -194,7 +194,13 @@ def test_setup_command_is_terminal_native_and_applies_after_confirmation(tmp_pat
     home = tmp_path / "home"
     result = CliRunner().invoke(
         cli,
-        ["setup", "--home", str(home), "--editor", "/usr/bin/true"],
+        [
+            "setup", "--home", str(home), "--editor", "/usr/bin/true",
+            "--credential-ref", "openai=environment:OPENAI_API_KEY",
+            "--endpoint", "openai=openai_api:openai:https://api.example.test",
+            "--model-target", "remote=openai:gpt-test",
+            "--create-model-target", "remote",
+        ],
         input="\n\n\nn\n\n\ny\n",
     )
     assert result.exit_code == 0, result.output
