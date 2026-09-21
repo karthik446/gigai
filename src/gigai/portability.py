@@ -48,6 +48,63 @@ class ProposalLineage:
     proposals: tuple[Mapping[str, Any], ...]
 
 
+def export_definition(*, workpad: Path, destination: Path):
+    """Export only portable Scout definition material.
+
+    Kept as a thin compatibility seam so callers that already use the
+    portability module do not accidentally reach the private-transfer format.
+    """
+    from .private_transfer import export_definition as _export_definition
+
+    return _export_definition(workpad=workpad, destination=destination)
+
+
+def import_definition(*, archive: Path, destination: Path):
+    """Import a definition archive into a new, non-existing destination."""
+    from .private_transfer import import_definition as _import_definition
+
+    return _import_definition(archive=archive, destination=destination)
+
+
+def backup_private(*, workpad: Path, destination: Path, project_id: str | None = None, gig_id: str | None = None, selected_paths: Any = None):
+    """Explicitly create the separate private Scout transfer format."""
+    from .private_transfer import backup_private as _backup_private
+
+    return _backup_private(workpad=workpad, destination=destination, project_id=project_id, gig_id=gig_id, selected_paths=selected_paths)
+
+
+def restore_private(*, archive: Path, destination: Path, expected_project_id: str | None = None, expected_gig_id: str | None = None):
+    """Restore a private transfer into a new destination after full validation."""
+    from .private_transfer import restore_private as _restore_private
+
+    return _restore_private(archive=archive, destination=destination, expected_project_id=expected_project_id, expected_gig_id=expected_gig_id)
+
+
+def bind_restored_private(*, restored: Path, home_root: Path, requested_target: Path, project_id: str, gig_id: str):
+    """Explicitly bind restored history to a fresh local journal substrate."""
+    from .private_transfer import bind_restored_private as _bind_restored_private
+
+    return _bind_restored_private(
+        restored=restored,
+        home_root=home_root,
+        requested_target=requested_target,
+        project_id=project_id,
+        gig_id=gig_id,
+    )
+
+
+def read_scout_source_snapshot(*, workpad: Path, project_id: str, gig_id: str, inventory_ref: Mapping[str, object]):
+    """Read inert Scout source members from one authenticated journal head."""
+    from .scout_materialization import read_scout_source_snapshot as _read_scout_source_snapshot
+
+    return _read_scout_source_snapshot(
+        workpad=workpad,
+        project_id=project_id,
+        gig_id=gig_id,
+        inventory_ref=inventory_ref,
+    )
+
+
 def verify_active_version_portability(workpad: Path) -> PortabilityResult:
     """Verify the live pointer against its sealed publication and manifest."""
 
@@ -64,6 +121,17 @@ def verify_active_version_portability(workpad: Path) -> PortabilityResult:
             raise PortabilityError("active-version pointer has not been published", code="refused_unpublished_pointer")
         raise PortabilityError("published active-version pointer is missing", code="refused_unsealed_pointer")
     live_bytes = pointer_path.read_bytes()
+    if validate_serialized_contract("active-gig-version-v2.schema.json", live_bytes).valid:
+        live_v2 = parse_json_bytes(live_bytes)
+        if not isinstance(live_v2, dict):
+            raise PortabilityError("active-version pointer is not an object", code="refused_unsealed_pointer")
+        sealed_commit = _required_string(live_v2, "journal_commit", "refused_unsealed_pointer")
+        tag = _required_string(live_v2, "journal_tag", "refused_unsealed_pointer")
+        _require_approval_tag(root, tag, sealed_commit)
+        raise PortabilityError(
+            "graph-selected active versions are inspection-only for G23 portability",
+            code="unsupported_schema_version",
+        )
     _require_schema("active-gig-version.schema.json", live_bytes, "refused_unsealed_pointer")
     live = parse_json_bytes(live_bytes)
     if not isinstance(live, dict):

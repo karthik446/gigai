@@ -1,0 +1,8 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"urn:gigai:schema:private-reference:1","type":"object","additionalProperties":false,
+  "required":["schema_version","reference_id","project_id","state","kind","privacy_class","label","origin","media_type","size_bytes","content_sha256","snapshot","created_at","created_by"],
+  "properties":{
+    "schema_version":{"const":"1.0"},"reference_id":{"type":"string","pattern":"^ref_[0-9a-f-]{36}$"},"project_id":{"$ref":"urn:gigai:schema:common:1#/$defs/project_id"},"state":{"const":"sealed"},"kind":{"enum":["resume","project_evidence","role_history","cover_letter"]},"privacy_class":{"const":"private_sensitive"},"label":{"type":"string","minLength":1,"maxLength":120},"origin":{"const":"local_file"},"media_type":{"enum":["text/plain","text/markdown"]},"size_bytes":{"type":"integer","minimum":1,"maximum":1048576},"content_sha256":{"$ref":"urn:gigai:schema:common:1#/$defs/sha256"},"snapshot":{"$ref":"urn:gigai:schema:common:1#/$defs/artifact_ref"},"created_at":{"type":"string","format":"date-time"},"created_by":{"$ref":"urn:gigai:schema:common:1#/$defs/actor"}
+  }
+}

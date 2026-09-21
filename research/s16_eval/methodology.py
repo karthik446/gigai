@@ -246,8 +246,6 @@ def score_case(
 
     expected = list(expected_findings)
     observed = list(observed_findings)
-    expected_keys = {_finding_key(item) for item in expected}
-    observed_keys = {_finding_key(item) for item in observed}
     expected_criteria = {item.get("criterion_id") for item in expected}
     observed_criteria = {item.get("criterion_id") for item in observed}
     true_positive = len(expected_criteria & observed_criteria)

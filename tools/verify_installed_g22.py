@@ -48,7 +48,19 @@ def main() -> int:
                 "--json",
             ]
         )
-        _run([str(executable), "init", "--home", str(home), "--target", str(target), "--json"])
+        _run(
+            [
+                str(executable),
+                "init",
+                "--home",
+                str(home),
+                "--target",
+                str(target),
+                "--username",
+                "installed-verifier",
+                "--json",
+            ]
+        )
         process = subprocess.Popen(
             [
                 str(executable),

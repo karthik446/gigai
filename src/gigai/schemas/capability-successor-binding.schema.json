@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:capability-successor-binding:1",
+  "title": "GigAI reviewed capability successor binding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "proposal_id", "project_id", "gig_id", "operation_key",
+    "input_sha256", "base_gig_version", "base_proposal_id", "parent_proposal_id",
+    "base_pointer_ref", "base_proposal_ref", "pending_proposal_ref",
+    "parent_manifest_ref", "decision_ref", "reviewed_manifest_ref", "source_binding",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "proposal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_proposal_id"},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "operation_key": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"},
+    "input_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "base_gig_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
+    "base_proposal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_proposal_id"},
+    "parent_proposal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_proposal_id"},
+    "base_pointer_ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "base_proposal_ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "pending_proposal_ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "parent_manifest_ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "decision_ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "reviewed_manifest_ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "source_binding": {"$ref": "#/$defs/source_binding"},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filesystem", "network", "credentials"],
+      "properties": {
+        "filesystem": {"const": "write_isolated"},
+        "network": {"const": "none"},
+        "credentials": {"const": "none"}
+      }
+    },
+    "inventory_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content_sha256", "media_type", "size_bytes"],
+      "properties": {
+        "path": {"$ref": "urn:gigai:schema:common:1#/$defs/relative_path"},
+        "content_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
+        "size_bytes": {"$ref": "urn:gigai:schema:common:1#/$defs/safe_nonnegative_integer"}
+      }
+    },
+    "source_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability_id", "entry_path", "wrapper_ref", "inventory", "inventory_sha256", "operations", "effects", "permissions"],
+      "properties": {
+        "capability_id": {"type": "string", "pattern": "^cap_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+        "entry_path": {"$ref": "urn:gigai:schema:common:1#/$defs/relative_path"},
+        "wrapper_ref": {"oneOf": [{"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}, {"type": "null"}]},
+        "inventory": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/inventory_item"}},
+        "inventory_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "operations": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["record_archive", "record_create", "record_update"]}},
+        "effects": {"const": ["write_workpad"]},
+        "permissions": {"$ref": "#/$defs/permissions"}
+      }
+    }
+  }
+}

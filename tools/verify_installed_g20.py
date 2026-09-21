@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 import tempfile
 import uuid
 
@@ -21,6 +22,8 @@ from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 from gigai.validators import SCHEMA_NAMES
 from gigai.workpad import resolve_workpad
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from installed_schema_expectations import EXPECTED_LEGACY_SCHEMA_NAMES
 
 
 DIGEST = "sha256:" + "a" * 64
@@ -31,8 +34,11 @@ def _artifact(path: str, digest: str = DIGEST) -> dict[str, object]:
 
 
 def main() -> int:
-    if len(SCHEMA_NAMES) != 31:
-        raise SystemExit(f"installed G20 schema inventory is {len(SCHEMA_NAMES)}, expected 31")
+    if tuple(SCHEMA_NAMES) != EXPECTED_LEGACY_SCHEMA_NAMES:
+        raise SystemExit(
+            "installed G20 schema identity mismatch: "
+            f"expected={EXPECTED_LEGACY_SCHEMA_NAMES!r}, actual={tuple(SCHEMA_NAMES)!r}"
+        )
     with tempfile.TemporaryDirectory(prefix="gigai-g20-installed-") as raw_root:
         root = Path(raw_root)
         home = root / "home"

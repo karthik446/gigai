@@ -16,8 +16,13 @@ from gigai.registry import (
     PROJECT_TABLE_SQL,
     REGISTRY_SCHEMA_VERSION,
     REGISTRY_V1_SCHEMA_VERSION,
+    REGISTRY_V2_BACKUP_FILENAME,
+    REGISTRY_V2_SCHEMA_VERSION,
+    TEMPLATE_INSTANCE_TABLE_SQL,
     WORKPAD_TABLE_SQL,
+    WORKSPACE_OWNER_TABLE_SQL,
     RegistryCorruptError,
+    RegistryMigrationRequired,
     RegistryVersionError,
     open_project_registry,
     registry_backup_path,
@@ -37,6 +42,11 @@ PROJECT_ROWS = (
         "/fixture/targets/non-git-two",
         "non-git",
     ),
+)
+V2_MIGRATION_FAILPOINTS = (
+    "before_v3_backup_publish",
+    "before_v3_transaction",
+    "after_v3_commit",
 )
 
 
@@ -61,6 +71,33 @@ def _read_version(path: Path) -> int:
         return int(row[0])
     finally:
         connection.close()
+
+
+def _materialize_v2(home: Path) -> Path:
+    path = _materialize_v1(home)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(WORKPAD_TABLE_SQL)
+        connection.execute(ACTIVE_WORKPAD_TABLE_SQL)
+        connection.executemany(
+            "INSERT INTO workpads(gig_id, project_id, workpad_locator) VALUES (?, ?, ?)",
+            (
+                (
+                    "gig_12345678-1234-4234-9234-123456789abc",
+                    PROJECT_ROWS[0][0],
+                    "/fixture/workpads/gig-one",
+                ),
+            ),
+        )
+        connection.execute(
+            "INSERT INTO active_workpads(project_id, gig_id) VALUES (?, ?)",
+            (PROJECT_ROWS[0][0], "gig_12345678-1234-4234-9234-123456789abc"),
+        )
+        connection.execute(f"PRAGMA user_version = {REGISTRY_V2_SCHEMA_VERSION}")
+        connection.commit()
+    finally:
+        connection.close()
+    return path
 
 
 def _tables(path: Path) -> dict[str, str]:
@@ -89,6 +126,31 @@ def _project_rows(path: Path) -> tuple[tuple[str, str, str], ...]:
         connection.close()
 
 
+def _workpad_rows(path: Path) -> tuple[tuple[str, str, str], ...]:
+    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return tuple(
+            connection.execute(
+                "SELECT gig_id, project_id, workpad_locator "
+                "FROM workpads ORDER BY gig_id"
+            )
+        )
+    finally:
+        connection.close()
+
+
+def _active_rows(path: Path) -> tuple[tuple[str, str], ...]:
+    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return tuple(
+            connection.execute(
+                "SELECT project_id, gig_id FROM active_workpads ORDER BY project_id"
+            )
+        )
+    finally:
+        connection.close()
+
+
 def _legacy_v1_open(path: Path) -> None:
     connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
@@ -106,11 +168,40 @@ def _legacy_v1_open(path: Path) -> None:
         connection.close()
 
 
+def _legacy_v2_open(path: Path) -> None:
+    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        version = connection.execute("PRAGMA user_version").fetchone()
+        if version != (REGISTRY_V2_SCHEMA_VERSION,):
+            raise RegistryVersionError(
+                f"registry schema version {version[0] if version else None!r} "
+                f"is unsupported; expected {REGISTRY_V2_SCHEMA_VERSION}; "
+                "no migration was attempted"
+            )
+        tables = _tables(path)
+        expected = {
+            "active_workpads": ACTIVE_WORKPAD_TABLE_SQL,
+            "projects": PROJECT_TABLE_SQL,
+            "workpads": WORKPAD_TABLE_SQL,
+        }
+        if tables != expected:
+            raise RegistryCorruptError("legacy v2 exact-schema validation failed")
+    finally:
+        connection.close()
+
+
 def test_registry_v2_constants_advance_as_one_contract() -> None:
     assert REGISTRY_V1_SCHEMA_VERSION == 1
-    assert REGISTRY_SCHEMA_VERSION == 2
+    assert REGISTRY_V2_SCHEMA_VERSION == 2
+    assert REGISTRY_SCHEMA_VERSION == 3
     assert EXPECTED_REGISTRY_TABLES == frozenset(
-        {"projects", "workpads", "active_workpads"}
+        {
+            "projects",
+            "workpads",
+            "active_workpads",
+            "workspace_owners",
+            "template_instances",
+        }
     )
     assert WORKPAD_TABLE_SQL == """\
 CREATE TABLE workpads (
@@ -128,6 +219,8 @@ CREATE TABLE active_workpads (
     FOREIGN KEY (project_id, gig_id) REFERENCES workpads(project_id, gig_id)
 ) WITHOUT ROWID
 """
+    assert WORKSPACE_OWNER_TABLE_SQL.startswith("CREATE TABLE workspace_owners")
+    assert TEMPLATE_INSTANCE_TABLE_SQL.startswith("CREATE TABLE template_instances")
     assert MIGRATION_FAILPOINTS == (
         "before_backup_publish",
         "before_transaction",
@@ -145,7 +238,7 @@ def test_populated_v1_migrates_with_exact_rows_and_retained_backup(
     home = tmp_path / "home"
     path = _materialize_v1(home)
 
-    registry, created = open_project_registry(home, create=False)
+    registry, created = open_project_registry(home, create=False, allow_migration=True)
 
     assert created is False
     assert registry.path == path
@@ -153,14 +246,207 @@ def test_populated_v1_migrates_with_exact_rows_and_retained_backup(
     assert _tables(path) == {
         "active_workpads": ACTIVE_WORKPAD_TABLE_SQL,
         "projects": PROJECT_TABLE_SQL,
+        "template_instances": TEMPLATE_INSTANCE_TABLE_SQL,
         "workpads": WORKPAD_TABLE_SQL,
+        "workspace_owners": WORKSPACE_OWNER_TABLE_SQL,
     }
     assert _project_rows(path) == PROJECT_ROWS
+    assert _workpad_rows(path) == ()
+    assert _active_rows(path) == ()
     backup = registry_backup_path(home)
     assert backup.stat().st_mode & 0o777 == 0o600
     assert _read_version(backup) == REGISTRY_V1_SCHEMA_VERSION
     assert _tables(backup) == {"projects": PROJECT_TABLE_SQL}
     assert _project_rows(backup) == PROJECT_ROWS
+    v2_backup = home / REGISTRY_V2_BACKUP_FILENAME
+    assert v2_backup.stat().st_mode & 0o777 == 0o600
+    assert _read_version(v2_backup) == REGISTRY_V2_SCHEMA_VERSION
+    assert _tables(v2_backup) == {
+        "active_workpads": ACTIVE_WORKPAD_TABLE_SQL,
+        "projects": PROJECT_TABLE_SQL,
+        "workpads": WORKPAD_TABLE_SQL,
+    }
+    assert _project_rows(v2_backup) == PROJECT_ROWS
+    assert _workpad_rows(v2_backup) == ()
+    assert _active_rows(v2_backup) == ()
+
+
+def test_read_only_populated_v1_refuses_without_bytes_or_backup(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    path = _materialize_v1(home)
+    before = path.read_bytes()
+
+    with pytest.raises(RegistryMigrationRequired, match="migration is required"):
+        open_project_registry(home, create=False)
+
+    assert path.read_bytes() == before
+    assert not registry_backup_path(home).exists()
+    assert not (home / REGISTRY_V2_BACKUP_FILENAME).exists()
+
+
+def test_read_only_v2_refuses_without_bytes_or_backup(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    path = _materialize_v2(home)
+    before = path.read_bytes()
+
+    with pytest.raises(RegistryMigrationRequired, match="migration is required"):
+        open_project_registry(home, create=False)
+
+    assert path.read_bytes() == before
+    assert not (home / REGISTRY_V2_BACKUP_FILENAME).exists()
+
+
+def test_populated_v2_migrates_with_exact_rows_and_additive_v3_tables(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    path = _materialize_v2(home)
+
+    open_project_registry(home, create=False, allow_migration=True)
+
+    assert _read_version(path) == REGISTRY_SCHEMA_VERSION
+    assert _tables(path) == {
+        "active_workpads": ACTIVE_WORKPAD_TABLE_SQL,
+        "projects": PROJECT_TABLE_SQL,
+        "template_instances": TEMPLATE_INSTANCE_TABLE_SQL,
+        "workpads": WORKPAD_TABLE_SQL,
+        "workspace_owners": WORKSPACE_OWNER_TABLE_SQL,
+    }
+    assert _project_rows(path) == PROJECT_ROWS
+    expected_workpads = (
+        (
+            "gig_12345678-1234-4234-9234-123456789abc",
+            PROJECT_ROWS[0][0],
+            "/fixture/workpads/gig-one",
+        ),
+    )
+    assert _workpad_rows(path) == expected_workpads
+    assert _active_rows(path) == (
+        (PROJECT_ROWS[0][0], "gig_12345678-1234-4234-9234-123456789abc"),
+    )
+    assert not registry_backup_path(home).exists()
+    backup = home / REGISTRY_V2_BACKUP_FILENAME
+    assert backup.stat().st_mode & 0o777 == 0o600
+    assert _read_version(backup) == REGISTRY_V2_SCHEMA_VERSION
+    assert _tables(backup) == {
+        "active_workpads": ACTIVE_WORKPAD_TABLE_SQL,
+        "projects": PROJECT_TABLE_SQL,
+        "workpads": WORKPAD_TABLE_SQL,
+    }
+    assert _project_rows(backup) == PROJECT_ROWS
+    assert _workpad_rows(backup) == expected_workpads
+    assert _active_rows(backup) == (
+        (PROJECT_ROWS[0][0], "gig_12345678-1234-4234-9234-123456789abc"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("failpoint", "expected_version", "backup_exists"),
+    (
+        ("before_v3_backup_publish", REGISTRY_V2_SCHEMA_VERSION, False),
+        ("before_v3_transaction", REGISTRY_V2_SCHEMA_VERSION, True),
+        ("after_v3_commit", REGISTRY_SCHEMA_VERSION, True),
+    ),
+)
+def test_v2_to_v3_exception_failpoints_leave_complete_versions(
+    tmp_path: Path,
+    failpoint: str,
+    expected_version: int,
+    backup_exists: bool,
+) -> None:
+    home = tmp_path / "home"
+    path = _materialize_v2(home)
+
+    def stop_at(observed: str) -> None:
+        if observed == failpoint:
+            raise RuntimeError(f"stopped at {observed}")
+
+    with pytest.raises(RuntimeError, match=failpoint):
+        open_project_registry(
+            home,
+            create=False,
+            allow_migration=True,
+            migration_observer=stop_at,
+        )
+
+    assert _read_version(path) == expected_version
+    assert registry_backup_path(home).exists() is False
+    assert (home / REGISTRY_V2_BACKUP_FILENAME).exists() is backup_exists
+    if expected_version == REGISTRY_V2_SCHEMA_VERSION:
+        assert _tables(path) == {
+            "active_workpads": ACTIVE_WORKPAD_TABLE_SQL,
+            "projects": PROJECT_TABLE_SQL,
+            "workpads": WORKPAD_TABLE_SQL,
+        }
+    else:
+        assert _tables(path) == {
+            "active_workpads": ACTIVE_WORKPAD_TABLE_SQL,
+            "projects": PROJECT_TABLE_SQL,
+            "template_instances": TEMPLATE_INSTANCE_TABLE_SQL,
+            "workpads": WORKPAD_TABLE_SQL,
+            "workspace_owners": WORKSPACE_OWNER_TABLE_SQL,
+        }
+    assert _project_rows(path) == PROJECT_ROWS
+    assert _workpad_rows(path) == (
+        (
+            "gig_12345678-1234-4234-9234-123456789abc",
+            PROJECT_ROWS[0][0],
+            "/fixture/workpads/gig-one",
+        ),
+    )
+    assert _active_rows(path) == (
+        (PROJECT_ROWS[0][0], "gig_12345678-1234-4234-9234-123456789abc"),
+    )
+
+
+@pytest.mark.parametrize("failpoint", V2_MIGRATION_FAILPOINTS)
+def test_v2_to_v3_process_crashes_recover_to_complete_v3(
+    tmp_path: Path, failpoint: str
+) -> None:
+    home = tmp_path / "home"
+    path = _materialize_v2(home)
+    script = """
+import os
+from pathlib import Path
+import sys
+from gigai.registry import open_project_registry
+
+home = Path(sys.argv[1])
+failpoint = sys.argv[2]
+
+def crash(observed: str) -> None:
+    if observed == failpoint:
+        os._exit(73)
+
+open_project_registry(home, create=False, allow_migration=True, migration_observer=crash)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, os.fspath(home), failpoint],
+        capture_output=True,
+        check=False,
+        shell=False,
+        timeout=20,
+    )
+
+    assert result.returncode == 73
+    assert _read_version(path) in {
+        REGISTRY_V2_SCHEMA_VERSION,
+        REGISTRY_SCHEMA_VERSION,
+    }
+    open_project_registry(home, create=False, allow_migration=True)
+    assert _read_version(path) == REGISTRY_SCHEMA_VERSION
+    assert _project_rows(path) == PROJECT_ROWS
+    assert _workpad_rows(path) == (
+        (
+            "gig_12345678-1234-4234-9234-123456789abc",
+            PROJECT_ROWS[0][0],
+            "/fixture/workpads/gig-one",
+        ),
+    )
+    assert _active_rows(path) == (
+        (PROJECT_ROWS[0][0], "gig_12345678-1234-4234-9234-123456789abc"),
+    )
+    assert not tuple(home.glob("*.tmp"))
 
 
 @pytest.mark.parametrize(
@@ -189,21 +475,37 @@ def test_migration_exception_failpoints_leave_only_complete_versions(
             raise RuntimeError(f"stopped at {observed}")
 
     with pytest.raises(RuntimeError, match=failpoint):
-        open_project_registry(home, create=False, migration_observer=stop_at)
+        open_project_registry(
+            home,
+            create=False,
+            allow_migration=True,
+            migration_observer=stop_at,
+        )
 
     assert _read_version(path) == expected_version
-    expected_tables = (
-        {"projects": PROJECT_TABLE_SQL}
-        if expected_version == 1
-        else {
-            "active_workpads": ACTIVE_WORKPAD_TABLE_SQL,
-            "projects": PROJECT_TABLE_SQL,
-            "workpads": WORKPAD_TABLE_SQL,
-        }
-    )
+    expected_tables = {"projects": PROJECT_TABLE_SQL}
+    if expected_version >= REGISTRY_V2_SCHEMA_VERSION:
+        expected_tables.update(
+            {
+                "active_workpads": ACTIVE_WORKPAD_TABLE_SQL,
+                "workpads": WORKPAD_TABLE_SQL,
+            }
+        )
+    if expected_version == REGISTRY_SCHEMA_VERSION:
+        expected_tables.update(
+            {
+                "template_instances": TEMPLATE_INSTANCE_TABLE_SQL,
+                "workspace_owners": WORKSPACE_OWNER_TABLE_SQL,
+            }
+        )
     assert _tables(path) == expected_tables
     assert _project_rows(path) == PROJECT_ROWS
+    if expected_version >= REGISTRY_V2_SCHEMA_VERSION:
+        assert _workpad_rows(path) == ()
+        assert _active_rows(path) == ()
     assert registry_backup_path(home).exists() is backup_exists
+    v2_backup = home / REGISTRY_V2_BACKUP_FILENAME
+    assert v2_backup.exists() is (expected_version == REGISTRY_SCHEMA_VERSION)
 
 
 @pytest.mark.parametrize("failpoint", MIGRATION_FAILPOINTS)
@@ -225,7 +527,7 @@ def crash(observed: str) -> None:
     if observed == failpoint:
         os._exit(73)
 
-open_project_registry(home, create=False, migration_observer=crash)
+open_project_registry(home, create=False, allow_migration=True, migration_observer=crash)
 """
     result = subprocess.run(
         [sys.executable, "-c", script, os.fspath(home), failpoint],
@@ -236,15 +538,23 @@ open_project_registry(home, create=False, migration_observer=crash)
 
     assert result.returncode == 73
     version = _read_version(path)
-    assert version in {REGISTRY_V1_SCHEMA_VERSION, REGISTRY_SCHEMA_VERSION}
-    open_project_registry(home, create=False)
+    assert version in {
+        REGISTRY_V1_SCHEMA_VERSION,
+        REGISTRY_V2_SCHEMA_VERSION,
+        REGISTRY_SCHEMA_VERSION,
+    }
+    open_project_registry(home, create=False, allow_migration=True)
     assert _read_version(path) == REGISTRY_SCHEMA_VERSION
     assert _tables(path) == {
         "active_workpads": ACTIVE_WORKPAD_TABLE_SQL,
         "projects": PROJECT_TABLE_SQL,
+        "template_instances": TEMPLATE_INSTANCE_TABLE_SQL,
         "workpads": WORKPAD_TABLE_SQL,
+        "workspace_owners": WORKSPACE_OWNER_TABLE_SQL,
     }
     assert _project_rows(path) == PROJECT_ROWS
+    assert _workpad_rows(path) == ()
+    assert _active_rows(path) == ()
     assert not tuple(home.glob("*migrat*"))
     assert not tuple(home.glob("*.tmp"))
 
@@ -255,7 +565,7 @@ def test_two_concurrent_migrators_converge(tmp_path: Path) -> None:
     script = (
         "from pathlib import Path; import sys; "
         "from gigai.registry import open_project_registry; "
-        "open_project_registry(Path(sys.argv[1]), create=False)"
+        "open_project_registry(Path(sys.argv[1]), create=False, allow_migration=True)"
     )
     processes = [
         subprocess.Popen(
@@ -270,6 +580,8 @@ def test_two_concurrent_migrators_converge(tmp_path: Path) -> None:
     assert [process.returncode for process in processes] == [0, 0], results
     assert _read_version(path) == REGISTRY_SCHEMA_VERSION
     assert _project_rows(path) == PROJECT_ROWS
+    assert _workpad_rows(path) == ()
+    assert _active_rows(path) == ()
     assert not tuple(home.glob("*migrat*"))
 
 
@@ -297,7 +609,7 @@ def observer(step: str) -> None:
         while not release.exists():
             time.sleep(0.01)
 
-open_project_registry(home, create=False, migration_observer=observer)
+open_project_registry(home, create=False, allow_migration=True, migration_observer=observer)
 """
     second_script = """
 from pathlib import Path
@@ -311,7 +623,7 @@ def observer(step: str) -> None:
     if step == "before_backup_publish":
         reached_backup.touch()
 
-open_project_registry(home, create=False, migration_observer=observer)
+open_project_registry(home, create=False, allow_migration=True, migration_observer=observer)
 """
     first = subprocess.Popen(
         [
@@ -377,7 +689,7 @@ def observer(step: str) -> None:
         while not release.exists():
             time.sleep(0.01)
 
-open_project_registry(home, create=False, migration_observer=observer)
+open_project_registry(home, create=False, allow_migration=True, migration_observer=observer)
 """
     second_script = """
 from pathlib import Path
@@ -427,6 +739,9 @@ completed.touch()
     assert second.returncode == 0, second_result
     assert second_completed.exists()
     assert _read_version(registry_path(home)) == REGISTRY_SCHEMA_VERSION
+    assert _project_rows(registry_path(home)) == PROJECT_ROWS
+    assert _workpad_rows(registry_path(home)) == ()
+    assert _active_rows(registry_path(home)) == ()
 
 
 def test_conflicting_backup_is_never_overwritten(tmp_path: Path) -> None:
@@ -438,7 +753,7 @@ def test_conflicting_backup_is_never_overwritten(tmp_path: Path) -> None:
     before = backup.read_bytes()
 
     with pytest.raises(RegistryCorruptError, match="backup"):
-        open_project_registry(home, create=False)
+        open_project_registry(home, create=False, allow_migration=True)
 
     assert backup.read_bytes() == before
     assert _read_version(registry_path(home)) == REGISTRY_V1_SCHEMA_VERSION
@@ -500,7 +815,7 @@ def test_malformed_populated_v1_rows_never_reach_backup_or_migration(
     assert _read_version(path) == REGISTRY_V1_SCHEMA_VERSION
 
 
-@pytest.mark.parametrize("version", (0, 3, 99))
+@pytest.mark.parametrize("version", (0, 99))
 def test_unknown_versions_refuse_migration_and_backup(
     tmp_path: Path, version: int
 ) -> None:
@@ -518,10 +833,23 @@ def test_unknown_versions_refuse_migration_and_backup(
     assert not registry_backup_path(home).exists()
 
 
-def test_legacy_v1_reader_refuses_live_v2_registry(tmp_path: Path) -> None:
+def test_legacy_v1_reader_refuses_live_v3_registry(tmp_path: Path) -> None:
     home = tmp_path / "home"
     path = _materialize_v1(home)
-    open_project_registry(home, create=False)
+    open_project_registry(home, create=False, allow_migration=True)
 
-    with pytest.raises(RegistryVersionError, match="no migration"):
+    with pytest.raises(RegistryVersionError, match="unsupported"):
         _legacy_v1_open(path)
+
+
+def test_legacy_v2_reader_refuses_live_v3_registry(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    path = _materialize_v2(home)
+    _legacy_v2_open(path)
+    open_project_registry(home, create=False, allow_migration=True)
+    before = path.read_bytes()
+
+    with pytest.raises(RegistryVersionError, match="unsupported"):
+        _legacy_v2_open(path)
+
+    assert path.read_bytes() == before

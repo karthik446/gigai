@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,11 +11,14 @@ from gigai.adapters.port import (
     ModelInvocationError,
 )
 from gigai.model_discovery import (
+    ModelReadiness,
     discover_installed_models,
+    persist_target_readiness,
     probe_target_readiness,
+    recorded_target_readiness,
     resolve_target_readiness,
 )
-from gigai.config import Endpoint, ModelTarget
+from gigai.config import Endpoint, ModelTarget, Profile
 from gigai.setup import build_config
 from click.testing import CliRunner
 from gigai.cli import cli
@@ -51,6 +55,26 @@ def test_model_discovery_records_bounded_cli_version_evidence(tmp_path: Path) ->
     assert detected[1].version is None
 
 
+def test_model_discovery_uses_only_the_bounded_install_directory_fallback(
+    tmp_path: Path, monkeypatch
+) -> None:
+    install_dir = tmp_path / "bounded-bin"
+    install_dir.mkdir()
+    executable = install_dir / "codex"
+    executable.write_text("#! /bin/sh\nprintf 'fallback-version\\n'\n", encoding="utf-8")
+    executable.chmod(0o755)
+    monkeypatch.setattr(
+        "gigai.model_discovery._BOUNDED_INSTALL_DIRECTORIES", (install_dir,)
+    )
+
+    detected = discover_installed_models(path="")
+
+    assert detected[0].resolution == "install_directory_fallback"
+    assert detected[0].path_source == "fallback"
+    assert detected[0].version == "fallback-version"
+    assert detected[1].readiness == "unavailable"
+
+
 def test_configured_deterministic_target_is_usable_without_a_model_call(tmp_path) -> None:
     config = build_config(
         home_root=tmp_path / "home",
@@ -61,6 +85,7 @@ def test_configured_deterministic_target_is_usable_without_a_model_call(tmp_path
     readiness = resolve_target_readiness(config, "offline-default")
     assert readiness.readiness == "usable"
     assert readiness.adapter == "deterministic"
+    assert readiness.states == ("configured", "compatible", "verified", "usable")
 
 
 def test_configured_provider_is_not_reported_usable_without_an_explicit_probe(
@@ -130,6 +155,37 @@ def test_explicit_provider_probe_promotes_target_to_usable(tmp_path, monkeypatch
 
     assert readiness.readiness == "usable"
     assert calls == ["Return exactly READY as a readiness check. Do not use tools or modify files."]
+
+
+def test_persisted_probe_is_bound_to_the_exact_target_configuration(tmp_path) -> None:
+    home = tmp_path / "home"
+    config = build_config(
+        home_root=home,
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(Endpoint("codex", "codex_cli"),),
+        model_targets=(ModelTarget("codex-luna", "codex", "gpt-5.6-luna", ("text",), 512),),
+        profiles=(Profile("default", "codex-luna", "codex-luna", "codex-luna"),),
+    )
+    persist_target_readiness(
+        home,
+        config,
+        ModelReadiness("codex-luna", "codex", "gpt-5.6-luna", "codex_cli", "usable", None),
+    )
+
+    assert recorded_target_readiness(home, config, "codex-luna").readiness == "usable"  # type: ignore[union-attr]
+
+    changed = build_config(
+        home_root=home,
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(Endpoint("codex", "codex_cli"),),
+        model_targets=(ModelTarget("codex-luna", "codex", "gpt-5.6-terra", ("text",), 512),),
+        profiles=(Profile("default", "codex-luna", "codex-luna", "codex-luna"),),
+    )
+    assert recorded_target_readiness(home, changed, "codex-luna") is None
 
 
 def test_explicit_provider_probe_fails_closed(tmp_path, monkeypatch) -> None:
@@ -210,12 +266,13 @@ def test_models_command_reports_configured_target_without_secret_values(tmp_path
     run_setup(config)
     result = CliRunner().invoke(cli, ["models", "--home", str(home), "--json"])
     assert result.exit_code == 0, result.output
-    assert '"target_name":"offline-default"' in result.output
-    assert "fixture-v1" in result.output
-    assert "credential" not in result.output
+    payload = json.loads(result.output)
+    assert payload["configured"] == []
+    assert "offline-default" not in result.output
+    assert "fixture-v1" not in result.output
 
 
-def test_models_command_probe_is_explicit_and_reports_readiness(tmp_path, monkeypatch) -> None:
+def test_models_command_rejects_test_only_target_probe(tmp_path) -> None:
     home = tmp_path / "home"
     config = build_config(
         home_root=home,
@@ -224,21 +281,30 @@ def test_models_command_probe_is_explicit_and_reports_readiness(tmp_path, monkey
         open_with_target=False,
     )
     run_setup(config)
-    monkeypatch.setattr(
-        "gigai.cli.probe_target_readiness",
-        lambda _config, target: SimpleNamespace(
-            target_name=target,
-            endpoint_name="offline",
-            model="fixture-v1",
-            adapter="deterministic",
-            readiness="usable",
-            reason=None,
-        ),
-    )
-
     result = CliRunner().invoke(
         cli, ["models", "--home", str(home), "--probe", "offline-default", "--json"]
     )
 
-    assert result.exit_code == 0, result.output
-    assert '"probe":{"adapter":"deterministic"' in result.output
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["error"]["code"] == "model_target_not_public"
+
+
+def test_models_command_reports_an_unknown_probe_without_persisting_it(tmp_path) -> None:
+    home = tmp_path / "home"
+    config = build_config(
+        home_root=home,
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+    )
+    run_setup(config)
+
+    result = CliRunner().invoke(
+        cli, ["models", "--home", str(home), "--probe", "not-a-target", "--json"]
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["probe"]["target_name"] == "not-a-target"
+    assert not (home / "snapshots" / "model-readiness").exists()

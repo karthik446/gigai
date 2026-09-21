@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:scout-private-transfer-manifest:1",
+  "title": "GigAI Scout private transfer manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "format", "files", "disclosure", "state_sqlite", "activation"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "scout_private_transfer"},
+    "format": {"const": "zip"},
+    "project_id": {"type": "string", "minLength": 1},
+    "gig_id": {"type": "string", "minLength": 1},
+    "journal_head": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|unknown)$"},
+    "disclosure": {"const": "explicit operator-selected private Gig history; no credentials or provider configuration"},
+    "state_sqlite": {"const": "rebuildable_omitted"},
+    "activation": {"const": "none"},
+    "files": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {"$ref": "#/$defs/member"}
+    }
+  },
+  "$defs": {
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content_sha256", "size_bytes"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^(README[.]md|CHANGELOG[.]md|gig[.]py|tools/|goalgraphs/|ui/|docs/|references/|run-inputs/|records/|runs/|run-plans/|review-inputs/|handoffs/)[A-Za-z0-9._/-]*$"},
+        "content_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 8388608}
+      }
+    }
+  }
+}

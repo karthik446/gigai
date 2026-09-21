@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
 
 from ..config import CredentialReference, GigAIConfig
 from ..model_targets import ResolvedModelTarget, resolve_model_target
@@ -11,6 +12,7 @@ from .claude_cli import ClaudeCLIAdapter
 from .codex_cli import CodexCLIAdapter
 from .openai_api import OpenAIAPIAdapter
 from .openrouter_api import OpenRouterAPIAdapter
+from .ollama_local import OllamaLocalAdapter
 from .port import InvocationRequest, ModelInvocationPort
 
 
@@ -26,6 +28,13 @@ class ModelAdapterBinding:
 
     current: ResolvedModelTarget
     port: ModelInvocationPort
+
+    def close(self) -> None:
+        """Close a transport owned by this binding, when one exists."""
+
+        close = getattr(self.port, "close", None)
+        if callable(close):
+            close()
 
     def request(
         self,
@@ -49,7 +58,13 @@ class ModelAdapterBinding:
         )
 
 
-def resolve_model_adapter(config: GigAIConfig, target_name: str) -> ModelAdapterBinding:
+def resolve_model_adapter(
+    config: GigAIConfig,
+    target_name: str,
+    *,
+    executable_overrides: Mapping[str, str] | None = None,
+    transport_overrides: Mapping[str, object] | None = None,
+) -> ModelAdapterBinding:
     """Resolve ``configuration -> target -> endpoint -> concrete adapter``."""
 
     target = resolve_model_target(config, target_name)
@@ -57,9 +72,36 @@ def resolve_model_adapter(config: GigAIConfig, target_name: str) -> ModelAdapter
     if endpoint.adapter == "deterministic":
         return ModelAdapterBinding(current=target, port=DeterministicAdapter())
     if endpoint.adapter == "codex_cli":
-        return ModelAdapterBinding(current=target, port=CodexCLIAdapter())
+        executable = executable_overrides.get(endpoint.name) if executable_overrides else None
+        return ModelAdapterBinding(current=target, port=CodexCLIAdapter(executable=executable))
     if endpoint.adapter == "claude_cli":
-        return ModelAdapterBinding(current=target, port=ClaudeCLIAdapter())
+        executable = executable_overrides.get(endpoint.name) if executable_overrides else None
+        return ModelAdapterBinding(current=target, port=ClaudeCLIAdapter(executable=executable))
+    if endpoint.adapter == "ollama_local":
+        if (
+            endpoint.base_url is None
+            or target.target.model_digest is None
+        ):
+            raise AdapterFactoryError(
+                f"local model target {target_name!r} has incomplete identity or bounds"
+            )
+        return ModelAdapterBinding(
+            current=target,
+            port=OllamaLocalAdapter(
+                endpoint=endpoint.base_url,
+                model=target.target.model,
+                model_digest=target.target.model_digest,
+                context_tokens=target.target.context_tokens or 4_096,
+                max_output_tokens=target.target.max_output_tokens,
+                max_response_bytes=target.target.max_response_bytes or 1 * 1024 * 1024,
+                think=False,
+                transport=(
+                    transport_overrides.get(endpoint.name)
+                    if transport_overrides is not None
+                    else None
+                ),
+            ),
+        )
     credential = _credential(config, endpoint.credential, endpoint.name)
     if endpoint.adapter == "openai_api":
         return ModelAdapterBinding(

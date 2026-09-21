@@ -27,7 +27,6 @@ from .project_binding import (
 )
 from .registry import (
     ProjectRecord,
-    RegistryConflictError,
     RegistryError,
     RegistryTransaction,
     open_project_registry,
@@ -279,6 +278,7 @@ def initialize_target(
     home_root: Path,
     requested_target: Path | None,
     cwd: Path | None = None,
+    allow_tracked_portable: bool = False,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> TargetBindingResult:
     """Bind one target without creating a workpad or touching tracked content."""
@@ -302,6 +302,7 @@ def initialize_target(
             return _initialize_git_target(
                 home=home,
                 target=target,
+                allow_tracked_portable=allow_tracked_portable,
                 uuid_factory=uuid_factory,
             )
         return _initialize_non_git_target(
@@ -319,18 +320,21 @@ def _initialize_git_target(
     *,
     home: Path,
     target: ResolvedTarget,
+    allow_tracked_portable: bool,
     uuid_factory: Callable[[], uuid.UUID],
 ) -> TargetBindingResult:
     status_before = _git_bytes(
         target.root, "status", "--porcelain=v1", "-z", "--untracked-files=all"
     )
-    _preflight_git_target(home, target.root)
-    lock_path = _git_path(target.root, INIT_LOCK_NAME)
+    _preflight_git_target(home, target.root, allow_tracked_portable=allow_tracked_portable)
+    lock_path = git_path(target.root, INIT_LOCK_NAME)
     with TargetInitLock(lock_path):
         assert_target_identity_stable(target)
-        _preflight_git_target(home, target.root)
+        _preflight_git_target(home, target.root, allow_tracked_portable=allow_tracked_portable)
         existing_binding = _optional_binding(target.root)
-        registry, registry_created = open_project_registry(home, create=True)
+        registry, registry_created = open_project_registry(
+            home, create=True, allow_migration=True
+        )
         try:
             with registry.transaction() as transaction:
                 result = _bind_git_transaction(
@@ -350,7 +354,11 @@ def _initialize_git_target(
         result.reconciled
         and status_after == _without_untracked_binding(status_before)
     )
-    if not status_is_exact and not status_is_binding_reconciliation:
+    status_is_portable_hidden = (
+        allow_tracked_portable
+        and status_after == _without_untracked_portable(status_before)
+    )
+    if not status_is_exact and not status_is_binding_reconciliation and not status_is_portable_hidden:
         raise TargetBindingError(
             "machine-readable Git status changed during init; binding was not reported successful"
         )
@@ -423,7 +431,9 @@ def _initialize_non_git_target(
     uuid_factory: Callable[[], uuid.UUID],
 ) -> TargetBindingResult:
     assert_target_identity_stable(target)
-    registry, registry_created = open_project_registry(home, create=True)
+    registry, registry_created = open_project_registry(
+        home, create=True, allow_migration=True
+    )
     try:
         with registry.transaction() as transaction:
             assert_target_identity_stable(target)
@@ -465,22 +475,33 @@ def _initialize_non_git_target(
         raise TargetBindingError(str(exc)) from exc
 
 
-def _preflight_git_target(home: Path, root: Path) -> None:
+def _preflight_git_target(
+    home: Path, root: Path, *, allow_tracked_portable: bool = False
+) -> None:
     tracked = _git_bytes(root, "ls-files", "-z", "--", BINDING_DIRECTORY)
     if tracked:
-        raise TrackedBindingError(
-            "tracked .gigai content is refused; resolve it explicitly before init"
+        tracked_paths = tuple(
+            item.decode("utf-8") for item in tracked.split(b"\0") if item
         )
+        if not allow_tracked_portable or any(
+            not path.startswith(f"{BINDING_DIRECTORY}/packages/")
+            for path in tracked_paths
+        ):
+            raise TrackedBindingError(
+                "tracked .gigai content is refused; resolve it explicitly before init"
+            )
     directory = root / BINDING_DIRECTORY
     if directory.is_symlink():
         raise ConflictingBindingError("target .gigai path must not be a symlink")
     if directory.exists() and not directory.is_dir():
         raise ConflictingBindingError("target .gigai path is not a directory")
     if directory.is_dir():
+        supplemental_private_roots = {"local", "locks"}
+        allowed = {binding_path(root).name, "packages", *supplemental_private_roots}
         unexpected = sorted(
             path.name
             for path in directory.iterdir()
-            if path.name != binding_path(root).name
+            if path.name not in allowed
         )
         if unexpected:
             raise ConflictingBindingError(
@@ -490,7 +511,41 @@ def _preflight_git_target(home: Path, root: Path) -> None:
         if project_path.is_symlink():
             raise ConflictingBindingError("project.toml must not be a symlink")
         if project_path.exists():
-            load_project_binding(root)
+            binding = load_project_binding(root)
+        else:
+            binding = None
+        present_private_roots = [
+            directory / name for name in supplemental_private_roots if (directory / name).exists()
+        ]
+        if present_private_roots:
+            if binding is None:
+                raise ConflictingBindingError(
+                    "private init state requires an existing validated project binding"
+                )
+            registry, _created = open_project_registry(home, create=False)
+            record = registry.find_project(binding.project_id)
+            if record is None or record.target_kind != "git":
+                raise ConflictingBindingError(
+                    "private init state requires the bound project registry record"
+                )
+            try:
+                matches_target = os.path.samefile(Path(record.target_locator), root)
+            except OSError:
+                matches_target = False
+            if not matches_target:
+                raise ConflictingBindingError(
+                    "private init state belongs to a different registered target"
+                )
+            with registry.transaction() as transaction:
+                if transaction.find_workspace_owner(binding.project_id) is None:
+                    raise ConflictingBindingError(
+                        "private init state requires a saved workspace owner"
+                    )
+            for private_root in present_private_roots:
+                if private_root.is_symlink() or not private_root.is_dir():
+                    raise ConflictingBindingError(
+                        f"private init root {private_root.name} must be a non-symlink directory"
+                    )
     root_mode = stat.S_IMODE(root.stat().st_mode)
     if root_mode & 0o222 == 0:
         raise TargetPermissionError(f"target root is read-only: {root}")
@@ -532,6 +587,8 @@ def _ensure_exclude_entry(root: Path) -> bool:
     before = path.read_bytes() if path.exists() else b""
     lines = before.splitlines()
     count = sum(line == EXCLUDE_ENTRY.rstrip(b"\n") for line in lines)
+    if count == 0 and b"/.gigai/project.toml" in lines:
+        return False
     if count == 1:
         return False
     if count == 0:
@@ -554,6 +611,21 @@ def _without_untracked_binding(status: bytes) -> bytes:
     binding_entry = f"?? {BINDING_DIRECTORY}/{BINDING_FILENAME}".encode()
     entries = [entry for entry in status.split(b"\0") if entry]
     kept = [entry for entry in entries if entry != binding_entry]
+    return b"".join(entry + b"\0" for entry in kept)
+
+
+def _without_untracked_portable(status: bytes) -> bytes:
+    """Remove only portable package entries hidden by the legacy root ignore."""
+
+    entries = [entry for entry in status.split(b"\0") if entry]
+    kept = [
+        entry
+        for entry in entries
+        if not (
+            entry.startswith(b"?? .gigai/packages/")
+            and entry.count(b"/") >= 3
+        )
+    ]
     return b"".join(entry + b"\0" for entry in kept)
 
 
@@ -590,10 +662,12 @@ def _write_bytes_atomic(path: Path, payload: bytes) -> None:
 
 
 def _exclude_path(root: Path) -> Path:
-    return _git_path(root, "info/exclude")
+    return git_path(root, "info/exclude")
 
 
-def _git_path(root: Path, name: str) -> Path:
+def git_path(root: Path, name: str) -> Path:
+    """Resolve a path in Git metadata, including linked worktree metadata."""
+
     result = _git(root, "rev-parse", "--git-path", name)
     path = Path(result.stdout.strip())
     if not path.is_absolute():

@@ -1,0 +1,21 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"urn:gigai:schema:gig-graph-set:1",
+  "title":"GigAI immutable Graph Set",
+  "type":"object","additionalProperties":false,
+  "required":["schema_version","graph_set_id","gig_id","graphs","shared_policy","created_at","created_by"],
+  "properties":{
+    "schema_version":{"$ref":"urn:gigai:schema:common:1#/$defs/schema_version"},
+    "graph_set_id":{"type":"string","pattern":"^graph_set_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "gig_id":{"$ref":"urn:gigai:schema:common:1#/$defs/gig_id"},
+    "graphs":{"type":"array","minItems":1,"maxItems":32,"items":{"$ref":"#/$defs/descriptor"}},
+    "shared_policy":{"$ref":"#/$defs/policy"},
+    "created_at":{"type":"string","format":"date-time"},
+    "created_by":{"$ref":"urn:gigai:schema:common:1#/$defs/actor"}
+  },
+  "$defs":{
+    "selector":{"type":"string","pattern":"^[a-z][a-z0-9-]{0,63}$"},
+    "policy":{"type":"object","additionalProperties":false,"required":["effects","required_capability_ids","provider_eligibility","budget"],"properties":{"effects":{"$ref":"urn:gigai:schema:common:1#/$defs/effect_set"},"required_capability_ids":{"type":"array","uniqueItems":true,"items":{"type":"string","pattern":"^[a-z][a-z0-9_.:-]{0,63}$"}},"provider_eligibility":{"type":"object","additionalProperties":false,"required":["providers"],"properties":{"providers":{"type":"array","uniqueItems":true,"items":{"type":"string","pattern":"^[a-z][a-z0-9_.:-]{0,63}$"}}}},"budget":{"$ref":"urn:gigai:schema:common:1#/$defs/budget"}}},
+    "descriptor":{"type":"object","additionalProperties":false,"required":["graph_id","purpose","aliases","routing_summary","goal_graph","input_contract","output_contract","permitted_reference_contract","effect_policy","capability_requirements","provider_eligibility","budget","review_contract","evaluation_contract","completion_evidence_contract"],"properties":{"graph_id":{"$ref":"#/$defs/selector"},"purpose":{"type":"string","minLength":1,"maxLength":2000},"aliases":{"type":"array","maxItems":32,"uniqueItems":true,"items":{"$ref":"#/$defs/selector"}},"routing_summary":{"type":"string","minLength":1,"maxLength":2000},"goal_graph":{"$ref":"urn:gigai:schema:common:1#/$defs/artifact_ref"},"input_contract":{"$ref":"urn:gigai:schema:common:1#/$defs/artifact_ref"},"output_contract":{"$ref":"urn:gigai:schema:common:1#/$defs/artifact_ref"},"permitted_reference_contract":{"$ref":"urn:gigai:schema:common:1#/$defs/artifact_ref"},"effect_policy":{"$ref":"urn:gigai:schema:common:1#/$defs/effect_set"},"capability_requirements":{"type":"array","uniqueItems":true,"items":{"type":"string","pattern":"^[a-z][a-z0-9_.:-]{0,63}$"}},"provider_eligibility":{"$ref":"#/$defs/policy/properties/provider_eligibility"},"budget":{"$ref":"urn:gigai:schema:common:1#/$defs/budget"},"review_contract":{"$ref":"urn:gigai:schema:common:1#/$defs/artifact_ref"},"evaluation_contract":{"$ref":"urn:gigai:schema:common:1#/$defs/artifact_ref"},"completion_evidence_contract":{"$ref":"urn:gigai:schema:common:1#/$defs/artifact_ref"}}}
+  }
+}

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Mapping
 import uuid
 
-from .adapters.factory import AdapterFactoryError, ModelAdapterBinding, resolve_model_adapter
+from .adapters.factory import AdapterFactoryError, resolve_model_adapter
 from .adapters.port import InvocationResult, ModelInvocationCancelled, ModelInvocationError
 from .canonical import (
     EntityPrefix,
@@ -34,6 +34,7 @@ from .credentials import (
 )
 from .journal import JournalArtifact, JournalEntry, record_transition
 from .review import redact_text
+from .roles import RoleError, require_registered
 from .validators import validate_model_invocation
 from .workpad import ResolvedWorkpad
 
@@ -43,6 +44,13 @@ _REFERENCE_ID = re.compile(
 )
 CHECK_ORDER_VERSION = "s18-05-1"
 DEFAULT_REDACTION_POLICY = "g18-explicit-redaction-1"
+# The descriptor is an additive binding for every host-selected Scout source,
+# including an imported G45 record. It carries only an identity digest; the
+# source resolver remains the authority for hydration and family rules.
+_SOURCE_FAMILIES = frozenset(
+    {"scout_discovery_posting", "scout_record", "g45_reference", "g45_run_input"}
+)
+_SOURCE_PURPOSES = frozenset({"posting", "preferences", "experience", "answer"})
 
 
 class ModelExecutionError(RuntimeError):
@@ -70,8 +78,16 @@ class InvocationPolicy:
     redaction_values: tuple[str, ...] = ()
     required_sensitive_values: tuple[str, ...] = ()
     network_allowed: bool = False
+    # This is deliberately distinct from hosted network consent.  It permits
+    # only a configured, identified local-loopback target; remote adapters do
+    # not inherit it.
+    local_allowed: bool = False
     offline: bool = False
     redaction_policy_version: str = DEFAULT_REDACTION_POLICY
+    # Native Scout records do not have legacy ``ref_`` IDs.  A local caller
+    # may opt into the additive v3 descriptor contract, carrying only host
+    # identity digests (never source bytes) in the invocation request.
+    selected_source_descriptors: tuple[Mapping[str, object], ...] = ()
 
 
 @dataclass
@@ -105,7 +121,11 @@ class ModelInvocationExecution:
 
     record: dict[str, object]
     result: InvocationResult | None
-    journal_entry: JournalEntry
+    journal_entry: JournalEntry | None
+    # A proposal host may need to validate the domain response before it
+    # terminalizes its owning Goal.  In that narrow path the invocation
+    # evidence is returned for the host's single authorized publication.
+    artifacts: tuple[JournalArtifact, ...] = ()
 
 
 def run_model_invocation(
@@ -122,6 +142,7 @@ def run_model_invocation(
     policy: InvocationPolicy,
     budget: InvocationBudget | None = None,
     uuid_factory: Any = uuid.uuid4,
+    commit_goal_transition: bool = True,
 ) -> ModelInvocationExecution:
     """Invoke one configured target after the explicit G18 boundary gate.
 
@@ -137,19 +158,31 @@ def run_model_invocation(
     if not selected_reference_ids:
         raise ModelExecutionError("at least one explicitly selected reference is required")
 
-    selected = _select_references(references, selected_reference_ids)
+    source_descriptors = tuple(policy.selected_source_descriptors)
+    if source_descriptors:
+        _validate_source_descriptors(source_descriptors, selected_reference_ids, references)
+    selected = _select_references(
+        references,
+        selected_reference_ids,
+        allow_source_ids=bool(source_descriptors),
+    )
     binding = resolve_model_adapter(config, model_target)
     endpoint = binding.current.endpoint
     credential = _credential_for_endpoint(config, endpoint.credential)
     provider_family = endpoint.adapter
     networked = endpoint.adapter != "deterministic"
+    local_runtime = endpoint.adapter == "ollama_local"
     gigai_credential_required = endpoint.adapter in {"openai_api", "openrouter_api"}
 
     selected_refs = tuple(_reference_ref(item) for item in selected)
     selection_reason: str | None = None
     redaction_result = "not_started"
     credential_lookup = "not_requested"
-    network_result = "offline" if not networked else "not_checked"
+    network_result = (
+        ("local_permitted" if policy.local_allowed else "local_denied")
+        if local_runtime
+        else ("offline" if not networked else "not_checked")
+    )
     provider_input: str | None = None
     provider_input_sha256: str | None = None
     result: InvocationResult | None = None
@@ -157,6 +190,16 @@ def run_model_invocation(
     outcome = "blocked"
     finish = "blocked"
     cancellation = "not_applicable"
+
+    if local_runtime:
+        if not policy.local_allowed:
+            selection_reason = "local_runtime_denied"
+        else:
+            try:
+                require_registered(role, namespace="model_invocation")
+            except RoleError as exc:
+                selection_reason = "local_role_unregistered"
+                error = _safe_error(selection_reason, exc)
 
     # S18-05 order: selection, credential shape, exact bytes, input,
     # redaction, network policy, then the adapter's transient credential read.
@@ -182,7 +225,11 @@ def run_model_invocation(
         except (UnicodeDecodeError, ValueError) as exc:
             selection_reason = "selected_reference_not_text"
             error = _safe_error("selected_reference_not_text", exc)
-    if selection_reason is None:
+    if selection_reason is None and local_runtime:
+        # Explicit trusted-local analysis may receive the selected private
+        # bytes.  No hosted redaction claim is recorded for this path.
+        redaction_result = "not_applicable"
+    elif selection_reason is None:
         redacted = redact_text(provider_input or "", policy.redaction_values)
         if any(value and value in redacted for value in policy.required_sensitive_values):
             redaction_result = "failed"
@@ -191,7 +238,7 @@ def run_model_invocation(
             redaction_result = "passed"
             provider_input = redacted
             provider_input_sha256 = digest_imported_bytes(redacted.encode("utf-8"))
-    if selection_reason is None and networked:
+    if selection_reason is None and networked and not local_runtime:
         if policy.offline or not policy.network_allowed:
             network_result = "denied"
             selection_reason = "network_denied"
@@ -206,6 +253,8 @@ def run_model_invocation(
         "input_sha256": provider_input_sha256,
         "blocked_reason": selection_reason,
     }
+    if source_descriptors:
+        request_payload["selected_source_descriptors"] = [dict(item) for item in source_descriptors]
     request_bytes = canonical_json_bytes(request_payload)
     request_path = f"runs/{run_id}/model-invocations/{invocation_id}/request.json"
     request_ref = _artifact_ref(request_path, request_bytes, "application/json")
@@ -226,8 +275,14 @@ def run_model_invocation(
                 selection_reason = "budget_exhausted"
         if selection_reason is None:
             try:
-                request = binding.request(role=role, prompt=provider_input or "")
-                result = binding.port.invoke(request)
+                try:
+                    request = binding.request(role=role, prompt=provider_input or "")
+                    result = binding.port.invoke(request)
+                finally:
+                    # Local adapters own an HTTP client; this also gives
+                    # future owned transports one success/error/cancel close
+                    # point without changing remote adapter semantics.
+                    binding.close()
                 outcome = "succeeded"
                 finish = "completed"
             except CredentialUnavailableError as exc:
@@ -255,6 +310,10 @@ def run_model_invocation(
                 error = _safe_error("provider_invocation_failed", exc)
 
     if selection_reason is not None:
+        # A local adapter allocates its HTTP client at factory bind time;
+        # denied/budgeted paths must release it even though invoke() was not
+        # reached.
+        binding.close()
         if selection_reason in {"credential_reference_missing", "credential_unavailable"}:
             outcome, finish = "unavailable", "unavailable"
         else:
@@ -275,6 +334,7 @@ def run_model_invocation(
         response_artifact_ref = _artifact_ref(response_path, response_bytes, "application/json")
     now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     usage = _usage(result)
+    local_identity = _local_identity(binding, result) if local_runtime else None
     record = _invocation_record(
         run_id=run_id,
         goal_id=goal_id,
@@ -297,9 +357,15 @@ def run_model_invocation(
         redaction_policy_version=policy.redaction_policy_version,
         credential=credential,
         credential_lookup=credential_lookup,
-        network_policy="offline" if not networked or policy.offline else "explicit_permission",
+        network_policy=(
+            "local_loopback"
+            if local_runtime
+            else ("offline" if not networked or policy.offline else "explicit_permission")
+        ),
         network_result=network_result,
         response_artifact=response_artifact_ref,
+        local_identity=local_identity,
+        source_descriptors=source_descriptors,
         terminal_committed_at=now,
     )
     report = validate_model_invocation(record)
@@ -319,35 +385,39 @@ def run_model_invocation(
     transition = "goal_completed" if outcome == "succeeded" else (
         "goal_blocked" if outcome == "blocked" else "goal_failed"
     )
-    journal_entry = record_transition(
-        workpad=resolved.path,
-        project_id=resolved.project_id,
-        gig_id=resolved.gig_id,
-        handoff_id=_new_id(EntityPrefix.HANDOFF, uuid_factory),
-        transition=transition,
-        body=f"G18 model invocation {invocation_id} terminalized as {outcome}.",
-        artifacts=tuple(artifacts),
-        front_matter={
-            "run_id": run_id,
-            "goal_id": goal_id,
-            "goal_version": 1,
-            "outcome": "COMPLETE" if outcome == "succeeded" else outcome.upper(),
-            "actor": {"kind": "gigai", "id": "g18-model-execution", "model_target": model_target},
-            "evidence": [request_ref, _artifact_ref(record_path, record_bytes, "application/json")],
-            "usage": usage,
-        },
-    )
-    return ModelInvocationExecution(record, result, journal_entry)
+    journal_entry: JournalEntry | None = None
+    if commit_goal_transition:
+        journal_entry = record_transition(
+            workpad=resolved.path,
+            project_id=resolved.project_id,
+            gig_id=resolved.gig_id,
+            handoff_id=_new_id(EntityPrefix.HANDOFF, uuid_factory),
+            transition=transition,
+            body=f"G18 model invocation {invocation_id} terminalized as {outcome}.",
+            artifacts=tuple(artifacts),
+            front_matter={
+                "run_id": run_id,
+                "goal_id": goal_id,
+                "goal_version": 1,
+                "outcome": "COMPLETE" if outcome == "succeeded" else outcome.upper(),
+                "actor": {"kind": "gigai", "id": "g18-model-execution", "model_target": model_target},
+                "evidence": [request_ref, _artifact_ref(record_path, record_bytes, "application/json")],
+                "usage": usage,
+            },
+        )
+    return ModelInvocationExecution(record, result, journal_entry, tuple(artifacts))
 
 
 def _select_references(
-    references: tuple[SelectedReference, ...], selected_ids: tuple[str, ...]
+    references: tuple[SelectedReference, ...], selected_ids: tuple[str, ...], *, allow_source_ids: bool = False
 ) -> tuple[SelectedReference, ...]:
     by_id = {item.reference_id: item for item in references}
     if len(by_id) != len(references):
         raise ModelExecutionError("reference IDs must be unique")
     for reference_id in selected_ids:
-        if not _REFERENCE_ID.fullmatch(reference_id):
+        if not _REFERENCE_ID.fullmatch(reference_id) and not (
+            allow_source_ids and re.fullmatch(r"source_[1-9][0-9]{0,2}", reference_id)
+        ):
             raise ModelExecutionError("selected reference IDs must be canonical ref IDs")
         if reference_id not in by_id:
             raise ModelExecutionError("selected reference bytes are missing")
@@ -415,9 +485,10 @@ def _usage(result: InvocationResult | None) -> dict[str, object]:
 
 
 def _invocation_record(**values: object) -> dict[str, object]:
+    source_descriptors = tuple(values.get("source_descriptors") or ())
     record = {
-        "schema_version": "1.0",
-        "record_version": 1,
+        "schema_version": "3.0" if source_descriptors else ("2.0" if values.get("local_identity") is not None else "1.0"),
+        "record_version": 3 if source_descriptors else (2 if values.get("local_identity") is not None else 1),
         "run_id": values["run_id"],
         "goal_id": values["goal_id"],
         "invocation_id": values["invocation_id"],
@@ -429,6 +500,7 @@ def _invocation_record(**values: object) -> dict[str, object]:
         "adapter_identity": values["adapter_identity"],
         "request": {
             "selected_references": list(values["selected_refs"]),
+            **({"selected_source_descriptors": [dict(item) for item in source_descriptors]} if source_descriptors else {}),
             "request_artifact": values["request_ref"],
             "request_sha256": values["request_sha256"],
         },
@@ -455,12 +527,93 @@ def _invocation_record(**values: object) -> dict[str, object]:
             "value_type": "object",
             "value": response_artifact,
         }]
+    if values.get("local_identity") is not None:
+        record["local_identity"] = values["local_identity"]
     stable = {key: value for key, value in record.items() if key not in {"invocation_id", "terminal_committed_at", "replay"}}
     record["replay"] = {
         "stable_sha256": canonical_json_digest(stable),
         "variable_fields": ["invocation_id", "terminal_committed_at"],
     }
     return record
+
+
+def _validate_source_descriptors(
+    descriptors: tuple[Mapping[str, object], ...],
+    selected_ids: tuple[str, ...],
+    references: tuple[SelectedReference, ...],
+) -> None:
+    """Validate host-created native source descriptors before local transport."""
+    if not descriptors or len(descriptors) > 32 or len(set(selected_ids)) != len(selected_ids) or len({item.get("source_id") for item in descriptors if isinstance(item, Mapping)}) != len(descriptors):
+        raise ModelExecutionError("native source descriptor set is invalid")
+    by_id = {item.reference_id: item for item in references}
+    descriptor_ids: set[str] = set()
+    for descriptor in descriptors:
+        if not isinstance(descriptor, Mapping):
+            raise ModelExecutionError("native source descriptor is invalid")
+        if set(descriptor) != {"source_id", "family", "purpose", "content_sha256", "identity_sha256"}:
+            raise ModelExecutionError("native source descriptor is not closed")
+        source_id = descriptor.get("source_id")
+        if not isinstance(source_id, str) or re.fullmatch(r"source_[1-9][0-9]{0,2}", source_id) is None:
+            raise ModelExecutionError("native source descriptor identity is invalid")
+        if source_id not in selected_ids or source_id in descriptor_ids:
+            raise ModelExecutionError("native source descriptor selection is inconsistent")
+        if source_id not in by_id or descriptor.get("content_sha256") != by_id[source_id].content_sha256:
+            raise ModelExecutionError("native source descriptor bytes are inconsistent")
+        if descriptor.get("family") not in _SOURCE_FAMILIES or descriptor.get("purpose") not in _SOURCE_PURPOSES:
+            raise ModelExecutionError("native source descriptor family or purpose is not admitted")
+        for key in ("content_sha256", "identity_sha256"):
+            if not isinstance(descriptor.get(key), str) or re.fullmatch(r"sha256:[0-9a-f]{64}", descriptor[key]) is None:
+                raise ModelExecutionError("native source descriptor digest is invalid")
+        descriptor_ids.add(source_id)
+    if descriptor_ids != set(selected_ids):
+        raise ModelExecutionError("native source descriptor selection is incomplete")
+
+
+def _local_identity(
+    binding: object, result: InvocationResult | None
+) -> dict[str, object]:
+    """Pin configured local identity and only observed metadata actually returned."""
+
+    current = getattr(binding, "current")
+    endpoint = current.endpoint
+    target = current.target
+    configured_digest = target.model_digest or ""
+    if not configured_digest.startswith("sha256:"):
+        configured_digest = f"sha256:{configured_digest}"
+    configured = {
+        "configured_endpoint": endpoint.base_url,
+        "configured_model": target.model,
+        "configured_model_digest": configured_digest,
+        "context_tokens": target.context_tokens or 4_096,
+        "max_output_tokens": target.max_output_tokens,
+        "max_response_bytes": target.max_response_bytes or 1 * 1024 * 1024,
+    }
+    observed: dict[str, object] = {
+        "status": "not_observed",
+        "runtime_version": None,
+        "model_digest": None,
+    }
+    if result is not None:
+        raw_usage = result.raw_usage
+        runtime_version = raw_usage.get("runtime_version")
+        observed_digest = raw_usage.get("model_digest")
+        canonical_runtime = (
+            runtime_version if isinstance(runtime_version, str) and runtime_version else None
+        )
+        if isinstance(observed_digest, str) and observed_digest:
+            canonical_observed = (
+                observed_digest
+                if observed_digest.startswith("sha256:")
+                else f"sha256:{observed_digest}"
+            )
+            if re.fullmatch(r"sha256:[0-9a-f]{64}", canonical_observed):
+                if canonical_runtime is not None:
+                    observed["status"] = "passed"
+                    observed["runtime_version"] = canonical_runtime
+                observed["model_digest"] = canonical_observed
+    configured["configuration_sha256"] = canonical_json_digest(configured)
+    configured["observed"] = observed
+    return configured
 
 
 def _credential_metadata(credential: object) -> dict[str, str] | None:

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:scout-public-import-input:1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "batch_id", "project_id", "gig_id", "rows"],
+  "properties": {
+    "schema_version": {"const": "scout-public-import-input:1"},
+    "batch_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "rows": {"type": "array", "maxItems": 512, "items": {"$ref": "#/$defs/public_row"}}
+  },
+  "$defs": {
+    "public_row": {
+      "type": "object", "additionalProperties": false,
+      "required": ["opportunity_id", "snapshot_id", "source_snapshot"],
+      "properties": {
+        "opportunity_id": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "snapshot_id": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "source_kind": {"enum": ["agent_discovered", "user_provided"]},
+        "title": {"type": ["string", "null"], "maxLength": 4096},
+        "employer": {"type": ["string", "null"], "maxLength": 4096},
+        "url": {"type": ["string", "null"], "maxLength": 4096},
+        "acquisition_state": {"enum": ["considered", "uncertain", "excluded", "failed", "error"]},
+        "error": {"type": ["string", "null"], "maxLength": 4096},
+        "duplicate_of": {"type": ["string", "null"], "maxLength": 4096},
+        "excluded_reason": {"type": ["string", "null"], "maxLength": 4096},
+        "source_snapshot": {"$ref": "#/$defs/source_snapshot"}
+      }
+    },
+    "source_snapshot": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "source_kind": {"type": ["string", "null"], "maxLength": 4096},
+        "locator": {"type": ["string", "null"], "maxLength": 4096},
+        "url": {"type": ["string", "null"], "maxLength": 4096},
+        "status": {"type": ["string", "null"], "maxLength": 4096},
+        "captured_at": {"type": ["string", "null"], "maxLength": 4096},
+        "content_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "media_type": {"type": ["string", "null"], "maxLength": 255},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 10000000}
+      }
+    }
+  }
+}

@@ -13,7 +13,23 @@ import tomllib
 
 
 REGISTRY_APPLICATION_ID = 0x47494741
-REGISTRY_SCHEMA_VERSION = 2
+REGISTRY_SCHEMA_VERSION = 3
+REGISTRY_TABLES = {
+    "projects",
+    "workpads",
+    "active_workpads",
+    "workspace_owners",
+    "template_instances",
+}
+
+
+def _without_package_status(status: str) -> str:
+    entries = [
+        entry
+        for entry in status.split("\0")
+        if entry and not entry.startswith("?? .gigai/packages/")
+    ]
+    return "\0".join(entries) + ("\0" if entries else "")
 
 
 def _run(
@@ -81,6 +97,14 @@ def main() -> None:
                 os.fspath(workpad),
                 "--editor",
                 "/usr/bin/true",
+                "--credential-ref",
+                "provider=environment:GIGAI_PROVIDER_TOKEN",
+                "--endpoint",
+                "remote=openai_api:provider:https://api.example.test",
+                "--model-target",
+                "remote=remote:gpt-test",
+                "--create-model-target",
+                "remote",
                 "--json",
             ],
             cwd=git_target,
@@ -111,7 +135,13 @@ def main() -> None:
         ).stdout
         first = json.loads(
             _run(
-                [os.fspath(executable), "init", "--json"],
+                [
+                    os.fspath(executable),
+                    "init",
+                    "--username",
+                    "installed-verifier",
+                    "--json",
+                ],
                 cwd=git_target,
                 env=env,
             ).stdout
@@ -122,7 +152,13 @@ def main() -> None:
         exclude = (git_target / ".git" / "info" / "exclude").read_bytes()
         second = json.loads(
             _run(
-                [os.fspath(executable), "init", "--json"],
+                [
+                    os.fspath(executable),
+                    "init",
+                    "--username",
+                    "installed-verifier",
+                    "--json",
+                ],
                 cwd=git_target,
                 env=env,
             ).stdout
@@ -135,7 +171,7 @@ def main() -> None:
             "-z",
             "--untracked-files=all",
         ).stdout
-        if status_after != status_before:
+        if _without_package_status(status_after) != _without_package_status(status_before):
             raise SystemExit("installed Git init changed machine-readable status")
         if first["project_id"] != second["project_id"]:
             raise SystemExit("installed Git init was not ID-idempotent")
@@ -147,8 +183,8 @@ def main() -> None:
             "workpad_locator": f"registry:{first['project_id']}",
         }:
             raise SystemExit("installed project binding is not the minimal path-free contract")
-        if exclude.splitlines().count(b"/.gigai/") != 1:
-            raise SystemExit("installed Git init did not create exactly one exclude entry")
+        if exclude.splitlines().count(b"/.gigai/") != 0:
+            raise SystemExit("installed Git init added an obsolete .gigai exclude entry")
         if project_bytes != project_path.read_bytes():
             raise SystemExit("installed Git init changed project bytes on rerun")
 
@@ -159,14 +195,20 @@ def main() -> None:
                     "init",
                     "--target",
                     os.fspath(non_git_target),
+                    "--username",
+                    "installed-verifier",
                     "--json",
                 ],
                 cwd=git_target,
                 env=env,
             ).stdout
         )
-        if non_git["target_kind"] != "non-git" or (non_git_target / ".gigai").exists():
-            raise SystemExit("installed non-Git init was not registry-only")
+        if (
+            non_git["target_kind"] != "non-git"
+            or not (non_git_target / ".gigai" / "packages").is_dir()
+            or (non_git_target / ".gigai" / "project.toml").exists()
+        ):
+            raise SystemExit("installed non-Git init did not preserve the registry binding")
 
         registry = home / "registry.sqlite"
         connection = sqlite3.connect(f"file:{registry}?mode=ro", uri=True)
@@ -188,8 +230,8 @@ def main() -> None:
             raise SystemExit("installed registry application identity is invalid")
         if user_version != (REGISTRY_SCHEMA_VERSION,):
             raise SystemExit("installed registry schema version is invalid")
-        if tables != {"projects", "workpads", "active_workpads"}:
-            raise SystemExit("installed registry does not expose the exact v2 table set")
+        if tables != REGISTRY_TABLES:
+            raise SystemExit("installed registry does not expose the exact v3 table set")
         if sorted(kind for _, kind in rows) != ["git", "non-git"]:
             raise SystemExit("installed registry does not contain exactly two verified bindings")
         if (git_target / ".git" / "gigai-init.lock").exists():

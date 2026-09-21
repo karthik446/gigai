@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:scout-interview-preparation:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "record_id", "revision_id", "parent_revision", "project_id", "gig_id", "state", "selection", "content", "feedback", "actor", "created_at", "provenance"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "scout_interview_preparation"},
+    "record_id": {"type": "string", "pattern": "^record_[0-9a-f-]{36}$"},
+    "revision_id": {"type": "string", "pattern": "^revision_[0-9a-f-]{36}$"},
+    "parent_revision": {"type": ["string", "null"], "pattern": "^revision_[0-9a-f-]{36}$"},
+    "project_id": {"type": "string", "minLength": 1},
+    "gig_id": {"type": "string", "pattern": "^gig_[0-9a-f-]{36}$"},
+    "state": {"const": "active"},
+    "selection": {"$ref": "#/$defs/selection"},
+    "content": {"$ref": "#/$defs/content"},
+    "feedback": {"type": "array", "maxItems": 128, "items": {"type": "object", "additionalProperties": false, "required": ["text"], "properties": {"text": {"type": "string", "minLength": 1, "maxLength": 16000}}}},
+    "actor": {"type": "object", "additionalProperties": false, "required": ["kind", "id"], "properties": {"kind": {"enum": ["operator", "agent", "gigai"]}, "id": {"type": "string", "minLength": 1, "maxLength": 255}}},
+    "created_at": {"type": "string", "format": "date-time"},
+    "provenance": {"type": "object", "additionalProperties": false, "required": ["kind", "source_refs"], "properties": {"kind": {"const": "user_selected_inputs"}, "source_refs": {"type": "array", "items": {"$ref": "#/$defs/source_ref"}}}}
+  },
+  "$defs": {
+    "artifact_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "content_sha256", "media_type", "size_bytes"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "content_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "media_type": {"type": "string", "minLength": 1, "maxLength": 120},
+        "size_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "scope": {"type": "object", "additionalProperties": false, "required": ["mode", "task_context_id"], "properties": {"mode": {"enum": ["saved_default", "run_override"]}, "task_context_id": {"type": ["string", "null"]}}},
+    "source_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["family", "kind", "artifact_ref", "owner"],
+      "properties": {
+        "family": {"enum": ["scout_record", "scout_research", "scout_discovery", "scout_interview"]},
+        "kind": {"enum": ["posting", "research", "experience", "feedback", "preparation"]},
+        "record_id": {"type": "string", "pattern": "^record_[0-9a-f-]{36}$"},
+        "revision_id": {"type": "string", "pattern": "^revision_[0-9a-f-]{36}$"},
+        "scope": {"$ref": "#/$defs/scope"},
+        "run_id": {"type": "string", "pattern": "^run_[0-9a-f-]{36}$"},
+        "receipt_id": {"type": "string", "pattern": "^receipt_[0-9a-f-]{36}$"},
+        "output_kind": {"type": "string", "minLength": 1},
+        "snapshot_id": {"type": "string", "minLength": 1},
+        "artifact_ref": {"$ref": "#/$defs/artifact_ref"},
+        "owner": {"type": "object", "additionalProperties": false, "required": ["project_id", "gig_id"], "properties": {"project_id": {"type": "string", "minLength": 1}, "gig_id": {"type": "string", "pattern": "^gig_[0-9a-f-]{36}$"}}}
+      },
+      "allOf": [
+        {"if": {"properties": {"family": {"enum": ["scout_record", "scout_interview"]}}}, "then": {"required": ["record_id", "revision_id"]}},
+        {"if": {"properties": {"family": {"enum": ["scout_research", "scout_discovery"]}}}, "then": {"required": ["run_id", "receipt_id", "output_kind"]}}
+      ]
+    },
+    "selection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode", "role", "posting", "stage_or_format", "research_revisions", "candidate_evidence", "prior_feedback", "prior_preparation", "reuse_prior_research"],
+      "properties": {
+        "mode": {"enum": ["role_only", "opportunity"]},
+        "role": {"type": "object", "additionalProperties": false, "required": ["title"], "properties": {"title": {"type": "string", "minLength": 1, "maxLength": 300}}},
+        "posting": {"anyOf": [{"$ref": "#/$defs/source_ref"}, {"type": "null"}]},
+        "stage_or_format": {"type": "object", "additionalProperties": false, "properties": {"stage": {"type": "string", "minLength": 1}, "format": {"type": "string", "minLength": 1}}, "minProperties": 1},
+        "research_revisions": {"type": "array", "items": {"$ref": "#/$defs/source_ref"}},
+        "candidate_evidence": {"type": "array", "items": {"$ref": "#/$defs/source_ref"}},
+        "prior_feedback": {"type": "array", "items": {"$ref": "#/$defs/source_ref"}},
+        "prior_preparation": {"type": "array", "items": {"$ref": "#/$defs/source_ref"}},
+        "reuse_prior_research": {"type": "boolean"}
+      }
+    },
+    "story": {
+      "type": "object", "additionalProperties": false,
+      "required": ["text", "source_refs"],
+      "properties": {
+        "text": {"type": "string", "minLength": 1, "maxLength": 16000},
+        "source_refs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/source_ref"}},
+        "claims": {"type": "array", "items": {"type": ["string", "object"]}},
+        "metrics": {"type": "array", "items": {"type": ["string", "object"]}},
+        "skills": {"type": "array", "items": {"type": ["string", "object"]}}
+      }
+    },
+    "hypothetical": {"type": "object", "additionalProperties": false, "required": ["label", "prompt"], "properties": {"label": {"const": "hypothetical"}, "prompt": {"type": "string", "minLength": 1, "maxLength": 16000}}},
+    "content": {
+      "type": "object", "additionalProperties": false,
+      "required": ["role_expectations", "technical_topics", "evidence_backed_stories", "hypothetical_examples", "practice_questions", "interviewer_questions", "unresolved_gaps"],
+      "properties": {
+        "role_expectations": {"type": "array", "items": {"type": ["string", "object"]}},
+        "technical_topics": {"type": "array", "items": {"type": ["string", "object"]}},
+        "evidence_backed_stories": {"type": "array", "items": {"$ref": "#/$defs/story"}},
+        "hypothetical_examples": {"type": "array", "items": {"$ref": "#/$defs/hypothetical"}},
+        "practice_questions": {"type": "array", "items": {"type": ["string", "object"]}},
+        "interviewer_questions": {"type": "array", "items": {"type": ["string", "object"]}},
+        "unresolved_gaps": {"type": "array", "items": {"type": ["string", "object"]}}
+      }
+    }
+  }
+}

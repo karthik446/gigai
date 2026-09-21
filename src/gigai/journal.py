@@ -8,11 +8,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
 import time
-from typing import Callable, Iterator
+from typing import Callable, Iterator, TypeVar
 
 from .canonical import (
     EntityPrefix,
@@ -20,15 +21,26 @@ from .canonical import (
     digest_imported_bytes,
     digest_owned_text,
     parse_json_bytes,
+    parse_json_front_matter,
     render_json_front_matter,
     validate_entity_id,
 )
 from .diagnostics import run_mount_probes
-from .workpad import WORKPAD_GITIGNORE, WORKPAD_GIT_USER_EMAIL, WORKPAD_GIT_USER_NAME
+from .workpad import (
+    WORKPAD_GITIGNORE,
+    WORKPAD_GIT_USER_EMAIL,
+    WORKPAD_GIT_USER_NAME,
+    WORKPAD_V2_GITIGNORE,
+    WORKPAD_LAYOUT_PATH,
+    workpad_layout_version,
+)
 
 
 LOCK_FILENAME = "gigai-writer.lock"
 LOCK_TIMEOUT_SECONDS = 10.0
+_MUTABLE_CAPABILITY_MANIFEST = re.compile(
+    r"^manifests/capabilities/capmanifest_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$"
+)
 SEQUENCE_TRAILER = "GigAI-Handoff-Sequence"
 HANDOFF_TRAILER = "GigAI-Handoff"
 TRANSACTION_DIRECTORY = "scratch"
@@ -50,14 +62,24 @@ TRANSITIONS = frozenset(
         "gig_builder_rejected",
         "improvement_manifest_staged",
         "gig_proposal_ready",
+        "gig_graph_set_proposed",
         "gig_proposal_feedback_recorded",
         "gig_proposal_revised",
         "gig_proposal_approved",
         "gig_proposal_rejected",
         "run_started",
+        "run_review_loop_materialized",
+        "run_plan_sealed",
+        "requirements_baseline_approved",
+        "provider_review_no_fix_required",
         "goal_started",
         "goal_completed",
         "goal_failed",
+        # A host-owned proposal invocation attempt is durable evidence, not a
+        # Goal terminal transition.  It may be committed after a competing
+        # Run cancellation and is read through the proposal attempt reader.
+        "proposal_invocation_recorded",
+        "tailor_invocation_recorded",
         "goal_blocked",
         "gate_waiting",
         "gate_continued",
@@ -66,6 +88,7 @@ TRANSITIONS = frozenset(
         "run_failed",
         "run_cancelled",
         "run_interrupted",
+        "comparison_started",
         "gig_accepted",
         "gig_closed",
         "target_effect_authorized",
@@ -92,10 +115,28 @@ TRANSITIONS = frozenset(
         "occurrence_failed",
         "occurrence_missed",
         "comparison_published",
+        "workpad_layout_migrated",
+        "template_instance_bound",
+        "scout_source_materialized",
+        "scout_public_acquisition_progress",
+        "capability_review_decided",
+        "capability_successor_prepared",
+        "private_reference_imported",
+        "run_input_imported",
+        "private_record_revised",
+        "private_record_archived",
+        "external_recording_plan_sealed",
+        "external_recording_started",
+        "external_recording_checkpointed",
+        "external_recording_waiting_input",
+        "external_recording_succeeded",
+        "external_recording_cancelled",
+        "external_recording_interrupted",
     }
 )
 JournalObserver = Callable[[str], None]
 JournalContinuation = Callable[["JournalEntry"], "JournalTransition"]
+_WriterResult = TypeVar("_WriterResult")
 
 
 class JournalError(RuntimeError):
@@ -108,6 +149,18 @@ class JournalConflictError(JournalError):
 
 class JournalReconciliationRequired(JournalError):
     code = "journal_reconciliation_required"
+
+
+class JournalUnbornError(JournalReconciliationRequired):
+    """The private Git substrate exists but has no committed journal yet."""
+
+    code = "journal_unborn"
+
+
+class JournalArtifactMissingError(JournalConflictError):
+    """A requested immutable artifact has not yet been published."""
+
+    code = "journal_artifact_missing"
 
 
 class InterprocessLockUnavailable(JournalError):
@@ -148,6 +201,73 @@ class JournalTransition:
     front_matter: dict[str, object] | None = None
 
 
+@dataclass(frozen=True)
+class JournalWriter:
+    """One already-validated writer critical section.
+
+    It is intentionally only handed to a callback while the private-Git lock
+    is held.  Storage services use it for their lookup/CAS/publish sequence;
+    ordinary callers continue to use :func:`record_transition`.
+    """
+
+    root: Path
+    project_id: str
+    gig_id: str
+    observer: JournalObserver
+
+    def record(self, entry: JournalTransition, *, allow_artifact_replacement: bool = False) -> JournalEntry:
+        _validate_ids(self.project_id, self.gig_id, entry.handoff_id)
+        _validate_transition(entry.transition, entry.body)
+        checked = JournalTransition(
+            entry.handoff_id,
+            entry.transition,
+            entry.body,
+            _validate_artifacts(entry.artifacts),
+            entry.front_matter,
+        )
+        return _record_transition_locked(
+            self.root,
+            self.project_id,
+            self.gig_id,
+            checked,
+            self.observer,
+            allow_artifact_replacement,
+        )
+
+    def snapshot(self, prefixes: tuple[str, ...]) -> "JournalSnapshot":
+        """Capture and verify one committed private-artifact tree at this lock."""
+
+        return _capture_committed_snapshot(
+            self.root, self.project_id, self.gig_id, prefixes
+        )
+
+
+@dataclass(frozen=True)
+class JournalSnapshot:
+    """Exact committed bytes plus a checked working-tree mirror at one HEAD."""
+
+    head: str
+    artifacts: dict[str, bytes]
+
+
+def run_with_journal_writer(
+    *,
+    workpad: Path,
+    project_id: str,
+    gig_id: str,
+    operation: Callable[[JournalWriter], _WriterResult],
+    lock_timeout_seconds: float = LOCK_TIMEOUT_SECONDS,
+    observer: JournalObserver | None = None,
+) -> _WriterResult:
+    """Run lookup, compare-and-swap, and publication as one writer operation."""
+
+    _validate_ids(project_id, gig_id, None)
+    root = _validate_workpad(workpad, project_id, gig_id)
+    _require_mount_probes(root)
+    with _writer_lock(root / ".git" / LOCK_FILENAME, lock_timeout_seconds):
+        return operation(JournalWriter(root, project_id, gig_id, observer or (lambda _step: None)))
+
+
 def record_transition(
     *,
     workpad: Path,
@@ -160,6 +280,7 @@ def record_transition(
     front_matter: dict[str, object] | None = None,
     lock_timeout_seconds: float = LOCK_TIMEOUT_SECONDS,
     observer: JournalObserver | None = None,
+    allow_artifact_replacement: bool = True,
 ) -> JournalEntry:
     """Durably record one caller-owned semantic transition under the writer lock."""
 
@@ -172,6 +293,7 @@ def record_transition(
         continuation=None,
         lock_timeout_seconds=lock_timeout_seconds,
         observer=observer,
+        allow_artifact_replacement=allow_artifact_replacement,
     )[0]
 
 
@@ -184,6 +306,7 @@ def record_transition_chain(
     continuation: JournalContinuation,
     lock_timeout_seconds: float = LOCK_TIMEOUT_SECONDS,
     observer: JournalObserver | None = None,
+    preflight: Callable[[], None] | None = None,
 ) -> tuple[JournalEntry, JournalEntry]:
     """Write two ordered transitions under one G06 writer lock.
 
@@ -199,6 +322,8 @@ def record_transition_chain(
         continuation=continuation,
         lock_timeout_seconds=lock_timeout_seconds,
         observer=observer,
+        allow_artifact_replacement=True,
+        preflight=preflight,
     )
     assert len(entries) == 2
     return entries[0], entries[1]
@@ -213,6 +338,8 @@ def _record_chain(
     continuation: JournalContinuation | None,
     lock_timeout_seconds: float,
     observer: JournalObserver | None,
+    allow_artifact_replacement: bool,
+    preflight: Callable[[], None] | None = None,
 ) -> tuple[JournalEntry, ...]:
     observer = observer or (lambda _step: None)
     _validate_ids(project_id, gig_id, first.handoff_id)
@@ -227,8 +354,10 @@ def _record_chain(
     root = _validate_workpad(workpad, project_id, gig_id)
     _require_mount_probes(root)
     with _writer_lock(root / ".git" / LOCK_FILENAME, lock_timeout_seconds):
+        if preflight is not None:
+            preflight()
         first_entry = _record_transition_locked(
-            root, project_id, gig_id, first, observer
+            root, project_id, gig_id, first, observer, allow_artifact_replacement
         )
         if continuation is None:
             return (first_entry,)
@@ -247,7 +376,7 @@ def _record_chain(
             second.front_matter,
         )
         second_entry = _record_transition_locked(
-            root, project_id, gig_id, second, observer
+            root, project_id, gig_id, second, observer, allow_artifact_replacement
         )
         return first_entry, second_entry
 
@@ -258,6 +387,7 @@ def _record_transition_locked(
     gig_id: str,
     entry: JournalTransition,
     observer: JournalObserver,
+    allow_artifact_replacement: bool,
 ) -> JournalEntry:
     mount = _mount_identity(root)
     head = _read_head(root)
@@ -269,6 +399,22 @@ def _record_transition_locked(
         raise JournalReconciliationRequired(
             "next handoff path is already present and uncommitted"
         )
+    # Every committed artifact must be addressable through the closed
+    # publication metadata.  Older callers often supplied richer semantic
+    # front matter but omitted these mechanical refs; fill them from the
+    # exact bytes being committed so later pinned snapshots can authenticate
+    # the whole Run tree without granting any new authority.
+    front_matter = dict(entry.front_matter or {})
+    if entry.artifacts and "artifact_refs" not in front_matter:
+        front_matter["artifact_refs"] = [
+            {
+                "path": artifact.path,
+                "content_sha256": digest_imported_bytes(artifact.content),
+                "media_type": "application/octet-stream",
+                "size_bytes": len(artifact.content),
+            }
+            for artifact in entry.artifacts
+        ]
     document = _render_handoff(
         sequence,
         gig_id,
@@ -276,13 +422,17 @@ def _record_transition_locked(
         entry.transition,
         entry.body,
         previous_commit,
-        front_matter=entry.front_matter,
+        front_matter=front_matter,
+    )
+    _preflight_artifact_destinations(
+        root, entry.artifacts, allow_replacement=allow_artifact_replacement
     )
     transaction = _write_transaction_manifest(
-        root, sequence, entry.handoff_id, entry.transition, document, entry.artifacts
+        root, sequence, entry.handoff_id, entry.transition, document, entry.artifacts,
+        allow_artifact_replacement=allow_artifact_replacement,
     )
     observer("after_transaction_prepare")
-    _replace_artifacts(root, entry.artifacts, allow_replacement=True)
+    _replace_artifacts(root, entry.artifacts, allow_replacement=allow_artifact_replacement)
     observer("after_artifact_replace")
     temporary = _write_atomic_temporary(handoffs, document)
     observer("before_replace")
@@ -318,7 +468,13 @@ def reconcile_journal(
     """Explicitly reconcile one interrupted writer state; normal writes never scan."""
 
     _validate_ids(project_id, gig_id, None)
-    root = _validate_workpad(workpad, project_id, gig_id)
+    try:
+        root = _validate_workpad(workpad, project_id, gig_id)
+    except JournalConflictError:
+        # A prepared migration can already have installed its v2 marker, which
+        # normal admission must reject until the handoff commits.  Recovery is
+        # the sole narrow path that may inspect that prepared intent.
+        root = _validate_recovery_migration_root(workpad, project_id, gig_id)
     _require_mount_probes(root)
     with _writer_lock(root / ".git" / LOCK_FILENAME, lock_timeout_seconds):
         handoffs = root / "handoffs"
@@ -456,14 +612,59 @@ def _validate_workpad(workpad: Path, project_id: str, gig_id: str) -> Path:
         "gigai.project-id": project_id,
         "gigai.gig-id": gig_id,
     }
-    if (root / ".gitignore").read_bytes() != WORKPAD_GITIGNORE:
-        raise JournalConflictError("journal workpad ignore rules differ from G05")
+    try:
+        layout_version = workpad_layout_version(root, project_id=project_id, gig_id=gig_id)
+    except Exception as exc:
+        raise JournalConflictError("journal workpad layout is invalid") from exc
+    expected_ignore = WORKPAD_V2_GITIGNORE if layout_version == 2 else WORKPAD_GITIGNORE
+    if (root / ".gitignore").read_bytes() != expected_ignore:
+        raise JournalConflictError("journal workpad ignore rules differ from declared layout")
     for key, value in expected.items():
         observed = _git(root, "config", "--local", "--get", key, check=False)
         if observed.returncode != 0 or observed.stdout.rstrip("\n") != value:
             raise JournalConflictError("journal workpad ownership marker mismatches")
     if _git(root, "remote").stdout.strip():
         raise JournalConflictError("journal workpad has a remote")
+    return root
+
+
+def _validate_recovery_migration_root(workpad: Path, project_id: str, gig_id: str) -> Path:
+    root = workpad.resolve(strict=True)
+    if root != workpad or root.is_symlink() or not root.is_dir():
+        raise JournalReconciliationRequired("journal recovery workpad is unavailable")
+    expected = {
+        "user.name": WORKPAD_GIT_USER_NAME,
+        "user.email": WORKPAD_GIT_USER_EMAIL,
+        "gigai.project-id": project_id,
+        "gigai.gig-id": gig_id,
+    }
+    for key, value in expected.items():
+        observed = _git(root, "config", "--local", "--get", key, check=False)
+        if observed.returncode != 0 or observed.stdout.rstrip("\n") != value:
+            raise JournalReconciliationRequired("journal recovery ownership marker mismatches")
+    if _git(root, "remote").stdout.strip():
+        raise JournalReconciliationRequired("journal recovery workpad has a remote")
+    head = _read_head(root)
+    sequence, _previous, _commit = _next_sequence(root, head)
+    transaction = _load_transaction_manifest(root, sequence)
+    if transaction is None or transaction.transition != "workpad_layout_migrated":
+        raise JournalReconciliationRequired("journal layout state is not recoverable")
+    marker = next((item for item in transaction.artifacts if item.path == WORKPAD_LAYOUT_PATH), None)
+    ignore = next((item for item in transaction.artifacts if item.path == ".gitignore"), None)
+    if marker is None or ignore is None or ignore.content != WORKPAD_V2_GITIGNORE:
+        raise JournalReconciliationRequired("journal migration artifacts are invalid")
+    try:
+        payload = parse_json_bytes(marker.content)
+    except ValueError as exc:
+        raise JournalReconciliationRequired("journal migration marker is invalid") from exc
+    if not isinstance(payload, dict) or payload != {
+        "schema_version": "2.0",
+        "layout_version": 2,
+        "project_id": project_id,
+        "gig_id": gig_id,
+        "ignore_sha256": digest_imported_bytes(WORKPAD_V2_GITIGNORE),
+    }:
+        raise JournalReconciliationRequired("journal migration marker identity differs")
     return root
 
 
@@ -477,7 +678,7 @@ def _read_head(root: Path) -> str | None:
 def _head_commit(root: Path, *, required: bool = True) -> str | None:
     value = _read_head(root)
     if value is None and required:
-        raise JournalReconciliationRequired("journal head is unexpectedly unborn")
+        raise JournalUnbornError("journal head is unexpectedly unborn")
     return value
 
 
@@ -586,6 +787,7 @@ class _JournalTransaction:
     transition: str
     handoff: bytes
     artifacts: tuple[JournalArtifact, ...]
+    allow_artifact_replacement: bool
 
 
 def _validate_artifacts(
@@ -625,6 +827,8 @@ def _write_transaction_manifest(
     transition: str,
     handoff: bytes,
     artifacts: tuple[JournalArtifact, ...],
+    *,
+    allow_artifact_replacement: bool,
 ) -> Path | None:
     if not artifacts:
         return None
@@ -649,6 +853,7 @@ def _write_transaction_manifest(
             }
             for item in artifacts
         ],
+        "allow_artifact_replacement": allow_artifact_replacement,
     }
     _write_atomic_bytes(
         path, canonical_json_bytes(payload), prefix=".gigai-transaction-"
@@ -664,14 +869,22 @@ def _load_transaction_manifest(root: Path, sequence: int) -> _JournalTransaction
         raise JournalReconciliationRequired("journal transaction state is invalid")
     try:
         payload = parse_json_bytes(path.read_bytes())
-        if not isinstance(payload, dict) or set(payload) != {
+        if not isinstance(payload, dict) or set(payload) not in ({
             "schema_version",
             "sequence",
             "handoff_id",
             "transition",
             "handoff_base64",
             "artifacts",
-        }:
+        }, {
+            "schema_version",
+            "sequence",
+            "handoff_id",
+            "transition",
+            "handoff_base64",
+            "artifacts",
+            "allow_artifact_replacement",
+        }):
             raise ValueError
         if payload["schema_version"] != "1.0" or payload["sequence"] != sequence:
             raise ValueError
@@ -687,6 +900,9 @@ def _load_transaction_manifest(root: Path, sequence: int) -> _JournalTransaction
         _validate_transition(transition, "transaction recovery")
         handoff = base64.b64decode(payload["handoff_base64"], validate=True)
         artifact_payloads = payload["artifacts"]
+        allow_artifact_replacement = payload.get("allow_artifact_replacement", True)
+        if type(allow_artifact_replacement) is not bool:
+            raise ValueError
         if not isinstance(artifact_payloads, list):
             raise ValueError
         artifacts: list[JournalArtifact] = []
@@ -708,6 +924,7 @@ def _load_transaction_manifest(root: Path, sequence: int) -> _JournalTransaction
             transition=transition,
             handoff=handoff,
             artifacts=_validate_artifacts(tuple(artifacts)),
+            allow_artifact_replacement=allow_artifact_replacement,
         )
     except Exception as exc:
         raise JournalReconciliationRequired(
@@ -716,7 +933,22 @@ def _load_transaction_manifest(root: Path, sequence: int) -> _JournalTransaction
 
 
 def _restore_transaction(root: Path, transaction: _JournalTransaction) -> None:
-    _replace_artifacts(root, transaction.artifacts, allow_replacement=False)
+    # Layout migration is the only recovery that may replace one existing
+    # policy file.  Every immutable record/snapshot/receipt remains no-clobber
+    # even while recovering an interrupted transaction.
+    if transaction.transition == "workpad_layout_migrated":
+        policy = tuple(item for item in transaction.artifacts if item.path == ".gitignore")
+        immutable = tuple(item for item in transaction.artifacts if item.path != ".gitignore")
+        if len(policy) != 1:
+            raise JournalReconciliationRequired("layout migration transaction lacks its ignore policy")
+        _replace_artifacts(root, immutable, allow_replacement=False)
+        _replace_artifacts(root, policy, allow_replacement=True)
+    else:
+        _replace_artifacts(
+            root,
+            transaction.artifacts,
+            allow_replacement=transaction.allow_artifact_replacement,
+        )
     handoffs = root / "handoffs"
     destination = (
         handoffs
@@ -748,6 +980,27 @@ def _replace_artifacts(
                     )
                 continue
         _replace_one(root, artifact.path, artifact.content)
+
+
+def _preflight_artifact_destinations(
+    root: Path, artifacts: tuple[JournalArtifact, ...], *, allow_replacement: bool
+) -> None:
+    """Refuse immutable collisions before creating recoverable transaction state."""
+
+    for artifact in artifacts:
+        destination = root / artifact.path
+        parent = destination.parent
+        if not parent.is_relative_to(root):
+            raise JournalConflictError("journal artifact path escaped its workpad")
+        current = root
+        for part in parent.relative_to(root).parts:
+            current = current / part
+            if current.is_symlink():
+                raise JournalConflictError("journal artifact parent is redirected")
+        if destination.is_symlink() or destination.is_dir():
+            raise JournalConflictError("journal artifact destination is invalid")
+        if not allow_replacement and destination.exists():
+            raise JournalConflictError("journal immutable artifact already exists")
 
 
 def _replace_one(root: Path, relative: str, data: bytes) -> None:
@@ -823,6 +1076,154 @@ def _read_handoff(path: Path) -> dict[str, object]:
     return metadata
 
 
+def read_committed_artifact(
+    *, workpad: Path, project_id: str, gig_id: str, path: str, head: str | None = None,
+    allow_replaced_run_details: bool = False,
+    allow_replaced_manifests: bool = False,
+) -> tuple[bytes, str]:
+    """Return an exact immutable artifact only when its publication is proven.
+
+    A schema-valid file in the working tree is deliberately insufficient: the
+    path must have been added by a journal commit and be listed, with its exact
+    bytes, in that commit's handoff metadata.  Callers must not follow paths
+    from the record itself before this check succeeds.
+    """
+
+    _validate_ids(project_id, gig_id, None)
+    checked = _validate_artifacts((JournalArtifact(path, b""),))[0].path
+    root = _validate_workpad(workpad, project_id, gig_id)
+    pinned_head = head or _head_commit(root)
+    commits = _git(root, "log", "--format=%H", pinned_head, "--", checked, check=False)
+    candidates = [line for line in commits.stdout.splitlines() if line]
+    if not candidates:
+        raise JournalArtifactMissingError("journal artifact is not committed")
+    # Immutable records have one publisher.  More than one means a legacy or
+    # malicious replacement and is not an authority source.
+    # Run details are deliberately mutable scheduler state: each goal
+    # transition publishes a replacement at the same stable path.  A pinned
+    # snapshot may read the newest authenticated replacement, while all
+    # immutable records continue to require exactly one publisher.
+    mutable_run_details = allow_replaced_run_details and path.startswith("runs/") and path.endswith("/run-details.json")
+    mutable_manifest = allow_replaced_manifests and bool(_MUTABLE_CAPABILITY_MANIFEST.fullmatch(path))
+    if len(candidates) != 1 and not (mutable_run_details or mutable_manifest):
+        raise JournalConflictError("journal immutable artifact has multiple publishers")
+    commit = candidates[0]
+    names = _git(root, "show", "--format=", "--name-only", commit).stdout.splitlines()
+    handoffs = [name for name in names if name.startswith("handoffs/") and name.endswith(".txt")]
+    if len(handoffs) != 1 or checked not in names:
+        raise JournalConflictError("journal artifact publication is incomplete")
+    try:
+        metadata, _body = parse_json_front_matter(_git_bytes(root, "show", f"{commit}:{handoffs[0]}"))
+        data = _git_bytes(root, "show", f"{pinned_head}:{checked}")
+    except (ValueError, JournalConflictError) as exc:
+        raise JournalConflictError("journal artifact publication is invalid") from exc
+    if metadata.get("gig_id") != gig_id:
+        raise JournalConflictError("journal artifact belongs to another Gig")
+    refs = metadata.get("artifact_refs")
+    if not isinstance(refs, list):
+        raise JournalConflictError("journal artifact lacks authenticated references")
+    matches = [item for item in refs if isinstance(item, dict) and item.get("path") == checked]
+    if len(matches) != 1:
+        raise JournalConflictError("journal artifact reference is ambiguous")
+    reference = matches[0]
+    if reference.get("content_sha256") != digest_imported_bytes(data) or reference.get("size_bytes") != len(data):
+        raise JournalConflictError("journal artifact digest differs from publication")
+    if mutable_manifest:
+        # Only reviewed, versioned capability manifests use replacement
+        # semantics.  Active pointers, graph sets, proposals and arbitrary
+        # nested manifests retain immutable exactly-one-publisher behavior.
+        # Initial materialization has one publisher and remains immutable in
+        # practice.  Replacement is the only case that requires the review
+        # transition; accepting its normal bootstrap transition keeps the
+        # existing capability provisioning path intact.
+        if len(candidates) != 1 and metadata.get("transition") != "capability_review_decided":
+            raise JournalConflictError("mutable capability manifest has an invalid publishing transition")
+        try:
+            manifest = parse_json_bytes(data)
+            from .validators import validate_serialized_contract
+            valid = validate_serialized_contract("capability-manifest.schema.json", data).valid
+        except Exception as exc:
+            raise JournalConflictError("mutable capability manifest is invalid") from exc
+        if not valid or not isinstance(manifest, dict) or manifest.get("manifest_id") != Path(path).stem or manifest.get("gig_id") != gig_id:
+            raise JournalConflictError("mutable capability manifest owner or schema is invalid")
+    return data, commit
+
+
+def _capture_committed_snapshot(
+    root: Path,
+    project_id: str,
+    gig_id: str,
+    prefixes: tuple[str, ...],
+) -> JournalSnapshot:
+    """Enumerate private authority from a pinned Git tree, never ``glob``."""
+
+    if not prefixes or any(
+        not prefix.endswith("/") or Path(prefix).is_absolute() or ".." in Path(prefix).parts
+        for prefix in prefixes
+    ):
+        raise JournalConflictError("journal snapshot prefixes are invalid")
+    head = _head_commit(root)
+    result = _git_bytes(root, "ls-tree", "-r", "-z", "--name-only", head, "--", *prefixes)
+    paths = tuple(item.decode("utf-8") for item in result.split(b"\0") if item)
+    artifacts: dict[str, bytes] = {}
+    for path in paths:
+        if not any(path.startswith(prefix) for prefix in prefixes):
+            raise JournalConflictError("journal snapshot escaped its requested family")
+        # Top-level provisioning manifests are mutable indexes (for example
+        # ``gig-proposal.json``) and are not needed by the journal-derived
+        # Run/source readers.  Keep only approved Graph Set resources and the
+        # fixed discovery validator bytes needed to redeem a posting; broad
+        # software manifests would needlessly make every snapshot expensive.
+        if path.startswith("manifests/") and (
+            len(Path(path).parts) == 2
+            or (
+                path.startswith("manifests/software/")
+                and "/compiled/" not in path
+                and "/tools/cap_00000000-0000-4000-8000-000000000074/" not in path
+            )
+        ):
+            continue
+        data, _publisher = read_committed_artifact(
+            workpad=root, project_id=project_id, gig_id=gig_id, path=path, head=head,
+            allow_replaced_run_details=True,
+            allow_replaced_manifests=True,
+        )
+        candidate = root / path
+        current = root
+        for component in Path(path).parts:
+            current = current / component
+            if current.is_symlink():
+                raise JournalConflictError("journal working evidence is redirected")
+        if not candidate.is_file() or candidate.read_bytes() != data:
+            raise JournalConflictError("journal working evidence differs from committed bytes")
+        artifacts[path] = data
+    for prefix in prefixes:
+        directory = root / prefix.rstrip("/")
+        if not directory.exists():
+            continue
+        if directory.is_symlink() or not directory.is_dir():
+            raise JournalConflictError("journal private evidence root is unavailable")
+        for current, directories, files in os.walk(directory, followlinks=False):
+            current_path = Path(current)
+            if any((current_path / name).is_symlink() for name in directories):
+                raise JournalConflictError("journal working evidence is redirected")
+            for name in files:
+                candidate = current_path / name
+                relative = candidate.relative_to(root).as_posix()
+                if relative.startswith("manifests/") and (
+                    len(Path(relative).parts) == 2
+                    or (
+                        relative.startswith("manifests/software/")
+                        and "/compiled/" not in relative
+                        and "/tools/cap_00000000-0000-4000-8000-000000000074/" not in relative
+                    )
+                ):
+                    continue
+                if candidate.is_symlink() or relative not in artifacts:
+                    raise JournalConflictError("journal working evidence is extra or redirected")
+    return JournalSnapshot(head, artifacts)
+
+
 def _mount_identity(root: Path) -> tuple[int, int]:
     stat_result = root.stat()
     return stat_result.st_dev, stat_result.st_ino
@@ -867,16 +1268,38 @@ def _git(
     return result
 
 
+def _git_bytes(root: Path, *args: str) -> bytes:
+    executable = shutil.which("git")
+    if executable is None:
+        raise JournalConflictError("Git executable is unavailable")
+    result = subprocess.run(
+        [executable, "-C", os.fspath(root), *args],
+        env={**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_OPTIONAL_LOCKS": "0"},
+        capture_output=True,
+        check=False,
+        shell=False,
+    )
+    if result.returncode != 0:
+        raise JournalConflictError("journal Git object lookup failed")
+    return result.stdout
+
+
 __all__ = [
     "InterprocessLockUnavailable",
     "JournalArtifact",
+    "JournalArtifactMissingError",
     "JournalConflictError",
     "JournalEntry",
     "JournalError",
     "JournalReconciliationRequired",
+    "JournalUnbornError",
     "JournalTransition",
+    "JournalWriter",
+    "JournalSnapshot",
     "ReconciliationResult",
     "record_transition",
     "record_transition_chain",
     "reconcile_journal",
+    "read_committed_artifact",
+    "run_with_journal_writer",
 ]

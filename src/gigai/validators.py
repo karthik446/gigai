@@ -26,11 +26,15 @@ from .roles import RoleError, require_registered
 
 
 SCHEMA_NAMES = (
+    "application-event.schema.json",
     "addressed-artifact.schema.json",
     "adjudication.schema.json",
     "active-gig-version.schema.json",
+    "active-gig-version-v2.schema.json",
     "capability-installation.schema.json",
     "capability-manifest.schema.json",
+    "capability-review-decision.schema.json",
+    "capability-successor-binding.schema.json",
     "common.schema.json",
     "feedback.schema.json",
     "finding.schema.json",
@@ -39,6 +43,10 @@ SCHEMA_NAMES = (
     "gig-discovery-manifest.schema.json",
     "gig-occurrence.schema.json",
     "gig-proposal.schema.json",
+    "gig-proposal-v2.schema.json",
+    "gig-graph-set.schema.json",
+    "graph-selection-record.schema.json",
+    "graph-selection-record-v2.schema.json",
     "goal-graph.schema.json",
     "handoff-frontmatter.schema.json",
     "improvement-manifest.schema.json",
@@ -47,16 +55,65 @@ SCHEMA_NAMES = (
     "model-invocation.schema.json",
     "proposal-interview.schema.json",
     "proposal-draft-manifest.schema.json",
+    "gig-package.schema.json",
     "report.schema.json",
     "review-bundle.schema.json",
     "review-contract.schema.json",
+    "review-input-record.schema.json",
+    "requirements-baseline-approval.schema.json",
+    "provider-review-closeout-receipt.schema.json",
+    "private-record-revision.schema.json",
+    "native-record-content.schema.json",
+    "reference-record.schema.json",
+    "run-input-record.schema.json",
+    "scout-operation-receipt.schema.json",
+    "template-instance-binding.schema.json",
+    "workpad-layout.schema.json",
+    "external-recording-invocation.schema.json",
+    "external-recording-invocation-v2.schema.json",
+    "external-recording-plan.schema.json",
+    "external-recording-plan-v2.schema.json",
+    "external-recording-run.schema.json",
+    "external-recording-run-v2.schema.json",
+    "external-recording-checkpoint.schema.json",
+    "external-recording-checkpoint-v2.schema.json",
+    "external-recording-receipt.schema.json",
+    "external-recording-receipt-v2.schema.json",
+    "run-plan.schema.json",
+    "run-plan-v2.schema.json",
+    "verification-record.schema.json",
     "run-brief-frontmatter.schema.json",
     "run-details.schema.json",
     "run-manifest.schema.json",
+    "run-manifest-v2.schema.json",
     "review-loop.schema.json",
     "role-reference.schema.json",
     "target-effect.schema.json",
     "trace.schema.json",
+)
+# Domain schemas are additive and versioned. Keep SCHEMA_NAMES as the frozen
+# historical 64-resource tuple: old inventory/readers rely on that baseline.
+# New Scout readers explicitly validate these resources without widening any
+# historical schema or changing the legacy count.
+_VERSIONED_SCHEMA_NAMES = (
+    "model-invocation-v2.schema.json",
+    "model-invocation-v3.schema.json",
+    "scout-proposal-revision.schema.json",
+    "scout-answer-association.schema.json",
+    "scout-proposal-discovery-job.schema.json",
+    "scout-tailor-selection-v2.schema.json",
+    "scout-document-revision-v1.schema.json",
+    "scout-document-selection-v1.schema.json",
+    "scout-document-selection-v2.schema.json",
+    "scout-public-import-input.schema.json",
+    "scout-public-import-progress.schema.json",
+    "runtime-evaluation-pack.schema.json",
+    "runtime-comparison.schema.json",
+    "runtime-comparison-attempt.schema.json",
+    "runtime-comparison-intent.schema.json",
+    "scout-interview-preparation.schema.json",
+    "scout-private-transfer-manifest.schema.json",
+    "scout-definition-export-manifest.schema.json",
 )
 _WRITING_EFFECTS = frozenset({"write_target", "write_workpad", "external_write"})
 _PROPOSAL_PATHS = {
@@ -107,7 +164,7 @@ def _schema_registry() -> tuple[dict[str, dict[str, Any]], Registry]:
     root = resources.files("gigai.schemas")
     schemas: dict[str, dict[str, Any]] = {}
     registry = Registry()
-    for name in SCHEMA_NAMES:
+    for name in (*SCHEMA_NAMES, *_VERSIONED_SCHEMA_NAMES):
         contents = json.loads(root.joinpath(name).read_text(encoding="utf-8"))
         schemas[name] = contents
         registry = registry.with_resource(
@@ -119,7 +176,7 @@ def _schema_registry() -> tuple[dict[str, dict[str, Any]], Registry]:
 def validate_serialized_contract(schema_name: str, data: bytes) -> ValidationReport:
     """Validate exact canonical JSON bytes against one packaged schema resource."""
 
-    if schema_name not in SCHEMA_NAMES:
+    if schema_name not in (*SCHEMA_NAMES, *_VERSIONED_SCHEMA_NAMES):
         return _report(
             (ValidationFinding("$", "unknown_schema", "schema is not packaged"),)
         )
@@ -200,10 +257,21 @@ def validate_model_invocation(data: Mapping[str, Any] | bytes) -> ValidationRepo
     """Validate a model invocation schema and its terminal/boundary semantics."""
 
     payload = data if isinstance(data, bytes) else canonical_json_bytes(data)
-    report = validate_serialized_contract("model-invocation.schema.json", payload)
+    try:
+        decoded = parse_json_bytes(payload)
+    except CanonicalizationError as exc:
+        return _report((ValidationFinding("$", "invalid_json", str(exc)),))
+    schema_name = (
+        "model-invocation-v3.schema.json"
+        if isinstance(decoded, dict) and decoded.get("schema_version") == "3.0"
+        else "model-invocation-v2.schema.json"
+        if isinstance(decoded, dict) and decoded.get("schema_version") == "2.0"
+        else "model-invocation.schema.json"
+    )
+    report = validate_serialized_contract(schema_name, payload)
     if not report.valid:
         return report
-    instance = parse_json_bytes(payload)
+    instance = decoded
     findings: list[ValidationFinding] = []
     expected_finish = {
         "succeeded": "completed",

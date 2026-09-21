@@ -42,8 +42,10 @@ Run:
 gigai setup
 ```
 
-GigAI opens a local, token-protected browser setup flow. It walks through five
-small decisions and shows the configuration before applying it.
+For v0.1.7, `gigai setup` is a local CLI flow. It walks through five small
+decisions, shows the configuration, and applies it only after explicit
+confirmation. The G40 goal defines and verifies this contract before the
+runtime surface is treated as complete.
 
 1. **Workspace** — choose where GigAI keeps its private machine state. GigAI
    derives the private workpad folder underneath that location. The target
@@ -63,8 +65,9 @@ small decisions and shows the configuration before applying it.
    and role assignments. Setup changes are applied only after explicit
    confirmation and can be rerun without silently replacing an existing home.
 
-Setup also detects a local editor for opening private workpads later. It does
-not define a Gig, approve a proposal, run work, or modify a target repository.
+Setup records an optional editor argv for later private-workpad commands. It
+does not define a Gig, approve a proposal, run work, or modify a target
+repository.
 
 After setup, diagnose the local installation with:
 
@@ -81,9 +84,10 @@ and local storage health without making provider calls.
 gigai create tailor-resume-for-a-job
 ```
 
-Gig creation opens a local browser session. The user describes the desired
-work, adds optional local context, and answers only the follow-up questions
-needed to define the Gig. Approval creates a proposal; it does not silently
+For v0.1.7, Gig creation is an explicit agent-invoked CLI flow. The invoking
+agent asks the questions and submits a typed proposal envelope; GigAI validates
+the input, persists the proposal, and requires explicit user approval. The
+surrounding agent conversation is not imported, and approval does not silently
 run work or modify the target.
 
 ### Run repeatable work
@@ -118,12 +122,11 @@ reinstallable rather than tied to one machine's incidental state.
 GigAI's foundations are usable, but the complete agent workbench is still being
 built. The main pieces under construction are:
 
-- **Gig creation lifecycle** — a dedicated browser flow for discovering a Gig,
+- **Gig creation lifecycle** — an agent-invoked CLI flow for discovering a Gig,
   researching its direction, displaying the proposal, collecting feedback,
   revising it, and reaching explicit approval.
-- **Gig improvement lifecycle** — a separate browser flow for proposing
-  evidence-backed changes to an existing Gig from completed Runs, feedback,
-  and review results.
+- **Gig improvement lifecycle** — a CLI flow for proposing evidence-backed
+  changes to an existing Gig from completed Runs, feedback, and review results.
 - **Multi-model review and verification** — assigning models to planner,
   researcher, reviewer, verifier, and adjudicator roles during Gig creation and
   execution, with disagreement treated as useful evidence rather than hidden

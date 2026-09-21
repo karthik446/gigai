@@ -11,6 +11,19 @@ from gigai.standard_pack import pack_digest
 from tests.scenarios import InstalledGigAI, ScenarioHarness, ScenarioRoots, ScenarioSpec
 
 
+_SETUP_REMOTE_MODEL_ARGS = (
+    "--credential-ref",
+    "provider=environment:GIGAI_PROVIDER_TOKEN",
+    "--endpoint",
+    "remote=openai_api:provider:https://api.example.test",
+    "--model-target",
+    "remote=remote:gpt-test",
+    "--create-model-target",
+    "remote",
+)
+_SETUP_REMOTE_MODEL_WITH_EXISTING_CREDENTIAL_ARGS = _SETUP_REMOTE_MODEL_ARGS[2:]
+
+
 @pytest.fixture
 def installed_gigai() -> InstalledGigAI:
     return InstalledGigAI.current()
@@ -68,7 +81,7 @@ def test_installed_fresh_setup_and_rerun_are_exactly_idempotent(
         "--credential-ref",
         "provider=environment:GIGAI_PROVIDER_TOKEN",
         "--json",
-    )
+    ) + _SETUP_REMOTE_MODEL_WITH_EXISTING_CREDENTIAL_ARGS
     first = harness.run(
         ScenarioSpec(
             name="fresh-setup",
@@ -124,7 +137,7 @@ def test_installed_doctor_is_offline_read_only_and_proves_the_configured_mount(
                 "--credential-ref",
                 "provider=environment:GIGAI_PROVIDER_TOKEN",
                 "--json",
-            ),
+            ) + _SETUP_REMOTE_MODEL_WITH_EXISTING_CREDENTIAL_ARGS,
             expected_home_changes=_fresh_home_changes(),
             allowed_subprocesses=(_python_executable(installed_gigai),),
             extra_env=(("GIGAI_PROVIDER_TOKEN", "doctor-secret-canary"),),
@@ -148,10 +161,7 @@ def test_installed_doctor_is_offline_read_only_and_proves_the_configured_mount(
         "configured_path_available=true",
         "configured_path_writable=true",
     ]
-    assert checks["adapter.offline"]["evidence_safe_to_share"] == [
-        "network_used=false",
-        "credential_used=false",
-    ]
+    assert "adapter.offline" not in checks
     assert result.home_before == result.home_after
     assert result.workpad_before == result.workpad_after
     assert result.target_before == result.target_after
@@ -176,7 +186,7 @@ def test_installed_setup_preserves_an_alternate_authoritative_mount(
                 "--editor",
                 "/usr/bin/true",
                 "--json",
-            ),
+            ) + _SETUP_REMOTE_MODEL_ARGS,
             expected_home_changes=_fresh_home_changes(),
             expected_workpad_changes=frozenset({"external-volume"}),
             allowed_subprocesses=(_python_executable(installed_gigai),),
@@ -237,15 +247,29 @@ def test_installed_interactive_setup_reviews_effects_before_applying(
     result = ScenarioHarness(installed_gigai.command, roots).run(
         ScenarioSpec(
             name="interactive-setup",
-            argv=("setup", "--terminal", "--editor", "/usr/bin/true"),
-            stdin="\n\n\n\n\n\n",
-            expected_home_changes=_fresh_home_changes(),
-            allowed_subprocesses=(_python_executable(installed_gigai),),
+            argv=(
+                "setup",
+                "--terminal",
+                "--editor",
+                "/usr/bin/true",
+                *_SETUP_REMOTE_MODEL_ARGS,
+            ),
+                stdin="\n\n\n\n\n\n",
+                expected_home_changes=_fresh_home_changes(),
+                allowed_home_change_prefixes=("snapshots",),
+                allowed_subprocesses=(
+                    _python_executable(installed_gigai),
+                    Path("/bin/sh"),
+                ),
+            )
         )
+    assert any(
+        path.name.startswith("discovery_")
+        for path in (roots.home / "snapshots" / "runtime-discovery").iterdir()
     )
 
     assert "Authoritative workpad root" in result.stdout
-    assert "Editor argv:" in result.stdout
+    assert "Editor:" in result.stdout
     assert "Apply this setup?" in result.stdout
     assert result.exit_code == 0
 
@@ -262,7 +286,7 @@ def test_installed_setup_refuses_read_only_config_without_partial_mutation(
         os.fspath(roots.workpad),
         "--editor",
         "/usr/bin/true",
-    )
+    ) + _SETUP_REMOTE_MODEL_ARGS
     harness.run(
         ScenarioSpec(
             name="read-only-prerequisite",
@@ -327,7 +351,7 @@ def test_installed_doctor_never_falls_back_when_configured_mount_disappears(
                 os.fspath(alternate),
                 "--editor",
                 "/usr/bin/true",
-            ),
+            ) + _SETUP_REMOTE_MODEL_ARGS,
             expected_home_changes=_fresh_home_changes(),
             expected_workpad_changes=frozenset({"removable-volume"}),
             allowed_subprocesses=(_python_executable(installed_gigai),),

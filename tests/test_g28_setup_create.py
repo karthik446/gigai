@@ -79,6 +79,14 @@ def test_initialized_non_git_target_resolves_implicitly_from_its_directory(
             str(workpad),
             "--editor",
             "/usr/bin/true",
+            "--credential-ref",
+            "openai=environment:OPENAI_API_KEY",
+            "--endpoint",
+            "openai=openai_api:openai:https://api.example.test",
+            "--model-target",
+            "remote=openai:gpt-test",
+            "--create-model-target",
+            "remote",
         ],
     )
     assert setup.exit_code == 0, setup.output

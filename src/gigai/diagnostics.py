@@ -1,4 +1,4 @@
-"""Offline installation and mount diagnostics for GigAI."""
+"""Installation and mount diagnostics for GigAI."""
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ from .config import ConfigurationError, GigAIConfig, load_config
 from .credentials import CredentialReferenceError, reference_is_available
 from .index import JournalIndexError, read_index
 from .model_targets import ModelTargetResolutionError
-from .standard_pack import PACK_NAME, PACK_VERSION, pack_digest, verify_standard_pack
 
 
 DIAGNOSTIC_SCHEMA_VERSION = "1.0"
@@ -101,7 +100,6 @@ def run_doctor(home_root: Path) -> DoctorReport:
     checks.extend(_path_checks(config))
     checks.extend(_credential_checks(config))
     checks.append(_editor_check(config))
-    checks.append(_offline_adapter_check(config))
     checks.extend(run_mount_probes(config.workpad_root))
     checks.extend(_journal_index_checks(config))
     return _report(checks)
@@ -110,8 +108,8 @@ def run_doctor(home_root: Path) -> DoctorReport:
 def run_live_doctor(home_root: Path, model_target: str) -> DoctorReport:
     """Run one explicit, local-only provider probe for a configured target.
 
-    This path is deliberately separate from ``run_doctor`` so offline checks,
-    CI, and scenario processes cannot invoke a provider by accident.
+    This path is deliberately separate from ``run_doctor`` so CI and scenario
+    processes cannot invoke a provider by accident.
     """
 
     report = run_doctor(home_root)
@@ -409,65 +407,6 @@ def _editor_check(config: GigAIConfig) -> DiagnosticCheck:
         "PASS",
         "configured editor executable resolves without shell parsing",
         ("argv_structured=true", "executable_resolved=true"),
-        None,
-        started,
-    )
-
-
-def _offline_adapter_check(config: GigAIConfig) -> DiagnosticCheck:
-    started = time.monotonic_ns()
-    try:
-        pack_valid, summary = verify_standard_pack(config.home_root)
-        offline_target = next(
-            (
-                target.name
-                for target in config.model_targets
-                if any(
-                    endpoint.name == target.endpoint
-                    and endpoint.adapter == "deterministic"
-                    for endpoint in config.endpoints
-                )
-            ),
-            None,
-        )
-        configured = offline_target is not None
-        configured = configured and (
-            config.standard_pack.name == PACK_NAME
-            and config.standard_pack.version == PACK_VERSION
-            and config.standard_pack.content_digest == pack_digest()
-        )
-        if offline_target is None:
-            raise AdapterFactoryError("no deterministic model target is configured")
-        binding = resolve_model_adapter(config, offline_target)
-        response_valid = (
-            binding.port.invoke(
-                binding.request(role="offline-diagnostic", prompt="doctor-probe")
-            ).output_text
-            == "gigai-offline-ok"
-        )
-    except Exception as exc:  # the check converts package corruption to a diagnostic
-        pack_valid = False
-        configured = False
-        response_valid = False
-        summary = f"deterministic adapter failed its fixture probe: {exc}"
-    if not (pack_valid and configured and response_valid):
-        return _check(
-            "adapter.offline",
-            "deterministic offline adapter",
-            "FAIL",
-            summary
-            if not pack_valid or not response_valid
-            else "offline endpoint is not configured",
-            ("network_used=false", "credential_used=false"),
-            "Rerun setup to restore the immutable standard pack and offline endpoint.",
-            started,
-        )
-    return _check(
-        "adapter.offline",
-        "deterministic offline adapter",
-        "PASS",
-        "deterministic adapter returned the installed fixture response",
-        ("network_used=false", "credential_used=false"),
         None,
         started,
     )

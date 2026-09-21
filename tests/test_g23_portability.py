@@ -249,8 +249,6 @@ def test_g23_three_hop_lineage_walks_real_git_history(tmp_path):
 
 @pytest.mark.parametrize("case", ["cycle", "missing", "cross_gig"])
 def test_g23_lineage_refusals_walk_real_git_history(tmp_path, case):
-    root_id = "gp_00000000-0000-4000-8000-000000000003"
-    gig_id = "gig_00000000-0000-4000-8000-000000000001"
     p2 = "gp_11111111-1111-4111-8111-111111111111"
     p3 = "gp_22222222-2222-4222-8222-222222222222"
     if case == "cycle":

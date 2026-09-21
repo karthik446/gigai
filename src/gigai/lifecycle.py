@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import tempfile
 from typing import Callable, Mapping
@@ -23,9 +24,17 @@ import uuid
 from .adapters.factory import resolve_model_adapter
 from .builder import GigBuilderError, build_model_draft
 from .capabilities import capability_manifest_artifact_ref
+from .capability_successor import (
+    CapabilitySuccessorApproval,
+    CapabilitySuccessorError,
+    reviewed_manifest_requires_successor,
+    successor_approval_context,
+)
 from .canonical import (
+    CanonicalizationError,
     EntityPrefix,
     canonical_json_bytes,
+    canonical_json_digest,
     canonicalize_owned_text,
     digest_imported_bytes,
     generate_entity_id,
@@ -38,10 +47,15 @@ from .improvement import validate_improvement_manifest
 from .learning import load_learning_records, validate_learning_record
 from .journal import (
     JournalArtifact,
+    JournalConflictError,
+    JournalArtifactMissingError,
     JournalEntry,
     JournalTransition,
+    JournalWriter,
+    read_committed_artifact,
     record_transition,
     record_transition_chain,
+    run_with_journal_writer,
 )
 from .proposal_interview import (
     InterviewSession,
@@ -56,12 +70,14 @@ from .proposal_interview import (
 )
 from .registry import open_project_registry
 from .validators import (
+    ValidationFinding,
     ValidationReport,
     validate_gig_builder_session,
     validate_proposal_draft_manifest,
     validate_proposal_workpad,
     validate_serialized_contract,
 )
+from .graph_set import validate_graph_set
 from .workpad import (
     BoundProject,
     ResolvedWorkpad,
@@ -70,6 +86,7 @@ from .workpad import (
     resolve_bound_project,
     resolve_workpad,
     select_active_workpad,
+    workpad_layout_version,
 )
 
 
@@ -81,6 +98,79 @@ class LifecycleError(RuntimeError):
     """A G08 lifecycle transition cannot truthfully continue."""
 
     code = "lifecycle_error"
+
+
+_KNOWN_PATH_ALIASES = {
+    Path("/var"): Path("/private/var"),
+    Path("/tmp"): Path("/private/tmp"),
+}
+
+
+def _definition_source_path(
+    value: Path, *, expected_identity: tuple[int, int] | None = None
+) -> tuple[Path, Path, tuple[int, int]]:
+    """Validate the caller spelling, then return it and its canonical path.
+
+    Link checks deliberately run on the original path before ``resolve``.  The
+    two macOS system aliases are accepted only when they resolve to their
+    known private locations; arbitrary source links remain refused.
+    """
+
+    original = value.expanduser()
+    if not original.is_absolute():
+        original = Path.cwd() / original
+    original = Path(os.path.normpath(os.fspath(original.absolute())))
+
+    def check_components() -> None:
+        current = Path(original.anchor)
+        for part in original.parts[1:]:
+            current /= part
+            try:
+                info = current.lstat()
+            except OSError as exc:
+                raise LifecycleError(
+                    "graph-set definition must be one regular local JSON file"
+                ) from exc
+            if stat.S_ISLNK(info.st_mode):
+                alias = _KNOWN_PATH_ALIASES.get(current)
+                if alias is None:
+                    raise LifecycleError(
+                        "graph-set definition must be one regular local JSON file"
+                    )
+                try:
+                    if current.resolve(strict=True) != alias:
+                        raise LifecycleError(
+                            "graph-set definition must be one regular local JSON file"
+                        )
+                except (OSError, RuntimeError) as exc:
+                    raise LifecycleError(
+                        "graph-set definition must be one regular local JSON file"
+                    ) from exc
+
+    try:
+        check_components()
+        info = original.stat()
+        if not stat.S_ISREG(info.st_mode):
+            raise LifecycleError(
+                "graph-set definition must be one regular local JSON file"
+            )
+        resolved = original.resolve(strict=True)
+        # Re-check after resolving to close a replacement race between the
+        # initial lstat walk and canonicalization.
+        check_components()
+        current_info = original.stat()
+    except LifecycleError:
+        raise
+    except (OSError, RuntimeError) as exc:
+        raise LifecycleError(
+            "graph-set definition must be one regular local JSON file"
+        ) from exc
+    identity = (int(current_info.st_dev), int(current_info.st_ino))
+    if expected_identity is not None and identity != expected_identity:
+        raise LifecycleError(
+            "first Graph Set definition source identity changed before publication"
+        )
+    return original, resolved, identity
 
 
 @dataclass(frozen=True)
@@ -113,6 +203,16 @@ class ApprovalResult:
     sealed_commit: str
     publication_commit: str
     tag: str
+
+
+@dataclass(frozen=True)
+class GraphSetProposalResult:
+    """A staged, still-pending multi-graph proposal; never an approval."""
+
+    gig_id: str
+    proposal_id: str
+    workpad: Path
+    entry: JournalEntry
 
 
 @dataclass(frozen=True)
@@ -1305,6 +1405,8 @@ def create_offline(
     name: str,
     commission: str | None = None,
     model_target: str = "offline-default",
+    model_output: str | None = None,
+    runtime_executables: Mapping[str, str] | None = None,
     open_editor: bool = True,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
     observer: CreateObserver | None = None,
@@ -1384,9 +1486,19 @@ def create_offline(
     )
     observer("after_active_selection")
 
-    config = load_config(home)
-    binding = resolve_model_adapter(config, model_target)
-    result = binding.port.invoke(binding.request(role="create", prompt="doctor-probe"))
+    if model_output is None:
+        config = load_config(home)
+        binding = resolve_model_adapter(
+            config,
+            model_target,
+            executable_overrides=runtime_executables,
+        )
+        result = binding.port.invoke(binding.request(role="create", prompt="doctor-probe"))
+        proposal_output = result.output_text
+    else:
+        if not model_output.strip() or "\0" in model_output:
+            raise LifecycleError("agent proposal input must be non-empty and NUL-free")
+        proposal_output = model_output
     proposal_id = _allocate_local_id(EntityPrefix.GIG_PROPOSAL, uuid_factory)
     artifacts = _build_proposal_artifacts(
         gig_id=gig_id,
@@ -1395,7 +1507,7 @@ def create_offline(
         name=name,
         commission=commission,
         model_target=model_target,
-        model_output=result.output_text,
+        model_output=proposal_output,
         uuid_factory=uuid_factory,
     )
     _validate_artifacts(artifacts)
@@ -1429,12 +1541,553 @@ def create_offline(
     )
 
 
+def propose_graph_set_offline(
+    *,
+    home_root: Path,
+    requested_target: Path | None,
+    definition_path: Path,
+    gig_id: str | None = None,
+    commission: str | None = None,
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+    _first_proposal: bool = False,
+    observer: CreateObserver | None = None,
+) -> GraphSetProposalResult:
+    """Stage a new v2 Graph Set proposal from an explicit local definition.
+
+    The definition is a transport input only.  Every referenced member and
+    attachment is checked, copied under the workpad, and journaled with the
+    pending proposal in one writer-locked transition.  It can therefore never
+    become authority by being edited in its original location afterwards.
+    """
+    resolved = resolve_workpad(
+        home_root=home_root.expanduser().resolve(strict=False),
+        requested_target=requested_target,
+        gig_id=gig_id,
+        allow_semantic_state=True,
+    )
+    definition_source_path, definition_path, definition_identity = _definition_source_path(
+        definition_path
+    )
+    try:
+        definition_data = definition_path.read_bytes()
+        source_set = parse_json_bytes(definition_data)
+    except Exception as exc:
+        raise LifecycleError("graph-set definition is not valid JSON") from exc
+    if not isinstance(source_set, Mapping) or source_set.get("gig_id") != resolved.gig_id:
+        raise LifecycleError("graph-set definition must name the resolved existing Gig")
+    current_path = resolved.path / "manifests" / "gig-proposal.json"
+    current: Mapping[str, object] | None = None
+    if current_path.exists():
+        if current_path.is_symlink():
+            raise LifecycleError("existing Gig proposal authority is redirected")
+        try:
+            parsed = parse_json_bytes(current_path.read_bytes())
+        except Exception as exc:
+            raise LifecycleError("existing Gig proposal authority is malformed") from exc
+        if not isinstance(parsed, Mapping):
+            raise LifecycleError("existing Gig proposal authority is malformed")
+        current = parsed
+    if _first_proposal:
+        if (
+            workpad_layout_version(
+                resolved.path,
+                project_id=resolved.project_id,
+                gig_id=resolved.gig_id,
+            )
+            != 2
+        ):
+            raise LifecycleError("first Graph Set proposal requires a provisioned v2 workpad")
+        active_pointer = resolved.path / "manifests" / "active-gig-version.json"
+        if active_pointer.exists() or active_pointer.is_symlink():
+            raise LifecycleError("first Graph Set proposal conflicts with an existing active Gig version")
+        if current is not None and (
+            current.get("kind") != "create" or current.get("status") != "proposed"
+        ):
+            raise LifecycleError("first Graph Set proposal conflicts with existing Gig authority")
+        active: Mapping[str, object] | None = None
+        expected_first_keys = {
+            "schema_version",
+            "gig_id",
+            "name",
+            "commission",
+            "gig_document",
+            "creation_manifest",
+            "graphs",
+            "shared_policy",
+        }
+        if set(source_set) != expected_first_keys:
+            raise LifecycleError("first Graph Set definition has unsupported fields")
+        if source_set.get("schema_version") != "1.0":
+            raise LifecycleError("first Graph Set definition has an unsupported schema version")
+        name = source_set.get("name")
+        first_commission = source_set.get("commission")
+        if not isinstance(name, str) or _NAME.fullmatch(name) is None:
+            raise LifecycleError("first Graph Set definition has an invalid Gig name")
+        if (
+            not isinstance(first_commission, str)
+            or not first_commission.strip()
+            or "\x00" in first_commission
+            or len(first_commission) > 20_000
+        ):
+            raise LifecycleError("first Graph Set definition has an invalid commission")
+    else:
+        if current is None or current.get("status") != "approved":
+            raise LifecycleError("graph-set propose requires an already approved Gig and no pending proposal")
+        active_path = resolved.path / "manifests" / "active-gig-version.json"
+        try:
+            active = parse_json_bytes(active_path.read_bytes())
+        except Exception as exc:
+            raise LifecycleError("existing Gig has no active approved version") from exc
+        if not isinstance(active, Mapping) or type(active.get("active_version")) is not int:
+            raise LifecycleError("existing active Gig version is invalid")
+
+    proposal_id = _allocate_local_id(EntityPrefix.GIG_PROPOSAL, uuid_factory)
+    prefix = f"manifests/graph-sets/{proposal_id}"
+    source_root = definition_path.parent
+    staged: dict[str, bytes] = {}
+    source_members: list[dict[str, object]] = []
+
+    def verify_source(ref: object) -> tuple[bytes, dict[str, object]]:
+        if not isinstance(ref, Mapping):
+            raise LifecycleError("graph-set definition reference is malformed")
+        path = ref.get("path")
+        digest = ref.get("content_sha256")
+        size = ref.get("size_bytes")
+        if not isinstance(path, str) or not isinstance(digest, str) or type(size) is not int:
+            raise LifecycleError("graph-set definition reference is malformed")
+        relative = Path(path)
+        if relative.is_absolute() or "\\" in path or ".." in relative.parts:
+            raise LifecycleError("graph-set definition reference path is unsafe")
+        candidate = source_root / relative
+        cursor = source_root
+        for part in relative.parts:
+            cursor /= part
+            if cursor.is_symlink():
+                raise LifecycleError("graph-set definition reference path is redirected")
+        if candidate.is_symlink() or not candidate.is_file():
+            raise LifecycleError("graph-set definition reference is unavailable")
+        data = candidate.read_bytes()
+        if len(data) != size or digest_imported_bytes(data) != digest:
+            raise LifecycleError("graph-set definition reference bytes changed")
+        return data, {
+            "path": path,
+            "content_sha256": digest,
+            "size_bytes": size,
+        }
+
+    def safe_source(ref: object) -> bytes:
+        data, member = verify_source(ref)
+        source_members.append(member)
+        return data
+
+    def stage_ref(ref: object, destination: str, *, media_type: str = "application/json") -> dict[str, object]:
+        data = safe_source(ref)
+        staged[destination] = data
+        if isinstance(ref, Mapping) and "canonical_sha256" in ref:
+            canonical = ref["canonical_sha256"]
+            if canonical is not None:
+                if media_type != "application/json":
+                    raise LifecycleError("canonical artifact digest requires JSON media")
+                try:
+                    actual = canonical_json_digest(parse_json_bytes(data))
+                except (CanonicalizationError, ValueError) as exc:
+                    raise LifecycleError("canonical artifact digest is unavailable") from exc
+                if canonical != actual:
+                    raise LifecycleError("canonical artifact digest is not authenticated")
+            return _artifact_ref(
+                destination, media_type, data, canonical_sha256=canonical
+            )
+        return _artifact_ref(destination, media_type, data)
+
+    def stage_evaluation_contract(
+        ref: object,
+        destination: str,
+        *,
+        local_output_ref: object,
+        staged_output_ref: object,
+    ) -> dict[str, object]:
+        """Stage an evaluation contract after binding its local output ref.
+
+        The definition is allowed to name the source-local output contract, but
+        the committed evaluation contract must name the immutable staged member.
+        This resolves the proposal-id path only after allocation and preserves
+        the full authenticated reference identity.
+        """
+        data = safe_source(ref)
+        try:
+            payload = parse_json_bytes(data)
+        except ValueError as exc:
+            raise LifecycleError("evaluation contract is not valid JSON") from exc
+        if isinstance(payload, Mapping) and "runtime_comparison" in payload:
+            binding = payload.get("runtime_comparison")
+            if (
+                not isinstance(binding, Mapping)
+                or not isinstance(local_output_ref, Mapping)
+                or not isinstance(staged_output_ref, Mapping)
+            ):
+                raise LifecycleError("runtime comparison output contract binding is malformed")
+            declared_ref = binding.get("output_contract_ref")
+            required_fields = {"path", "content_sha256", "media_type", "size_bytes"}
+            allowed_fields = required_fields | {"canonical_sha256"}
+            if (
+                not isinstance(declared_ref, Mapping)
+                or set(declared_ref) - allowed_fields
+                or set(local_output_ref) - allowed_fields
+                or required_fields - set(declared_ref)
+                or required_fields - set(local_output_ref)
+                or set(declared_ref) != set(local_output_ref)
+                or any(declared_ref.get(field) != local_output_ref.get(field) for field in required_fields)
+                or ("canonical_sha256" in local_output_ref and declared_ref.get("canonical_sha256") != local_output_ref.get("canonical_sha256"))
+            ):
+                raise LifecycleError(
+                    "runtime comparison output contract reference shape or identity is not local"
+                )
+            rewritten = dict(payload)
+            rewritten_binding = dict(binding)
+            rewritten_output_ref = dict(staged_output_ref)
+            if "canonical_sha256" in declared_ref:
+                rewritten_output_ref["canonical_sha256"] = declared_ref["canonical_sha256"]
+            rewritten_binding["output_contract_ref"] = rewritten_output_ref
+            rewritten["runtime_comparison"] = rewritten_binding
+            data = canonical_json_bytes(rewritten)
+        staged[destination] = data
+        return _artifact_ref(destination, "application/json", data)
+
+    graphs = source_set.get("graphs")
+    if not isinstance(graphs, list) or not graphs:
+        raise LifecycleError("graph-set definition requires at least one graph descriptor")
+    descriptors: list[dict[str, object]] = []
+    for index, raw in enumerate(graphs):
+        if not isinstance(raw, Mapping) or not isinstance(raw.get("graph_id"), str):
+            raise LifecycleError("graph-set definition descriptor is malformed")
+        graph_id = raw["graph_id"]
+        graph_data = safe_source(raw.get("goal_graph"))
+        graph = parse_json_bytes(graph_data)
+        if not isinstance(graph, dict) or graph.get("gig_id") != resolved.gig_id:
+            raise LifecycleError("each staged Goal Graph must belong to the resolved Gig")
+        goal_items = graph.get("goals")
+        if not isinstance(goal_items, list):
+            raise LifecycleError("staged Goal Graph is malformed")
+        rewritten_goals: list[dict[str, object]] = []
+        for goal_index, goal in enumerate(goal_items):
+            if not isinstance(goal, Mapping):
+                raise LifecycleError("staged Goal Graph is malformed")
+            copied = dict(goal)
+            copied["contract"] = stage_ref(
+                goal.get("contract"),
+                f"{prefix}/{graph_id}/goal-contracts/{goal_index}.md",
+                media_type="text/markdown",
+            )
+            rewritten_goals.append(copied)
+        graph = {**graph, "goals": rewritten_goals}
+        rewritten_graph = canonical_json_bytes(graph)
+        graph_ref = _artifact_ref(f"{prefix}/{graph_id}/goal-graph.json", "application/json", rewritten_graph)
+        staged[str(graph_ref["path"])] = rewritten_graph
+        descriptor = dict(raw)
+        descriptor["goal_graph"] = graph_ref
+        output_ref = stage_ref(
+            raw.get("output_contract"), f"{prefix}/{graph_id}/output_contract.json"
+        )
+        descriptor["output_contract"] = output_ref
+        for field in (
+            "input_contract", "permitted_reference_contract", "review_contract",
+            "completion_evidence_contract",
+        ):
+            descriptor[field] = stage_ref(
+                raw.get(field), f"{prefix}/{graph_id}/{field}.json"
+            )
+        descriptor["evaluation_contract"] = stage_evaluation_contract(
+            raw.get("evaluation_contract"),
+            f"{prefix}/{graph_id}/evaluation_contract.json",
+            local_output_ref=raw.get("output_contract"),
+            staged_output_ref=output_ref,
+        )
+        descriptors.append(descriptor)
+
+    created_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    graph_set = {
+        "schema_version": "1.0",
+        "graph_set_id": _allocate_local_id(EntityPrefix.GRAPH_SET, uuid_factory),
+        "gig_id": resolved.gig_id,
+        "graphs": descriptors,
+        "shared_policy": source_set.get("shared_policy"),
+        "created_at": created_at,
+        "created_by": {"kind": "operator", "id": "local-user", "model_target": None},
+    }
+    graph_set_data = canonical_json_bytes(graph_set)
+    graph_set_ref = _artifact_ref(f"{prefix}/graph-set.json", "application/json", graph_set_data)
+    staged[str(graph_set_ref["path"])] = graph_set_data
+    validation_root = Path(tempfile.mkdtemp(prefix="gigai-graph-set-stage-"))
+    try:
+        for path, content in staged.items():
+            candidate = validation_root / path
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.write_bytes(content)
+        report = validate_graph_set(graph_set_data, root=validation_root)
+    finally:
+        shutil.rmtree(validation_root)
+    if not report.valid:
+        raise LifecycleError("graph-set proposal is invalid: " + ", ".join(f"{item.location}:{item.code}" for item in report.findings))
+    if _first_proposal:
+        first_gig_document = source_set.get("gig_document")
+        first_creation_manifest = source_set.get("creation_manifest")
+        gig_document_data = safe_source(first_gig_document)
+        try:
+            document_text = gig_document_data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise LifecycleError("first Graph Set Gig document must be UTF-8 Markdown") from exc
+        try:
+            canonical_document = canonicalize_owned_text(document_text)
+        except CanonicalizationError as exc:
+            raise LifecycleError("first Graph Set Gig document is not canonical Markdown") from exc
+        if not document_text.strip() or canonical_document != gig_document_data:
+            raise LifecycleError("first Graph Set Gig document is not canonical Markdown")
+        creation_manifest_data = safe_source(first_creation_manifest)
+        try:
+            creation_payload = parse_json_bytes(creation_manifest_data)
+        except ValueError as exc:
+            raise LifecycleError("first Graph Set creation metadata is not valid JSON") from exc
+        if (
+            not isinstance(creation_payload, Mapping)
+            or set(creation_payload) != {
+                "schema_version",
+                "creation_mode",
+                "model_target",
+                "model_output",
+            }
+            or creation_payload.get("schema_version") != "1.0"
+            or not all(
+                isinstance(creation_payload.get(field), str)
+                and "\x00" not in creation_payload[field]
+                for field in ("creation_mode", "model_target", "model_output")
+            )
+        ):
+            raise LifecycleError("first Graph Set creation metadata has an unsupported shape")
+        gig_document = stage_ref(
+            first_gig_document, f"{prefix}/gig.md", media_type="text/markdown"
+        )
+        creation_manifest = stage_ref(
+            first_creation_manifest,
+            f"{prefix}/creation-manifest.json",
+            media_type="application/json",
+        )
+    else:
+        assert current is not None
+        gig_document = current.get("gig_document")
+        creation_manifest = current.get("creation_manifest")
+        if not isinstance(gig_document, Mapping) or not isinstance(creation_manifest, Mapping):
+            raise LifecycleError("existing proposal lacks required immutable artifacts")
+    def current_ref(ref: Mapping[str, object]) -> dict[str, object]:
+        path = ref.get("path")
+        if not isinstance(path, str):
+            raise LifecycleError("existing proposal artifact reference is malformed")
+        candidate = resolved.path / path
+        if candidate.is_symlink() or not candidate.is_file():
+            raise LifecycleError("existing proposal artifact is unavailable")
+        return _artifact_ref(path, str(ref.get("media_type", "application/octet-stream")), candidate.read_bytes())
+    if _first_proposal:
+        proposal = {
+            "schema_version": "1.0", "proposal_id": proposal_id,
+            "gig_id": resolved.gig_id, "project_id": resolved.project_id,
+            "name": source_set["name"], "status": "proposed", "kind": "create",
+            "created_at": created_at,
+            "created_by": {"kind": "operator", "id": "local-user", "model_target": None},
+            "base_gig_version": None, "parent_proposal_id": None,
+            "change_request": None, "commission": source_set["commission"],
+            "gig_document": gig_document, "graph_set": graph_set_ref,
+            "creation_manifest": creation_manifest,
+        }
+    else:
+        assert current is not None and active is not None
+        proposal = {
+            "schema_version": "1.0", "proposal_id": proposal_id,
+            "gig_id": resolved.gig_id, "project_id": resolved.project_id,
+            "name": current.get("name"), "status": "proposed", "kind": "amend",
+            "created_at": created_at,
+            "created_by": {"kind": "operator", "id": "local-user", "model_target": None},
+            "base_gig_version": active["active_version"],
+            "parent_proposal_id": current.get("proposal_id"), "change_request": "Stage a bounded multi-graph Graph Set.",
+            "commission": commission if commission is not None else current.get("commission"),
+            "gig_document": current_ref(gig_document), "graph_set": graph_set_ref,
+            "creation_manifest": current_ref(creation_manifest),
+        }
+    proposal_data = canonical_json_bytes(proposal)
+    if not validate_serialized_contract("gig-proposal-v2.schema.json", proposal_data).valid:
+        raise LifecycleError("staged multi-graph proposal failed strict schema validation")
+    artifacts = tuple(JournalArtifact(path, data) for path, data in sorted(staged.items()))
+    if _first_proposal:
+        identity_data = canonical_json_bytes(
+            {
+                "schema_version": "1.0",
+                "kind": "first_graph_set_source_identity",
+                "definition_sha256": digest_imported_bytes(definition_data),
+                "sources": sorted(source_members, key=lambda item: (str(item["path"]), str(item["content_sha256"]))),
+            }
+        )
+        identity_path = f"{prefix}/first-proposal-inputs.json"
+        artifacts += (
+            JournalArtifact(identity_path, identity_data),
+            JournalArtifact("manifests/gig-proposal.json", proposal_data),
+        )
+
+        def revalidate_source_inputs() -> None:
+            _definition_source_path(
+                definition_source_path,
+                expected_identity=definition_identity,
+            )
+            if definition_source_path.read_bytes() != definition_data:
+                raise LifecycleError("first Graph Set definition bytes changed before publication")
+            for member in tuple(source_members):
+                verify_source(member)
+
+        def publish_first(writer: JournalWriter) -> JournalEntry:
+            revalidate_source_inputs()
+            try:
+                committed_proposal_data, proposal_commit = read_committed_artifact(
+                    workpad=resolved.path,
+                    project_id=resolved.project_id,
+                    gig_id=resolved.gig_id,
+                    path="manifests/gig-proposal.json",
+                )
+            except JournalArtifactMissingError:
+                committed_proposal_data = None
+                proposal_commit = ""
+            except JournalConflictError as exc:
+                raise LifecycleError("existing first Graph Set proposal cannot be authenticated") from exc
+            if committed_proposal_data is not None:
+                candidate = resolved.path / "manifests" / "gig-proposal.json"
+                if candidate.is_symlink() or not candidate.is_file() or candidate.read_bytes() != committed_proposal_data:
+                    raise LifecycleError("existing first Graph Set proposal working copy differs from committed authority")
+                try:
+                    existing = parse_json_bytes(committed_proposal_data)
+                except ValueError as exc:
+                    raise LifecycleError("existing first Graph Set proposal is malformed") from exc
+                if (
+                    not isinstance(existing, Mapping)
+                    or existing.get("gig_id") != resolved.gig_id
+                    or existing.get("project_id") != resolved.project_id
+                    or existing.get("status") != "proposed"
+                    or existing.get("kind") != "create"
+                    or existing.get("base_gig_version") is not None
+                    or existing.get("parent_proposal_id") is not None
+                ):
+                    raise LifecycleError("first Graph Set proposal conflicts with committed Gig authority")
+                graph_set_ref = existing.get("graph_set")
+                if not isinstance(graph_set_ref, Mapping) or not isinstance(graph_set_ref.get("path"), str):
+                    raise LifecycleError("existing first Graph Set proposal lacks a Graph Set reference")
+                existing_identity_path = str(Path(str(graph_set_ref["path"])).parent / "first-proposal-inputs.json")
+                try:
+                    existing_identity, _identity_commit = read_committed_artifact(
+                        workpad=resolved.path,
+                        project_id=resolved.project_id,
+                        gig_id=resolved.gig_id,
+                        path=existing_identity_path,
+                    )
+                except JournalArtifactMissingError as exc:
+                    raise LifecycleError("existing first Graph Set proposal lacks sealed source identity") from exc
+                except JournalConflictError as exc:
+                    raise LifecycleError("existing first Graph Set source identity cannot be authenticated") from exc
+                identity_candidate = resolved.path / existing_identity_path
+                if (
+                    identity_candidate.is_symlink()
+                    or not identity_candidate.is_file()
+                    or identity_candidate.read_bytes() != existing_identity
+                ):
+                    raise LifecycleError("existing first Graph Set source identity differs from committed authority")
+                if existing_identity != identity_data:
+                    raise LifecycleError("first Graph Set proposal conflicts with changed source inputs")
+                existing_id = existing.get("proposal_id")
+                if not isinstance(existing_id, str):
+                    raise LifecycleError("existing first Graph Set proposal has no valid identity")
+                return JournalEntry(0, "recovered", candidate, proposal_commit)
+            if current is not None:
+                raise LifecycleError("existing first Graph Set proposal is not committed authority")
+            return writer.record(
+                JournalTransition(
+                    _allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+                    "gig_graph_set_proposed",
+                    f"First Graph Set proposal {proposal_id} staged; direct approval is still required.",
+                    artifacts,
+                    {
+                        "artifact_refs": [
+                            _artifact_ref(
+                                artifact.path,
+                                "text/markdown"
+                                if artifact.path.endswith(".md")
+                                else "application/json",
+                                artifact.content,
+                            )
+                            for artifact in artifacts
+                        ]
+                    },
+                )
+            )
+
+        entry = run_with_journal_writer(
+            workpad=resolved.path,
+            project_id=resolved.project_id,
+            gig_id=resolved.gig_id,
+            operation=publish_first,
+        )
+        if entry.handoff_id == "recovered":
+            recovered = parse_json_bytes((resolved.path / "manifests" / "gig-proposal.json").read_bytes())
+            assert isinstance(recovered, Mapping)
+            proposal_id = str(recovered["proposal_id"])
+        if observer is not None:
+            observer("after_first_graph_set_proposed")
+    else:
+        artifacts += (JournalArtifact("manifests/gig-proposal.json", proposal_data),)
+        entry = record_transition(
+            workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id,
+            handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+            transition="gig_graph_set_proposed",
+            body=f"Graph Set proposal {proposal_id} staged; direct approval is still required.",
+            artifacts=artifacts,
+            front_matter={
+                "artifact_refs": [
+                    _artifact_ref(
+                        artifact.path,
+                        "text/markdown" if artifact.path.endswith(".md") else "application/json",
+                        artifact.content,
+                    )
+                    for artifact in artifacts
+                ]
+            },
+        )
+    return GraphSetProposalResult(resolved.gig_id, proposal_id, resolved.path, entry)
+
+
+def propose_first_graph_set_offline(
+    *,
+    home_root: Path,
+    requested_target: Path | None,
+    definition_path: Path,
+    gig_id: str,
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+    observer: CreateObserver | None = None,
+) -> GraphSetProposalResult:
+    """Stage the first pending v2 Graph Set for one explicit provisioned Gig."""
+
+    if not isinstance(gig_id, str) or not gig_id:
+        raise LifecycleError("first Graph Set proposal requires an explicit Gig ID")
+    return propose_graph_set_offline(
+        home_root=home_root,
+        requested_target=requested_target,
+        definition_path=definition_path,
+        gig_id=gig_id,
+        uuid_factory=uuid_factory,
+        _first_proposal=True,
+        observer=observer,
+    )
+
+
 def approve_offline(
     *,
     home_root: Path,
     requested_target: Path | None,
     proposal_id: str,
     capability_manifest_id: str | None = None,
+    gig_id: str | None = None,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
     observer: CreateObserver | None = None,
 ) -> ApprovalResult:
@@ -1444,7 +2097,7 @@ def approve_offline(
     resolved = resolve_workpad(
         home_root=home,
         requested_target=requested_target,
-        gig_id=None,
+        gig_id=gig_id,
         allow_semantic_state=True,
     )
     workpad = resolved.path
@@ -1460,7 +2113,14 @@ def approve_offline(
             capability_manifest_id=capability_manifest_id,
             uuid_factory=uuid_factory,
         )
-    report = validate_proposal_workpad(workpad)
+    is_v2 = validate_serialized_contract(
+        "gig-proposal-v2.schema.json", canonical_json_bytes(proposal)
+    ).valid
+    report = (
+        validate_graph_set_proposal_workpad(workpad, proposal)
+        if is_v2
+        else validate_proposal_workpad(workpad)
+    )
     if not report.valid:
         raise LifecycleError(
             "proposal is not valid for approval: "
@@ -1473,6 +2133,33 @@ def approve_offline(
     proposal["status"] = "approved"
     approved_proposal = canonical_json_bytes(proposal)
     approved_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    successor_approval: CapabilitySuccessorApproval | None = None
+
+    def preflight_successor() -> None:
+        nonlocal successor_approval
+        try:
+            successor_approval = successor_approval_context(
+                workpad=workpad,
+                project_id=resolved.project_id,
+                gig_id=resolved.gig_id,
+                proposal_id=proposal_id,
+                capability_manifest_id=capability_manifest_id,
+            )
+            if (
+                successor_approval is None
+                and capability_manifest_id is not None
+                and reviewed_manifest_requires_successor(
+                    workpad=workpad,
+                    project_id=resolved.project_id,
+                    gig_id=resolved.gig_id,
+                    manifest_id=capability_manifest_id,
+                )
+            ):
+                raise LifecycleError(
+                    "reviewed capability manifest requires its authenticated successor"
+                )
+        except CapabilitySuccessorError as exc:
+            raise LifecycleError(str(exc)) from exc
 
     def publish(sealed: JournalEntry) -> JournalTransition:
         _git(workpad, "tag", tag, sealed.commit)
@@ -1483,7 +2170,6 @@ def approve_offline(
             "gig_id": resolved.gig_id,
             "active_version": version,
             "approved_proposal_id": proposal_id,
-            "goal_graph": proposal["goal_graph"],
             "journal_commit": sealed.commit,
             "journal_tag": tag,
             "approved_at": approved_at,
@@ -1493,8 +2179,14 @@ def approve_offline(
                 "model_target": None,
             },
         }
+        if is_v2:
+            pointer_payload["graph_set"] = proposal["graph_set"]
+        else:
+            pointer_payload["goal_graph"] = proposal["goal_graph"]
         manifest_ref = (
-            capability_manifest_artifact_ref(
+            successor_approval.reviewed_manifest_ref
+            if successor_approval is not None
+            else capability_manifest_artifact_ref(
                 workpad, capability_manifest_id, gig_id=resolved.gig_id
             )
             if capability_manifest_id is not None
@@ -1504,14 +2196,40 @@ def approve_offline(
             pointer_payload["capability_manifest"] = manifest_ref
         pointer = canonical_json_bytes(pointer_payload)
         if not validate_serialized_contract(
-            "active-gig-version.schema.json", pointer
+            "active-gig-version-v2.schema.json" if is_v2 else "active-gig-version.schema.json", pointer
         ).valid:
             raise LifecycleError("active-version pointer failed schema validation")
+        artifacts = [JournalArtifact("manifests/active-gig-version.json", pointer)]
+        # A newly selected manifest is part of the accepted-version authority,
+        # not merely a working-tree convenience for the pointer ref.  Later
+        # versions carry the immutable reference without republishing it.
+        if capability_manifest_id is not None and successor_approval is None:
+            manifest_path = manifest_ref["path"]
+            assert isinstance(manifest_path, str)
+            manifest_bytes = (workpad / manifest_path).read_bytes()
+            if (
+                digest_imported_bytes(manifest_bytes) != manifest_ref["content_sha256"]
+                or len(manifest_bytes) != manifest_ref["size_bytes"]
+            ):
+                raise LifecycleError("capability manifest changed during approval")
+            artifacts.append(JournalArtifact(manifest_path, manifest_bytes))
         return JournalTransition(
             _allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
             "gig_accepted",
             f"Gig version {version} is active at sealed commit {sealed.commit}.",
-            (JournalArtifact("manifests/active-gig-version.json", pointer),),
+            tuple(artifacts),
+            {
+                "gig_version": version,
+                "artifact_refs": [
+                    {
+                        "path": artifact.path,
+                        "content_sha256": digest_imported_bytes(artifact.content),
+                        "media_type": "application/json",
+                        "size_bytes": len(artifact.content),
+                    }
+                    for artifact in artifacts
+                ],
+            },
         )
 
     sealed, published = record_transition_chain(
@@ -1525,6 +2243,7 @@ def approve_offline(
             (JournalArtifact("manifests/gig-proposal.json", approved_proposal),),
         ),
         continuation=publish,
+        preflight=preflight_successor,
     )
     if _git(workpad, "rev-parse", "--verify", tag).stdout.strip() != sealed.commit:
         raise LifecycleError("approval tag does not resolve to the sealed commit")
@@ -1549,7 +2268,24 @@ def _recover_approved_publication(
     """Publish only the missing Commit B for an already sealed approval."""
 
     workpad = resolved.path
+    pointer_path = workpad / "manifests" / "active-gig-version.json"
     sealed_commit = _git(workpad, "rev-parse", "--verify", "HEAD").stdout.strip()
+    # After Commit B, HEAD no longer points at the tagged Commit A.  A
+    # successful recovery can therefore be replayed only by following its
+    # already-authenticated pointer back to the sealed approval commit.  A
+    # stale base pointer after a crash is deliberately ignored because its
+    # approved proposal ID differs from this recovery request.
+    if pointer_path.is_file() and not pointer_path.is_symlink():
+        try:
+            pointer_hint = parse_json_bytes(pointer_path.read_bytes())
+        except (CanonicalizationError, OSError):
+            pointer_hint = None
+        if (
+            isinstance(pointer_hint, dict)
+            and pointer_hint.get("approved_proposal_id") == proposal_id
+            and isinstance(pointer_hint.get("journal_commit"), str)
+        ):
+            sealed_commit = str(pointer_hint["journal_commit"])
     tags = [
         value
         for value in _git(
@@ -1576,82 +2312,180 @@ def _recover_approved_publication(
     )
     if metadata.get("transition") != "gig_proposal_approved":
         raise LifecycleError("sealed approval handoff has the wrong transition")
-    pointer_path = workpad / "manifests" / "active-gig-version.json"
-    if pointer_path.exists():
-        pointer = pointer_path.read_bytes()
-        if not validate_serialized_contract(
-            "active-gig-version.schema.json", pointer
-        ).valid:
-            raise LifecycleError("existing active-version pointer is invalid")
-        payload = parse_json_bytes(pointer)
-        if (
-            not isinstance(payload, dict)
-            or payload.get("journal_commit") != sealed_commit
-        ):
-            raise LifecycleError(
-                "existing active-version pointer names another approval"
+    is_v2 = validate_serialized_contract(
+        "gig-proposal-v2.schema.json", canonical_json_bytes(proposal)
+    ).valid
+
+    def recover(writer: JournalWriter) -> ApprovalResult:
+        # Recovery validation and the missing Commit B publication share this
+        # writer lock; a swapped sidecar/source cannot pass outside the lock.
+        try:
+            successor_approval = successor_approval_context(
+                workpad=workpad,
+                project_id=resolved.project_id,
+                gig_id=resolved.gig_id,
+                proposal_id=proposal_id,
+                capability_manifest_id=capability_manifest_id,
+                allow_approved=True,
+                allow_published=True,
             )
-        if capability_manifest_id is not None:
-            expected = capability_manifest_artifact_ref(
+            if (
+                successor_approval is None
+                and capability_manifest_id is not None
+                and reviewed_manifest_requires_successor(
+                    workpad=workpad,
+                    project_id=resolved.project_id,
+                    gig_id=resolved.gig_id,
+                    manifest_id=capability_manifest_id,
+                )
+            ):
+                raise LifecycleError(
+                    "reviewed capability manifest requires its authenticated successor"
+                )
+        except CapabilitySuccessorError as exc:
+            raise LifecycleError(str(exc)) from exc
+        payload: dict[str, object] | None = None
+        if pointer_path.exists():
+            pointer = pointer_path.read_bytes()
+            if not validate_serialized_contract(
+                "active-gig-version-v2.schema.json" if is_v2 else "active-gig-version.schema.json", pointer
+            ).valid:
+                raise LifecycleError("existing active-version pointer is invalid")
+            parsed_payload = parse_json_bytes(pointer)
+            if not isinstance(parsed_payload, dict):
+                raise LifecycleError("existing active-version pointer is malformed")
+            payload = parsed_payload
+        if payload is not None and payload.get("journal_commit") == sealed_commit:
+            if payload.get("approved_proposal_id") != proposal_id:
+                raise LifecycleError(
+                    "existing active-version pointer names another approval"
+                )
+            if successor_approval is not None:
+                if payload.get("capability_manifest") != successor_approval.reviewed_manifest_ref:
+                    raise LifecycleError(
+                        "existing active-version pointer has another capability manifest"
+                    )
+            elif capability_manifest_id is not None:
+                expected = capability_manifest_artifact_ref(
+                    workpad, capability_manifest_id, gig_id=resolved.gig_id
+                )
+                if payload.get("capability_manifest") != expected:
+                    raise LifecycleError(
+                        "existing active-version pointer has another capability manifest"
+                    )
+            return ApprovalResult(
+                resolved.gig_id,
+                proposal_id,
+                version,
+                sealed_commit,
+                _git(workpad, "rev-parse", "--verify", "HEAD").stdout.strip(),
+                tag,
+            )
+        if payload is None:
+            if version != 1:
+                raise LifecycleError("existing active-version pointer is unavailable")
+        else:
+            is_previous_pointer = payload.get("active_version") == version - 1
+            if is_v2:
+                is_previous_pointer = is_previous_pointer and payload.get(
+                    "approved_proposal_id"
+                ) == proposal.get("parent_proposal_id")
+            if not is_previous_pointer:
+                raise LifecycleError("existing active-version pointer names another approval")
+        approved_at = metadata.get("timestamp")
+        if not isinstance(approved_at, str):
+            raise LifecycleError("sealed approval handoff lacks its timestamp")
+        pointer_payload: dict[str, object] = {
+            "schema_version": "1.0",
+            "gig_id": resolved.gig_id,
+            "active_version": version,
+            "approved_proposal_id": proposal_id,
+            "journal_commit": sealed_commit,
+            "journal_tag": tag,
+            "approved_at": approved_at,
+            "approved_by": {
+                "kind": "operator",
+                "id": "local-user",
+                "model_target": None,
+            },
+        }
+        if is_v2:
+            pointer_payload["graph_set"] = proposal["graph_set"]
+        else:
+            pointer_payload["goal_graph"] = proposal["goal_graph"]
+        manifest_ref = (
+            successor_approval.reviewed_manifest_ref
+            if successor_approval is not None
+            else capability_manifest_artifact_ref(
                 workpad, capability_manifest_id, gig_id=resolved.gig_id
             )
-            if payload.get("capability_manifest") != expected:
-                raise LifecycleError(
-                    "existing active-version pointer has another capability manifest"
-                )
+            if capability_manifest_id is not None
+            else _existing_capability_manifest_ref(workpad, resolved.gig_id)
+        )
+        if manifest_ref is not None:
+            pointer_payload["capability_manifest"] = manifest_ref
+        pointer = canonical_json_bytes(pointer_payload)
+        if not validate_serialized_contract(
+            "active-gig-version-v2.schema.json" if is_v2 else "active-gig-version.schema.json", pointer
+        ).valid:
+            raise LifecycleError(
+                "recovered active-version pointer failed schema validation"
+            )
+        artifacts = [JournalArtifact("manifests/active-gig-version.json", pointer)]
+        if capability_manifest_id is not None and successor_approval is None:
+            manifest_path = manifest_ref["path"]
+            assert isinstance(manifest_path, str)
+            manifest_bytes = (workpad / manifest_path).read_bytes()
+            if (
+                digest_imported_bytes(manifest_bytes) != manifest_ref["content_sha256"]
+                or len(manifest_bytes) != manifest_ref["size_bytes"]
+            ):
+                raise LifecycleError("capability manifest changed during recovery")
+            artifacts.append(JournalArtifact(manifest_path, manifest_bytes))
         return ApprovalResult(
             resolved.gig_id,
             proposal_id,
             version,
             sealed_commit,
-            _git(workpad, "rev-parse", "--verify", "HEAD").stdout.strip(),
+            writer.record(
+                JournalTransition(
+                    _allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
+                    "gig_accepted",
+                    f"Recovered active Gig version {version} at sealed commit {sealed_commit}.",
+                    tuple(artifacts),
+                    {
+                        "gig_version": version,
+                        "artifact_refs": [
+                            {
+                                "path": artifact.path,
+                                "content_sha256": digest_imported_bytes(artifact.content),
+                                "media_type": "application/json",
+                                "size_bytes": len(artifact.content),
+                            }
+                            for artifact in artifacts
+                        ],
+                    },
+                ),
+                # Successor recovery publishes only the missing pointer; the
+                # already reviewed manifest must never be re-journaled.  The
+                # legacy branch preserves its historical identical-artifact
+                # replay behavior.
+                allow_artifact_replacement=(
+                    pointer_path.exists()
+                    or (
+                        capability_manifest_id is not None
+                        and successor_approval is None
+                    )
+                ),
+            ).commit,
             tag,
         )
-    approved_at = metadata.get("timestamp")
-    if not isinstance(approved_at, str):
-        raise LifecycleError("sealed approval handoff lacks its timestamp")
-    pointer_payload: dict[str, object] = {
-        "schema_version": "1.0",
-        "gig_id": resolved.gig_id,
-        "active_version": version,
-        "approved_proposal_id": proposal_id,
-        "goal_graph": proposal["goal_graph"],
-        "journal_commit": sealed_commit,
-        "journal_tag": tag,
-        "approved_at": approved_at,
-        "approved_by": {
-            "kind": "operator",
-            "id": "local-user",
-            "model_target": None,
-        },
-    }
-    manifest_ref = (
-        capability_manifest_artifact_ref(
-            workpad, capability_manifest_id, gig_id=resolved.gig_id
-        )
-        if capability_manifest_id is not None
-        else _existing_capability_manifest_ref(workpad, resolved.gig_id)
-    )
-    if manifest_ref is not None:
-        pointer_payload["capability_manifest"] = manifest_ref
-    pointer = canonical_json_bytes(pointer_payload)
-    if not validate_serialized_contract(
-        "active-gig-version.schema.json", pointer
-    ).valid:
-        raise LifecycleError(
-            "recovered active-version pointer failed schema validation"
-        )
-    published = record_transition(
+
+    return run_with_journal_writer(
         workpad=workpad,
         project_id=resolved.project_id,
         gig_id=resolved.gig_id,
-        handoff_id=_allocate_local_id(EntityPrefix.HANDOFF, uuid_factory),
-        transition="gig_accepted",
-        body=f"Recovered active Gig version {version} at sealed commit {sealed_commit}.",
-        artifacts=(JournalArtifact("manifests/active-gig-version.json", pointer),),
-    )
-    return ApprovalResult(
-        resolved.gig_id, proposal_id, version, sealed_commit, published.commit, tag
+        operation=recover,
     )
 
 
@@ -1742,15 +2576,23 @@ def reject_offline(
     requested_target: Path | None,
     proposal_id: str,
     reason: str,
+    gig_id: str | None = None,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> JournalEntry:
-    """Record rejection of one pending proposal without creating a version."""
+    """Record rejection of one pending proposal without creating a version.
+
+    ``gig_id`` is optional for compatibility with the historical active-Gig
+    selection path. When supplied, workpad resolution is exact and never falls
+    back to the target's active Gig or scans other Gigs.
+    """
 
     if type(reason) is not str or not reason.strip() or "\0" in reason:
         raise LifecycleError(
             "rejection reason must be non-empty text without NUL bytes"
         )
-    resolved, proposal = _pending_proposal(home_root, requested_target, proposal_id)
+    resolved, proposal = _pending_proposal(
+        home_root, requested_target, proposal_id, gig_id=gig_id
+    )
     if (resolved.path / "manifests" / "active-gig-version.json").exists():
         raise LifecycleError("rejection cannot replace an existing active Gig version")
     proposal["status"] = "rejected"
@@ -1770,16 +2612,20 @@ def reject_offline(
 
 
 def _pending_proposal(
-    home_root: Path, requested_target: Path | None, proposal_id: str
+    home_root: Path,
+    requested_target: Path | None,
+    proposal_id: str,
+    *,
+    gig_id: str | None = None,
 ) -> tuple[ResolvedWorkpad, dict[str, object]]:
     home = home_root.expanduser().resolve(strict=False)
     resolved = resolve_workpad(
         home_root=home,
         requested_target=requested_target,
-        gig_id=None,
+        gig_id=gig_id,
         allow_semantic_state=True,
     )
-    report = validate_proposal_workpad(resolved.path)
+    report = validate_pending_proposal_workpad(resolved.path)
     if not report.valid:
         raise LifecycleError(
             "proposal is not pending and valid: "
@@ -1790,18 +2636,32 @@ def _pending_proposal(
     )
     if not isinstance(payload, dict) or payload.get("proposal_id") != proposal_id:
         raise LifecycleError("proposal ID does not match the active proposed workpad")
+    if payload.get("gig_id") != resolved.gig_id:
+        raise LifecycleError("proposal Gig ID does not match the selected Gig")
     if payload.get("status") not in {"drafting", "proposed"}:
         raise LifecycleError("only a pending proposal can receive this transition")
     return resolved, payload
 
 
-def _artifact_ref(path: str, media_type: str, data: bytes) -> dict[str, object]:
-    return {
+_ARTIFACT_CANONICAL_UNSET = object()
+
+
+def _artifact_ref(
+    path: str,
+    media_type: str,
+    data: bytes,
+    *,
+    canonical_sha256: str | None | object = _ARTIFACT_CANONICAL_UNSET,
+) -> dict[str, object]:
+    reference = {
         "path": path,
         "content_sha256": digest_imported_bytes(data),
         "media_type": media_type,
         "size_bytes": len(data),
     }
+    if canonical_sha256 is not _ARTIFACT_CANONICAL_UNSET:
+        reference["canonical_sha256"] = canonical_sha256
+    return reference
 
 
 def _validate_workpad_overlay(
@@ -1836,8 +2696,16 @@ def _allocate_gig_id(home: Path, uuid_factory: Callable[[], uuid.UUID]) -> str:
             return True
         return any(config.workpad_root.glob(f"projects/*/gigs/{candidate}"))
 
+    return allocate_gig_id(is_persisted=persisted, uuid_factory=uuid_factory)
+
+
+def allocate_gig_id(
+    *, is_persisted: Callable[[str], bool], uuid_factory: Callable[[], uuid.UUID]
+) -> str:
+    """Allocate a canonical Gig identity for lifecycle-owned callers."""
+
     return generate_entity_id(
-        EntityPrefix.GIG, is_persisted=persisted, uuid_factory=uuid_factory
+        EntityPrefix.GIG, is_persisted=is_persisted, uuid_factory=uuid_factory
     )
 
 
@@ -2068,6 +2936,42 @@ def _validate_artifacts(artifacts: tuple[JournalArtifact, ...]) -> None:
         shutil.rmtree(root)
 
 
+def validate_graph_set_proposal_workpad(workpad: Path, proposal: Mapping[str, object]) -> ValidationReport:
+    """Validate a pending v2 proposal without treating a mutable projection as authority."""
+    graph_set_ref = proposal.get("graph_set")
+    if not isinstance(graph_set_ref, Mapping):
+        return ValidationReport((ValidationFinding("graph_set", "graph_set_invalid", "proposal has no Graph Set reference"),))
+    path = graph_set_ref.get("path")
+    if not isinstance(path, str):
+        return ValidationReport((ValidationFinding("graph_set", "graph_set_invalid", "proposal Graph Set reference is malformed"),))
+    candidate = workpad / path
+    if candidate.is_symlink() or not candidate.is_file():
+        return ValidationReport((ValidationFinding("graph_set", "graph_set_invalid", "proposal Graph Set is unavailable"),))
+    report = validate_graph_set(candidate.read_bytes(), root=workpad)
+    if not report.valid:
+        return report
+    if graph_set_ref.get("content_sha256") != digest_imported_bytes(candidate.read_bytes()):
+        return ValidationReport((ValidationFinding("graph_set", "graph_set_invalid", "proposal Graph Set digest changed"),))
+    graph_set = parse_json_bytes(candidate.read_bytes())
+    if not isinstance(graph_set, Mapping) or graph_set.get("gig_id") != proposal.get("gig_id"):
+        return ValidationReport((ValidationFinding("graph_set", "graph_set_invalid", "proposal and Graph Set have different Gig identities"),))
+    return ValidationReport(())
+
+
+def validate_pending_proposal_workpad(workpad: Path) -> ValidationReport:
+    """Dispatch validation to the proposal schema's matching workpad validator."""
+    try:
+        proposal_bytes = (workpad / "manifests" / "gig-proposal.json").read_bytes()
+        proposal = parse_json_bytes(proposal_bytes)
+    except (OSError, ValueError):
+        return validate_proposal_workpad(workpad)
+    if isinstance(proposal, Mapping) and validate_serialized_contract(
+        "gig-proposal-v2.schema.json", canonical_json_bytes(proposal)
+    ).valid:
+        return validate_graph_set_proposal_workpad(workpad, proposal)
+    return validate_proposal_workpad(workpad)
+
+
 def _has_proposal(workpad: Path) -> bool:
     return (workpad / "manifests" / "gig-proposal.json").is_file()
 
@@ -2096,11 +3000,17 @@ def _read_interview_references(
 
 
 def _persist_interview_trace(workpad: Path, session: InterviewSession) -> None:
-    connection = sqlite3.connect(workpad / "state.sqlite")
-    try:
-        persist_trace(connection, session)
-    finally:
-        connection.close()
+    # G22 shares state.sqlite with rebuildable SCOUT projections.  It takes the
+    # same database lock as index publication; this function never takes the
+    # journal writer lock, preserving the documented journal -> database order.
+    from .index import database_lock
+
+    with database_lock(workpad):
+        connection = sqlite3.connect(workpad / "state.sqlite")
+        try:
+            persist_trace(connection, session, workpad=workpad, already_locked=True)
+        finally:
+            connection.close()
 
 
 def _allocate_interview_id(prefix: str, uuid_factory: Callable[[], uuid.UUID]) -> str:
@@ -2201,6 +3111,7 @@ def _git(
 __all__ = [
     "ApprovalResult",
     "CreateResult",
+    "GraphSetProposalResult",
     "InterviewStartResult",
     "LifecycleError",
     "RevisionResult",
@@ -2209,6 +3120,7 @@ __all__ = [
     "create_offline",
     "persist_discovery_manifest",
     "persist_interview_session",
+    "propose_graph_set_offline",
     "record_feedback",
     "reject_offline",
     "revise_offline",

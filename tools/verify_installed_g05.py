@@ -81,6 +81,14 @@ def main() -> None:
                 os.fspath(workpad_root),
                 "--editor",
                 "/usr/bin/true",
+                "--credential-ref",
+                "provider=environment:GIGAI_PROVIDER_TOKEN",
+                "--endpoint",
+                "remote=openai_api:provider:https://api.example.test",
+                "--model-target",
+                "remote=remote:gpt-test",
+                "--create-model-target",
+                "remote",
                 "--json",
             ],
             cwd=target,
@@ -89,7 +97,13 @@ def main() -> None:
         _git(target, env, "init", "--initial-branch=main", "--quiet")
         binding = json.loads(
             _run(
-                [os.fspath(executable), "init", "--json"],
+                [
+                    os.fspath(executable),
+                    "init",
+                    "--username",
+                    "installed-verifier",
+                    "--json",
+                ],
                 cwd=target,
                 env=env,
             ).stdout
@@ -162,10 +176,29 @@ def main() -> None:
                 "SELECT gig_id, project_id, workpad_locator FROM workpads"
             ).fetchall()
             active = connection.execute("SELECT * FROM active_workpads").fetchall()
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
         finally:
             connection.close()
-        if version != (2,) or rows != [(GIG_ID, project_id, os.fspath(expected))]:
-            raise SystemExit("installed G05 registry row or schema version differs")
+        if version != (3,) or tables != {
+            "projects",
+            "workpads",
+            "active_workpads",
+            "workspace_owners",
+            "template_instances",
+        }:
+            raise SystemExit("installed G05 registry schema differs")
+        matching = [
+            row for row in rows if row == (GIG_ID, project_id, os.fspath(expected))
+        ]
+        if len(matching) != 1 or len(rows) != 4 or any(
+            row[1] != project_id for row in rows
+        ):
+            raise SystemExit("installed G05 registry rows differ")
         if active:
             raise SystemExit("installed G05 provisioning selected an active Gig")
 

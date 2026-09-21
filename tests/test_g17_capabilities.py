@@ -71,11 +71,14 @@ def _stage_source(root: Path, payload: bytes = b"fixture bytes\n") -> str:
 
 
 def test_g17_additive_schema_inventory_and_baseline_hashes() -> None:
-    assert len(SCHEMA_NAMES) == 31
+    assert len(SCHEMA_NAMES) == 64
     root = Path(__file__).parents[1] / "src/gigai/schemas"
     manifest = root / "capability-manifest.schema.json"
     installation = root / "capability-installation.schema.json"
-    assert hashlib.sha256(manifest.read_bytes()).hexdigest() == "17844fd06a4a905ebcd12cff9994c86ad83dfd941e774ff539beb6e4429ec4cd"
+    # The accepted additive tool-binding contract changes this resource; keep
+    # an exact identity assertion against the SHA256SUMS entry rather than
+    # weakening the check to presence or a discovered count.
+    assert hashlib.sha256(manifest.read_bytes()).hexdigest() == "2d36b8e0552c810f1ec17e50d4edbc68be39cc1572c0f535073bf7f59731b5a7"
     assert hashlib.sha256(installation.read_bytes()).hexdigest() == "c21641988e728cd94a8617a994ec1e3f5ffa9ae38ca020a2f7406916d6d083c0"
 
 

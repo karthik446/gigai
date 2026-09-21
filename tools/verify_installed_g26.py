@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import sys
 import tempfile
 
 from gigai.canonical import canonical_json_bytes
@@ -12,6 +13,8 @@ from gigai.proposal_interview import answer_question
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 from gigai.validators import SCHEMA_NAMES, validate_serialized_contract
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from installed_schema_expectations import EXPECTED_LEGACY_SCHEMA_NAMES
 
 
 SHA = "sha256:" + "1" * 64
@@ -23,8 +26,11 @@ def _artifact(path: str) -> dict[str, object]:
 
 
 def main() -> int:
-    if len(SCHEMA_NAMES) != 31:
-        raise SystemExit(f"installed G26 schema inventory is {len(SCHEMA_NAMES)}, expected 31")
+    if tuple(SCHEMA_NAMES) != EXPECTED_LEGACY_SCHEMA_NAMES:
+        raise SystemExit(
+            "installed G26 schema identity mismatch: "
+            f"expected={EXPECTED_LEGACY_SCHEMA_NAMES!r}, actual={tuple(SCHEMA_NAMES)!r}"
+        )
     session = {
         "schema_version": "1.0",
         "record_version": 1,

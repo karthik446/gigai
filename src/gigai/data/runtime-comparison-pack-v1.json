@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "kind": "runtime_evaluation_pack",
+  "pack_id": "gigai-synthetic-runtime-comparison",
+  "pack_version": "1.0",
+  "owner": "synthetic-gig-definition",
+  "selected_graph": {
+    "graph_id": "graph_00000000-0000-4000-8000-000000000601",
+    "graph_version": 1,
+    "goal": "source-grounded-review",
+    "input_contract_version": "r6-input:1",
+    "output_contract_version": "r7-output-contract:1"
+  },
+  "goal_id": "goal_00000000-0000-4000-8000-000000000602",
+  "grader": {
+    "id": "gigai.source-grounded-comparison-grader",
+    "version": "1.0",
+    "method": "deterministic-criterion-and-source-allowlist",
+    "self_grading": false
+  },
+  "cases": [
+    {
+      "case_id": "posting_supported",
+      "case_version": "1.0",
+      "split": "development",
+      "synthetic": true,
+      "prompt": "Review the supplied posting fact. Return JSON with exactly verdict, criteria, and unsupported_claims. Cite only supplied evidence IDs.",
+      "output_contract": {"version": "r7-output-contract:1", "criteria": [{"criterion_id": "location", "description": "Whether the supplied posting fact claim is supported by supplied evidence."}]},
+      "input": {"artifact_kind": "posting_fact", "claim": "The synthetic posting lists Denver."},
+      "evidence": [{"id": "E1", "kind": "posting_capture", "text": "Example Labs lists Denver as the role location."}],
+      "expected": {"verdict": "pass", "criteria": {"location": "supported"}, "criterion_evidence": {"location": {"ids": ["E1"], "kinds": ["posting_capture"]}}}
+    },
+    {
+      "case_id": "unsupported_duration",
+      "case_version": "1.0",
+      "split": "development",
+      "synthetic": true,
+      "prompt": "Review the supplied candidate claim. Return JSON with exactly verdict, criteria, and unsupported_claims. A posting requirement is not candidate evidence; cite only supplied evidence IDs.",
+      "output_contract": {"version": "r7-output-contract:1", "criteria": [{"criterion_id": "candidate_duration", "description": "Whether the candidate claim is supported by supplied candidate evidence."}]},
+      "input": {"artifact_kind": "candidate_claim", "claim": "The candidate has five years of production Kubernetes ownership."},
+      "evidence": [{"id": "E2", "kind": "candidate_evidence", "text": "No Kubernetes duration, ownership, or production record is supplied."}],
+      "expected": {"verdict": "fail", "criteria": {"candidate_duration": "unsupported"}, "criterion_evidence": {"candidate_duration": {"ids": ["E2"], "kinds": ["candidate_evidence"]}}, "require_unsupported_claim": true}
+    },
+    {
+      "case_id": "finalized_not_applied",
+      "case_version": "1.0",
+      "split": "final_held_out_acceptance",
+      "synthetic": true,
+      "prompt": "Review the supplied lifecycle state. Return JSON with exactly verdict, criteria, and unsupported_claims. Distinguish finalized document state from applied state and cite only supplied evidence IDs.",
+      "output_contract": {"version": "r7-output-contract:1", "criteria": [{"criterion_id": "application_state", "description": "Whether the lifecycle claim distinguishes finalized document state from submitted or applied state."}]},
+      "input": {"artifact_kind": "application_state", "claim": "A resume revision is finalized; it was not submitted."},
+      "evidence": [{"id": "E3", "kind": "lifecycle_record", "text": "resume-17 finalized=true; application_event is absent; applied=false."}],
+      "expected": {"verdict": "pass", "criteria": {"application_state": "supported"}, "criterion_evidence": {"application_state": {"ids": ["E3"], "kinds": ["lifecycle_record"]}}}
+    }
+  ],
+  "grader_validation": {
+    "known_good": {
+      "case_id": "posting_supported",
+      "output": {"verdict": "pass", "criteria": [{"criterion_id": "location", "status": "supported", "evidence_ids": ["E1"]}], "unsupported_claims": []}
+    },
+    "known_bad": {
+      "case_id": "unsupported_duration",
+      "output": {"verdict": "pass", "criteria": [{"criterion_id": "candidate_duration", "status": "supported", "evidence_ids": ["E2"]}], "unsupported_claims": []}
+    }
+  }
+}

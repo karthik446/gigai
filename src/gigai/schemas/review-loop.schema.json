@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "loop_id", "loop_version", "run_id", "gig_id", "bundle_id", "contract_id", "state", "cycle_cap", "cycle_count", "stage_sequence", "finding_ids", "report_ids", "feedback_ids", "adjudication_ids", "trace_ids", "addressed_artifact_ids", "created_at", "updated_at"],
   "properties": {
-    "schema_version": {"$ref": "urn:gigai:schema:common:1#/$defs/schema_version"},
+    "schema_version": {"type": "string", "enum": ["1.0", "1.1"]},
     "loop_id": {"$ref": "#/$defs/loop_id"},
     "loop_version": {"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"},
     "run_id": {"$ref": "urn:gigai:schema:common:1#/$defs/run_id"},
@@ -22,6 +22,7 @@
     "feedback_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/feedback_id"}},
     "adjudication_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/adjudication_id"}},
     "trace_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/trace_id"}},
+    "verification_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:gigai:schema:common:1#/$defs/verification_id"}},
     "addressed_artifact_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/addressed_artifact_id"}},
     "terminal_decision": {"oneOf": [{"$ref": "#/$defs/terminal_decision"}, {"type": "null"}]},
     "created_at": {"type": "string", "format": "date-time"},

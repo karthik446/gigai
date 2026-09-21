@@ -81,6 +81,8 @@ def compare_occurrences(
         result, reason = "incomparable", "Run Gig identities differ"
     elif current_run.get("gig_version") != prior_run.get("gig_version"):
         result, reason = "incomparable", "Gig versions differ"
+    elif _selected_graph_identity(current_run) != _selected_graph_identity(prior_run):
+        result, reason = "incomparable", "selected Graph identities differ"
     elif current["snapshot"].get("bundle_id") != prior["snapshot"].get("bundle_id"):
         result, reason = "incomparable", "Review Bundle identities differ"
     elif current_run.get("goal_graph", {}).get("content_sha256") != prior_run.get("goal_graph", {}).get("content_sha256"):
@@ -155,13 +157,33 @@ def _read_run(workpad: Path, run_id: str) -> dict[str, object]:
     if path.is_symlink() or not path.is_file():
         raise ComparisonError("sealed Run manifest is unavailable")
     payload = path.read_bytes()
-    report = validate_serialized_contract("run-manifest.schema.json", payload)
-    if not report.valid:
+    v1_report = validate_serialized_contract("run-manifest.schema.json", payload)
+    v2_report = validate_serialized_contract("run-manifest-v2.schema.json", payload)
+    if not v1_report.valid and not v2_report.valid:
         raise ComparisonError("Run manifest failed schema validation")
     value = parse_json_bytes(payload)
     if not isinstance(value, Mapping) or value.get("run_id") != run_id or value.get("status") != "sealed":
         raise ComparisonError("Run manifest is not a sealed Run authority")
     return dict(value)
+
+
+def _selected_graph_identity(run: Mapping[str, object]) -> tuple[object, object, object]:
+    """Keep selected-graph equivalence explicit for v2 comparisons.
+
+    A v1 Run has no Graph Set selector; a v1/v2 pair is therefore deliberately
+    incomparable rather than being treated as one implicit selected graph.
+    """
+
+    graph_set = run.get("graph_set")
+    if not isinstance(graph_set, Mapping):
+        return (None, None, None)
+    return (
+        graph_set.get("content_sha256"),
+        run.get("selected_graph_id"),
+        run.get("selected_graph", {}).get("content_sha256")
+        if isinstance(run.get("selected_graph"), Mapping)
+        else None,
+    )
 
 
 def _run_output_ref(workpad: Path, run_id: str) -> dict[str, object] | None:

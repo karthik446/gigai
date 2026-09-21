@@ -118,13 +118,16 @@ def test_cli_eval_contract_and_behavior_write_report(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     runner = CliRunner()
-    contract = runner.invoke(cli, ["eval", "contract", "--manifest", str(manifest_path)])
+    contract = runner.invoke(
+        cli, ["internal", "eval", "contract", "--manifest", str(manifest_path)]
+    )
     assert contract.exit_code == 0, contract.output
     assert json.loads(contract.output)["status"] == "pass"
     output_path = tmp_path / "report.json"
     behavior = runner.invoke(
         cli,
         [
+            "internal",
             "eval",
             "behavior",
             "--manifest",

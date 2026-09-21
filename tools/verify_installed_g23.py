@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 import tempfile
 import uuid
 
@@ -14,6 +15,8 @@ from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 from gigai.validators import SCHEMA_NAMES
 from gigai.workpad import resolve_workpad
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from installed_schema_expectations import EXPECTED_LEGACY_SCHEMA_NAMES
 
 
 CAP = "cap_00000000-0000-4000-8000-000000000003"
@@ -58,8 +61,11 @@ def _manifest(digest: str, *, gig_id: str) -> dict[str, object]:
 
 
 def main() -> int:
-    if len(SCHEMA_NAMES) != 31:
-        raise SystemExit(f"installed G23 schema inventory is {len(SCHEMA_NAMES)}, expected 31")
+    if tuple(SCHEMA_NAMES) != EXPECTED_LEGACY_SCHEMA_NAMES:
+        raise SystemExit(
+            "installed G23 schema identity mismatch: "
+            f"expected={EXPECTED_LEGACY_SCHEMA_NAMES!r}, actual={tuple(SCHEMA_NAMES)!r}"
+        )
     with tempfile.TemporaryDirectory(prefix="gigai-g23-installed-") as directory:
         root = Path(directory)
         runtime_home = root / "runtime-home"

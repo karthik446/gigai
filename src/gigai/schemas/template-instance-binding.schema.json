@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:template-instance-binding:2",
+  "title": "GigAI prepared template instance binding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "kind", "project_id", "gig_id", "owner_id", "username",
+    "template_id", "instance_name", "package_id", "package_digest", "inventory_digest",
+    "software_inventory", "source_digest", "proposal_id", "proposal_ref", "approval",
+    "customization_parent"
+  ],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "kind": {"const": "template_instance_binding"},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "owner_id": {"type": "string", "pattern": "^owner_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "username": {"type": "string", "minLength": 1, "maxLength": 64, "not": {"pattern": "[\u0000-\u001f\u007f-\u009f]"}},
+    "template_id": {"const": "scout"},
+    "instance_name": {"const": "default"},
+    "package_id": {"$ref": "urn:gigai:schema:gig-package:1#/properties/package_id"},
+    "package_digest": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "inventory_digest": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "software_inventory": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "source_digest": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "proposal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_proposal_id"},
+    "proposal_ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "approved_version"],
+      "properties": {"state": {"const": "unapproved"}, "approved_version": {"type": "null"}}
+    },
+    "customization_parent": {"type": "null"}
+  }
+}

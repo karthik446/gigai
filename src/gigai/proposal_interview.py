@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import html
 import http.server
 import json
+from pathlib import Path
 import secrets
 import sqlite3
 import threading
@@ -553,8 +554,25 @@ def session_from_record(payload: Mapping[str, object]) -> InterviewSession:
     return session
 
 
-def persist_trace(connection: sqlite3.Connection, session: InterviewSession) -> None:
+def persist_trace(
+    connection: sqlite3.Connection,
+    session: InterviewSession,
+    *,
+    workpad: Path | None = None,
+    already_locked: bool = False,
+) -> None:
     """Persist only ordered event identities and redacted state metadata."""
+
+    if workpad is None:
+        database = next((row[2] for row in connection.execute("PRAGMA database_list") if row[1] == "main"), "")
+        candidate = Path(database).parent if database else None
+        workpad = candidate if candidate is not None and (candidate / ".git").is_dir() else None
+    if workpad is not None and not already_locked:
+        from .index import database_lock
+
+        with database_lock(workpad):
+            persist_trace(connection, session, workpad=workpad, already_locked=True)
+        return
 
     connection.execute(
         "CREATE TABLE IF NOT EXISTS interview_events ("

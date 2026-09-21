@@ -154,6 +154,24 @@ def test_artifacts_and_handoff_share_one_semantic_commit(tmp_path: Path) -> None
     assert not tuple((workpad / "scratch").glob(".gigai-journal-*.json"))
 
 
+def test_immutable_artifact_refusal_precedes_transaction_intent(tmp_path: Path) -> None:
+    from gigai.journal import JournalArtifact, JournalConflictError
+
+    workpad = _workpad(tmp_path)
+    first = _write(workpad, 1, artifacts=(JournalArtifact("receipt.json", b"first"),))
+    original = (workpad / "receipt.json").read_bytes()
+    with pytest.raises(JournalConflictError, match="immutable artifact already exists"):
+        _write(
+            workpad,
+            2,
+            artifacts=(JournalArtifact("receipt.json", b"second"),),
+            allow_artifact_replacement=False,
+        )
+    assert (workpad / "receipt.json").read_bytes() == original
+    assert not tuple((workpad / "scratch").glob(".gigai-journal-*.json"))
+    assert _git(workpad, "rev-parse", "HEAD").stdout.strip() == first.commit
+
+
 def test_artifact_transaction_recovery_commits_exact_declared_bytes_once(
     tmp_path: Path,
 ) -> None:

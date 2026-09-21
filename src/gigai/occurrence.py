@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import uuid
-from typing import Any, Callable
+from typing import Callable
 
 from .canonical import (
     EntityPrefix,
@@ -154,6 +154,7 @@ def trigger_occurrence(
     occurrence_id: str,
     gig_id: str | None = None,
     wait: bool = False,
+    operator_consent: Mapping[str, object] | None = None,
     uuid_factory: UUIDFactory = uuid.uuid4,
     observer: OccurrenceObserver | None = None,
 ) -> OccurrenceResult:
@@ -193,6 +194,7 @@ def trigger_occurrence(
             version=int(record["gig_version"]),
             wait=wait,
             invocation_argv=("gigai", "occurrence", "trigger", occurrence_id),
+            operator_consent=operator_consent,
             uuid_factory=uuid_factory,
             observer=observer,
         )
@@ -228,12 +230,17 @@ def reconcile_occurrence(
     run_id = record.get("run_id")
     if not isinstance(run_id, str):
         raise OccurrenceError("prepared occurrence has no Run identity")
-    details = read_run_details(
-        home_root=home_root,
-        requested_target=requested_target,
-        gig_id=resolved.gig_id,
-        run_id=run_id,
-    )
+    try:
+        details = read_run_details(
+            home_root=home_root,
+            requested_target=requested_target,
+            gig_id=resolved.gig_id,
+            run_id=run_id,
+        )
+    except RunError as exc:
+        if str(exc).startswith("run_details_reconciliation_required:"):
+            return _result(resolved, record)
+        raise
     status = details.get("status")
     if status in {"preparing", "running"}:
         return _result(resolved, record)

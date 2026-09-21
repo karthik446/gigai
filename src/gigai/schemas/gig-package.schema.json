@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:gig-package:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "package_id", "package_version", "project_scope", "content_digest", "files"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "package_id": {"type": "string", "pattern": "^package_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "package_version": {"type": "integer", "minimum": 1},
+    "project_scope": {"const": "repository"},
+    "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "content_sha256", "size_bytes"],
+        "properties": {
+          "path": {"type": "string", "pattern": "^[A-Za-z0-9._/-]+$"},
+          "content_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "size_bytes": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  }
+}

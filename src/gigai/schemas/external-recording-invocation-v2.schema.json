@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:external-recording-invocation:2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "invocation_id", "operation", "project_id", "gig_id", "origin", "actor", "input", "operation_key", "payload_sha256", "created_at"],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "invocation_id": {"$ref": "urn:gigai:schema:common:1#/$defs/invocation_id"},
+    "operation": {"enum": ["plan", "start", "checkpoint", "submit", "cancel"]},
+    "project_id": {"$ref": "urn:gigai:schema:common:1#/$defs/project_id"},
+    "gig_id": {"$ref": "urn:gigai:schema:common:1#/$defs/gig_id"},
+    "origin": {"enum": ["agent_invocation", "direct_cli"]},
+    "actor": {"oneOf": [{"$ref": "urn:gigai:schema:external-recording-invocation:1#/$defs/operator_actor"}, {"$ref": "urn:gigai:schema:external-recording-invocation:1#/$defs/agent_actor"}]},
+    "input": {"type": "object"},
+    "operation_key": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{1,160}$"},
+    "payload_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [
+    {"if": {"properties": {"origin": {"const": "agent_invocation"}}}, "then": {"properties": {"actor": {"$ref": "urn:gigai:schema:external-recording-invocation:1#/$defs/agent_actor"}}}},
+    {"if": {"properties": {"origin": {"const": "direct_cli"}}}, "then": {"properties": {"actor": {"$ref": "urn:gigai:schema:external-recording-invocation:1#/$defs/operator_actor"}}}},
+    {"if": {"properties": {"operation": {"const": "checkpoint"}}}, "then": {"properties": {"input": {"$ref": "#/$defs/checkpoint_input"}}}},
+    {"if": {"properties": {"operation": {"const": "submit"}}}, "then": {"properties": {"input": {"$ref": "#/$defs/submit_input"}}}},
+    {"if": {"properties": {"operation": {"const": "plan"}}}, "then": {"properties": {"input": {"$ref": "#/$defs/plan_input"}}}},
+    {"if": {"properties": {"operation": {"const": "start"}}}, "then": {"properties": {"input": {"$ref": "urn:gigai:schema:external-recording-invocation:1#/$defs/start_input"}}}},
+    {"if": {"properties": {"operation": {"const": "cancel"}}}, "then": {"properties": {"input": {"$ref": "urn:gigai:schema:external-recording-invocation:1#/$defs/cancel_input"}}}}
+  ],
+  "$defs": {
+    "checkpoint_input": {
+      "type": "object", "additionalProperties": false,
+      "required": ["run_id", "parent_checkpoint", "questions", "artifact_refs", "reason"],
+      "properties": {
+        "run_id": {"$ref": "urn:gigai:schema:common:1#/$defs/run_id"},
+        "parent_checkpoint": {"oneOf": [{"$ref": "urn:gigai:schema:external-recording-invocation:1#/$defs/checkpoint_id"}, {"type": "null"}]},
+        "questions": {"type": "array", "maxItems": 32, "items": {"$ref": "urn:gigai:schema:external-recording-invocation:1#/$defs/question"}},
+        "artifact_refs": {"type": "array", "maxItems": 32, "items": {"oneOf": [{"$ref": "#/$defs/artifact_input"}, {"$ref": "#/$defs/check_artifact_input"}]}},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 2000}
+      }
+    },
+    "artifact_input": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "markdown", "sidecar", "domain_sidecar", "supporting_artifacts"],
+      "properties": {
+        "kind": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "markdown": {"type": "string", "minLength": 1, "maxLength": 1048576},
+        "sidecar": {"$ref": "#/$defs/generic_sidecar"},
+        "domain_sidecar": {"$ref": "#/$defs/domain_sidecar"},
+        "supporting_artifacts": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/supporting_artifact"}}
+      }
+    },
+    "check_artifact_input": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "markdown", "sidecar"],
+      "properties": {
+        "kind": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "markdown": {"type": "string", "minLength": 1, "maxLength": 1048576},
+        "sidecar": {"$ref": "urn:gigai:schema:external-recording-invocation:1#/$defs/check_artifact_input/properties/sidecar"}
+      }
+    },
+    "output_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "markdown", "sidecar", "domain_sidecar", "supporting_artifacts"],
+      "properties": {
+        "kind": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "markdown": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        "sidecar": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        "domain_sidecar": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        "supporting_artifacts": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/supporting_ref"}}
+      }
+    },
+    "supporting_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["artifact_id", "ref"],
+      "properties": {
+        "artifact_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "ref": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}
+      }
+    },
+    "submit_input": {
+      "type": "object", "additionalProperties": false,
+      "required": ["run_id", "parent_checkpoint", "output_refs", "check_refs", "disclosure"],
+      "properties": {
+        "run_id": {"$ref": "urn:gigai:schema:common:1#/$defs/run_id"},
+        "parent_checkpoint": {"oneOf": [{"$ref": "urn:gigai:schema:external-recording-invocation:1#/$defs/checkpoint_id"}, {"type": "null"}]},
+        "output_refs": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/output_ref"}},
+        "check_refs": {"type": "array", "maxItems": 32, "items": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}},
+        "disclosure": {"$ref": "urn:gigai:schema:external-recording-receipt:1#/$defs/disclosure"}
+      }
+    },
+    "domain_sidecar": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_id", "value"],
+      "properties": {
+        "schema_id": {"type": "string", "pattern": "^urn:gigai:[A-Za-z0-9._:-]{1,160}$"},
+        "value": {"type": "object"}
+      }
+    },
+    "supporting_artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["artifact_id", "media_type", "content_base64", "content_sha256", "size_bytes"],
+      "properties": {
+        "artifact_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "media_type": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]{0,126}/[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]{0,126}$"},
+        "content_base64": {"type": "string", "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$", "maxLength": 1398104},
+        "content_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 1048576}
+      }
+    },
+    "generic_sidecar": {
+      "type": "object", "additionalProperties": false,
+      "required": ["document_sha256", "output_kind", "run_id", "selected_inputs"],
+      "properties": {
+        "document_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "output_kind": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "run_id": {"$ref": "urn:gigai:schema:common:1#/$defs/run_id"},
+        "selected_inputs": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "urn:gigai:schema:external-recording-plan:2#/$defs/resolved_input"}}
+      }
+    },
+    "plan_input": {
+      "type": "object", "additionalProperties": false,
+      "required": ["graph_selector", "gig_version", "selection_record", "input_refs", "output_kinds", "predecessor"],
+      "properties": {
+        "graph_selector": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+        "gig_version": {"oneOf": [{"$ref": "urn:gigai:schema:common:1#/$defs/positive_version"}, {"type": "null"}]},
+        "selection_record": {"oneOf": [{"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"}, {"type": "null"}]},
+        "input_refs": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "urn:gigai:schema:external-recording-plan:2#/$defs/raw_input_ref"}},
+        "output_kinds": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}},
+        "predecessor": {"oneOf": [{"$ref": "urn:gigai:schema:external-recording-invocation:1#/$defs/predecessor"}, {"type": "null"}]}
+      }
+    }
+  }
+}

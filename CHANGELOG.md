@@ -28,6 +28,16 @@ Do not include commit IDs, schema field names, test counts, or implementation
 mechanics here. Those belong in the internal changelog.
 -->
 
+#### 0.1.7 candidate — Scout and local workflow foundations
+
+- Adds the bundled Scout authoring source, local record workflow, bounded public
+  acquisition import, and rebuildable local report surface.
+- Adds resumable interview and private-transfer preparation plus a local runtime
+  comparison workflow with explicit synthetic/offline boundaries.
+- This is a release candidate entry pending automated verification,
+  authorization, and publication; it does not claim live-provider or human-UAT
+  completion.
+
 ## Released versions
 
 ### 0.1.5

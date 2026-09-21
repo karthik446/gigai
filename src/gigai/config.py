@@ -11,6 +11,7 @@ import stat
 import tempfile
 import tomllib
 from typing import Any
+from urllib.parse import urlsplit
 
 from .canonical import canonicalize_owned_text
 
@@ -72,6 +73,12 @@ class ModelTarget:
     max_output_tokens: int
     reasoning_effort: str | None = None
     enabled: bool = True
+    # Local-only identity and transport bounds.  They are optional on the
+    # dataclass so existing deterministic/remote callers remain source
+    # compatible; parse_config applies the adapter-specific requirements.
+    model_digest: str | None = None
+    context_tokens: int | None = None
+    max_response_bytes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -159,6 +166,12 @@ def render_config(config: GigAIConfig) -> bytes:
             lines.append(f'reasoning_effort = {_toml_string(target.reasoning_effort)}')
         if not target.enabled:
             lines.append("enabled = false")
+        if target.model_digest is not None:
+            lines.append(f'model_digest = {_toml_string(target.model_digest)}')
+        if target.context_tokens is not None:
+            lines.append(f'context_tokens = {target.context_tokens}')
+        if target.max_response_bytes is not None:
+            lines.append(f'max_response_bytes = {target.max_response_bytes}')
     for profile in sorted(config.profiles, key=lambda item: item.name):
         lines.extend(
             (
@@ -540,6 +553,44 @@ def _positive_integer(value: dict[str, Any], key: str, name: str, where: str) ->
     return result
 
 
+def _optional_bounded_integer(
+    value: dict[str, Any], key: str, name: str, where: str, *, maximum: int
+) -> int | None:
+    if key not in value:
+        return None
+    result = value[key]
+    if type(result) is not int or result <= 0 or result > maximum:
+        raise MalformedConfigurationError(
+            f"{name}.{key}{where} must be a positive integer no greater than {maximum}"
+        )
+    return result
+
+
+def _validate_local_endpoint(value: str, name: str, where: str) -> str:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise MalformedConfigurationError(
+            f"{name}{where} must contain a valid explicit port"
+        ) from exc
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or port is None
+        or not 1 <= port <= 65_535
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise MalformedConfigurationError(
+            f"{name}{where} must be http://127.0.0.1:<port> without credentials, path, query, or fragment"
+        )
+    return f"http://127.0.0.1:{port}"
+
+
 def _string_array(
     value: dict[str, Any], key: str, name: str, where: str
 ) -> tuple[str, ...]:
@@ -595,6 +646,9 @@ def _target_v1(value: object, index: int, where: str) -> ModelTarget:
         max_output_tokens=64,
         reasoning_effort=None,
         enabled=True,
+        model_digest=None,
+        context_tokens=None,
+        max_response_bytes=None,
     )
 
 
@@ -611,6 +665,7 @@ def _endpoint(value: object, index: int, where: str) -> Endpoint:
         "openrouter_api",
         "codex_cli",
         "claude_cli",
+        "ollama_local",
     }:
         raise MalformedConfigurationError(
             f"endpoints[{index}].adapter{where} is not a supported G11 adapter"
@@ -627,7 +682,13 @@ def _endpoint(value: object, index: int, where: str) -> Endpoint:
         raise MalformedConfigurationError(
             f"endpoint {name!r}{where} requires a credential reference name"
         )
-    if base_url is not None and not base_url.startswith("https://"):
+    if adapter == "ollama_local":
+        if credential is not None or base_url is None:
+            raise MalformedConfigurationError(
+                f"local Ollama endpoint {name!r}{where} requires base_url and cannot declare credentials"
+            )
+        base_url = _validate_local_endpoint(base_url, f"endpoints[{index}].base_url", where)
+    elif base_url is not None and not base_url.startswith("https://"):
         raise MalformedConfigurationError(
             f"endpoint {name!r}.base_url{where} must use https"
         )
@@ -639,7 +700,7 @@ def _target(value: object, index: int, where: str) -> ModelTarget:
     _allowed_keys(
         item,
         {"name", "endpoint", "model", "capabilities", "max_output_tokens"},
-        {"reasoning_effort", "enabled"},
+        {"reasoning_effort", "enabled", "model_digest", "context_tokens", "max_response_bytes"},
         f"model_targets[{index}]",
         where,
     )
@@ -668,6 +729,15 @@ def _target(value: object, index: int, where: str) -> ModelTarget:
         raise MalformedConfigurationError(
             f"model_targets[{index}].enabled{where} must be a boolean"
         )
+    model_digest = _optional_string(item, "model_digest", f"model_targets[{index}]", where)
+    if model_digest is not None and re.fullmatch(r"[0-9a-f]{64}", model_digest):
+        model_digest = f"sha256:{model_digest}"
+    context_tokens = _optional_bounded_integer(
+        item, "context_tokens", f"model_targets[{index}]", where, maximum=262_144
+    )
+    max_response_bytes = _optional_bounded_integer(
+        item, "max_response_bytes", f"model_targets[{index}]", where, maximum=4 * 1024 * 1024
+    )
     return ModelTarget(
         name=_string(item, "name", f"model_targets[{index}]", where),
         endpoint=_string(item, "endpoint", f"model_targets[{index}]", where),
@@ -676,6 +746,9 @@ def _target(value: object, index: int, where: str) -> ModelTarget:
         max_output_tokens=max_output_tokens,
         reasoning_effort=reasoning_effort,
         enabled=enabled,
+        model_digest=model_digest,
+        context_tokens=context_tokens,
+        max_response_bytes=max_response_bytes,
     )
 
 
@@ -762,6 +835,35 @@ def _validate_config_relationships(
                 raise MalformedConfigurationError(
                     f"profile {profile.name!r}{where} references unknown model target {role!r}"
                 )
+    endpoint_by_name = {item.name: item for item in endpoints}
+    digest_pattern = re.compile(r"\A(?:sha256:)?[0-9a-f]{64}\Z")
+    for target in targets:
+        endpoint = endpoint_by_name[target.endpoint]
+        local_fields = (
+            target.model_digest,
+            target.context_tokens,
+            target.max_response_bytes,
+        )
+        if endpoint.adapter == "ollama_local":
+            if target.model_digest is None or not digest_pattern.fullmatch(target.model_digest):
+                raise MalformedConfigurationError(
+                    f"local model target {target.name!r}{where} requires a canonical lowercase model_digest"
+                )
+            # Context/response options are additive and may use the adapter's
+            # bounded defaults; when present they were already range-checked
+            # by _target.
+            if target.max_output_tokens > 8_192:
+                raise MalformedConfigurationError(
+                    f"local model target {target.name!r}{where} max_output_tokens must be no greater than 8192"
+                )
+            if target.reasoning_effort not in {None, "none"}:
+                raise MalformedConfigurationError(
+                    f"local model target {target.name!r}{where} only supports reasoning_effort='none'"
+                )
+        elif any(value is not None for value in local_fields):
+            raise MalformedConfigurationError(
+                f"model target {target.name!r}{where} has local-only fields for non-local endpoint"
+            )
 
 
 __all__ = [

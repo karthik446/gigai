@@ -20,6 +20,7 @@ from gigai.occurrence import (
     reconcile_occurrence,
 )
 from gigai.review import materialize_review_bundle
+from gigai.run import RunError
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
 from gigai.workpad import resolve_workpad
@@ -379,6 +380,53 @@ def test_prepared_occurrence_reconciles_without_relaunch(tmp_path: Path) -> None
         occurrence_id=occurrence.occurrence_id,
     ).state == "closed"
     assert len(list((resolved.path / "runs").glob("run_*/run-manifest.json"))) == 1
+
+
+def test_transient_run_details_reconciliation_preserves_prepared_run_until_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, target, gig_id, bundle_path = _fixture(tmp_path)
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
+    occurrence = declare_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        cadence="daily", occurrence_key="2026-08-16",
+        snapshot_path=bundle_path.relative_to(resolved.path).as_posix(),
+        uuid_factory=_uuids(),
+    )
+    prepared = trigger_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        occurrence_id=occurrence.occurrence_id, wait=False, uuid_factory=_uuids(),
+    )
+    assert prepared.state == "run_prepared"
+    run_paths = tuple((resolved.path / "runs").glob("run_*/run-manifest.json"))
+
+    responses = iter(
+        (
+            RunError("run_details_reconciliation_required: transient writer state"),
+            {"status": "succeeded"},
+        )
+    )
+
+    def read_details(**_kwargs: object) -> dict[str, object]:
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(occurrence_module, "read_run_details", read_details)
+    retryable = reconcile_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        occurrence_id=occurrence.occurrence_id,
+    )
+    assert retryable.state == "run_prepared"
+    assert tuple((resolved.path / "runs").glob("run_*/run-manifest.json")) == run_paths
+
+    terminal = reconcile_occurrence(
+        home_root=home, requested_target=target, gig_id=gig_id,
+        occurrence_id=occurrence.occurrence_id,
+    )
+    assert terminal.state == "run_terminal"
+    assert tuple((resolved.path / "runs").glob("run_*/run-manifest.json")) == run_paths
 
 
 def test_mark_requires_explicit_outcome_actor() -> None:

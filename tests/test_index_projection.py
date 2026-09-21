@@ -71,10 +71,10 @@ def test_index_rebuild_is_disposable_deterministic_and_idempotent(
     )
     assert rebuilt.as_dict() == first.as_dict()
     (created.workpad / "state.sqlite").write_bytes(b"not a SQLite database")
-    repaired = read_index(
-        workpad=created.workpad, project_id=created.project_id, gig_id=created.gig_id
-    )
-    assert repaired.as_dict() == first.as_dict()
+    with pytest.raises(JournalIndexError, match="malformed"):
+        read_index(
+            workpad=created.workpad, project_id=created.project_id, gig_id=created.gig_id
+        )
 
 
 def test_index_repair_temp_stays_inside_allowed_scratch_surface(
@@ -302,7 +302,10 @@ def test_read_commands_return_stable_json_without_a_target_delta(
         command: runner.invoke(cli, [command, *common])
         for command in ("proposals", "status", "show", "history", "plan")
     }
-    gigs = runner.invoke(cli, ["gigs", "--home", str(home), "--json"])
+    gigs = runner.invoke(
+        cli,
+        ["gigs", "--target", str(target), "--home", str(home), "--json"],
+    )
     failures = {
         name: result.output
         for name, result in {**results, "gigs": gigs}.items()
@@ -316,9 +319,19 @@ def test_read_commands_return_stable_json_without_a_target_delta(
     assert payloads["history"][0]["sequence"] == 1
     assert payloads["proposals"]["proposal_id"] == created.proposal_id
     assert payloads["show"]["gig_id"] == created.gig_id
-    assert json.loads(gigs.output) == [
-        {"gig_id": created.gig_id, "project_id": created.project_id}
+    gigs_payload = json.loads(gigs.output)
+    assert gigs_payload["scope"]["kind"] == "project"
+    assert gigs_payload["scope"]["project_id"] == created.project_id
+    assert gigs_payload["entries"] == [
+        {
+            "gig_id": created.gig_id,
+            "project_id": created.project_id,
+            "title": "read-surface-proof",
+            "status": "Proposed",
+            "version": "Proposed",
+        }
     ]
+    assert gigs_payload["diagnostics"] == []
     after = tuple(
         sorted(path.relative_to(target).as_posix() for path in target.rglob("*"))
     )

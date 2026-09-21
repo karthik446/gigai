@@ -130,6 +130,7 @@ def _validate_manifest_semantics(manifest: Mapping[str, Any]) -> ValidationRepor
             findings.append(_finding(location + "/capability_id", "duplicate_capability_id", "capability_id occurs more than once"))
         if isinstance(capability_id, str):
             seen_ids.add(capability_id)
+        _validate_tool_binding(capability, location, findings)
         options = capability.get("options", [])
         if not isinstance(options, list):
             continue
@@ -159,6 +160,68 @@ def _validate_manifest_semantics(manifest: Mapping[str, Any]) -> ValidationRepor
             if isinstance(option, Mapping) and option.get("kind") == "choose_alternative" and option.get("option_id") not in alternative_ids:
                 findings.append(_finding(f"{location}/options/{option_index}", "invented_alternative", "alternative option is not declared"))
     return ValidationReport(tuple(sorted(set(findings))))
+
+
+def _validate_tool_binding(
+    capability: Mapping[str, Any], location: str, findings: list[ValidationFinding]
+) -> None:
+    """Reject a self-contradictory tool authority before Gig approval.
+
+    The schema closes object shapes.  These checks bind its fields together:
+    the inventory is a canonical authority list, its selected entry agrees with
+    the established source-constraint identity/digest, and this narrow C3
+    bridge has exactly one admitted operation and effect.
+    """
+    binding = capability.get("tool_binding")
+    if binding is None:
+        return
+    if capability.get("kind") != "tool" or not isinstance(binding, Mapping):
+        findings.append(_finding(location + "/tool_binding", "tool_binding_not_tool", "tool binding is allowed only for a tool capability"))
+        return
+    inventory = binding.get("inventory")
+    entry_path = binding.get("entry_path")
+    if not isinstance(inventory, list) or not isinstance(entry_path, str):
+        return
+    paths = [item.get("path") for item in inventory if isinstance(item, Mapping)]
+    if len(paths) != len(inventory) or any(not isinstance(path, str) for path in paths):
+        return
+    typed_paths = [str(path) for path in paths]
+    if typed_paths != sorted(typed_paths) or len(set(typed_paths)) != len(typed_paths):
+        findings.append(_finding(location + "/tool_binding/inventory", "tool_inventory_not_canonical", "tool inventory paths must be unique and sorted"))
+    expected_inventory = canonical_json_digest(inventory)
+    if binding.get("inventory_sha256") != expected_inventory:
+        findings.append(_finding(location + "/tool_binding/inventory_sha256", "tool_inventory_digest_mismatch", "tool inventory digest must match its canonical inventory"))
+    entry = next((item for item in inventory if isinstance(item, Mapping) and item.get("path") == entry_path), None)
+    if not isinstance(entry, Mapping):
+        findings.append(_finding(location + "/tool_binding/entry_path", "tool_entry_not_in_inventory", "tool entry must be an inventoried member"))
+        return
+    wrapper_ref = binding.get("wrapper_ref")
+    root_members = [item for item in inventory if isinstance(item, Mapping) and item.get("path") == "gig.py"]
+    if root_members:
+        if len(root_members) != 1 or not isinstance(wrapper_ref, Mapping) or dict(wrapper_ref) != dict(root_members[0]):
+            findings.append(_finding(location + "/tool_binding/wrapper_ref", "tool_wrapper_not_bound", "an inventoried root wrapper must have one exact wrapper_ref binding"))
+    elif wrapper_ref is not None:
+        findings.append(_finding(location + "/tool_binding/wrapper_ref", "tool_wrapper_not_in_inventory", "wrapper_ref must be the exact inventoried root gig.py member"))
+    constraints = capability.get("source_constraints")
+    if not isinstance(constraints, Mapping):
+        return
+    if entry.get("content_sha256") != constraints.get("required_digest"):
+        findings.append(_finding(location + "/source_constraints/required_digest", "tool_entry_digest_mismatch", "tool entry digest must equal the required source digest"))
+    required_identity = constraints.get("required_identity")
+    if not isinstance(required_identity, str) or Path(entry_path).name != required_identity:
+        findings.append(_finding(location + "/source_constraints/required_identity", "tool_entry_identity_mismatch", "tool required identity must equal the canonical entry basename"))
+    operations = binding.get("operations")
+    admitted_operations = ["record_archive", "record_create", "record_update"]
+    if (
+        not isinstance(operations, list)
+        or not operations
+        or operations != sorted(set(operations))
+        or any(operation not in admitted_operations for operation in operations)
+    ):
+        findings.append(_finding(location + "/tool_binding/operations", "tool_operation_mismatch", "tool operations must be a canonical subset of the admitted native CRUD operations"))
+    effects = binding.get("effects")
+    if effects != ["write_workpad"] or capability.get("declared_effects") != effects:
+        findings.append(_finding(location + "/tool_binding/effects", "tool_effect_mismatch", "tool binding effects must exactly match declared write_workpad"))
 
 
 def validate_capability_manifest(manifest_bytes: bytes) -> ValidationReport:

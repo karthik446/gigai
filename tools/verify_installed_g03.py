@@ -72,7 +72,6 @@ def main() -> None:
         for identifier in (
             "mount.atomic_replace",
             "mount.interprocess_lock",
-            "adapter.offline",
             "editor.resolved",
         ):
             if checks.get(identifier) != "PASS":

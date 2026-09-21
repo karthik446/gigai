@@ -1,0 +1,32 @@
+[
+  {
+    "id": "synthetic_salary_hybrid",
+    "posting": "Compensation: USD 140000-180000 yearly. Location: Denver, CO; hybrid schedule. Employer sponsorship is explicitly unavailable.",
+    "expected": {
+      "salary_min_usd_yearly": 140000,
+      "salary_max_usd_yearly": 180000,
+      "location_mode": "denver_hybrid",
+      "sponsorship_status": "unavailable",
+      "evidence": {
+        "salary": "USD 140000-180000 yearly",
+        "location": "Denver, CO; hybrid schedule",
+        "sponsorship": "Employer sponsorship is explicitly unavailable"
+      }
+    }
+  },
+  {
+    "id": "synthetic_unknown_remote",
+    "posting": "Location: remote within the United States only. Compensation and employer sponsorship are not stated.",
+    "expected": {
+      "salary_min_usd_yearly": null,
+      "salary_max_usd_yearly": null,
+      "location_mode": "remote_us_only",
+      "sponsorship_status": "unknown",
+      "evidence": {
+        "salary": null,
+        "location": "remote within the United States only",
+        "sponsorship": "not stated"
+      }
+    }
+  }
+]

@@ -55,6 +55,7 @@ def main() -> None:
             [
                 os.fspath(executable), "run", created.gig_id,
                 "--target", os.fspath(target), "--home", os.fspath(home),
+                "--confirm",
                 "--wait", "--json",
             ],
             capture_output=True, text=True, check=False, shell=False,

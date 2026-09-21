@@ -1,0 +1,44 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  --page: #f8f9fb;
+  --panel: #fff;
+  --text: #192333;
+  --muted: #526174;
+  --line: #dce2ea;
+  --accent: #2456a6;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--text); }
+.shell { width: min(100% - 3rem, 64rem); margin: 3rem auto; }
+header { margin-bottom: 1.75rem; }
+h1, h2, p { margin-top: 0; }
+h1 { font-size: 2.4rem; line-height: 1.2; margin-bottom: .6rem; letter-spacing: -.04em; }
+h2 { font-size: 1.15rem; margin-bottom: 1rem; }
+.eyebrow { color: var(--muted); font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; margin-bottom: .5rem; }
+.muted, .empty { color: var(--muted); }
+nav { display: flex; flex-wrap: wrap; gap: 1.5rem; padding: 1rem 0; border-block: 1px solid var(--line); }
+a { color: var(--accent); text-underline-offset: .2em; }
+a:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 2px; }
+main { display: grid; gap: 1.25rem; padding-block: 1.5rem; }
+section { padding: 1.5rem; background: var(--panel); border: 1px solid var(--line); border-radius: .5rem; }
+.empty { margin-bottom: 0; max-width: 65ch; }
+footer { color: var(--muted); font-size: .85rem; }
+table { width: 100%; border-collapse: collapse; text-align: left; }
+th, td { padding: .75rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: .85rem; color: var(--muted); }
+@media (prefers-color-scheme: dark) {
+  :root { --page: #111820; --panel: #19232e; --text: #e6edf4; --muted: #acbaca; --line: #344455; --accent: #94baff; }
+}
+@media (max-width: 40rem) {
+  .shell { width: min(100% - 2rem, 64rem); margin-block: 2rem; }
+  section { padding: 1rem; }
+}
+@media print {
+  :root { color-scheme: light; --page: #fff; --panel: #fff; --text: #000; --muted: #333; --line: #bbb; }
+  .shell { width: 100%; margin: 0; }
+  nav { display: none; }
+  section { break-inside: avoid; }
+}

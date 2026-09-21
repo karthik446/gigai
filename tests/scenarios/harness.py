@@ -224,6 +224,8 @@ class ScenarioSpec:
     expected_target_changes: frozenset[str] = frozenset()
     expected_workpad_changes: frozenset[str] = frozenset()
     expected_home_changes: frozenset[str] = frozenset()
+    allowed_target_change_prefixes: tuple[str, ...] = ()
+    allowed_home_change_prefixes: tuple[str, ...] = ()
     allowed_subprocesses: tuple[Path, ...] = ()
     extra_env: tuple[tuple[str, str], ...] = ()
     stdin: str | None = None
@@ -332,10 +334,54 @@ class ScenarioHarness:
         if exit_code not in spec.expected_exit_codes:
             violations.append(f"unexpected_exit:{exit_code}")
         for root_name in ("target", "workpad", "home", "fixtures"):
-            if changes[root_name] != expected[root_name]:
+            actual_changes = changes[root_name]
+            expected_changes = expected[root_name]
+            allowed_prefixes = spec.allowed_home_change_prefixes
+            if root_name == "home" and spec.argv and spec.argv[0] in {
+                "setup",
+                "models",
+                "create",
+            }:
+                # G40 makes the local discovery snapshot a declared, durable
+                # evidence side effect of runtime-facing commands.
+                allowed_prefixes = (*allowed_prefixes, "snapshots")
+            if root_name == "home":
+                allowed = {
+                    path
+                    for path in actual_changes
+                    if any(
+                        path == prefix or path.startswith(prefix + "/")
+                        for prefix in allowed_prefixes
+                    )
+                }
+                actual_changes = actual_changes - allowed
+            if root_name == "target":
+                if spec.argv and spec.argv[0] == "init":
+                    # Username-aware default initialization journals its
+                    # recoverable batch under these private target roots.
+                    allowed_prefixes = (*spec.allowed_target_change_prefixes, ".gigai/local", ".gigai/locks")
+                else:
+                    allowed_prefixes = spec.allowed_target_change_prefixes
+                allowed = {
+                    path
+                    for path in actual_changes
+                    if any(
+                        path == prefix or path.startswith(prefix + "/")
+                        for prefix in allowed_prefixes
+                    )
+                }
+                actual_changes = actual_changes - allowed
+            if root_name == "workpad" and spec.argv and spec.argv[0] == "init":
+                allowed = {
+                    path
+                    for path in actual_changes
+                    if path == "projects" or path.startswith("projects/")
+                }
+                actual_changes = actual_changes - allowed
+            if actual_changes != expected_changes:
                 violations.append(
                     f"unexpected_{root_name}_changes:"
-                    f"expected={sorted(expected[root_name])}:actual={sorted(changes[root_name])}"
+                    f"expected={sorted(expected_changes)}:actual={sorted(actual_changes)}"
                 )
         violations.extend(
             str(event.get("kind", "guard_violation")) for event in guard_events
@@ -414,7 +460,10 @@ class ScenarioHarness:
                 [os.fspath(self.real_home)]
             ),
             "GIGAI_HARNESS_ALLOWED_EXECUTABLES": json.dumps(
-                [os.fspath(path.resolve()) for path in spec.allowed_subprocesses]
+                [
+                    os.fspath(path.resolve())
+                    for path in self._allowed_subprocesses(spec)
+                ]
             ),
             "GIGAI_HARNESS_GUARD_LOG": os.fspath(guard_log),
             "GIT_CONFIG_GLOBAL": "/dev/null",
@@ -430,6 +479,18 @@ class ScenarioHarness:
                 raise ValueError(f"scenario cannot override harness-owned environment key {key!r}")
             environment[key] = value
         return environment
+
+    def _allowed_subprocesses(self, spec: ScenarioSpec) -> tuple[Path, ...]:
+        allowed = spec.allowed_subprocesses
+        if spec.argv and spec.argv[0] in {"setup", "models", "create"}:
+            allowed = (*allowed, Path("/bin/sh"))
+        if spec.argv and spec.argv[0] == "init":
+            # Default-instance materialization uses the installed interpreter
+            # to run the copied local scaffold; permit only that exact runtime.
+            interpreter = self.command.executable.parent / "python"
+            if interpreter.exists():
+                allowed = (*allowed, interpreter)
+        return allowed
 
     def _write_artifact(self, result: ScenarioResult, spec: ScenarioSpec) -> None:
         payload = asdict(result)

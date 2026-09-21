@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gigai:schema:model-invocation:3",
+  "title": "GigAI local model invocation record v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "record_version", "run_id", "goal_id", "invocation_id", "role", "provider_family", "configured_selector", "endpoint_identity", "resolved_model", "adapter_identity", "request", "outcome", "finish", "cancellation", "error", "usage", "boundary", "local_identity", "extensions", "replay", "terminal_committed_at"],
+  "properties": {
+    "schema_version": {"const": "3.0"},
+    "record_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "run_id": {"$ref": "urn:gigai:schema:common:1#/$defs/run_id"},
+    "goal_id": {"$ref": "urn:gigai:schema:common:1#/$defs/goal_id"},
+    "invocation_id": {"$ref": "urn:gigai:schema:common:1#/$defs/invocation_id"},
+    "role": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+    "provider_family": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "maxLength": 120},
+    "configured_selector": {"type": "string", "minLength": 1, "maxLength": 255},
+    "endpoint_identity": {"type": ["string", "null"], "maxLength": 255},
+    "resolved_model": {"type": ["string", "null"], "maxLength": 255},
+    "adapter_identity": {"type": "string", "minLength": 1, "maxLength": 255},
+    "request": {"$ref": "#/$defs/request"},
+    "outcome": {"type": "string", "enum": ["succeeded", "partial", "failed", "cancelled", "timeout", "unavailable", "blocked"]},
+    "finish": {"type": "string", "enum": ["completed", "partial", "failed", "cancelled", "timeout", "unavailable", "blocked"]},
+    "cancellation": {"type": "string", "enum": ["not_requested", "requested", "acknowledged", "forced", "unsupported", "not_applicable"]},
+    "error": {"oneOf": [{"$ref": "urn:gigai:schema:common:1#/$defs/error"}, {"type": "null"}]},
+    "usage": {"$ref": "urn:gigai:schema:common:1#/$defs/usage"},
+    "boundary": {"$ref": "urn:gigai:schema:model-invocation:2#/$defs/boundary"},
+    "local_identity": {"$ref": "urn:gigai:schema:model-invocation:2#/$defs/local_identity"},
+    "extensions": {"type": "array", "uniqueItems": true, "items": {"$ref": "urn:gigai:schema:model-invocation:2#/$defs/extension"}},
+    "replay": {"$ref": "urn:gigai:schema:model-invocation:2#/$defs/replay"},
+    "terminal_committed_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "request": {
+      "type": "object", "additionalProperties": false,
+      "required": ["selected_references", "selected_source_descriptors", "request_artifact", "request_sha256"],
+      "properties": {
+        "selected_references": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/selected_reference"}},
+        "selected_source_descriptors": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/source_descriptor"}},
+        "request_artifact": {"$ref": "urn:gigai:schema:common:1#/$defs/artifact_ref"},
+        "request_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}
+      }
+    },
+    "selected_reference": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reference_id", "content_sha256"],
+      "properties": {
+        "reference_id": {"type": "string", "pattern": "^(?:ref_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|source_[1-9][0-9]{0,2})$"},
+        "content_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}
+      }
+    },
+    "source_descriptor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_id", "family", "purpose", "content_sha256", "identity_sha256"],
+      "properties": {
+        "source_id": {"type": "string", "pattern": "^source_[1-9][0-9]{0,2}$"},
+        "family": {"type": "string", "enum": ["scout_discovery_posting", "scout_record", "g45_reference", "g45_run_input"]},
+        "purpose": {"type": "string", "enum": ["posting", "preferences", "experience", "answer"]},
+        "content_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"},
+        "identity_sha256": {"$ref": "urn:gigai:schema:common:1#/$defs/sha256"}
+      }
+    }
+  }
+}

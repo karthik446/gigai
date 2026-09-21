@@ -20,7 +20,6 @@ from gigai.config import (
     CredentialReference,
     Endpoint,
     ModelTarget,
-    Profile,
     config_path,
     load_config,
     migrate_config,
@@ -145,6 +144,10 @@ def test_setup_command_explicitly_migrates_recognized_v1_configuration(tmp_path:
             "--editor",
             "/usr/bin/true",
             "--json",
+            "--credential-ref", "openai=environment:OPENAI_API_KEY",
+            "--endpoint", "openai=openai_api:openai:https://api.example.test",
+            "--model-target", "remote=openai:gpt-test",
+            "--create-model-target", "remote",
         ),
     )
 
