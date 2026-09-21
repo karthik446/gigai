@@ -61,6 +61,7 @@ def _commands(tier: str, report_dir: Path) -> list[list[str]]:
                 uv,
                 "run",
                 "gigai",
+                "internal",
                 "eval",
                 "behavior",
                 "--manifest",
