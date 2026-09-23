@@ -1,0 +1,14 @@
+TARGET: Apply the fixes F1–F8 in .orchestrator/reviews/w0d-reconcile.md to the same two docs you just reconciled. Read the review first. Small targeted edits only; no restructuring.
+
+OWNED FILES (nothing else): docs/development/v0.1.8/roadmaps/v0.1.8-find-jobs-functional-roadmap.md; docs/development/v0.1.8/phase-2/evidence/P2-FREEZE-04-amendment-02-find-jobs-functional.md; .orchestrator/workers/w0e-fixes.md
+
+ACCEPTANCE (run these and paste the output into the worker file):
+- `grep -n 'I-3' docs/development/v0.1.8/roadmaps/v0.1.8-find-jobs-functional-roadmap.md | grep -c 'after-M1'` prints 0
+- `grep -n '^| A-5' docs/development/v0.1.8/roadmaps/v0.1.8-find-jobs-functional-roadmap.md | grep -c 'luna medium'` prints 1
+- `grep -n '^| I-0' docs/development/v0.1.8/roadmaps/v0.1.8-find-jobs-functional-roadmap.md | grep -c 'fixtures/'` prints 1
+- `grep -c 'Coordinator publishes fixtures' docs/development/v0.1.8/roadmaps/v0.1.8-find-jobs-functional-roadmap.md` prints 0
+- `grep -n '3491-3497' <both docs>`: every hit is about aggregate status, not the effect check
+- each doc is <= 260 lines
+Add one line per fix to the amendment's Revision 2 note (or a "Revision 2.1" line) and to the roadmap change log.
+
+EXCLUSIONS: documentation only; no other files; no git stash/reset/clean/add/commit; no network/tests. Say READ vs EXECUTED. On finish, write the worker file (per-fix disposition + grep outputs), then worker_done. Questions go through `orca orchestration ask`.

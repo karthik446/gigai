@@ -1,0 +1,21 @@
+# Wave 1b independent review (Terra)
+
+## Scope and evidence boundary
+
+**READ:** frozen contracts; the named integration, acquire, assess, and present modules; relevant Wave 1b handoffs and `.orchestrator/decisions.log`. **EXECUTED:** one read-only import check for every named module (`imports-ok`); no provider/network run, no test run, and no source changes. The working tree was already materially dirty; this report is limited to the current source observed.
+
+| id | severity blocker/major/minor | file:line | finding | concrete failure scenario | fix |
+| --- | --- | --- | --- | --- | --- |
+| W1BT-1 | blocker | `src/gigai/run.py:4224-4238`; `src/gigai/scout_projection.py:537-543`; `src/gigai/scout_market_acquisition.py:224-233` | **READ:** The scheduler builds `PresentInput.batch_ref` from `AcquireOutput.batch_ref`. A-6 sets that field to the acquisition-record input path, but `present_node` reads the field as an `AcquireOutput` and rejects the acquisition-record object. This is a producer/consumer contract mismatch, not a missing I-3 registration. | A real acquire succeeds, then present is invoked with (for example) `records/scout-acquisition/<batch>/input.json`; `AcquireOutput.from_json(...)` raises and the terminal present goal/run fails before UI results can be built. | In the scheduler, set present's `batch_ref` to `runs/{run_id}/outputs/acquire.json` (the artifact serialized as `AcquireOutput`); retain `AcquireOutput.batch_ref` only for assess's pinned posting source. Add an unstubbed acquire-to-present traversal test. |
+| W1BT-2 | major | `src/gigai/scout_market_acquisition.py:167-187,219-234` | **READ:** A-6 records every enabled-source exception as a `FailureRow`, then unconditionally writes an artificial `example.invalid` empty acquisition and returns an `AcquireOutput`; it never raises when all enabled sources fail. That contradicts the packet rule that the node fails if every enabled source fails and lets the scheduler mark acquire COMPLETE. | Missing `EXA_API_KEY`, Exa outage, and/or every ATS board request failure yields a successful acquire receipt plus an empty result instead of a failed Run, so the UI can present a completed-looking zero-row matrix with only buried failures. | After source collection, if at least one source was enabled and every attempted enabled source failed, raise a redacted node error before `import_public_rows`; preserve the partial-success `FailureRow` path. Add a real-node receipt test for all-Exa/all-ATS failure. |
+
+## Checks that did not produce a finding
+
+- **READ:** Exa obtains `EXA_API_KEY` only for the `x-api-key` header and redacts transport failures to an exception type (`scout_exa_client.py:123-153`); no key is placed in its request body or error strings. ATS requests take only public board URLs/data (`scout_ats_board_clients.py:82-95,129-205`), and the acquire call sites receive no resume bytes (`scout_market_acquisition.py:151-187`).
+- **READ:** The API determines loopback solely from the socket peer, rather than any forwarded header (`scout_present_api.py:115-120`); `serve` permits a test-supplied bind but requests from non-loopback peers remain refused (`283-303`). This must remain true when I-3 supplies the real backend.
+- **READ:** assess rejects an unavailable sealed adapter before invocation and has no provider fallback (`scout_proposal_execution.py:113-131`); per-posting invocation failures are represented as typed `NotAssessedRow`s rather than erased (`172-181`). The hosted prompt does include resume bytes, as expected for the explicitly non-local assess target, but no resume crosses the Exa/ATS surfaces above.
+- **READ:** scheduler admission still requires an exact registry key and limits unregistered graphs to the legacy offline capabilities (`run.py:3943-3987`); the wider Gig shared policy is a ceiling while unchanged legacy descriptors remain narrow (`scout_materialization.py:550-575`). I found no evidence that this alone widens an existing graph's admitted effects.
+
+## Verdict
+
+**fix first** — I-3 can supply child-process bindings and the real API backend, but it cannot repair W1BT-1 in `run.py` or W1BT-2 in acquisition. After those two fixes and an unstubbed M1 traversal, the reviewed security boundaries are consistent with the stated constraints.

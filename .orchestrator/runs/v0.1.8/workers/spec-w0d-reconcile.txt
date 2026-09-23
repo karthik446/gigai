@@ -1,0 +1,31 @@
+TARGET: Make the new roadmap and Amendment 02 agree, fix the coordinator's review findings, and reshape both around the operator's scope decision. You own BOTH docs so they cannot drift again.
+
+OWNED FILES (nothing else):
+- docs/development/v0.1.8/roadmaps/v0.1.8-find-jobs-functional-roadmap.md
+- docs/development/v0.1.8/phase-2/evidence/P2-FREEZE-04-amendment-02-find-jobs-functional.md
+- .orchestrator/workers/w0d-reconcile.md
+
+READ FIRST: .orchestrator/reviews/w0c-roadmap-and-w0r-rev1.md (findings R1-R5, P1-P7), then both docs. For R1, recover Rev 0's dropped text with `git diff` or from .orchestrator/reviews/w0-amendment-02.md context: the node receipt fields (producer{callable,version,actor,model_target,adapter}; usage{input_tokens,output_tokens,total_tokens,cost,cost_status,measured}; cost_status="unavailable"/measured=false distinct from measured zero), aggregate precedence `interrupted > failed > blocked > cancelled > running > pending > succeeded` (only all-required-COMPLETE yields succeeded; this fixes src/gigai/scout_report_readers.py ~315-342 and src/gigai/run.py `_terminal_status`), and the watchlist JSON shape `{"schema_version":"scout-watchlist:1","watchlist_id","provider","board_token","company","state","first_seen":{source_kind,source_url,query_key,batch_id,observed_at}}`. The amendment file is untracked, so if git has no copy, rewrite these from this spec.
+
+OPERATOR SCOPE DECISION (2026-09-22), recorded as D10 in the amendment and at the top of the roadmap:
+"Scout is a Gig, the first of many (find product, track prices, stock explainer). v0.1.8's function is getting Scout out and working ASAP. More gigs and GigAI foundations wherever needed come in 0.2.0."
+Apply it:
+1. Add milestone **M1 "usable"**: from a source checkout, the operator runs `yarn dev` + the local API, clicks Run workflow with a real config and their real resume on the local model, and sees rows plus the matrix. M1 comes BEFORE the installed-wheel proof and release gates, which remain for publishing. Mark each DAG item as needed-for-M1 or after-M1.
+2. Cut or defer anything that doesn't serve M1, one line each with the reason. Candidates: HiringCafe sitemaps (unproven that they expose board tokens; M1 works with Exa + ATS boards; defer to after M1 unless it's trivial); receipt fields beyond what `present` shows and restart needs; model-quality evaluation. Keep what the existing code ENFORCES (consent validator, model-boundary network check, scheduler effect check) — those aren't optional.
+3. Add a section **"0.2.0 generalization ledger"**: the Scout-specific seams built in 0.1.8 that would become GigAI-generic when gig #2 arrives (UI consent source, network_public_acquisition / network_hosted_model effects, present API + UI shell, per-gig config file, graph binding `find-jobs:functional:1`, and the contracts module split between generic node context and Scout DTOs). A table: seam | 0.1.8 Scout form | what gig #2 would need. Record only; don't build.
+
+FIXES (all from the review):
+R1 restore the dropped content (above). R2 D6: the Run input seals N + the selection RULE; the selected posting identities go in AssessInput and the assess node receipt. R3 give the watchlist a storage home (journal record kind or workpad path, and the writer), reusing the existing journal publish pattern (cite src/gigai/private_records.py:326 `_publish` or the acquisition-records equivalent you actually read). R4 add new `tests/behaviors/scout_find_jobs/test_run_seam.py` to Integration (UI consent, effects, newest-resume resolution, input sealing) and to its command. R5 add new `tests/behaviors/scout_find_jobs/test_assess_model_policy.py` to B and to its command.
+P1 the roadmap uses the amendment's names exactly: scout_exa_client.py, scout_hiringcafe_sitemaps.py, scout_ats_board_clients.py, scout_url_change_detection.py, scout_watchlist.py, scout_market_acquisition.py, and config at `<target_root>/find-jobs.json`. P2 fixtures are owned by I-0: `tests/behaviors/scout_find_jobs/fixtures/*.json`, validated against the dataclasses in test_contracts.py; name each fixture file. P3 add I-3 "bind real callables" (scout_materialization.py, same owner as I-1, sequential after A-6/B-2/C-2). P4 I-0 also freezes the A-1..A-5 client function signatures and the present API routes + request/response JSON, so A-6 and C-4 can truly run in parallel; list them in the contracts section. P5 put D7 newest-resume resolution in I-2 explicitly. P6 A-5 routes to gpt-5.6-luna medium. P7 update the I-2/B-2 acceptance commands with R4/R5.
+
+CONSTRAINTS: keep ownership disjoint across every row in both docs (list the audit result); keep the models cheapest-capable; every new code claim cites a file:line you actually read; each doc <= 260 lines; tables over prose. Add a "Revision 2" change note to the amendment and a change-log entry to the roadmap.
+
+ACCEPTANCE (run these and paste the output into your worker file):
+- `grep -c -E 'interrupted > failed|cost_status|scout-watchlist:1' docs/development/v0.1.8/phase-2/evidence/P2-FREEZE-04-amendment-02-find-jobs-functional.md` prints >= 3
+- `grep -n -E 'scout_find_jobs_(exa|hiringcafe|ats|urls)|\.gigai/find-jobs' docs/development/v0.1.8/roadmaps/v0.1.8-find-jobs-functional-roadmap.md` prints nothing
+- `grep -c -E 'M1|0\.2\.0 generalization ledger' docs/development/v0.1.8/roadmaps/v0.1.8-find-jobs-functional-roadmap.md` prints >= 2
+- `wc -l` of both docs <= 260
+
+EXCLUSIONS: documentation only; do not edit the README, the old roadmap or any source/test/schema/ui file; no git stash/reset/clean/add/commit; no network, provider or model calls; no tests. Say what you READ vs EXECUTED.
+
+ON FINISH OR QUESTION: write .orchestrator/workers/w0d-reconcile.md (state, per-finding disposition R1-R5/P1-P7/D10 items, the acceptance command outputs, READ vs EXECUTED), then worker_done. Use `orca orchestration ask` for questions; never a local prompt.

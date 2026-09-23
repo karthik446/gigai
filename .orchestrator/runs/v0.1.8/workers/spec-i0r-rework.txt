@@ -1,0 +1,20 @@
+TARGET (I-0 rework): fix the contract freeze per Terra's review .orchestrator/reviews/terra-i0.md (T1–T10) and the coordinator's minor items m1/m2 in .orchestrator/reviews/i0-coordinator.md. Verdict was "rework": wave 1b (about 11 packets) is waiting on this, so completeness matters more than speed. Read both reviews first.
+
+OWNED FILES (same as before, nothing else): src/gigai/scout_find_jobs_contracts.py; tests/behaviors/scout_find_jobs/{__init__.py,conftest.py,test_contracts.py}; tests/behaviors/scout_find_jobs/fixtures/*.json; .orchestrator/workers/i0r-rework.md
+
+REQUIRED:
+T1 NodeReceipt ↔ run-details `goal_details` (src/gigai/schemas/run-details.schema.json:118-152): add goal_id, goal_version, executor, outcome, errors, evidence (artifact refs), usage, started_at/finished_at so the mapping is lossless, plus an explicit `to_goal_details()` that produces a dict valid against that schema (test it with the repo's existing schema validator, e.g. validate_serialized_contract / the helper the other tests use). Map node statuses onto the schema enum (pending/ready/running/waiting_for_gate/verifying/complete/failed/blocked/cancelled). `interrupted` is a RUN-level status, not a goal status: keep it in the aggregate-status enum and out of the goal status mapping. State that rule in a docstring.
+T2 Seal acquire→assess: SelectedPosting requires content_sha256; AssessInput carries acquire batch ref + AcquireOutput digest; selection reasons keyed per posting; the validator enforces uniqueness, one reason per posting, and a cap relationship.
+T3 Put PinnedResume (or an explicit unavailable state) in PresentPayload / RunResultsResponse.
+T4 Complete accounting: every candidate row is either assessed or not-assessed with a reason (reasons cover unchanged, duplicate, failed, over_cap, role_mismatch, model_unavailable, model_denied); no overlaps; validated.
+T5 Replace diff_url_sets with a diff over URL→content-digest observations: mutually exclusive added/removed/unchanged/edited; the fixture and tests cover an edit.
+T6 Decide `pending` (row outcome vs progress state), encode it, and put it in the fixture.
+T7 An AggregateStatus enum (pending/running/succeeded/failed/blocked/cancelled/interrupted) used by every DTO status field; payload/output agreement validated where both appear.
+T8 Table-driven negative tests for EVERY public DTO and nested object: unknown key, missing key, wrong type and bad enum each rejected with a stable code. The route test asserts method, path, statuses AND request/response types.
+T9 Representative fixtures: the assessment fixture gets success plus model-unavailable/denied variants; a present-payload fixture that is non-empty (rows, failures, matrix, suggestions, questions, not_assessed, three node receipts, pinned resume); API request/response samples for all 4 routes (separate fixture files are fine).
+T10 URL helper tests: malformed input, userinfo, explicit port (preserve non-default ports), fragment, tracking params, dedup.
+m1 `selection_rule` becomes an enum (`new_or_edited_role_match`). m2 parse_board_url: `boards.greenhouse.io/embed/job_board?for=<token>` (and job-boards) yields the token from `for=`; any other `embed` path returns None.
+
+ACCEPTANCE: `uv run --locked --extra test pytest tests/behaviors/scout_find_jobs/test_contracts.py -q` passes; paste the count. Also paste a list of every public DTO and the negative-test ids covering it, so drift coverage can be counted. `uv run --locked --extra test ruff check src/gigai/scout_find_jobs_contracts.py tests/behaviors/scout_find_jobs` passes.
+
+EXCLUSIONS: owned files only; no run.py/schema edits (read them only); no git stash/reset/clean/add/commit; no network; focused tests only. Say READ vs EXECUTED. On finish, write the worker file (per-finding disposition), then worker_done.

@@ -1,0 +1,403 @@
+uv run --locked --extra test python tools/run_ci_tests.py source \
+		--xdist-workers "auto" \
+		--xdist-max-workers "14" \
+		--xdist-dist "worksteal"
+{"actual_workers": 14, "bounded": true, "cpu_count": 14, "distribution": "worksteal", "kind": "xdist-plan", "lane": "source", "max_workers": 14, "offline_gigai_g30_uat": "0", "requested_workers": "auto"}
++ /Users/kar/orca/workspaces/gigai/gigai-v0.1.8/.venv/bin/python3 -m pytest -n 14 --dist=worksteal
+============================= test session starts ==============================
+platform darwin -- Python 3.13.1, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kar/orca/workspaces/gigai/gigai-v0.1.8
+configfile: pyproject.toml
+testpaths: tests, research/contract_spike/tests, research/phase0_spike/tests
+plugins: xdist-3.8.0, anyio-4.14.2
+created: 14/14 workers
+14 workers [1872 items]
+
+........................................................................ [  3%]
+........................................................................ [  7%]
+........................................................................ [ 11%]
+........................................................................ [ 15%]
+........................................................................ [ 19%]
+........................................................................ [ 23%]
+........................................................................ [ 26%]
+.....................................F.................................. [ 30%]
+......................................s................................. [ 34%]
+........................................................................ [ 38%]
+........................................................................ [ 42%]
+......F................................................................. [ 46%]
+........................................................................ [ 50%]
+.........F........F..................................................... [ 53%]
+........................................................................ [ 57%]
+........................................................................ [ 61%]
+........................................................................ [ 65%]
+........................................................................ [ 69%]
+........................................................................ [ 73%]
+........................................................................ [ 76%]
+........................................................................ [ 80%]
+........................................................................ [ 84%]
+........................................................................ [ 88%]
+........................................................................ [ 92%]
+........................................................................ [ 96%]
+......................F................................................. [100%]
+=================================== FAILURES ===================================
+___________ test_m1_real_api_run_child_process_and_second_run_dedup ____________
+[gw8] darwin -- Python 3.13.1 /Users/kar/orca/workspaces/gigai/gigai-v0.1.8/.venv/bin/python3
+
+    @contextlib.contextmanager
+    def map_httpcore_exceptions() -> typing.Iterator[None]:
+        global HTTPCORE_EXC_MAP
+        if len(HTTPCORE_EXC_MAP) == 0:
+            HTTPCORE_EXC_MAP = _load_httpcore_exceptions()
+        try:
+>           yield
+
+.venv/lib/python3.13/site-packages/httpx/_transports/default.py:101: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.13/site-packages/httpx/_transports/default.py:250: in handle_request
+    resp = self._pool.handle_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/httpcore/_sync/connection_pool.py:256: in handle_request
+    raise exc from None
+.venv/lib/python3.13/site-packages/httpcore/_sync/connection_pool.py:236: in handle_request
+    response = connection.handle_request(
+.venv/lib/python3.13/site-packages/httpcore/_sync/connection.py:103: in handle_request
+    return self._connection.handle_request(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/httpcore/_sync/http11.py:136: in handle_request
+    raise exc
+.venv/lib/python3.13/site-packages/httpcore/_sync/http11.py:106: in handle_request
+    ) = self._receive_response_headers(**kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/httpcore/_sync/http11.py:177: in _receive_response_headers
+    event = self._receive_event(timeout=timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/httpcore/_sync/http11.py:217: in _receive_event
+    data = self._network_stream.read(
+.venv/lib/python3.13/site-packages/httpcore/_backends/sync.py:126: in read
+    with map_exceptions(exc_map):
+         ^^^^^^^^^^^^^^^^^^^^^^^
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/contextlib.py:162: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+map = {<class 'TimeoutError'>: <class 'httpcore.ReadTimeout'>, <class 'OSError'>: <class 'httpcore.ReadError'>}
+
+    @contextlib.contextmanager
+    def map_exceptions(map: ExceptionMapping) -> typing.Iterator[None]:
+        try:
+            yield
+        except Exception as exc:  # noqa: PIE786
+            for from_exc, to_exc in map.items():
+                if isinstance(exc, from_exc):
+>                   raise to_exc(exc) from exc
+E                   httpcore.ReadTimeout: timed out
+
+.venv/lib/python3.13/site-packages/httpcore/_exceptions.py:14: ReadTimeout
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1538/popen-gw8/test_m1_real_api_run_child_pro0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d120650>
+
+    def test_m1_real_api_run_child_process_and_second_run_dedup(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The child registry hook is proven by requiring all real node receipts."""
+    
+        home, target = _fixture(tmp_path)
+        monkeypatch.setenv("EXA_API_KEY", "m1-test-key")
+        # The bindings construct these MockTransports in the spawned child.  A
+        # parent transport cannot be pickled through multiprocessing.spawn.
+        monkeypatch.setenv("GIGAI_SCOUT_FIND_JOBS_TEST_HTTP", "1")
+        monkeypatch.setenv("GIGAI_SCOUT_FIND_JOBS_TEST_MODEL", "1")
+    
+        backend = ScoutFindJobsBackend(home_root=home, target=target)
+        server = serve(backend=backend, bind=("127.0.0.1", 0))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address[0], server.server_address[1]
+        try:
+            with httpx.Client(base_url=f"http://{host}:{port}", timeout=5.0) as client:
+                config_response = client.get("/api/config")
+                assert config_response.status_code == 200, config_response.text
+                config_body = config_response.json()
+                assert config_body["resume_preview"] is not None
+                request_body = _run_request(config_body["config_digest"])
+    
+                started = time.monotonic()
+>               response = client.post("/api/run", json=request_body)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/behaviors/scout_find_jobs/test_m1_end_to_end.py:180: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.13/site-packages/httpx/_client.py:1144: in post
+    return self.request(
+.venv/lib/python3.13/site-packages/httpx/_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/httpx/_client.py:914: in send
+    response = self._send_handling_auth(
+.venv/lib/python3.13/site-packages/httpx/_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+.venv/lib/python3.13/site-packages/httpx/_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/httpx/_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/httpx/_transports/default.py:249: in handle_request
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/contextlib.py:162: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    @contextlib.contextmanager
+    def map_httpcore_exceptions() -> typing.Iterator[None]:
+        global HTTPCORE_EXC_MAP
+        if len(HTTPCORE_EXC_MAP) == 0:
+            HTTPCORE_EXC_MAP = _load_httpcore_exceptions()
+        try:
+            yield
+        except Exception as exc:
+            mapped_exc = None
+    
+            for from_exc, to_exc in HTTPCORE_EXC_MAP.items():
+                if not isinstance(exc, from_exc):
+                    continue
+                # We want to map to the most specific exception we can find.
+                # Eg if `exc` is an `httpcore.ReadTimeout`, we want to map to
+                # `httpx.ReadTimeout`, not just `httpx.TimeoutException`.
+                if mapped_exc is None or issubclass(to_exc, mapped_exc):
+                    mapped_exc = to_exc
+    
+            if mapped_exc is None:  # pragma: no cover
+                raise
+    
+            message = str(exc)
+>           raise mapped_exc(message) from exc
+E           httpx.ReadTimeout: timed out
+
+.venv/lib/python3.13/site-packages/httpx/_transports/default.py:118: ReadTimeout
+_________ test_canonical_module_owns_all_product_sha256_implementation _________
+[gw1] darwin -- Python 3.13.1 /Users/kar/orca/workspaces/gigai/gigai-v0.1.8/.venv/bin/python3
+
+    def test_canonical_module_owns_all_product_sha256_implementation() -> None:
+        violations: list[str] = []
+        for path in PRODUCT_ROOT.rglob("*.py"):
+            if path == CANONICAL_MODULE:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    names = (
+                        [alias.name for alias in node.names]
+                        if isinstance(node, ast.Import)
+                        else [node.module or ""]
+                    )
+                    if any(name == "hashlib" or name.startswith("hashlib.") for name in names):
+                        violations.append(f"{path.relative_to(PRODUCT_ROOT)} imports hashlib")
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "sha256"
+                ):
+                    violations.append(f"{path.relative_to(PRODUCT_ROOT)} calls sha256")
+>       assert violations == []
+E       AssertionError: assert ['scout_marke...calls sha256'] == []
+E         
+E         Left contains 2 more items, first extra item: 'scout_market_acquisition.py imports hashlib'
+E         Use -v to get more diff
+
+tests/behaviors/integrity_canonical/test_canonical_ownership.py:41: AssertionError
+____________ test_both_graphs_run_independently_in_one_approved_gig ____________
+[gw8] darwin -- Python 3.13.1 /Users/kar/orca/workspaces/gigai/gigai-v0.1.8/.venv/bin/python3
+
+tmp_path = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1538/popen-gw8/test_both_graphs_run_independe0')
+
+    def test_both_graphs_run_independently_in_one_approved_gig(tmp_path: Path) -> None:
+        home, target, created, workpad = _workspace(tmp_path)
+        proposed = propose_graph_set_offline(home_root=home, requested_target=target, gig_id=created.gig_id, definition_path=_write_definition(tmp_path / "bundle", workpad, created.gig_id))
+        approve_offline(home_root=home, requested_target=target, proposal_id=proposed.proposal_id)
+        runs = []
+        for selector in ("career", "stock"):
+            source = tmp_path / f"{selector}-input.md"
+            source.write_text(f"explicit {selector} fixture input\n")
+            plan = create_run_plan(home_root=home, requested_target=target, gig_id=created.gig_id, graph_selector=selector, input_paths=(source,))
+            assert plan.plan["selected_graph_id"] == selector
+            run = launch_run(home_root=home, requested_target=target, gig_id=created.gig_id, run_plan_id=plan.run_plan_id, wait=True, operator_consent={"schema_version": "1.0", "kind": "operator_run_consent", "action": "run", "actor": {"kind": "operator", "id": "local-user"}, "source": "direct_cli_confirm"})
+>           assert run.status == "succeeded"
+E           AssertionError: assert 'interrupted' == 'succeeded'
+E             
+E             - succeeded
+E             + interrupted
+
+tests/behaviors/scout_proposals_tools/test_scout02_acceptance_negative_paths.py:128: AssertionError
+----------------------------- Captured stderr call -----------------------------
+Process SpawnProcess-2:
+Traceback (most recent call last):
+  File "/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
+    self.run()
+    ~~~~~~~~^^
+  File "/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout_find_jobs_bindings.py", line 492, in _child_worker_entry
+    _register_nodes(
+    ~~~~~~~~~~~~~~~^
+        home_root=Path(home_value),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        target=target_root,
+        ^^^^^^^^^^^^^^^^^^^
+        install_worker_hook=False,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout_find_jobs_bindings.py", line 391, in _register_nodes
+    graph_ids = _registry_graph_ids(home_root=home, target=root)
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout_find_jobs_bindings.py", line 76, in _registry_graph_ids
+    resolved = resolve_workpad(
+        home_root=home_root,
+    ...<2 lines>...
+        allow_semantic_state=True,
+    )
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/workpad.py", line 263, in resolve_workpad
+    bound = _resolve_bound_project(home, requested_target, cwd=cwd)
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/workpad.py", line 683, in _resolve_bound_project
+    raise WorkpadConflictError("target is not bound to a GigAI project")
+gigai.workpad.WorkpadConflictError: target is not bound to a GigAI project
+_____________ test_two_graph_propose_approve_plan_history_and_run ______________
+[gw8] darwin -- Python 3.13.1 /Users/kar/orca/workspaces/gigai/gigai-v0.1.8/.venv/bin/python3
+
+tmp_path = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1538/popen-gw8/test_two_graph_propose_approve0')
+
+    def test_two_graph_propose_approve_plan_history_and_run(tmp_path: Path) -> None:
+        home, target = tmp_path / "home", tmp_path / "target"
+        target.mkdir()
+        run_setup(build_config(home_root=home, workpad_root=tmp_path / "workpads", editor_argv=("/usr/bin/true",), open_with_target=False))
+        initialize_target(home_root=home, requested_target=target)
+        created = create_offline(home_root=home, requested_target=target, name="two-graphs", open_editor=False)
+        approve_offline(home_root=home, requested_target=target, proposal_id=created.proposal_id)
+        workpad = next((tmp_path / "workpads").glob("projects/*/gigs/*"))
+        proposed = propose_graph_set_offline(home_root=home, requested_target=target, gig_id=created.gig_id, definition_path=_write_definition(tmp_path / "definition-one", workpad, created.gig_id))
+        approved = approve_offline(home_root=home, requested_target=target, proposal_id=proposed.proposal_id)
+        assert approved.version == 2
+        source = tmp_path / "source.md"
+        source.write_text("explicit fixture input\n")
+        with pytest.raises(RunPlanError, match="graph_selection_required"):
+            create_run_plan(home_root=home, requested_target=target, gig_id=created.gig_id, input_paths=(source,))
+        plan = create_run_plan(home_root=home, requested_target=target, gig_id=created.gig_id, graph_selector="role", input_paths=(source,))
+        assert plan.plan["selected_graph_id"] == "career"
+        plan_bytes = (plan.workpad / "run-plans" / plan.run_plan_id / "run-plan.json").read_bytes()
+        # A changed Graph Set must become a new version and cannot mutate the v2 Plan.
+        proposed_next = propose_graph_set_offline(home_root=home, requested_target=target, gig_id=created.gig_id, definition_path=_write_definition(tmp_path / "definition-two", workpad, created.gig_id, suffix="2"))
+        approved_next = approve_offline(home_root=home, requested_target=target, proposal_id=proposed_next.proposal_id)
+        assert approved_next.version == 3
+        reread = read_run_plan(home_root=home, requested_target=target, gig_id=created.gig_id, run_plan_id=plan.run_plan_id)
+        assert (plan.workpad / "run-plans" / plan.run_plan_id / "run-plan.json").read_bytes() == plan_bytes
+        run = launch_run(home_root=home, requested_target=target, gig_id=created.gig_id, run_plan_id=reread.run_plan_id, wait=True, operator_consent={"schema_version": "1.0", "kind": "operator_run_consent", "action": "run", "actor": {"kind": "operator", "id": "local-user"}, "source": "direct_cli_confirm"})
+>       assert run.status == "succeeded"
+E       AssertionError: assert 'interrupted' == 'succeeded'
+E         
+E         - succeeded
+E         + interrupted
+
+tests/behaviors/scout_proposals_tools/test_scout02_graph_set_flow.py:100: AssertionError
+----------------------------- Captured stderr call -----------------------------
+Process SpawnProcess-3:
+Traceback (most recent call last):
+  File "/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
+    self.run()
+    ~~~~~~~~^^
+  File "/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout_find_jobs_bindings.py", line 492, in _child_worker_entry
+    _register_nodes(
+    ~~~~~~~~~~~~~~~^
+        home_root=Path(home_value),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        target=target_root,
+        ^^^^^^^^^^^^^^^^^^^
+        install_worker_hook=False,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout_find_jobs_bindings.py", line 391, in _register_nodes
+    graph_ids = _registry_graph_ids(home_root=home, target=root)
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout_find_jobs_bindings.py", line 76, in _registry_graph_ids
+    resolved = resolve_workpad(
+        home_root=home_root,
+    ...<2 lines>...
+        allow_semantic_state=True,
+    )
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/workpad.py", line 263, in resolve_workpad
+    bound = _resolve_bound_project(home, requested_target, cwd=cwd)
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/workpad.py", line 683, in _resolve_bound_project
+    raise WorkpadConflictError("target is not bound to a GigAI project")
+gigai.workpad.WorkpadConflictError: target is not bound to a GigAI project
+_ test_candidate_copies_bundled_tool_assets_and_pins_pending_manifest_to_real_goals _
+[gw8] darwin -- Python 3.13.1 /Users/kar/orca/workspaces/gigai/gigai-v0.1.8/.venv/bin/python3
+
+tmp_path = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1538/popen-gw8/test_candidate_copies_bundled_0')
+
+    def test_candidate_copies_bundled_tool_assets_and_pins_pending_manifest_to_real_goals(
+        tmp_path: Path,
+    ) -> None:
+        _home, target, instance, workpad = _candidate(tmp_path)
+        source = scout_source_files()
+        for path in ("gig.py", SCOUT_CRUD_ENTRY_PATH, SCOUT_CRUD_SCHEMA_PATH):
+            assert (workpad / path).read_bytes() == source[path]
+    
+        manifest = _prepared_manifest(workpad)
+        assert validate_capability_manifest(canonical_json_bytes(manifest)).valid
+        capability = manifest["capabilities"][0]
+>       assert capability["goal_ids"] == _compiled_goal_ids(workpad)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/behaviors/scout_proposals_tools/test_scout05_bundled_tools.py:165: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+workpad = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1538/popen-gw8/test_candidate...undled_0/workpads/projects/project_27227251-6425-4bfc-b8d5-7014a756e227/gigs/gig_5af4b5d6-33dc-4a8a-9ca8-558410e01925')
+
+    def _compiled_goal_ids(workpad: Path) -> list[str]:
+        values: list[str] = []
+        for path in workpad.glob("manifests/software/*/compiled/*/goal-graph.json"):
+            graph = parse_json_bytes(path.read_bytes())
+            assert isinstance(graph, dict)
+            goals = graph["goals"]
+>           assert isinstance(goals, list) and len(goals) == 1
+E           AssertionError: assert (True and 3 == 1)
+E            +  where True = isinstance([{'activation': 'automatic', 'budget': {'currency': 'USD', 'max_cost': '0.16', 'max_model_calls': 1, 'max_parallel_goa.../markdown', 'path': 'find-jobs-functional/present/goal-contract.md', 'size_bytes': 63}, 'display_ordinal': 'G02', ...}], list)
+E            +  and   3 = len([{'activation': 'automatic', 'budget': {'currency': 'USD', 'max_cost': '0.16', 'max_model_calls': 1, 'max_parallel_goa.../markdown', 'path': 'find-jobs-functional/present/goal-contract.md', 'size_bytes': 63}, 'display_ordinal': 'G02', ...}])
+
+tests/behaviors/scout_proposals_tools/test_scout05_bundled_tools.py:149: AssertionError
+=============================== warnings summary ===============================
+tests/behaviors/runtime_run_authority/test_jsl_closeout_regressions.py::test_concurrent_identical_closeout_publishes_once_and_replays_once
+tests/behaviors/runtime_run_authority/test_jsl_closeout_regressions.py::test_concurrent_identical_closeout_publishes_once_and_replays_once
+  /Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/multiprocessing/popen_fork.py:67: DeprecationWarning: This process (pid=19908) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_provider_process_death_is_recovered_once_without_offline_work
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_terminal_publication_crash_never_exposes_uncommitted_success[after_artifact_replace]
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_terminal_publication_crash_never_exposes_uncommitted_success[after_replace]
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_terminal_publication_crash_never_exposes_uncommitted_success[before_commit]
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_terminal_publication_crash_never_exposes_uncommitted_success[after_commit]
+  /Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/multiprocessing/popen_fork.py:67: DeprecationWarning: This process (pid=19897) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/behaviors/scout_tracking_reporting/test_scout_r5_transfer_corrections.py::test_import_rejects_duplicate_members_before_last_entry_wins
+  /Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/zipfile/__init__.py:1638: UserWarning: Duplicate name: 'README.md'
+    return self._open_to_write(zinfo, force_zip64=force_zip64)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/behaviors/runtime_model_boundary/test_g30_live_cli.py:19: set GIGAI_G30_UAT=1 to invoke real local model CLIs
+FAILED tests/behaviors/scout_find_jobs/test_m1_end_to_end.py::test_m1_real_api_run_child_process_and_second_run_dedup
+FAILED tests/behaviors/integrity_canonical/test_canonical_ownership.py::test_canonical_module_owns_all_product_sha256_implementation
+FAILED tests/behaviors/scout_proposals_tools/test_scout02_acceptance_negative_paths.py::test_both_graphs_run_independently_in_one_approved_gig
+FAILED tests/behaviors/scout_proposals_tools/test_scout02_graph_set_flow.py::test_two_graph_propose_approve_plan_history_and_run
+FAILED tests/behaviors/scout_proposals_tools/test_scout05_bundled_tools.py::test_candidate_copies_bundled_tool_assets_and_pins_pending_manifest_to_real_goals
+====== 5 failed, 1866 passed, 1 skipped, 8 warnings in 482.41s (0:08:02) =======
+make: *** [test-source] Error 1
+=== EXIT 2 ===

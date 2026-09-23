@@ -1,0 +1,18 @@
+TARGET: Independent READ-ONLY review of two planning docs before implementation starts:
+- docs/development/v0.1.8/roadmaps/v0.1.8-find-jobs-functional-roadmap.md (Revision 2.1)
+- docs/development/v0.1.8/phase-2/evidence/P2-FREEZE-04-amendment-02-find-jobs-functional.md (Revision 2.1)
+Context: the operator's decision D10 is "v0.1.8 = Scout working ASAP; more gigs and foundations in 0.2.0". The coordinator already reviewed these twice (.orchestrator/reviews/w0-amendment-02.md, w0c-roadmap-and-w0r-rev1.md, w0d-reconcile.md). Do not re-report findings those reviews already closed; find what they missed.
+
+OWNED FILES (nothing else): .orchestrator/reviews/terra-w0.md; .orchestrator/workers/w0t-terra-review.md
+
+REVIEW FOR, in priority order:
+1. Code truth: sample at least 10 file:line citations across both docs and verify each against the source. Report the exact count checked/accurate/wrong.
+2. Will M1 actually work? Walk one Run workflow click end to end through the DAG (API → consent → run.py sealing → acquire → assess → present → UI) and name any step no row owns or any contract that's missing. Check especially whether the existing scheduler/executor can call real node callables at all (run.py placeholder executor ~3546-3561), and whether I-2 + I-3 cover that.
+3. Is I-0 freezable? I-0 freezes every DTO, the client signatures and the API routes. List anything the docs leave too vague to freeze (a field, type or route that isn't specified).
+4. Contradictions between the two docs, or within one.
+5. Hidden scope creep against D10, or ceremony that doesn't serve M1 and could be cut.
+6. Ownership: disjointness, and any file a row must edit that it doesn't own.
+
+OUTPUT: .orchestrator/reviews/terra-w0.md, a table: id | severity (blocker/major/minor) | doc:line | finding | evidence file:line | suggested fix. Then the citation count and a one-line verdict: dispatch I-0 now / fix first.
+
+EXCLUSIONS: read-only; do not edit the docs or any repo file; no git stash/reset/clean/add; no network, provider or model calls; no tests. Say READ vs EXECUTED. On finish write the worker file (verdict + counts), then worker_done.

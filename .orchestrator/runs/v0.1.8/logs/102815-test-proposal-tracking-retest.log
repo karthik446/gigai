@@ -1,0 +1,510 @@
+...............................FFFFFF........F................           [100%]
+=================================== FAILURES ===================================
+____ test_interview_revision_feedback_reloads_and_rejects_unsupported_story ____
+
+data = b'{"actor":{"id":"local-user","kind":"operator"},"content":{"evidence_backed_stories":[{"claims":[],"metrics":[],"skil...,"role":{"title":"Forward Deployed Engineer"},"stage_or_format":{"format":"panel","stage":"onsite"}},"state":"active"}'
+
+    def _validate_interview_bytes(data: bytes) -> None:
+        """Validate both the frozen local schema and the central registry when present."""
+        try:
+>           value = json.loads(_INTERVIEW_SCHEMA.read_text(encoding="utf-8"))
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/gigai/scout/interview_records.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout/schemas/scout-interview-preparation.schema.json')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout/schemas/scout-interview-preparation.schema.json'
+
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_local.py:537: FileNotFoundError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1573/test_interview_revision_feedba0')
+
+    def test_interview_revision_feedback_reloads_and_rejects_unsupported_story(tmp_path: Path):
+        home, target, created, source_ref = _env(tmp_path)
+        options = {"home_root": home, "requested_target": target, "gig_id": created.gig_id}
+>       first = prepare_interview(**options, selection=_selection(source_ref=source_ref), content=_content(source_ref), operation_key="prep-1")
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/behaviors/scout_tracking_reporting/test_scout_r5_interview_transfer.py:135: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/gigai/scout/interview_records.py:644: in prepare_interview
+    return _publish(resolved=resolved, record=record, markdown=_markdown(record), operation_key=operation_key, authenticate=authenticate)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/gigai/scout/interview_records.py:567: in _publish
+    receipt, created = run_with_journal_writer(
+src/gigai/journal.py:268: in run_with_journal_writer
+    return operation(JournalWriter(root, project_id, gig_id, observer or (lambda _step: None)))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/gigai/scout/interview_records.py:535: in publish
+    _validate_interview_bytes(current_bytes)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+data = b'{"actor":{"id":"local-user","kind":"operator"},"content":{"evidence_backed_stories":[{"claims":[],"metrics":[],"skil...,"role":{"title":"Forward Deployed Engineer"},"stage_or_format":{"format":"panel","stage":"onsite"}},"state":"active"}'
+
+    def _validate_interview_bytes(data: bytes) -> None:
+        """Validate both the frozen local schema and the central registry when present."""
+        try:
+            value = json.loads(_INTERVIEW_SCHEMA.read_text(encoding="utf-8"))
+            errors = sorted(Draft202012Validator(value).iter_errors(json.loads(data)), key=lambda item: list(item.path))
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
+>           raise ScoutInterviewError("interview_schema_unavailable", "interview preparation schema is unavailable") from exc
+E           gigai.scout.interview_records.ScoutInterviewError: interview preparation schema is unavailable
+
+src/gigai/scout/interview_records.py:55: ScoutInterviewError
+__ test_feedback_source_requires_real_feedback_delta_not_preparation_or_copy ___
+
+data = b'{"actor":{"id":"local-user","kind":"operator"},"content":{"evidence_backed_stories":[{"claims":[],"metrics":[],"skil...,"role":{"title":"Forward Deployed Engineer"},"stage_or_format":{"format":"panel","stage":"onsite"}},"state":"active"}'
+
+    def _validate_interview_bytes(data: bytes) -> None:
+        """Validate both the frozen local schema and the central registry when present."""
+        try:
+>           value = json.loads(_INTERVIEW_SCHEMA.read_text(encoding="utf-8"))
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/gigai/scout/interview_records.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout/schemas/scout-interview-preparation.schema.json')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout/schemas/scout-interview-preparation.schema.json'
+
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_local.py:537: FileNotFoundError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1573/test_feedback_source_requires_0')
+
+    def test_feedback_source_requires_real_feedback_delta_not_preparation_or_copy(tmp_path: Path):
+        home, target, created, source_ref = _env(tmp_path)
+        options = {"home_root": home, "requested_target": target, "gig_id": created.gig_id}
+>       first = prepare_interview(**options, selection=_selection(source_ref=source_ref), content=_content(source_ref), operation_key="feedback-source-prep")
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/behaviors/scout_tracking_reporting/test_scout_r5_interview_transfer.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/gigai/scout/interview_records.py:644: in prepare_interview
+    return _publish(resolved=resolved, record=record, markdown=_markdown(record), operation_key=operation_key, authenticate=authenticate)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/gigai/scout/interview_records.py:567: in _publish
+    receipt, created = run_with_journal_writer(
+src/gigai/journal.py:268: in run_with_journal_writer
+    return operation(JournalWriter(root, project_id, gig_id, observer or (lambda _step: None)))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/gigai/scout/interview_records.py:535: in publish
+    _validate_interview_bytes(current_bytes)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+data = b'{"actor":{"id":"local-user","kind":"operator"},"content":{"evidence_backed_stories":[{"claims":[],"metrics":[],"skil...,"role":{"title":"Forward Deployed Engineer"},"stage_or_format":{"format":"panel","stage":"onsite"}},"state":"active"}'
+
+    def _validate_interview_bytes(data: bytes) -> None:
+        """Validate both the frozen local schema and the central registry when present."""
+        try:
+            value = json.loads(_INTERVIEW_SCHEMA.read_text(encoding="utf-8"))
+            errors = sorted(Draft202012Validator(value).iter_errors(json.loads(data)), key=lambda item: list(item.path))
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
+>           raise ScoutInterviewError("interview_schema_unavailable", "interview preparation schema is unavailable") from exc
+E           gigai.scout.interview_records.ScoutInterviewError: interview preparation schema is unavailable
+
+src/gigai/scout/interview_records.py:55: ScoutInterviewError
+________ test_interview_accepts_actual_saved_discovery_posting_snapshot ________
+
+data = b'{"actor":{"id":"local-user","kind":"operator"},"content":{"evidence_backed_stories":[],"hypothetical_examples":[{"la...,"role":{"title":"Forward Deployed Engineer"},"stage_or_format":{"format":"panel","stage":"onsite"}},"state":"active"}'
+
+    def _validate_interview_bytes(data: bytes) -> None:
+        """Validate both the frozen local schema and the central registry when present."""
+        try:
+>           value = json.loads(_INTERVIEW_SCHEMA.read_text(encoding="utf-8"))
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/gigai/scout/interview_records.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout/schemas/scout-interview-preparation.schema.json')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout/schemas/scout-interview-preparation.schema.json'
+
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_local.py:537: FileNotFoundError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1573/test_interview_accepts_actual_0')
+
+    def test_interview_accepts_actual_saved_discovery_posting_snapshot(tmp_path: Path):
+        resolved, selector, _snapshot, _expected = _completed_find_jobs(tmp_path)
+        posting = resolve_discovery_posting_input_from_journal(resolved, selector)
+        posting_ref = posting["posting_ref"]
+        assert isinstance(posting_ref, dict) and isinstance(posting_ref.get("ref"), dict)
+        selection = _selection("opportunity")
+        selection["posting"] = {
+            "family": "scout_discovery", "kind": "posting", "run_id": selector["run_id"],
+            "receipt_id": selector["receipt_id"], "output_kind": "discovery",
+            "opportunity_id": selector["opportunity_id"], "snapshot_id": selector["snapshot_id"],
+            "artifact_ref": posting_ref["ref"],
+        }
+>       result = prepare_interview(
+            home_root=tmp_path / "home", requested_target=tmp_path / "target", gig_id=resolved.gig_id,
+            selection=selection, content=_empty_content(), operation_key="saved-discovery-posting",
+        )
+
+tests/behaviors/scout_tracking_reporting/test_scout_r5_interview_transfer.py:212: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/gigai/scout/interview_records.py:644: in prepare_interview
+    return _publish(resolved=resolved, record=record, markdown=_markdown(record), operation_key=operation_key, authenticate=authenticate)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/gigai/scout/interview_records.py:567: in _publish
+    receipt, created = run_with_journal_writer(
+src/gigai/journal.py:268: in run_with_journal_writer
+    return operation(JournalWriter(root, project_id, gig_id, observer or (lambda _step: None)))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/gigai/scout/interview_records.py:535: in publish
+    _validate_interview_bytes(current_bytes)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+data = b'{"actor":{"id":"local-user","kind":"operator"},"content":{"evidence_backed_stories":[],"hypothetical_examples":[{"la...,"role":{"title":"Forward Deployed Engineer"},"stage_or_format":{"format":"panel","stage":"onsite"}},"state":"active"}'
+
+    def _validate_interview_bytes(data: bytes) -> None:
+        """Validate both the frozen local schema and the central registry when present."""
+        try:
+            value = json.loads(_INTERVIEW_SCHEMA.read_text(encoding="utf-8"))
+            errors = sorted(Draft202012Validator(value).iter_errors(json.loads(data)), key=lambda item: list(item.path))
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
+>           raise ScoutInterviewError("interview_schema_unavailable", "interview preparation schema is unavailable") from exc
+E           gigai.scout.interview_records.ScoutInterviewError: interview preparation schema is unavailable
+
+src/gigai/scout/interview_records.py:55: ScoutInterviewError
+________ test_interview_accepts_actual_saved_research_revision_snapshot ________
+
+data = b'{"actor":{"id":"local-user","kind":"operator"},"content":{"evidence_backed_stories":[],"hypothetical_examples":[{"la...,"role":{"title":"Forward Deployed Engineer"},"stage_or_format":{"format":"panel","stage":"onsite"}},"state":"active"}'
+
+    def _validate_interview_bytes(data: bytes) -> None:
+        """Validate both the frozen local schema and the central registry when present."""
+        try:
+>           value = json.loads(_INTERVIEW_SCHEMA.read_text(encoding="utf-8"))
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/gigai/scout/interview_records.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout/schemas/scout-interview-preparation.schema.json')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout/schemas/scout-interview-preparation.schema.json'
+
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_local.py:537: FileNotFoundError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1573/test_interview_accepts_actual_1')
+
+    def test_interview_accepts_actual_saved_research_revision_snapshot(tmp_path: Path):
+        home, target, gig_id, resolved, _snapshot, raw, _plan, _started, _receipt = complete_research(tmp_path)
+        research_ref = {
+            "family": "scout_research", "kind": "research", "run_id": raw["run_id"],
+            "receipt_id": raw["receipt_id"], "output_kind": raw["output_kind"],
+        }
+        # Resolve the committed domain sidecar through the public research reader;
+        # the interview service then re-authenticates those exact bytes in its own
+        # single writer snapshot.
+        from gigai.scout.research_inputs import resolve_research_input_from_journal
+        resolved_research = resolve_research_input_from_journal(resolved, raw)
+        research_ref["artifact_ref"] = resolved_research["output"]["domain_sidecar"]
+        selection = _selection()
+        selection["research_revisions"] = [research_ref]
+        selection["reuse_prior_research"] = True
+>       result = prepare_interview(
+            home_root=home, requested_target=target, gig_id=gig_id,
+            selection=selection, content=_empty_content(), operation_key="saved-research-revision",
+        )
+
+tests/behaviors/scout_tracking_reporting/test_scout_r5_interview_transfer.py:234: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/gigai/scout/interview_records.py:644: in prepare_interview
+    return _publish(resolved=resolved, record=record, markdown=_markdown(record), operation_key=operation_key, authenticate=authenticate)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/gigai/scout/interview_records.py:567: in _publish
+    receipt, created = run_with_journal_writer(
+src/gigai/journal.py:268: in run_with_journal_writer
+    return operation(JournalWriter(root, project_id, gig_id, observer or (lambda _step: None)))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/gigai/scout/interview_records.py:535: in publish
+    _validate_interview_bytes(current_bytes)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+data = b'{"actor":{"id":"local-user","kind":"operator"},"content":{"evidence_backed_stories":[],"hypothetical_examples":[{"la...,"role":{"title":"Forward Deployed Engineer"},"stage_or_format":{"format":"panel","stage":"onsite"}},"state":"active"}'
+
+    def _validate_interview_bytes(data: bytes) -> None:
+        """Validate both the frozen local schema and the central registry when present."""
+        try:
+            value = json.loads(_INTERVIEW_SCHEMA.read_text(encoding="utf-8"))
+            errors = sorted(Draft202012Validator(value).iter_errors(json.loads(data)), key=lambda item: list(item.path))
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
+>           raise ScoutInterviewError("interview_schema_unavailable", "interview preparation schema is unavailable") from exc
+E           gigai.scout.interview_records.ScoutInterviewError: interview preparation schema is unavailable
+
+src/gigai/scout/interview_records.py:55: ScoutInterviewError
+_ test_public_prepare_interview_runs_approved_graph_and_persists_run_evidence __
+
+tmp_path = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1573/test_public_prepare_interview_0')
+
+    def test_public_prepare_interview_runs_approved_graph_and_persists_run_evidence(tmp_path: Path):
+        home, target, created, source_ref = _env(tmp_path)
+        _approve_prepare_interview_graph(tmp_path, home, target, created)
+        selection_file = tmp_path / "selection.json"
+        content_file = tmp_path / "content.json"
+        selection_file.write_bytes(canonical_json_bytes(_selection(source_ref=source_ref)))
+        content_file.write_bytes(canonical_json_bytes(_content(source_ref)))
+        result = CliRunner().invoke(
+            cli,
+            [
+                "scout-interview", "prepare", "--selection-file", str(selection_file),
+                "--content-file", str(content_file), "--operation-key", "run-prep-1",
+                "--home", str(home), "--target", str(target), "--gig", created.gig_id,
+                "--run", "--confirm", "--json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+>       assert payload["status"] == "succeeded"
+E       AssertionError: assert 'failed' == 'succeeded'
+E         
+E         - succeeded
+E         + failed
+
+tests/behaviors/scout_tracking_reporting/test_scout_r5_interview_transfer.py:259: AssertionError
+___ test_public_revision_race_refuses_competing_parent_without_second_commit ___
+
+data = b'{"actor":{"id":"local-user","kind":"operator"},"content":{"evidence_backed_stories":[{"claims":[],"metrics":[],"skil...,"role":{"title":"Forward Deployed Engineer"},"stage_or_format":{"format":"panel","stage":"onsite"}},"state":"active"}'
+
+    def _validate_interview_bytes(data: bytes) -> None:
+        """Validate both the frozen local schema and the central registry when present."""
+        try:
+>           value = json.loads(_INTERVIEW_SCHEMA.read_text(encoding="utf-8"))
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/gigai/scout/interview_records.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout/schemas/scout-interview-preparation.schema.json')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/src/gigai/scout/schemas/scout-interview-preparation.schema.json'
+
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/pathlib/_local.py:537: FileNotFoundError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1573/test_public_revision_race_refu0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x108790980>
+
+    def test_public_revision_race_refuses_competing_parent_without_second_commit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        import gigai.scout.interview_records as records
+    
+        home, target, created, source_ref = _env(tmp_path)
+        options = {"home_root": home, "requested_target": target, "gig_id": created.gig_id}
+>       first = prepare_interview(**options, selection=_selection(source_ref=source_ref), content=_content(source_ref), operation_key="race-prep")
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/behaviors/scout_tracking_reporting/test_scout_r5_interview_transfer.py:270: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/gigai/scout/interview_records.py:644: in prepare_interview
+    return _publish(resolved=resolved, record=record, markdown=_markdown(record), operation_key=operation_key, authenticate=authenticate)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/gigai/scout/interview_records.py:567: in _publish
+    receipt, created = run_with_journal_writer(
+src/gigai/journal.py:268: in run_with_journal_writer
+    return operation(JournalWriter(root, project_id, gig_id, observer or (lambda _step: None)))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/gigai/scout/interview_records.py:535: in publish
+    _validate_interview_bytes(current_bytes)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+data = b'{"actor":{"id":"local-user","kind":"operator"},"content":{"evidence_backed_stories":[{"claims":[],"metrics":[],"skil...,"role":{"title":"Forward Deployed Engineer"},"stage_or_format":{"format":"panel","stage":"onsite"}},"state":"active"}'
+
+    def _validate_interview_bytes(data: bytes) -> None:
+        """Validate both the frozen local schema and the central registry when present."""
+        try:
+            value = json.loads(_INTERVIEW_SCHEMA.read_text(encoding="utf-8"))
+            errors = sorted(Draft202012Validator(value).iter_errors(json.loads(data)), key=lambda item: list(item.path))
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
+>           raise ScoutInterviewError("interview_schema_unavailable", "interview preparation schema is unavailable") from exc
+E           gigai.scout.interview_records.ScoutInterviewError: interview preparation schema is unavailable
+
+src/gigai/scout/interview_records.py:55: ScoutInterviewError
+______ test_existing_scout_graphs_are_byte_identical_to_pre_change_output ______
+
+tmp_path = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1573/test_existing_scout_graphs_are0')
+_seed_uuids = [UUID('af6bd4fb-30de-4ecd-af2a-d09ea6b85237'), UUID('0b881081-9a84-48a4-9f1d-51d8e1e4f5e4'), UUID('3ee5a431-eb9e-422d-...4-a054-28136c89c448'), UUID('c7c87369-3e42-478b-8c5a-71118efeaf39'), UUID('c7e62744-1477-4db1-832f-69c3229382b5'), ...]
+
+    def test_existing_scout_graphs_are_byte_identical_to_pre_change_output(tmp_path: Path, _seed_uuids: list[uuid.UUID]) -> None:
+        """Prove I-1 did not alter any of the six existing Scout descriptors/graphs.
+    
+        Loads the pre-wave-1b committed module (``git show HEAD:...``, HEAD being
+        the last commit before this worker's edits) under an isolated module
+        name, and compares its compiled output against the current module's,
+        given the identical uuid sequence and frozen clock so only the addition
+        of the new graph can produce a difference.
+        """
+    
+        import subprocess
+    
+        baseline_source = subprocess.run(
+            ["git", "show", "HEAD:src/gigai/scout_materialization.py"],
+            check=True, capture_output=True, cwd=Path(__file__).resolve().parents[3],
+        ).stdout
+        baseline_path = tmp_path / "scout_materialization_baseline.py"
+        baseline_path.write_bytes(baseline_source)
+    
+        spec = importlib.util.spec_from_file_location(
+            "gigai._scout_materialization_baseline_for_test", baseline_path
+        )
+        assert spec is not None and spec.loader is not None
+        baseline_module = importlib.util.module_from_spec(spec)
+        baseline_module.__package__ = "gigai"
+        sys.modules[spec.name] = baseline_module
+        try:
+>           spec.loader.exec_module(baseline_module)
+
+tests/behaviors/scout_find_jobs/test_integration_graph.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+<frozen importlib._bootstrap_external>:1026: in exec_module
+    ???
+<frozen importlib._bootstrap>:488: in _call_with_frames_removed
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    """Typed, inert compilation of the bundled Scout candidate into one Gig.
+    
+    This module is intentionally a closed built-in boundary: it accepts only the
+    bundled Scout catalog candidate and never imports, executes, or dynamically
+    discovers user supplied Python.  It journals immutable software snapshots;
+    editable root copies are derived conveniences and are never execution approval.
+    """
+    
+    from __future__ import annotations
+    
+    from dataclasses import dataclass
+    from datetime import UTC, datetime
+    import os
+    from pathlib import Path
+    import subprocess
+    import tempfile
+    from types import MappingProxyType
+    from typing import Callable, Mapping
+    import uuid
+    
+    from .canonical import EntityPrefix, canonical_json_bytes, canonical_json_digest, digest_imported_bytes, generate_entity_id, parse_json_bytes
+    from .capabilities import CapabilityManifestError, materialize_capability_manifest
+    from .catalog import CatalogEntry
+    from .journal import JournalArtifact, JournalArtifactMissingError, JournalConflictError, JournalReconciliationRequired, read_committed_artifact, record_transition
+    from .lifecycle import LifecycleError, propose_first_graph_set_offline
+>   from .scout_template import (SCOUT_DEFINITION_VERSION, SCOUT_DISCOVERY_SCHEMA_PATH,
+                                  SCOUT_DISCOVERY_SOURCE_PATH, SCOUT_OPERATION_GRAPHS,
+                                  SCOUT_RESEARCH_SOURCE_PATH, SCOUT_RESEARCH_SCHEMA_PATH,
+                                  SCOUT_TAILORING_SOURCE_PATH, SCOUT_TAILORING_SCHEMA_PATH,
+                                  ScoutTemplateComparison, scout_catalog_candidate,
+                                  scout_source_files)
+E   ModuleNotFoundError: No module named 'gigai.scout_template'
+
+/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1573/test_existing_scout_graphs_are0/scout_materialization_baseline.py:26: ModuleNotFoundError
+=========================== short test summary info ============================
+FAILED tests/behaviors/scout_tracking_reporting/test_scout_r5_interview_transfer.py::test_interview_revision_feedback_reloads_and_rejects_unsupported_story
+FAILED tests/behaviors/scout_tracking_reporting/test_scout_r5_interview_transfer.py::test_feedback_source_requires_real_feedback_delta_not_preparation_or_copy
+FAILED tests/behaviors/scout_tracking_reporting/test_scout_r5_interview_transfer.py::test_interview_accepts_actual_saved_discovery_posting_snapshot
+FAILED tests/behaviors/scout_tracking_reporting/test_scout_r5_interview_transfer.py::test_interview_accepts_actual_saved_research_revision_snapshot
+FAILED tests/behaviors/scout_tracking_reporting/test_scout_r5_interview_transfer.py::test_public_prepare_interview_runs_approved_graph_and_persists_run_evidence
+FAILED tests/behaviors/scout_tracking_reporting/test_scout_r5_interview_transfer.py::test_public_revision_race_refuses_competing_parent_without_second_commit
+FAILED tests/behaviors/scout_find_jobs/test_integration_graph.py::test_existing_scout_graphs_are_byte_identical_to_pre_change_output
+7 failed, 55 passed in 779.90s (0:12:59)
+=== EXIT 1 ===

@@ -1,0 +1,29 @@
+TARGET: Apply the coordinator's triage of Terra's review (.orchestrator/reviews/terra-w0-triage.md; Terra's findings are in .orchestrator/reviews/terra-w0.md) to the same two docs. The operator chose T1 approach A (2026-09-23). Read both files first.
+
+OWNED FILES (nothing else): docs/development/v0.1.8/roadmaps/v0.1.8-find-jobs-functional-roadmap.md; docs/development/v0.1.8/phase-2/evidence/P2-FREEZE-04-amendment-02-find-jobs-functional.md; .orchestrator/workers/w0f-terra-fixes.md
+
+CHANGES:
+T1 (approach A, recorded as D11 in the amendment): a minimal G14 extension so the scheduler runs real nodes.
+ - New generic module `src/gigai/graph_node_registry.py` (owned by I-2): maps sealed `(graph_id, graph_version, goal_slug)` → an approved callable plus its declared capability/effects. `_validate_scheduler_policy` (run.py:3438-3460) additionally admits `local_capability` executors whose capability is in the registry for THIS sealed graph only (e.g. `scout.find_jobs.acquire|assess|present`), with effects drawn from the EXISTING enum (common.schema.json:148-157): acquire `["network_read","credential_use","write_workpad"]`, assess `["write_workpad"]` for a local target or `["network_read","credential_use","write_workpad"]` for a hosted one, present `["write_workpad"]`. All other graphs keep today's rule. `_execute_goal` (run.py:3546-3561) dispatches to the registered callable with the NodeContext, records the result, receipt and failure, keeps the target-change interrupt check, and fails closed on unknown identity or effect.
+ - Replace EVERY `network_public_acquisition` / `network_hosted_model` mention with the existing enum values. No change to the common.schema.json effect enum.
+ - I-1 (scout_materialization.py) also sets the Scout graph goals' executors/effects and the graph-set ceiling (`capability_requirements` ~:365, `shared_policy` effects/providers ~:395) so graph_set.py:238-262 accepts them; cite what you read.
+ - I-2 owns run.py, graph_node_registry.py (new), run-details.schema.json and test_run_seam.py. Its test proves a registered callable is actually reached and that an undeclared effect or unregistered capability is refused.
+ - Edges: I-3 depends on I-2 as well as A-6/B-2/C-2.
+ - Add "node registry" to the 0.2.0 ledger (generalize the registry per gig).
+T2: state that I-0's CODE is the normative freeze: the contracts module + fixtures + test_contracts.py, which must reject field/type/route drift. The docs keep semantics/invariants and name the module as the authority. Add the gate "coordinator + Terra review I-0's output before any wave-1b dispatch".
+T3: C-2 owns the server entry point (pick one: a `gigai scout serve` subcommand needs cli.py, which nobody owns, so prefer `python -m gigai.scout_present_api`), a fixed loopback port (pick one, e.g. 8765), and the lifecycle. C-3's vite.config.js proxies `/api` to it. I-0 freezes the route table: at least GET config+resume preview, POST run (with consent), GET run status/node states for polling, GET results. Name each method/path.
+T4: M1 IS the consented real traversal. The UI shows scope and redeems consent before allocation. Remove any "then obtain consent" ordering.
+T5: the roadmap DAG is the single ownership authority. Replace the amendment's packet ownership table with a pointer to it (keep the acceptance commands there if useful, or point to them). The fixtures dir sits under I-0; add the I-2 → I-3 edge.
+T6: no full `make test` per wave before M1. Focused row checks gate the waves; one full `make test` (coordinator, TEST tab) after wave 3 and before the M1 click; the installed lane is after M1.
+T7: `src/gigai/scout_report_readers.py:315-337`.
+Add a "Revision 3" note to the amendment and a change-log entry to the roadmap.
+
+ACCEPTANCE (run these and paste the outputs into the worker file):
+- `grep -c -E 'network_public_acquisition|network_hosted_model' <both docs>` prints 0 for each (except inside the Revision 3 note line explaining the rename, if any; prefer 0)
+- `grep -c 'graph_node_registry.py' docs/development/v0.1.8/roadmaps/v0.1.8-find-jobs-functional-roadmap.md` >= 1
+- `grep -n '^| I-3' <roadmap> | grep -c 'I-2'` prints 1
+- `grep -c 'then obtain' <roadmap>` prints 0
+- each doc <= 270 lines
+Every new code claim cites a file:line you actually read.
+
+EXCLUSIONS: documentation only; no other files; no git stash/reset/clean/add/commit; no network/tests. Say READ vs EXECUTED. On finish, write the worker file, then worker_done. Questions go through `orca orchestration ask`.
