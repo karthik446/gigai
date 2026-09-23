@@ -324,7 +324,7 @@ def _publish(*, resolved: ResolvedWorkpad, operation_name: str, operation_key: s
             # This is intentionally resolved by the shared publisher, not by a
             # caller-provided callback.  A direct caller can supply bytes but
             # cannot mint a binding that does not match committed authority.
-            from .scout_tools import revalidate_tool_binding_at_publication
+            from .scout.tools import revalidate_tool_binding_at_publication
 
             verified_binding = dict(
                 revalidate_tool_binding_at_publication(
@@ -459,7 +459,7 @@ def create_native_record_from_tool(*, home_root: Path, requested_target: Path | 
     """Publish one already-authorized tool request through the shared C1 service.
 
     This is intentionally not a general tool runner.  The publisher resolves
-    the supplied binding independently through :mod:`gigai.scout_tools` while
+    the supplied binding independently through :mod:`gigai.scout.tools` while
     holding the journal writer lock; callers cannot supply a validator.
     """
     return _create_native_record(home_root=home_root, requested_target=requested_target, content=content, actor=actor, origin=origin, operation_key=operation_key, gig_id=gig_id, uuid_factory=uuid_factory, tool_binding=tool_binding, before_tool_revalidation=_before_tool_revalidation)
