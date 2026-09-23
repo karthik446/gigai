@@ -15,7 +15,8 @@ permissions:
 jobs:
   preflight:
     name: Release preflight
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       commit: ${{ steps.metadata.outputs.commit }}
       version: ${{ steps.metadata.outputs.version }}
@@ -53,7 +54,8 @@ jobs:
   build:
     name: Build and attest release artifacts
     needs: [preflight, ci]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       attestations: write
       artifact-metadata: write
@@ -69,6 +71,7 @@ jobs:
       - uses: astral-sh/setup-uv@v8.0.0
         with:
           enable-cache: true
+          cache-dependency-glob: uv.lock
       - run: rm -rf dist
       - run: uv build --no-sources
       - run: python tools/release_check.py verify-artifacts
@@ -87,7 +90,8 @@ jobs:
   smoke-artifacts:
     name: Fresh wheel and source-distribution smoke test
     needs: [preflight, build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/setup-python@v6
         with:
@@ -95,6 +99,7 @@ jobs:
       - uses: astral-sh/setup-uv@v8.0.0
         with:
           enable-cache: true
+          cache-dependency-glob: uv.lock
       - uses: actions/download-artifact@v4
         with:
           name: release-dist
@@ -120,7 +125,8 @@ jobs:
   publish-testpypi:
     name: Publish to TestPyPI
     needs: [preflight, smoke-artifacts]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     environment: testpypi
     permissions:
       id-token: write
@@ -143,10 +149,11 @@ jobs:
     name: TestPyPI clean install on ${{ matrix.os }}
     needs: [preflight, publish-testpypi]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-latest]
     steps:
       - uses: astral-sh/setup-uv@v8.0.0
         with:
@@ -177,7 +184,8 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     needs: [preflight, verify-testpypi]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     environment: pypi
     permissions:
       id-token: write
@@ -198,10 +206,11 @@ jobs:
     name: PyPI clean install on ${{ matrix.os }}
     needs: [preflight, publish-pypi]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-latest]
     steps:
       - uses: astral-sh/setup-uv@v8.0.0
         with:
@@ -228,7 +237,8 @@ jobs:
   github-release:
     name: Verify provenance and create GitHub Release
     needs: [preflight, build, verify-pypi]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       attestations: read
       contents: write

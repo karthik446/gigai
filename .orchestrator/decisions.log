@@ -16,3 +16,5 @@
 - 11:09 Operator rule: worker test budget = only tests for the files they changed (no directory/-n sweeps); full make test only by the coordinator, once per release. Added to skill §4. The v0.1.9 S19 test-diet spike is requested, with a 'make unit-tests' target (not test-fast).
 - 11:31 Final make test (post-reorg) GREEN: source 1885/0, installed verifiers + 38 installed tests pass, EXIT 0 (runs/v0.1.8/logs/111655-*). v0.1.9 spikes S16-S19 accepted (research only). Commit plan v2 dispatched.
 - 11:36 Found: pyproject version still 0.1.7, so the bump to 0.1.8 is in this PR; release.yml needs an ANNOTATED tag (git tag -a); the wheel ships no UI (the README must say the UI runs from a source checkout). release-docs worker: README rewrite (also PyPI; For-agents section) + version + CHANGELOG.
+- 11:47 Committed 15 commits per the plan (716 paths, coverage 0/0/0), pushed karthik446/gigai-v0.1.8, opened PR #35.
+- 11:52 Operator: optimize GitHub Actions release time (v0.1.7 exact-tag CI ~1h20m before publish). ci-speed worker dispatched; the coordinator will measure via a workflow_dispatch full-matrix run on the PR branch before tagging.

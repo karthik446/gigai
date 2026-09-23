@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-23 11:35: **final make test GREEN** (1885 passed / 0 failed; installed lanes pass; EXIT 0). Commit plan v2 being generated → operator approves → commit + PR → merge → tag v0.1.8._ by Claude (coordinator of `run_b12de8fdda28`; the old coordinator terminal closed, and the Run was rebound with `run-use` to generation 2)._
+_Updated 2026-09-23: **PR #35 open** (https://github.com/karthik446/gigai/pull/35), 15 commits, final make test green. Next: PR CI → operator merges → `git tag -a v0.1.8 -m "GigAI v0.1.8" && git push origin v0.1.8` → release (~1h45m) → install the published package → M1 live test._ by Claude (coordinator of `run_b12de8fdda28`; the old coordinator terminal closed, and the Run was rebound with `run-use` to generation 2)._
 
 ## Coordinator
 - **Claude**: `run_b12de8fdda28` (find-jobs functional).
