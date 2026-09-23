@@ -59,6 +59,4 @@ markers = [
 ]
 testpaths = [
   "tests",
-  "research/contract_spike/tests",
-  "research/phase0_spike/tests",
 ]

@@ -6,13 +6,23 @@ TEST_XDIST_WORKERS ?= auto
 TEST_XDIST_MAX_WORKERS ?= 14
 TEST_XDIST_DIST ?= worksteal
 
-.PHONY: test test-source test-behavior test-wheel test-installed test-live test-debian-offline
+.PHONY: test test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests
 
 # Complete portable offline coverage: one source discovery pass, the existing
 # deterministic behavior evaluation, and a fresh wheel plus every installed
 # verifier and installed test node.  Live/provider/UAT and Debian-container
 # gates are deliberately separate targets below.
 test: test-source test-behavior test-wheel
+
+# Fast inner-loop lane: only tests tests/conftest.py's AST classifier marks
+# fast_unit (no filesystem, process, network, or mutable-workpad seam,
+# tracing same-file helpers and cross-file test-to-test imports). Measured
+# at 719 tests / ~6.6s wall on the 14-CPU reference host with -n 0; xdist
+# start-up cost exceeded its benefit at this lane's size, so it runs
+# unparallelized. Does not replace `make test`; see
+# docs/development/v0.1.9/spikes/S19-test-suite-diet.md's revision note.
+unit-tests:
+	$(UV) run --locked --extra test pytest -m fast_unit -q --durations=25 -n 0
 
 # The unfiltered invocation is authoritative for source, unit, integration,
 # behavior-directory, CLI, and source-installed test discovery.  It uses a

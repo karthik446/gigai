@@ -12,6 +12,31 @@ read-only counting scripts and a handful of sampled `pytest` runs on
 individual files (never the full suite), per the brief's explicit
 instruction not to run the full suite.
 
+**2026-09-23 revision (test-lanes worker, EXECUTED):** this spike's "markers
+applied to 1 of 159 files" claim (§2) and its framing that `-m fast_unit`
+selection was unbuilt were **wrong about what `-m` already selects**.
+`tests/conftest.py:140`'s `pytest_collection_modifyitems` hook applies a
+`fast_unit`/`integration`/`release` marker to *every* collected item via its
+AST classifier (`classify_source`, `tests/conftest.py:101`) — it does not
+depend on any `@pytest.mark.fast_unit` decorator existing in source, so
+`pytest -m fast_unit` was already a working selector before this revision,
+contrary to §2's "essentially unused" framing. Measured directly: `-m
+fast_unit` selects **719** tests (current `testpaths = ["tests"]`, after
+dropping the two `research/*_spike/tests` testpaths below), **1106**
+`-m integration`, **64** `-m release` (719+1106+64 = 1889 = full collection
+count). A full `make unit-tests` run (added this revision, `pytest -m
+fast_unit -q -n 0`) passes in **6.60s** wall on this Mac — nowhere near the
+60s budget and not blocked by §1's unresolved 17s-invocation-overhead
+finding, which did not reproduce across repeated runs this revision (see
+`.orchestrator/workers/test-lanes.md` for full before/after counts, xdist
+vs `-n 0` timings, and the cross-file-misclassification audit this revision
+ran before the first real `-m fast_unit` execution). No classifier change
+was needed: the audit found zero fast_unit tests reaching a heavy helper
+through a same-file or cross-file (`tests.*` import) path. The rest of this
+document (§1-§5, tasks, migration plan) is kept as originally written below
+for its research value, but its "not yet built" framing and 60s-target
+uncertainty are superseded by the measurements above.
+
 ## Problem
 
 `make test` makes the operator's Mac spin. Measured directly against this
