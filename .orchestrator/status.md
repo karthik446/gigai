@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-23 15:10 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` rebased onto `main` at `c36f182`, the #36 hotfix; not pushed). **The v0.1.9 roadmap is not decided; nothing is dispatched.** The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-23 15:25 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` rebased onto `main` at `c36f182`, the #36 hotfix; pushed). **Wave 1 running: workflow + tests first (operator, 15:20), while the operator does UAT.** Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -18,23 +18,27 @@ Not set yet. Inputs for the roadmap discussion (not decisions):
 - The Release still has the **auto notes** (2 PR lines). The real notes (`/Users/kar/orca/workspaces/gigai/v0.1.8-release-notes.md`) are not applied. Waiting on the operator (it's outward-facing).
 - Post-release full matrix (run 35909539154): wheel resources + G28 eval passed; 7 source-suite jobs and Debian **still running** at 21:05Z.
 
-## In progress
-- Nothing dispatched.
+## In progress (wave 1; specs in `workers/specs/`)
+| Packet | Model | State | Task / dispatch | Next |
+| --- | --- | --- | --- | --- |
+| release-pipeline: release.yml Release right after publish; clean-install checks post-release with a bounded retry; notes from the CHANGELOG section (fails preflight if missing) | Sonnet 5 | **rework r1** (review `reviews/wave1-r0.md`: caller `actions: read`, retry the install itself, timeout 20) | `task_41853568a92a` / `ctx_b27ead9fc69b` (r0 `ctx_873d6c06350f`) | verify → commit |
+| ci-docs-skip: pull_request.yaml skips heavy jobs on a docs-only push when `before` passed; job renames | Sonnet 5 | **rework r1** (compatibility_job.yaml grants `actions: read`; caller test; event filter) | `task_152fd940c790` / `ctx_269e7458be8f` (r0 `ctx_0e4fbae4e8f0`) | verify → commit → prove live with a docs-only push to #37 |
 
 ## Next up
-- Agree the v0.1.9 roadmap with the operator.
-- If the operator adopts first-things item 1: open the draft PR before any code.
+- UAT fix requests from the v0.1.8 coordinator (they jump the queue).
+- After wave 1: S16/S17 stay deferred until find-jobs works live (UAT). S18 undecided.
 
 ## Done
 - Run `run_7cba834cb817` created.
 - Handoff + README "Handoffs" section committed as the first v0.1.9 commit.
+- **test-lanes verified + committed** (`acb7728`): `make unit-tests` 729 passed / 6.9s (coordinator re-run); testpaths −41; S19 revision note; skill §4 allows `make unit-tests` for workers.
+- Git workflow adopted (skill §9, memory updated); branch pushed; draft PR #37 opened.
 
 ## Open tabs
 - None started by this Run.
 
 ## Blocked on operator
 - Apply the v0.1.8 release notes? (`gh release edit v0.1.8 --repo karthik446/gigai --notes-file /Users/kar/orca/workspaces/gigai/v0.1.8-release-notes.md`)
-- The v0.1.9 roadmap.
 
 ## Flagged
 - S16 counts disagree: 45 strict rows in its inventory and in S20, but open question 2 says "the existing 34". Fix before S16 is used for sizing.
