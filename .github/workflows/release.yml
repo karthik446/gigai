@@ -108,7 +108,12 @@ jobs:
             uv pip install --python "${root}/venv/bin/python" "${artifact}"
             "${root}/venv/bin/gigai" --version | grep -Fx "gigai ${VERSION}"
             "${root}/venv/bin/gigai" --help >/dev/null
-            "${root}/venv/bin/gigai" setup --non-interactive --home "${root}/home" --workpad-root "${root}/workpad" --editor /usr/bin/true --json >/dev/null
+            "${root}/venv/bin/gigai" setup --non-interactive --home "${root}/home" --workpad-root "${root}/workpad" --editor /usr/bin/true \
+              --credential-ref provider=environment:GIGAI_PROVIDER_TOKEN \
+              --endpoint remote=openai_api:provider:https://api.example.test \
+              --model-target remote=remote:smoke-test \
+              --create-model-target remote \
+              --json >/dev/null
             "${root}/venv/bin/gigai" doctor --home "${root}/home" --json >/dev/null
           done
 
@@ -161,7 +166,12 @@ jobs:
             "gigai==${VERSION}"
           gigai --version | grep -Fx "gigai ${VERSION}"
           gigai --help >/dev/null
-          gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true --json >/dev/null
+          gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true \
+            --credential-ref provider=environment:GIGAI_PROVIDER_TOKEN \
+            --endpoint remote=openai_api:provider:https://api.example.test \
+            --model-target remote=remote:smoke-test \
+            --create-model-target remote \
+            --json >/dev/null
           gigai doctor --home "${root}/gigai-home" --json >/dev/null
 
   publish-pypi:
@@ -207,7 +217,12 @@ jobs:
           uv tool install "gigai==${VERSION}"
           gigai --version | grep -Fx "gigai ${VERSION}"
           gigai --help >/dev/null
-          gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true --json >/dev/null
+          gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true \
+            --credential-ref provider=environment:GIGAI_PROVIDER_TOKEN \
+            --endpoint remote=openai_api:provider:https://api.example.test \
+            --model-target remote=remote:smoke-test \
+            --create-model-target remote \
+            --json >/dev/null
           gigai doctor --home "${root}/gigai-home" --json >/dev/null
 
   github-release:
