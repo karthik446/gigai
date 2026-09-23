@@ -40,12 +40,9 @@ mechanics here. Those belong in the internal changelog.
 - Raw Exa and applicant-tracking-board responses are now stored per run for
   debugging and as test fixtures.
 - Acquire applies an explicit country filter and prefers a job board's own
-  posting over an Exa search result for the same job. _(pending: packet not
-  yet landed)_
-- Adds a visa-sponsorship filter to find-jobs. _(pending: packet not yet
-  landed)_
-- Adds search and filters to the Scout UI. _(pending: packet not yet
-  landed)_
+  posting over an Exa search result for the same job.
+- Adds a visa-sponsorship filter to find-jobs.
+- Adds search and filters to the Scout UI.
 - Fixes the release pipeline: the GitHub Release now publishes right after
   PyPI, and PyPI/TestPyPI clean-install checks run as non-blocking
   post-publish checks with a bounded wait for the index instead of racing
