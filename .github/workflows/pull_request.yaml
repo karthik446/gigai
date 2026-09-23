@@ -38,6 +38,9 @@ jobs:
     name: Detect implementation changes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
       code_changed: ${{ steps.detect.outputs.code_changed }}
     steps:
@@ -48,38 +51,15 @@ jobs:
       - id: detect
         env:
           EVENT_NAME: ${{ github.event_name }}
+          PR_ACTION: ${{ github.event.action }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
           PROFILE: ${{ inputs.profile || 'pr' }}
           SHA: ${{ github.sha }}
-        run: |
-          if [ "${PROFILE}" != "pr" ]; then
-            code_changed=true
-            changed="${PROFILE} compatibility profile"
-          elif [ "${EVENT_NAME}" = "pull_request" ]; then
-            changed="$(git diff --name-only "${BASE_SHA}...${SHA}")"
-            code_changed=false
-            if [ -n "${changed}" ]; then
-              while IFS= read -r path; do
-                case "${path}" in
-                  *.md|*.markdown) ;;
-                  *) code_changed=true; break ;;
-                esac
-              done <<< "${changed}"
-            fi
-          else
-            changed="$(git diff --name-only "${SHA}^" "${SHA}")"
-            code_changed=false
-            if [ -n "${changed}" ]; then
-              while IFS= read -r path; do
-                case "${path}" in
-                  *.md|*.markdown) ;;
-                  *) code_changed=true; break ;;
-                esac
-              done <<< "${changed}"
-            fi
-          fi
-          echo "code_changed=${code_changed}" >> "${GITHUB_OUTPUT}"
-          echo "implementation changes: ${code_changed}"
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          WORKFLOW_FILE: pull_request.yaml
+        run: python3 tools/ci_changes.py
 
   source-matrix:
     needs: changes
@@ -115,7 +95,7 @@ jobs:
 
   source-tests:
     needs: source-matrix
-    name: Source suite (Python ${{ matrix.python }} on ${{ matrix.os }})
+    name: All tests (source) (Python ${{ matrix.python }} on ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45  # measured 2026-09-23: ubuntu 16.4m, macOS >20m (20 killed the v0.1.8 release)
     env:
@@ -147,7 +127,7 @@ jobs:
   behavior:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true'
-    name: Deterministic G28 behavior evaluation
+    name: Eval scoring check (frozen cases)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -167,7 +147,7 @@ jobs:
   wheel:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true'
-    name: Built-wheel resources
+    name: Wheel install + packaging checks
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

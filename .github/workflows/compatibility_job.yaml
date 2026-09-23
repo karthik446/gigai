@@ -11,6 +11,9 @@ permissions:
 jobs:
   compatibility:
     name: Full compatibility matrix
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/pull_request.yaml
     with:
       profile: full
