@@ -1,0 +1,206 @@
+{
+  "schema_version": "scout-find-jobs-present-payload:1",
+  "run_id": "run_123e4567-e89b-42d3-a456-426614174002",
+  "config": {
+    "schema_version": "find-jobs-config:1",
+    "roles": [
+      "software engineer",
+      "data engineer"
+    ],
+    "merged_queries": [
+      "software engineer OR data engineer"
+    ],
+    "location": "Denver, CO",
+    "remote": true,
+    "published_after": "2026-09-15T00:00:00Z",
+    "sources": {
+      "exa": true,
+      "ats": true,
+      "hiringcafe": false
+    },
+    "default_assess_cap": 10,
+    "default_model_target": "ollama_local"
+  },
+  "pinned_resume": {
+    "record_id": "resume-record-001",
+    "revision_id": "resume-revision-007",
+    "content_sha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+  },
+  "rows": [
+    {
+      "posting": {
+        "url": "https://boards.greenhouse.io/acme/jobs/101",
+        "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
+        "provider": "greenhouse",
+        "board_token": "acme",
+        "company": "Acme",
+        "title": "Software Engineer",
+        "location": "Denver, CO",
+        "published_at": "2026-09-20T00:00:00Z",
+        "content_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source_kind": "exa",
+        "query_key": "software-engineer"
+      },
+      "outcome": "edited"
+    },
+    {
+      "posting": {
+        "url": "https://jobs.ashbyhq.com/orbit/303",
+        "normalized_url": "https://jobs.ashbyhq.com/orbit/303",
+        "provider": "ashby",
+        "board_token": "orbit",
+        "company": "Orbit",
+        "title": "Platform Engineer",
+        "location": "Remote",
+        "published_at": null,
+        "content_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "source_kind": "ats",
+        "query_key": "software-engineer"
+      },
+      "outcome": "new"
+    }
+  ],
+  "failures": [
+    {
+      "source_kind": "ats",
+      "query_key": "data-engineer",
+      "url": "https://jobs.lever.co/bright/404",
+      "code": "provider_unavailable",
+      "message": "public board response was unavailable"
+    }
+  ],
+  "assessments": [
+    {
+      "posting": {
+        "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
+        "url": "https://boards.greenhouse.io/acme/jobs/101",
+        "content_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "role_match": true
+      },
+      "matrix": [
+        {
+          "requirement": "Python",
+          "resume_evidence": [
+            "Built data services in Python"
+          ],
+          "status": "met"
+        },
+        {
+          "requirement": "Distributed systems",
+          "resume_evidence": [
+            "Operated event-driven services"
+          ],
+          "status": "partial"
+        },
+        {
+          "requirement": "Kubernetes",
+          "resume_evidence": [],
+          "status": "gap"
+        }
+      ],
+      "suggestions": [
+        "Highlight event-driven service ownership."
+      ],
+      "questions": [
+        "Which Kubernetes examples should be added?"
+      ],
+      "proposal_revision_ref": "records/scout-proposals/revision-001.json"
+    }
+  ],
+  "not_assessed": [
+    {
+      "posting": {
+        "url": "https://jobs.ashbyhq.com/orbit/303",
+        "normalized_url": "https://jobs.ashbyhq.com/orbit/303",
+        "provider": "ashby",
+        "board_token": "orbit",
+        "company": "Orbit",
+        "title": "Platform Engineer",
+        "location": "Remote",
+        "published_at": null,
+        "content_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "source_kind": "ats",
+        "query_key": "software-engineer"
+      },
+      "reason": "over_cap"
+    }
+  ],
+  "node_receipts": [
+    {
+      "schema_version": "scout-node-receipt:1",
+      "goal_id": "goal_123e4567-e89b-42d3-a456-426614174010",
+      "goal_version": 1,
+      "executor": "scout.find_jobs.acquire",
+      "node_slug": "acquire",
+      "operation_key": "find-jobs:acquire:001",
+      "status": "complete",
+      "outcome": "COMPLETE",
+      "errors": [],
+      "evidence": [],
+      "producer": {
+        "callable": "scout.find_jobs.acquire",
+        "version": "1",
+        "actor": "scout-acquire",
+        "model_target": "ollama_local",
+        "adapter": "ollama_local"
+      },
+      "usage": null,
+      "started_at": "2026-09-22T00:00:00Z",
+      "finished_at": "2026-09-22T00:00:01Z",
+      "failure": null
+    },
+    {
+      "schema_version": "scout-node-receipt:1",
+      "goal_id": "goal_123e4567-e89b-42d3-a456-426614174011",
+      "goal_version": 1,
+      "executor": "scout.find_jobs.assess",
+      "node_slug": "assess",
+      "operation_key": "find-jobs:assess:001",
+      "status": "failed",
+      "outcome": "FAILED",
+      "errors": [],
+      "evidence": [],
+      "producer": {
+        "callable": "scout.find_jobs.assess",
+        "version": "1",
+        "actor": "scout-assess",
+        "model_target": "ollama_local",
+        "adapter": "ollama_local"
+      },
+      "usage": null,
+      "started_at": "2026-09-22T00:00:01Z",
+      "finished_at": "2026-09-22T00:00:02Z",
+      "failure": {
+        "code": "model_unavailable",
+        "message": "local model was unavailable"
+      }
+    },
+    {
+      "schema_version": "scout-node-receipt:1",
+      "goal_id": "goal_123e4567-e89b-42d3-a456-426614174012",
+      "goal_version": 1,
+      "executor": "scout.find_jobs.present",
+      "node_slug": "present",
+      "operation_key": "find-jobs:present:001",
+      "status": "interrupted",
+      "outcome": null,
+      "errors": [],
+      "evidence": [],
+      "producer": {
+        "callable": "scout.find_jobs.present",
+        "version": "1",
+        "actor": "scout-present",
+        "model_target": "ollama_local",
+        "adapter": "ollama_local"
+      },
+      "usage": null,
+      "started_at": "2026-09-22T00:00:02Z",
+      "finished_at": null,
+      "failure": {
+        "code": "run_interrupted",
+        "message": "operator interrupted traversal"
+      }
+    }
+  ],
+  "status": "interrupted"
+}

@@ -1,0 +1,67 @@
+{
+  "schema_version": "scout-find-jobs-assess-output:1",
+  "selected_postings": [
+    {
+      "normalized_url": "https://jobs.ashbyhq.com/orbit/303",
+      "url": "https://jobs.ashbyhq.com/orbit/303",
+      "content_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "role_match": true
+    }
+  ],
+  "pinned_resume": {
+    "record_id": "resume-record-001",
+    "revision_id": "resume-revision-007",
+    "content_sha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+  },
+  "target": "targets/acme",
+  "selection_cap": 10,
+  "selection_rule": "new_or_edited_role_match",
+  "candidate_rows": [
+    {
+      "posting": {
+        "url": "https://jobs.ashbyhq.com/orbit/303",
+        "normalized_url": "https://jobs.ashbyhq.com/orbit/303",
+        "provider": "ashby",
+        "board_token": "orbit",
+        "company": "Orbit",
+        "title": "Platform Engineer",
+        "location": "Remote",
+        "published_at": null,
+        "content_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "source_kind": "ats",
+        "query_key": "software-engineer"
+      },
+      "outcome": "new"
+    }
+  ],
+  "assessments": [],
+  "not_assessed": [
+    {
+      "posting": {
+        "url": "https://jobs.ashbyhq.com/orbit/303",
+        "normalized_url": "https://jobs.ashbyhq.com/orbit/303",
+        "provider": "ashby",
+        "board_token": "orbit",
+        "company": "Orbit",
+        "title": "Platform Engineer",
+        "location": "Remote",
+        "published_at": null,
+        "content_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "source_kind": "ats",
+        "query_key": "software-engineer"
+      },
+      "reason": "model_denied"
+    }
+  ],
+  "proposal_revision_refs": [],
+  "model_target": "codex_cli",
+  "producer": {
+    "callable": "scout.find_jobs.assess",
+    "version": "1",
+    "actor": "scout-assess",
+    "model_target": "codex_cli",
+    "adapter": "codex_cli"
+  },
+  "usage": null,
+  "failures": []
+}

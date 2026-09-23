@@ -1,0 +1,110 @@
+{
+  "schema_version": "fixture-node-receipts-v1",
+  "receipts": [
+    {
+      "schema_version": "scout-node-receipt:1",
+      "goal_id": "goal_123e4567-e89b-42d3-a456-426614174010",
+      "goal_version": 1,
+      "executor": "scout.find_jobs.acquire",
+      "node_slug": "acquire",
+      "operation_key": "find-jobs:acquire:001",
+      "status": "complete",
+      "outcome": "COMPLETE",
+      "errors": [],
+      "evidence": [
+        {
+          "path": "records/scout-acquisition/batch-001.json",
+          "content_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "media_type": "application/json",
+          "size_bytes": 128
+        }
+      ],
+      "producer": {
+        "callable": "scout.find_jobs.acquire",
+        "version": "1",
+        "actor": "scout-acquire",
+        "model_target": "ollama_local",
+        "adapter": "ollama_local"
+      },
+      "usage": {
+        "measured": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "total_tokens": null,
+        "cost": null,
+        "currency": null,
+        "cost_status": "not_applicable"
+      },
+      "started_at": "2026-09-22T00:00:00Z",
+      "finished_at": "2026-09-22T00:00:01Z",
+      "failure": null
+    },
+    {
+      "schema_version": "scout-node-receipt:1",
+      "goal_id": "goal_123e4567-e89b-42d3-a456-426614174011",
+      "goal_version": 1,
+      "executor": "scout.find_jobs.assess",
+      "node_slug": "assess",
+      "operation_key": "find-jobs:assess:001",
+      "status": "failed",
+      "outcome": "FAILED",
+      "errors": [
+        {
+          "code": "model_unavailable",
+          "message": "local model was unavailable",
+          "retryable": true,
+          "invocation_id": null
+        }
+      ],
+      "evidence": [],
+      "producer": {
+        "callable": "scout.find_jobs.assess",
+        "version": "1",
+        "actor": "scout-assess",
+        "model_target": "ollama_local",
+        "adapter": "ollama_local"
+      },
+      "usage": {
+        "measured": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "total_tokens": null,
+        "cost": null,
+        "currency": null,
+        "cost_status": "not_applicable"
+      },
+      "started_at": "2026-09-22T00:00:01Z",
+      "finished_at": "2026-09-22T00:00:02Z",
+      "failure": {
+        "code": "model_unavailable",
+        "message": "local model was unavailable"
+      }
+    },
+    {
+      "schema_version": "scout-node-receipt:1",
+      "goal_id": "goal_123e4567-e89b-42d3-a456-426614174012",
+      "goal_version": 1,
+      "executor": "scout.find_jobs.present",
+      "node_slug": "present",
+      "operation_key": "find-jobs:present:001",
+      "status": "interrupted",
+      "outcome": null,
+      "errors": [],
+      "evidence": [],
+      "producer": {
+        "callable": "scout.find_jobs.present",
+        "version": "1",
+        "actor": "scout-present",
+        "model_target": "ollama_local",
+        "adapter": "ollama_local"
+      },
+      "usage": null,
+      "started_at": "2026-09-22T00:00:02Z",
+      "finished_at": null,
+      "failure": {
+        "code": "run_interrupted",
+        "message": "operator interrupted traversal"
+      }
+    }
+  ]
+}

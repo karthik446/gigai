@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "kind": "operator_run_consent",
+  "action": "run",
+  "actor": {"kind": "operator", "id": "local-user"},
+  "source": "direct_local_ui_confirm",
+  "invocation_id": "invocation_001",
+  "occurrence_id": "occurrence_001"
+}

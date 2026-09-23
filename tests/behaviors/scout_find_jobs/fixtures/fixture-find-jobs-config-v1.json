@@ -1,0 +1,11 @@
+{
+  "schema_version": "find-jobs-config:1",
+  "roles": ["software engineer", "data engineer"],
+  "merged_queries": ["software engineer OR data engineer"],
+  "location": "Denver, CO",
+  "remote": true,
+  "published_after": "2026-09-15T00:00:00Z",
+  "sources": {"exa": true, "ats": true, "hiringcafe": false},
+  "default_assess_cap": 10,
+  "default_model_target": "ollama_local"
+}

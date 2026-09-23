@@ -1,0 +1,106 @@
+{
+  "schema_version": "scout-find-jobs-assess-output:1",
+  "selected_postings": [
+    {
+      "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
+      "url": "https://boards.greenhouse.io/acme/jobs/101",
+      "content_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "role_match": true
+    },
+    {
+      "normalized_url": "https://jobs.ashbyhq.com/orbit/303",
+      "url": "https://jobs.ashbyhq.com/orbit/303",
+      "content_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "role_match": true
+    }
+  ],
+  "pinned_resume": {
+    "record_id": "resume-record-001",
+    "revision_id": "resume-revision-007",
+    "content_sha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+  },
+  "target": "targets/acme",
+  "selection_cap": 10,
+  "selection_rule": "new_or_edited_role_match",
+  "candidate_rows": [
+    {
+      "posting": {
+        "url": "https://boards.greenhouse.io/acme/jobs/101",
+        "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
+        "provider": "greenhouse",
+        "board_token": "acme",
+        "company": "Acme",
+        "title": "Software Engineer",
+        "location": "Denver, CO",
+        "published_at": "2026-09-20T00:00:00Z",
+        "content_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source_kind": "exa",
+        "query_key": "software-engineer"
+      },
+      "outcome": "edited"
+    },
+    {
+      "posting": {
+        "url": "https://jobs.ashbyhq.com/orbit/303",
+        "normalized_url": "https://jobs.ashbyhq.com/orbit/303",
+        "provider": "ashby",
+        "board_token": "orbit",
+        "company": "Orbit",
+        "title": "Platform Engineer",
+        "location": "Remote",
+        "published_at": null,
+        "content_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "source_kind": "ats",
+        "query_key": "software-engineer"
+      },
+      "outcome": "new"
+    }
+  ],
+  "assessments": [
+    {
+      "posting": {
+        "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
+        "url": "https://boards.greenhouse.io/acme/jobs/101",
+        "content_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "role_match": true
+      },
+      "matrix": [
+        {"requirement": "Python", "resume_evidence": ["Built data services in Python"], "status": "met"},
+        {"requirement": "Distributed systems", "resume_evidence": ["Operated event-driven services"], "status": "partial"},
+        {"requirement": "Kubernetes", "resume_evidence": [], "status": "gap"}
+      ],
+      "suggestions": ["Highlight event-driven service ownership."],
+      "questions": ["Which Kubernetes examples should be added?"],
+      "proposal_revision_ref": "records/scout-proposals/revision-001.json"
+    }
+  ],
+  "not_assessed": [
+    {
+      "posting": {
+        "normalized_url": "https://jobs.ashbyhq.com/orbit/303",
+        "url": "https://jobs.ashbyhq.com/orbit/303",
+        "provider": "ashby",
+        "board_token": "orbit",
+        "company": "Orbit",
+        "title": "Platform Engineer",
+        "location": "Remote",
+        "published_at": null,
+        "content_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "source_kind": "ats",
+        "query_key": "software-engineer"
+      },
+      "reason": "over_cap"
+    }
+  ],
+  "proposal_revision_refs": ["records/scout-proposals/revision-001.json"],
+  "model_target": "ollama_local",
+  "producer": {
+    "callable": "scout.find_jobs.assess",
+    "version": "1",
+    "actor": "scout-assess",
+    "model_target": "ollama_local",
+    "adapter": "ollama_local"
+  },
+  "usage": null,
+  "failures": []
+}
