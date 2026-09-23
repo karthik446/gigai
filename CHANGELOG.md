@@ -40,7 +40,8 @@ mechanics here. Those belong in the internal changelog.
   and present results through a localhost API and Vite UI that asks for
   explicit consent before any network call or hosted-model use.
 - Moves the Scout package to `gigai.scout` so it imports and packages as a
-  self-contained Gig on top of GigAI core, with core never importing a Gig.
+  self-contained Gig built on GigAI core. Core still imports Scout in places;
+  removing those so core never imports a Gig is planned for v0.1.9.
 - Reorganizes the test suite into behavior-grouped directories (S11) with a
   `make test` runner that separates source, behavior, and wheel-resource
   suites.
