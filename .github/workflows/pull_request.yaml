@@ -117,7 +117,7 @@ jobs:
     needs: source-matrix
     name: Source suite (Python ${{ matrix.python }} on ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 45  # measured 2026-09-23: ubuntu 16.4m, macOS >20m (20 killed the v0.1.8 release)
     env:
       TEST_XDIST_WORKERS: auto
       # ubuntu-24.04 runners are 4 vCPU; macos-latest runners are 3 vCPU.
@@ -189,7 +189,7 @@ jobs:
     if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') == 'full'
     name: Debian 12 offline container
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 50  # docker build + full suite; not yet measured end to end
     steps:
       - uses: actions/checkout@v6
         with:
