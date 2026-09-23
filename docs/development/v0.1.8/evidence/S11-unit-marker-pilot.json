@@ -1,0 +1,121 @@
+{
+  "collection": {
+    "duration_seconds": 0.059534,
+    "errors": [],
+    "items_collected": 4
+  },
+  "command": [
+    "/Users/kar/Developer/projects/gigai/.venv/bin/python",
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+    "-p",
+    "no:cacheprovider",
+    "tests/behaviors/acquisition/test_public_import_state.py",
+    "-q",
+    "-m",
+    "fast_unit and scout_acquisition"
+  ],
+  "exit_code": 0,
+  "kind": "pytest-selection-measurement",
+  "outcomes": {
+    "passed": 4
+  },
+  "root": "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8",
+  "schema_version": "s11-measurement.v1",
+  "session": {
+    "duration_seconds": 0.060768
+  },
+  "started_at": "2026-09-21T22:38:07.530393+00:00",
+  "status": "pass",
+  "tests": [
+    {
+      "duration_seconds": 0.000104,
+      "nodeid": "tests/behaviors/acquisition/test_public_import_state.py::test_bounded_public_import_deadline_reports_next_index_without_private_fields",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 4.4e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 3.1e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 2.9e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 0.000123,
+      "nodeid": "tests/behaviors/acquisition/test_public_import_state.py::test_bounded_public_import_preserves_considered_duplicate_failure_and_exclusion",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 6e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 3.1e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 3.2e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 0.000297,
+      "nodeid": "tests/behaviors/acquisition/test_public_import_state.py::test_discovery_job_exposes_public_acquisition_fields_only",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 5.9e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000194,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 4.4e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 0.000145,
+      "nodeid": "tests/behaviors/acquisition/test_public_import_state.py::test_discovery_job_rejects_private_assessment_state",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 7.6e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 3.7e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 3.2e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "schema_version": "s11-full-suite-environment.v1",
+  "kind": "project-local-test-environment-receipt",
+  "observed_on": "2026-09-22",
+  "workspace": "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8",
+  "venv": ".venv",
+  "interpreter": "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/.venv/bin/python",
+  "python_version": "3.13.1",
+  "commands": [
+    "rtk uv lock",
+    "rtk uv sync --all-extras"
+  ],
+  "resolution": {
+    "lockfile_used": true,
+    "dependency_added": "pytest-xdist>=3.6",
+    "resolved_pytest_xdist": "3.8.0",
+    "resolved_execnet": "2.1.2",
+    "shared_venv_used": false,
+    "bare_pyenv_python_used": false,
+    "global_install_used": false
+  },
+  "files": {
+    "pyproject_sha256": "01d6b5034b83d05f6714e6f334b37f5926be91dbae85fa607f795dbf835b7655",
+    "uv_lock_sha256": "1bd9b0fa24e269dddf037fc8c61623f6fcf9b252a3ec912d791962834152dd94"
+  },
+  "boundaries": [
+    "Only the project-local .venv was synchronized.",
+    "No production dependency declaration was added; pytest-xdist is test-only.",
+    "No provider, model, daemon, personal configuration, or live/UAT execution was performed."
+  ]
+}

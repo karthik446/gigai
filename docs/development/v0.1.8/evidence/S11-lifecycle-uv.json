@@ -1,0 +1,317 @@
+{
+  "collection": {
+    "duration_seconds": 0.130558,
+    "errors": [],
+    "items_collected": 13
+  },
+  "command": [
+    "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/.venv/bin/python3",
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+    "-p",
+    "no:cacheprovider",
+    "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py",
+    "-q"
+  ],
+  "exit_code": 0,
+  "kind": "pytest-selection-measurement",
+  "outcomes": {
+    "passed": 13
+  },
+  "root": "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8",
+  "schema_version": "s11-measurement.v1",
+  "session": {
+    "duration_seconds": 13.927316
+  },
+  "started_at": "2026-09-22T02:59:51.638669+00:00",
+  "status": "pass",
+  "tests": [
+    {
+      "duration_seconds": 1.207922,
+      "nodeid": "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py::test_changed_input_private_fields_and_unsafe_batch_are_refused",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 1.207474,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000381,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 6.7e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 0.807011,
+      "nodeid": "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py::test_copied_wrapper_uses_shared_rows_loader_for_redirects[False]",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 0.80645,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000434,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 0.000127,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 0.783304,
+      "nodeid": "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py::test_copied_wrapper_uses_shared_rows_loader_for_redirects[True]",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 0.782601,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000499,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 0.000204,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 1.043762,
+      "nodeid": "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py::test_every_acquisition_path_component_rejects_redirect_before_read_or_write[records-True]",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 1.04322,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000412,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 0.00013,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 1.034113,
+      "nodeid": "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py::test_every_acquisition_path_component_rejects_redirect_before_read_or_write[records/scout-acquisition-True]",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 1.033505,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000475,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 0.000133,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 1.057655,
+      "nodeid": "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py::test_every_acquisition_path_component_rejects_redirect_before_read_or_write[records/scout-acquisition/fixture-batch-True]",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 1.057016,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000464,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 0.000175,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 1.053799,
+      "nodeid": "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py::test_every_acquisition_path_component_rejects_redirect_before_read_or_write[records/scout-acquisition/fixture-batch/input.json-False]",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 1.053148,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000518,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 0.000133,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 1.045532,
+      "nodeid": "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py::test_every_acquisition_path_component_rejects_redirect_before_read_or_write[records/scout-acquisition/fixture-batch/progress-True]",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 1.044774,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000638,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 0.00012,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 1.243478,
+      "nodeid": "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py::test_every_acquisition_path_component_rejects_redirect_before_read_or_write[records/scout-acquisition/fixture-batch/progress/revision.json-False]",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 1.242881,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000468,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 0.000129,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 2.138459,
+      "nodeid": "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py::test_import_deadline_fresh_status_resume_and_exact_replay",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 2.137294,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.001059,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 0.000106,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 1.102568,
+      "nodeid": "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py::test_normal_cli_import_and_fresh_status",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 1.102079,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000388,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 0.000101,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 0.63418,
+      "nodeid": "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py::test_shared_rows_loader_rejects_parent_and_final_symlink_for_normal_cli[False]",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 0.63365,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000415,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 0.000115,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 0.640296,
+      "nodeid": "tests/behaviors/acquisition/test_public_acquisition_lifecycle.py::test_shared_rows_loader_rejects_parent_and_final_symlink_for_normal_cli[True]",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 0.639688,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000487,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 0.000121,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    }
+  ]
+}

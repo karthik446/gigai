@@ -1,0 +1,70 @@
+{
+  "schema_version": "s11-full-suite-baseline.v1",
+  "kind": "pytest-baseline-receipt",
+  "observed_on": "2026-09-22",
+  "workspace": "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8",
+  "head": "b01675d0b7ef39b49853a26df61aadeea2064a6a",
+  "branch": "karthik446/gigai-v0.1.8",
+  "version_identity": {
+    "git_describe": "v0.1.7-dirty",
+    "project_version": "0.1.7",
+    "python": ".venv/bin/python",
+    "python_version": "3.13.1",
+    "pytest_version": "9.1.1",
+    "pytest_xdist": "not installed at baseline",
+    "cpu_count": 14,
+    "pyproject_sha256": "not-captured-before-test-dependency-sync",
+    "uv_lock_sha256": "not-captured-before-test-dependency-sync"
+  },
+  "command": "GIGAI_G30_UAT=0 PYTHONPATH=src /usr/bin/time -p .venv/bin/python -m pytest -q",
+  "selection": {
+    "configured_roots": [
+      "tests",
+      "research/contract_spike/tests",
+      "research/phase0_spike/tests"
+    ],
+    "collected_nodes": 1588,
+    "live_provider_selection": false,
+    "deselected": 0
+  },
+  "result": {
+    "exit_code": 1,
+    "passed": 1582,
+    "failed": 5,
+    "skipped": 1,
+    "warnings": 1,
+    "subtests": 269,
+    "pytest_wall_seconds": 3178.83,
+    "time_real_seconds": 3179.01,
+    "time_user_seconds": 1585.52,
+    "time_sys_seconds": 1440.24
+  },
+  "failures": [
+    {
+      "nodeid": "tests/test_g22_http_approval.py::test_http_answers_then_operator_approval_reaches_terminal_lifecycle",
+      "error": "PermissionError: [Errno 1] Operation not permitted at socket.bind"
+    },
+    {
+      "nodeid": "tests/test_g22_proposal_interview.py::test_loopback_http_requires_token_and_preserves_session_boundary",
+      "error": "PermissionError: [Errno 1] Operation not permitted at socket.bind"
+    },
+    {
+      "nodeid": "tests/test_g22_proposal_interview.py::test_loopback_http_rejects_malformed_payload_and_expires",
+      "error": "PermissionError: [Errno 1] Operation not permitted at socket.bind"
+    },
+    {
+      "nodeid": "tests/test_g26_review_actions.py::test_builder_review_can_revise_rebuild_and_reject_without_activation",
+      "error": "PermissionError: [Errno 1] Operation not permitted at socket.bind"
+    },
+    {
+      "nodeid": "tests/test_setup_browser.py::test_setup_page_uses_human_model_labels_and_reports_cli_detection",
+      "error": "PermissionError: [Errno 1] Operation not permitted at socket.bind"
+    }
+  ],
+  "boundaries": [
+    "This was the pre-migration serialized full-suite receipt.",
+    "The only skipped case was the explicit g30_live provider/UAT guard.",
+    "No provider, model, daemon, personal configuration, or live lane was invoked.",
+    "The five failures are the same sandbox loopback bind restriction, not a migration claim."
+  ]
+}

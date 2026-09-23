@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gigai"
-version = "0.1.7"
+version = "0.1.8"
 description = "Contract-first foundations for a local, user-controlled agent runtime"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,6 +34,7 @@ gigai = "gigai.cli:cli"
 test = [
   "pydantic>=2.10",
   "pytest>=8.3",
+  "pytest-xdist>=3.6",
 ]
 
 [tool.setuptools.packages.find]
@@ -41,7 +42,8 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "gigai.schemas" = ["*.schema.json", "README.md", "SHA256SUMS"]
-"gigai.data" = ["*.json", "runtime-comparison-pack-v1.json", "scout/*.md", "scout/goalgraphs/*.md", "scout/ui/*.html", "scout/ui/*.css", "scout/tools/*/*.json"]
+"gigai.data" = ["*.json", "runtime-comparison-pack-v1.json"]
+"gigai.scout" = ["data/*.md", "data/goalgraphs/*.md", "data/ui/*.html", "data/ui/*.css", "data/tools/*/*.json"]
 "gigai" = ["static/*.css"]
 
 [tool.pytest.ini_options]
@@ -51,6 +53,9 @@ markers = [
   "fast_unit: isolated deterministic unit/contract test with no filesystem, process, network, or mutable-workpad fixture",
   "integration: test requiring disposable filesystem, persistence, CLI, subprocess, concurrency, or authority-boundary setup",
   "release: test exercising installed/package/resource or release-boundary behavior",
+  "cli: test that exercises a public GigAI command or CLI wrapper; selected separately from library integration",
+  "installed: test or verifier that requires a normally installed GigAI package or console script",
+  "scout_acquisition: behavior grouping for public Scout acquisition, discovery, and progress semantics",
 ]
 testpaths = [
   "tests",
