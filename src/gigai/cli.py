@@ -45,11 +45,11 @@ from .external_cli import external_group
 from .capability_cli import capability_group
 from .native_records_cli import native_record_group
 from .application_cli import application_group
-from .scout_report_cli import report_group
-from .scout_documents_cli import document_group
-from .scout_answer_cli import answer_group
-from .scout_acquisition_cli import acquisition_group
-from .scout_interview_cli import interview_group
+from .scout.report_cli import report_group
+from .scout.documents_cli import document_group
+from .scout.answer_cli import answer_group
+from .scout.acquisition_cli import acquisition_group
+from .scout.interview_cli import interview_group
 from .private_transfer_cli import transfer_group
 from .index import JournalIndexError, JournalProjection, read_index
 from .listing import GigListingError, list_gigs

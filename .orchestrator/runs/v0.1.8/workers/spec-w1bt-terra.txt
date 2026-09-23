@@ -1,0 +1,15 @@
+TARGET: an independent READ-ONLY review of wave 1b, all packets built against the frozen contracts (src/gigai/scout_find_jobs_contracts.py). The coordinator re-ran every focused suite (all pass), so find what tests don't: real-run failures, contract drift, security/privacy, and silent fallbacks. Files:
+- Integration: src/gigai/run.py (git diff), src/gigai/graph_node_registry.py, src/gigai/scout_materialization.py (git diff)
+- Acquire: src/gigai/scout_exa_client.py, scout_ats_board_clients.py, scout_watchlist.py, scout_market_acquisition.py
+- Assess: src/gigai/scout_proposals.py, scout_proposal_records.py, scout_proposal_execution.py (git diffs)
+- Present: src/gigai/scout_projection.py, scout_report_readers.py (git diffs), scout_present_api.py, ui/src/*
+Coordinator decisions: .orchestrator/decisions.log. Worker reports: .orchestrator/workers/*.md.
+OWNED FILES (nothing else): .orchestrator/reviews/terra-w1b.md; .orchestrator/workers/w1bt-terra.md
+REVIEW FOR (priority order):
+1. Would a real M1 click fail? Trace POST /api/run → launch_find_jobs_run → child process → registered nodes → outputs/receipts → build_present_payload → UI. Note that I-3 (bindings/registration in the child process) is being built now, so flag only what I-3 cannot fix from its owned files.
+2. Security/privacy: EXA_API_KEY never logged, stored or put in errors; the loopback check can't be bypassed (X-Forwarded-For, 0.0.0.0 bind); consent can't be forged from non-loopback; hosted-model network only for a non-local target; resume bytes never sent to Exa/ATS; no application/tracking mutation.
+3. Silent fallbacks or swallowed errors (e.g. a model failure turning into "succeeded" with an empty matrix).
+4. Run-scheduler safety: the change to _validate_scheduler_policy/_execute_goal can't widen OTHER graphs; the shared_policy widening in scout_materialization doesn't let other Scout graphs declare network effects that the scheduler would then admit.
+5. Contract drift between producers and consumers (field names, statuses, paths).
+OUTPUT: a table (id | severity blocker/major/minor | file:line | finding | concrete failure scenario | fix), then the verdict "M1-ready after I-3" or "fix first". Evidence must be file:line you read; label anything inferred.
+EXCLUSIONS: read-only; you may run focused tests and import checks, nothing else; no network; no git stash/reset/clean/add. Say READ vs EXECUTED. Write the worker file, then worker_done.

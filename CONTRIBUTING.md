@@ -7,12 +7,27 @@ product behavior.
 ## Development setup
 
 ~~~bash
-uv sync --extra test
-uv run pytest
+uv sync --locked --extra test
+make test
 ~~~
 
-The complete source suite must run from the repository root and report 128
-passing tests.
+`make test` is the complete portable offline command. It runs one unfiltered
+source pytest discovery pass, the deterministic G28 behavior evaluation, then
+builds a wheel and runs every `tools/verify_installed_*.py` verifier plus the
+direct installed-test node selection. Debian's direct-mount container gate is
+explicitly `make test-debian-offline`; real local-model/provider/UAT execution
+is explicitly `GIGAI_G30_UAT=1 make test-live` and is never part of `make test`.
+
+The source pass defaults to bounded resource-aware xdist: `TEST_XDIST_WORKERS=auto`
+with `TEST_XDIST_MAX_WORKERS=14` and `TEST_XDIST_DIST=worksteal`; the cap matches
+the measured 14-CPU host, while actual workers are clamped by the host CPU count.
+The runner records the requested, cap, CPU, and actual worker counts before
+pytest starts. For a controlled local measurement, use `make test-source
+TEST_XDIST_WORKERS=14 TEST_XDIST_MAX_WORKERS=14 TEST_XDIST_DIST=worksteal`; the
+worker override applies only to the source lane, while behavior and wheel
+verifier lanes retain their own sequencing. The runner forces
+`GIGAI_G30_UAT=0` for ordinary offline lanes; `make test-live` remains a separate
+explicit opt-in and is not affected by source xdist settings.
 
 ## Repository boundaries
 
@@ -59,7 +74,8 @@ Pure relocation always preserves the exact filename set and SHA-256 mapping.
 - State whether the change affects product, research, documentation, or a
   serialized contract.
 - Keep runtime and test-only dependencies separate.
-- Run uv run --locked pytest.
+- Run `make test` for the complete portable offline coverage. `make
+  test-source` is the source-only subtarget used by each CI OS/Python lane.
 - If packaging changes, build the wheel and run
   tools/verify_installed_schemas.py with the wheel-installed interpreter.
 - Scan for credentials, personal paths, session identifiers, and generated

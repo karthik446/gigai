@@ -1,0 +1,234 @@
+{
+  "collection": {
+    "duration_seconds": 3.795032,
+    "errors": [
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_bug_001_gigs_listing.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_bug_001_gigs_listing.py:11: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_bug_001_gigs_listing.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_bug_002_cli_surface.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_bug_002_cli_surface.py:8: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_bug_002_cli_surface.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_bug_003_offline_surface.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_bug_003_offline_surface.py:9: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_bug_003_offline_surface.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_cli_invocation_argv.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_cli_invocation_argv.py:7: in <module>\n    from gigai.cli import InvocationGroup, _invocation_argv\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_cli_invocation_argv.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_g22_cli_create.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_g22_cli_create.py:8: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_g22_cli_create.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_g26_cli_builder.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_g26_cli_builder.py:8: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_g26_cli_builder.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_g26_model_discovery.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_g26_model_discovery.py:24: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_g26_model_discovery.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_g28_evaluation.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_g28_evaluation.py:8: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_g28_evaluation.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_g28_setup_create.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_g28_setup_create.py:7: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_g28_setup_create.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_g40_runtime.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_g40_runtime.py:13: in <module>\n    from gigai.cli import (\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_g40_runtime.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_g41_package_boundary.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_g41_package_boundary.py:10: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_g41_package_boundary.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_g42_catalog.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_g42_catalog.py:10: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_g42_catalog.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_g43_provider_review.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_g43_provider_review.py:12: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_g43_provider_review.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_g43_provider_run_status.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_g43_provider_run_status.py:16: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_g43_provider_run_status.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_g43_run_plan.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_g43_run_plan.py:9: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_g43_run_plan.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_g43_text_media.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_g43_text_media.py:14: in <module>\n    from tests.test_g43_provider_review import _fixture\ntests/test_g43_provider_review.py:12: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_g43_text_media.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_index_projection.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_index_projection.py:11: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_index_projection.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_jsl_closeout_regressions.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_jsl_closeout_regressions.py:12: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_jsl_closeout_regressions.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_model_invocation_foundation.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_model_invocation_foundation.py:28: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_model_invocation_foundation.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_runtime_comparison.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_runtime_comparison.py:15: in <module>\n    from gigai.cli import _parse_endpoint_spec, _parse_model_target_spec, cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_runtime_comparison.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout03_native_records.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout03_native_records.py:10: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout03_native_records.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout03_package_privacy.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout03_package_privacy.py:17: in <module>\n    from tests.test_g41_package_boundary import _setup\ntests/test_g41_package_boundary.py:10: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout03_package_privacy.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout05_capability_cli.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout05_capability_cli.py:12: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout05_capability_cli.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout05_capability_prepare_cli.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout05_capability_prepare_cli.py:10: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout05_capability_prepare_cli.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout05_first_proposal.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout05_first_proposal.py:14: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout05_first_proposal.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout05_init.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout05_init.py:12: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout05_init.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout05_init_corrections.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout05_init_corrections.py:12: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout05_init_corrections.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout05_reviewed_manifest_guard.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout05_reviewed_manifest_guard.py:13: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout05_reviewed_manifest_guard.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout05_source_bundle.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout05_source_bundle.py:14: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout05_source_bundle.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout06_protocol_replay.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout06_protocol_replay.py:9: in <module>\n    from tests.test_scout06_research_run_flow import _envelope, _started_v2_run\ntests/test_scout06_research_run_flow.py:16: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout06_protocol_replay.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout06_research_run_adversarial.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout06_research_run_adversarial.py:20: in <module>\n    _FLOW_SPEC.loader.exec_module(_FLOW)\ntests/test_scout06_research_run_flow.py:16: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout06_research_run_adversarial.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout06_research_run_flow.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout06_research_run_flow.py:16: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout06_research_run_flow.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout09_application_events.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout09_application_events.py:7: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout09_application_events.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout_acquisition_progress.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout_acquisition_progress.py:14: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout_acquisition_progress.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout_proposal_execution.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout_proposal_execution.py:26: in <module>\n    from tests.test_scout03_native_records import _experience, _profile\ntests/test_scout03_native_records.py:10: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout_proposal_execution.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout_proposal_records.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout_proposal_records.py:17: in <module>\n    from tests.test_scout_proposal_execution import _Transport, _config, _setup_inputs\ntests/test_scout_proposal_execution.py:26: in <module>\n    from tests.test_scout03_native_records import _experience, _profile\ntests/test_scout03_native_records.py:10: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout_proposal_records.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout_proposal_run.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout_proposal_run.py:25: in <module>\n    from tests.test_scout03_native_records import _experience, _profile\ntests/test_scout03_native_records.py:10: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout_proposal_run.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout_r3_report.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout_r3_report.py:13: in <module>\n    from tests.test_scout09_application_events import _application\ntests/test_scout09_application_events.py:7: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout_r3_report.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout_r4_journey.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout_r4_journey.py:29: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout_r4_journey.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_scout_r5_interview_transfer.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_scout_r5_interview_transfer.py:34: in <module>\n    from gigai.cli import cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_scout_r5_interview_transfer.py",
+        "outcome": "failed"
+      },
+      {
+        "message": "ImportError while importing test module '/Users/kar/orca/workspaces/gigai/gigai-v0.1.8/tests/test_setup_browser.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_setup_browser.py:11: in <module>\n    from gigai.cli import _enable_probe_target, _model_target_description, cli\nsrc/gigai/cli.py:14: in <module>\n    import questionary\nE   ModuleNotFoundError: No module named 'questionary'",
+        "nodeid": "tests/test_setup_browser.py",
+        "outcome": "failed"
+      }
+    ],
+    "items_collected": 1173
+  },
+  "command": [
+    "/Users/kar/Developer/projects/gigai/.venv/bin/python",
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+    "-p",
+    "no:cacheprovider",
+    "--collect-only",
+    "-q"
+  ],
+  "exit_code": 2,
+  "kind": "pytest-selection-measurement",
+  "outcomes": {},
+  "root": "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8",
+  "schema_version": "s11-measurement.v1",
+  "session": {
+    "duration_seconds": 3.820672
+  },
+  "started_at": "2026-09-21T22:29:14.751277+00:00",
+  "status": "fail",
+  "tests": []
+}

@@ -1,0 +1,272 @@
+"""Journal-backed Tailor document revisions and final selections.
+
+The journal remains the authority.  This service accepts a validated
+``DocumentRevision`` and records its exact Markdown bytes plus a closed JSON
+descriptor through the existing private revision transition; it does not
+resolve mutable sources or create application state.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+import json
+from pathlib import Path
+import re
+import uuid
+from typing import Callable
+
+from ..canonical import EntityPrefix, canonical_json_bytes, digest_imported_bytes, validate_entity_id
+from ..journal import JournalArtifact, JournalEntry, JournalTransition, read_committed_artifact, run_with_journal_writer
+from .documents import DocumentRevision, FinalDocumentSelection, ScoutDocumentError, SourceLineage
+from ..validators import validate_serialized_contract
+from ..workpad import ResolvedWorkpad
+
+_SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+class ScoutDocumentRecordError(ValueError):
+    """Redacted refusal from the journal-backed document service."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class DocumentRecordResult:
+    revision: DocumentRevision
+    created: bool
+    entry: JournalEntry | None
+
+
+@dataclass(frozen=True)
+class SelectionRecordResult:
+    selection: FinalDocumentSelection
+    created: bool
+    entry: JournalEntry | None
+
+
+def _fail(code: str, message: str) -> None:
+    raise ScoutDocumentRecordError(code, message)
+
+
+def _validate_tailor_provenance(
+    *, resolved: ResolvedWorkpad, selection: FinalDocumentSelection,
+    invocation: Mapping[str, object],
+) -> dict[str, object] | None:
+    """Authenticate a selection against the actual completed Tailor result.
+
+    R2's original service accepted an opaque invocation map for compatibility
+    with its standalone fixtures.  The public user-selection path opts into
+    this closed discriminator so a caller cannot invent a model invocation or
+    merely repeat a document identity.
+    """
+    if invocation.get("authority") != "tailor_run":
+        return None
+    allowed = {"authority", "run_id", "goal_id", "invocation_id", "output_sha256"}
+    if set(invocation) != allowed:
+        _fail("document_selection_provenance_invalid", "Tailor provenance shape is invalid")
+    run_id, goal_id, invocation_id = (invocation.get(key) for key in ("run_id", "goal_id", "invocation_id"))
+    if not all(isinstance(item, str) and item for item in (run_id, goal_id, invocation_id)):
+        _fail("document_selection_provenance_invalid", "Tailor provenance identity is invalid")
+    try:
+        validate_entity_id(run_id, expected_prefix=EntityPrefix.RUN)
+        validate_entity_id(goal_id, expected_prefix=EntityPrefix.GOAL)
+        validate_entity_id(invocation_id, expected_prefix=EntityPrefix.INVOCATION)
+    except (TypeError, ValueError):
+        _fail("document_selection_provenance_invalid", "Tailor provenance identity is invalid")
+    output_sha = invocation.get("output_sha256")
+    if not isinstance(output_sha, str) or not _SHA256.fullmatch(output_sha):
+        _fail("document_selection_provenance_invalid", "Tailor output digest is invalid")
+    result_path = f"runs/{run_id}/scout-tailor/result.json"
+    try:
+        result_data, _ = read_committed_artifact(
+            workpad=resolved.path, project_id=resolved.project_id,
+            gig_id=resolved.gig_id, path=result_path,
+        )
+        result = json.loads(result_data)
+    except Exception as exc:
+        raise ScoutDocumentRecordError(
+            "document_selection_provenance_unavailable",
+            "Tailor result is not committed authority",
+        ) from exc
+    if (
+        not isinstance(result, Mapping)
+        or result.get("schema_version") != "scout-tailor-run-result:1"
+        or result.get("status") != "complete"
+        or result.get("run_id") != run_id
+        or result.get("goal_id") != goal_id
+        or result.get("invocation_id") != invocation_id
+        or result.get("output_sha256") != output_sha
+        or result.get("sealed_journal_head") is None
+        or not isinstance(result.get("documents"), list)
+    ):
+        _fail("document_selection_provenance_mismatch", "Tailor result does not match selected provenance")
+    result_docs = {
+        (item.get("document_kind"), item.get("record_id"), item.get("revision_id"), item.get("content_sha256"))
+        for item in result["documents"]
+        if isinstance(item, Mapping)
+    }
+    selected_docs = {
+        (item.document_kind, item.record_id, item.revision_id, item.content_sha256)
+        for item in selection.documents
+    }
+    if not selected_docs <= result_docs:
+        _fail("document_selection_provenance_mismatch", "selected documents were not generated by the Tailor Run")
+    return {
+        "authority": "tailor_run", "run_id": run_id, "goal_id": goal_id,
+        "invocation_id": invocation_id, "output_sha256": output_sha,
+    }
+
+
+def _paths(revision: DocumentRevision) -> tuple[str, str]:
+    base = f"records/scout-documents/{revision.record_id}/revisions/{revision.revision_id}"
+    return f"{base}/{revision.document_kind}.md", f"{base}/record.json"
+
+
+def _ref(path: str, data: bytes, media_type: str) -> dict[str, object]:
+    return {"path": path, "content_sha256": digest_imported_bytes(data), "media_type": media_type, "size_bytes": len(data)}
+
+
+def _record_payload(revision: DocumentRevision, content_path: str) -> bytes:
+    value = revision.to_json()
+    value["content_ref"] = _ref(content_path, revision.content, "text/markdown; charset=utf-8")
+    return canonical_json_bytes(value)
+
+
+def record_document_revision(
+    *,
+    resolved: ResolvedWorkpad,
+    revision: DocumentRevision,
+    invocation: Mapping[str, object],
+    operation_key: str,
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> DocumentRecordResult:
+    """Commit an immutable document revision and invocation provenance.
+
+    ``invocation`` is an opaque already-authenticated host record; this layer
+    records it in metadata but does not grant model or source authority.
+    """
+    if not isinstance(revision, DocumentRevision) or not isinstance(resolved, ResolvedWorkpad):
+        _fail("document_record_invalid", "document revision or workpad is invalid")
+    if not isinstance(invocation, Mapping) or not operation_key or len(operation_key) > 256 or any(not isinstance(k, str) for k in invocation):
+        _fail("document_record_invalid", "invocation provenance or operation is invalid")
+    for lineage in revision.source_lineage:
+        for key, expected in (("project_id", resolved.project_id), ("gig_id", resolved.gig_id)):
+            value = lineage.identity.get(key)
+            if value is not None and (type(value) is not str or value != expected):
+                _fail("document_record_invalid", "source lineage belongs to another scope")
+    try:
+        canonical_json_bytes(dict(invocation))
+    except (TypeError, ValueError, UnicodeError):
+        _fail("document_record_invalid", "invocation provenance is not canonical data")
+    content_path, record_path = _paths(revision)
+    record_data = _record_payload(revision, content_path)
+
+    def operation(writer) -> DocumentRecordResult:
+        existing = _existing_revision(writer.root, resolved.project_id, resolved.gig_id, revision.record_id, revision.revision_id)
+        if existing is not None:
+            if existing.content != revision.content or existing.content_sha256 != revision.content_sha256:
+                _fail("document_record_conflict", "document revision identity is already bound to other bytes")
+            return DocumentRecordResult(existing, False, None)
+        refs = [_ref(content_path, revision.content, "text/markdown; charset=utf-8"), _ref(record_path, record_data, "application/json")]
+        entry = writer.record(JournalTransition(
+            f"handoff_{uuid_factory()}", "private_record_revised", "Immutable Scout Tailor document revision recorded.",
+            (JournalArtifact(content_path, revision.content), JournalArtifact(record_path, record_data)),
+            {"project_id": resolved.project_id, "gig_id": resolved.gig_id, "domain": "scout-tailor-document", "operation_key": operation_key, "source": "scout-document-records", "actor": {"kind": "gigai", "id": "scout-document-records"}, "invocation": dict(invocation), "artifact_refs": refs},
+        ))
+        return DocumentRecordResult(revision, True, entry)
+
+    return run_with_journal_writer(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=operation)
+
+
+def _existing_revision(root: Path, project_id: str, gig_id: str, record_id: str, revision_id: str) -> DocumentRevision | None:
+    path = f"records/scout-documents/{record_id}/revisions/{revision_id}/record.json"
+    try:
+        data, _ = read_committed_artifact(workpad=root, project_id=project_id, gig_id=gig_id, path=path)
+    except Exception:
+        return None
+    try:
+        value = json.loads(data)
+        ref = value.pop("content_ref")
+        content, _ = read_committed_artifact(workpad=root, project_id=project_id, gig_id=gig_id, path=str(ref["path"]))
+        lineage = tuple(SourceLineage(item["source_id"], item["content_sha256"], item.get("identity", {})) for item in value["source_lineage"])
+        return DocumentRevision(opportunity_id=value["opportunity"]["opportunity_id"], snapshot_id=value["opportunity"]["snapshot_id"], document_kind=value["document_kind"], record_id=value["record_id"], revision_id=value["revision_id"], content=content, content_sha256=value["content_sha256"], source_lineage=lineage, checks=value["checks"], parent_revision_id=value["parent_revision_id"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError, ScoutDocumentError):
+        raise ScoutDocumentRecordError("document_record_conflict", "committed document revision is malformed")
+
+
+def read_document_revision(*, resolved: ResolvedWorkpad, record_id: str, revision_id: str, document_kind: str) -> DocumentRevision:
+    """Read one exact published document and authenticate its descriptor/bytes."""
+    if not isinstance(resolved, ResolvedWorkpad) or not isinstance(document_kind, str):
+        _fail("document_record_invalid", "document reader inputs are invalid")
+    path = f"records/scout-documents/{record_id}/revisions/{revision_id}/record.json"
+    try:
+        data, _ = read_committed_artifact(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, path=path)
+        value = json.loads(data)
+        if value.get("document_kind") != document_kind:
+            _fail("document_record_invalid", "document kind does not match committed revision")
+        return _existing_revision(resolved.path, resolved.project_id, resolved.gig_id, record_id, revision_id) or _fail("document_record_unavailable", "document revision is unavailable")
+    except ScoutDocumentRecordError:
+        raise
+    except Exception as exc:
+        raise ScoutDocumentRecordError("document_record_unavailable", "document revision is not authenticated") from exc
+
+
+def record_final_selection(*, resolved: ResolvedWorkpad, selection: FinalDocumentSelection, invocation: Mapping[str, object], operation_key: str, uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4) -> SelectionRecordResult:
+    """Persist explicit final selection only after each revision is published."""
+    if not isinstance(selection, FinalDocumentSelection) or not isinstance(invocation, Mapping) or not operation_key:
+        _fail("document_selection_invalid", "final selection inputs are invalid")
+    try:
+        canonical_json_bytes(dict(invocation))
+    except (TypeError, ValueError, UnicodeError):
+        _fail("document_selection_invalid", "invocation provenance is not canonical data")
+    for revision in selection.documents:
+        read_document_revision(resolved=resolved, record_id=revision.record_id, revision_id=revision.revision_id, document_kind=revision.document_kind)
+    source_run = _validate_tailor_provenance(resolved=resolved, selection=selection, invocation=invocation)
+    path = f"records/scout-documents/selections/{selection.opportunity_id}_{selection.snapshot_id}.json"
+    selection_data = selection.to_json()
+    if source_run is not None:
+        # Version 2 makes host-authenticated Run provenance part of the
+        # immutable selection descriptor. Legacy R2 callers retain v1.
+        selection_data = {**selection_data, "selection_version": "scout-document-selection:2", "source_run": source_run}
+    data = canonical_json_bytes(selection_data)
+
+    def operation(writer) -> SelectionRecordResult:
+        try:
+            existing, _ = read_committed_artifact(workpad=writer.root, project_id=resolved.project_id, gig_id=resolved.gig_id, path=path)
+        except Exception:
+            existing = None
+        if existing is not None:
+            if existing != data:
+                _fail("document_selection_conflict", "final selection identity is already bound to other bytes")
+            return SelectionRecordResult(selection, False, None)
+        refs = [_ref(path, data, "application/json")]
+        entry = writer.record(JournalTransition(f"handoff_{uuid_factory()}", "private_record_revised", "Explicit final Tailor document selection recorded.", (JournalArtifact(path, data),), {"project_id": resolved.project_id, "gig_id": resolved.gig_id, "domain": "scout-tailor-selection", "operation_key": operation_key, "source": "scout-document-records", "actor": {"kind": "gigai", "id": "scout-document-records"}, "invocation": dict(invocation), "artifact_refs": refs}))
+        return SelectionRecordResult(selection, True, entry)
+
+    return run_with_journal_writer(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=operation)
+
+
+def read_final_selection(*, resolved: ResolvedWorkpad, opportunity_id: str, snapshot_id: str) -> dict[str, object]:
+    path = f"records/scout-documents/selections/{opportunity_id}_{snapshot_id}.json"
+    try:
+        data, _ = read_committed_artifact(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, path=path)
+        value = json.loads(data)
+        if not isinstance(value, dict) or value.get("selection_version") not in {"scout-document-selection:1", "scout-document-selection:2"}:
+            _fail("document_selection_invalid", "committed final selection is invalid")
+        schema = "scout-document-selection-v2.schema.json" if value.get("selection_version") == "scout-document-selection:2" else "scout-document-selection-v1.schema.json"
+        if not validate_serialized_contract(schema, canonical_json_bytes(value)).valid:
+            _fail("document_selection_invalid", "committed final selection failed its strict schema")
+        opportunity = value.get("opportunity")
+        if not isinstance(opportunity, Mapping) or opportunity.get("opportunity_id") != opportunity_id or opportunity.get("snapshot_id") != snapshot_id:
+            _fail("document_selection_scope_refused", "final selection opportunity differs")
+        return value
+    except ScoutDocumentRecordError:
+        raise
+    except Exception as exc:
+        raise ScoutDocumentRecordError("document_selection_unavailable", "final selection is not authenticated") from exc
+
+
+__all__ = ["DocumentRecordResult", "ScoutDocumentRecordError", "SelectionRecordResult", "read_document_revision", "read_final_selection", "record_document_revision", "record_final_selection"]

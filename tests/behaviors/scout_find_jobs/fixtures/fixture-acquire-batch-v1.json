@@ -1,0 +1,143 @@
+{
+  "schema_version": "scout-find-jobs-acquire-output:1",
+  "batch_id": "batch-001",
+  "batch_ref": "records/scout-acquisition/batch-001/input.json",
+  "progress_ref": "records/scout-acquisition/batch-001/progress/revision-001.json",
+  "progress_status": "pending",
+  "rows": [
+    {
+      "posting": {
+        "url": "https://boards.greenhouse.io/acme/jobs/101",
+        "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
+        "provider": "greenhouse",
+        "board_token": "acme",
+        "company": "Acme",
+        "title": "Software Engineer",
+        "location": "Denver, CO",
+        "published_at": "2026-09-20T00:00:00Z",
+        "content_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source_kind": "exa",
+        "query_key": "software-engineer"
+      },
+      "outcome": "edited"
+    },
+    {
+      "posting": {
+        "url": "https://jobs.lever.co/bright/202",
+        "normalized_url": "https://jobs.lever.co/bright/202",
+        "provider": "lever",
+        "board_token": "bright",
+        "company": "Bright",
+        "title": "Data Engineer",
+        "location": "Remote",
+        "published_at": null,
+        "content_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "source_kind": "ats",
+        "query_key": "data-engineer"
+      },
+      "outcome": "new"
+    },
+    {
+      "posting": {
+        "url": "https://jobs.ashbyhq.com/orbit/303",
+        "normalized_url": "https://jobs.ashbyhq.com/orbit/303",
+        "provider": "ashby",
+        "board_token": "orbit",
+        "company": "Orbit",
+        "title": "Platform Engineer",
+        "location": "Remote",
+        "published_at": null,
+        "content_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "source_kind": "ats",
+        "query_key": "software-engineer"
+      },
+      "outcome": "unchanged"
+    },
+    {
+      "posting": {
+        "url": "https://boards.greenhouse.io/acme/jobs/101?utm_source=repeat",
+        "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
+        "provider": "greenhouse",
+        "board_token": "acme",
+        "company": "Acme",
+        "title": "Software Engineer",
+        "location": "Denver, CO",
+        "published_at": "2026-09-20T00:00:00Z",
+        "content_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source_kind": "exa",
+        "query_key": "software-engineer"
+      },
+      "outcome": "duplicate"
+    },
+    {
+      "posting": {
+        "url": "https://jobs.lever.co/bright/404",
+        "normalized_url": "https://jobs.lever.co/bright/404",
+        "provider": "lever",
+        "board_token": "bright",
+        "company": "Bright",
+        "title": "Unknown Role",
+        "location": "Remote",
+        "published_at": null,
+        "content_sha256": null,
+        "source_kind": "ats",
+        "query_key": "data-engineer"
+      },
+      "outcome": "failed"
+    }
+  ],
+  "failures": [
+    {
+      "source_kind": "ats",
+      "query_key": "data-engineer",
+      "url": "https://jobs.lever.co/bright/404",
+      "code": "provider_unavailable",
+      "message": "public board response was unavailable"
+    }
+  ],
+  "url_set_diff": {
+    "added": [
+      {
+        "url": "https://jobs.lever.co/bright/202",
+        "content_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ],
+    "removed": [
+      {
+        "url": "https://jobs.lever.co/bright/404",
+        "content_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    ],
+    "unchanged": [
+      {
+        "url": "https://jobs.ashbyhq.com/orbit/303",
+        "content_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    ],
+    "edited": [
+      {
+        "url": "https://boards.greenhouse.io/acme/jobs/101",
+        "previous_content_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "current_content_sha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    ]
+  },
+  "watchlist_refs": [
+    "records/scout-watchlist/scout_watchlist:greenhouse:acme.json",
+    "records/scout-watchlist/scout_watchlist:lever:bright.json"
+  ],
+  "selected_postings": [
+    {
+      "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
+      "url": "https://boards.greenhouse.io/acme/jobs/101",
+      "content_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "role_match": true
+    },
+    {
+      "normalized_url": "https://jobs.lever.co/bright/202",
+      "url": "https://jobs.lever.co/bright/202",
+      "content_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "role_match": true
+    }
+  ]
+}

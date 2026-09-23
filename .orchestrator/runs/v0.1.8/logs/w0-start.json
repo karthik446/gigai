@@ -1,0 +1,86 @@
+{
+  "id": "cc0f0710-c215-4c71-b9a0-40d859b85258",
+  "ok": true,
+  "result": {
+    "runId": "run_b12de8fdda28",
+    "taskId": "task_620013d3494d",
+    "dispatchId": "ctx_73b51935ef16",
+    "state": "ready",
+    "stage": "input_accepted",
+    "turnStart": "observed",
+    "setup": {
+      "requested": "not_applicable",
+      "effective": "not_applicable",
+      "source": "existing_worktree",
+      "hookFound": false,
+      "startupPolicy": "start-immediately",
+      "state": "not_applicable"
+    },
+    "launch": {
+      "requested": {
+        "agent": "codex",
+        "model": "gpt-5.6-luna",
+        "effort": "max"
+      },
+      "effective": {
+        "agent": "codex",
+        "model": "gpt-5.6-luna",
+        "effort": "max"
+      }
+    },
+    "mode": {
+      "mode": "terminal",
+      "preferred": "terminal",
+      "reason": "user_default",
+      "detail": "Started a terminal agent worker, the default for new agent tabs in your settings."
+    },
+    "timeoutMs": 60000,
+    "effects": [
+      {
+        "kind": "worktree",
+        "action": "reused",
+        "id": "a29deb41-dc30-4b54-9fab-44cc4e35999b::/Users/kar/orca/workspaces/gigai/gigai-v0.1.8"
+      },
+      {
+        "kind": "setup",
+        "action": "not_applicable",
+        "state": "not_applicable"
+      },
+      {
+        "kind": "terminal",
+        "role": "agent",
+        "action": "created",
+        "id": "term_8bb71d88-31ef-4df9-9cc3-c2fcfea94f4e",
+        "surface": "visible"
+      },
+      {
+        "kind": "dispatch_input",
+        "role": "agent",
+        "id": "term_8bb71d88-31ef-4df9-9cc3-c2fcfea94f4e",
+        "state": "accepted"
+      }
+    ],
+    "prompt": {
+      "requestId": "5dd91e07-2e5d-4419-907a-ddb0fde1b425",
+      "stages": [
+        "input_accepted",
+        "turn_started"
+      ],
+      "provider": "codex",
+      "observation": "supported",
+      "processIncarnation": "2e73d326-8824-434c-a3bc-e01ba1a13d93",
+      "generation": 23,
+      "baselineWorkingSequence": 1,
+      "baselineExplicitWorkingStartedAt": null,
+      "baselinePermissionSequence": 0
+    },
+    "residualResources": [],
+    "mutation": {
+      "requestId": "5dd91e07-2e5d-4419-907a-ddb0fde1b425",
+      "replayed": false
+    }
+  },
+  "_meta": {
+    "runtimeId": "b9b8c09d-29cd-4820-9945-84e91f255ac9"
+  }
+}

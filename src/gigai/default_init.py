@@ -25,7 +25,7 @@ from .journal import (
 )
 from .package import PackageInitResult, initialize_project_package
 from .private_records import PrivateRecordError, migrate_workpad_layout
-from .scout_materialization import (
+from .scout.materialization import (
     ScoutMaterializationError,
     is_scout_candidate,
     materialize_scout_candidate,

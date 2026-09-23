@@ -1,0 +1,117 @@
+{
+ "sanitization": "Allow-listed fields only. Excluded: worker preamble, transcript, terminal handles and any dispatch capability values.",
+ "run_id": "run_c7a2891bce10",
+ "orca_version": "1.4.206",
+ "worker_model": "claude-haiku-4-5-20251001",
+ "worker_start": [
+  {
+   "worker": "n3",
+   "ok": true,
+   "task_id": "task_52ad01725b28",
+   "dispatch_id": "ctx_d2383ea30513",
+   "stage": "input_accepted"
+  }
+ ],
+ "coordinator_timeline": [
+  {
+   "coordinator_time_utc": "2026-09-22T20:49:09.474+00:00",
+   "event": "run-create begin"
+  },
+  {
+   "coordinator_time_utc": "2026-09-22T20:49:09.637+00:00",
+   "event": "run-create end rc=0"
+  },
+  {
+   "coordinator_time_utc": "2026-09-22T20:49:22.126+00:00",
+   "event": "wait begin (blocked, before worker exists)"
+  },
+  {
+   "coordinator_time_utc": "2026-09-22T20:49:24.194+00:00",
+   "event": "worker-start n3 begin"
+  },
+  {
+   "coordinator_time_utc": "2026-09-22T20:49:27.524+00:00",
+   "event": "worker-start n3 end rc=0"
+  },
+  {
+   "coordinator_time_utc": "2026-09-22T20:49:39.532+00:00",
+   "event": "RESUME (woken by Orca injected nudge in terminal, not by harness background notification)"
+  },
+  {
+   "coordinator_time_utc": "2026-09-22T20:49:48.663+00:00",
+   "event": "read-only --all peek (after nudge)"
+  },
+  {
+   "coordinator_time_utc": "2026-09-22T20:50:38.532+00:00",
+   "event": "wait returned rc=0"
+  },
+  {
+   "coordinator_time_utc": "2026-09-22T20:50:46.752+00:00",
+   "event": "RESUME (harness background-task notification: wait exited)"
+  },
+  {
+   "coordinator_time_utc": "2026-09-22T20:51:00.211+00:00",
+   "event": "release ctx_d2383ea30513 rc=0"
+  },
+  {
+   "coordinator_time_utc": "2026-09-22T20:51:00.371+00:00",
+   "event": "ack delivery_ab48c2d04db9 rc=0"
+  }
+ ],
+ "blocked_wait": {
+  "keepalives": [
+   {
+    "elapsedMs": 15002
+   },
+   {
+    "elapsedMs": 30003
+   },
+   {
+    "elapsedMs": 45004
+   },
+   {
+    "elapsedMs": 60005
+   },
+   {
+    "elapsedMs": 75006
+   }
+  ],
+  "delivery_id": "delivery_ab48c2d04db9",
+  "replayed": false,
+  "timed_out": false,
+  "message_ids": [
+   "msg_733d63c889f5"
+  ]
+ },
+ "final_ack": {
+  "acknowledged": "delivery_ab48c2d04db9",
+  "remaining_count": 0
+ },
+ "reclaimable_after_release": 0,
+ "all_run_messages_read_only_check_all": [
+  {
+   "id": "msg_9caf0cecea6a",
+   "type": "heartbeat",
+   "subject": "ACK n3",
+   "body": "",
+   "created_at": "2026-09-22T20:49:30Z",
+   "delivered_at": "2026-09-22T20:49:31Z",
+   "task_id": "task_52ad01725b28",
+   "dispatch_id": "ctx_d2383ea30513",
+   "outcome": null,
+   "phase": "waiting"
+  },
+  {
+   "id": "msg_733d63c889f5",
+   "type": "worker_done",
+   "subject": "DONE n3",
+   "body": "N3 worker acknowledged, waited 60 seconds, and completed. No work performed. Nothing remaining.",
+   "created_at": "2026-09-22T20:50:38Z",
+   "delivered_at": null,
+   "task_id": "task_52ad01725b28",
+   "dispatch_id": "ctx_d2383ea30513",
+   "outcome": "succeeded",
+   "phase": null
+  }
+ ]
+}

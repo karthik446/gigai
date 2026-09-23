@@ -1,0 +1,118 @@
+{
+  "collection": {
+    "duration_seconds": 0.056906,
+    "items_collected": 4
+  },
+  "command": [
+    "/Users/kar/Developer/projects/gigai/.venv/bin/python",
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_scout_discovery_job.py",
+    "-q"
+  ],
+  "exit_code": 0,
+  "kind": "pytest-selection-measurement",
+  "outcomes": {
+    "passed": 4
+  },
+  "root": "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8",
+  "schema_version": "s11-measurement.v1",
+  "session": {
+    "duration_seconds": 0.058024
+  },
+  "started_at": "2026-09-21T22:28:30.578242+00:00",
+  "status": "pass",
+  "tests": [
+    {
+      "duration_seconds": 9.8e-05,
+      "nodeid": "tests/test_scout_discovery_job.py::test_bounded_public_import_deadline_reports_next_index_without_private_fields",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 3.8e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 2.6e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 3.4e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 0.000123,
+      "nodeid": "tests/test_scout_discovery_job.py::test_bounded_public_import_preserves_considered_duplicate_failure_and_exclusion",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 5.5e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 2.9e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 3.9e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 0.000209,
+      "nodeid": "tests/test_scout_discovery_job.py::test_discovery_job_exposes_public_acquisition_fields_only",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 6.4e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 0.000106,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 3.9e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    },
+    {
+      "duration_seconds": 0.000139,
+      "nodeid": "tests/test_scout_discovery_job.py::test_discovery_job_rejects_private_assessment_state",
+      "outcome": "passed",
+      "phases": {
+        "call": {
+          "duration_seconds": 6.6e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "setup": {
+          "duration_seconds": 3.5e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        },
+        "teardown": {
+          "duration_seconds": 3.8e-05,
+          "outcome": "passed",
+          "wasxfail": null
+        }
+      }
+    }
+  ]
+}

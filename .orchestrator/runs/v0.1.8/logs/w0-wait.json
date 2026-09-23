@@ -1,0 +1,27 @@
+{
+  "id": "316d40b8-1e17-44ad-a266-4c43efafc6f9",
+  "ok": false,
+  "error": {
+    "code": "consumer_fenced",
+    "message": "This mailbox consumer was replaced while waiting. Orchestration mutation request ID: 2264c524-69cc-4e83-bba0-2ffa39804faf.",
+    "data": {
+      "orchestrationRequestId": "2264c524-69cc-4e83-bba0-2ffa39804faf",
+      "originalCommand": [
+        "orca",
+        "orchestration",
+        "check",
+        "--run",
+        "run_b12de8fdda28",
+        "--wait",
+        "--types",
+        "worker_done,escalation,question",
+        "--timeout-ms",
+        "3600000",
+        "--json"
+      ]
+    }
+  },
+  "_meta": {
+    "runtimeId": "b9b8c09d-29cd-4820-9945-84e91f255ac9"
+  }
+}

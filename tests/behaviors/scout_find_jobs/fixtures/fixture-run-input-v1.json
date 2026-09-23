@@ -1,0 +1,32 @@
+{
+  "schema_version": "scout-find-jobs-run-input:1",
+  "config": {
+    "schema_version": "find-jobs-config:1",
+    "roles": [
+      "software engineer",
+      "data engineer"
+    ],
+    "merged_queries": [
+      "software engineer OR data engineer"
+    ],
+    "location": "Denver, CO",
+    "remote": true,
+    "published_after": "2026-09-15T00:00:00Z",
+    "sources": {
+      "exa": true,
+      "ats": true,
+      "hiringcafe": false
+    },
+    "default_assess_cap": 10,
+    "default_model_target": "ollama_local"
+  },
+  "config_digest": "sha256:e14f80205b4dda9cdcd2f594c2eb341c224c4ee2a10d5765e0848df1db6e4dee",
+  "selection_cap": 10,
+  "selection_rule": "new_or_edited_role_match",
+  "model_target": "ollama_local",
+  "pinned_resume": {
+    "record_id": "resume-record-001",
+    "revision_id": "resume-revision-007",
+    "content_sha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+  }
+}

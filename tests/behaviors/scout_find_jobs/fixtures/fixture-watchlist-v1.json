@@ -1,0 +1,50 @@
+{
+  "schema_version": "fixture-watchlist-v1",
+  "entries": [
+    {
+      "schema_version": "scout-watchlist:1",
+      "watchlist_id": "scout_watchlist:greenhouse:acme",
+      "provider": "greenhouse",
+      "board_token": "acme",
+      "company": "Acme",
+      "state": "active",
+      "first_seen": {
+        "source_kind": "exa",
+        "source_url": "https://boards.greenhouse.io/acme/jobs/101",
+        "query_key": "software-engineer",
+        "batch_id": "batch-001",
+        "observed_at": "2026-09-22T00:00:00Z"
+      }
+    },
+    {
+      "schema_version": "scout-watchlist:1",
+      "watchlist_id": "scout_watchlist:lever:bright",
+      "provider": "lever",
+      "board_token": "bright",
+      "company": "Bright",
+      "state": "active",
+      "first_seen": {
+        "source_kind": "ats",
+        "source_url": "https://jobs.lever.co/bright/202",
+        "query_key": "data-engineer",
+        "batch_id": "batch-001",
+        "observed_at": "2026-09-22T00:00:00Z"
+      }
+    },
+    {
+      "schema_version": "scout-watchlist:1",
+      "watchlist_id": "scout_watchlist:ashby:orbit",
+      "provider": "ashby",
+      "board_token": "orbit",
+      "company": "Orbit",
+      "state": "active",
+      "first_seen": {
+        "source_kind": "exa",
+        "source_url": "https://jobs.ashbyhq.com/orbit/303",
+        "query_key": "software-engineer",
+        "batch_id": "batch-001",
+        "observed_at": "2026-09-22T00:00:00Z"
+      }
+    }
+  ]
+}

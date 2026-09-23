@@ -1,0 +1,46 @@
+{
+  "schema_version": "scout-find-jobs-acquire-input:1",
+  "config": {
+    "schema_version": "find-jobs-config:1",
+    "roles": ["software engineer", "data engineer"],
+    "merged_queries": ["software engineer OR data engineer"],
+    "location": "Denver, CO",
+    "remote": true,
+    "published_after": "2026-09-15T00:00:00Z",
+    "sources": {"exa": true, "ats": true, "hiringcafe": false},
+    "default_assess_cap": 10,
+    "default_model_target": "ollama_local"
+  },
+  "config_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "prior_batch_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "rows": [
+    {
+      "url": "https://boards.greenhouse.io/acme/jobs/101",
+      "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
+      "provider": "greenhouse",
+      "board_token": "acme",
+      "company": "Acme",
+      "title": "Software Engineer",
+      "location": "Denver, CO",
+      "published_at": "2026-09-20T00:00:00Z",
+      "content_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_kind": "exa",
+      "query_key": "software-engineer"
+    },
+    {
+      "url": "https://jobs.lever.co/bright/202",
+      "normalized_url": "https://jobs.lever.co/bright/202",
+      "provider": "lever",
+      "board_token": "bright",
+      "company": "Bright",
+      "title": "Data Engineer",
+      "location": "Remote",
+      "published_at": null,
+      "content_sha256": null,
+      "source_kind": "ats",
+      "query_key": "data-engineer"
+    }
+  ],
+  "selection_cap": 10,
+  "selection_rule": "new_or_edited_role_match"
+}

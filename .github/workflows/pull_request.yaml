@@ -4,24 +4,40 @@ on:
   pull_request:
   workflow_call:
     inputs:
-      full_matrix:
-        description: Run every supported Python and operating-system combination.
+      profile:
+        description: "CI profile: pr (ubuntu/3.11), release (macOS+ubuntu/3.12), or full (macOS+ubuntu x 3.11/3.12/3.13 + Debian offline)."
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: pr
       ref:
         description: Exact ref to test when called by another workflow.
         required: false
         type: string
         default: ""
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "CI profile to run on this branch, without tagging."
+        required: false
+        type: choice
+        options:
+          - pr
+          - release
+          - full
+        default: pr
 
 permissions:
   contents: read
 
+concurrency:
+  group: gigai-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   changes:
     name: Detect implementation changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       code_changed: ${{ steps.detect.outputs.code_changed }}
     steps:
@@ -33,12 +49,12 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          FULL_MATRIX: ${{ inputs.full_matrix }}
+          PROFILE: ${{ inputs.profile || 'pr' }}
           SHA: ${{ github.sha }}
         run: |
-          if [ "${FULL_MATRIX}" = "true" ]; then
+          if [ "${PROFILE}" != "pr" ]; then
             code_changed=true
-            changed="full compatibility profile"
+            changed="${PROFILE} compatibility profile"
           elif [ "${EVENT_NAME}" = "pull_request" ]; then
             changed="$(git diff --name-only "${BASE_SHA}...${SHA}")"
             code_changed=false
@@ -65,16 +81,54 @@ jobs:
           echo "code_changed=${code_changed}" >> "${GITHUB_OUTPUT}"
           echo "implementation changes: ${code_changed}"
 
-  source-tests:
+  source-matrix:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true'
-    name: G28 readiness tiers (Python ${{ matrix.python }} on ${{ matrix.os }})
+    name: Compute source-suite matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      include: ${{ steps.matrix.outputs.include }}
+    steps:
+      - id: matrix
+        env:
+          PROFILE: ${{ inputs.profile || 'pr' }}
+        run: |
+          case "${PROFILE}" in
+            pr)
+              include='[{"os":"ubuntu-24.04","python":"3.11"}]'
+              ;;
+            release)
+              # Operator: everyone uses macOS, so that's the one to test at
+              # release; the broad matrix runs nightly / post-release instead.
+              include='[{"os":"macos-latest","python":"3.12"},{"os":"ubuntu-24.04","python":"3.12"}]'
+              ;;
+            full)
+              include='[{"os":"ubuntu-24.04","python":"3.11"},{"os":"ubuntu-24.04","python":"3.12"},{"os":"ubuntu-24.04","python":"3.13"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.12"},{"os":"macos-latest","python":"3.13"}]'
+              ;;
+            *)
+              echo "unknown profile: ${PROFILE}" >&2
+              exit 1
+              ;;
+          esac
+          echo "include=${include}" >> "${GITHUB_OUTPUT}"
+
+  source-tests:
+    needs: source-matrix
+    name: Source suite (Python ${{ matrix.python }} on ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      TEST_XDIST_WORKERS: auto
+      # ubuntu-24.04 runners are 4 vCPU; macos-latest runners are 3 vCPU.
+      # _xdist_options() clamps to min(requested, max, os.cpu_count()) anyway,
+      # so this cap is a documented ceiling, not the binding constraint.
+      TEST_XDIST_MAX_WORKERS: ${{ contains(matrix.os, 'macos') && '3' || '4' }}
+      TEST_XDIST_DIST: worksteal
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.full_matrix && '["ubuntu-latest", "macos-latest"]' || '["ubuntu-latest"]') }}
-        python: ${{ fromJSON(inputs.full_matrix && '["3.11", "3.12", "3.13"]' || '["3.11"]') }}
+        include: ${{ fromJSON(needs.source-matrix.outputs.include) }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -85,24 +139,17 @@ jobs:
       - uses: astral-sh/setup-uv@v8.0.0
         with:
           enable-cache: true
+          cache-dependency-glob: uv.lock
       - run: uv sync --locked --extra test --python "${{ matrix.python }}"
-      - name: G28 unit and contract tier
-        if: ${{ !inputs.full_matrix }}
-        run: python tools/run_g28_tier.py unit
-      - name: G28 integration tier
-        if: ${{ !inputs.full_matrix }}
-        run: python tools/run_g28_tier.py integration
-      - name: G28 behavioral evaluation tier
-        if: ${{ !inputs.full_matrix }}
-        run: python tools/run_g28_tier.py behavior
       - name: Full source suite
-        run: uv run --locked pytest
+        run: make test-source
 
-  wheel:
+  behavior:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true'
-    name: Built-wheel resources
-    runs-on: ubuntu-latest
+    name: Deterministic G28 behavior evaluation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -113,76 +160,49 @@ jobs:
       - uses: astral-sh/setup-uv@v8.0.0
         with:
           enable-cache: true
-      - run: rm -rf dist
-      - run: uv build
-      - run: uv venv --python 3.11 .wheel-venv
-      - run: |
-          version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
-          set -- "dist/gigai-${version}-"*.whl
-          if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
-            echo "expected exactly one built GigAI wheel for version ${version}" >&2
-            exit 1
-          fi
-          uv pip install --python .wheel-venv/bin/python "$1"
-      - run: .wheel-venv/bin/python tools/verify_installed_schemas.py
-      - run: .wheel-venv/bin/python tools/verify_installed_canonical.py
-      - run: .wheel-venv/bin/python tools/verify_installed_cli.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g03.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g04.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g05.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g06.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g07.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g08.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g09.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g11.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g13.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g14.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g15.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g16.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g17.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g19.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g20.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g21.py
-      - if: ${{ inputs.full_matrix }}
-        run: .wheel-venv/bin/python tools/verify_installed_g23.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g28.py
-      - run: .wheel-venv/bin/python tools/verify_installed_g27.py
-      - run: >-
-          uv run --locked --extra test pytest
-          tests/test_cli_and_scenario_harness.py
-          tests/test_g*_installed_scenarios.py
-          tests/test_g10_phase1_audit.py
-          -k 'installed_help_version or installed_'
-        if: ${{ inputs.full_matrix }}
-        env:
-          GIGAI_TEST_EXECUTABLE: ${{ github.workspace }}/.wheel-venv/bin/gigai
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --extra test --python "3.11"
+      - run: make test-behavior
 
-  debian-offline:
+  wheel:
     needs: changes
-    if: needs.changes.outputs.code_changed == 'true' && inputs.full_matrix
-    name: Debian 12 offline container
-    runs-on: ubuntu-latest
+    if: needs.changes.outputs.code_changed == 'true'
+    name: Built-wheel resources
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref || github.sha }}
-      - run: docker build --tag gigai-debian-offline:${{ github.sha }} --file containers/debian-offline/Dockerfile .
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --extra test --python "3.11"
+      - run: make test-wheel
+
+  debian-offline:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') == 'full'
+    name: Debian 12 offline container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: containers/debian-offline/Dockerfile
+          tags: gigai-debian-offline:${{ github.sha }}
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - run: >-
           docker run --rm
           --network none

@@ -32,7 +32,7 @@ from .journal import (
     JournalTransition,
     run_with_journal_writer,
 )
-from .scout_tools import ScoutToolError, _inventory
+from .scout.tools import ScoutToolError, _inventory
 from .validators import validate_serialized_contract
 
 

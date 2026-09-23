@@ -34,13 +34,13 @@ from .journal import (
 )
 from .private_records import _resolved
 from .run import RunError, _resolve_authority, resolve_selected_graph_authority
-from .scout_inputs import (
+from .scout.inputs import (
     ScoutInputError,
     assert_single_override_context,
     resolve_external_input,
     revalidate_external_input,
 )
-from .scout_tailoring import validate_tailoring_request
+from .scout.tailoring import validate_tailoring_request
 from .validators import validate_serialized_contract
 
 
@@ -54,16 +54,16 @@ LIMITS = {
 }
 RESEARCH_DOMAIN_SCHEMA_ID = "urn:gigai:scout:research-packet:2"
 RESEARCH_VALIDATOR_REF = "scout-role-research:2"
-RESEARCH_VALIDATOR_SOURCE = "gigai.scout_research:validate_research_domain"
+RESEARCH_VALIDATOR_SOURCE = "gigai.scout.research:validate_research_domain"
 RESEARCH_V3_DOMAIN_SCHEMA_ID = "urn:gigai:scout:research-packet:3"
 RESEARCH_V3_VALIDATOR_REF = "scout-role-research:3"
-RESEARCH_V3_VALIDATOR_SOURCE = "gigai.scout_research_v3:validate_research_domain"
+RESEARCH_V3_VALIDATOR_SOURCE = "gigai.scout.research_v3:validate_research_domain"
 DISCOVERY_DOMAIN_SCHEMA_ID = "urn:gigai:scout:discovery-packet:2"
 DISCOVERY_VALIDATOR_REF = "scout-job-discovery:2"
-DISCOVERY_VALIDATOR_SOURCE = "gigai.scout_discovery:validate_discovery_domain"
+DISCOVERY_VALIDATOR_SOURCE = "gigai.scout.discovery:validate_discovery_domain"
 TAILORING_DOMAIN_SCHEMA_ID = "urn:gigai:scout:tailoring-packet:1"
 TAILORING_VALIDATOR_REF = "scout-application-tailoring:1"
-TAILORING_VALIDATOR_SOURCE = "gigai.scout_tailoring:validate_tailoring_domain"
+TAILORING_VALIDATOR_SOURCE = "gigai.scout.tailoring:validate_tailoring_domain"
 _DOMAIN_ID_LIMIT = 64
 TERMINAL = frozenset({"succeeded", "cancelled", "interrupted"})
 
@@ -91,9 +91,9 @@ class ExternalRecordingError(RuntimeError):
 def _fixed_research_validator(**kwargs: object) -> None:
     """Dispatch only to the reviewed packaged research bridge by fixed name."""
     try:
-        from .scout_research import validate_research_domain
+        from .scout.research import validate_research_domain
     except ModuleNotFoundError as exc:
-        if exc.name != "gigai.scout_research":
+        if exc.name != "gigai.scout.research":
             raise
         raise ExternalRecordingError(
             "external_domain_validator_unavailable",
@@ -116,9 +116,9 @@ def _fixed_research_validator(**kwargs: object) -> None:
 def _fixed_research_v3_validator(**kwargs: object) -> None:
     """Dispatch only to the reviewed packaged v3 research bridge."""
     try:
-        from .scout_research_v3 import validate_research_domain
+        from .scout.research_v3 import validate_research_domain
     except ModuleNotFoundError as exc:
-        if exc.name != "gigai.scout_research_v3":
+        if exc.name != "gigai.scout.research_v3":
             raise
         raise ExternalRecordingError(
             "external_domain_validator_unavailable",
@@ -139,9 +139,9 @@ def _fixed_research_v3_validator(**kwargs: object) -> None:
 def _fixed_discovery_validator(**kwargs: object) -> None:
     """Dispatch only to the reviewed packaged discovery bridge by fixed name."""
     try:
-        from .scout_discovery import validate_discovery_domain
+        from .scout.discovery import validate_discovery_domain
     except ModuleNotFoundError as exc:
-        if exc.name != "gigai.scout_discovery":
+        if exc.name != "gigai.scout.discovery":
             raise
         raise ExternalRecordingError(
             "external_domain_validator_unavailable",
@@ -164,9 +164,9 @@ def _fixed_discovery_validator(**kwargs: object) -> None:
 def _fixed_tailoring_validator(**kwargs: object) -> None:
     """Dispatch only to the reviewed packaged tailoring bridge by fixed name."""
     try:
-        from .scout_tailoring import validate_tailoring_domain
+        from .scout.tailoring import validate_tailoring_domain
     except ModuleNotFoundError as exc:
-        if exc.name != "gigai.scout_tailoring":
+        if exc.name != "gigai.scout.tailoring":
             raise
         raise ExternalRecordingError(
             "external_domain_validator_unavailable",
@@ -1658,13 +1658,13 @@ def _validate_domain_binding(
             "v2 domain binding does not name packaged resources",
         )
     if domain.get("schema_id") == RESEARCH_DOMAIN_SCHEMA_ID:
-        from .scout_research import FIXED_DOMAIN_RESOURCES
+        from .scout.research import FIXED_DOMAIN_RESOURCES
     elif domain.get("schema_id") == RESEARCH_V3_DOMAIN_SCHEMA_ID:
-        from .scout_research_v3 import FIXED_DOMAIN_RESOURCES
+        from .scout.research_v3 import FIXED_DOMAIN_RESOURCES
     elif domain.get("schema_id") == DISCOVERY_DOMAIN_SCHEMA_ID:
-        from .scout_discovery import FIXED_DOMAIN_RESOURCES
+        from .scout.discovery import FIXED_DOMAIN_RESOURCES
     elif domain.get("schema_id") == TAILORING_DOMAIN_SCHEMA_ID:
-        from .scout_tailoring import FIXED_DOMAIN_RESOURCES
+        from .scout.tailoring import FIXED_DOMAIN_RESOURCES
     else:  # pragma: no cover - specs guard above
         raise ExternalRecordingError(
             "external_domain_validator_unavailable",

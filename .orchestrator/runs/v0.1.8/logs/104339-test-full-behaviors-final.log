@@ -1,0 +1,131 @@
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [  3%]
+........................................................................ [  7%]
+........................................................................ [ 11%]
+.....................................................................s.. [ 15%]
+........................................................................ [ 19%]
+........................................................................ [ 23%]
+........................................................................ [ 27%]
+........................................................................ [ 31%]
+........................................................................ [ 35%]
+........................................................................ [ 39%]
+.........................................................F.............. [ 42%]
+........................................................................ [ 46%]
+........................................................................ [ 50%]
+........................................................................ [ 54%]
+........................................................................ [ 58%]
+........................................................................ [ 62%]
+........................................................................ [ 66%]
+........................................................................ [ 70%]
+........................................................................ [ 74%]
+........................................................................ [ 78%]
+........................................................................ [ 81%]
+........................................................................ [ 85%]
+........................................................................ [ 89%]
+........................................................................ [ 93%]
+........................................................................ [ 97%]
+.............................................                            [100%]
+=================================== FAILURES ===================================
+______ test_existing_scout_graphs_are_byte_identical_to_pre_change_output ______
+[gw7] darwin -- Python 3.13.1 /Users/kar/orca/workspaces/gigai/gigai-v0.1.8/.venv/bin/python
+
+tmp_path = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1575/popen-gw7/test_existing_scout_graphs_are0')
+_seed_uuids = [UUID('a2058868-2e9f-4498-85ec-af43962930ee'), UUID('19b67b52-852a-4e0a-93e6-42be45e43bbf'), UUID('fbc495e3-4807-4995-...a-91d7-272246771d90'), UUID('66056cf8-f289-445a-9016-6a15889fc507'), UUID('99d2aaa7-1c32-4f8e-a5c6-58d0a8f0ab1b'), ...]
+
+    def test_existing_scout_graphs_are_byte_identical_to_pre_change_output(tmp_path: Path, _seed_uuids: list[uuid.UUID]) -> None:
+        """Prove I-1 did not alter any of the six existing Scout descriptors/graphs.
+    
+        Loads the pre-wave-1b committed module (``git show HEAD:...``, HEAD being
+        the last commit before this worker's edits) under an isolated module
+        name, and compares its compiled output against the current module's,
+        given the identical uuid sequence and frozen clock so only the addition
+        of the new graph can produce a difference.
+        """
+    
+        import subprocess
+    
+        baseline_source = subprocess.run(
+            ["git", "show", "HEAD:src/gigai/scout_materialization.py"],
+            check=True, capture_output=True, cwd=Path(__file__).resolve().parents[3],
+        ).stdout
+        baseline_path = tmp_path / "scout_materialization_baseline.py"
+        baseline_path.write_bytes(baseline_source)
+    
+        spec = importlib.util.spec_from_file_location(
+            "gigai._scout_materialization_baseline_for_test", baseline_path
+        )
+        assert spec is not None and spec.loader is not None
+        baseline_module = importlib.util.module_from_spec(spec)
+        baseline_module.__package__ = "gigai"
+        sys.modules[spec.name] = baseline_module
+        try:
+>           spec.loader.exec_module(baseline_module)
+
+tests/behaviors/scout_find_jobs/test_integration_graph.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+<frozen importlib._bootstrap_external>:1026: in exec_module
+    ???
+<frozen importlib._bootstrap>:488: in _call_with_frames_removed
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    """Typed, inert compilation of the bundled Scout candidate into one Gig.
+    
+    This module is intentionally a closed built-in boundary: it accepts only the
+    bundled Scout catalog candidate and never imports, executes, or dynamically
+    discovers user supplied Python.  It journals immutable software snapshots;
+    editable root copies are derived conveniences and are never execution approval.
+    """
+    
+    from __future__ import annotations
+    
+    from dataclasses import dataclass
+    from datetime import UTC, datetime
+    import os
+    from pathlib import Path
+    import subprocess
+    import tempfile
+    from types import MappingProxyType
+    from typing import Callable, Mapping
+    import uuid
+    
+    from .canonical import EntityPrefix, canonical_json_bytes, canonical_json_digest, digest_imported_bytes, generate_entity_id, parse_json_bytes
+    from .capabilities import CapabilityManifestError, materialize_capability_manifest
+    from .catalog import CatalogEntry
+    from .journal import JournalArtifact, JournalArtifactMissingError, JournalConflictError, JournalReconciliationRequired, read_committed_artifact, record_transition
+    from .lifecycle import LifecycleError, propose_first_graph_set_offline
+>   from .scout_template import (SCOUT_DEFINITION_VERSION, SCOUT_DISCOVERY_SCHEMA_PATH,
+                                  SCOUT_DISCOVERY_SOURCE_PATH, SCOUT_OPERATION_GRAPHS,
+                                  SCOUT_RESEARCH_SOURCE_PATH, SCOUT_RESEARCH_SCHEMA_PATH,
+                                  SCOUT_TAILORING_SOURCE_PATH, SCOUT_TAILORING_SCHEMA_PATH,
+                                  ScoutTemplateComparison, scout_catalog_candidate,
+                                  scout_source_files)
+E   ModuleNotFoundError: No module named 'gigai.scout_template'
+
+/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1575/popen-gw7/test_existing_scout_graphs_are0/scout_materialization_baseline.py:26: ModuleNotFoundError
+=============================== warnings summary ===============================
+tests/behaviors/runtime_run_authority/test_jsl_closeout_regressions.py::test_concurrent_identical_closeout_publishes_once_and_replays_once
+tests/behaviors/runtime_run_authority/test_jsl_closeout_regressions.py::test_concurrent_identical_closeout_publishes_once_and_replays_once
+  /Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/multiprocessing/popen_fork.py:67: DeprecationWarning: This process (pid=87175) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_provider_process_death_is_recovered_once_without_offline_work
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_terminal_publication_crash_never_exposes_uncommitted_success[after_artifact_replace]
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_terminal_publication_crash_never_exposes_uncommitted_success[after_replace]
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_terminal_publication_crash_never_exposes_uncommitted_success[before_commit]
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_terminal_publication_crash_never_exposes_uncommitted_success[after_commit]
+  /Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/multiprocessing/popen_fork.py:67: DeprecationWarning: This process (pid=87183) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/behaviors/scout_tracking_reporting/test_scout_r5_transfer_corrections.py::test_import_rejects_duplicate_members_before_last_entry_wins
+  /Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/zipfile/__init__.py:1638: UserWarning: Duplicate name: 'README.md'
+    return self._open_to_write(zinfo, force_zip64=force_zip64)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/behaviors/runtime_model_boundary/test_g30_live_cli.py:19: set GIGAI_G30_UAT=1 to invoke real local model CLIs
+FAILED tests/behaviors/scout_find_jobs/test_integration_graph.py::test_existing_scout_graphs_are_byte_identical_to_pre_change_output
+1 failed, 1843 passed, 1 skipped, 8 warnings in 641.12s (0:10:41)
+=== EXIT 1 ===

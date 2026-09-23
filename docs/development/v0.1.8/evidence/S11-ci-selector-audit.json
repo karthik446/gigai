@@ -1,0 +1,170 @@
+{
+  "schema_version": "s11-ci-selector-audit.v1",
+  "kind": "bounded-ci-selector-receipt",
+  "status": "completed_without_test_execution",
+  "observed_at": "2026-09-22",
+  "checkout": {
+    "path": "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8",
+    "head": "b01675d0b7ef39b49853a26df61aadeea2064a6a",
+    "branch": "karthik446/gigai-v0.1.8"
+  },
+  "commands": [
+    {
+      "command": "rtk .venv/bin/python tools/run_ci_tests.py installed --list-installed",
+      "exit_code": 0,
+      "result": "31 AST candidate node ids discovered under migrated behavior paths; no tests executed"
+    },
+    {
+      "command": "rtk .venv/bin/python -m py_compile tools/run_ci_tests.py",
+      "exit_code": 0,
+      "result": "runner syntax compiled; no tests executed"
+    },
+    {
+      "command": "rtk .venv/bin/python -m py_compile tools/verify_installed_g03.py",
+      "exit_code": 0,
+      "result": "G03 verifier syntax compiled after stdout/stderr diagnostic correction; no tests executed"
+    },
+    {
+      "command": "rtk make -n test",
+      "exit_code": 0,
+      "result": "source, behavior, and wheel phases are the sole aggregate prerequisites"
+    },
+    {
+      "command": "rtk ruby -e 'require \"yaml\"; YAML.load_file(\".github/workflows/pull_request.yaml\")'",
+      "exit_code": 0,
+      "result": "pull-request workflow parsed successfully"
+    },
+    {
+      "command": "rtk git diff --check -- .github/workflows/pull_request.yaml CONTRIBUTING.md docs/development/v0.1.8/roadmaps/v0.1.8-scout-search-first-roadmap.md tools/verify_installed_g03.py",
+      "exit_code": 0,
+      "result": "scoped tracked-file diff has no whitespace errors"
+    },
+    {
+      "command": "rtk .venv/bin/python -c 'compare glob(\"tools/verify_installed_*.py\") with recorded selector paths'",
+      "exit_code": 0,
+      "result": "actual_count=24, recorded_count=24, match=true, tools/verify_debian_offline.py present=true"
+    },
+    {
+      "command": "rtk .venv/bin/python -c 'import tools.run_ci_tests as runner; print(runner._xdist_options(\"auto\", \"14\", \"worksteal\"))'",
+      "exit_code": 0,
+      "result": "xdist plan reported requested=auto, max=14, cpu_count=14, actual=14, distribution=worksteal, GIGAI_G30_UAT=0"
+    },
+    {
+      "command": "rtk .venv/bin/python -c 'import socket; s=socket.socket(); s.bind((\"127.0.0.1\", 0))'",
+      "exit_code": 1,
+      "result": "bounded environment probe reproduced PermissionError: [Errno 1] Operation not permitted at socket.bind; no test or product code executed"
+    },
+    {
+      "command": "rtk make -n test-source TEST_XDIST_WORKERS=14 TEST_XDIST_MAX_WORKERS=14 TEST_XDIST_DIST=worksteal",
+      "exit_code": 0,
+      "result": "source command passes explicit xdist worker, cap, and worksteal options"
+    },
+    {
+      "command": "rtk make -n test-live",
+      "exit_code": 0,
+      "result": "live target retains GIGAI_G30_UAT=1 guard and does not inherit source xdist options"
+    }
+  ],
+  "installed_verifier_selection": {
+    "authority": "tools/verify_installed_*.py filesystem enumeration",
+    "count": 24,
+    "paths": [
+      "tools/verify_installed_canonical.py",
+      "tools/verify_installed_cli.py",
+      "tools/verify_installed_g03.py",
+      "tools/verify_installed_g04.py",
+      "tools/verify_installed_g05.py",
+      "tools/verify_installed_g06.py",
+      "tools/verify_installed_g07.py",
+      "tools/verify_installed_g08.py",
+      "tools/verify_installed_g09.py",
+      "tools/verify_installed_g11.py",
+      "tools/verify_installed_g13.py",
+      "tools/verify_installed_g14.py",
+      "tools/verify_installed_g15.py",
+      "tools/verify_installed_g16.py",
+      "tools/verify_installed_g17.py",
+      "tools/verify_installed_g19.py",
+      "tools/verify_installed_g20.py",
+      "tools/verify_installed_g21.py",
+      "tools/verify_installed_g22.py",
+      "tools/verify_installed_g23.py",
+      "tools/verify_installed_g26.py",
+      "tools/verify_installed_g27.py",
+      "tools/verify_installed_g28.py",
+      "tools/verify_installed_schemas.py"
+    ],
+    "execution_contract": "The aggregate runner executes each path with the wheel venv Python in lexical order and stops on the first nonzero exit code."
+  },
+  "offline_verifier_inventory": {
+    "total": 25,
+    "wheel_installed_scripts": 24,
+    "wheel_selection_glob": "tools/verify_installed_*.py",
+    "explicit_platform_gate": {
+      "path": "tools/verify_debian_offline.py",
+      "entrypoint": "make test-debian-offline",
+      "reason_not_in_wheel_selection": "The Debian verifier is a container/platform gate and does not match the verify_installed_*.py wheel-lane naming contract."
+    },
+    "reconciliation": "The earlier 25 count is 24 wheel-installed verifiers plus this separately named Debian offline verifier; no wheel verifier is missing from the 24-script enumeration."
+  },
+  "installed_test_selection": {
+    "authority": "AST candidate discovery yielding direct pytest node ids; pytest collection remains execution authority",
+    "count": 31,
+    "configured_test_roots": [
+      "tests",
+      "research/contract_spike/tests",
+      "research/phase0_spike/tests"
+    ],
+    "root_discovery": "tools/run_ci_tests.py reads tool.pytest.ini_options.testpaths from pyproject.toml and recursively discovers test*.py below every existing configured root, so relocated files and both research roots remain in scope.",
+    "selection_rule": "All test functions in *_installed_scenarios.py plus functions whose body references InstalledGigAI, installed_gigai, or GIGAI_TEST_EXECUTABLE; parameterization remains pytest-owned.",
+    "collection_authority": {
+      "authority": "pytest collection and repository conftest/marker policy applied to the explicit node ids",
+      "status": "not_executed_by_worker",
+      "boundary": "The 31 AST candidates are discovery input only; they do not prove collection or execution. Inherited fixtures, module/class/function markers, and parametrization remain pytest-owned and require an actual bounded collection or lane receipt."
+    },
+    "nodeids": [
+      "tests/behaviors/cli_surface/test_cli_and_scenario_harness.py::test_equivalent_manifest_mechanics_cover_python_and_non_python_repositories",
+      "tests/behaviors/cli_surface/test_cli_and_scenario_harness.py::test_installed_help_version_and_goal_approved_commands_are_the_only_surface",
+      "tests/behaviors/cli_surface/test_cli_and_scenario_harness.py::test_runtime_metadata_declares_click_and_console_script_is_installed",
+      "tests/behaviors/installed_release/test_g03_installed_scenarios.py::test_installed_doctor_fails_on_missing_config_without_creating_state",
+      "tests/behaviors/installed_release/test_g03_installed_scenarios.py::test_installed_doctor_is_offline_read_only_and_proves_the_configured_mount",
+      "tests/behaviors/installed_release/test_g03_installed_scenarios.py::test_installed_doctor_never_falls_back_when_configured_mount_disappears",
+      "tests/behaviors/installed_release/test_g03_installed_scenarios.py::test_installed_fresh_setup_and_rerun_are_exactly_idempotent",
+      "tests/behaviors/installed_release/test_g03_installed_scenarios.py::test_installed_interactive_setup_reviews_effects_before_applying",
+      "tests/behaviors/installed_release/test_g03_installed_scenarios.py::test_installed_setup_preserves_an_alternate_authoritative_mount",
+      "tests/behaviors/installed_release/test_g03_installed_scenarios.py::test_installed_setup_refuses_corrupt_or_incompatible_config_without_mutation",
+      "tests/behaviors/installed_release/test_g03_installed_scenarios.py::test_installed_setup_refuses_read_only_config_without_partial_mutation",
+      "tests/behaviors/installed_release/test_g04_installed_scenarios.py::test_installed_default_non_git_and_broken_alias_fail_without_registry",
+      "tests/behaviors/installed_release/test_g04_installed_scenarios.py::test_installed_explicit_non_git_init_is_registry_only",
+      "tests/behaviors/installed_release/test_g04_installed_scenarios.py::test_installed_git_init_has_exact_path_free_delta_and_idempotent_rerun",
+      "tests/behaviors/installed_release/test_g04_installed_scenarios.py::test_installed_git_init_refuses_invalid_target_state_without_replacement",
+      "tests/behaviors/installed_release/test_g04_installed_scenarios.py::test_installed_init_fails_closed_on_registry_corruption_or_version",
+      "tests/behaviors/installed_release/test_g04_installed_scenarios.py::test_installed_init_preserves_dirty_python_and_non_python_targets",
+      "tests/behaviors/installed_release/test_g04_installed_scenarios.py::test_installed_init_refuses_invalid_config_before_target_or_registry_mutation",
+      "tests/behaviors/installed_release/test_g04_installed_scenarios.py::test_installed_init_requires_valid_setup_before_any_target_mutation",
+      "tests/behaviors/installed_release/test_g04_installed_scenarios.py::test_installed_tmp_and_private_tmp_spellings_converge",
+      "tests/behaviors/installed_release/test_g04_installed_scenarios.py::test_two_installed_init_processes_converge_without_lock_or_duplicate",
+      "tests/behaviors/installed_release/test_g05_installed_scenarios.py::test_installed_cli_exposes_no_provision_or_activation_surface",
+      "tests/behaviors/installed_release/test_g05_installed_scenarios.py::test_installed_explicit_workpad_path_is_read_only_and_artifact_sanitized",
+      "tests/behaviors/installed_release/test_g05_installed_scenarios.py::test_installed_no_id_forms_fail_typed_without_active_or_mutation",
+      "tests/behaviors/installed_release/test_g05_installed_scenarios.py::test_installed_open_records_structured_workpad_and_target_argv",
+      "tests/behaviors/installed_release/test_g05_installed_scenarios.py::test_installed_open_target_only_requires_no_active_gig",
+      "tests/behaviors/installed_release/test_g06_installed_scenarios.py::test_installed_journal_transition_and_trailer_sequence",
+      "tests/behaviors/installed_release/test_g07_installed_scenarios.py::test_installed_check_validates_a_registered_proposal_without_mutation",
+      "tests/behaviors/installed_release/test_g08_installed_scenarios.py::test_installed_offline_proposal_lifecycle",
+      "tests/behaviors/installed_release/test_g10_phase1_audit.py::test_installed_open_without_id_resolves_active_private_workpad_with_target",
+      "tests/behaviors/installed_release/test_g11_installed_scenarios.py::test_installed_offline_doctor_uses_factory_without_network_or_secret_access"
+    ]
+  },
+  "upstream_migration": {
+    "reported_by_dispatch": "ctx_453939594ac0",
+    "top_level_test_modules_moved": 145,
+    "research_roots_retained": {
+      "research/contract_spike/tests": 3,
+      "research/phase0_spike/tests": 6
+    },
+    "collected_cases_reported_unchanged": 1588,
+    "authority": "Luna A owns the old/new identity map and actual pytest collection/conftest runtime policy; these fields are a handoff record, not a B test execution receipt."
+  },
+  "migration_boundary": "The bounded selector snapshot now follows the migrated tests/behaviors paths and configured research roots. This receipt remains candidate discovery only; A's old/new identity map and actual collection receipt are the authority, and no test pass or model/provider/live gate is claimed."
+}

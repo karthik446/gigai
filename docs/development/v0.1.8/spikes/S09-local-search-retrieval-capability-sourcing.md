@@ -1,7 +1,15 @@
 # Spike 9 — Local search/retrieval capability sourcing
 
-**Requested:** 2026-09-20; backlog, not started. Research only; no provider
-signup, API key activation, paid call, or scraping is authorized by this brief.
+**Requested:** 2026-09-20. **Status:** Research recorded 2026-09-21; no
+provider signup, API key activation, paid call, ATS polling or scraping is
+authorized by this brief.
+
+**Current evidence pointer:** [S09 research record](evidence/S09-local-search-retrieval-capability-sourcing-research.md)
+supersedes the earlier "not started" index status. It records documented
+provider claims plus a clearly labelled small query addendum; it does not prove
+indexing/freshness latency, sustained coverage, or a durable right to store
+returned results. Those remain implementation/proof decisions requiring
+separate authorization.
 
 **Question:** A local-first, installable Scout still needs to find jobs on the
 public web. Local inference (Qwen/Ollama) does not itself supply search or page
@@ -17,7 +25,8 @@ and flags that private preferences must not leak into search queries. This
 spike answers the operator's direct question: "for local + search — Exa API
 key needed? or Tavily or whatever — how do we provide those capabilities?"
 
-This is a landscape survey to pick a direction, not a procurement decision.
+This is a completed landscape survey to pick a direction, not a procurement
+decision or runtime acceptance.
 The likely outcome the operator already anticipates is "cost-zero except
 search" — this spike should confirm or correct that, not assume it.
 

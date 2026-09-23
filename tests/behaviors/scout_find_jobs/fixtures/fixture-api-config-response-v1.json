@@ -1,0 +1,20 @@
+{
+  "schema_version": "scout-find-jobs-config-response:1",
+  "config": {
+    "schema_version": "find-jobs-config:1",
+    "roles": ["software engineer"],
+    "merged_queries": ["software engineer"],
+    "location": "Denver, CO",
+    "remote": true,
+    "published_after": null,
+    "sources": {"exa": true, "ats": true, "hiringcafe": false},
+    "default_assess_cap": 10,
+    "default_model_target": "ollama_local"
+  },
+  "resume_preview": {
+    "record_id": "resume-record-001",
+    "revision_id": "resume-revision-007",
+    "content_sha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+  },
+  "config_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+}

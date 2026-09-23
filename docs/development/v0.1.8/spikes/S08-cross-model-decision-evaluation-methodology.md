@@ -1,7 +1,16 @@
 # Spike 8 — Cross-model decision evaluation methodology
 
-**Requested:** 2026-09-20; backlog, not started. Research only; no adoption,
-model call, paid API usage, or runtime change is authorized by this brief.
+**Requested:** 2026-09-20. **Status:** Research recorded 2026-09-20; no
+adoption, model call, paid API usage, or runtime change is authorized by this
+brief.
+
+**Current evidence pointer:** [S08 research record](evidence/S08-cross-model-eval-methodology-research.md)
+supersedes the earlier "backlog, not started" index status. The record is a
+methodology decision, not runtime/model quality evidence. Any v0.1.8 pilot must
+prepare frozen cases, synthetic candidate inputs and human-adjudicated gold
+labels before execution, then record quality failures as fix/re-evaluate,
+defer assessment, or a release-scope decision with the user; it may never hide
+a failure behind silent hosted fallback.
 
 **Question:** How do we run the *same* Scout-shaped decision task fairly across
 different execution setups — local Qwen/Ollama, hosted GPT, Luna/Codex, and

@@ -1,13 +1,18 @@
 # GigAI v0.1.8 — Research spikes
 
-**Status:** Backlog; a bounded Spike 6 local-model pilot is separately authorized below.  
-**Sequence:** Full research after v0.1.7 Scout, starting with S07; the local-model pilot is separately scoped.
-S08 and S09 (requested 2026-09-20) may be researched now without disturbing the
-active v0.1.7 release — they are research-only briefs, not implementation.  
+**Status:** Backlog with recorded S08/S09/S10 research and a completed bounded
+S11 Phase 1 groundwork packet; a bounded Spike 6 local-model pilot is
+separately authorized below.  
+**Sequence:** v0.1.8 release groundwork starts with the bounded S11 Phase 1
+packet under explicit authorization; later release phases still wait for the
+actual v0.1.7 Scout verification. S07 remains parallel, non-blocking research;
+it is not the release's first prerequisite. S08, S09 and S10 research records do not
+authorize runtime changes, provider calls or implementation.  
 **Requested:** 2026-09-07.
 
-v0.1.7 is for the current operator's own use first. Finish Scout before the full
-spikes, apart from the explicitly authorized Spike 6 pilot. This list records
+v0.1.7 is for the current operator's own use first. Finish Scout before the
+remaining full spikes, apart from the explicitly authorized Spike 6 pilot and
+the recorded S08/S09/S10 research. This list records
 future research, not approved designs or
 new v0.1.7 requirements. The included Scout package and portability work remain
 part of the [existing roadmap](../../v0.1.7/roadmaps/v0.1.7-scout-roadmap.md).
@@ -17,16 +22,42 @@ Concrete delivery work is tracked in the [v0.1.8 backlog](../README.md), includi
 That requested cleanup builds on accessibility Spike 1; it is not only research
 and does not depend on the memory, hooks, or Dolt spikes.
 
-## First priority — S07: execution modes and cost-aware orchestration
+## Ticket format for new work
 
-[S07](S07-execution-modes-and-cost-aware-orchestration.md) is the first full
-v0.1.8 spike, requested 2026-09-10. Investigate local/API/CLI eligibility policies,
-automatic role and dependency assignment from the task prompt, proportionate
-review, and dispatch/ETA/yield coordination with completion events and one
-fallback check. Measure the orchestrator's overhead as well as the workers'.
-Names such as `no_$` and `quick-review` are proposals, not shipped flags.
-Existing Spike 1–6 identifiers remain unchanged to preserve links and history;
-their numbering is not the execution order. No new v0.1.7 scope is implied.
+Start new v0.1.8 work documents with a short Jira-style Markdown ticket:
+problem, intended system-behavior change, tasks, acceptance criteria and
+attached evidence. Put conversation notes and granular specifications below
+that summary. Mark undefined scope and proposed experiments explicitly; the
+ticket is not an execution receipt. Existing documents need not be rewritten
+as part of recording this convention.
+
+## Release foundation and parallel research
+
+[S11](S11-behavior-based-test-organization.md) is the first v0.1.8 release
+foundation: its bounded Phase 1 packet inventories and measures current tests and
+installed verifiers by behavior and lane, establishes deterministic fixtures,
+separates unit/integration/CLI/installed/live evidence, and performs only a
+bounded initial migration. Preserve coverage and failure semantics; do not
+mass-rename or block the first useful slice on repo-wide cleanup.
+
+[S07](S07-execution-modes-and-cost-aware-orchestration.md) is a parallel,
+non-blocking research thread, requested 2026-09-10. Investigate local/API/CLI
+eligibility policies, automatic role and dependency assignment from the task
+prompt, risk-based review, and dispatch/ETA/yield coordination with completion
+events and one fallback check. Measure orchestrator overhead as well as worker
+work, but do not hold the first slice for S07 implementation. Names such as
+`no_$` and `quick-review` are proposals, not shipped flags. Existing Spike 1–6
+identifiers remain unchanged to preserve links and history; their numbering is
+not the execution order. No new v0.1.7 scope is implied.
+
+## Current S08–S11 status
+
+| ID | Current evidence/status | v0.1.8 release relationship |
+| --- | --- | --- |
+| S08 | Research recorded; frozen cases, setup parity and human adjudication method documented | Prepare a small synthetic-input pilot early; research does not prove runtime/model quality |
+| S09 | Research recorded, with documented provider claims and a labelled small query addendum | Informs acquisition; freshness/indexing and durable storage rights remain unproven |
+| S10 | Research recorded; local adapter boundaries are documented and caller/installed/live gaps remain | Audit relevant callers after v0.1.7 ships; adapter evidence is not caller or release proof |
+| S11 | **Phase 1 groundwork implemented and independently verified:** inventory, measured receipts, explicit lanes and bounded acquisition migration recorded under `evidence/`; [focused project-local lifecycle receipt](../evidence/S11-lifecycle-uv.json) is 13/13 passed, while the missing-`questionary` result remains historical shared-interpreter baseline. Terra task `task_6795b28e61ad` / dispatch `ctx_b6f405f97b53` confirmed the bounded migration/selector and exact receipt. | First release foundation slice complete; v0.1.7 verification, Phase 2 audit/interface freeze and later gates remain required |
 
 ## Starting point from the Gig design discussion
 
@@ -364,7 +395,8 @@ or real-private-input comparisons by recording this scope.
 
 ## Spike 8 — Cross-model decision evaluation methodology
 
-**Requested:** 2026-09-20; backlog, not started.
+**Requested:** 2026-09-20; research recorded. No runtime comparison or model
+adoption follows from the record.
 
 **Question:** How do we run the same Scout-shaped decision task fairly across
 local Qwen/Ollama, hosted GPT, Luna/Codex, and Claude Sonnet, and get a
@@ -380,7 +412,9 @@ No live cross-backend comparison or model adoption is authorized by the brief.
 
 ## Spike 9 — Local search/retrieval capability sourcing
 
-**Requested:** 2026-09-20; backlog, not started.
+**Requested:** 2026-09-20; research recorded. Documented provider evidence and
+the labelled small query addendum inform design but do not prove freshness,
+coverage or durable storage rights.
 
 **Question:** A local-first Scout still needs to find jobs on the public web;
 local inference alone does not supply that. Which search/retrieval provider
@@ -395,27 +429,138 @@ signup, key activation, paid call, or scraping is authorized by the brief.
 
 ## Spike 10 — Ollama invocation and harness onboarding
 
-**Requested:** 2026-09-21; brief only, research not started.
+**Requested:** 2026-09-21; research recorded. Caller, installed and live
+invocation gaps remain open; no v0.1.7 release gate is added.
 
 See [S10](S10-ollama-invocation-and-harness-onboarding.md) for the practical
 invocation investigation: interactive Ollama, GigAI's existing adapter, agent
 harnesses and the desktop menu's ChatGPT integration. Establish actual routing,
 structured-output support and a clear first-use path, reusing Spike 6's work.
-No research execution, model calls, configuration changes or implementation is
-authorized now. This adds no v0.1.7 release gate.
+The recorded research does not authorize additional model calls, configuration
+changes or implementation and adds no v0.1.7 release gate; caller/installed/live
+proof remains a later, separately authorized step.
 
 ## Spike 11 — Behavior-based test organization
 
 [S11](S11-behavior-based-test-organization.md) investigates replacing historical
 goal-number organization with behavior/component-based tests, explicit unit and
 integration boundaries, faster deterministic fixtures and no-model test running.
-Requested 2026-09-21; brief only. No test refactor or new release gate authorized.
+Requested 2026-09-21; the bounded Phase 1 groundwork is implemented under an
+explicit operator authorization. It is the first v0.1.8 release foundation
+for the later phases, while the authorization preceded v0.1.7 verification and
+does not claim v0.1.7 shipped or authorize later feature/provider work. Preserve coverage,
+negative cases, failure meanings and historical mapping; do not mass-rename or
+block the first useful slice on repo-wide cleanup.
+
+## Spike 12 — One Gig function as an auditable graph traversal
+
+[S12](S12-gig-graph-traversal-and-auditable-execution.md) records the operator's
+graph-centered workflow direction, Scout example, TypeSafe/Jev decision-node
+connection, and proposed three-worker Orca acknowledgment evaluation.
+**S15 dependency satisfied; task 1 closed 2026-09-22** — task 1 (map
+`find-jobs` onto existing graph/execution capabilities) is documented in the
+[Scout graph mapping](evidence/S12-scout-graph-mapping.md), revised twice
+same-day after review and closed as a documentation mapping. It builds on
+S15's finding that Scout's compiler emits single-goal, zero-edge graphs
+today. `run.py`'s scheduler policy rejects recovery edges, parallel goals,
+and operator-gated goals, but existing test coverage (read, not executed)
+shows plain sequential multi-goal execution is supported; the narrower open
+question is whether Scout's specific proposed stages and a custom typed
+decision outcome (vs. the hard-coded `COMPLETE` observed) are supported —
+this does not block the rest of S12's scoping.
+**Task 2 documented 2026-09-22** in the
+[decision-edge design](evidence/S12-decision-edge-design.md), which answers
+that question. The schema, validator and scheduler already declare, check
+and route custom typed outcomes; the routing tests were executed and passed.
+But no execution path produces a label other than `COMPLETE`/`FAILED`. A
+branch that isn't taken is marked `blocked`, which finishes the run
+`blocked`, and OR-joins are unsupported. `find-jobs`'s discovery packet
+already carries a typed `matches`/`partial`/`no_match` decision that isn't
+connected to routing. Candidate changes D1–D6 are recorded; they include
+alternatives and an optional item, so they are not all required. **Task 4
+documented 2026-09-22** in
+[proposed system-behavior changes](evidence/S12-proposed-system-behavior-changes.md)
+(the D1–D6 register plus visibility changes V1–V4). **Task 3 run 2026-09-22** as the
+[Orca acknowledgment check](evidence/S12-orca-ack-check.md): three ACKs and
+three separate completions, none missing or duplicated, and no polling. It
+didn't exercise blocking resume or the Orca-unreachable path. Its findings
+complete task 4's section C. An operator-authorized
+[blocking-resume check](evidence/S12-orca-blocking-resume-check.md) (N3)
+then showed a blocked wait resuming within the second of completion. It
+also found that heartbeat nudges can start unplanned coordinator turns
+(N6). The three-worker Orca
+acknowledgment check specifically remains gated behind a separate operator
+go-ahead. This is not an orchestration-framework rebuild or a new release
+gate.
+
+## Spike 13 — Existing job-discovery solutions research
+
+[S13](S13-existing-job-discovery-solutions-research.md) builds on S09's
+provider/ATS survey to find concrete existing *implementations* — projects
+and libraries doing posting discovery, dedup, or staleness detection — that
+Scout's intended (not yet established as built) discovery tools could reuse.
+Requested and researched 2026-09-22, revised twice same-day after review;
+see the [research record](evidence/S13-existing-job-discovery-solutions-research.md)
+for the eight candidates surveyed and a source-based adapter sketch. Finding:
+two installable libraries exist — `ats-scrapers` (its live scraper classes
+return a typed `list[Job]` model and cover Greenhouse/Lever/Ashby, kept
+distinct from its separate hosted-dataset `search()` interface) and `JobSpy`
+(LinkedIn/Indeed-class boards) — neither installed or run, so suitability is
+unverified pending real evaluation; `job-finder`'s multi-pass dedup and
+apply-link staleness probe are concrete techniques worth adapting; the
+embedding-based dedup technique is documented but its effectiveness is
+unverified. No provider change, tool-binding change, or implementation is
+authorized by this ticket.
+
+## Spike 14 — Schema inventory and consolidation audit
+
+[S14](S14-schema-inventory-and-consolidation-audit.md) inventories the 82
+schema files (85 total) in `src/gigai/schemas/`, groups them by concept
+family, and identifies which schema versions are actively written by current
+input validators, which are read by legacy-only paths, and which have no
+evident reader/writer. Requested
+2026-09-22. Audit and reporting only; no schema deletion, merge, or version
+bump is authorized by this ticket. **Audit documented 2026-09-22** in the
+[schema inventory audit](evidence/S14-schema-inventory-audit.md). 76 of the
+82 are validated against their file by current code. None of the 12 multi-version families is
+legacy-read-only: current writers still emit the older versions, chosen by
+payload shape. Seven schemas are flagged for operator review, three of them with
+hand-rolled code contracts that disagree with the packaged file, and one
+privacy-guard gap (v1-only external-recording recognition) needs a
+decision. Nothing is recommended for removal. A follow-up found that 0 of 28 real
+journal handoffs conform to `handoff-frontmatter`, and that `occurrence
+declare` refuses graph-set Gigs with a misleading error.
+
+## Spike 15 — Goal and tool-unit composition research
+
+[S15](S15-goal-and-tool-unit-composition-research.md) traces how goal graphs
+are actually constructed today and finds that **Scout's bundled compiler**
+does not currently compose from a reusable catalog (scoped to that one
+traced path, not a codebase-wide claim): `scout_materialization.py`'s
+`_compiled_snapshot` iterates a fixed six-selector tuple and emits one
+single-goal, zero-edge graph per selector, with `tools` hard-coded empty and
+a literal `executor` inlined each time; `graph_set.py` only validates an
+already-built document. Surveys LangGraph, Temporal, Anthropic's tool-use
+API, and CrewAI — CrewAI's `Task` and LangGraph's Functional-API `@task` are
+the closest precedents for a position-independent "goal unit"; LangGraph
+also has a genuine reusable tool object (`ToolNode`) and richer graph
+composition (dynamic routing, subgraphs) than an earlier draft of this
+research credited it with — and sketches a composition proposal plus a
+handoff note to S14, without ranking GigAI's schema as more expressive than
+the frameworks surveyed. Requested and researched 2026-09-22, revised
+same-day after review, from the same Gig-composition discussion as S13; see
+the [research record](evidence/S15-goal-and-tool-unit-composition-research.md).
+Research only; no schema change or new authoring tool is authorized by this
+ticket.
 
 ## How these spikes finish
 
 Each spike produces a reviewable research decision, not a promise to implement
 every option studied. Record sources, evidence, tradeoffs, and unanswered
 questions. The operator reviews the recommendation before implementation is
-scheduled. None of these spikes blocks or adds research prerequisites to the
-current Scout work. The separate v0.1.7 product additions noted above still need
-their own contract and acceptance updates.
+scheduled. S08/S09/S10 research records are bounded inputs; S11 is the bounded
+Phase 1 release foundation and its later gates remain planned; S07 remains
+parallel and non-blocking. None of these records
+claims v0.1.7 shipped or authorizes a provider call, schema/memory/hooks/Dolt
+change, storage migration or new full Gig. The separate v0.1.7 product
+additions noted above still need their own contract and acceptance updates.

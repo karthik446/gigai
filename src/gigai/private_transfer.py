@@ -28,7 +28,7 @@ from .journal import JournalConflictError, run_with_journal_writer
 from .journal import JournalArtifact, record_transition
 from .private_records import migrate_workpad_layout
 from .project_binding import load_project_binding
-from .scout_template import scout_source_files
+from .scout.template import scout_source_files
 from .workpad import provision_workpad, resolve_bound_project
 
 

@@ -1,0 +1,16 @@
+{
+  "schema_version": "scout-find-jobs-run-request:1",
+  "consent": {
+    "schema_version": "1.0",
+    "kind": "operator_run_consent",
+    "action": "run",
+    "actor": {"kind": "operator", "id": "local-user"},
+    "source": "direct_local_ui_confirm",
+    "invocation_id": "inv_123e4567-e89b-42d3-a456-426614174020",
+    "occurrence_id": "occurrence-001"
+  },
+  "config_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "selection_cap": 10,
+  "selection_rule": "new_or_edited_role_match",
+  "model_target": "ollama_local"
+}

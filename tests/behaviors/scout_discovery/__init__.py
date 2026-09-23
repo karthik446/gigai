@@ -1,0 +1,1 @@
+"""Scout discovery behavior tests."""

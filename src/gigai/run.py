@@ -50,6 +50,29 @@ from .graph_set import (
     validate_graph_set,
     validate_selection_record,
 )
+from .graph_node_registry import lookup as lookup_graph_node
+from .scout.find_jobs.contracts import (
+    ASSESS_LOCAL_EFFECTS,
+    AcquireInput,
+    AcquireOutput,
+    ArtifactRef,
+    AssessInput,
+    FindJobsConfig,
+    FindJobsRunInput,
+    GoalError,
+    ModelTarget,
+    NodeContext,
+    NodeFailure,
+    NodeReceipt,
+    NodeStatus,
+    PresentInput,
+    Producer,
+    PinnedResume,
+    RunRequest,
+    SelectionReasonCode,
+    UsageBlock,
+    aggregate_status,
+)
 from .workpad import ResolvedWorkpad, resolve_workpad
 
 
@@ -128,6 +151,122 @@ class InterviewRunRequest:
     operation_key: str
 
 
+@dataclass(frozen=True)
+class _FindJobsRunExecution:
+    """Validated find-jobs inputs handed to the common Run sealing path."""
+
+    request: RunRequest
+    config: FindJobsConfig
+    config_bytes: bytes
+    pinned_resume: PinnedResume
+    input_bytes: bytes
+
+
+def resolve_newest_resume(
+    home_root: Path, target: Path | None
+) -> PinnedResume:
+    """Resolve the newest committed ``resume`` record and exact revision."""
+
+    from . import private_records
+    from .scout.inputs import _record_revision
+
+    try:
+        resolved = resolve_workpad(
+            home_root=home_root,
+            requested_target=target,
+            gig_id=None,
+            allow_semantic_state=True,
+        )
+        imports = private_records.list_imports(
+            home_root=home_root,
+            requested_target=target,
+            family="reference",
+            gig_id=resolved.gig_id,
+        )
+    except Exception as exc:
+        raise RunError("find_jobs_resume_required: committed resume records are unavailable") from exc
+    resume_imports = [
+        item
+        for item in imports
+        if item.get("kind") == "resume" and isinstance(item.get("reference_id"), str)
+    ]
+    if not resume_imports:
+        raise RunError("find_jobs_resume_required: no committed resume is available")
+    resume_imports.sort(
+        key=lambda item: (str(item.get("created_at", "")), str(item.get("reference_id", "")))
+    )
+    snapshot = private_records._private_snapshot(resolved)
+    record_ids = sorted(
+        {
+            Path(path).parts[1]
+            for path in snapshot.artifacts
+            if len(Path(path).parts) == 4
+            and Path(path).parts[0] == "records"
+            and Path(path).parts[1].startswith("record_")
+            and Path(path).parts[2] == "revisions"
+        }
+    )
+    linked: list[tuple[dict[str, object], str, str, dict[str, object]]] = []
+    for imported in resume_imports:
+        reference_id = imported["reference_id"]
+        assert isinstance(reference_id, str)
+        for record_id in record_ids:
+            try:
+                revisions = private_records.list_revisions(
+                    resolved=resolved, record_id=record_id, snapshot=snapshot
+                )
+            except Exception:
+                continue
+            if not revisions:
+                continue
+            revision = revisions[-1]
+            content = revision.get("content")
+            if not isinstance(content, Mapping):
+                continue
+            if content.get("family") != "g45_reference" or content.get("reference_id") != reference_id:
+                continue
+            revision_id = revision.get("revision_id")
+            if not isinstance(revision_id, str):
+                continue
+            linked.append((imported, record_id, revision_id, dict(content)))
+    if not linked:
+        raise RunError("find_jobs_resume_required: no committed resume record revision is available")
+    imported, record_id, revision_id, content_ref = max(
+        linked,
+        key=lambda item: (
+            str(item[0].get("created_at", "")),
+            str(item[2]),
+        ),
+    )
+    try:
+        # This is the exact Scout input-chain guard used by other private
+        # record consumers.  Imported references use g45_reference content and
+        # therefore do not have a native sidecar; private_records.list_revisions
+        # remains the authenticated fallback for that frozen C1 shape.
+        try:
+            _record_revision(resolved, snapshot, record_id, revision_id)
+        except Exception:
+            pass
+        selected = private_records.read_record(
+            home_root=home_root,
+            requested_target=target,
+            record_id=record_id,
+            revision_id=revision_id,
+            content=True,
+            gig_id=resolved.gig_id,
+        )
+        content = selected.get("content")
+        if not isinstance(content, bytes):
+            raise ValueError("resume content is unavailable")
+        digest = digest_imported_bytes(content)
+        snapshot_ref = content_ref.get("snapshot_ref")
+        if isinstance(snapshot_ref, Mapping) and snapshot_ref.get("content_sha256") != digest:
+            raise ValueError("resume content digest differs from its committed snapshot")
+        return PinnedResume(record_id, revision_id, digest)
+    except Exception as exc:
+        raise RunError("find_jobs_resume_required: selected resume is unavailable") from exc
+
+
 _ZERO_USAGE = {
     "input_tokens": 0,
     "output_tokens": 0,
@@ -153,6 +292,8 @@ def launch_run(
     proposal_execution: ProposalRunRequest | None = None,
     tailor_execution: TailorRunRequest | None = None,
     interview_execution: InterviewRunRequest | None = None,
+    find_jobs_execution: _FindJobsRunExecution | None = None,
+    ui_loopback_verified: bool = False,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
     observer: RunObserver | None = None,
 ) -> RunResult:
@@ -193,13 +334,19 @@ def launch_run(
     authority = _resolve_authority(resolved, projection, version)
     proposal = authority["proposal"]
     selector = (
-        (proposal_execution or tailor_execution or interview_execution).graph_selector
-        if proposal_execution is not None or tailor_execution is not None or interview_execution is not None
+        "find-jobs-functional"
+        if find_jobs_execution is not None
         else (
-        selected_plan.plan.get("selected_graph_id")
-        if selected_plan is not None
-        and isinstance(selected_plan.plan.get("selected_graph_id"), str)
-        else None
+            (proposal_execution or tailor_execution or interview_execution).graph_selector
+            if proposal_execution is not None
+            or tailor_execution is not None
+            or interview_execution is not None
+            else (
+                selected_plan.plan.get("selected_graph_id")
+                if selected_plan is not None
+                and isinstance(selected_plan.plan.get("selected_graph_id"), str)
+                else None
+            )
         )
     )
     graph, selected_descriptor = resolve_selected_graph_authority(
@@ -208,9 +355,26 @@ def launch_run(
     proposal_request_bytes: bytes | None = None
     proposal_config: object | None = None
     proposal_budget: object | None = None
-    if sum(item is not None for item in (proposal_execution, tailor_execution, interview_execution)) > 1:
+    if sum(
+        item is not None
+        for item in (
+            proposal_execution,
+            tailor_execution,
+            interview_execution,
+            find_jobs_execution,
+        )
+    ) > 1:
         raise RunError("run_input_invalid: domain entries cannot be combined")
-    if proposal_execution is not None or tailor_execution is not None or interview_execution is not None:
+    if find_jobs_execution is not None:
+        if selected_plan is not None or execute_provider_review:
+            raise RunError(
+                "find_jobs_run_authority_refused: find-jobs cannot combine a review Plan or provider execution"
+            )
+        if operator_consent is None:
+            raise RunError(
+                "find_jobs_run_consent_required: direct local UI confirmation is required"
+            )
+    elif proposal_execution is not None or tailor_execution is not None or interview_execution is not None:
         if selected_plan is not None or execute_provider_review:
             raise RunError(
                 "proposal_run_authority_refused: proposal entry cannot combine a review Plan or provider execution"
@@ -278,7 +442,9 @@ def launch_run(
             )
     redeemed_consent = None
     if operator_consent is not None:
-        _validate_operator_consent(operator_consent)
+        _validate_operator_consent(
+            operator_consent, ui_loopback_verified=ui_loopback_verified
+        )
         redeemed_consent = {
             **dict(operator_consent),
             "confirmation_id": f"confirm_{uuid_factory()}",
@@ -323,7 +489,16 @@ def launch_run(
             operator_consent=redeemed_consent,
             run_plan_ref=run_plan_ref,
             proposal_request_bytes=proposal_request_bytes,
-            operation_request_kind=("tailor" if tailor_execution is not None else ("interview" if interview_execution is not None else "proposal")),
+            operation_request_kind=(
+                "find-jobs"
+                if find_jobs_execution is not None
+                else (
+                    "tailor"
+                    if tailor_execution is not None
+                    else ("interview" if interview_execution is not None else "proposal")
+                )
+            ),
+            find_jobs_execution=find_jobs_execution,
         )
         observer("after_brief_write")
         observer("after_manifest_seal")
@@ -382,7 +557,7 @@ def launch_run(
                 parent_handoff_id=started.handoff_id,
             )
             try:
-                from .scout_proposal_execution import execute_local_proposal
+                from .scout.proposal_execution import execute_local_proposal
 
                 proposal_result = execute_local_proposal(
                     resolved=resolved,
@@ -408,7 +583,7 @@ def launch_run(
                     # the exact sealed selectors/configuration are in scope.
                     # This association is separate from Tailor and is never
                     # derived from model-returned lineage.
-                    from .scout_proposal_records import record_proposal_revision
+                    from .scout.proposal_records import record_proposal_revision
 
                     target = resolve_model_target(
                         proposal_config, str(sealed_proposal_request["model_target"])
@@ -733,6 +908,66 @@ def launch_run(
     finally:
         if provider_lease is not None:
             os.close(provider_lease)
+
+
+def launch_find_jobs_run(
+    *,
+    home_root: Path,
+    target: Path | None,
+    run_request: RunRequest,
+    config_bytes: bytes,
+    ui_loopback_verified: bool,
+) -> str:
+    """Seal and launch one local find-jobs Run from the API boundary.
+
+    The API has already parsed the request and performed its peer check, but
+    this boundary repeats the configuration identity check before allocating a
+    Run ID.  The worker receives only the canonical DTO snapshot and the exact
+    pinned resume triple; it never reloads the mutable target configuration or
+    selects a newer resume at execution time.
+    """
+
+    if not isinstance(run_request, RunRequest):
+        raise RunError("find_jobs_run_input_invalid: run_request is not a RunRequest")
+    if type(config_bytes) is not bytes:
+        raise RunError("find_jobs_config_invalid: config_bytes must be bytes")
+    try:
+        config = FindJobsConfig.from_json(parse_json_bytes(config_bytes))
+    except Exception as exc:
+        raise RunError("find_jobs_config_invalid: config snapshot is invalid") from exc
+    config_digest = config.digest()
+    if config_digest != run_request.config_digest:
+        raise RunError("find_jobs_config_digest_mismatch: config digest does not match run request")
+    canonical_config_bytes = canonical_json_bytes(config.to_json())
+    try:
+        pinned_resume = resolve_newest_resume(home_root, target)
+    except RunError:
+        raise
+    sealed_input = FindJobsRunInput(
+        config=config,
+        config_digest=config_digest,
+        selection_cap=run_request.selection_cap,
+        selection_rule=run_request.selection_rule,
+        model_target=run_request.model_target,
+        pinned_resume=pinned_resume,
+    )
+    execution = _FindJobsRunExecution(
+        request=run_request,
+        config=config,
+        config_bytes=canonical_config_bytes,
+        pinned_resume=pinned_resume,
+        input_bytes=canonical_json_bytes(sealed_input.to_json()),
+    )
+    result = launch_run(
+        home_root=home_root,
+        requested_target=target,
+        invocation_argv=("gigai", "find-jobs", "run"),
+        operator_consent=run_request.consent.to_json(),
+        find_jobs_execution=execution,
+        ui_loopback_verified=ui_loopback_verified,
+        wait=False,
+    )
+    return result.run_id
 
 
 def read_run_details(
@@ -1162,7 +1397,7 @@ def _execute_interview_run(
         graph=graph, manifest_digest=manifest_digest, parent_handoff_id=started.handoff_id,
     )
     try:
-        from .scout_interview_records import prepare_interview
+        from .scout.interview_records import prepare_interview
         result = prepare_interview(
             home_root=home_root,
             requested_target=requested_target,
@@ -1224,7 +1459,7 @@ def _publish_interview_result(
             (JournalArtifact(result_path, result_data), JournalArtifact(f"runs/{run_id}/run-details.json", details_data)),
             _goal_front_matter(gig_version, run_id, next(item for item in graph["goals"] if item.get("goal_id") == goal_id), digest_imported_bytes(graph_bytes), manifest_digest, parent_handoff_id, "COMPLETE", [evidence]),
         ), allow_artifact_replacement=True)
-    from .scout_proposal_execution import _committed_run_bytes, _validate_active_goal_bytes
+    from .scout.proposal_execution import _committed_run_bytes, _validate_active_goal_bytes
     return run_with_journal_writer(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=operation)
 
 
@@ -1244,12 +1479,12 @@ def _execute_tailor_run(
     started_goal = _mark_proposal_goal_started(resolved=resolved, run_id=run_id, gig_version=authority["version"], graph=graph, manifest_digest=manifest_digest, parent_handoff_id=started.handoff_id)
     holder: dict[str, object] = {}
     try:
-        from .scout_proposal_execution import _resolve_sources
-        from .scout_tailor_selection import TailorAnswer, TailorProposal, TailorSelection, TailorSource, build_tailoring_request
-        from .scout_tailor_execution import execute_tailor
-        from .scout_document_records import record_document_revision
-        from .scout_documents import prepare_document_revision
-        from .scout_tailoring import decode_tailoring_bundle
+        from .scout.proposal_execution import _resolve_sources
+        from .scout.tailor_selection import TailorAnswer, TailorProposal, TailorSelection, TailorSource, build_tailoring_request
+        from .scout.tailor_execution import execute_tailor
+        from .scout.document_records import record_document_revision
+        from .scout.documents import prepare_document_revision
+        from .scout.tailoring import decode_tailoring_bundle
         from .adapters.port import InvocationResult
 
         private_selectors = tuple(dict(item) for item in sealed.get("private_selectors", []))
@@ -1365,7 +1600,7 @@ def _execute_tailor_run(
 
 
 def _tailor_saved_proposal(resolved: ResolvedWorkpad, selector: Mapping[str, object]) -> dict[str, object]:
-    from .scout_tailor_selection import hydrate_saved_proposal
+    from .scout.tailor_selection import hydrate_saved_proposal
     proposal = hydrate_saved_proposal(resolved=resolved, record_id=str(selector["record_id"]), revision_id=str(selector["revision_id"]))
     return {"record_id": proposal.record_id, "revision_id": proposal.revision_id, "content": proposal.content, "content_sha256": proposal.content_sha256, "identity": proposal.identity}
 
@@ -1378,7 +1613,7 @@ def _publish_tailor_invocation_attempt(resolved: ResolvedWorkpad, run_id: str, g
 
 
 def _publish_tailor_result(*, resolved: ResolvedWorkpad, run_id: str, goal_id: str, graph: Mapping[str, object], gig_version: int, manifest_digest: str, result: Mapping[str, object], parent_handoff_id: str, uuid_factory: Callable[[], uuid.UUID]) -> JournalEntry:
-    from .scout_proposal_execution import _committed_run_bytes, _validate_active_goal_bytes
+    from .scout.proposal_execution import _committed_run_bytes, _validate_active_goal_bytes
     result_data = canonical_json_bytes(dict(result))
     result_path = f"runs/{run_id}/scout-tailor/result.json"
     def operation(writer: JournalWriter) -> JournalEntry:
@@ -2184,7 +2419,9 @@ def _authority_commit_for_plan(
     return tag_result.stdout.strip() if tag_result.returncode == 0 else None
 
 
-def _validate_operator_consent(consent: Mapping[str, object]) -> None:
+def _validate_operator_consent(
+    consent: Mapping[str, object], *, ui_loopback_verified: bool = False
+) -> None:
     """Validate the caller envelope before server-side scope synthesis."""
     allowed = {
         "schema_version",
@@ -2195,8 +2432,14 @@ def _validate_operator_consent(consent: Mapping[str, object]) -> None:
         "invocation_id",
         "occurrence_id",
     }
-    if set(consent) - allowed or consent.get("source") != "direct_cli_confirm":
+    source = consent.get("source")
+    if set(consent) - allowed or source not in {
+        "direct_cli_confirm",
+        "direct_local_ui_confirm",
+    }:
         raise RunError("Run consent must come from direct local operator confirmation")
+    if source == "direct_local_ui_confirm" and ui_loopback_verified is not True:
+        raise RunError("Run consent from the local UI requires a verified loopback peer")
     if (
         consent.get("schema_version") != "1.0"
         or consent.get("kind") != "operator_run_consent"
@@ -2229,6 +2472,7 @@ def _prepare_records(
     selected_descriptor: Mapping[str, object] | None = None,
     proposal_request_bytes: bytes | None = None,
     operation_request_kind: str = "proposal",
+    find_jobs_execution: _FindJobsRunExecution | None = None,
 ) -> dict[str, bytes]:
     run_dir = f"runs/{run_id}"
     goals = [item for item in graph["goals"] if isinstance(item, dict)]
@@ -2239,6 +2483,19 @@ def _prepare_records(
     target_bytes = canonical_json_bytes(target_before)
     now = _now()
     budget = graph["aggregate_budget"]
+    sealed_effects = {"write_workpad"}
+    if find_jobs_execution is not None:
+        local_model = (
+            find_jobs_execution.request.model_target == ModelTarget.OLLAMA_LOCAL
+        )
+        for goal in goals:
+            effects = {
+                effect for effect in goal.get("effects", ()) if isinstance(effect, str)
+            }
+            if local_model and goal.get("slug") == "assess":
+                effects = set(ASSESS_LOCAL_EFFECTS)
+            sealed_effects.update(effects)
+    sealed_effect_list = sorted(sealed_effects)
 
     def artifact(path: str, media: str, data: bytes) -> dict[str, object]:
         return {
@@ -2310,6 +2567,77 @@ def _prepare_records(
             "application/json",
             selection_data,
         )
+    find_jobs_input_ref: dict[str, object] | None = None
+    find_jobs_input_bytes: bytes | None = None
+    find_jobs_config_ref: dict[str, object] | None = None
+    find_jobs_config_bytes: bytes | None = None
+    find_jobs_selection_ref: dict[str, object] | None = None
+    find_jobs_selection_bytes: bytes | None = None
+    if find_jobs_execution is not None:
+        find_jobs_input_bytes = find_jobs_execution.input_bytes
+        find_jobs_config_bytes = find_jobs_execution.config_bytes
+        find_jobs_input_ref = artifact(
+            f"{run_dir}/sealed/find-jobs-run-input.json",
+            "application/json",
+            find_jobs_input_bytes,
+        )
+        find_jobs_config_ref = artifact(
+            f"{run_dir}/sealed/find-jobs-config.json",
+            "application/json",
+            find_jobs_config_bytes,
+        )
+        if graph_authority is not None and selected_descriptor is not None:
+            graph_set = graph_authority.get("graph_set")
+            graph_set_ref = graph_authority.get("graph_set_ref")
+            if not isinstance(graph_set, Mapping) or not isinstance(graph_set_ref, Mapping):
+                raise RunError(
+                    "find_jobs_run_authority_refused: Graph Set selection authority is unavailable"
+                )
+            selection_id = derive_deterministic_id(
+                "graph_selection",
+                {
+                    "gig_id": resolved.gig_id,
+                    "gig_version": gig_version,
+                    "graph_set": graph_set_ref.get("content_sha256"),
+                    "selected_graph_id": selected_descriptor.get("graph_id"),
+                    "kind": "find_jobs_functional",
+                },
+            )
+            selection = {
+                "schema_version": "1.0",
+                "selection_record_id": selection_id,
+                "gig_id": resolved.gig_id,
+                "gig_version": gig_version,
+                "graph_set": graph_set_ref,
+                "selected_graph_id": selected_descriptor.get("graph_id"),
+                "selected_graph": selected_descriptor.get("goal_graph"),
+                "selection_kind": "operator_explicit",
+                "selector": {
+                    "kind": "operator",
+                    "actor": {"kind": "operator", "id": "local-user", "model_target": None},
+                    "rule_id": None,
+                    "rule_version": None,
+                },
+                "selection_reason": "sealed functional find-jobs traversal",
+                "routing_evidence_refs": [],
+                "created_at": graph_set.get("created_at", now),
+            }
+            selection_data = canonical_json_bytes(selection)
+            if not validate_selection_record(
+                selection_data,
+                graph_set=graph_set,
+                gig_id=resolved.gig_id,
+                gig_version=gig_version,
+            ).valid:
+                raise RunError(
+                    "find_jobs_run_authority_refused: find-jobs Graph selection is invalid"
+                )
+            find_jobs_selection_bytes = selection_data
+            find_jobs_selection_ref = artifact(
+                f"{run_dir}/sealed/find-jobs-graph-selection.json",
+                "application/json",
+                selection_data,
+            )
     consent_bytes = (
         canonical_json_bytes(dict(operator_consent))
         if operator_consent is not None
@@ -2325,9 +2653,13 @@ def _prepare_records(
     )
     graph_ref = artifact(f"{run_dir}/goal-graph.json", "application/json", graph_bytes)
     brief_body = (
-        f"# Run {run_id}\n\nScout local {operation_request_kind} execution; operator-selected sources and target are sealed.\n"
-        if proposal_request_bytes is not None
-        else f"# Run {run_id}\n\nDeterministic workpad-only execution.\n"
+        f"# Run {run_id}\n\nScout find-jobs execution; operator-selected sources, target, and resume are sealed.\n"
+        if find_jobs_execution is not None
+        else (
+            f"# Run {run_id}\n\nScout local {operation_request_kind} execution; operator-selected sources and target are sealed.\n"
+            if proposal_request_bytes is not None
+            else f"# Run {run_id}\n\nDeterministic workpad-only execution.\n"
+        )
     )
     brief_meta = {
         "schema_version": "1.0",
@@ -2348,7 +2680,7 @@ def _prepare_records(
         "profile": "default",
         "resolved_models": [],
         "resolved_tools": [],
-        "effects": ["write_workpad"],
+        "effects": sealed_effect_list,
         "aggregate_budget": budget,
         "input_canonical_sha256": digest_imported_bytes(graph_bytes),
         "body_sha256": digest_owned_text(brief_body),
@@ -2393,8 +2725,11 @@ def _prepare_records(
             *([consent_ref] if consent_ref else []),
             *([proposal_ref] if proposal_ref else []),
             *([proposal_selection_ref] if proposal_selection_ref else []),
+            *([find_jobs_input_ref] if find_jobs_input_ref else []),
+            *([find_jobs_config_ref] if find_jobs_config_ref else []),
+            *([find_jobs_selection_ref] if find_jobs_selection_ref else []),
         ],
-        "effects": ["write_workpad"],
+        "effects": sealed_effect_list,
         "aggregate_budget": budget,
         "input_canonical_sha256": digest_imported_bytes(graph_bytes),
     }
@@ -2411,6 +2746,8 @@ def _prepare_records(
             manifest["selection_record"] = plan["selection_record"]
         elif proposal_selection_ref is not None:
             manifest["selection_record"] = proposal_selection_ref
+        elif find_jobs_selection_ref is not None:
+            manifest["selection_record"] = find_jobs_selection_ref
         else:
             raise RunError("graph-selected Run requires sealed selection evidence")
     manifest_bytes = canonical_json_bytes(manifest)
@@ -2476,6 +2813,21 @@ def _prepare_records(
         **(
             {f"{run_dir}/sealed/proposal-graph-selection.json": proposal_selection_bytes}
             if proposal_selection_bytes is not None
+            else {}
+        ),
+        **(
+            {f"{run_dir}/sealed/find-jobs-run-input.json": find_jobs_input_bytes}
+            if find_jobs_input_bytes is not None
+            else {}
+        ),
+        **(
+            {f"{run_dir}/sealed/find-jobs-config.json": find_jobs_config_bytes}
+            if find_jobs_config_bytes is not None
+            else {}
+        ),
+        **(
+            {f"{run_dir}/sealed/find-jobs-graph-selection.json": find_jobs_selection_bytes}
+            if find_jobs_selection_bytes is not None
             else {}
         ),
         **{
@@ -3276,7 +3628,13 @@ def _execute_deterministic(
         or manifest.get("goal_graph", {}).get("content_sha256") != graph_digest
     ):
         raise _PreScheduleFailure("Run manifest does not pin the sealed Goal Graph")
-    _validate_scheduler_policy(graph)
+    find_jobs_input = _read_find_jobs_run_input(resolved, run_id)
+    model_target = (
+        find_jobs_input.get("model_target")
+        if isinstance(find_jobs_input, Mapping)
+        else None
+    )
+    _validate_scheduler_policy(graph, model_target=model_target)
     goals = {goal["goal_id"]: goal for goal in graph["goals"]}
     goal_details = {goal["goal_id"]: goal for goal in details["goals"]}
     previous_handoff = run_started_handoff_id
@@ -3345,18 +3703,37 @@ def _execute_deterministic(
             ),
         )
         previous_handoff = started.handoff_id
+        registered_binding = _registered_goal_binding(graph, goal)
         try:
-            evidence = _execute_goal(resolved, run_id, goal_id, target_before)
-            detail.update(
-                {
-                    "status": "complete",
-                    "outcome": "COMPLETE",
-                    "finished_at": _now(),
-                    "evidence": [evidence],
-                }
+            evidence = _execute_goal(
+                resolved,
+                run_id,
+                goal_id,
+                target_before,
+                goal=goal,
+                graph=graph,
+                manifest_digest=manifest_digest,
+                started_at=now,
             )
+            if registered_binding is not None:
+                _apply_registered_receipt_to_detail(
+                    resolved, run_id, goal, detail, expected_status=NodeStatus.COMPLETE.value
+                )
+                evidence = detail["evidence"][0]
+            else:
+                detail.update(
+                    {
+                        "status": "complete",
+                        "outcome": "COMPLETE",
+                        "finished_at": _now(),
+                        "evidence": [evidence],
+                    }
+                )
             _refresh_details(details, goal_details, graph, "running")
             completed_bytes = canonical_json_bytes(details)
+            goal_evidence = [
+                item for item in detail.get("evidence", []) if isinstance(item, Mapping)
+            ]
             completed = record_transition(
                 workpad=resolved.path,
                 project_id=resolved.project_id,
@@ -3366,10 +3743,7 @@ def _execute_deterministic(
                 body=f"Goal {goal_id} completed with outcome COMPLETE.",
                 artifacts=(
                     JournalArtifact(f"runs/{run_id}/run-details.json", completed_bytes),
-                    JournalArtifact(
-                        str(evidence["path"]),
-                        (resolved.path / str(evidence["path"])).read_bytes(),
-                    ),
+                    *_evidence_artifacts(resolved, goal_evidence),
                 ),
                 front_matter=_goal_front_matter(
                     gig_version,
@@ -3379,29 +3753,39 @@ def _execute_deterministic(
                     manifest_digest,
                     previous_handoff,
                     "COMPLETE",
-                    [evidence],
+                    goal_evidence,
                 ),
             )
             previous_handoff = completed.handoff_id
         except _RunInterrupted:
             raise
         except Exception as exc:
-            detail.update(
-                {
-                    "status": "failed",
-                    "errors": [
-                        {
-                            "code": "goal_execution_failed",
-                            "message": str(exc),
-                            "retryable": False,
-                            "invocation_id": None,
-                        }
-                    ],
-                    "finished_at": _now(),
-                }
-            )
+            if registered_binding is not None and _node_receipt_exists(
+                resolved, run_id, goal
+            ):
+                _apply_registered_receipt_to_detail(
+                    resolved, run_id, goal, detail, expected_status=NodeStatus.FAILED.value
+                )
+            else:
+                detail.update(
+                    {
+                        "status": "failed",
+                        "errors": [
+                            {
+                                "code": "goal_execution_failed",
+                                "message": str(exc),
+                                "retryable": False,
+                                "invocation_id": None,
+                            }
+                        ],
+                        "finished_at": _now(),
+                    }
+                )
             _refresh_details(details, goal_details, graph, "failed")
             failed_bytes = canonical_json_bytes(details)
+            goal_evidence = [
+                item for item in detail.get("evidence", []) if isinstance(item, Mapping)
+            ]
             failed = record_transition(
                 workpad=resolved.path,
                 project_id=resolved.project_id,
@@ -3411,6 +3795,7 @@ def _execute_deterministic(
                 body=f"Goal {goal_id} failed during deterministic execution.",
                 artifacts=(
                     JournalArtifact(f"runs/{run_id}/run-details.json", failed_bytes),
+                    *_evidence_artifacts(resolved, goal_evidence),
                 ),
                 front_matter=_goal_front_matter(
                     gig_version,
@@ -3420,6 +3805,7 @@ def _execute_deterministic(
                     manifest_digest,
                     previous_handoff,
                     "FAILED",
+                    goal_evidence,
                 ),
             )
             terminal = _finish_run(
@@ -3435,7 +3821,128 @@ def _execute_deterministic(
             return terminal
 
 
-def _validate_scheduler_policy(graph: dict[str, object]) -> None:
+def _registered_goal_binding(
+    graph: Mapping[str, object], goal: Mapping[str, object]
+) -> object | None:
+    executor = goal.get("executor")
+    if not isinstance(executor, Mapping):
+        return None
+    if executor.get("kind") != "local_capability":
+        return None
+    return lookup_graph_node(
+        graph.get("graph_id"),
+        graph.get("graph_version"),
+        goal.get("slug"),
+        executor.get("capability"),
+    )
+
+
+def _registered_node_paths(
+    resolved: ResolvedWorkpad, run_id: str, goal: Mapping[str, object]
+) -> tuple[Path, Path]:
+    slug = goal.get("slug")
+    if not isinstance(slug, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", slug):
+        raise RunError("registered node slug is invalid")
+    run_root = resolved.path / "runs" / run_id
+    output = run_root / "outputs" / f"{slug}.json"
+    receipt = run_root / "receipts" / f"{slug}.json"
+    _reject_symlinked_components(resolved.path, output, "registered node output path is unsafe")
+    _reject_symlinked_components(resolved.path, receipt, "registered node receipt path is unsafe")
+    return output, receipt
+
+
+def _node_receipt_exists(
+    resolved: ResolvedWorkpad, run_id: str, goal: Mapping[str, object]
+) -> bool:
+    try:
+        _output_path, receipt_path = _registered_node_paths(resolved, run_id, goal)
+    except RunError:
+        return False
+    return receipt_path.is_file() and not receipt_path.is_symlink()
+
+
+def _read_registered_receipt(
+    resolved: ResolvedWorkpad, run_id: str, goal: Mapping[str, object]
+) -> tuple[NodeReceipt, dict[str, object]]:
+    _output_path, receipt_path = _registered_node_paths(resolved, run_id, goal)
+    if receipt_path.is_symlink() or not receipt_path.is_file():
+        raise RunError("registered node receipt is unavailable")
+    try:
+        receipt = NodeReceipt.from_json(parse_json_bytes(receipt_path.read_bytes()))
+    except Exception as exc:
+        raise RunError("registered node receipt is invalid") from exc
+    return receipt, _artifact_ref(
+        receipt_path.relative_to(resolved.path).as_posix(),
+        "application/json",
+        receipt_path.read_bytes(),
+    )
+
+
+def _apply_registered_receipt_to_detail(
+    resolved: ResolvedWorkpad,
+    run_id: str,
+    goal: Mapping[str, object],
+    detail: dict[str, object],
+    *,
+    expected_status: str,
+) -> None:
+    receipt, receipt_ref = _read_registered_receipt(resolved, run_id, goal)
+    if receipt.status.value != expected_status:
+        raise RunError("registered node receipt status is inconsistent")
+    projected = receipt.to_goal_details()
+    projected_evidence = [
+        item for item in projected.get("evidence", []) if isinstance(item, Mapping)
+    ]
+    if not any(item.get("path") == receipt_ref.get("path") for item in projected_evidence):
+        projected_evidence.append(receipt_ref)
+    projected["evidence"] = projected_evidence
+    detail.clear()
+    detail.update(projected)
+
+
+def _evidence_artifacts(
+    resolved: ResolvedWorkpad, refs: list[Mapping[str, object]]
+) -> tuple[JournalArtifact, ...]:
+    artifacts: list[JournalArtifact] = []
+    seen: set[str] = set()
+    for ref in refs:
+        path_value = ref.get("path")
+        if not isinstance(path_value, str) or path_value in seen:
+            continue
+        seen.add(path_value)
+        path = resolved.path / path_value
+        _reject_symlinked_components(resolved.path, path, "node evidence path is unsafe")
+        if not path.is_file() or path.is_symlink():
+            raise RunError("node evidence is unavailable")
+        data = path.read_bytes()
+        if digest_imported_bytes(data) != ref.get("content_sha256"):
+            raise RunError("node evidence digest diverged")
+        artifacts.append(JournalArtifact(path_value, data))
+    return tuple(artifacts)
+
+
+def _effective_goal_effects(
+    goal: Mapping[str, object], *, model_target: object | None = None
+) -> frozenset[str]:
+    """Return the effects admitted for this invocation of one Goal."""
+
+    effects = goal.get("effects", ())
+    if not isinstance(effects, (list, tuple, set, frozenset)):
+        raise _PreScheduleFailure("Goal effect set is malformed")
+    if any(type(effect) is not str or not effect for effect in effects):
+        raise _PreScheduleFailure("Goal effect set is malformed")
+    effective = frozenset(effects)
+    if (
+        goal.get("slug") == "assess"
+        and str(model_target) == ModelTarget.OLLAMA_LOCAL.value
+    ):
+        return frozenset(ASSESS_LOCAL_EFFECTS)
+    return effective
+
+
+def _validate_scheduler_policy(
+    graph: dict[str, object], *, model_target: object | None = None
+) -> None:
     budget = graph.get("aggregate_budget", {})
     if budget.get("max_parallel_goals") != 1:
         raise _PreScheduleFailure("parallel Goal capacity is unsupported by G14")
@@ -3452,11 +3959,31 @@ def _validate_scheduler_policy(graph: dict[str, object]) -> None:
         if goal.get("activation") != "automatic":
             raise _PreScheduleFailure("operator-gated Goals are unsupported by G14")
         executor = goal.get("executor", {})
-        if executor.get("kind") != "local_capability" or executor.get(
-            "capability"
-        ) not in {"gigai.offline", "gigai.deterministic"}:
+        if not isinstance(executor, Mapping):
             raise _PreScheduleFailure("Goal executor is unsupported by G14")
-        if goal.get("effects") != ["write_workpad"]:
+        if executor.get("kind") != "local_capability":
+            raise _PreScheduleFailure("Goal executor is unsupported by G14")
+        capability = executor.get("capability")
+        binding = lookup_graph_node(
+            graph.get("graph_id"),
+            graph.get("graph_version"),
+            goal.get("slug"),
+            capability,
+        )
+        if binding is None:
+            if capability not in {"gigai.offline", "gigai.deterministic"}:
+                raise _PreScheduleFailure("Goal executor is unsupported by G14")
+            if goal.get("effects") != ["write_workpad"]:
+                raise _PreScheduleFailure("Goal declares an unsafe effect set")
+            continue
+        try:
+            declared = frozenset(goal.get("effects", ()))
+            effective = _effective_goal_effects(goal, model_target=model_target)
+        except (TypeError, _PreScheduleFailure) as exc:
+            raise _PreScheduleFailure("Goal declares a malformed effect set") from exc
+        if not declared.issubset(binding.declared_effects):
+            raise _PreScheduleFailure("Goal declares an undeclared effect")
+        if not effective.issubset(binding.declared_effects):
             raise _PreScheduleFailure("Goal declares an unsafe effect set")
 
 
@@ -3489,11 +4016,7 @@ def _ready_goals(
 
 
 def _terminal_status(details: dict[str, dict[str, object]]) -> str:
-    if any(item["status"] == "failed" for item in details.values()):
-        return "failed"
-    if any(item["status"] == "blocked" for item in details.values()):
-        return "blocked"
-    return "succeeded"
+    return aggregate_status(item.get("status", "pending") for item in details.values())
 
 
 def _critical_path(graph: dict[str, object]) -> list[str]:
@@ -3543,22 +4066,353 @@ def _blocked_by_terminal_outcome(
     return sorted(set(blocked))
 
 
+def _read_find_jobs_run_input(
+    resolved: ResolvedWorkpad, run_id: str
+) -> dict[str, object] | None:
+    path = resolved.path / "runs" / run_id / "sealed" / "find-jobs-run-input.json"
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        payload = parse_json_bytes(path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise _PreScheduleFailure("sealed find-jobs Run input is invalid") from exc
+    if not isinstance(payload, dict):
+        raise _PreScheduleFailure("sealed find-jobs Run input is invalid")
+    return payload
+
+
+def _node_model_target(run_input: Mapping[str, object] | None) -> ModelTarget:
+    value = run_input.get("model_target") if run_input is not None else None
+    try:
+        return ModelTarget(str(value))
+    except ValueError:
+        return ModelTarget.OLLAMA_LOCAL
+
+
+def _build_node_context(
+    *,
+    resolved: ResolvedWorkpad,
+    run_id: str,
+    graph: Mapping[str, object],
+    goal: Mapping[str, object],
+    target_before: Mapping[str, object],
+    manifest_digest: str,
+    run_input: Mapping[str, object] | None,
+) -> NodeContext:
+    graph_id = graph.get("graph_id")
+    graph_version = graph.get("graph_version")
+    goal_slug = goal.get("slug")
+    if not isinstance(graph_id, str) or not isinstance(graph_version, int) or not isinstance(goal_slug, str):
+        raise RunError("registered node identity is unavailable")
+    operation_key = (
+        run_input.get("operation_key") if run_input is not None else None
+    )
+    if not isinstance(operation_key, str) or not operation_key:
+        operation_key = f"find-jobs:{goal_slug}:{run_id}"
+    observation_digest = target_before.get("observation_sha256")
+    if not isinstance(observation_digest, str):
+        raise RunError("registered node target observation is unavailable")
+    consent_path = resolved.path / "runs" / run_id / "operator-consent.json"
+    consent_ref = (
+        consent_path.relative_to(resolved.path).as_posix()
+        if consent_path.is_file() and not consent_path.is_symlink()
+        else "none"
+    )
+    return NodeContext(
+        run_id=run_id,
+        project_id=resolved.project_id,
+        gig_id=resolved.gig_id,
+        graph_id=graph_id,
+        graph_version=graph_version,
+        goal_slug=goal_slug,
+        manifest_digest=manifest_digest,
+        operation_key=operation_key,
+        target_observation_digest=observation_digest,
+        workpad_path=str(resolved.path),
+        redeemed_consent_ref=consent_ref,
+        model_target=_node_model_target(run_input),
+    )
+
+
+def _sealed_node_input(
+    *,
+    resolved: ResolvedWorkpad,
+    run_id: str,
+    goal: Mapping[str, object],
+    run_input: Mapping[str, object] | None,
+) -> object:
+    """Build the frozen Scout DTO for one registered goal.
+
+    A graph may provide an explicit ``input`` object in tests or in a future
+    graph compiler.  The functional graph instead derives assess/present input
+    from the prior sealed node output and the immutable Run input.
+    """
+
+    slug = goal.get("slug")
+    explicit = goal.get("input")
+    if isinstance(explicit, Mapping):
+        if slug == "acquire":
+            return AcquireInput.from_json(dict(explicit))
+        if slug == "assess":
+            return AssessInput.from_json(dict(explicit))
+        if slug == "present":
+            return PresentInput.from_json(dict(explicit))
+        return dict(explicit)
+    if run_input is None:
+        return {}
+    if slug == "acquire":
+        payload = {
+            "schema_version": "scout-find-jobs-acquire-input:1",
+            "config": run_input.get("config"),
+            "config_digest": run_input.get("config_digest"),
+            "prior_batch_digest": run_input.get("prior_batch_digest"),
+            "rows": run_input.get("rows", []),
+            "selection_cap": run_input.get("selection_cap"),
+            "selection_rule": run_input.get("selection_rule"),
+        }
+        return AcquireInput.from_json(payload)
+    if slug == "assess":
+        acquire_path = resolved.path / "runs" / run_id / "outputs" / "acquire.json"
+        if acquire_path.is_symlink() or not acquire_path.is_file():
+            raise RunError("registered assess input is unavailable")
+        try:
+            acquire = AcquireOutput.from_json(parse_json_bytes(acquire_path.read_bytes()))
+            pinned = PinnedResume.from_json(run_input["pinned_resume"])
+        except Exception as exc:
+            raise RunError("registered assess input is invalid") from exc
+        reasons: dict[str, str] = {}
+        outcomes = {
+            row.posting.normalized_url: row.outcome.value for row in acquire.rows
+        }
+        for posting in acquire.selected_postings:
+            reason = outcomes.get(posting.normalized_url)
+            if reason not in {
+                SelectionReasonCode.NEW.value,
+                SelectionReasonCode.EDITED.value,
+            }:
+                reason = SelectionReasonCode.NEW.value
+            reasons[posting.normalized_url] = reason
+        payload = {
+            "schema_version": "scout-find-jobs-assess-input:1",
+            "acquire_batch_ref": acquire.batch_ref,
+            "acquire_output_digest": acquire.digest(),
+            "selected_postings": [item.to_json() for item in acquire.selected_postings],
+            "selection_cap": run_input.get("selection_cap"),
+            "selection_reasons": reasons,
+            "pinned_resume": pinned.to_json(),
+            "target": run_input.get("target", str(resolved.target_root)),
+            "model_target": run_input.get("model_target"),
+            "answer_association_version": "scout-answer-association:1",
+        }
+        try:
+            return AssessInput.from_json(payload)
+        except Exception as exc:
+            raise RunError("registered assess input is invalid") from exc
+    if slug == "present":
+        outputs_dir = resolved.path / "runs" / run_id / "outputs"
+        receipts_dir = resolved.path / "runs" / run_id / "receipts"
+        receipts: list[NodeReceipt] = []
+        for prior_slug in ("acquire", "assess"):
+            receipt_path = receipts_dir / f"{prior_slug}.json"
+            if receipt_path.is_symlink() or not receipt_path.is_file():
+                continue
+            try:
+                receipt = NodeReceipt.from_json(parse_json_bytes(receipt_path.read_bytes()))
+            except Exception as exc:
+                raise RunError("registered present input is invalid") from exc
+            receipts.append(receipt)
+        batch_ref = ""
+        acquire_path = outputs_dir / "acquire.json"
+        if acquire_path.is_file() and not acquire_path.is_symlink():
+            try:
+                batch_ref = AcquireOutput.from_json(
+                    parse_json_bytes(acquire_path.read_bytes())
+                ).batch_ref
+            except Exception as exc:
+                raise RunError("registered present input is invalid") from exc
+        assessment_ref = (
+            "runs/" + run_id + "/outputs/assess.json"
+            if (outputs_dir / "assess.json").is_file()
+            else None
+        )
+        return PresentInput(batch_ref, assessment_ref, tuple(receipts))
+    return dict(run_input)
+
+
+def _node_output_bytes(output: object) -> bytes:
+    to_json = getattr(output, "to_json", None)
+    value = to_json() if callable(to_json) else output
+    if not isinstance(value, (Mapping, list, tuple, str, int, float, bool, type(None))):
+        raise RunError("registered node output is not serializable")
+    try:
+        return canonical_json_bytes(value)
+    except (TypeError, ValueError) as exc:
+        raise RunError("registered node output is not serializable") from exc
+
+
+def _registered_producer(
+    binding: object, context: NodeContext
+) -> Producer:
+    capability = getattr(binding, "capability", None)
+    if not isinstance(capability, str) or not capability:
+        raise RunError("registered node capability is invalid")
+    return Producer(
+        callable=capability,
+        version="1",
+        actor="scheduler",
+        model_target=context.model_target,
+        adapter="local_capability",
+    )
+
+
+def _write_registered_failure_receipt(
+    *,
+    resolved: ResolvedWorkpad,
+    run_id: str,
+    goal: Mapping[str, object],
+    context: NodeContext,
+    binding: object,
+    started_at: str,
+) -> None:
+    _output_path, receipt_path = _registered_node_paths(resolved, run_id, goal)
+    message = "registered node execution failed"
+    receipt = NodeReceipt(
+        goal_id=str(goal.get("goal_id")),
+        goal_version=int(goal.get("goal_version", 1)),
+        executor=str(getattr(binding, "capability", "local_capability")),
+        node_slug=str(goal.get("slug")),
+        operation_key=context.operation_key,
+        status=NodeStatus.FAILED,
+        outcome="FAILED",
+        errors=(GoalError("node_execution_failed", message, False, None),),
+        evidence=(),
+        producer=_registered_producer(binding, context),
+        usage=None,
+        started_at=started_at,
+        finished_at=_now(),
+        failure=NodeFailure("node_execution_failed", message),
+    )
+    receipt_bytes = canonical_json_bytes(receipt.to_json())
+    receipt_path.parent.mkdir(mode=0o700, exist_ok=True)
+    receipt_path.write_bytes(receipt_bytes)
+
+
 def _execute_goal(
     resolved: ResolvedWorkpad,
     run_id: str,
     goal_id: str,
     target_before: dict[str, object],
+    *,
+    goal: Mapping[str, object] | None = None,
+    graph: Mapping[str, object] | None = None,
+    manifest_digest: str | None = None,
+    started_at: str | None = None,
 ) -> dict[str, object]:
-    run_dir = resolved.path / "runs" / run_id
-    evidence_path = run_dir / "evidence" / f"{goal_id}.txt"
-    evidence_path.parent.mkdir(mode=0o700, exist_ok=True)
-    evidence = canonicalize_evidence(f"gigai-offline-ok:{goal_id}\n")
-    evidence_path.write_bytes(evidence)
-    if _target_observation(resolved) != target_before:
-        raise _RunInterrupted("target changed during deterministic execution")
-    return _artifact_ref(
-        evidence_path.relative_to(resolved.path).as_posix(), "text/plain", evidence
+    """Execute one Goal, dispatching only an explicitly registered binding."""
+
+    if goal is None or graph is None:
+        run_dir = resolved.path / "runs" / run_id
+        evidence_path = run_dir / "evidence" / f"{goal_id}.txt"
+        evidence_path.parent.mkdir(mode=0o700, exist_ok=True)
+        evidence = canonicalize_evidence(f"gigai-offline-ok:{goal_id}\n")
+        evidence_path.write_bytes(evidence)
+        if _target_observation(resolved) != target_before:
+            raise _RunInterrupted("target changed during deterministic execution")
+        return _artifact_ref(
+            evidence_path.relative_to(resolved.path).as_posix(), "text/plain", evidence
+        )
+
+    binding = _registered_goal_binding(graph, goal)
+    if binding is None:
+        run_dir = resolved.path / "runs" / run_id
+        evidence_path = run_dir / "evidence" / f"{goal_id}.txt"
+        evidence_path.parent.mkdir(mode=0o700, exist_ok=True)
+        evidence = canonicalize_evidence(f"gigai-offline-ok:{goal_id}\n")
+        evidence_path.write_bytes(evidence)
+        if _target_observation(resolved) != target_before:
+            raise _RunInterrupted("target changed during deterministic execution")
+        return _artifact_ref(
+            evidence_path.relative_to(resolved.path).as_posix(), "text/plain", evidence
+        )
+
+    run_input = _read_find_jobs_run_input(resolved, run_id)
+    context = _build_node_context(
+        resolved=resolved,
+        run_id=run_id,
+        graph=graph,
+        goal=goal,
+        target_before=target_before,
+        manifest_digest=manifest_digest or "",
+        run_input=run_input,
     )
+    started = started_at or _now()
+    try:
+        node_input = _sealed_node_input(
+            resolved=resolved, run_id=run_id, goal=goal, run_input=run_input
+        )
+        output = getattr(binding, "callable")(context, node_input)
+        output_bytes = _node_output_bytes(output)
+        output_path, receipt_path = _registered_node_paths(resolved, run_id, goal)
+        output_ref = _artifact_ref(
+            output_path.relative_to(resolved.path).as_posix(),
+            "application/json",
+            output_bytes,
+        )
+        output_path.parent.mkdir(mode=0o700, exist_ok=True)
+        output_path.write_bytes(output_bytes)
+        if _target_observation(resolved) != target_before:
+            raise _RunInterrupted("target changed during deterministic execution")
+        usage = getattr(output, "usage", None)
+        if not isinstance(usage, UsageBlock):
+            usage = None
+        producer = getattr(output, "producer", None)
+        if not isinstance(producer, Producer):
+            producer = _registered_producer(binding, context)
+        receipt = NodeReceipt(
+            goal_id=str(goal.get("goal_id")),
+            goal_version=int(goal.get("goal_version", 1)),
+            executor=str(getattr(binding, "capability")),
+            node_slug=str(goal.get("slug")),
+            operation_key=context.operation_key,
+            status=NodeStatus.COMPLETE,
+            outcome="COMPLETE",
+            errors=(),
+            evidence=(
+                # The output ref is the authenticated node evidence.  The
+                # receipt ref is added to goal_details after serialization so
+                # it can carry its own non-recursive digest.
+                ArtifactRef(
+                    str(output_ref["path"]),
+                    str(output_ref["content_sha256"]),
+                    str(output_ref["media_type"]),
+                    int(output_ref["size_bytes"]),
+                ),
+            ),
+            producer=producer,
+            usage=usage,
+            started_at=started,
+            finished_at=_now(),
+            failure=None,
+        )
+        receipt_bytes = canonical_json_bytes(receipt.to_json())
+        receipt_path.parent.mkdir(mode=0o700, exist_ok=True)
+        receipt_path.write_bytes(receipt_bytes)
+        return output_ref
+    except _RunInterrupted:
+        raise
+    except Exception as exc:
+        try:
+            _write_registered_failure_receipt(
+                resolved=resolved,
+                run_id=run_id,
+                goal=goal,
+                context=context,
+                binding=binding,
+                started_at=started,
+            )
+        except Exception:
+            pass
+        raise RunError("registered node execution failed") from exc
 
 
 def _goal_front_matter(
@@ -4201,4 +5055,13 @@ def _git_bytes(root: Path, *args: str) -> bytes:
     return result.stdout
 
 
-__all__ = ["ProposalRunRequest", "TailorRunRequest", "RunError", "RunResult", "launch_run", "read_run_details"]
+__all__ = [
+    "ProposalRunRequest",
+    "TailorRunRequest",
+    "RunError",
+    "RunResult",
+    "launch_find_jobs_run",
+    "launch_run",
+    "read_run_details",
+    "resolve_newest_resume",
+]

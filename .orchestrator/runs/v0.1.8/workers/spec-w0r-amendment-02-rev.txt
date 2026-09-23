@@ -1,0 +1,26 @@
+TARGET: Revise docs/development/v0.1.8/phase-2/evidence/P2-FREEZE-04-amendment-02-find-jobs-functional.md (your W0 output) to fix the coordinator's review at .orchestrator/reviews/w0-amendment-02.md. Read that review first.
+
+OWNED FILES (nothing else): that amendment; .orchestrator/workers/w0r-amendment-02-rev.md.
+
+OPERATOR DECISIONS (2026-09-22, added as D5-D9 in the Decisions table):
+D5 UI consent: Run workflow opens a confirm dialog showing the sources, queries, role filter, assess cap and model target. Confirm sends a new consent source `direct_local_ui_confirm`, accepted ONLY through the 127.0.0.1 API, redeemed before allocation like the CLI path (run.py:280-302, validator run.py:2187-2205). The CLI path stays unchanged.
+D6 The assess cap: assess only postings that are new (unseen URL or edited content hash) AND pass the role filter, at most N per run (default 10, set per run from the UI). Everything else shows as "not assessed" with a reason. N and the selection are sealed in the run input.
+D7 Resume: at run start the API resolves the newest committed `resume` private record (ingested via cli.py:217 / private_records.py:308; trace the exact reader and cite it), pins its record_id/revision_id/digest into the run input, and the UI shows which resume was used. No resume means the run refuses before assess, with a clear message.
+D8 Polling: Run workflow click only for now. Hourly polling and the 4h/12h/24h backoff are deferred to the cron follow-up; keep the backoff rule as a recorded non-goal, not a contract.
+D9 Roles/queries config: a project-local, operator-authored `find-jobs.json` (roles, merged queries, location/remote, published_after window, sources on/off, default assess cap, default model target), read by the API and shown in the UI. Each run seals a snapshot and digest of it into the run input. It is config, not a new persisted record type; say so. Pick and justify its path (e.g. beside the existing project/Gig config; cite where the project dir is resolved).
+
+FIXES REQUIRED:
+B1 Consent per D5: Integration owns the run.py change; state the exact envelope fields and the loopback check.
+B2 Hosted assess effect: define `network_hosted_model` (or reuse an existing effect name if one exists; grep first) for assess, admitted only for the sealed graph and only when model_target is non-local. The same D5 consent covers it and shows the target. Map it to InvocationPolicy.network_allowed (model_execution.py:74-86, the check at ~241-244). State who builds the policy (B, in scout_proposal_execution.py).
+B3 Add a shared contracts module, e.g. src/gigai/scout_find_jobs_contracts.py, defining NodeContext, AcquireInput/Output, AssessInput/Output, PresentInput/Output, the watchlist entry, and the find-jobs.json config shape as frozen dataclasses with validators. Owned by Integration and landing FIRST (wave 1a); all other packets read it. Add its test file to Integration's ownership and acceptance command.
+G1/G2/G3/G4 per D6/D9/D7/D8.
+M1 Domain filter: boards.greenhouse.io AND job-boards.greenhouse.io; jobs.lever.co; jobs.ashbyhq.com.
+M2 State that every network client is tested with httpx.MockTransport (httpx is a runtime dep, pyproject.toml); no live network in focused tests. A live run is a separate operator-consented step.
+M3 Use plain `path:lines` text, or links without line anchors.
+Keep the four packets, but add a sub-item split hint for A (Exa client, HiringCafe sitemap reader, ATS board clients [greenhouse/lever/ashby], URL normalization + diff, watchlist) so the roadmap can split it. Ownership must stay disjoint, with new files named.
+
+ACCEPTANCE: every B/G/M item addressed and listed in a short "Revision 1" change note at the end; D5-D9 in the Decisions table; ownership still disjoint; every new code claim cites a file:line you actually read; <= 250 lines.
+
+EXCLUSIONS: documentation only; do not edit the roadmap or README (another worker owns them); no git stash/reset/clean/add; no network; no tests. Say what you READ vs EXECUTED.
+
+ON FINISH OR QUESTION: write .orchestrator/workers/w0r-amendment-02-rev.md (state, what changed per item, READ vs EXECUTED), then worker_done.

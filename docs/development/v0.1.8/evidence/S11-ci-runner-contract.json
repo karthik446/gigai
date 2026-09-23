@@ -1,0 +1,105 @@
+{
+  "schema_version": "s11-ci-runner-contract.v1",
+  "kind": "ci-runner-contract",
+  "status": "implemented_preparation_pending_full_receipt",
+  "recorded_at": "2026-09-22",
+  "authority": {
+    "aggregate": "Makefile target test",
+    "runner": "tools/run_ci_tests.py",
+    "workflow": ".github/workflows/pull_request.yaml",
+    "source_suite": "uv run --locked --extra test python tools/run_ci_tests.py source",
+    "selector_boundary": "The source phase is one unfiltered pytest invocation over configured roots with a bounded xdist plan; the installed phase uses direct AST candidate node ids and filesystem enumeration of installed verifiers, while pytest collection/conftest remains authoritative."
+  },
+  "aggregate_phases": [
+    {
+      "name": "source",
+      "command": "make test-source",
+      "coverage": [
+        "pytest unit and fast_unit-marked tests",
+        "pytest integration and CLI tests",
+        "research and behavior-directory tests discovered by configured testpaths",
+        "source-environment installed tests discovered by the full suite",
+        "opt-in g30_live tests remain skipped unless explicitly enabled"
+      ],
+        "selection": "unfiltered pytest with TEST_XDIST_WORKERS=auto, TEST_XDIST_MAX_WORKERS=14, TEST_XDIST_DIST=worksteal by default; actual worker plan is emitted before pytest"
+    },
+    {
+      "name": "deterministic_behavior",
+      "command": "make test-behavior",
+      "coverage": [
+        "G28 development split",
+        "G28 calibration split",
+        "G28 final_held_out_acceptance split"
+      ],
+      "selection": "existing deterministic behavior evaluator; temporary receipts"
+    },
+    {
+      "name": "wheel_installed",
+      "command": "make test-wheel",
+      "coverage": [
+        "wheel build and isolated Python 3.11 installation",
+        "runtime dependencies exported and installed from uv.lock with --locked",
+        "all tools/verify_installed_*.py scripts, including G22 and G26",
+        "direct AST-derived installed pytest node ids with GIGAI_TEST_EXECUTABLE pointing at the wheel"
+      ],
+      "selection": "lexical verifier enumeration plus direct node ids"
+    }
+  ],
+  "explicit_nonaggregate_gates": [
+    {
+      "name": "debian_offline_container",
+      "command": "make test-debian-offline",
+      "reason": "Requires Linux direct mounts, Docker, read-only execution and non-root identity; the CI full_matrix job retains the existing exact container contract."
+    },
+    {
+      "name": "live_provider_uat",
+      "command": "GIGAI_G30_UAT=1 make test-live",
+      "reason": "Requires explicit operator consent/configuration and may invoke real local model/provider CLIs; never part of ordinary test."
+    }
+  ],
+  "ci_changes": {
+    "source_matrix": "Preserves Ubuntu/macOS and Python 3.11/3.12/3.13 full-matrix coverage; removes the default PR's duplicate G28 unit/integration selectors.",
+    "behavior_job": "Runs deterministic G28 evaluation once as a separate Ubuntu Python 3.11 job in both default and full-matrix workflows.",
+    "wheel_job": "Runs the complete wheel-installed offline lane once, rather than a partial default set plus a larger conditional list.",
+    "concurrency": "Superseded pull_request runs are cancelled per pull request; workflow_call release/compatibility invocations are not cancelled by this expression.",
+    "debian": "Existing full_matrix Debian 12 offline job is retained unchanged."
+  },
+  "source_parallelism": {
+    "default_request": "TEST_XDIST_WORKERS=auto",
+    "hard_cap": 14,
+    "scheduler": "worksteal",
+    "actual_worker_rule": "min(requested_workers, TEST_XDIST_MAX_WORKERS, os.cpu_count())",
+    "initial_measurement_override": "make test-source TEST_XDIST_WORKERS=14 TEST_XDIST_MAX_WORKERS=14 TEST_XDIST_DIST=worksteal",
+    "ci_setting": "Source matrix sets auto/cap14/worksteal; it does not assume 14 workers on every OS/Python runner.",
+    "scope": "Source lane only; behavior, wheel/verifier, Debian, and explicit live/UAT targets are not changed by source xdist options.",
+    "receipt": "tools/run_ci_tests.py emits kind=xdist-plan with requested, cap, CPU, actual, distribution, and GIGAI_G30_UAT=0 before pytest.",
+    "evidence_boundary": "A measured speedup, fixture-isolation safety, and runner-minute effect require A's controlled full workload receipt."
+  },
+  "migration_handoff": {
+    "reported_by_dispatch": "ctx_453939594ac0",
+    "top_level_test_modules_moved": 145,
+    "research_roots_retained": {
+      "research/contract_spike/tests": 3,
+      "research/phase0_spike/tests": 6
+    },
+    "collected_cases_reported_unchanged": 1588,
+    "authority": "A owns old/new identities and actual pytest collection/conftest policy; B's 31 AST candidates are not collection proof."
+  },
+  "performance_disposition": {
+    "observed": "Historical run 35660274375 shows source G28 lanes from 2096 to 4933 seconds, Debian at 4773 seconds, and a 17-second wheel failure; see S11-ci-historical-run.json.",
+    "expected": [
+      "Removing duplicate default G28 unit/integration invocations avoids repeating tests before the unfiltered source suite.",
+      "One behavior job avoids repeating the deterministic evaluator in every source matrix lane and adds it to full_matrix coverage.",
+      "Concurrency cancellation reduces abandoned superseded PR work.",
+      "The complete wheel lane can increase default PR duration versus the former partial verifier list; this is intentional coverage restoration, not a cost-saving claim."
+    ],
+    "cost_boundary": "No billable-minute or total-cost savings are claimed without a post-change remote receipt; parallel wall-time reduction may increase total runner minutes."
+  },
+  "open_receipts": [
+    "Luna A's actual pytest collection/conftest receipt confirming the migrated identity map and 1,588-case preservation",
+    "Luna A's final complete make test before/after timing receipt, including source, behavior, wheel/verifier, and all setup/build costs",
+    "A final aggregate execution environment receipt for the five existing loopback socket.bind cases; current sandbox permissions deny the product-required 127.0.0.1 ephemeral bind and no supported runner setting can bypass that contract",
+    "A future remote CI run verifying workflow behavior and G03/G22/G26 installed lanes"
+  ],
+  "evidence_boundary": "This contract records source changes and bounded selector validation only. No complete suite, wheel lane, Debian container, provider/model invocation, remote workflow rerun, release, or current CI pass was executed by this worker."
+}

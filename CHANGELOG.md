@@ -28,17 +28,31 @@ Do not include commit IDs, schema field names, test counts, or implementation
 mechanics here. Those belong in the internal changelog.
 -->
 
-#### 0.1.7 candidate — Scout and local workflow foundations
+## Released versions
+
+### 0.1.8
+
+- Adds Scout's `find-jobs` workflow, GigAI's first shipped Gig: acquire public
+  postings from Exa search and the Greenhouse/Lever/Ashby applicant-tracking
+  boards through an auto-managed watchlist; assess each posting with a
+  requirements-by-resume matrix that surfaces suggestions and open questions,
+  defaulting to a local model with explicit hosted-model targets available;
+  and present results through a localhost API and Vite UI that asks for
+  explicit consent before any network call or hosted-model use.
+- Moves the Scout package to `gigai.scout` so it imports and packages as a
+  self-contained Gig on top of GigAI core, with core never importing a Gig.
+- Reorganizes the test suite into behavior-grouped directories (S11) with a
+  `make test` runner that separates source, behavior, and wheel-resource
+  suites.
+- Fixes release CI's setup verifier and workflow model-target wiring, and adds
+  an interpreter safety guard to the wheel-resource test lane.
+
+### 0.1.7
 
 - Adds the bundled Scout authoring source, local record workflow, bounded public
   acquisition import, and rebuildable local report surface.
 - Adds resumable interview and private-transfer preparation plus a local runtime
   comparison workflow with explicit synthetic/offline boundaries.
-- This is a release candidate entry pending automated verification,
-  authorization, and publication; it does not claim live-provider or human-UAT
-  completion.
-
-## Released versions
 
 ### 0.1.5
 

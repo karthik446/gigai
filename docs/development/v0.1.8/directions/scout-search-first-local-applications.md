@@ -1,8 +1,10 @@
 # Scout search-first execution and GigAI local applications
 
 Recorded: 2026-09-20 (America/Denver).  
-Status: product direction and detailed execution topic for v0.1.8; not an
-implemented contract, approved schema, or expansion of the active v0.1.7 wave.
+Status: product direction and first-vertical-slice execution input for v0.1.8;
+not an implemented contract, approved schema, or expansion of the active v0.1.7
+wave. The essential local tracking UI described here is part of the first slice,
+not an end-stage report or an optional framework project.
 
 This is a refinement of the existing direction, not a replacement roadmap or
 a platform pivot. The user wants Scout to be installable, customizable,
@@ -50,6 +52,17 @@ A slow/unavailable local model leaves visible saved jobs with pending or failed
 assessment status. It must not hide jobs or lose acquisition progress. Keep the
 bounded job/deadline/resume behavior; separately design any recurring scheduler
 instead of silently installing an always-running agent.
+
+Keep assessment state and user tracking state as separate, explainable fields:
+
+| State | Meaning | Allowed transition authority |
+| --- | --- | --- |
+| Assessment | System progress such as new, pending, running, succeeded, failed or skipped; a slow/off model must leave the saved posting visible | Acquisition/assessment operations and their receipts |
+| Tracking | An explicit user decision such as untracked, shortlisted, applied, interviewing, rejected or archived | Existing validated user/tracking operation; browsing must not silently mutate it |
+
+Tailoring or selecting/finalizing a resume never implies `applied`. The user
+must explicitly record an application, and the source posting, selected resume,
+proposal evidence and tracking event remain linked.
 
 Retain distinct metadata for first discovered time, last observed time, fetched
 snapshot time, and the employer/source's claimed posting time. Posting time may
@@ -106,6 +119,30 @@ Newest does not necessarily mean most relevant. Never silently switch the resume
 under an existing assessment. Retain the selected revision and selection rationale;
 edits create new revisions, not rewritten historical assessment inputs.
 
+## First vertical-slice local tracking UI
+
+The first vertical slice includes a simple usable local surface for the operator
+and a few trusted friends using the installation. It is deliberately small but
+must be useful for browsing and status updates before any broader UX research:
+
+- a job table with basic filters (new/pending/failed assessment and tracking
+  status), immediate visibility of newly saved postings, and a detail view;
+- source posting/snapshot links, selected resume revision, requirements and
+  evidence/gaps/actions from the readable proposal; and
+- explicit `shortlisted`, `applied`, `interviewing`, `rejected` and `archived`
+  tracking updates through the existing validated operations, with assessment
+  state shown separately from user tracking state.
+
+The surface must remain usable with inference off: a user can browse saved
+postings, inspect evidence and change tracking status without a model call. Use
+the simplest suitable existing local interface and storage/projection path. Do
+not force React, FastAPI, a new frontend framework, hosting or multi-tenant
+account expansion into this slice; compare those options only after the
+behavior and operation boundaries are proven. The [V018-01 workpad and readable
+artifacts task](../tasks/V018-01-workpad-navigation-and-readable-artifacts.md)
+supplies the readable navigation/detail concerns, while its separate storage
+migration ideas remain out of this slice.
+
 ## Dashboard and ranking
 
 Show new jobs for the day/hour or since the last visit, pending assessments,
@@ -126,9 +163,10 @@ probability of hiring. Do not count an unanswered question as an assured fix.
 Changing a rubric must not silently change historical score meaning.
 
 The dashboard must work with inference disabled: browse history, inspect evidence,
-change preferences, record application events and view status using ordinary
-local software. Models are used only for operations requiring interpretation or
-generation, not every read or mutation.
+change preferences, record tracking/application events and view status using
+ordinary local software. Models are used only for operations requiring
+interpretation or generation, not every read or mutation. Application history is
+explicit user data, never an inference from tailoring or a finalized resume.
 
 ## GigAI: portable applications, not disposable prompt bundles
 
@@ -150,12 +188,12 @@ rebuildable-projection distinction until an explicit design changes it. A UI
 must call the same validated operations as agent/CLI tools, not introduce a
 second independently writable source of truth.
 
-FastAPI plus a simple React frontend is an option for a future local dashboard,
-informed by the user's experience in another project. It is not a framework
-decision, deployed-service requirement or v0.1.7 addition. Compare it with the
-existing generated HTML and other local interfaces in the accessibility spike.
-If chosen, specify loopback binding, local request protection, server lifetime,
-installation and model-off operation. Frontend replacement remains possible
+FastAPI plus a simple React frontend is one future option, not a framework
+decision, deployed-service requirement or v0.1.7 addition. Start with the
+existing generated HTML/CLI/local surfaces and compare alternatives only if the
+first slice demonstrates a real gap. Any later choice must preserve loopback
+and model-off behavior, but no new framework is required to deliver the first
+local table/detail/status surface. Frontend replacement remains possible
 without replacing the Gig's data or domain operations.
 
 Before building a second full Gig, audit concrete reusable boundaries: snapshot
@@ -187,16 +225,22 @@ model-generated confidence number with calibrated fit or hiring probability.
 
 ## Proposed execution sequence and evidence
 
-1. Audit the existing Scout acquisition, proposal, document and report paths;
-   identify missing behavior before proposing replacement infrastructure.
-2. Freeze minimal job lifecycle/requirements/resume-selection/proposal shapes
-   and lineage. Specify unknown timestamps, duplicates and changed inputs.
-3. Prove immediate durable visibility with deliberately slow/failed assessment,
-   restart recovery and bounded acquisition; no duplicate proposal publication.
-4. Prove resume library selection, matrix evidence, focused answers and revised
-   assessment, with no automatic Tailor or application event.
-5. Prototype the local dashboard and portable model-off history experience;
-   compare UI options without binding domain services to one frontend.
+1. Run the S11 behavior-based test inventory/baseline and bounded initial
+   migration; keep deterministic unit, integration, CLI, installed and live
+   provider lanes distinct.
+2. Audit the actually shipped v0.1.7 package/source and S10 caller/local
+   invocation gaps, then freeze minimal job lifecycle,
+   requirements/resume-selection, proposal and tracking-operation interfaces
+   with lineage and evaluation acceptance criteria.
+3. Prove through the real scheduling path that a posting is acquired, durably
+   saved and shown as new/pending independently of deliberately slow, stopped or
+   failed assessment; check restart recovery, duplicates and privacy boundaries.
+4. Prove local assessment against the selected resume with matrix evidence,
+   focused answers and a readable actionable proposal, with no automatic
+   tailoring or application event.
+5. Deliver the essential local table/filter/detail tracking UI through the same
+   validated operations, including explicit tracking states and model-off
+   browsing/status updates; do not wait until the end for this surface.
 6. Evaluate structured local/CLI setups and measure reusable platform boundaries
    using a small non-Scout fixture before committing to another full Gig.
 
@@ -207,16 +251,29 @@ resume-selection quality. Set thresholds from a representative workload; no
 unmeasured speed or accuracy target is declared achieved here.
 
 Open decisions: acquisition sources and polling cadence; scheduler ownership;
-resume tagging/selection policy; matrix and scoring rubrics; UI choice and local
-server behavior; hardware-specific quality/latency budgets. These need bounded
-design/evaluation, not expansion of the active correction workers' tasks.
+resume tagging/selection policy; matrix and scoring rubrics; the simplest local
+UI surface after the existing operations are audited; and hardware-specific
+quality/latency budgets. These need bounded design/evaluation, not expansion of
+the active correction workers' tasks or a new schema, memory, hooks, Dolt,
+storage migration or full Gig.
 
 ## Relationship to existing work
 
 - [v0.1.8 backlog](../README.md): this direction adds a detailed topic, not a release gate.
 - [S07 execution modes](../spikes/S07-execution-modes-and-cost-aware-orchestration.md)
-  retains first full-spike priority; eligibility, cost and event-driven execution
-  apply across Gigs.
+  remains parallel non-blocking research; eligibility, cost and event-driven
+  execution apply across Gigs but are not prerequisites for the first slice.
+- [S08 evaluation methodology](../spikes/S08-cross-model-decision-evaluation-methodology.md)
+  supplies the frozen-case, synthetic-input and human-gold method; research
+  evidence does not itself prove runtime/model quality.
+- [S09 search/retrieval sourcing](../spikes/S09-local-search-retrieval-capability-sourcing.md)
+  informs source selection; its research does not prove indexing freshness or
+  durable storage rights.
+- [S10 Ollama invocation](../spikes/S10-ollama-invocation-and-harness-onboarding.md)
+  supplies the local-routing and caller-gap audit boundary; adapter evidence is
+  not installed/live caller proof.
+- [S11 behavior-based tests](../spikes/S11-behavior-based-test-organization.md)
+  is the first release foundation for deterministic lanes and measured baseline.
 - [Accessibility, memory and local-model spikes](../spikes/README.md) retain their
   scope and numbering. This topic gives them a concrete Scout use case.
 - [v0.1.7 release execution graph](../../evidence/v0.1.7/Scout/SCOUT-release-execution-graph.md)
