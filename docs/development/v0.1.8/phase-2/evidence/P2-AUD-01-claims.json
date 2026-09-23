@@ -1,0 +1,217 @@
+{
+  "schema_version": "p2-aud-01-claims.v1",
+  "story": "P2-AUD-01",
+  "audit_status": "completed-audit",
+  "observed_on": "2026-09-22",
+  "scope": {
+    "mode": "read-only source, Git, workflow, historical-evidence, and public-metadata audit",
+    "workspace": "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8",
+    "forbidden_actions_not_performed": [
+      "tests or suites",
+      "production execution",
+      "model/provider/daemon calls",
+      "downloads or installs",
+      "private workpad access",
+      "release workflow mutation",
+      "tag/push/publish",
+      "source/test/config/schema edits"
+    ],
+    "owned_outputs": [
+      "docs/development/v0.1.8/phase-2/evidence/P2-AUD-01-baseline-and-invocation.md",
+      "docs/development/v0.1.8/phase-2/evidence/P2-AUD-01-claims.json"
+    ]
+  },
+  "checkout": {
+    "branch": "karthik446/gigai-v0.1.8",
+    "head": "b01675d0b7ef39b49853a26df61aadeea2064a6a",
+    "describe": "v0.1.7-dirty",
+    "local_tag": {
+      "name": "v0.1.7",
+      "object": "19cf24c6710c565228344f5cdca378c085c7792f",
+      "object_type": "tag",
+      "peeled_commit": "b01675d0b7ef39b49853a26df61aadeea2064a6a",
+      "message": "Release GigAI 0.1.7"
+    },
+    "project": {
+      "name": "gigai",
+      "version": "0.1.7",
+      "requires_python": ">=3.11",
+      "pyproject_sha256": "d9a81709a2ca558ea76c8e97fff3880efa79859b7994435d6e88934cd7993045",
+      "uv_lock_sha256": "bee6e19997640180c6738f5b524fc828919871acdeca75602c3b07af32b96f42",
+      "lock_project_version": "0.1.7",
+      "runtime_dependency_questionary": ">=2.1.1",
+      "preexisting_pyproject_numstat": "3 0"
+    }
+  },
+  "receipts": [
+    {
+      "id": "local-baseline",
+      "kind": "shell-read-only",
+      "commands": [
+        "rtk git status --short --branch",
+        "rtk git rev-parse HEAD",
+        "rtk git branch --show-current",
+        "rtk git describe --tags --always --dirty",
+        "rtk git show-ref --tags",
+        "rtk git rev-parse 'v0.1.7^{}'",
+        "rtk git cat-file -t refs/tags/v0.1.7",
+        "rtk git cat-file -p refs/tags/v0.1.7",
+        "rtk git show --no-patch --format='%H%n%P%n%an <%ae>%n%ad%n%s' refs/tags/v0.1.7",
+        "rtk rg -n '^version|^requires-python|questionary|ollama|dependencies' pyproject.toml",
+        "rtk rg -n '^name = \"gigai\"|^version = \"0.1.7\"|requires-python|questionary' uv.lock",
+        "rtk git diff --numstat -- pyproject.toml uv.lock",
+        "rtk sha256sum pyproject.toml uv.lock"
+      ],
+      "exit_code": 0,
+      "result": "HEAD/version/lock/tag identity recorded; uv.lock has no diff"
+    },
+    {
+      "id": "remote-tag",
+      "kind": "public-read-only-git-metadata",
+      "command": "rtk git ls-remote --tags origin 'refs/tags/v0.1.7' 'refs/tags/v0.1.7^{}'",
+      "exit_code": 0,
+      "stdout": "19cf24c6710c565228344f5cdca378c085c7792f\trefs/tags/v0.1.7\nb01675d0b7ef39b49853a26df61aadeea2064a6a\trefs/tags/v0.1.7^{}\n"
+    },
+    {
+      "id": "github-release-metadata",
+      "kind": "public-read-only-http-metadata",
+      "command": "rtk curl -sS -D - -o /dev/null https://api.github.com/repos/karthik446/gigai/releases/tags/v0.1.7",
+      "http_status": 404,
+      "observed_date": "2026-09-22",
+      "result": "No GitHub Release observed"
+    },
+    {
+      "id": "pypi-metadata",
+      "kind": "public-read-only-http-metadata",
+      "command": "rtk curl -sS -D - -o /dev/null https://pypi.org/pypi/gigai/0.1.7/json",
+      "http_status": 404,
+      "observed_date": "2026-09-22",
+      "result": "No PyPI release observed"
+    },
+    {
+      "id": "testpypi-metadata",
+      "kind": "public-read-only-http-metadata",
+      "command": "rtk curl -sS -D - -o /dev/null https://test.pypi.org/pypi/gigai/0.1.7/json",
+      "http_status": 404,
+      "observed_date": "2026-09-22",
+      "result": "No TestPyPI release observed"
+    },
+    {
+      "id": "github-actions-run",
+      "kind": "public-read-only-github-actions-metadata",
+      "command": "rtk curl -sS https://api.github.com/repos/karthik446/gigai/actions/runs?branch=v0.1.7&per_page=10",
+      "exit_code": 0,
+      "total_count": 1,
+      "run_id": 35660274375,
+      "head_sha": "b01675d0b7ef39b49853a26df61aadeea2064a6a",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/karthik446/gigai/actions/runs/35660274375"
+    },
+    {
+      "id": "github-actions-jobs",
+      "kind": "public-read-only-github-actions-job-summary",
+      "command": "rtk proxy curl -sS 'https://api.github.com/repos/karthik446/gigai/actions/runs/35660274375/jobs?per_page=100' | rtk python3 -c \"import json,sys; data=json.load(sys.stdin); print(json.dumps([{'name':j.get('name'),'status':j.get('status'),'conclusion':j.get('conclusion'),'failed_steps':[s.get('name') for s in j.get('steps',[]) if s.get('conclusion')=='failure']} for j in data.get('jobs',[])],sort_keys=True,indent=2))\"",
+      "exit_code": 0,
+      "jobs": [
+        {"name": "Release preflight", "conclusion": "success"},
+        {"name": "Exact-tag CI / Detect implementation changes", "conclusion": "success"},
+        {"name": "Exact-tag CI / Debian 12 offline container", "conclusion": "success"},
+        {"name": "Exact-tag CI / Built-wheel resources", "conclusion": "failure", "failed_steps": ["Run .wheel-venv/bin/python tools/verify_installed_g03.py"]},
+        {"name": "Exact-tag CI / G28 readiness tiers (Python 3.11 on ubuntu-latest)", "conclusion": "success"},
+        {"name": "Exact-tag CI / G28 readiness tiers (Python 3.12 on ubuntu-latest)", "conclusion": "success"},
+        {"name": "Exact-tag CI / G28 readiness tiers (Python 3.13 on ubuntu-latest)", "conclusion": "success"},
+        {"name": "Exact-tag CI / G28 readiness tiers (Python 3.11 on macos-latest)", "conclusion": "success"},
+        {"name": "Exact-tag CI / G28 readiness tiers (Python 3.12 on macos-latest)", "conclusion": "success"},
+        {"name": "Exact-tag CI / G28 readiness tiers (Python 3.13 on macos-latest)", "conclusion": "success"},
+        {"name": "Build and attest release artifacts", "conclusion": "skipped"},
+        {"name": "Fresh wheel and source-distribution smoke test", "conclusion": "skipped"},
+        {"name": "Publish to TestPyPI", "conclusion": "skipped"},
+        {"name": "TestPyPI clean install on ${{ matrix.os }}", "conclusion": "skipped"},
+        {"name": "Publish to PyPI", "conclusion": "skipped"},
+        {"name": "PyPI clean install on ${{ matrix.os }}", "conclusion": "skipped"},
+        {"name": "Verify provenance and create GitHub Release", "conclusion": "skipped"}
+      ]
+    }
+  ],
+  "historical_evidence": {
+    "final_candidate": {
+      "path": "docs/development/evidence/v0.1.7/Scout/SCOUT-R7-final-candidate-verification-20260921.md",
+      "source_head": "fda48574f8642e66c0e7d53e7303ec04f04d7bb8",
+      "wheel_sha256": "0371662823de1b963455f50a967d226c95cfe2fadbefe03557630b3f844ca5b7",
+      "sdist_sha256": "11fb92ba696cc1ffc67808930857dee6c0c7f5f91f1972e5cc5f867ec638a9a5",
+      "publication_approved": false,
+      "exact_tag_ci_proven": false,
+      "uat_proven": false
+    },
+    "release_integration": {
+      "path": "docs/development/evidence/v0.1.7/Scout/SCOUT-R7-release-integration-20260921.md",
+      "wheel_sha256": "da75dde1f9672e6e096ed4fed3f78da8b1915c6ce6b104174d46c9c2354b527e",
+      "sdist_sha256": "d89629aaa301432b65a003ffe91184887462d68ff26493e682393bacd512e0e3",
+      "publication_performed": false
+    },
+    "publication_preparation": {
+      "path": "docs/development/evidence/v0.1.7/Scout/SCOUT-R7-publication-preparation-20260921.md",
+      "historical_tag_absence": true,
+      "historical_publication_absence": true,
+      "historical_debian_blocker": true,
+      "rewritten": false
+    },
+    "uat": {
+      "path": "docs/development/evidence/v0.1.7/Scout/SCOUT-12-user-uat-checklist.md",
+      "status": "planned acceptance checklist, not executed",
+      "publication_required_first": true
+    }
+  },
+  "claims": [
+    {"id": "baseline.source", "claim": "Current source is b01675d on branch karthik446/gigai-v0.1.8 in a dirty worktree", "status": "proven", "evidence": ["checkout", "local-baseline"], "conflict": "Dirty worktree is not a clean release input", "smallest_next_proof": "Owner-approved clean checkout manifest"},
+    {"id": "baseline.version", "claim": "pyproject.toml and uv.lock identify gigai 0.1.7 with Python >=3.11", "status": "proven", "evidence": ["pyproject.toml:5-28", "uv.lock:1-92", "local-baseline"], "conflict": "pyproject.toml has pre-existing marker additions", "smallest_next_proof": "verify-lockfile on the owner-approved release checkout"},
+    {"id": "baseline.local_tag", "claim": "Local annotated v0.1.7 points to b01675d", "status": "proven", "evidence": ["local-baseline"], "conflict": "Tag presence is not publication", "smallest_next_proof": "Successful exact-tag workflow for the same commit"},
+    {"id": "baseline.remote_tag", "claim": "Remote annotated v0.1.7 matches tag object and peeled b01675d", "status": "proven", "evidence": ["remote-tag"], "conflict": "Historical absence report is stale for tag fields only", "smallest_next_proof": "None for ref identity; retain release gates"},
+    {"id": "candidate.artifacts", "claim": "Historical R7 candidate artifacts were verified for other recorded snapshots", "status": "historical-only", "evidence": ["historical_evidence.final_candidate", "historical_evidence.release_integration"], "conflict": "Recorded hashes/source heads are not proven equal to current b01675d artifact", "smallest_next_proof": "Build and hash artifacts from exact current tag after CI passes"},
+    {"id": "ci.exact_tag", "claim": "Current v0.1.7 workflow attempted and failed in Built-wheel resources at verify_installed_g03.py", "status": "failed", "evidence": ["github-actions-run", "github-actions-jobs"], "conflict": "Successful source/Debian/G28 jobs do not override one required failure", "smallest_next_proof": "Owner disposition and successful exact-tag rerun"},
+    {"id": "publication.github", "claim": "GitHub Release v0.1.7 was not observed", "status": "unproven-absent", "evidence": ["github-release-metadata", "github-actions-jobs"], "conflict": "HTTP 404 is time-scoped and not a permanent absence proof", "smallest_next_proof": "Successful GitHub Release job followed by metadata query"},
+    {"id": "publication.pypi", "claim": "PyPI gigai 0.1.7 was not observed", "status": "unproven-absent", "evidence": ["pypi-metadata", "github-actions-jobs"], "conflict": "No artifact download performed", "smallest_next_proof": "Workflow PyPI publication and clean-index install"},
+    {"id": "publication.testpypi", "claim": "TestPyPI gigai 0.1.7 was not observed", "status": "unproven-absent", "evidence": ["testpypi-metadata", "github-actions-jobs"], "conflict": "No artifact download performed", "smallest_next_proof": "Workflow TestPyPI publication and clean install"},
+    {"id": "uat.human", "claim": "Human UAT remains planned and unexecuted", "status": "unproven", "evidence": ["historical_evidence.uat"], "conflict": "Publication is a prerequisite", "smallest_next_proof": "Explicit publication then operator checklist"},
+    {"id": "s10.source_route", "claim": "Public proposal source route reaches local invocation and immutable persistence", "status": "source-proven", "evidence": ["cli.py:3048-3107", "run.py:142-557", "scout_proposal_execution.py:91-270,803-1177", "scout_proposal_records.py:356-470"], "conflict": "Source proof is not runtime proof", "smallest_next_proof": "Focused installed/local proof"},
+    {"id": "s10.injected_route", "claim": "Existing focused tests use MockTransport and disposable fixture workpads", "status": "injected-offline-only", "evidence": ["tests/test_ollama_local_adapter.py:45-86", "tests/test_ollama_local_integration.py:69-167", "tests/test_scout_proposal_execution.py", "tests/test_scout_proposal_run.py"], "conflict": "Inspected, not rerun in this audit", "smallest_next_proof": "Authorized focused offline run"},
+    {"id": "s10.installed_caller", "claim": "Current installed public CLI caller is proven", "status": "unproven", "evidence": ["github-actions-jobs", "historical_evidence.final_candidate"], "conflict": "Current built-wheel verifier failed; historical installs are candidate-specific", "smallest_next_proof": "Clean install exact current artifact and synthetic CLI proof"},
+    {"id": "s10.live_local", "claim": "Current Ollama daemon/model identity and live caller route are proven", "status": "unproven", "evidence": ["S10 evidence:118-141"], "conflict": "No live model/daemon/provider call authorized", "smallest_next_proof": "One separately authorized synthetic loopback probe"},
+    {"id": "s10.no_hosted_fallback", "claim": "Proposal caller rejects non-local targets and passes offline local policy; general harness locality is open", "status": "source-guard-proven", "evidence": ["scout_proposal_execution.py:138-155", "model_execution.py:241-245", "ollama_local.py:1-6,99-111,280-304"], "conflict": "Adapter/source guard is not whole-harness policy", "smallest_next_proof": "Installed caller/harness trace with explicit target and receipt"},
+    {"id": "s10.cancellation", "claim": "KeyboardInterrupt maps to typed model cancellation and host proposal failure; journal conflict can return interrupted", "status": "source-semantics-proven", "evidence": ["ollama_local.py:238-239", "model_execution.py:292-320,385-408", "scout_proposal_execution.py:1153-1165", "run.py:432-557"], "conflict": "Real endpoint cancellation/recovery was not exercised", "smallest_next_proof": "Focused injected cancellation receipt"}
+  ],
+  "route": {
+    "entry_points": [
+      {"path": "src/gigai/cli.py", "lines": "3048-3107", "name": "gigai proposal", "consent": "--confirm required", "status": "source-proven"},
+      {"path": "src/gigai/data/scout/gig.py", "lines": "88-95,337-438", "name": "copied Scout proposal wrapper", "consent": "--confirm required", "status": "source-proven"},
+      {"path": "src/gigai/scout_proposal_cli.py", "lines": "19-42", "name": "run_saved_proposal helper", "status": "programmatic helper; top-level CLI reachability not assumed"}
+    ],
+    "stages": [
+      {"stage": "Run authority", "source": "src/gigai/run.py:142-354", "output": "sealed Run/Goal artifacts and run_started journal transition"},
+      {"stage": "Source join", "source": "src/gigai/scout_proposal_execution.py:908-1126", "output": "authenticated posting/private bytes and sealed journal head"},
+      {"stage": "Invocation policy", "source": "src/gigai/scout_proposal_execution.py:178-230; src/gigai/model_execution.py:131-245", "output": "selected refs, source descriptors, offline local policy"},
+      {"stage": "Target/factory", "source": "src/gigai/model_targets.py:20-31; src/gigai/adapters/factory.py:61-104", "output": "resolved ollama_local binding"},
+      {"stage": "Ollama transport", "source": "src/gigai/adapters/ollama_local.py:189-419", "output": "validated InvocationResult or typed failure"},
+      {"stage": "Invocation receipt", "source": "src/gigai/model_execution.py:262-408; src/gigai/scout_proposal_execution.py:285-365", "output": "request/record/response artifacts and non-terminal receipt"},
+      {"stage": "Domain result", "source": "src/gigai/scout_proposal_execution.py:1129-1177,803-905", "output": "validated result and Goal terminal transition"},
+      {"stage": "Proposal revision", "source": "src/gigai/scout_proposal_records.py:356-437", "output": "immutable records/scout-proposals revision"},
+      {"stage": "Readers/views", "source": "src/gigai/scout_report_readers.py:150-190,296-343; src/gigai/scout_projection.py:1-8,273-337", "output": "journal-pinned report/projection; disposable SQLite/in-memory view"}
+    ]
+  },
+  "evidence_lanes": {
+    "source": "current source inspected",
+    "injected_offline": "existing MockTransport/temporary-workpad tests inspected, not executed",
+    "installed": "historical candidate-only receipts; current exact-tag built-wheel verifier failed",
+    "live_provider": "not executed",
+    "publication": "not observed on GitHub/PyPI/TestPyPI",
+    "human_uat": "not executed"
+  },
+  "residuals": [
+    "Owner disposition and successful rerun for exact-tag Built-wheel resources / verify_installed_g03.py",
+    "Current exact artifact build and clean installation",
+    "Current installed public proposal caller proof",
+    "Separately authorized synthetic Ollama runtime and harness proof",
+    "Explicit publication and human UAT"
+  ]
+}

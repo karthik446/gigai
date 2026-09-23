@@ -1,0 +1,31 @@
+# S14 reproduction run — 2026-09-22T20:56:44+00:00
+# HEAD=b01675d; src/gigai modified files: 0; Python 3.13.1
+
+$ uv run python docs/development/v0.1.8/spikes/evidence/S14-repro/census.py <scratch>/census.json
+schemas=82 with_src_call_site=76 in_registry=82
+
+$ uv run pytest tests/behaviors/scout_discovery/test_scout07_discovery_run_flow.py -q -p no:cacheprovider --basetemp=<BT>
+3 passed in 17.83s
+
+$ uv run python docs/development/v0.1.8/spikes/evidence/S14-repro/handoff_scan.py <BT>
+handoffs=28 valid=0 invalid=28
+unexpected_keys: {'artifact_refs': 28, 'operation': 3, 'operation_key': 3, 'layout_marker': 3, 'layout_version': 3}
+other_findings: {"$/actor/kind: 'agent' is not one of ['operator', 'gigai', 'model', 'tool']": 7, "$/transition: 'private_record_revised' is not one of ['creation_started', 'gig_propo": 3, "$/transition: 'template_instance_bound' is not one of ['creation_started', 'gig_prop": 3, "$/transition: 'scout_source_materialized' is not one of ['creation_started', 'gig_pr": 3, "$/transition: 'gig_graph_set_proposed' is not one of ['creation_started', 'gig_propo": 3, "$/transition: 'workpad_layout_migrated' is not one of ['creation_started', 'gig_prop": 3, "$/transition: 'external_recording_started' is not one of ['creation_started', 'gig_p": 2, "$/transition: 'external_recording_plan_sealed' is not one of ['creation_started', 'g": 2, "$/transition: 'external_recording_checkpointed' is not one of ['creation_started', '": 2, "$/transition: 'external_recording_succeeded' is not one of ['creation_started', 'gig": 1}
+invalid_by_transition: {'gig_accepted': 3, 'private_record_revised': 3, 'template_instance_bound': 3, 'scout_source_materialized': 3, 'gig_graph_set_proposed': 3, 'gig_proposal_approved': 3, 'workpad_layout_migrated': 3, 'external_recording_started': 2, 'external_recording_plan_sealed': 2, 'external_recording_checkpointed': 2, 'external_recording_succeeded': 1}
+
+$ uv run python docs/development/v0.1.8/spikes/evidence/S14-repro/handoff_synthetic.py
+default_metadata_only: valid=True []
+with_artifact_refs: valid=False ["Additional properties are not allowed ('artifact_refs' was unexpected)"]
+
+$ uv run python docs/development/v0.1.8/spikes/evidence/S14-repro/privacy_guard.py <BT>
+checkpoint v2.0 valid_against_own_schema=True guard_in_place=True guard_renamed_docs_x_json=False
+run        v2.0 valid_against_own_schema=True guard_in_place=True guard_renamed_docs_x_json=False
+receipt    v2.0 valid_against_own_schema=True guard_in_place=True guard_renamed_docs_x_json=False
+families_sampled: [('checkpoint', '2.0'), ('receipt', '2.0'), ('run', '2.0')]
+
+$ uv run python docs/development/v0.1.8/spikes/evidence/S14-repro/tailor_selection.py
+fixture_shape=proposal+answer valid=True []
+
+$ uv run python docs/development/v0.1.8/spikes/evidence/S14-repro/active_pointer_compare.py
+v1_additionalProperties: False
+v2_required_keys_not_allowed_by_v1: ['graph_set']

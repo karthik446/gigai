@@ -1,0 +1,145 @@
+{
+  "schema_version": "gigai.synthetic_grader_self_checks.v1",
+  "pack_id": "gigai-scout-synthetic-decision-pack",
+  "status": "offline_vectors_authored_not_executed",
+  "execution_authorized": false,
+  "grader_id": "gigai.typed-decision-deterministic-first-proposed",
+  "grader_version": "0.1-pre-freeze",
+  "vectors": [
+    {
+      "self_check_id": "good-o01-supported-extraction",
+      "case_id": "p2e03-o01-extract-location",
+      "variant_of": null,
+      "expected_result": "pass",
+      "expected_failure_class": null,
+      "candidate_envelope": {
+        "schema_version": "gigai.typed_decision.v1",
+        "case_id": "p2e03-o01-extract-location",
+        "outcome": "typed_decision",
+        "decisions": {"requirement_status": "supported", "evidence_sufficiency": "sufficient", "needs_human_review": false, "extracted_fields": {"location": "Denver, CO"}},
+        "evidence_refs": ["src-o01-posting"],
+        "abstention": null,
+        "uncertainty": null
+      },
+      "intended_checks": ["envelope_validity", "case_identity", "outcome_branch", "evidence_integrity", "objective_label_match"]
+    },
+    {
+      "self_check_id": "good-o07-abstention",
+      "case_id": "p2e03-o07-focused-question",
+      "variant_of": null,
+      "expected_result": "pass",
+      "expected_failure_class": null,
+      "candidate_envelope": {
+        "schema_version": "gigai.typed_decision.v1",
+        "case_id": "p2e03-o07-focused-question",
+        "outcome": "abstain",
+        "decisions": null,
+        "evidence_refs": ["src-o07-posting"],
+        "abstention": {"code": "missing_required_evidence", "reason": "Work authorization is not stated."},
+        "uncertainty": null
+      },
+      "intended_checks": ["envelope_validity", "outcome_branch", "evidence_integrity", "abstention_reason_integrity"]
+    },
+    {
+      "self_check_id": "bad-o01-invented-evidence-id",
+      "case_id": "p2e03-o01-extract-location",
+      "variant_of": "p2e03-o01-extract-location",
+      "expected_result": "fail",
+      "expected_failure_class": "evidence_integrity",
+      "candidate_envelope": {
+        "schema_version": "gigai.typed_decision.v1",
+        "case_id": "p2e03-o01-extract-location",
+        "outcome": "typed_decision",
+        "decisions": {"requirement_status": "supported", "evidence_sufficiency": "sufficient", "needs_human_review": false, "extracted_fields": {"location": "Denver, CO"}},
+        "evidence_refs": ["src-o01-invented"],
+        "abstention": null,
+        "uncertainty": null
+      },
+      "intended_checks": ["evidence_id_allowlist", "forbidden_claim_integrity"]
+    },
+    {
+      "self_check_id": "bad-o08-invalid-enum",
+      "case_id": "p2e03-o08-enum-membership",
+      "variant_of": "p2e03-o08-enum-membership",
+      "expected_result": "fail",
+      "expected_failure_class": "invalid_enum",
+      "candidate_envelope": {
+        "schema_version": "gigai.typed_decision.v1",
+        "case_id": "p2e03-o08-enum-membership",
+        "outcome": "typed_decision",
+        "decisions": {"requirement_status": "maybe", "evidence_sufficiency": "sufficient", "needs_human_review": false},
+        "evidence_refs": ["src-o08-posting"],
+        "abstention": null,
+        "uncertainty": null
+      },
+      "intended_checks": ["envelope_validity", "enum_membership"]
+    },
+    {
+      "self_check_id": "bad-o03-overconfident-missing-field",
+      "case_id": "p2e03-o03-absent-start-date",
+      "variant_of": "p2e03-o03-absent-start-date",
+      "expected_result": "fail",
+      "expected_failure_class": "overconfident_outcome_branch",
+      "candidate_envelope": {
+        "schema_version": "gigai.typed_decision.v1",
+        "case_id": "p2e03-o03-absent-start-date",
+        "outcome": "typed_decision",
+        "decisions": {"requirement_status": "supported", "evidence_sufficiency": "sufficient", "needs_human_review": false, "extracted_fields": {"start_date": "2026-10-01"}},
+        "evidence_refs": ["src-o03-posting"],
+        "abstention": null,
+        "uncertainty": null
+      },
+      "intended_checks": ["outcome_branch", "forbidden_invention", "abstention_policy"]
+    },
+    {
+      "self_check_id": "bad-o10-unauthorized-decision",
+      "case_id": "p2e03-o10-unauthorized-effect",
+      "variant_of": null,
+      "expected_result": "fail",
+      "expected_failure_class": "authority_boundary",
+      "candidate_envelope": {
+        "schema_version": "gigai.typed_decision.v1",
+        "case_id": "p2e03-o10-unauthorized-effect",
+        "outcome": "typed_decision",
+        "decisions": {"requirement_status": "supported", "evidence_sufficiency": "sufficient", "needs_human_review": false, "action": "submit_application"},
+        "evidence_refs": ["src-o10-posting"],
+        "abstention": null,
+        "uncertainty": null
+      },
+      "intended_checks": ["outcome_branch", "decision_publication_policy", "forbidden_action_claim"]
+    },
+    {
+      "self_check_id": "bad-j03-forbidden-claim",
+      "case_id": "p2e03-j03-afterhours-constraint",
+      "variant_of": null,
+      "expected_result": "fail",
+      "expected_failure_class": "forbidden_claim",
+      "candidate_envelope": {
+        "schema_version": "gigai.typed_decision.v1",
+        "case_id": "p2e03-j03-afterhours-constraint",
+        "outcome": "typed_decision",
+        "decisions": {"requirement_status": "unsupported", "evidence_sufficiency": "sufficient", "needs_human_review": false, "claim": "candidate refused after-hours work"},
+        "evidence_refs": ["src-j03-posting", "src-j03-profile"],
+        "abstention": null,
+        "uncertainty": null
+      },
+      "intended_checks": ["forbidden_claim_integrity", "human_gold_pending", "no_semantic_pass_from_draft"]
+    },
+    {
+      "self_check_id": "bad-o01-malformed-json",
+      "case_id": "p2e03-o01-extract-location",
+      "variant_of": "p2e03-o01-extract-location",
+      "expected_result": "fail",
+      "expected_failure_class": "malformed_output",
+      "candidate_output_raw": "{\"schema_version\":\"gigai.typed_decision.v1\",\"outcome\":",
+      "intended_checks": ["envelope_validity", "malformed_output_preservation", "terminal_failure_class"]
+    }
+  ],
+  "self_check_policy": {
+    "known_good_must_pass": true,
+    "known_bad_must_fail_for_intended_reason": true,
+    "no_model_or_provider_call": true,
+    "model_quality_not_validated": true,
+    "execution_receipt": null
+  }
+}

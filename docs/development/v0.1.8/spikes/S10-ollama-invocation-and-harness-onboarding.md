@@ -1,8 +1,15 @@
 # S10 — Ollama invocation and harness onboarding
 
 **Requested:** 2026-09-21.  
-**Status:** Research recorded; implementation and live proof not authorized.  
-**Scope:** v0.1.8; not a v0.1.7 release gate.
+**Status:** Research recorded 2026-09-21; implementation and live proof are
+not authorized by this brief and S10 is not a v0.1.7 release gate.  
+**Scope:** v0.1.8; no v0.1.7 release gate is added by this research record.
+
+**Current evidence pointer:** [S10 invocation and harness onboarding research](evidence/S10-ollama-invocation-and-harness-onboarding-research.md)
+supersedes the earlier brief-only index status. It establishes documented and
+repo-verified boundaries plus untested caller/harness gaps; it does not prove
+the currently installed route, a live caller, durable completion, or private
+data safety.
 
 ## Question
 
@@ -74,6 +81,8 @@ Research evidence: [S10 Ollama invocation and harness onboarding research](evide
 - [S09](S09-local-search-retrieval-capability-sourcing.md) owns search sourcing;
   invoking a local model does not by itself provide fresh job discovery.
 
-Before research, reconcile the final shipped v0.1.7 adapter and comparison
-behavior with its evidence. Preserve the distinction between implemented code,
-injected offline tests, installed-package proof and live execution.
+Before any implementation or authorized proof, reconcile the actually shipped
+v0.1.7 adapter and comparison behavior with its evidence and audit the callers
+identified above. Preserve the distinction between implemented code, injected
+offline tests, installed-package proof and live execution; do not promote the
+adapter's local checks into caller or release acceptance.

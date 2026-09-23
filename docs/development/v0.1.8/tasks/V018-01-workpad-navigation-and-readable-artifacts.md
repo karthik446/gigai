@@ -1,9 +1,13 @@
 # V018-01 — Understandable workpads and readable artifacts
 
 **Release:** v0.1.8  
-**Status:** Requested; design and implementation not started.  
+**Status:** Requested; design and implementation not started. The readable
+navigation/detail slice maps into the first v0.1.8 local tracking UI; this task
+does not make storage migration a prerequisite.  
 **Requested:** 2026-09-08, after inspecting the real G44 review artifacts.  
-**Sequence:** After v0.1.7 Scout; coordinate with [accessibility Spike 1](../spikes/README.md#spike-1--user-accessibility-onboarding-and-interaction).
+**Sequence:** After the S11 foundation and shared-interface freeze, alongside
+the first vertical slice after v0.1.7 Scout; coordinate with [accessibility
+Spike 1](../spikes/README.md#spike-1--user-accessibility-onboarding-and-interaction).
 
 ## User problem
 
@@ -29,6 +33,27 @@ find and read without decoding envelopes or opening several evidence files.
 Make the project/Gig/workpad model understandable and provide readable outputs
 by default. This is a storage/navigation cleanup as well as an artifact-formatting
 task, not merely shorter labels over an unexplained hierarchy.
+
+## First-slice mapping
+
+For the v0.1.8 Scout slice, this task owns the readable navigation and detail
+concerns used by the essential local tracking surface:
+
+- a basic job table/list with filters and immediate new/pending/failed
+  visibility;
+- a detail view linking the source posting, selected resume revision,
+  requirements/evidence, gaps, questions and actions; and
+- readable display of separate assessment state and explicit user tracking
+  state (`shortlisted`, `applied`, `interviewing`, `rejected`, `archived`).
+
+Status changes must call the existing validated operations. Finalizing or
+tailoring a resume never creates an application event, and the surface remains
+usable for browsing and tracking updates with inference disabled. Reuse the
+existing local storage/projection and simplest suitable interface. React,
+FastAPI, a new frontend framework, hosting, multi-tenant expansion and a
+canonical storage migration are not part of this task's first-slice boundary.
+The [v0.1.8 roadmap](../roadmaps/v0.1.8-scout-search-first-roadmap.md) owns the
+cross-packet integration gate.
 
 ### 1. Names and a simpler navigation model
 

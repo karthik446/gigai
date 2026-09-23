@@ -1,6 +1,7 @@
 # S07 — Execution modes and cost-aware orchestration
 
-**Priority:** First v0.1.8 spike, before the other full research spikes.  
+**Priority:** Parallel, non-blocking v0.1.8 research; not a prerequisite for
+the S11 foundation or the first Scout vertical slice.  
 **Requested:** 2026-09-10.  
 **Status:** Recorded; research and implementation not started.
 
@@ -95,8 +96,9 @@ measure, not permanent price rankings or an approved model registry.
 
 ## Scope and related work
 
-This is GigAI-level orchestration, not Scout-specific routing. Run the spike after
-Scout; it does not expand v0.1.7. The already accepted narrow v0.1.7
+This is GigAI-level orchestration, not Scout-specific routing. Run the spike as
+parallel v0.1.8 research after Scout's prerequisite is satisfied; it does not
+block the first Scout slice or expand v0.1.7. The already accepted narrow v0.1.7
 [RUNTIME-01](../../v0.1.7/goals/RUNTIME-01-local-execution-and-backend-comparison.md)
 local execution/setup comparison remains in scope for that release. Reuse its
 evidence and coordinate with [Spike 6](README.md#spike-6--local-models-through-ollama-and-agent-harnesses)

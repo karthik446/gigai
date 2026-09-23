@@ -1,0 +1,665 @@
+{
+  "schema_version": "P2-FREEZE-04-ledger:1",
+  "packet": "P2-FREEZE-04",
+  "recorded_on": "2026-09-22",
+  "allowed_statuses": [
+    "existing",
+    "partial",
+    "missing",
+    "conflicting",
+    "proposed"
+  ],
+  "exit_proposal": "dispatch-ready",
+  "release_status": "blocked_exact_tag_ci_and_unproven_publication_uat_installed_live_evidence",
+  "scope": "documentation_only_reconciliation_no_schema_or_product_change",
+  "source_inputs": [
+    "docs/development/v0.1.8/phase-2/evidence/P2-AUD-01-baseline-and-invocation.md",
+    "docs/development/v0.1.8/phase-2/evidence/P2-AUD-01-claims.json",
+    "docs/development/v0.1.8/phase-2/evidence/P2-AUD-02-scout-operation-map.md",
+    "docs/development/v0.1.8/phase-2/evidence/P2-AUD-02-interface-ledger.json",
+    "docs/development/v0.1.8/phase-2/evidence/P2-EVAL-03-pack-and-rubric.md",
+    "docs/development/v0.1.8/phase-2/evidence/P2-EVAL-03-manifest.json",
+    "docs/development/v0.1.8/phase-2/evidence/synthetic-evaluation/"
+  ],
+  "validation_receipts": {
+    "json_parse": {
+      "command": "rtk proxy python -m json.tool docs/development/v0.1.8/phase-2/evidence/P2-FREEZE-04-ledger.json >/dev/null",
+      "exit": 0
+    },
+    "ledger_completeness": {
+      "rows": 18,
+      "required_fields_per_row": 21,
+      "missing_fields": 0,
+      "bad_statuses": 0,
+      "exit": 0
+    },
+    "source_internal_paths": {
+      "references_checked": 33,
+      "missing": 0,
+      "exit": 0
+    },
+    "eval_manifest_hashes": {
+      "pack": true,
+      "self_checks": true,
+      "exit": 0
+    },
+    "markdown_relative_links": {
+      "links_checked": 12,
+      "missing": 0,
+      "exit": 0
+    },
+    "owned_markdown_whitespace": {
+      "files_checked": 3,
+      "trailing_whitespace": 0,
+      "exit": 0
+    }
+  },
+  "review_receipts": [
+    {
+      "role": "Terra",
+      "context": "ctx_7ff479b90fc9",
+      "result": "AUD01_AUD02_EVAL_integrity_pass_one_EVAL_manifest_freeze_gate_finding"
+    },
+    {
+      "role": "Luna",
+      "context": "ctx_461e730dc554",
+      "result": "corrected_the_EVAL_manifest_freeze_gate_finding"
+    },
+    {
+      "role": "Terra",
+      "context": "ctx_57133c5bc2bb",
+      "result": "pass_closed_sole_finding"
+    },
+    {
+      "role": "Terra",
+      "context": "ctx_faaa104e3ea4",
+      "receipt": "msg_a70bbd115366",
+      "result": "phase_2_documentation_complete_subject_to_root_integration",
+      "scope_note": "final freeze closure; predates amendment P2-FREEZE-04-A01, which needs its own review"
+    }
+  ],
+  "authority_rules": [
+    "committed_record_or_journal_bytes_with_revision_digest_and_provenance_are_authoritative",
+    "sqlite_projection_html_report_and_ui_are_derived_readers_unless_an_explicit_tracking_operation_commits_an_event",
+    "public_saved_pending_failed_visibility_is_independent_of_local_private_assessment",
+    "model_drafts_are_not_human_gold_and_source_or_injected_proof_is_not_installed_live_or_publication_proof",
+    "no_provider_model_search_daemon_or_fallback_authorization_is_inferred"
+  ],
+  "state_vocabulary": {
+    "public_acquisition": [
+      "new",
+      "pending",
+      "failed",
+      "saved"
+    ],
+    "assessment_view": [
+      "new",
+      "pending",
+      "running",
+      "succeeded",
+      "failed",
+      "skipped"
+    ],
+    "tracking_roadmap_labels": [
+      "shortlisted",
+      "applied",
+      "interviewing",
+      "rejected",
+      "archived",
+      "untracked"
+    ],
+    "evaluation_outcomes": [
+      "typed_decision",
+      "abstain",
+      "uncertain",
+      "refused_or_failed"
+    ],
+    "evaluation_decision_statuses": [
+      "supported",
+      "unclear",
+      "unsupported",
+      "not_applicable"
+    ],
+    "evaluation_sufficiency": [
+      "sufficient",
+      "insufficient"
+    ]
+  },
+  "operation_vocabulary": [
+    "acquisition.import_supplied_rows",
+    "acquisition.status",
+    "acquisition.resume",
+    "discovery.resolve_completed_posting",
+    "assessment.select_private_inputs",
+    "assessment.invoke_local",
+    "assessment.publish_result",
+    "assessment.record_revision",
+    "assessment.associate_answers",
+    "tailor.select_sources",
+    "tailor.publish_document_revision",
+    "tailor.final_select_documents",
+    "tracking.record_event",
+    "tracking.read_history",
+    "view.rebuild_projection",
+    "view.publish_report",
+    "view.read_report_status"
+  ],
+  "case_vocabulary": [
+    "duplicate_posting_snapshot",
+    "missing_posting_bytes",
+    "stale_journal_head",
+    "model_stopped_after_acquisition",
+    "proposal_input_revision_changed",
+    "unanswered_question",
+    "selected_document_digest_mismatch",
+    "application_retry",
+    "application_correction",
+    "unresolved_opportunity",
+    "report_rebuild",
+    "tracking_without_assessment"
+  ],
+  "rows": [
+    {
+      "behavior_id": "public_acquisition_input",
+      "current_status": "existing",
+      "producer_role/path": "acquisition/scheduling; src/gigai/scout_acquisition_records.py:246-292,309-355,378-557",
+      "consumer_role/path": "UI/report; src/gigai/scout_report_readers.py:63-147",
+      "input_record_or_bytes": "scout-public-import-input.schema.json supplied row bytes and source identity",
+      "output_record_or_bytes": "committed acquisition row/journal record with source identifiers",
+      "schema/version": "src/gigai/schemas/scout-public-import-input.schema.json",
+      "revision/provenance": "source row identity plus committed record revision/digest; no latest selector",
+      "authority_and_scope": "acquisition record/journal is public source authority; no assessment/private data",
+      "failure/recovery/idempotency": "duplicate_posting_snapshot is explicit; replay only by record identity; missing bytes fail closed",
+      "public_cli_entry": "src/gigai/scout_acquisition_cli.py:20-103; registered in src/gigai/cli.py:51,4047-4048; copied wrapper parser/dispatch src/gigai/data/scout/gig.py:135-147,355-371",
+      "Run entry": "src/gigai/run.py integration seam; no separate operation-specific Run writer identified",
+      "UI/report reader": "src/gigai/scout_report_readers.py:63-147; src/gigai/scout_projection.py:248-394",
+      "acceptance_receipt": "P2-AUD-02-scout-operation-map.md supplied-row acquisition/status/resume source citations; source-only receipt",
+      "implementation_owner_role": "acquisition/scheduling packet",
+      "integration_owner_role": "integration role for run.py/journal.py/cli.py seam",
+      "review_gate": "Terra verifies packet; root final gate",
+      "dependency_edges": [
+        "public_acquisition_progress",
+        "public_visibility_before_assessment"
+      ],
+      "proposed_amendment": "none to current row authority",
+      "disposition": "retain existing contract; do not infer connectors",
+      "unresolved_blocker": "none for supplied-row source path; connector scope remains separate"
+    },
+    {
+      "behavior_id": "public_acquisition_progress_status_resume",
+      "current_status": "existing",
+      "producer_role/path": "acquisition/scheduling; src/gigai/scout_acquisition_records.py:309-355,378-557",
+      "consumer_role/path": "acquisition CLI and projection/report readers; src/gigai/scout_report_readers.py:296-455",
+      "input_record_or_bytes": "scout-public-import-progress.schema.json progress/checkpoint bytes",
+      "output_record_or_bytes": "progress/status/resume journal entries and source-row disposition",
+      "schema/version": "src/gigai/schemas/scout-public-import-progress.schema.json",
+      "revision/provenance": "checkpoint/source digest and operation receipt where present",
+      "authority_and_scope": "progress record is authoritative for acquisition progress only; not assessment or tracking",
+      "failure/recovery/idempotency": "resume and failed progress are explicit; stale_journal_head and interrupted import require bounded recovery receipt",
+      "public_cli_entry": "src/gigai/scout_acquisition_cli.py:20-103; registered in src/gigai/cli.py:51,4047-4048; copied wrapper parser/dispatch src/gigai/data/scout/gig.py:135-147,355-371",
+      "Run entry": "src/gigai/run.py integration seam; no model/provider route implied",
+      "UI/report reader": "src/gigai/scout_projection.py:248-394; src/gigai/scout_report.py:114-340",
+      "acceptance_receipt": "P2-AUD-02 operation map/source citations; not an installed/live receipt",
+      "implementation_owner_role": "acquisition/scheduling packet",
+      "integration_owner_role": "integration role",
+      "review_gate": "Terra verifies recovery/idempotency evidence",
+      "dependency_edges": [
+        "public_acquisition_input",
+        "public_visibility_before_assessment"
+      ],
+      "proposed_amendment": "add explicit progress-to-public-view mapping for pending/failed",
+      "disposition": "existing producer; view amendment proposed",
+      "unresolved_blocker": "complete independent pending reader not frozen"
+    },
+    {
+      "behavior_id": "completed_posting_resolution",
+      "current_status": "existing",
+      "producer_role/path": "acquisition/scheduling; src/gigai/scout_posting_inputs.py:341-489",
+      "consumer_role/path": "assessment/tailor; proposal and document selection consumers",
+      "input_record_or_bytes": "completed posting snapshot/source bytes and selector",
+      "output_record_or_bytes": "resolved posting input with pinned source/digest",
+      "schema/version": "Scout posting input record as cited by AUD02; no web connector contract",
+      "revision/provenance": "pinned snapshot/digest; no latest/current implicit selector",
+      "authority_and_scope": "bounded completed-posting resolver; does not prove search/fetch/provider support",
+      "failure/recovery/idempotency": "missing_posting_bytes and digest mismatch refuse; repeated resolution is safe only for same snapshot",
+      "public_cli_entry": "no dedicated public caller beyond mapped Scout CLI registration; direct registrations src/gigai/cli.py:47-52",
+      "Run entry": "src/gigai/run.py integration seam",
+      "UI/report reader": "report readers consume resolved opportunity metadata; no resolver UI authority",
+      "acceptance_receipt": "docs/development/evidence/v0.1.7/Scout/SCOUT-07-posting-input-resolution-review.md:84-122 accepted bounded resolver; no CLI/UI/Tailor/app/provider acceptance",
+      "implementation_owner_role": "acquisition/scheduling packet",
+      "integration_owner_role": "integration role",
+      "review_gate": "Terra verifies source/digest cases",
+      "dependency_edges": [
+        "public_acquisition_input",
+        "assessment_invocation_and_result"
+      ],
+      "proposed_amendment": "none to resolver; connector/freshness work stays proposed",
+      "disposition": "retain existing bounded resolver",
+      "unresolved_blocker": "no authorized web/ATS fetch or freshness evidence"
+    },
+    {
+      "behavior_id": "public_visibility_before_assessment",
+      "current_status": "partial",
+      "producer_role/path": "acquisition record/progress; src/gigai/scout_acquisition_records.py; progress schema",
+      "consumer_role/path": "UI/tracking; src/gigai/scout_projection.py:248-394 and src/gigai/scout_report_readers.py:296-455",
+      "input_record_or_bytes": "committed public acquisition row/progress/failure bytes",
+      "output_record_or_bytes": "new/pending/failed/saved public view row independent of assessment",
+      "schema/version": "existing import input/progress schemas; independent pending DTO not present",
+      "revision/provenance": "must carry source row revision/digest and assessment absence/failure distinction",
+      "authority_and_scope": "public saved/pending/failed visibility does not depend on model inference",
+      "failure/recovery/idempotency": "model_stopped_after_acquisition must preserve row; report_rebuild rebuilds view from authority; no silent drop",
+      "public_cli_entry": "src/gigai/scout_acquisition_cli.py:20-103; registered in src/gigai/cli.py:51,4047-4048; copied wrapper parser/dispatch src/gigai/data/scout/gig.py:135-147,355-371; pending-status UI/reader is proposed, not a current CLI command",
+      "Run entry": "src/gigai/run.py integration seam only",
+      "UI/report reader": "src/gigai/scout_report.py:114-340; src/gigai/scout_report_cli.py:14-60",
+      "acceptance_receipt": "docs/development/v0.1.8/roadmaps/v0.1.8-scout-search-first-roadmap.md:47-61 release promise; docs/development/v0.1.8/phase-2/evidence/P2-AUD-02-scout-operation-map.md partial pending visibility classification",
+      "implementation_owner_role": "acquisition/scheduling produces; UI/tracking consumes",
+      "integration_owner_role": "integration seam only",
+      "review_gate": "Terra verifies no-private-mixing and pre-assessment visibility",
+      "dependency_edges": [
+        "public_acquisition_progress",
+        "projection_report_cli_ui_readers"
+      ],
+      "proposed_amendment": "add additive status DTO/reader sourced only from acquisition records",
+      "disposition": "proposed amendment; dispatch-ready",
+      "unresolved_blocker": "no complete independent pending/failed reader contract"
+    },
+    {
+      "behavior_id": "assessment_invocation_and_result",
+      "current_status": "partial",
+      "producer_role/path": "assessment/evaluation; src/gigai/scout_proposals.py:239-309,366-430 and src/gigai/scout_proposal_execution.py:91-173,803-905,1129-1176",
+      "consumer_role/path": "assessment report/tailor; src/gigai/scout_proposal_records.py:146-188,195-310,314-470",
+      "input_record_or_bytes": "resolved posting and private selected inputs with proposal request",
+      "output_record_or_bytes": "proposal result/revision record and explicit refusal/failure outcome",
+      "schema/version": "src/gigai/schemas/scout-proposal-revision.schema.json",
+      "revision/provenance": "proposal input revision/digest and result revision; local/private selection required",
+      "authority_and_scope": "assessment result is local/private and cannot mutate public acquisition/tracking",
+      "failure/recovery/idempotency": "unanswered_question, proposal_input_revision_changed, cancellation/refusal; retry only with pinned revision",
+      "public_cli_entry": "proposal CLI path as mapped by AUD02; direct registrations src/gigai/cli.py:3048-3207",
+      "Run entry": "src/gigai/run.py and source route cited by P2-AUD-01; no installed/live proof",
+      "UI/report reader": "src/gigai/scout_report_readers.py:296-455; proposal details are read-only",
+      "acceptance_receipt": "P2-AUD-02 proposal invocation/result source citations; P2-AUD-01 S10 source route only",
+      "implementation_owner_role": "assessment/evaluation packet",
+      "integration_owner_role": "integration role for Run/CLI seam",
+      "review_gate": "Terra verifies local-only/failure/idempotency receipt",
+      "dependency_edges": [
+        "completed_posting_resolution",
+        "assessment_revision_and_answer_association"
+      ],
+      "proposed_amendment": "document view-state mapping without renaming source schema",
+      "disposition": "existing path with partial public lifecycle mapping",
+      "unresolved_blocker": "installed/live route and human-gold execution remain unauthorized"
+    },
+    {
+      "behavior_id": "assessment_revision_and_answer_association",
+      "current_status": "conflicting",
+      "producer_role/path": "assessment/evaluation; src/gigai/scout_proposal_records.py:163-174 and schema src/gigai/schemas/scout-answer-association.schema.json:3-12",
+      "consumer_role/path": "proposal revision/tailor; src/gigai/scout_proposal_records.py:146-188 and src/gigai/scout_tailor_selection.py:187-292",
+      "input_record_or_bytes": "question/answer association, proposal input revision, selected source digest",
+      "output_record_or_bytes": "revision record with answer provenance or explicit unanswered/refused outcome",
+      "schema/version": "embedded association plus standalone scout-answer-association schema; not reconciled",
+      "revision/provenance": "question identifier, input revision/digest, answer source and record revision required",
+      "authority_and_scope": "assessment evidence only; no application event or public state mutation",
+      "failure/recovery/idempotency": "unanswered_question and proposal_input_revision_changed refuse; adapter must be deterministic and replay-safe",
+      "public_cli_entry": "proposal/assessment CLI mapped in AUD02; no standalone answer CLI acceptance identified",
+      "Run entry": "src/gigai/run.py integration seam",
+      "UI/report reader": "proposal/report readers may display association; they are not writers",
+      "acceptance_receipt": "P2-AUD-02 conflicting answer-association classification; no schema change allowed by this freeze",
+      "implementation_owner_role": "assessment/evaluation packet",
+      "integration_owner_role": "schema registry handoff only if later amendment approved",
+      "review_gate": "Terra verifies one explicit adapter/version choice",
+      "dependency_edges": [
+        "assessment_invocation_and_result",
+        "r6_eval_envelope_compatibility"
+      ],
+      "proposed_amendment": "choose explicit versioned adapter or deliberate schema shape; preserve both source digests",
+      "disposition": "blocked for packet acceptance; dispatch allowed",
+      "unresolved_blocker": "embedded and standalone schemas currently conflict"
+    },
+    {
+      "behavior_id": "tailor_document_selection_and_revision",
+      "current_status": "existing",
+      "producer_role/path": "assessment/evaluation; src/gigai/scout_tailor_selection.py:187-292 and src/gigai/scout_document_records.py:138-269",
+      "consumer_role/path": "document CLI/report; src/gigai/scout_documents_cli.py:27-122",
+      "input_record_or_bytes": "selected proposal/answer inputs and source document bytes",
+      "output_record_or_bytes": "document revision/final selected-document record with digest",
+      "schema/version": "Scout document record path cited by AUD02",
+      "revision/provenance": "selected source/document revision and digest; mismatch is not auto-corrected",
+      "authority_and_scope": "document selection is assessment/tailoring output, not application state",
+      "failure/recovery/idempotency": "selected_document_digest_mismatch refuses; deterministic reselect only with same pinned revision",
+      "public_cli_entry": "src/gigai/scout_documents_cli.py:27-122",
+      "Run entry": "src/gigai/run.py integration seam",
+      "UI/report reader": "document/report readers consume committed document revision",
+      "acceptance_receipt": "P2-AUD-02 Tailor/document-selection source citations",
+      "implementation_owner_role": "assessment/evaluation packet",
+      "integration_owner_role": "integration role for CLI seam",
+      "review_gate": "Terra verifies digest mismatch/refusal case",
+      "dependency_edges": [
+        "assessment_revision_and_answer_association"
+      ],
+      "proposed_amendment": "none to current selection authority",
+      "disposition": "retain existing; no application coupling",
+      "unresolved_blocker": "none in bounded source map"
+    },
+    {
+      "behavior_id": "tracking_event_correction_and_history",
+      "current_status": "existing",
+      "producer_role/path": "UI/tracking; src/gigai/application_events.py:27-34,129-180,199-383,470-742,745-801",
+      "consumer_role/path": "UI/report; src/gigai/scout_projection.py:248-394, src/gigai/scout_report_readers.py:296-455, src/gigai/scout_report.py:114-340",
+      "input_record_or_bytes": "explicit tracking event/correction request and current journal head",
+      "output_record_or_bytes": "committed application-event bytes plus rebuilt status-history projection",
+      "schema/version": "src/gigai/schemas/application-event.schema.json:1-20",
+      "revision/provenance": "event identity, prior/current state and journal revision; source event remains authority",
+      "authority_and_scope": "tracking event writer is authoritative for application state; no proposal/model/report inference",
+      "failure/recovery/idempotency": "application_retry and application_correction use explicit event semantics; stale_journal_head fails/reloads; duplicate event identity must be idempotent",
+      "public_cli_entry": "src/gigai/application_cli.py:15-99",
+      "Run entry": "src/gigai/run.py integration seam; no Run inference of application state",
+      "UI/report reader": "src/gigai/scout_report.py:114-340 and report CLI src/gigai/scout_report_cli.py:14-60",
+      "acceptance_receipt": "docs/development/evidence/v0.1.7/Scout/SCOUT-09-application-service-review.md:14-38,40-57; source baseline only",
+      "implementation_owner_role": "UI/tracking/navigation packet",
+      "integration_owner_role": "integration role for journal/CLI seam",
+      "review_gate": "Terra verifies append/correction/rebuild receipts",
+      "dependency_edges": [
+        "tracking_state_vocabulary",
+        "projection_report_cli_ui_readers"
+      ],
+      "proposed_amendment": "document event identity and replay key in packet; no second writer",
+      "disposition": "retain event authority; packet dispatch-ready",
+      "unresolved_blocker": "roadmap labels are not yet one declared enum"
+    },
+    {
+      "behavior_id": "tracking_state_vocabulary",
+      "current_status": "conflicting",
+      "producer_role/path": "UI/tracking event writer; src/gigai/application_events.py and application-event.schema.json",
+      "consumer_role/path": "report/UI readers; src/gigai/scout_report_readers.py:296-455 and scout_report.py:114-340",
+      "input_record_or_bytes": "committed application event/state values",
+      "output_record_or_bytes": "history projection and roadmap-facing labels",
+      "schema/version": "application-event.schema.json plus roadmap labels; no reconciled shared enum",
+      "revision/provenance": "event source revision and explicit alias/version required",
+      "authority_and_scope": "event schema wins until an additive alias/version is approved",
+      "failure/recovery/idempotency": "unknown label must be visible as unresolved; no silent coercion; correction appends explicit event",
+      "public_cli_entry": "src/gigai/application_cli.py:15-99",
+      "Run entry": "src/gigai/run.py integration seam",
+      "UI/report reader": "scout_projection.py and report readers are views only",
+      "acceptance_receipt": "docs/development/v0.1.8/phase-2/evidence/P2-AUD-02-scout-operation-map.md tracking-event/conflicting-roadmap-enum classification; docs/development/v0.1.8/roadmaps/v0.1.8-scout-search-first-roadmap.md:47-61",
+      "implementation_owner_role": "UI/tracking/navigation packet",
+      "integration_owner_role": "schema registry only after approved amendment",
+      "review_gate": "Terra verifies alias/version and no inferred state",
+      "dependency_edges": [
+        "tracking_event_correction_and_history",
+        "public_visibility_before_assessment"
+      ],
+      "proposed_amendment": "versioned event-to-roadmap-label map or explicit enum amendment",
+      "disposition": "blocked for acceptance; dispatch allowed",
+      "unresolved_blocker": "current event/state semantics and roadmap vocabulary do not yet share one authority"
+    },
+    {
+      "behavior_id": "journal_snapshot_and_projection_report_callers",
+      "current_status": "partial",
+      "producer_role/path": "integration/journal plus acquisition/tracking writers; src/gigai/journal.py:237-250,393-405,461-516 and committed records",
+      "consumer_role/path": "SQLite cursor/projection/report/UI; src/gigai/scout_projection.py:248-394, scout_report.py:114-340, scout_report_cli.py:14-60",
+      "input_record_or_bytes": "journal snapshot/head, committed rows/events, SQLite cursor",
+      "output_record_or_bytes": "rebuildable SQLite projection cursor, HTML/report DTO, public CLI/UI rows",
+      "schema/version": "existing journal/projection/report shapes; no new schema frozen",
+      "revision/provenance": "snapshot/head, cursor revision, source row/event digests must remain visible",
+      "authority_and_scope": "journal/committed bytes are authority; SQLite/HTML/report/UI are derived readers",
+      "failure/recovery/idempotency": "stale_journal_head and report_rebuild are explicit; rebuild from pinned snapshot; no silent omission",
+      "public_cli_entry": "src/gigai/scout_report_cli.py:14-60 and src/gigai/cli.py:47-52,4041-4048",
+      "Run entry": "src/gigai/run.py; shared integration seam only",
+      "UI/report reader": "src/gigai/scout_report.py:114-340; copied wrapper src/gigai/data/scout/gig.py:70-147,337-554",
+      "acceptance_receipt": "P2-AUD-02 projection/report/UI partial classification; R0 authority lines 8-17,132-160",
+      "implementation_owner_role": "UI/tracking/navigation reads; acquisition/assessment provide records",
+      "integration_owner_role": "integration owns journal/run/CLI/wrapper seam",
+      "review_gate": "Terra verifies rebuild/cursor/read-only authority",
+      "dependency_edges": [
+        "public_visibility_before_assessment",
+        "tracking_event_correction_and_history"
+      ],
+      "proposed_amendment": "add explicit pending/failed reader and wrapper coverage receipt",
+      "disposition": "partial; reader amendment proposed",
+      "unresolved_blocker": "no complete end-to-end reader acceptance receipt"
+    },
+    {
+      "behavior_id": "run_goal_invocation_local_route_policy",
+      "current_status": "partial",
+      "producer_role/path": "assessment/evaluation plus integration; src/gigai/run.py and src/gigai/cli.py:47-52,3048-3207",
+      "consumer_role/path": "Run/report/UI callers; P2-AUD-01 source route and cancellation semantics",
+      "input_record_or_bytes": "sealed Run/goal invocation request and local/private input selector",
+      "output_record_or_bytes": "attempt/result/failure/refusal receipt with route identity and no-fallback disposition",
+      "schema/version": "existing Run/journal/receipt shapes; installed adapter not proven",
+      "revision/provenance": "attempt ID, source input digest, route/setup identity, retries, cancellation, output digest",
+      "authority_and_scope": "source route proven; injected route offline-only; no hosted fallback authorization",
+      "failure/recovery/idempotency": "cancellation/failure semantics source-proven; retry/recovery must preserve attempt identity and never fallback silently",
+      "public_cli_entry": "src/gigai/cli.py:47-52,3048-3207",
+      "Run entry": "src/gigai/run.py",
+      "UI/report reader": "reports consume receipts; no UI route authorization",
+      "acceptance_receipt": "P2-AUD-01 claims s10.source_route source-proven, s10.injected_route injected-offline-only, s10.no_hosted_fallback source-guard-proven",
+      "implementation_owner_role": "assessment/evaluation packet records; integration owns seam",
+      "integration_owner_role": "integration role",
+      "review_gate": "Terra verifies route receipt; root authorizes any later live gate",
+      "dependency_edges": [
+        "assessment_invocation_and_result",
+        "r6_eval_pack_case_gold_grader"
+      ],
+      "proposed_amendment": "add route identity/attempt receipt to packet without hosted fallback",
+      "disposition": "source-prepared; installed/live proof downstream",
+      "unresolved_blocker": "no installed/live/provider/model proof"
+    },
+    {
+      "behavior_id": "r6_eval_pack_case_gold_grader",
+      "current_status": "partial",
+      "producer_role/path": "assessment/evaluation; docs/development/v0.1.8/phase-2/evidence/P2-EVAL-03-pack-and-rubric.md and synthetic-evaluation/",
+      "consumer_role/path": "assessment/evaluation grader and future comparison reader; src/gigai/runtime_comparison.py",
+      "input_record_or_bytes": "20 synthetic case bytes, manifest, pack/self-check digests, R6 comparison shape",
+      "output_record_or_bytes": "planned deterministic-first typed decision/refusal/uncertain receipt; no execution output",
+      "schema/version": "r7-output-contract:1; existing runtime-evaluation-pack.schema.json; proposed gigai.typed_decision.v1 wrapper",
+      "revision/provenance": "pack sha256 fa2f486f74628be295ce585c3f30066cd8162507652e5ef69fa98032d08c1143; self-check sha256 d9bc8517dec063a85456e28b9b5c916023f6b34210f22ebb72fd8babc95a6ed4",
+      "authority_and_scope": "synthetic preparation only; no human gold/model/provider/runtime claim",
+      "failure/recovery/idempotency": "malformed/timeout/cancelled/failure fields planned; no execution/retry receipt exists",
+      "public_cli_entry": "none authorized; EVAL-03 execution not authorized",
+      "Run entry": "src/gigai/run.py integration seam only",
+      "UI/report reader": "none; future evaluation report is downstream",
+      "acceptance_receipt": "P2-EVAL-03 manifest status preparation_complete_execution_not_authorized; 20 cases/10 objective/10 judgment",
+      "implementation_owner_role": "assessment/evaluation packet",
+      "integration_owner_role": "schema registry only if later adapter approved",
+      "review_gate": "Terra verifies pack/manifest hashes; human gold and execution are downstream gates",
+      "dependency_edges": [
+        "assessment_invocation_and_result",
+        "r6_eval_envelope_compatibility"
+      ],
+      "proposed_amendment": "explicit wrapper-to-R6 adapter receipt, no runtime schema mutation now",
+      "disposition": "preparation accepted; execution not authorized",
+      "unresolved_blocker": "human adjudication, execution authorization, and model/provider identity absent"
+    },
+    {
+      "behavior_id": "r6_eval_envelope_compatibility",
+      "current_status": "proposed",
+      "producer_role/path": "assessment/evaluation; EVAL-03 manifest compatibility_analysis and R6 paths",
+      "consumer_role/path": "future grader/comparison readers; src/gigai/runtime_comparison.py and runtime-comparison-attempt.schema.json",
+      "input_record_or_bytes": "typed wrapper fields plus R6 verdict/criteria/unsupported_claims",
+      "output_record_or_bytes": "versioned adapter receipt preserving outcome, evidence, abstention, uncertainty, and R6 fields",
+      "schema/version": "proposed gigai.typed_decision.v1 to existing r7-output-contract:1; no installed wrapper schema",
+      "revision/provenance": "wrapper/pack/case/source digests and adapter version must be recorded",
+      "authority_and_scope": "documentation-only compatibility proposal; no runtime schema authority yet",
+      "failure/recovery/idempotency": "unknown/missing wrapper field refuses; no silent coercion; adapter replay keyed by case/setup/attempt",
+      "public_cli_entry": "none authorized",
+      "Run entry": "src/gigai/run.py integration seam after explicit authorization",
+      "UI/report reader": "none authorized",
+      "acceptance_receipt": "P2-EVAL-03 lines 74-109 and manifest proposed_documentation_only_no_runtime_schema_change",
+      "implementation_owner_role": "assessment/evaluation packet proposes",
+      "integration_owner_role": "integration role owns registry seam only after approval",
+      "review_gate": "Terra verifies mapping; root decides downstream execution gate",
+      "dependency_edges": [
+        "r6_eval_pack_case_gold_grader"
+      ],
+      "proposed_amendment": "versioned explicit adapter preserving R6 and typed fields",
+      "disposition": "proposed; no runtime change in freeze",
+      "unresolved_blocker": "compatibility has not been executed or installed-verified"
+    },
+    {
+      "behavior_id": "s09_source_capability_privacy_freshness_storage",
+      "current_status": "proposed",
+      "producer_role/path": "acquisition/scheduling; docs/development/v0.1.8/spikes/evidence/S09-local-search-retrieval-capability-sourcing-research.md:177-190,340-388",
+      "consumer_role/path": "public acquisition/projection and privacy gate; no current live consumer",
+      "input_record_or_bytes": "authorized capability/freshness/storage/privacy decision and source-specific evidence",
+      "output_record_or_bytes": "measured source receipt or explicit unavailable/refused capability record",
+      "schema/version": "no implemented connector/freshness/storage-rights schema identified",
+      "revision/provenance": "source/date/measurement method/retention decision required; descriptions are not measurements",
+      "authority_and_scope": "S09 is exploratory design input; no legal conclusion or live call",
+      "failure/recovery/idempotency": "unmeasured source and denied capability remain explicit; no scrape/search retry implied",
+      "public_cli_entry": "none authorized",
+      "Run entry": "none authorized; integration seam only",
+      "UI/report reader": "none authorized",
+      "acceptance_receipt": "S09 research explicitly separates documented claims from measured experiment; no experiment here",
+      "implementation_owner_role": "acquisition/scheduling packet after user-authorized scope",
+      "integration_owner_role": "integration role only for later registry/CLI seam",
+      "review_gate": "Terra verifies source/privacy evidence; root/user decides live scope",
+      "dependency_edges": [
+        "public_acquisition_input",
+        "public_visibility_before_assessment"
+      ],
+      "proposed_amendment": "capability record with public/private query separation and freshness/storage fields",
+      "disposition": "proposed and user-decision-needed before live work",
+      "unresolved_blocker": "no authorized source rights/freshness/storage measurement"
+    },
+    {
+      "behavior_id": "s10_installed_live_local_route",
+      "current_status": "partial",
+      "producer_role/path": "assessment/evaluation; P2-AUD-01 source route and S10 cited adapter paths",
+      "consumer_role/path": "Run/CLI invocation and result receipt; no installed/live consumer receipt",
+      "input_record_or_bytes": "local/private input, route/setup identity, cancellation and no-fallback policy",
+      "output_record_or_bytes": "installed/live attempt receipt or explicit unproven disposition",
+      "schema/version": "source route shape in current code; installed/live envelope not proven",
+      "revision/provenance": "route identity, attempt, endpoint/permissions, input/output digests required",
+      "authority_and_scope": "source-proven and injected-offline-only; no hosted fallback; no live authorization",
+      "failure/recovery/idempotency": "source cancellation semantics proven; live retry/failure behavior unobserved",
+      "public_cli_entry": "source CLI route mapped by P2-AUD-01; installed caller unproven",
+      "Run entry": "src/gigai/run.py",
+      "UI/report reader": "none as acceptance authority",
+      "acceptance_receipt": "P2-AUD-01 claims s10.installed_caller unproven and s10.live_local unproven",
+      "implementation_owner_role": "assessment/evaluation packet records route; root authorizes proof",
+      "integration_owner_role": "integration role for shared caller only",
+      "review_gate": "Terra verifies future installed/live receipts; root final gate",
+      "dependency_edges": [
+        "run_goal_invocation_local_route_policy"
+      ],
+      "proposed_amendment": "separate installed/live receipt lane; no source claim promotion",
+      "disposition": "partial; downstream gate",
+      "unresolved_blocker": "installed/live/provider/model execution not observed or authorized"
+    },
+    {
+      "behavior_id": "s11_inventory_groundwork",
+      "current_status": "existing",
+      "producer_role/path": "integration/inventory coordination; docs/development/v0.1.8/evidence/S11-groundwork.md:34-69,104-156",
+      "consumer_role/path": "planning/evaluation packet selectors; not runtime authority",
+      "input_record_or_bytes": "checkout-local inventory/category receipts and focused lifecycle selector receipts",
+      "output_record_or_bytes": "groundwork evidence (broad 1173/41, focused 13/13) with limits",
+      "schema/version": "S11 inventory artifacts; no product schema authority",
+      "revision/provenance": "dated checkout-local command receipt and selected node IDs",
+      "authority_and_scope": "planning groundwork only; no release/installed/live/provider claim",
+      "failure/recovery/idempotency": "inventory errors are recorded; no runtime retry or selector authority inferred",
+      "public_cli_entry": "none; groundwork docs only",
+      "Run entry": "none; no product Run claim",
+      "UI/report reader": "none",
+      "acceptance_receipt": "S11 focused lifecycle 13/13 checkout-local; broad inventory 1173/41 with limits",
+      "implementation_owner_role": "integration role for receipt coordination only",
+      "integration_owner_role": "integration role",
+      "review_gate": "Terra verifies limits; not release acceptance",
+      "dependency_edges": [
+        "r6_eval_pack_case_gold_grader"
+      ],
+      "proposed_amendment": "none; keep direct node IDs as runtime selectors",
+      "disposition": "groundwork retained, not substituted for implementation proof",
+      "unresolved_blocker": "no installed/live/release acceptance"
+    },
+    {
+      "behavior_id": "v017_release_publication_uat_installed_live",
+      "current_status": "missing",
+      "producer_role/path": "integration/release owner after packet completion; P2-AUD-01 exact-tag evidence",
+      "consumer_role/path": "root release gate and external package/UAT consumers; none positively receipted",
+      "input_record_or_bytes": "corrected exact-tag build/attestation, package artifacts, publication/UAT/installed/live receipts",
+      "output_record_or_bytes": "release decision and externally verifiable receipts",
+      "schema/version": "AUD-01 release lanes; no current positive artifact/publication receipt",
+      "revision/provenance": "exact tag and immutable artifact/package/provenance digests required",
+      "authority_and_scope": "release gate, not Phase 2 freeze authority",
+      "failure/recovery/idempotency": "exact-tag CI run 35660274375 failed at tools/verify_installed_g03.py; correction/rerun must retain tag/receipt identity",
+      "public_cli_entry": "none for this documentation freeze",
+      "Run entry": "none; downstream release tooling only",
+      "UI/report reader": "none",
+      "acceptance_receipt": "P2-AUD-01 lines 17-46,134-180: CI failed; publication/TestPyPI/PyPI/GitHub Release/provenance/UAT unproven or absent",
+      "implementation_owner_role": "integration/release owner after authorized correction",
+      "integration_owner_role": "integration role coordinates receipts; root approves release",
+      "review_gate": "Terra verifies evidence; root release gate",
+      "dependency_edges": [
+        "s11_inventory_groundwork",
+        "r6_eval_pack_case_gold_grader"
+      ],
+      "proposed_amendment": "none to freeze; carry exact-tag blocker unchanged",
+      "disposition": "release blocked; no shipment claim",
+      "unresolved_blocker": "G03 failure and missing publication/UAT/installed/live evidence"
+    },
+    {
+      "behavior_id": "s12_graph_traversal_exploration",
+      "current_status": "proposed",
+      "producer_role/path": "root research coordination; docs/development/v0.1.8/spikes/S12-gig-graph-traversal-and-auditable-execution.md:1-39,85-97",
+      "consumer_role/path": "future architecture research only; no current Scout consumer",
+      "input_record_or_bytes": "exploratory graph/tool/execution questions",
+      "output_record_or_bytes": "future spike findings; no implementation contract in this freeze",
+      "schema/version": "none",
+      "revision/provenance": "dated exploratory notes only",
+      "authority_and_scope": "not fully defined; execution not started; no release gate",
+      "failure/recovery/idempotency": "no runtime behavior, provider/model call, or recovery receipt",
+      "public_cli_entry": "none",
+      "Run entry": "none",
+      "UI/report reader": "none",
+      "acceptance_receipt": "S12 explicitly says no architecture decision/live experiment/provider/implementation",
+      "implementation_owner_role": "root research coordination later; no packet assignment here",
+      "integration_owner_role": "none in this freeze",
+      "review_gate": "root keeps exploratory scope out of packet gate",
+      "dependency_edges": [],
+      "proposed_amendment": "none; keep spike exploratory",
+      "disposition": "not a dependency; do not redesign framework",
+      "unresolved_blocker": "research not complete, intentionally outside Scout freeze"
+    }
+  ],
+  "amendments": [
+    {
+      "amendment_id": "P2-FREEZE-04-A01",
+      "recorded_on": "2026-09-22",
+      "decision_owner": "operator",
+      "document": "docs/development/v0.1.8/phase-2/evidence/P2-FREEZE-04-amendment-01-scout-graph-proof.md",
+      "supersedes_row": "s12_graph_traversal_exploration",
+      "superseded_scope": "phase_3_proof_only",
+      "decision": "Phase 3 thin vertical proof runs as a real linear Scout graph: acquire -> assess -> present with COMPLETE edges only; assessment labels stay in the assessment artifact.",
+      "acceptance": [
+        "one bounded acquisition source saves postings visible even if assessment fails",
+        "assessment consumes saved postings and selected local evidence",
+        "presentation shows results and questions in the simple tracking UI",
+        "one graph traversal owns the run with per-node status, evidence and available cost/usage",
+        "an interrupted run resumes without duplicating acquisition records"
+      ],
+      "not_required": [
+        "custom outcomes (S12 D2) until labels select edges",
+        "branch-not-taken (D4)",
+        "OR-join (D5)",
+        "operator-gated goals (D6)"
+      ],
+      "excluded": [
+        "catalog",
+        "generic graph builder",
+        "autonomous improvement workflow",
+        "orchestration rebuild"
+      ],
+      "first_step": "Luna traces node execution integration (callable, inputs/outputs, evidence, failure/restart) before sizing or dispatch; Terra reviews; root final gate",
+      "sizing": "not sized; must not be called small before the integration trace",
+      "authorizes": "phase_3_scope_change_only",
+      "does_not_authorize": [
+        "implementation dispatch",
+        "live acquisition",
+        "model/provider execution",
+        "release claim"
+      ],
+      "release_status_unchanged": true,
+      "review_status": "pending: amendment and Luna integration trace need their own Terra review (Luna/max trace in progress, documentation only, as of 2026-09-22)"
+    }
+  ]
+}
