@@ -48,7 +48,7 @@ jobs:
     needs: preflight
     uses: ./.github/workflows/pull_request.yaml
     with:
-      full_matrix: true
+      profile: release
       ref: refs/tags/${{ github.ref_name }}
 
   build:
@@ -301,3 +301,11 @@ jobs:
             dist/*.whl dist/*.tar.gz dist/SHA256SUMS dist/release-manifest.json \
             --title "GigAI ${VERSION}" \
             --generate-notes
+
+  post-release-compatibility:
+    name: Full compatibility matrix (post-release)
+    needs: github-release
+    uses: ./.github/workflows/pull_request.yaml
+    with:
+      profile: full
+      ref: refs/tags/${{ github.ref_name }}

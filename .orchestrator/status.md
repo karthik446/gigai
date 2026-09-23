@@ -36,6 +36,7 @@ acquire (Exa + HiringCafe sitemaps + auto watchlist + hourly ATS polling) → as
 | final make test | coordinator | **aborted** (layout changing) | — | re-run after the re-org |
 
 ## Next up
+- **Measuring release CI speed:** full-matrix dispatch run https://github.com/karthik446/gigai/actions/runs/35899145345 (commit 6d69ee4). Then: operator merges #35 → annotated tag → release.
 - Later (operator deferred): OMP trial in one throwaway worktree (plan in `research/oh-my-pi.md`); Beads-style `.orchestrator/pinned-facts.md` idea.
 - Polish (non-blocking for M1): P1 C-2 GET handlers catch unexpected backend exceptions → JSON 500; P2 UI shows the API's 'running' status when there are no receipts yet.
 - 0.2.0 ledger: move the W1BT-1 present batch_ref normalization from bindings into run.py; generalize the node registry; test-seam env hooks → a proper fixture injection mechanism.

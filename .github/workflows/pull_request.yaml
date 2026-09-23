@@ -4,11 +4,11 @@ on:
   pull_request:
   workflow_call:
     inputs:
-      full_matrix:
-        description: Run every supported Python and operating-system combination.
+      profile:
+        description: "CI profile: pr (ubuntu/3.11), release (macOS+ubuntu/3.12), or full (macOS+ubuntu x 3.11/3.12/3.13 + Debian offline)."
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: pr
       ref:
         description: Exact ref to test when called by another workflow.
         required: false
@@ -16,11 +16,15 @@ on:
         default: ""
   workflow_dispatch:
     inputs:
-      full_matrix:
-        description: Run the release-equivalent full compatibility matrix on this branch, without tagging.
+      profile:
+        description: "CI profile to run on this branch, without tagging."
         required: false
-        type: boolean
-        default: false
+        type: choice
+        options:
+          - pr
+          - release
+          - full
+        default: pr
 
 permissions:
   contents: read
@@ -45,12 +49,12 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          FULL_MATRIX: ${{ inputs.full_matrix }}
+          PROFILE: ${{ inputs.profile || 'pr' }}
           SHA: ${{ github.sha }}
         run: |
-          if [ "${FULL_MATRIX}" = "true" ]; then
+          if [ "${PROFILE}" != "pr" ]; then
             code_changed=true
-            changed="full compatibility profile"
+            changed="${PROFILE} compatibility profile"
           elif [ "${EVENT_NAME}" = "pull_request" ]; then
             changed="$(git diff --name-only "${BASE_SHA}...${SHA}")"
             code_changed=false
@@ -77,9 +81,40 @@ jobs:
           echo "code_changed=${code_changed}" >> "${GITHUB_OUTPUT}"
           echo "implementation changes: ${code_changed}"
 
-  source-tests:
+  source-matrix:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true'
+    name: Compute source-suite matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      include: ${{ steps.matrix.outputs.include }}
+    steps:
+      - id: matrix
+        env:
+          PROFILE: ${{ inputs.profile || 'pr' }}
+        run: |
+          case "${PROFILE}" in
+            pr)
+              include='[{"os":"ubuntu-24.04","python":"3.11"}]'
+              ;;
+            release)
+              # Operator: everyone uses macOS, so that's the one to test at
+              # release; the broad matrix runs nightly / post-release instead.
+              include='[{"os":"macos-latest","python":"3.12"},{"os":"ubuntu-24.04","python":"3.12"}]'
+              ;;
+            full)
+              include='[{"os":"ubuntu-24.04","python":"3.11"},{"os":"ubuntu-24.04","python":"3.12"},{"os":"ubuntu-24.04","python":"3.13"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.12"},{"os":"macos-latest","python":"3.13"}]'
+              ;;
+            *)
+              echo "unknown profile: ${PROFILE}" >&2
+              exit 1
+              ;;
+          esac
+          echo "include=${include}" >> "${GITHUB_OUTPUT}"
+
+  source-tests:
+    needs: source-matrix
     name: Source suite (Python ${{ matrix.python }} on ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -93,17 +128,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # full_matrix covers every Python on ubuntu, but only ONE Python on
-        # macOS: macos-latest runners are far slower and costlier per minute,
-        # and Python-version behavior is not OS-specific here (see report for
-        # the coverage-risk note on dropping macOS 3.11/3.13).
-        os: ${{ fromJSON(inputs.full_matrix && '["ubuntu-24.04", "macos-latest"]' || '["ubuntu-24.04"]') }}
-        python: ${{ fromJSON(inputs.full_matrix && '["3.11", "3.12", "3.13"]' || '["3.11"]') }}
-        exclude:
-          - os: macos-latest
-            python: "3.11"
-          - os: macos-latest
-            python: "3.13"
+        include: ${{ fromJSON(needs.source-matrix.outputs.include) }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -161,7 +186,7 @@ jobs:
 
   debian-offline:
     needs: changes
-    if: needs.changes.outputs.code_changed == 'true' && inputs.full_matrix
+    if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') == 'full'
     name: Debian 12 offline container
     runs-on: ubuntu-24.04
     timeout-minutes: 20

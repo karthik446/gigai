@@ -13,4 +13,4 @@ jobs:
     name: Full compatibility matrix
     uses: ./.github/workflows/pull_request.yaml
     with:
-      full_matrix: true
+      profile: full
