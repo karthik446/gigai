@@ -1,26 +1,43 @@
 from types import SimpleNamespace
 import json
 from pathlib import Path
+import uuid
 
 import pytest
 
-from gigai.adapters.port import InvocationResult, NormalizedUsage
+from gigai.adapters.port import InvocationResult, ModelInvocationError, NormalizedUsage
 from gigai.canonical import digest_imported_bytes, parse_json_bytes
+from gigai.config import load_config
+from gigai.lifecycle import approve_offline, create_offline
+from gigai.private_records import create_record, import_reference, migrate_workpad_layout
 from gigai.scout.find_jobs.contracts import (
+    ATSProvider,
+    AssessInput,
     AssessmentResult,
     MatrixStatus,
     ModelTarget,
+    NodeContext,
+    NotAssessedReason,
     PinnedResume,
+    PostingRow,
     Producer,
     RequirementMatrixRow,
     SelectedPosting,
+    SelectionReason,
+    SelectionReasonCode,
+    SourceKind,
+    SponsorshipStatus,
 )
 from gigai.scout.proposal_execution import (
     ScoutProposalExecutionError,
     assess_invocation_policy,
+    assess_node,
 )
 from gigai.scout.proposal_records import read_proposal_revision, save_assessment_revision
 from gigai.scout.proposals import parse_assessment_proposal
+from gigai.setup import build_config, run_setup
+from gigai.target_binding import initialize_target
+from gigai.workpad import resolve_workpad
 from tests.behaviors.scout_discovery.test_scout07_posting_inputs import _completed_find_jobs
 
 
@@ -87,3 +104,472 @@ def test_real_b1_parse_and_save_revision_is_readable(tmp_path: Path):
     record_id, revision_id = ref.split("/")[-3], ref.split("/")[-1].removesuffix(".json")
     saved = read_proposal_revision(resolved=resolved, record_id=record_id, revision_id=revision_id)
     assert saved["assessment"]["posting"] == posting.to_json()
+
+
+# --- assess_node: P2 (U25 posting text, U22 tolerant parse + isolation, U12 sponsorship) ---
+
+
+class _ScriptedPort:
+    """A model port whose ``invoke`` returns one scripted result per call.
+
+    Raising an entry (instead of returning a result) simulates a model
+    invocation failure for that call.
+    """
+
+    def __init__(self, outputs: list[object]) -> None:
+        self._outputs = list(outputs)
+        self.prompts: list[str] = []
+
+    def invoke(self, request):
+        self.prompts.append(request.prompt)
+        item = self._outputs.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return InvocationResult(
+            status="success",
+            output_text=item,
+            resolved_model="fixture",
+            raw_usage={},
+            normalized_usage=NormalizedUsage(1, 1, 2),
+            cost_status="unavailable",
+        )
+
+
+class _ScriptedBinding:
+    def __init__(self, outputs: list[object]) -> None:
+        self.port = _ScriptedPort(outputs)
+
+    def request(self, *, role: str, prompt: str, required_capabilities=frozenset({"text"})):
+        return SimpleNamespace(prompt=prompt, role=role)
+
+
+def _assess_fixture(tmp_path: Path) -> tuple[dict, Path]:
+    """A resolved workpad + a pinned resume, ready for a direct assess_node call."""
+    home = tmp_path / "home"
+    target = tmp_path / "target"
+    target.mkdir()
+    run_setup(
+        build_config(
+            home_root=home,
+            workpad_root=tmp_path / "workpads",
+            editor_argv=("/usr/bin/true",),
+            open_with_target=False,
+        )
+    )
+    initialize_target(
+        home_root=home,
+        requested_target=target,
+        uuid_factory=lambda: uuid.UUID("12345678-1234-4234-9234-123456789abc"),
+    )
+    values = iter(uuid.UUID(f"00000000-0000-4000-8000-{index:012x}") for index in range(1, 40))
+    created = create_offline(
+        home_root=home, requested_target=target, name="assess-fixture", open_editor=False,
+        uuid_factory=lambda: next(values),
+    )
+    approve_offline(
+        home_root=home, requested_target=target, proposal_id=created.proposal_id,
+        uuid_factory=lambda: next(values),
+    )
+    gig_id = created.gig_id
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
+    migrate_workpad_layout(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id)
+
+    source = tmp_path / "resume.md"
+    source.write_bytes(b"Built and operated Python backend services for 6 years.\n")
+    imported = import_reference(
+        home_root=home, requested_target=target, gig_id=gig_id, kind="resume",
+        source=source, operation_key="assess-fixture-resume-import",
+    )
+    revision = create_record(
+        home_root=home, requested_target=target, gig_id=gig_id, kind="imported_reference",
+        content_family="g45_reference", content_id=imported.item_id,
+        actor={"kind": "operator", "id": "local-user"}, origin="imported",
+        operation_key="assess-fixture-resume-record",
+    )
+    pinned = PinnedResume(revision.record_id, revision.revision_id, digest_imported_bytes(source.read_bytes()))
+    config = load_config(home)
+    return {"home": home, "target": target, "gig_id": gig_id, "resolved": resolved, "pinned": pinned, "config": config}, target
+
+
+def _posting(
+    *,
+    normalized_url: str,
+    text: str | None,
+    location: str = "Denver, CO",
+    sponsorship: SponsorshipStatus | None = None,
+) -> PostingRow:
+    return PostingRow(
+        url=normalized_url,
+        normalized_url=normalized_url,
+        provider=ATSProvider.GREENHOUSE,
+        board_token="acme",
+        company="Acme",
+        title="Software Engineer",
+        location=location,
+        published_at="2026-09-20T00:00:00Z",
+        content_sha256="sha256:" + "a" * 64,
+        source_kind=SourceKind.ATS,
+        query_key="software-engineer",
+        text=text,
+        sponsorship=sponsorship,
+    )
+
+
+def _run_assess(
+    fixture: dict,
+    target: Path,
+    *,
+    run_id: str,
+    postings: list[PostingRow],
+    outputs: list[object],
+    monkeypatch: pytest.MonkeyPatch,
+    visa_sponsorship_required: bool | None = None,
+    countries: list[str] | None = None,
+    outcomes: dict[str, str] | None = None,
+    selected_postings: list[PostingRow] | None = None,
+    selection_cap: int = 10,
+):
+    """Run assess_node directly against a hand-written acquire batch.
+
+    ``postings`` is every row in the acquire batch (in order); ``outcomes``
+    maps a normalized_url to its RowOutcome string (default "new" for any
+    posting not named). ``selected_postings`` defaults to ``postings`` (every
+    row selected) when omitted; pass a subset to exercise non-selected
+    candidates (over_cap / exclusion_reason labeling).
+    """
+    run_dir = target / "runs" / run_id
+    (run_dir / "outputs").mkdir(parents=True)
+    outcomes = outcomes or {}
+    (run_dir / "outputs" / "acquire.json").write_text(
+        json.dumps(
+            {
+                "rows": [
+                    {"posting": posting.to_json(), "outcome": outcomes.get(posting.normalized_url, "new")}
+                    for posting in postings
+                ]
+            }
+        )
+    )
+    if visa_sponsorship_required is not None or countries is not None:
+        (run_dir / "sealed").mkdir(parents=True)
+        (run_dir / "sealed" / "find-jobs-run-input.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "scout-find-jobs-run-input:1",
+                    "config": {
+                        "schema_version": "find-jobs-config:1",
+                        "roles": ["Software Engineer"],
+                        "merged_queries": ["software engineer"],
+                        "location": None,
+                        "remote": True,
+                        "published_after": None,
+                        "sources": {"exa": True, "ats": True, "hiringcafe": False},
+                        "default_assess_cap": 10,
+                        "default_model_target": "ollama_local",
+                        "visa_sponsorship_required": bool(visa_sponsorship_required),
+                        **({"countries": countries} if countries else {}),
+                    },
+                    "config_digest": "sha256:" + "0" * 64,
+                    "selection_cap": selection_cap,
+                    "selection_rule": "new_or_edited_role_match",
+                    "model_target": "ollama_local",
+                    "pinned_resume": fixture["pinned"].to_json(),
+                }
+            )
+        )
+        # config_digest must equal the actual config digest; recompute in place.
+        from gigai.scout.find_jobs.contracts import FindJobsConfig
+
+        payload = json.loads((run_dir / "sealed" / "find-jobs-run-input.json").read_text())
+        payload["config_digest"] = FindJobsConfig.from_json(payload["config"]).digest()
+        (run_dir / "sealed" / "find-jobs-run-input.json").write_text(json.dumps(payload))
+
+    selected_source = selected_postings if selected_postings is not None else postings
+    selected = tuple(
+        SelectedPosting(posting.normalized_url, posting.url, posting.content_sha256, True) for posting in selected_source
+    )
+    context = NodeContext(
+        run_id=run_id,
+        project_id=fixture["resolved"].project_id,
+        gig_id=fixture["gig_id"],
+        graph_id="graph_find_jobs_test",
+        graph_version=1,
+        goal_slug="assess",
+        manifest_digest="sha256:" + "0" * 64,
+        operation_key="assess-test",
+        target_observation_digest="sha256:" + "0" * 64,
+        workpad_path=str(fixture["resolved"].path),
+        redeemed_consent_ref="none",
+        model_target=ModelTarget.OLLAMA_LOCAL,
+    )
+    assess_input = AssessInput(
+        acquire_batch_ref=str(run_dir / "outputs" / "acquire.json"),
+        acquire_output_digest="sha256:" + "0" * 64,
+        selected_postings=selected,
+        selection_cap=selection_cap,
+        selection_reasons=tuple(
+            SelectionReason(posting.normalized_url, SelectionReasonCode.NEW) for posting in selected_source
+        ),
+        pinned_resume=fixture["pinned"],
+        target=str(target),
+        model_target=ModelTarget.OLLAMA_LOCAL,
+        answer_association_version="scout-answer-association:1",
+    )
+    binding = _ScriptedBinding(outputs)
+    monkeypatch.setattr(
+        "gigai.scout.proposal_execution.resolve_model_adapter", lambda config, adapter_target: binding
+    )
+    output = assess_node(context, assess_input, home_root=fixture["home"], target=target, config=fixture["config"])
+    return output, binding
+
+
+def test_posting_text_reaches_the_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/101",
+        text="We need 5+ years of Python. Remote OK. No visa sponsorship available for this role.",
+    )
+    good = json.dumps({
+        "matrix": [{"requirement": "5+ years Python", "resume_evidence": ["Built Python services for 6 years"], "status": "met"}],
+        "suggestions": ["Call out the backend ownership."],
+        "questions": [],
+        "sponsorship": "not_offered",
+    })
+    output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000101",
+        postings=[posting], outputs=[good], monkeypatch=monkeypatch,
+    )
+    assert len(output.assessments) == 1
+    assert not output.not_assessed
+    assert posting.text in binding.port.prompts[0]
+    assert posting.title in binding.port.prompts[0]
+    assert posting.company in binding.port.prompts[0]
+
+
+def test_missing_posting_text_is_not_assessed_without_calling_the_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(normalized_url="https://boards.greenhouse.io/acme/jobs/202", text=None)
+    output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000102",
+        postings=[posting], outputs=[], monkeypatch=monkeypatch,
+    )
+    assert not output.assessments
+    assert len(output.not_assessed) == 1
+    assert output.not_assessed[0].reason is NotAssessedReason.FAILED
+    assert binding.port.prompts == []
+
+
+def test_visa_sponsorship_required_reaches_the_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/303",
+        text="We need 5+ years of Python.",
+    )
+    good = json.dumps({
+        "matrix": [{"requirement": "5+ years Python", "resume_evidence": ["Built Python services for 6 years"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+    _output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000103",
+        postings=[posting], outputs=[good], monkeypatch=monkeypatch, visa_sponsorship_required=True,
+    )
+    assert "visa sponsorship required = yes" in binding.port.prompts[0]
+
+
+def test_string_resume_evidence_is_normalized_and_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """U22 real failure: Codex returned resume_evidence as a string, not an array."""
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/404",
+        text="We need Kubernetes production experience.",
+    )
+    sloppy = json.dumps({
+        "matrix": [{"requirement": "Kubernetes", "resume_evidence": "Ran production Kubernetes clusters", "status": "yes"}],
+        "suggestions": "Mention the cluster count.",
+        "questions": None,
+        "sponsorship": "not offered",
+    })
+    output, _binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000104",
+        postings=[posting], outputs=[sloppy], monkeypatch=monkeypatch,
+    )
+    assert len(output.assessments) == 1
+    assert not output.not_assessed
+    assessed = output.assessments[0]
+    assert assessed.matrix[0].resume_evidence == ("Ran production Kubernetes clusters",)
+    assert assessed.matrix[0].status is MatrixStatus.MET
+    assert assessed.sponsorship is SponsorshipStatus.NOT_OFFERED
+
+
+def test_garbage_answer_retries_once_then_not_assessed_while_others_succeed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture, target = _assess_fixture(tmp_path)
+    bad_posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/505",
+        text="We need Rust experience.",
+    )
+    good_posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/606",
+        text="We need Go experience.",
+    )
+    garbage = "not json at all, sorry"
+    still_garbage = "still not json"
+    good = json.dumps({
+        "matrix": [{"requirement": "Go", "resume_evidence": ["Built Go services"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+    output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000105",
+        postings=[bad_posting, good_posting], outputs=[garbage, still_garbage, good], monkeypatch=monkeypatch,
+    )
+    assert len(binding.port.prompts) == 3  # 2 attempts for bad_posting + 1 for good_posting
+    assert "did not match the required JSON shape" in binding.port.prompts[1]
+    assert len(output.not_assessed) == 1
+    assert output.not_assessed[0].posting.normalized_url == bad_posting.normalized_url
+    assert output.not_assessed[0].reason is NotAssessedReason.MODEL_OUTPUT_INVALID
+    assert len(output.assessments) == 1
+    assert output.assessments[0].posting.normalized_url == good_posting.normalized_url
+
+
+def test_all_postings_failing_at_the_model_raises_a_specific_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/707",
+        text="We need Elixir experience.",
+    )
+    garbage = "not json at all"
+    with pytest.raises(ScoutProposalExecutionError, match="every selected posting failed"):
+        _run_assess(
+            fixture, target, run_id="run_00000000-0000-4000-8000-000000000106",
+            postings=[posting], outputs=[garbage, garbage], monkeypatch=monkeypatch,
+        )
+
+
+def test_fenced_json_output_is_extracted_before_normalization(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/808",
+        text="We need SQL experience.",
+    )
+    fenced = "Here is my answer:\n```json\n" + json.dumps({
+        "matrix": [{"requirement": "SQL", "resume_evidence": ["Wrote SQL migrations"], "status": "partially"}],
+        "suggestions": [],
+        "questions": [],
+    }) + "\n```\nLet me know if you need more."
+    output, _binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000107",
+        postings=[posting], outputs=[fenced], monkeypatch=monkeypatch,
+    )
+    assert len(output.assessments) == 1
+    assert output.assessments[0].matrix[0].status is MatrixStatus.PARTIAL
+
+
+def test_model_denied_is_not_assessed_without_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/909",
+        text="We need Java experience.",
+    )
+    denied = ModelInvocationError("credential missing")
+    denied.code = "model_denied"
+    output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000108",
+        postings=[posting], outputs=[denied], monkeypatch=monkeypatch,
+    )
+    assert len(binding.port.prompts) == 1
+    assert len(output.not_assessed) == 1
+    assert output.not_assessed[0].reason is NotAssessedReason.MODEL_DENIED
+
+
+def test_candidate_partition_mixes_assessed_over_cap_and_exclusions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Coordinator-specified mix: in-cap assessed, over_cap, location_mismatch,
+    sponsorship_excluded, and an unchanged row excluded from candidates entirely.
+    """
+    fixture, target = _assess_fixture(tmp_path)
+
+    assessed_posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/1001",
+        text="We need Go experience.",
+    )
+    over_cap_posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/1002",
+        text="We need Rust experience.",
+    )
+    location_mismatch_posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/1003",
+        text="We need Java experience.",
+        location="Bengaluru, India",
+    )
+    sponsorship_excluded_posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/1004",
+        text="We need C++ experience. No visa sponsorship available for this role.",
+        sponsorship=SponsorshipStatus.NOT_OFFERED,
+    )
+    unchanged_posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/1005",
+        text="We need PHP experience.",
+    )
+
+    good = json.dumps({
+        "matrix": [{"requirement": "Go", "resume_evidence": ["Built Go services"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+
+    output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000201",
+        postings=[
+            assessed_posting,
+            over_cap_posting,
+            location_mismatch_posting,
+            sponsorship_excluded_posting,
+            unchanged_posting,
+        ],
+        outcomes={unchanged_posting.normalized_url: "unchanged"},
+        # Only the first posting is selected (as acquire's own cap=1 loop
+        # would have chosen it first); the rest are role-matched new/edited
+        # candidates acquire's loop passed over for a specific reason.
+        selected_postings=[assessed_posting],
+        selection_cap=1,
+        countries=["US"],
+        visa_sponsorship_required=True,
+        outputs=[good],
+        monkeypatch=monkeypatch,
+    )
+
+    by_url = {row.posting.normalized_url: row for row in output.not_assessed}
+    assert len(output.assessments) == 1
+    assert output.assessments[0].posting.normalized_url == assessed_posting.normalized_url
+    assert by_url[over_cap_posting.normalized_url].reason is NotAssessedReason.OVER_CAP
+    assert by_url[location_mismatch_posting.normalized_url].reason is NotAssessedReason.LOCATION_MISMATCH
+    assert by_url[sponsorship_excluded_posting.normalized_url].reason is NotAssessedReason.SPONSORSHIP_EXCLUDED
+    assert unchanged_posting.normalized_url not in by_url
+
+    # candidate_rows: complete, non-overlapping partition (T4), and the
+    # unchanged row is not a candidate at all.
+    candidate_urls = {row.posting.normalized_url for row in output.candidate_rows}
+    assert candidate_urls == {
+        assessed_posting.normalized_url,
+        over_cap_posting.normalized_url,
+        location_mismatch_posting.normalized_url,
+        sponsorship_excluded_posting.normalized_url,
+    }
+    assessed_urls = {a.posting.normalized_url for a in output.assessments}
+    not_assessed_urls = set(by_url)
+    assert assessed_urls | not_assessed_urls == candidate_urls
+    assert not (assessed_urls & not_assessed_urls)
+
+    # The frozen contract's own T4 partition validation (candidate rows
+    # complete + non-overlapping) must accept this output on a round-trip.
+    from gigai.scout.find_jobs.contracts import AssessOutput
+
+    assert AssessOutput.from_json(output.to_json()) == output
