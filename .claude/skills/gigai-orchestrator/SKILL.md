@@ -35,7 +35,7 @@ Status sweep: `grep -nE '^\*\*Status' docs/development/v0.1.8/spikes/S*.md docs/
 | Same check, **something is waiting on it**, or local was wrong or UNSURE | `--agent claude --model claude-haiku-4-5-20251001`, falling back to `--agent codex --model gpt-5.6-luna --effort medium` |
 | Implementation, audits, evidence docs | `--agent codex --model gpt-5.6-luna --effort max` |
 | Independent review, **after** the Luna packet is done | `--agent codex --model gpt-5.6-terra --effort medium` |
-| Doc and claim review needing judgment | `--agent claude --model claude-sonnet-5` (not yet tried through Orca) |
+| Well-specified implementation, doc writing, reviews, CI/tooling fixes, research | `--agent claude --model claude-sonnet-5` (proven in v0.1.8: most packets; no Codex quota; can reach Orca after an Orca restart when Codex sessions couldn't) |
 
 Codex quota is shared with implementation: don't spend it on checks a local model or Haiku can do. Reuse a worker for same-role follow-ups. Compare `launch.requested` with `launch.effective` on every start.
 
@@ -60,10 +60,10 @@ Anything over about 30s runs in a named Orca tab the operator can watch:
 ## 5. The loop
 
 1. Launch the whole wave of independent packets in one turn (`worker-start --run <run> --worktree current … --task-title … --spec …`). Use `task-create --deps` only when B reads A's output.
-2. One waiter per wave: `orca orchestration check --run <run> --wait --types worker_done,escalation,question --timeout-ms 1800000 --json`, in the background or a tab. Write the checkpoint to `status.md`, tell the operator, and yield. Don't poll.
+2. One waiter per wave: `ORCH_RUN=<run> .claude/skills/gigai-orchestrator/wait.sh` in the background. It returns on worker_done, question or escalation, acks heartbeats, sweeps idle workers every 5 min, and gives up after 1 h (`MAX_WAITS`). Write the checkpoint to `status.md`, tell the operator, and yield. Don't poll.
 3. **Messaging is flaky** (ORCA-01, missed wakes). Every spec tells the worker to also write `.orchestrator/workers/<task-title>.md` (state, evidence paths, open question). If the inbox is silent, read those files, then `worker-show` or `worker-read --limit 40` before restarting anything.
 4. On a delivery: read *every* message, `reply --id` to questions, verify each `worker_done` (§7), and only then `check --ack <delivery_id>`.
-5. **Close workers as soon as they're verified.** Keep one only if you'll reuse it in the same wave (`worker-start --terminal <handle>`), and say so in `status.md`. Otherwise `worker-release --dispatch <id>`. If that returns `dispatch_inactive` (the worker never delivered, e.g. after an Orca outage), close its tab with `orca terminal close --terminal <handle> --tab`. Close your own finished `TEST`/`LOCAL` tabs too, but never terminals you didn't start. At every wave end, run `worker-list --run <run> --terminal-state reclaimable --json` and close what it lists (`terminal_handle_stale` means it's already gone). A sidebar full of finished worker tabs is a coordinator bug.
+5. **Clean up automatically; idle for 5 minutes means closed.** `wait.sh` runs `sweep_workers.py` every loop (at most every 5 min). It releases every settled worker whose terminal has been silent for `IDLE_MIN` (default 5) minutes and **closes its tab**: `worker-release` alone leaves Claude worker tabs open. It also closes finished `TEST`/`LOCAL` tabs (preview shows `=== EXIT`), never closes a terminal an in-progress worker is still using, and only reports (never kills) in-progress workers silent for 30+ minutes as `STALLED?`. Run it by hand after verifying a wave: `ORCH_RUN=<run> .claude/skills/gigai-orchestrator/sweep_workers.py` (`--dry-run` to preview). Keep a worker you plan to reuse by reusing it within the idle window, or note it in `status.md` and set `IDLE_MIN` higher. Never close terminals this Run didn't start. Your own background shells (watchers, waiters) end when their job does; don't leave loops running.
 6. **Hand off; don't do.** Debugging, CI/log audits, fixes and long test lanes go to a worker with a spec. You verify, re-run focused checks and report. Never block the foreground on a long job: use a `TEST` tab plus a background waiter.
 
 ## 6. Worker spec: all five, always
