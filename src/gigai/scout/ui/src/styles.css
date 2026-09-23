@@ -219,6 +219,16 @@ select {
   color: var(--muted);
 }
 
+.node-failure-message {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 0.8rem;
+  border: 1px solid #f0b4ae;
+}
+
 .status-badge {
   display: inline-block;
   border-radius: 999px;
@@ -240,6 +250,80 @@ select {
 .status-badge.gap {
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+.status-badge.sponsorship-offered {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.status-badge.sponsorship-not_offered {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.status-badge.sponsorship-unknown {
+  background: #eef0f4;
+  color: var(--muted);
+}
+
+.assessment-card summary .status-badge {
+  margin-left: 8px;
+}
+
+.search-row {
+  margin-bottom: 12px;
+}
+
+.search-box {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.95rem;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin-bottom: 14px;
+}
+
+.chip-group-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+}
+
+.chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
 }
 
 table.postings-table {
@@ -304,5 +388,10 @@ table.matrix-table td {
 
   table.postings-table {
     font-size: 0.8rem;
+  }
+
+  .filter-chips {
+    flex-direction: column;
+    gap: 10px;
   }
 }
