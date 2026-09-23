@@ -20,3 +20,4 @@
 - 11:52 Operator: optimize GitHub Actions release time (v0.1.7 exact-tag CI ~1h20m before publish). ci-speed worker dispatched; the coordinator will measure via a workflow_dispatch full-matrix run on the PR branch before tagging.
 - 12:00 Operator: macOS is the release-gating platform (everyone uses macOS). CI profiles: pr (ubuntu 3.11) · release (macOS 3.12 + ubuntu 3.12, blocking) · full (3x3 + Debian, nightly + post-release). Also fixes the nightly job narrowed by ci-speed.
 - 12:16 Operator: close workers idle 5 min. sweep_workers.py (in skill) + wait.sh runs it every loop; skill §5 updated. Closed 6 leftover tabs (5 released Claude workers + the final make test tab).
+- 2026-09-23 15:06 v0.1.9 coordinator (Claude) created Run run_7cba834cb817; run_b12de8fdda28 stays with the v0.1.8 coordinator (UAT). Roadmap not decided; no dispatch until agreed with the operator.
