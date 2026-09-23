@@ -35,6 +35,10 @@ jobs:
           python tools/release_check.py verify-lockfile
           echo "commit=$(git rev-parse "refs/tags/${RELEASE_TAG}^{}")" >> "${GITHUB_OUTPUT}"
           echo "version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "${GITHUB_OUTPUT}"
+      - name: Require a non-empty CHANGELOG section for this version
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: python tools/release_notes.py --version "${VERSION}" >/dev/null
       - name: Require named publication environments
         env:
           GH_TOKEN: ${{ github.token }}
@@ -47,6 +51,9 @@ jobs:
     name: Exact-tag CI
     needs: preflight
     uses: ./.github/workflows/pull_request.yaml
+    permissions:
+      contents: read
+      actions: read
     with:
       profile: release
       ref: refs/tags/${{ github.ref_name }}
@@ -149,7 +156,7 @@ jobs:
     name: TestPyPI clean install on ${{ matrix.os }}
     needs: [preflight, publish-testpypi]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -166,11 +173,33 @@ jobs:
           export XDG_BIN_HOME="${root}/bin"
           export XDG_DATA_HOME="${root}/data"
           export PATH="${XDG_BIN_HOME}:${PATH}"
-          uv tool install \
-            --index https://test.pypi.org/simple \
-            --index https://pypi.org/simple \
-            --index-strategy unsafe-best-match \
-            "gigai==${VERSION}"
+          # Cheap first gate: wait for the JSON index before hammering the
+          # simple index uv installs from (which can lag it further).
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error "https://test.pypi.org/pypi/gigai/${VERSION}/json" >/dev/null; then
+              break
+            fi
+            if [ "${attempt}" = 20 ]; then
+              echo "gigai==${VERSION} did not appear on TestPyPI's JSON index within ~10 minutes" >&2
+              exit 1
+            fi
+            sleep 30
+          done
+          for attempt in $(seq 1 20); do
+            if uv tool install --refresh --force \
+              --index https://test.pypi.org/simple \
+              --index https://pypi.org/simple \
+              --index-strategy unsafe-best-match \
+              "gigai==${VERSION}"; then
+              break
+            fi
+            echo "uv tool install gigai==${VERSION} from TestPyPI failed (attempt ${attempt}/20)" >&2
+            if [ "${attempt}" = 20 ]; then
+              echo "gigai==${VERSION} was not installable from TestPyPI within ~10 minutes" >&2
+              exit 1
+            fi
+            sleep 30
+          done
           gigai --version | grep -Fx "gigai ${VERSION}"
           gigai --help >/dev/null
           gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true \
@@ -202,47 +231,18 @@ jobs:
         with:
           packages-dir: publish/
 
-  verify-pypi:
-    name: PyPI clean install on ${{ matrix.os }}
-    needs: [preflight, publish-pypi]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-latest]
-    steps:
-      - uses: astral-sh/setup-uv@v8.0.0
-        with:
-          enable-cache: true
-      - env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          root="$(mktemp -d)"
-          export HOME="${root}/home"
-          export XDG_BIN_HOME="${root}/bin"
-          export XDG_DATA_HOME="${root}/data"
-          export PATH="${XDG_BIN_HOME}:${PATH}"
-          uv tool install "gigai==${VERSION}"
-          gigai --version | grep -Fx "gigai ${VERSION}"
-          gigai --help >/dev/null
-          gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true \
-            --credential-ref provider=environment:GIGAI_PROVIDER_TOKEN \
-            --endpoint remote=openai_api:provider:https://api.example.test \
-            --model-target remote=remote:smoke-test \
-            --create-model-target remote \
-            --json >/dev/null
-          gigai doctor --home "${root}/gigai-home" --json >/dev/null
-
   github-release:
     name: Verify provenance and create GitHub Release
-    needs: [preflight, build, verify-pypi]
+    needs: [preflight, build, publish-pypi]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       attestations: read
       contents: write
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ github.ref_name }}
       - uses: actions/download-artifact@v4
         with:
           name: release-dist
@@ -290,6 +290,9 @@ jobs:
           )
           PY
       - env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: python tools/release_notes.py --version "${VERSION}" > release-notes.md
+      - env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
@@ -300,12 +303,69 @@ jobs:
             --verify-tag \
             dist/*.whl dist/*.tar.gz dist/SHA256SUMS dist/release-manifest.json \
             --title "GigAI ${VERSION}" \
-            --generate-notes
+            --notes-file release-notes.md
+
+  verify-pypi:
+    name: PyPI clean install on ${{ matrix.os }} (post-release)
+    needs: [preflight, github-release]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+    steps:
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+      - env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          root="$(mktemp -d)"
+          export HOME="${root}/home"
+          export XDG_BIN_HOME="${root}/bin"
+          export XDG_DATA_HOME="${root}/data"
+          export PATH="${XDG_BIN_HOME}:${PATH}"
+          # Cheap first gate: wait for the JSON index before hammering the
+          # simple index uv installs from (which can lag it further).
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error "https://pypi.org/pypi/gigai/${VERSION}/json" >/dev/null; then
+              break
+            fi
+            if [ "${attempt}" = 20 ]; then
+              echo "gigai==${VERSION} did not appear on PyPI's JSON index within ~10 minutes" >&2
+              exit 1
+            fi
+            sleep 30
+          done
+          for attempt in $(seq 1 20); do
+            if uv tool install --refresh --force "gigai==${VERSION}"; then
+              break
+            fi
+            echo "uv tool install gigai==${VERSION} from PyPI failed (attempt ${attempt}/20)" >&2
+            if [ "${attempt}" = 20 ]; then
+              echo "gigai==${VERSION} was not installable from PyPI within ~10 minutes" >&2
+              exit 1
+            fi
+            sleep 30
+          done
+          gigai --version | grep -Fx "gigai ${VERSION}"
+          gigai --help >/dev/null
+          gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true \
+            --credential-ref provider=environment:GIGAI_PROVIDER_TOKEN \
+            --endpoint remote=openai_api:provider:https://api.example.test \
+            --model-target remote=remote:smoke-test \
+            --create-model-target remote \
+            --json >/dev/null
+          gigai doctor --home "${root}/gigai-home" --json >/dev/null
 
   post-release-compatibility:
     name: Full compatibility matrix (post-release)
     needs: github-release
     uses: ./.github/workflows/pull_request.yaml
+    permissions:
+      contents: read
+      actions: read
     with:
       profile: full
       ref: refs/tags/${{ github.ref_name }}
