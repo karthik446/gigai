@@ -1,0 +1,21 @@
+TARGET (test-lanes): a fast `make unit-tests` lane for the worker inner loop (S19, docs/development/v0.1.9/spikes/S19-test-suite-diet.md, steps 1-2), and drop research/*_spike/tests from pytest testpaths.
+KEY FACT S19 MISSED (coordinator, READ): tests/conftest.py already puts a lane marker on EVERY collected test. `pytest_collection_modifyitems` (conftest.py:140) calls `classify_source` (conftest.py:~101), an AST classifier that returns "fast_unit", "integration" or "release". So `pytest -m fast_unit` probably already selects a lane today. S19's "markers applied to 1 of 159 files" counts static decorators only and is wrong about what `-m` selects.
+Known weakness to check: the classifier only follows helper functions defined in the SAME file. A test that calls an imported helper (e.g. from a tests/ helper module) that runs a subprocess, git, launch_run or a server may be labelled fast_unit.
+
+CHANGE:
+1. Measure (collection only first): `uv run --locked --extra test pytest --collect-only -q -m fast_unit`, and the same for `-m integration` and `-m release`. Report counts per lane and per top-level tests/ directory for fast_unit.
+1b. The operator is doing UAT on this Mac right now. Before the FIRST real `-m fast_unit` run, grep the fast_unit-selected files for imported heavy helpers (launch_run, subprocess, CliRunner-less `python -m gigai`, git, HTTPServer/present_api) and fix the classifier (step 3) first, so the first run doesn't make the Mac spin.
+2. Add a Makefile target named exactly `unit-tests` (and a help/comment line like the other targets) that runs `pytest -m fast_unit` via `$(UV) run --locked --extra test`, matching the Makefile's existing style. Decide xdist vs `-n 0` by measuring both (wall time, same flags, run each twice: cold then warm). Resolve or explain S19's unexplained ~17s per-invocation overhead (collection time? conftest AST parsing of every file? plugin startup?). Use `--durations=25`.
+3. Misclassification: from the durations and a read of the slowest fast_unit tests, list the ones doing subprocess/git/server/multiprocessing/launch_run work through imported helpers. Fix them in the classifier in tests/conftest.py (e.g. treat imports of the known heavy helper modules as integration), not with per-file decorators. Re-measure.
+4. Target: `make unit-tests` < 60s wall on this Mac. If you can't get there, report the real number and what dominates it. Don't cut tests out of other lanes.
+5. pyproject.toml: remove "research/contract_spike/tests" and "research/phase0_spike/tests" from [tool.pytest.ini_options] testpaths. First grep Makefile, tools/run_ci_tests.py, .github/workflows and the Dockerfile (if any) for anything that relies on them, and report. Record the collection count before and after (`pytest --collect-only -q | tail -1`; expect about -41).
+6. Add a dated revision note at the top of S19 (under its Status line) correcting the markers claim and pointing to the measured numbers. Keep the rest of the spike as is.
+
+OWNED FILES (nothing else): Makefile (the new target only), pyproject.toml (testpaths only), tests/conftest.py (the classifier only), docs/development/v0.1.9/spikes/S19-test-suite-diet.md (revision note only), .orchestrator/workers/test-lanes.md. Don't touch .github/workflows/*, tools/*, or any test file other than conftest.py.
+
+ACCEPTANCE:
+- Paste: lane counts (before/after your classifier fix); `make unit-tests` wall time (xdist and -n 0, cold and warm) and its pass/fail summary line; the 10 slowest fast_unit tests after the fix; the testpaths collection count before/after.
+- `make unit-tests` exits 0.
+- Run every long command (anything over ~30s) in a visible tab: `.claude/skills/gigai-orchestrator/run_visible.sh "TEST unit-tests" make unit-tests` (the log path it prints is your evidence).
+
+EXCLUSIONS: no schema or storage migration; no git add/commit/stash/reset/clean/push (the coordinator commits); no live/provider runs; never make test / test-source / test-wheel / test-installed, never a directory-wide or tests/behaviors run outside `-m fast_unit` (the unit-tests lane itself is the one broad run allowed, because it IS the thing you're building); --collect-only is fine. Write .orchestrator/workers/test-lanes.md on finish or on a question (state, files changed, evidence, open questions). Say what you READ vs EXECUTED. Then worker_done.

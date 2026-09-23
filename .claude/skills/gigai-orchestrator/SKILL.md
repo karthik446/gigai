@@ -93,3 +93,11 @@ Also record every decision (operator's or yours) with its reason as one line in 
 **Waiting and the inbox:** `ORCH_RUN=<run> .claude/skills/gigai-orchestrator/wait.sh` (run it in the background) blocks until a non-heartbeat event arrives and acks heartbeat-only deliveries itself. `ORCH_RUN=<run> .claude/skills/gigai-orchestrator/inbox.sh` prints pending messages without acking.
 
 **At release:** move `workers/` and `logs/` into `.orchestrator/runs/<version>/` (the release commit plan and PR body go in `runs/<version>/release/`), delete session-only files (terminal handles, worker lists), and fix `status.md`/review links to the archive paths. The next version starts with an empty `workers/` and still has the full history.
+
+## 9. Git workflow (adopted 2026-09-23, from v0.1.9)
+
+- **One worktree + branch per version** (`karthik446/gigai-vX.Y.Z`), cut from `main` after the previous release. Open a **draft PR** at once and keep its body current (packets done, what each one proved).
+- **Workers never commit.** The coordinator commits right after verifying a packet: that packet's files only, by explicit path (never `git add -A` or `.`), one logical commit ending with the Co-Authored-By line. Secret-scan `.orchestrator/` changes first (§8). Never let verified work sit uncommitted.
+- **Push at wave ends.** A push cancels and restarts PR CI. Never force-push a pushed branch without the operator.
+- **Ship:** the operator squash-merges; the tag is annotated: `git tag -a vX.Y.Z -m "GigAI vX.Y.Z" && git push origin vX.Y.Z` (`release.yml` requires it). Give the operator the command; push it only when they explicitly ask.
+- **Release notes are part of the release.** The CHANGELOG `### X.Y.Z` section becomes the GitHub Release notes. Before tagging, write it and review every claim against the code like any other doc (§7).
