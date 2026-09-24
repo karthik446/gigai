@@ -24,6 +24,15 @@ execution receipt. READ vs EXECUTED is stated for every claim.
   dead-code candidates) ranked by risk, describes what library packaging
   (typed surface, docs, example gig, distribution, compatibility testing)
   requires, and proposes a themed (undated) path from v0.1.9 to v0.2.0.
+- [S21 — Gigs in their own repos; gigai as a facilitation library](S21-gig-repos-and-data-ownership.md):
+  records the operator's 2026-09-23 decisions (gigs get their own repos,
+  gigai facilitates run/db/local tracking, gig domain data lives in the
+  gig's own store not gigai's, Python only, PII-by-default is later); traces
+  the resulting authority reversal in today's journal/projection code, the
+  shared `state.sqlite` constraint with core's G22 interview trace, and
+  core's current hosting of Scout's execution; gives execution-ownership
+  and repo/packaging alternatives with a stated lean; and collects the open
+  questions the decisions don't yet resolve.
 
 ## Relationship to v0.1.9
 

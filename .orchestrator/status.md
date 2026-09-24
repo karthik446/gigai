@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-23 20:51 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` rebased onto `main` at `c36f182`, the #36 hotfix; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-23 21:02 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` rebased onto `main` at `c36f182`, the #36 hotfix; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -16,10 +16,7 @@ _Updated 2026-09-23 20:51 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - Post-release full matrix (run 35909539154) **finished with 2 failures**: Debian 12 offline container, and Source suite Python 3.12 on macos-latest. The other 9 passed (incl. macOS 3.11/3.13). PyPI and the Release are unaffected. Audit proposed, waiting on the operator.
 
 ## In progress
-| Packet | Model | State | Task / dispatch | Next |
-| --- | --- | --- | --- | --- |
-| v020-s21-gig-repos: v0.2.0 spike S21 (gig repos, gig-owned data, gigai as library + CLI). r1 accepted on content; **r2 folds in D-B (monorepo for now)** | Sonnet 5 | running r2 | `task_52676e838fca` / `ctx_3f464ccb9701` | review → commit |
-| v020-roadmap-workbench: PROPOSED v0.2.0 roadmap, gigai as a personal gig workbench (D-A..D-G; workstreams 0-7; brief `workers/specs/v020-roadmap-workbench.brief.txt`) | Sonnet 5 | running | `task_31d88fb71133` / `ctx_77db0d7b9906` | coordinator content review → commit; operator decides whether Workstream 0 (secrets) is pulled into 0.1.9 |
+- Nothing dispatched. Waiting on the operator (see Blocked on operator).
 
 ## Next up
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
@@ -28,6 +25,8 @@ _Updated 2026-09-23 20:51 MDT by Claude (coordinator of `run_7cba834cb817`, work
 ## Done
 - Run `run_7cba834cb817` created.
 - Handoff + README "Handoffs" section committed as the first v0.1.9 commit.
+- **S21 spike** (`docs/development/v0.2.0/spikes/S21-gig-repos-and-data-ownership.md`) accepted after r1-r3 (reviews `reviews/s21-r0.md`; r3 fixed a coordinator over-attribution) and committed.
+- **Proposed v0.2.0 gig-workbench roadmap** (`docs/development/v0.2.0/roadmaps/v0.2.0-gig-workbench-roadmap.md`) accepted as a proposed doc after r1-r2 (review `reviews/roadmap-workbench-r0.md`), committed `939c5b3`.
 - **Docs-only CI skip proven live** (run 35924315765 on `aa9d06a`: only `changes` ran; the `before` run succeeded).
 - **release-pipeline verified + committed** (`c4cc1b3`, r1): Release right after publish; install retried ~10 min; notes from CHANGELOG. Fully proven only by the next tag.
 - **ci-docs-skip verified + committed** (`384234e`, r1): docs-only skip when `before` passed; callers grant `actions: read`; job renames.

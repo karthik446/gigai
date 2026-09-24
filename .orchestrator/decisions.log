@@ -40,3 +40,4 @@
 - 2026-09-23 20:57 S21 r2 verified against its spec; but the coordinator's r2 spec over-attributed: D-B = monorepo only, while in-repo separate packages (option ii) is the roadmap's proposed W7, not a decision. r3 dispatched to correct it (coordinator error, logged).
 - 2026-09-23 21:00 Roadmap r1 accepted on content (36/10-file count + S21 §7; real v0.1.9 scope; diagram fixed; exact test files). r2 one-liner: wave 1 is in draft PR #37, not merged.
 - 2026-09-23 21:01 Roadmap r2 verified (grep merged: only 'not merged' text). Roadmap accepted as a PROPOSED doc and committed; S21 waits on r3.
+- 2026-09-23 21:02 S21 r3 verified: in-repo package layout attributed to roadmap W7 (proposed), not D-B. S21 accepted and committed (spike, discussion only).
