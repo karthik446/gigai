@@ -51,6 +51,7 @@ from .scout.answer_cli import answer_group
 from .scout.acquisition_cli import acquisition_group
 from .scout.interview_cli import interview_group
 from .private_transfer_cli import transfer_group
+from .secrets_cli import secrets_group
 from .index import JournalIndexError, JournalProjection, read_index
 from .listing import GigListingError, list_gigs
 from .invocation import InvocationValidationError, load_invocation_bytes
@@ -4048,6 +4049,7 @@ cli.add_command(acquisition_group)
 cli.add_command(acquisition_group, name="scout-import")
 cli.add_command(interview_group)
 cli.add_command(transfer_group)
+cli.add_command(secrets_group)
 # Keep existing G45 wrapper create/read behavior while exposing native CRUD.
 # Registering this independently named group as "record" would silently replace
 # the existing Click group and break its accepted command surface.

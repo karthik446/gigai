@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 
+from . import secrets_store
 from .config import CredentialReference
 
 
@@ -65,7 +66,7 @@ def resolve_reference_value(reference: CredentialReference) -> str:
             f"credential {reference.name!r} uses {reference.kind!r}, which is not "
             "available to the local G11 runtime resolver"
         )
-    value = os.environ.get(reference.reference)
+    value = os.environ.get(reference.reference) or secrets_store.get(reference.reference)
     if not value:
         raise CredentialUnavailableError(
             f"credential {reference.name!r} is not available in its configured environment reference"
