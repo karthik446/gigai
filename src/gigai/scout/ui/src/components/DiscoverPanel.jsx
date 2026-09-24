@@ -55,6 +55,12 @@ function sourceStatusLabel(source) {
   return null;
 }
 
+// P0-5: mid-run (and any other partial/malformed) snapshot may be missing
+// cost_usd, or have it as null/non-number -- never render "$undefined".
+function formatCostUsd(costUsd) {
+  return typeof costUsd === "number" && Number.isFinite(costUsd) ? `$${costUsd.toFixed(4)}` : "—";
+}
+
 function formatDaysAgo(daysAgo) {
   if (daysAgo === null || daysAgo === undefined) {
     return "never run";
@@ -92,13 +98,13 @@ export default function DiscoverPanel({ latest, running, cadenceDays, onStart, s
         {result && (
           <div className="field">
             <div className="label">Cost</div>
-            <div className="value">${result.cost_usd?.toFixed(4)}</div>
+            <div className="value">{formatCostUsd(result.cost_usd)}</div>
           </div>
         )}
         {result && (
           <div className="field">
             <div className="label">Status</div>
-            <div className="value">{result.status}</div>
+            <div className="value">{result.status || "unknown"}</div>
           </div>
         )}
       </div>
@@ -125,7 +131,7 @@ export default function DiscoverPanel({ latest, running, cadenceDays, onStart, s
               const statusLabel = sourceStatusLabel(source);
               return (
                 <li key={source.name}>
-                  {source.name}: {source.runs} run(s), ${source.cost_usd?.toFixed(4)}
+                  {source.name}: {source.runs ?? 0} run(s), {formatCostUsd(source.cost_usd)}
                   {statusLabel ? ` -- ${statusLabel}` : ""}
                 </li>
               );

@@ -743,6 +743,58 @@ def test_start_discovery_runs_synchronously_on_a_background_thread(
     assert str(backend_fixture.target) in results_store
 
 
+def test_latest_discovery_mid_run_keeps_the_result_shape_with_progress_nested(
+    backend_fixture: ScoutFindJobsBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P0-5 repro: ``run_discovery``'s ``on_progress`` emits small, raw
+    progress-step events (e.g. ``{"stage": "discovery_start", ...}`` --
+    see ``discovery/__init__.py``'s own ``_progress`` calls), not anything
+    shaped like ``DiscoveryResult``. ``GET /api/discover/latest`` mid-run
+    must still carry the contract fields (``status``, ``cost_usd``,
+    ``sources``, ``new_boards``) instead of just whatever the raw event
+    happened to contain -- otherwise the Discover panel renders "Cost
+    $undefined" mid-run.
+    """
+
+    prefs_store: dict[str, _FakeDiscoveryPrefs] = {str(backend_fixture.target): _FakeDiscoveryPrefs(roles=("x",))}
+    results_store: dict[str, _FakeDiscoveryResult] = {}
+    progress_seen = threading.Event()
+    release = threading.Event()
+
+    def slow_run(*, home_root, target, prefs, on_progress):
+        # Mirrors discovery/__init__.py's real _progress({"stage": ...})
+        # shape exactly -- no "status"/"cost_usd"/"sources" keys at all.
+        if on_progress is not None:
+            on_progress({"stage": "discovery_start", "discovery_id": "disc_midrun_001", "runs": 3})
+        progress_seen.set()
+        release.wait(timeout=5)
+        return _FakeDiscoveryResult(discovery_id="disc_midrun_001")
+
+    _install_fake_discovery_module(
+        monkeypatch, prefs_store=prefs_store, results_store=results_store, run_discovery_impl=slow_run
+    )
+
+    backend_fixture.start_discovery(lambda _event: None)
+    assert progress_seen.wait(timeout=5)
+
+    snapshot = backend_fixture.latest_discovery()
+    assert snapshot is not None
+    assert snapshot["status"] == "running"
+    assert snapshot["cost_usd"] == 0.0
+    assert snapshot["sources"] == []
+    assert snapshot["new_boards"] == []
+    assert snapshot["skipped"] == {}
+    # The raw progress event is still observable, just nested rather than
+    # overwriting the snapshot.
+    assert snapshot["progress"]["stage"] == "discovery_start"
+
+    release.set()
+    for _ in range(200):
+        if not backend_fixture.discovery_running():
+            break
+        time.sleep(0.01)
+
+
 def test_start_discovery_refuses_a_second_run_while_one_is_in_progress(
     backend_fixture: ScoutFindJobsBackend, monkeypatch: pytest.MonkeyPatch
 ) -> None:

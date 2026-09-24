@@ -145,6 +145,13 @@ export default function App() {
       await putSetup(fields);
       setEditingSetup(false);
       setupState.reload();
+      // P0-2: PUT /api/setup also rewrites find-jobs.json (present_api.py's
+      // _handle_put_setup), so the config -- and its config_digest that
+      // handleConfirm sends on the next Run -- goes stale the moment the
+      // setup save succeeds. Without this, the next Run POST 409s
+      // (config_digest_mismatch) even though nothing about the run itself
+      // was wrong; reloading here keeps configResponse.config_digest current.
+      reloadConfig();
     } catch (error) {
       if (error instanceof ApiError && error.status === 400) {
         setSetupFieldErrors(error.field_errors || null);

@@ -747,10 +747,27 @@ class ScoutFindJobsBackend:
         request_id = f"discovery_req_{uuid.uuid4().hex}"
         started_at = datetime.now(timezone.utc).isoformat()
         self._discovery_running = True
-        self._discovery_progress = {"discovery_id": request_id, "status": "running", "started_at": started_at}
+        self._discovery_progress = {
+            "discovery_id": request_id,
+            "status": "running",
+            "started_at": started_at,
+            "finished_at": None,
+            "cost_usd": 0.0,
+            "sources": [],
+            "new_boards": [],
+            "skipped": {},
+        }
 
         def _capture_progress(event: dict[str, object]) -> None:
-            self._discovery_progress = dict(event)
+            # P0-5: `event` is the raw, small progress-step dict
+            # run_discovery emits (e.g. {"stage": "discovery_start", ...}),
+            # not a DiscoveryResult -- overwriting the snapshot with it wipes
+            # cost_usd/sources/new_boards that GET /api/discover/latest
+            # promises mid-run, so keep the DiscoveryResult-shaped snapshot
+            # as the source of truth and nest the raw event under "progress".
+            snapshot = dict(self._discovery_progress or {})
+            snapshot["progress"] = event
+            self._discovery_progress = snapshot
             on_progress(event)
 
         def _run() -> None:
