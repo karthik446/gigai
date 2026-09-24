@@ -33,7 +33,7 @@ _Updated 2026-09-23 22:27 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - **secrets-core committed** `a915c24`: `gigai secrets add/list/rm`, env → ~/.gigai/.env resolver (python-dotenv, interpolation off, 0600 under umask 077). Coordinator reproduced + re-verified the 2 r0 bugs.
 - **README uv-only** `f1fb6c6` (+ API command via `uv tool run --from gigai`, verified on 0.1.8.1).
 - **Country-data research** accepted (`.orchestrator/research/country-data.md`): Lever/Ashby structured country fields unread; pycountry fallback. Implementation waits on the operator.
-- **acquire-country-filter** `80a2e98` (B1/B3/B5 + structured countries + pycountry + region-only → no match). **README one-command flow** `50a8d64`. **S23 spike** `998f6cc` (\$0.834 spent; low/strict/board-URL query; not deterministic; blended \$0.0125/usable board).
+- **acquire-country-filter** `80a2e98` (B1/B3/B5 + structured countries + pycountry + region-only → no match). **README one-command flow** `50a8d64`. **S23 spike** `998f6cc` ($0.834 spent; low/strict/board-URL query; not deterministic; blended $0.0125/usable board).
 - **scout-run-supervisor (C)** `65ce7b4`: `gigai scout run/stop/status` (coordinator real cycle in a temp home). **selection-diversity-u2** `0bf97c0`: selection.py (not yet wired) + U2. **v0.1.8.1 released** (PyPI + GitHub Release; post-release matrix all pass except macOS 3.12, which was cancelled; CI ignored per the operator).
 - **scout-setup-cmds (B)** `b0eea58`: `gig use`, `scout install`, `scout resume add` (coordinator CLI end-to-end, non-git target). **exa-query-errors** `5fec35d`.
 - **secrets-exa** `9e66428` (Workstream 0 P0-P3 done). **scout-ui-package (A)** `f4d0fb1`: UI in the wheel, served by the API; PR CI freshness job.
