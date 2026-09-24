@@ -50,6 +50,7 @@ WORKPAD_LAYOUT_PATH = "manifests/workpad-layout.json"
 RUN_LOCAL_ARTIFACT_EXCLUDES = (
     "/runs/*/raw/",
     "/runs/*/progress/",
+    "/runs/*/logs/",
 )
 _V2_ROOTS = frozenset({
     "README.md", "CHANGELOG.md", "gig.py", "tools", "goalgraphs", "ui",
