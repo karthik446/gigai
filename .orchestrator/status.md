@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-24 08:43 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-24 09:05 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -20,9 +20,9 @@ _Updated 2026-09-24 08:43 MDT by Claude (coordinator of `run_7cba834cb817`, work
 | --- | --- | --- | --- | --- |
 | S2-A discovery engine: OpenAI web_search ×3 + H-1B → merge, board-check, evidence verify → watchlist; `gigai scout discover`; budget guard; one live smoke ≤ $0.50 | Sonnet 5 | running | `task_f082af89d99d` / `ctx_3a56797ab9a4` | verify → commit |
 | S2-B setup interview (11 Qs) in the Scout UI + Discover panel; /api/setup, /api/discover | Sonnet 5 | running | `task_f951e3e00855` / `ctx_1f13631aa84c` | verify → commit → end-to-end check with A |
+| interview-prep-engine: `gigai scout prep` on interview_scheduled (company research w/ sources ≤ $0.50, role research, question categories, prep notes); reuses S2-A helpers read-only | Sonnet 5 | running | `task_9751514825bf` / `ctx_c6d135336247` | verify → commit → UI prep card after S2-B |
 
 ## Next up
-- interview-prep-engine (pulled into 0.1.9): spec ready (`workers/specs/interview-prep-engine.txt`); dispatch when S2-A lands; the UI prep card after S2-B.
 - After stage 2: make acquire watchlist-only by default (Exa optional, off by default); confirm with the operator first. Small config + README packet.
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
 - After wave 1: S16/S17 stay deferred until find-jobs works live (UAT). S18 undecided.
