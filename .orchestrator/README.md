@@ -20,9 +20,8 @@ The GigAI coordinator's workpad (see `.claude/skills/gigai-orchestrator/SKILL.md
 ## Archive (evidence, read on demand)
 
 - `runs/<version>/workers/`: each worker's report (state, root causes, READ vs EXECUTED); `rel/` and `w1b/` hold the specs they were given.
-- `runs/<version>/logs/`: visible TEST/LOCAL run logs, each ending in `=== EXIT <code> ===`.
 - `runs/<version>/release/`: commit plan and PR body.
 
 ## Live run
 
-`workers/` and `logs/` at the top level belong to the run in progress. At release, move them into `runs/<version>/`.
+`workers/` at the top level belongs to the run in progress; at release, move it into `runs/<version>/`. `logs/` holds local TEST/LOCAL run logs (each ends in `=== EXIT <code> ===`); `*.log` is gitignored except `decisions.log`, so logs are never committed.

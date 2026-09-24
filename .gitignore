@@ -21,3 +21,7 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+
+# Orchestrator run/test logs are local only (decisions.log is the committed record)
+.orchestrator/**/*.log
+!.orchestrator/decisions.log

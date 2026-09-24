@@ -51,7 +51,7 @@ Codex quota is shared with implementation: don't spend it on checks a local mode
 ## 4. Visible by default: never run hidden long jobs
 
 Anything over about 30s runs in a named Orca tab the operator can watch:
-`.claude/skills/gigai-orchestrator/run_visible.sh "TEST make test" make test` prints a log path under `.orchestrator/logs/`.
+`.claude/skills/gigai-orchestrator/run_visible.sh "TEST make test" make test` prints a log path under `.orchestrator/logs/` (local only: `*.log` is gitignored; never commit test logs, and cite results in status/decisions, not log paths).
 - Tab title prefixes: `TEST`, `EVAL`, `LOCAL`, `BUILD`, `LINT`. Read only the log tail. The run is done when the log has `=== EXIT <code> ===`.
 - To wait: a background `until grep -q '^=== EXIT' <log>; do sleep 10; done` if your harness resumes on background exit (Claude: `run_in_background`). Otherwise end your turn and check once when prompted.
 - **Test budget (the operator's rule; the full suite makes the Mac spin).** A worker's acceptance is **only the tests covering the files it changed**, plus directly dependent test files: exact `path::test` or `tests/behaviors/<area>/test_x.py` selectors, never whole directories, never `tests/behaviors`, never `-n` parallel sweeps, never `make test`/`test-wheel`/`test-installed`. A one-test fix gets that one test. Workers may also run **`make unit-tests`** (the conftest `fast_unit` lane, ~730 tests, ~7s, no subprocess/network/git) as a cheap regression check. The **full `make test` runs only through the coordinator**, once per release (or once after a cross-cutting change like a package move), in one `TEST` tab, and never while workers are editing. `make test-live` needs `GIGAI_G30_UAT=1` and operator consent. When writing a spec's ACCEPTANCE, list the exact test selectors; if you catch yourself writing a directory or `-n 8`, narrow it.
@@ -92,7 +92,7 @@ Also record every decision (operator's or yours) with its reason as one line in 
 
 **Waiting and the inbox:** `ORCH_RUN=<run> .claude/skills/gigai-orchestrator/wait.sh` (run it in the background) blocks until a non-heartbeat event arrives and acks heartbeat-only deliveries itself. `ORCH_RUN=<run> .claude/skills/gigai-orchestrator/inbox.sh` prints pending messages without acking.
 
-**At release:** move `workers/` and `logs/` into `.orchestrator/runs/<version>/` (the release commit plan and PR body go in `runs/<version>/release/`), delete session-only files (terminal handles, worker lists), and fix `status.md`/review links to the archive paths. The next version starts with an empty `workers/` and still has the full history.
+**At release:** move `workers/` into `.orchestrator/runs/<version>/` (delete `logs/`; logs are never committed) (the release commit plan and PR body go in `runs/<version>/release/`), delete session-only files (terminal handles, worker lists), and fix `status.md`/review links to the archive paths. The next version starts with an empty `workers/` and still has the full history.
 
 ## 9. Git workflow (adopted 2026-09-23, from v0.1.9)
 

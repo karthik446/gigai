@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-23 21:02 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` rebased onto `main` at `c36f182`, the #36 hotfix; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-23 21:11 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -16,7 +16,7 @@ _Updated 2026-09-23 21:02 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - Post-release full matrix (run 35909539154) **finished with 2 failures**: Debian 12 offline container, and Source suite Python 3.12 on macos-latest. The other 9 passed (incl. macOS 3.11/3.13). PyPI and the Release are unaffected. Audit proposed, waiting on the operator.
 
 ## In progress
-- Nothing dispatched. Waiting on the operator (see Blocked on operator).
+- PR CI on the merge push (`b2a4f2d`) and the v0.1.8.1 release run 35948069799: background watcher.
 
 ## Next up
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
@@ -25,6 +25,7 @@ _Updated 2026-09-23 21:02 MDT by Claude (coordinator of `run_7cba834cb817`, work
 ## Done
 - Run `run_7cba834cb817` created.
 - Handoff + README "Handoffs" section committed as the first v0.1.9 commit.
+- **Merged main (0.1.8.1, #38)** at `8380102`: the release.yml conflict was resolved as main's shipped release design + `actions: read` on the pull_request.yaml callers; our preflight notes hard-fail was dropped for main's fallback (worker `workers/merge-main-release.md`; coordinator re-ran 63 focused tests + make unit-tests 869). 0.1.8.1 worker reports archived to `runs/v0.1.8.1/`.
 - **S21 spike** (`docs/development/v0.2.0/spikes/S21-gig-repos-and-data-ownership.md`) accepted after r1-r3 (reviews `reviews/s21-r0.md`; r3 fixed a coordinator over-attribution) and committed.
 - **Proposed v0.2.0 gig-workbench roadmap** (`docs/development/v0.2.0/roadmaps/v0.2.0-gig-workbench-roadmap.md`) accepted as a proposed doc after r1-r2 (review `reviews/roadmap-workbench-r0.md`), committed `939c5b3`.
 - **Docs-only CI skip proven live** (run 35924315765 on `aa9d06a`: only `changes` ran; the `before` run succeeded).
