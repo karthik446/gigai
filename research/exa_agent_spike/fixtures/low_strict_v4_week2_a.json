@@ -1,0 +1,360 @@
+{
+  "cap_dollars": null,
+  "effort": "low",
+  "latency_seconds": 25.195,
+  "request": {
+    "effort": "low",
+    "exclusion_count": 23,
+    "outputSchema": {
+      "properties": {
+        "companies": {
+          "items": {
+            "properties": {
+              "ats_provider": {
+                "enum": [
+                  "greenhouse",
+                  "lever",
+                  "ashby",
+                  "other",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "board_token": {
+                "type": "string"
+              },
+              "careers_url": {
+                "format": "uri",
+                "type": "string"
+              },
+              "company": {
+                "type": "string"
+              },
+              "source": {
+                "format": "uri",
+                "type": "string"
+              },
+              "sponsorship": {
+                "enum": [
+                  "yes",
+                  "no",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "sponsorship_evidence": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "company",
+              "careers_url",
+              "ats_provider",
+              "sponsorship",
+              "sponsorship_evidence",
+              "source"
+            ],
+            "type": "object"
+          },
+          "maxItems": 15,
+          "type": "array"
+        }
+      },
+      "required": [
+        "companies"
+      ],
+      "type": "object"
+    },
+    "query": "Find US companies hiring for staff or senior backend engineer roles (remote or Denver, Colorado area) that use Greenhouse, Lever, or Ashby as their applicant tracking system AND are documented to sponsor US work visas (H-1B). Only return companies where you can identify the company's OWN job board base URL on one of these three platforms (e.g. https://boards.greenhouse.io/<company>, https://jobs.lever.co/<company>, or https://jobs.ashbyhq.com/<company> -- the board root, not a link to a specific job posting or a third-party aggregator like LinkedIn, Indeed, or another job site). Skip a company if you cannot find its own board URL on one of those three ATS platforms. For each company give: the company name, the exact board URL, the ATS provider, and visa sponsorship evidence with a source URL (an H-1B filing record, careers page, or job posting). Exclude: Coupang, ClickHouse, Gen Digital."
+  },
+  "response": {
+    "completedAt": "2026-09-24T04:16:55.345Z",
+    "costDollars": {
+      "agentCompute": 0.01,
+      "emails": 0,
+      "phoneNumbers": 0,
+      "search": 0.015,
+      "total": 0.025
+    },
+    "createdAt": "2026-09-24T04:16:34.598Z",
+    "id": "agent_run_1aaae85b94194d4d964af9ffb41f9d08",
+    "object": "agent_run",
+    "output": {
+      "grounding": [
+        {
+          "citations": [
+            {
+              "title": "VRChat Lever job listing",
+              "url": "https://jobs.lever.co/vrchat/27436490-d4c6-49a7-8ead-131b9b4e3b8c/apply"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[0].careers_url"
+        },
+        {
+          "citations": [
+            {
+              "title": "VRChat Lever job listing",
+              "url": "https://jobs.lever.co/vrchat/27436490-d4c6-49a7-8ead-131b9b4e3b8c/apply"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[0].ats_provider"
+        },
+        {
+          "citations": [
+            {
+              "title": "VRChat H-1B data",
+              "url": "https://h1bgrader.com/h1b-sponsors/vrchat-inc-60eemry10z"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[0].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "VRChat H-1B data",
+              "url": "https://h1bgrader.com/h1b-sponsors/vrchat-inc-60eemry10z"
+            },
+            {
+              "title": "VRChat Senior/Staff Backend Engineer listing",
+              "url": "https://jobs.lever.co/vrchat/27436490-d4c6-49a7-8ead-131b9b4e3b8c/apply"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[0].sponsorship_evidence"
+        },
+        {
+          "citations": [
+            {
+              "title": "VRChat H-1B data",
+              "url": "https://h1bgrader.com/h1b-sponsors/vrchat-inc-60eemry10z"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[0].source"
+        },
+        {
+          "citations": [
+            {
+              "title": "Docker Ashby job listing",
+              "url": "https://jobs.ashbyhq.com/docker/9d5c3e18-eaef-4ffe-4ff1-795742fcba98"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[1].careers_url"
+        },
+        {
+          "citations": [
+            {
+              "title": "Docker Ashby job listing",
+              "url": "https://jobs.ashbyhq.com/docker/9d5c3e18-eaef-4ffe-4ff1-795742fcba98"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[1].ats_provider"
+        },
+        {
+          "citations": [
+            {
+              "title": "Docker Principal Backend Engineer listing",
+              "url": "https://jobs.ashbyhq.com/docker/9d5c3e18-eaef-4ffe-4ff1-795742fcba98"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[1].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "Docker Principal Backend Engineer listing",
+              "url": "https://jobs.ashbyhq.com/docker/9d5c3e18-eaef-4ff1-795742fcba98"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[1].sponsorship_evidence"
+        },
+        {
+          "citations": [
+            {
+              "title": "Docker Principal Backend Engineer listing",
+              "url": "https://jobs.ashbyhq.com/docker/9d5c3e18-eaef-4ff1-795742fcba98"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[1].source"
+        }
+      ],
+      "structured": {
+        "companies": [
+          {
+            "ats_provider": "lever",
+            "board_token": "vrchat",
+            "careers_url": "https://jobs.lever.co/vrchat",
+            "company": "VRChat",
+            "source": "https://h1bgrader.com/h1b-sponsors/vrchat-inc-60eemry10z",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "VRChat has filed and obtained approval for H-1B labor-condition applications; its current Lever listings include Senior / Staff Backend Engineer roles and explicitly ask whether applicants will require U.S. visa sponsorship, including H-1B."
+          },
+          {
+            "ats_provider": "ashby",
+            "board_token": "docker",
+            "careers_url": "https://jobs.ashbyhq.com/docker",
+            "company": "Docker",
+            "source": "https://jobs.ashbyhq.com/docker/9d5c3e18-eaef-4ffe-b4f1-795742fcba98",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "Docker's Principal/Staff Backend Engineer, Hub posting states that the company considers visa sponsorship on a case-by-case basis based on business needs. The role is remote-first and open to U.S. remote workers."
+          }
+        ]
+      },
+      "text": "As of September 24, 2026, two qualifying companies were identified with first-party Lever or Ashby board roots, remote U.S. senior/staff backend-oriented openings, and documented H-1B or employment-visa sponsorship evidence. Coverage is limited to companies for which both the ATS board root and sponsorship evidence were verifiable."
+    },
+    "request": {
+      "effort": "low",
+      "input": {
+        "exclusion": [
+          {
+            "company": "Affirm"
+          },
+          {
+            "company": "Capital One"
+          },
+          {
+            "company": "ClickHouse"
+          },
+          {
+            "company": "Close"
+          },
+          {
+            "company": "Clubhouse"
+          },
+          {
+            "company": "Corelight"
+          },
+          {
+            "company": "Coupang"
+          },
+          {
+            "company": "Cresta"
+          },
+          {
+            "company": "Eight Sleep"
+          },
+          {
+            "company": "Engine"
+          },
+          {
+            "company": "Flex"
+          },
+          {
+            "company": "Gen Digital"
+          },
+          {
+            "company": "Grafana Labs"
+          },
+          {
+            "company": "Instrumentl"
+          },
+          {
+            "company": "LaunchDarkly"
+          },
+          {
+            "company": "NimbleRx"
+          },
+          {
+            "company": "Palantir Technologies"
+          },
+          {
+            "company": "Profound"
+          },
+          {
+            "company": "Remote"
+          },
+          {
+            "company": "Retell AI"
+          },
+          {
+            "company": "Solana Labs"
+          },
+          {
+            "company": "Worldpay"
+          },
+          {
+            "company": "Z\u016bm"
+          }
+        ]
+      },
+      "outputSchema": {
+        "properties": {
+          "companies": {
+            "items": {
+              "properties": {
+                "ats_provider": {
+                  "enum": [
+                    "greenhouse",
+                    "lever",
+                    "ashby",
+                    "other",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "board_token": {
+                  "type": "string"
+                },
+                "careers_url": {
+                  "format": "uri",
+                  "type": "string"
+                },
+                "company": {
+                  "type": "string"
+                },
+                "source": {
+                  "format": "uri",
+                  "type": "string"
+                },
+                "sponsorship": {
+                  "enum": [
+                    "yes",
+                    "no",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "sponsorship_evidence": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "company",
+                "careers_url",
+                "ats_provider",
+                "sponsorship",
+                "sponsorship_evidence",
+                "source"
+              ],
+              "type": "object"
+            },
+            "maxItems": 15,
+            "type": "array"
+          }
+        },
+        "required": [
+          "companies"
+        ],
+        "type": "object"
+      },
+      "query": "Find US companies hiring for staff or senior backend engineer roles (remote or Denver, Colorado area) that use Greenhouse, Lever, or Ashby as their applicant tracking system AND are documented to sponsor US work visas (H-1B). Only return companies where you can identify the company's OWN job board base URL on one of these three platforms (e.g. https://boards.greenhouse.io/<company>, https://jobs.lever.co/<company>, or https://jobs.ashbyhq.com/<company> -- the board root, not a link to a specific job posting or a third-party aggregator like LinkedIn, Indeed, or another job site). Skip a company if you cannot find its own board URL on one of those three ATS platforms. For each company give: the company name, the exact board URL, the ATS provider, and visa sponsorship evidence with a source URL (an H-1B filing record, careers page, or job posting). Exclude: Coupang, ClickHouse, Gen Digital."
+    },
+    "status": "completed",
+    "stopReason": "schema_satisfied",
+    "usage": {
+      "agentComputeUnits": 0.1,
+      "emails": 0,
+      "phoneNumbers": 0,
+      "searches": 3
+    }
+  },
+  "run_label": "low_strict_v4_week2_a"
+}

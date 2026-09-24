@@ -79,9 +79,29 @@ target's exact name) on 2026-09-23. Reports an unresolved per-invocation
 timing discrepancy as an open blocker rather than certifying the 60s goal.
 This is a measurement and lane-addition proposal, not a test purge.
 
+## Spike 23 — Scout setup interview + Exa Agent company discovery (stage 1)
+
+[S23](S23-scout-setup-interview-exa-agent.md) verifies Exa's Agent API
+(`POST /agent/runs`, `outputSchema`, effort levels, `budget.maxCostDollars`,
+async polling) against the docs plus one live correction
+(`input.exclusion` entries must be objects, not bare strings), drafts the
+Scout setup-interview question list with the operator's UAT answers as
+defaults, and runs 5 live, spend-guarded Agent API calls (actual spend
+$0.759 of a $30 cap, no run over $2) varying query phrasing x schema shape
+x effort. Finds a decisive primary-metric spread: a query that explicitly
+asks for the ATS board root URL plus a strict typed schema at `low` effort
+scores $0.0042 per new usable board, 30x-plus better than the weakest
+tested combination, and free ATS polling (Scout's existing
+`ats_board_clients`) is enough to verify board usability with no extra Exa
+spend. Also finds a live 404'd grounding source cited as sponsorship
+evidence and a pre-existing gap in `list_greenhouse_board`'s country
+parsing. Requested and researched 2026-09-24. Documentation + scripts under
+`research/exa_agent_spike/` only; no product code added. Stage 2
+(implementation) requires a separate operator review.
+
 ## How these spikes finish
 
 Each spike produces a reviewable research record and a set of proposals, not
 a promise to implement any of them. The operator reviews before any v0.1.9
-implementation is scheduled. None of these four spikes claims v0.1.8 shipped,
+implementation is scheduled. None of these five spikes claims v0.1.8 shipped,
 authorizes a code change, or commits to a v0.1.9 scope.

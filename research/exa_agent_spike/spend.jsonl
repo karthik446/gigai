@@ -1,0 +1,17 @@
+{"ts": "2026-09-24T04:00:59.169444Z", "run_label": "low_strict_v1", "effort": "low", "cap_dollars": 0.025, "cost_dollars": 0.025, "cumulative_dollars": 0.025, "reported": false}
+{"ts": "2026-09-24T04:01:36.383156Z", "run_label": "low_strict_v1", "effort": "low", "cap_dollars": 0.025, "cost_dollars": 0.025, "cumulative_dollars": 0.05, "reported": false}
+{"ts": "2026-09-24T04:02:46.724601Z", "run_label": "low_strict_v4_boardurl", "effort": "low", "cap_dollars": 0.025, "cost_dollars": 0.025, "cumulative_dollars": 0.07500000000000001, "reported": false}
+{"ts": "2026-09-24T04:04:27.093180Z", "run_label": "low_loose_v4", "effort": "low", "cap_dollars": 0.025, "cost_dollars": 0.025, "cumulative_dollars": 0.1, "reported": false}
+{"ts": "2026-09-24T04:05:10.142138Z", "run_label": "medium_strict_v4", "effort": "medium", "cap_dollars": 0.1, "cost_dollars": 0.1, "cumulative_dollars": 0.2, "reported": false}
+{"ts": "2026-09-24T04:06:35.939832Z", "run_label": "auto_strict_v4_cap2", "effort": "auto", "cap_dollars": 2.0, "cost_dollars": 2.0, "cumulative_dollars": 2.2, "reported": false}
+{"ts": "2026-09-24T04:09:21.580942Z", "run_label": "auto_strict_v4_cap2", "effort": "auto", "cap_dollars": null, "cost_dollars": 0.584, "cumulative_dollars": null, "reported": true}
+{"ts": "2026-09-24T04:09:21.581255Z", "run_label": "low_loose_v4", "effort": "low", "cap_dollars": null, "cost_dollars": 0.025, "cumulative_dollars": null, "reported": true}
+{"ts": "2026-09-24T04:09:21.581376Z", "run_label": "low_strict_v1", "effort": "low", "cap_dollars": null, "cost_dollars": 0.025, "cumulative_dollars": null, "reported": true}
+{"ts": "2026-09-24T04:09:21.581486Z", "run_label": "low_strict_v4_boardurl", "effort": "low", "cap_dollars": null, "cost_dollars": 0.025, "cumulative_dollars": null, "reported": true}
+{"ts": "2026-09-24T04:09:21.581575Z", "run_label": "medium_strict_v4", "effort": "medium", "cap_dollars": null, "cost_dollars": 0.1, "cumulative_dollars": null, "reported": true}
+{"ts": "2026-09-24T04:14:44.213421Z", "run_label": "low_strict_v4_boardurl_repeat1", "effort": "low", "cap_dollars": 0.025, "cost_dollars": 0.025, "cumulative_dollars": 2.225, "reported": false}
+{"ts": "2026-09-24T04:16:15.609587Z", "run_label": "low_strict_v4_boardurl_repeat1", "effort": "low", "cap_dollars": null, "cost_dollars": 0.025, "cumulative_dollars": null, "reported": true}
+{"ts": "2026-09-24T04:16:34.361140Z", "run_label": "low_strict_v4_week2_a", "effort": "low", "cap_dollars": 0.025, "cost_dollars": 0.025, "cumulative_dollars": 2.25, "reported": false}
+{"ts": "2026-09-24T04:16:59.557065Z", "run_label": "low_strict_v4_week2_a", "effort": "low", "cap_dollars": null, "cost_dollars": 0.025, "cumulative_dollars": null, "reported": true}
+{"ts": "2026-09-24T04:17:12.670824Z", "run_label": "low_strict_v4_week2_b", "effort": "low", "cap_dollars": 0.025, "cost_dollars": 0.025, "cumulative_dollars": 2.275, "reported": false}
+{"ts": "2026-09-24T04:18:03.003123Z", "run_label": "low_strict_v4_week2_b", "effort": "low", "cap_dollars": null, "cost_dollars": 0.025, "cumulative_dollars": null, "reported": true}

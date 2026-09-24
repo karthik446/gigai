@@ -1,0 +1,26 @@
+[
+  {
+    "board_token": "retell-ai",
+    "careers_url": "https://jobs.ashbyhq.com/retell-ai",
+    "company": "Retell AI",
+    "error": null,
+    "is_usable_board": true,
+    "matching_role_us_count": 1,
+    "parses_as_ats": true,
+    "posting_count": 1,
+    "provider": "ashby",
+    "resolved": true
+  },
+  {
+    "board_token": "engine",
+    "careers_url": "https://job-boards.greenhouse.io/engine",
+    "company": "Engine",
+    "error": null,
+    "is_usable_board": true,
+    "matching_role_us_count": 2,
+    "parses_as_ats": true,
+    "posting_count": 2,
+    "provider": "greenhouse",
+    "resolved": true
+  }
+]

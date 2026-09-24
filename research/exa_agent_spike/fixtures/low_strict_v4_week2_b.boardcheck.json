@@ -1,0 +1,26 @@
+[
+  {
+    "board_token": "turnkey",
+    "careers_url": "https://jobs.ashbyhq.com/turnkey",
+    "company": "Turnkey",
+    "error": null,
+    "is_usable_board": false,
+    "matching_role_us_count": 0,
+    "parses_as_ats": true,
+    "posting_count": 0,
+    "provider": "ashby",
+    "resolved": true
+  },
+  {
+    "board_token": "lively43",
+    "careers_url": "https://job-boards.greenhouse.io/lively43",
+    "company": "Lively",
+    "error": null,
+    "is_usable_board": false,
+    "matching_role_us_count": 0,
+    "parses_as_ats": true,
+    "posting_count": 0,
+    "provider": "greenhouse",
+    "resolved": true
+  }
+]

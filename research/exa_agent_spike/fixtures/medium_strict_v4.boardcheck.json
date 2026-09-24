@@ -1,0 +1,26 @@
+[
+  {
+    "board_token": "flex",
+    "careers_url": "https://job-boards.greenhouse.io/flex",
+    "company": "Flex",
+    "error": null,
+    "is_usable_board": true,
+    "matching_role_us_count": 2,
+    "parses_as_ats": true,
+    "posting_count": 2,
+    "provider": "greenhouse",
+    "resolved": true
+  },
+  {
+    "board_token": "close",
+    "careers_url": "https://jobs.ashbyhq.com/close",
+    "company": "Close",
+    "error": null,
+    "is_usable_board": true,
+    "matching_role_us_count": 3,
+    "parses_as_ats": true,
+    "posting_count": 3,
+    "provider": "ashby",
+    "resolved": true
+  }
+]

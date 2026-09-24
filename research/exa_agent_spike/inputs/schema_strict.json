@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "properties": {
+    "companies": {
+      "type": "array",
+      "maxItems": 15,
+      "items": {
+        "type": "object",
+        "properties": {
+          "company": { "type": "string" },
+          "careers_url": { "type": "string", "format": "uri" },
+          "ats_provider": {
+            "type": "string",
+            "enum": ["greenhouse", "lever", "ashby", "other", "unknown"]
+          },
+          "board_token": { "type": "string" },
+          "sponsorship": {
+            "type": "string",
+            "enum": ["yes", "no", "unknown"]
+          },
+          "sponsorship_evidence": { "type": "string" },
+          "source": { "type": "string", "format": "uri" }
+        },
+        "required": ["company", "careers_url", "ats_provider", "sponsorship", "sponsorship_evidence", "source"]
+      }
+    }
+  },
+  "required": ["companies"]
+}
