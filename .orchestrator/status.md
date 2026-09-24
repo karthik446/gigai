@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-24 09:05 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-24 09:48 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -16,11 +16,7 @@ _Updated 2026-09-24 09:05 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - Post-release full matrix (run 35909539154) **finished with 2 failures**: Debian 12 offline container, and Source suite Python 3.12 on macos-latest. The other 9 passed (incl. macOS 3.11/3.13). PyPI and the Release are unaffected. Audit proposed, waiting on the operator.
 
 ## In progress
-| Packet | Model | State | Task / dispatch | Next |
-| --- | --- | --- | --- | --- |
-| S2-A discovery engine: OpenAI web_search ×3 + H-1B → merge, board-check, evidence verify → watchlist; `gigai scout discover`; budget guard; one live smoke ≤ $0.50 | Sonnet 5 | running | `task_f082af89d99d` / `ctx_3a56797ab9a4` | verify → commit |
-| S2-B setup interview (11 Qs) in the Scout UI + Discover panel; /api/setup, /api/discover | Sonnet 5 | running | `task_f951e3e00855` / `ctx_1f13631aa84c` | verify → commit → end-to-end check with A |
-| interview-prep-engine: `gigai scout prep` on interview_scheduled (company research w/ sources ≤ $0.50, role research, question categories, prep notes); reuses S2-A helpers read-only | Sonnet 5 | running | `task_9751514825bf` / `ctx_c6d135336247` | verify → commit → UI prep card after S2-B |
+- Nothing dispatched. **Operator UAT on the branch** (all of 0.1.9 incl. discovery + interview prep).
 
 ## Next up
 - Release path (operator 2026-09-24): interview-prep lands → operator UAT on the branch → fix UAT issues → user docs + README pass (NOT before UAT) → CHANGELOG 0.1.9 → one make test → release.
@@ -34,6 +30,7 @@ _Updated 2026-09-24 09:05 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - **secrets-core committed** `a915c24`: `gigai secrets add/list/rm`, env → ~/.gigai/.env resolver (python-dotenv, interpolation off, 0600 under umask 077). Coordinator reproduced + re-verified the 2 r0 bugs.
 - **README uv-only** `f1fb6c6` (+ API command via `uv tool run --from gigai`, verified on 0.1.8.1).
 - **Country-data research** accepted (`.orchestrator/research/country-data.md`): Lever/Ashby structured country fields unread; pycountry fallback. Implementation waits on the operator.
+- **Stage 2** `8c3743f` (setup interview + Discover panel) + `c461869` (discovery engine; live smoke $0.088, 3 verified boards). **Interview prep** (`gigai scout prep <url>`; live smoke $0.056).
 - **S24 bake-off** `74512c3` ($0.30): OpenAI web_search most repeatable ($0.025/board, never empty); H-1B free (1.5% slug hits); Tavily none; Websets needs Exa Pro. Operator chose OpenAI + H-1B.
 - **`gigai scout run` feature complete** (brief acceptance met from an installed wheel, `d82b9a0` report; flow gaps fixed in scout-ux-gaps): setup → init → secrets add exa → resume add → scout run/status/stop, from inside the target, no --target, no Python/TOML/record create.
 - **B4 progressive cards** `546b346`: progress/ files + /api/runs/{id}/progress + card UI + live step status; writes best-effort (r1).
