@@ -1,6 +1,7 @@
 import { useState } from "react";
 import TagListInput from "./TagListInput.jsx";
 import CountryPicker from "./CountryPicker.jsx";
+import { numberQuestions, questionLabel } from "../questionNumbering.js";
 
 const WORK_MODES = [
   { value: "remote", label: "Remote-only" },
@@ -48,6 +49,7 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
 
   const showCity = fields.work_mode !== "remote";
   const errors = fieldErrors || {};
+  const questionNumbers = numberQuestions(fields);
 
   return (
     <section className="panel">
@@ -59,7 +61,7 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
       <form onSubmit={handleSubmit}>
         <TagListInput
           id="setup-roles"
-          label="1. What roles/level are you targeting?"
+          label={questionLabel("roles", questionNumbers)}
           values={fields.roles}
           onChange={(values) => setField("roles", values)}
           placeholder="staff backend, senior backend…"
@@ -68,7 +70,7 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
 
         <TagListInput
           id="setup-titles-to-avoid"
-          label="2. Any job titles to avoid?"
+          label={questionLabel("titles_to_avoid", questionNumbers)}
           values={fields.titles_to_avoid}
           onChange={(values) => setField("titles_to_avoid", values)}
           placeholder="optional…"
@@ -77,7 +79,7 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
 
         <CountryPicker
           id="setup-countries"
-          label="3. Which countries should postings be in?"
+          label={questionLabel("countries", questionNumbers)}
           values={fields.countries}
           onChange={(values) => setField("countries", values)}
           error={errors.countries}
@@ -85,10 +87,11 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
 
         <div className="form-group">
           <label className="form-label" htmlFor="setup-work-mode">
-            4. Remote-only, hybrid, onsite, or any?
+            {questionLabel("work_mode", questionNumbers)}
           </label>
           <select
             id="setup-work-mode"
+            className="text-input"
             value={fields.work_mode}
             onChange={(event) => setField("work_mode", event.target.value)}
           >
@@ -104,11 +107,12 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
         {showCity && (
           <div className="form-group">
             <label className="form-label" htmlFor="setup-city">
-              5. If not remote-only, what city/area?
+              {questionLabel("city", questionNumbers)}
             </label>
             <input
               id="setup-city"
               type="text"
+              className="text-input"
               value={fields.city}
               placeholder="Denver, CO"
               onChange={(event) => setField("city", event.target.value)}
@@ -119,7 +123,7 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
 
         <div className="form-group">
           <label className="form-label" htmlFor="setup-visa">
-            6. Do you need visa sponsorship?
+            {questionLabel("visa_sponsorship_required", questionNumbers)}
           </label>
           <div className="toggle-row">
             <button
@@ -145,7 +149,7 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
 
         <TagListInput
           id="setup-exclude-companies"
-          label="7. Any companies to exclude?"
+          label={questionLabel("exclude_companies", questionNumbers)}
           values={fields.exclude_companies}
           onChange={(values) => setField("exclude_companies", values)}
           placeholder="not interested / current employer…"
@@ -154,7 +158,7 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
 
         <TagListInput
           id="setup-watch-companies"
-          label="8. Any companies to always watch?"
+          label={questionLabel("watch_companies", questionNumbers)}
           values={fields.watch_companies}
           onChange={(values) => setField("watch_companies", values)}
           placeholder="optional…"
@@ -163,11 +167,12 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
 
         <div className="form-group">
           <label className="form-label" htmlFor="setup-stage-size">
-            9a. Preferred company stage/size?
+            {questionLabel("company_stage_size", questionNumbers)}
           </label>
           <input
             id="setup-stage-size"
             type="text"
+            className="text-input"
             value={fields.company_stage_size}
             placeholder="e.g. Series B-D, 200-1000 employees…"
             onChange={(event) => setField("company_stage_size", event.target.value)}
@@ -177,7 +182,7 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
 
         <TagListInput
           id="setup-industries-include"
-          label="9b. Industries to include?"
+          label={questionLabel("industries_include", questionNumbers)}
           values={fields.industries_include}
           onChange={(values) => setField("industries_include", values)}
           placeholder="optional…"
@@ -186,7 +191,7 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
 
         <TagListInput
           id="setup-industries-exclude"
-          label="9c. Industries to exclude?"
+          label={questionLabel("industries_exclude", questionNumbers)}
           values={fields.industries_exclude}
           onChange={(values) => setField("industries_exclude", values)}
           placeholder="optional…"
@@ -195,7 +200,7 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
 
         <TagListInput
           id="setup-must-have-stack"
-          label="10a. Must-have tech stack?"
+          label={questionLabel("must_have_stack", questionNumbers)}
           values={fields.must_have_stack}
           onChange={(values) => setField("must_have_stack", values)}
           placeholder="optional…"
@@ -204,7 +209,7 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
 
         <TagListInput
           id="setup-dealbreaker-stack"
-          label="10b. Deal-breaker tech stack?"
+          label={questionLabel("dealbreaker_stack", questionNumbers)}
           values={fields.dealbreaker_stack}
           onChange={(values) => setField("dealbreaker_stack", values)}
           placeholder="optional…"
@@ -214,11 +219,12 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
         <div className="field-row">
           <div className="form-group">
             <label className="form-label" htmlFor="setup-cadence">
-              11a. How often should discovery run? (days)
+              {questionLabel("cadence_days", questionNumbers)}
             </label>
             <input
               id="setup-cadence"
               type="number"
+              className="text-input"
               min={1}
               value={fields.cadence_days}
               onChange={(event) => setField("cadence_days", Number(event.target.value) || 1)}
@@ -227,11 +233,12 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="setup-budget">
-              11b. Acceptable Exa/OpenAI spend per run ($)
+              {questionLabel("budget_usd_per_session", questionNumbers)}
             </label>
             <input
               id="setup-budget"
               type="number"
+              className="text-input"
               min={0.01}
               step={0.01}
               value={fields.budget_usd_per_session}

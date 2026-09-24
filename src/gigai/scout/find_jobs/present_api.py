@@ -104,6 +104,18 @@ class Backend(Protocol):
 
     def resume_preview(self) -> PinnedResume | None: ...
 
+    def resume_metadata(self) -> tuple[str | None, str | None] | None:
+        """``(label, created_at)`` for the resume ``resume_preview`` picked.
+
+        ``None`` when there is no resume (mirrors ``resume_preview()``
+        returning ``None``); the tuple's members can themselves be ``None``
+        if the reference is missing that field. uat-bug-004: additive to
+        ``resume_preview`` so the Configuration card can show
+        "<label> · added <date>" instead of raw record/revision ids,
+        without changing the sealed ``PinnedResume`` shape.
+        """
+        ...
+
     def start_run(
         self,
         run_request: RunRequest,
@@ -169,6 +181,10 @@ class NotWiredBackend:
         raise AssertionError("unreachable")
 
     def resume_preview(self) -> PinnedResume | None:
+        self._not_wired()
+        raise AssertionError("unreachable")
+
+    def resume_metadata(self) -> tuple[str | None, str | None] | None:
         self._not_wired()
         raise AssertionError("unreachable")
 
@@ -524,6 +540,17 @@ class ScoutFindJobsBackend:
             if str(exc).startswith("find_jobs_resume_required:"):
                 return None
             raise
+
+    def resume_metadata(self) -> tuple[str | None, str | None] | None:
+        from ... import run
+
+        try:
+            details = run.resolve_newest_resume_details(self.home_root, self._target_root())
+        except RunError as exc:
+            if str(exc).startswith("find_jobs_resume_required:"):
+                return None
+            raise
+        return (details.label, details.created_at)
 
     def start_run(
         self,
@@ -1233,11 +1260,21 @@ def _make_handler(
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "config not found")
                 return
             resume_preview = backend.resume_preview()
+            # uat-bug-004: additive display fields alongside resume_preview's
+            # raw ids -- the Configuration card shows "<label> · added <date>"
+            # with the ids moved to a tooltip. Resolved separately from
+            # resume_preview() (see ScoutFindJobsBackend.resume_metadata) so
+            # the sealed PinnedResume shape itself never grows display-only
+            # fields.
+            resume_metadata = backend.resume_metadata() if resume_preview is not None else None
+            resume_label, resume_created_at = resume_metadata if resume_metadata is not None else (None, None)
             config_digest = config.digest()
             payload = {
                 "schema_version": "scout-find-jobs-config-response:1",
                 "config": config.to_json(),
                 "resume_preview": resume_preview.to_json() if resume_preview is not None else None,
+                "resume_label": resume_label,
+                "resume_created_at": resume_created_at,
                 "resume_missing_hint": (
                     None if resume_preview is not None else "gigai scout resume add <file>"
                 ),

@@ -163,10 +163,32 @@ class _FindJobsRunExecution:
     input_bytes: bytes
 
 
-def resolve_newest_resume(
+@dataclass(frozen=True)
+class ResumeDetails:
+    """``resolve_newest_resume``'s pick, plus the reference's display metadata.
+
+    ``pinned`` is the exact same ``PinnedResume`` ``resolve_newest_resume``
+    returns (record_id/revision_id/content digest) -- a sealed shape used by
+    the find-jobs run input contract. ``label``/``created_at`` come from the
+    winning ``g45_reference`` import record (uat-bug-004: the Configuration
+    card shows these instead of raw ids) and are additive display-only
+    fields, never part of the sealed run input.
+    """
+
+    pinned: PinnedResume
+    label: str | None
+    created_at: str | None
+
+
+def resolve_newest_resume_details(
     home_root: Path, target: Path | None
-) -> PinnedResume:
-    """Resolve the newest committed ``resume`` record and exact revision."""
+) -> ResumeDetails:
+    """Resolve the newest committed ``resume`` record, its exact revision,
+
+    and the reference's display metadata (label + created date). The single
+    implementation of "which resume wins" lives here; ``resolve_newest_resume``
+    is a thin wrapper returning just the sealed ``PinnedResume`` piece.
+    """
 
     from . import private_records
     from .scout.inputs import _record_revision
@@ -263,9 +285,23 @@ def resolve_newest_resume(
         snapshot_ref = content_ref.get("snapshot_ref")
         if isinstance(snapshot_ref, Mapping) and snapshot_ref.get("content_sha256") != digest:
             raise ValueError("resume content digest differs from its committed snapshot")
-        return PinnedResume(record_id, revision_id, digest)
+        label = imported.get("label")
+        created_at = imported.get("created_at")
+        return ResumeDetails(
+            pinned=PinnedResume(record_id, revision_id, digest),
+            label=label if isinstance(label, str) else None,
+            created_at=created_at if isinstance(created_at, str) else None,
+        )
     except Exception as exc:
         raise RunError("find_jobs_resume_required: selected resume is unavailable") from exc
+
+
+def resolve_newest_resume(
+    home_root: Path, target: Path | None
+) -> PinnedResume:
+    """Resolve the newest committed ``resume`` record and exact revision."""
+
+    return resolve_newest_resume_details(home_root, target).pinned
 
 
 _ZERO_USAGE = {
@@ -5113,4 +5149,6 @@ __all__ = [
     "launch_run",
     "read_run_details",
     "resolve_newest_resume",
+    "resolve_newest_resume_details",
+    "ResumeDetails",
 ]

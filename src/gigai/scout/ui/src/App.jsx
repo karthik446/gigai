@@ -385,6 +385,8 @@ export default function App() {
               <ConfigPanel
                 config={configResponse.config}
                 resumePreview={configResponse.resume_preview}
+                resumeLabel={configResponse.resume_label}
+                resumeCreatedAt={configResponse.resume_created_at}
                 resumeMissingHint={configResponse.resume_missing_hint}
               />
 

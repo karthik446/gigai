@@ -1,4 +1,4 @@
-import { resumeDisplayLabel } from "../display.js";
+import { resumeDisplayLabel, resumeIdsTooltip } from "../display.js";
 
 function SourceList({ sources }) {
   const active = Object.entries(sources)
@@ -18,7 +18,7 @@ function SourceList({ sources }) {
   );
 }
 
-export default function ConfigPanel({ config, resumePreview, resumeMissingHint }) {
+export default function ConfigPanel({ config, resumePreview, resumeLabel, resumeCreatedAt, resumeMissingHint }) {
   return (
     <section className="panel">
       <h2>Configuration</h2>
@@ -76,7 +76,9 @@ export default function ConfigPanel({ config, resumePreview, resumeMissingHint }
         <div className="field">
           <div className="label">Resume</div>
           {resumePreview ? (
-            <div className="value">{resumeDisplayLabel(resumePreview)}</div>
+            <div className="value" title={resumeIdsTooltip(resumePreview)}>
+              {resumeDisplayLabel(resumePreview, resumeLabel, resumeCreatedAt)}
+            </div>
           ) : (
             <div className="callout warn" style={{ marginBottom: 0 }}>
               No resume saved: run <code>{resumeMissingHint || "gigai scout resume add <file>"}</code>{" "}

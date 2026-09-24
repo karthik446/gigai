@@ -182,7 +182,8 @@ label.form-label {
 }
 
 input[type="number"],
-select {
+select,
+.text-input {
   width: 100%;
   padding: 8px;
   border: 1px solid var(--border);

@@ -39,6 +39,15 @@ def _resume() -> PinnedResume:
     return PinnedResume.from_json(load_fixture("fixture-api-config-response-v1.json")["resume_preview"])
 
 
+def _resume_metadata() -> tuple[str | None, str | None]:
+    # uat-bug-004: resume_label/resume_created_at are additive /api/config
+    # fields not modeled by the ConfigResponse contract (like
+    # resume_missing_hint before them), so they live here rather than in
+    # fixture-api-config-response-v1.json, which test_contracts.py round-trips
+    # through ConfigResponse.from_json under closed-object validation.
+    return ("kar-omada-staff-resume.md", "2026-09-23T12:00:00+00:00")
+
+
 def _run_status_response(run_id: str) -> RunStatusResponse:
     fixture = load_fixture("fixture-api-run-status-response-v1.json")
     fixture = dict(fixture, run_id=run_id)
@@ -69,6 +78,7 @@ class FakeBackend:
         *,
         config: FindJobsConfig | None = None,
         resume: PinnedResume | None = None,
+        resume_metadata: tuple[str | None, str | None] | None = None,
         known_run_id: str = "run_123e4567-e89b-42d3-a456-426614174002",
         pre_allocation_error: Exception | None = None,
         post_allocation_error: Exception | None = None,
@@ -76,6 +86,9 @@ class FakeBackend:
     ) -> None:
         self.config = config if config is not None else _config()
         self.resume = resume if resume is not None else _resume()
+        self.resume_metadata_value = (
+            resume_metadata if resume_metadata is not None else _resume_metadata()
+        )
         self.known_run_id = known_run_id
         self.pre_allocation_error = pre_allocation_error
         self.post_allocation_error = post_allocation_error
@@ -88,6 +101,9 @@ class FakeBackend:
 
     def resume_preview(self) -> PinnedResume | None:
         return self.resume
+
+    def resume_metadata(self) -> tuple[str | None, str | None] | None:
+        return self.resume_metadata_value
 
     def start_run(
         self,
@@ -146,6 +162,19 @@ def test_get_config_happy_path(running_server) -> None:
     assert body["config_digest"] == backend.config.digest()
 
 
+def test_get_config_carries_the_resume_label_and_created_date(running_server) -> None:
+    # uat-bug-004: the Configuration card shows the resume's label + created
+    # date instead of raw record/revision ids (those stay in resume_preview
+    # for a tooltip). Before this fix, /api/config carried only the ids.
+    client, backend = running_server
+    response = client.get("/api/config")
+    assert response.status_code == 200
+    body = response.json()
+    expected_label, expected_created_at = backend.resume_metadata_value
+    assert body["resume_label"] == expected_label == "kar-omada-staff-resume.md"
+    assert body["resume_created_at"] == expected_created_at == "2026-09-23T12:00:00+00:00"
+
+
 class _ConfigMissingBackend(FakeBackend):
     """Models an unwritten ``find-jobs.json`` (0.1.8.1 UAT addendum)."""
 
@@ -157,6 +186,9 @@ class _NoResumeBackend(FakeBackend):
     """Models a project with a config but no saved resume yet (U15)."""
 
     def resume_preview(self) -> PinnedResume | None:
+        return None
+
+    def resume_metadata(self) -> tuple[str | None, str | None] | None:
         return None
 
 
@@ -199,6 +231,8 @@ def test_get_config_with_no_resume_carries_an_explicit_hint(running_server) -> N
     body = response.json()
     assert body["resume_preview"] is None
     assert body["resume_missing_hint"] == "gigai scout resume add <file>"
+    assert body["resume_label"] is None
+    assert body["resume_created_at"] is None
 
 
 def test_get_config_with_a_resume_has_no_hint(running_server) -> None:

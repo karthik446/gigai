@@ -146,6 +146,9 @@ class _SetupDiscoverBackend:
     def resume_preview(self):
         return None
 
+    def resume_metadata(self):
+        return None
+
     def start_run(self, run_request, config_bytes, on_run_allocated) -> None:  # pragma: no cover - unused here
         raise NotImplementedError
 

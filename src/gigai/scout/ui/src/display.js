@@ -23,17 +23,46 @@ export function displayCompanyName(company) {
     .join(" ");
 }
 
-// PinnedResume (contracts.py) currently carries only record_id/revision_id/
-// content_sha256 — no human label or source filename. U17 asked for the
-// resume's label/filename to show instead of raw ids; until the contract
-// grows a field for that (see the note in .orchestrator/workers/p3-ui.md),
-// this falls back to the ids so the UI still reads as "resume used" rather
-// than opaque record noise.
-export function resumeDisplayLabel(pinnedResume) {
+// PinnedResume (contracts.py) itself still carries only record_id/
+// revision_id/content_sha256 — no human label or source filename (U17).
+// uat-bug-004: GET /api/config now also returns the resume reference's
+// label and created date alongside those ids (resume_label/
+// resume_created_at, additive — see present_api.py's resume_metadata /
+// run.resolve_newest_resume_details), so the Configuration card can show
+// e.g. "kar-omada-staff-resume.md · added Sep 23" instead of raw record/
+// revision ids. Falls back to the ids when a label isn't available (older
+// server, or a reference missing that field) so the card never renders
+// blank.
+export function resumeDisplayLabel(pinnedResume, label, createdAt) {
   if (!pinnedResume) {
     return null;
   }
+  const idFallback = `${pinnedResume.record_id} (${pinnedResume.revision_id})`;
+  if (!label) {
+    return idFallback;
+  }
+  const dateText = formatShortDate(createdAt);
+  return dateText ? `${label} · added ${dateText}` : label;
+}
+
+// The ids to show in a tooltip (title attribute) alongside the friendly
+// resumeDisplayLabel text.
+export function resumeIdsTooltip(pinnedResume) {
+  if (!pinnedResume) {
+    return undefined;
+  }
   return `${pinnedResume.record_id} (${pinnedResume.revision_id})`;
+}
+
+function formatShortDate(isoDate) {
+  if (!isoDate) {
+    return null;
+  }
+  const parsed = new Date(isoDate);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(parsed);
 }
 
 const NOT_ASSESSED_REASON_LABELS = {
