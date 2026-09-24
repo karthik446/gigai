@@ -16,9 +16,7 @@ export default function NodeStatusList({ status, nodeReceipts }) {
               <div className="node-name">{slug}</div>
               <div className="node-state">{receipt ? receipt.status : "waiting"}</div>
               {receipt && receipt.failure && (
-                <div className="muted" style={{ fontSize: "0.8rem" }}>
-                  {receipt.failure.message}
-                </div>
+                <div className="node-failure-message">{receipt.failure.message}</div>
               )}
             </div>
           );

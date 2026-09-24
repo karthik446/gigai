@@ -52,8 +52,14 @@ def test_release_job_graph_does_not_let_verify_pypi_block_the_release() -> None:
     # verify-pypi becomes a post-release check gated on the Release existing.
     assert "github-release" in graph["verify-pypi"]
 
-    # publish-pypi is still gated on the pre-publish TestPyPI staging check.
-    assert "verify-testpypi" in graph["publish-pypi"]
+    # publish-pypi is gated on the TestPyPI publish step, not on the
+    # (post-publish, continue-on-error) TestPyPI install check.
+    assert set(graph["publish-pypi"]) == {"preflight", "publish-testpypi"}
+    assert "verify-testpypi" not in graph["publish-pypi"]
+
+    # verify-testpypi is a post-publish check that nothing waits on.
+    assert set(graph["verify-testpypi"]) == {"preflight", "publish-testpypi"}
+    assert all("verify-testpypi" not in needs for needs in graph.values())
 
     # The full post-release compatibility matrix must not wait on the
     # post-release install check either.
@@ -132,6 +138,14 @@ def test_project_metadata_and_exact_release_tag(tmp_path: Path) -> None:
     release_check.assert_release_tag(version, "v0.1.0")
     with pytest.raises(release_check.ReleaseCheckError, match="does not match"):
         release_check.assert_release_tag(version, "v0.1.1")
+
+
+def test_four_part_hotfix_version_is_a_valid_release_tag(tmp_path: Path) -> None:
+    name, version = release_check.project_metadata(_write_project(tmp_path, "0.1.8.1"))
+    assert (name, version) == ("gigai", "0.1.8.1")
+    release_check.assert_release_tag(version, "v0.1.8.1")
+    with pytest.raises(release_check.ReleaseCheckError, match="does not match"):
+        release_check.assert_release_tag(version, "v0.1.8")
 
 
 def test_lockfile_project_version_must_match_static_project_version(tmp_path: Path) -> None:

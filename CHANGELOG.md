@@ -30,6 +30,24 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.8.1
+
+- Assess now sends the model the real posting text and a real assessment
+  prompt (with the output schema and examples) instead of the title alone.
+- Assess tolerates sloppy model output (normalizes odd field shapes) and
+  isolates a bad answer to that one posting instead of failing the whole
+  run; when a posting can't be assessed, the recorded cause explains why.
+- Raw Exa and applicant-tracking-board responses are now stored per run for
+  debugging and as test fixtures.
+- Acquire applies an explicit country filter and prefers a job board's own
+  posting over an Exa search result for the same job.
+- Adds a visa-sponsorship filter to find-jobs.
+- Adds search and filters to the Scout UI.
+- Fixes the release pipeline: the GitHub Release now publishes right after
+  PyPI, and PyPI/TestPyPI clean-install checks run as non-blocking
+  post-publish checks with a bounded wait for the index instead of racing
+  it.
+
 ### 0.1.8
 
 - Adds Scout's `find-jobs` workflow, GigAI's first shipped Gig: acquire public

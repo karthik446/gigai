@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import traceback
 import uuid
 from typing import Callable, Mapping
 
@@ -4265,6 +4266,51 @@ def _registered_producer(
     )
 
 
+_MAX_FAILURE_MESSAGE = 300
+
+
+def _redacted_failure_message(exc: BaseException) -> str:
+    """A bounded, content-free failure message: exception class + str(exc).
+
+    U21: the receipt and run-details goal errors must carry *something*
+    specific enough to diagnose a run without ever risking resume text,
+    posting text, or secrets in a record that may be shared/inspected. The
+    exception's own message is the closest thing to "specific" that is safe
+    to keep here — this call site never sees raw model output or private
+    record bytes, only exceptions raised by parsing/adapter code — and it is
+    hard-truncated regardless.
+    """
+    exc_class = type(exc).__name__
+    detail = str(exc).strip().replace("\n", " ")
+    message = f"{exc_class}: {detail}" if detail else exc_class
+    if len(message) > _MAX_FAILURE_MESSAGE:
+        message = message[: _MAX_FAILURE_MESSAGE - 1].rstrip() + "…"
+    return message
+
+
+def _write_node_failure_log(
+    resolved: ResolvedWorkpad, run_id: str, goal: Mapping[str, object], exc: BaseException
+) -> None:
+    """Write the full traceback to ``runs/<run_id>/logs/<goal_slug>.log`` (U21).
+
+    This is the durable, unredacted diagnostic counterpart to the bounded
+    receipt/goal-error message: local-only, never surfaced through the API
+    or UI, so it may hold the full exception chain and traceback.
+    """
+    slug = goal.get("slug")
+    if not isinstance(slug, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", slug):
+        return
+    log_path = resolved.path / "runs" / run_id / "logs" / f"{slug}.log"
+    try:
+        _reject_symlinked_components(resolved.path, log_path, "registered node log path is unsafe")
+        log_path.parent.mkdir(mode=0o700, exist_ok=True)
+        rendered = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"--- {_now()} ---\n{rendered}\n")
+    except OSError:
+        pass
+
+
 def _write_registered_failure_receipt(
     *,
     resolved: ResolvedWorkpad,
@@ -4273,9 +4319,10 @@ def _write_registered_failure_receipt(
     context: NodeContext,
     binding: object,
     started_at: str,
+    exc: BaseException | None = None,
 ) -> None:
     _output_path, receipt_path = _registered_node_paths(resolved, run_id, goal)
-    message = "registered node execution failed"
+    message = _redacted_failure_message(exc) if exc is not None else "registered node execution failed"
     receipt = NodeReceipt(
         goal_id=str(goal.get("goal_id")),
         goal_version=int(goal.get("goal_version", 1)),
@@ -4401,6 +4448,7 @@ def _execute_goal(
     except _RunInterrupted:
         raise
     except Exception as exc:
+        _write_node_failure_log(resolved, run_id, goal, exc)
         try:
             _write_registered_failure_receipt(
                 resolved=resolved,
@@ -4409,6 +4457,7 @@ def _execute_goal(
                 context=context,
                 binding=binding,
                 started_at=started,
+                exc=exc,
             )
         except Exception:
             pass

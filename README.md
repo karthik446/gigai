@@ -79,6 +79,20 @@ gigai setup --non-interactive \
 secret value. Run `gigai setup --help` for the full reference, including
 Ollama loopback endpoints and per-target reasoning-effort options.
 
+> **0.1.8.x workaround; v0.1.9 replaces this with `gigai scout setup/run`.**
+> Scout's find-jobs resolves a model target by its *name*, using the target
+> name `codex_cli` (or `ollama_local`) literally — an auto-named target like
+> `codex-default` will not be found. Name the target explicitly and raise its
+> output limit (512 is too small for an assessment):
+>
+> ```bash
+> gigai setup --non-interactive --home ~/.gigai --workpad-root ~/gigai-workpads --editor /usr/bin/true \
+>   --endpoint codex=codex_cli \
+>   --model-target codex_cli=codex:default \
+>   --target-output-limit codex_cli=4096 \
+>   --json
+> ```
+
 ### Bind a project
 
 ```bash
@@ -91,21 +105,66 @@ idempotent for an already-bound project.
 
 ### Scout: install and approve
 
-Binding a project auto-materializes Scout as a candidate Gig — it is not
-pulled from `gigai catalog` (that command lists other built-in Gigs).
-Approving it follows the normal capability-review path: `gigai capability
-review` records reviewer judgment for the generated effect, then `gigai
-approve <proposal-id>` seals the version. Run `gigai capability review
---help` / `gigai approve --help` for the exact required IDs, and `gigai gigs
+> **0.1.8.x workaround; v0.1.9 replaces this with `gigai scout setup/run`.**
+
+Binding a project does **not** auto-materialize Scout as a candidate Gig, and
+Scout is not in `gigai catalog list` either. The only current path is the
+package's own Python interpreter running the internal helper, then approving
+the resulting proposal:
+
+```bash
+"$(uv tool dir)/gigai/bin/python" -c '
+from gigai.default_init import initialize_defaults
+from gigai.scout.template import scout_candidate_inventory
+initialize_defaults(inventory=scout_candidate_inventory())
+'
+gigai approve <proposal-id> --gig <gig-id> --json
+```
+
+Run `gigai approve --help` for the exact required IDs, and `gigai gigs
 --json` to confirm Scout is active once approved.
 
 ### Add a resume reference
 
+> **0.1.8.x limit:** only `.txt`/`.md`/`.markdown` files up to 1 MB are
+> accepted; a `.pdf` or `.docx` resume is rejected (`media_type_unsupported`).
+> Convert it first, e.g.:
+>
+> ```bash
+> pdftotext resume.pdf resume.txt          # Linux, or macOS with poppler
+> textutil -convert txt resume.docx        # macOS built-in, .docx only
+> ```
+
 ```bash
-gigai reference add --kind resume --file ./resume.pdf --json
+gigai reference add --kind resume --file ./resume.txt --json
 ```
 
 `--kind` also accepts `project_evidence`, `role_history`, `cover_letter`.
+
+### Setting the active Gig
+
+> **0.1.8.x workaround; v0.1.9 replaces this with `gigai scout setup/run`.**
+
+The Scout API resolves the bound project's active Gig, but no CLI command
+sets it after approval. Until v0.1.9, edit
+`<target_root>/.gigai/project.toml` directly and add:
+
+```toml
+active_gig_id = "<scout gig id>"
+```
+
+### Wrapping an imported resume for find-jobs
+
+> **0.1.8.x workaround; v0.1.9 replaces this with `gigai scout setup/run`.**
+
+`gigai reference add` alone is not enough: find-jobs only reads a resume
+wrapped as a private record. After adding the reference, wrap it:
+
+```bash
+gigai record create --kind imported_reference --content-family g45_reference \
+  --content-id <reference-id> --operation-key <operation-key> \
+  --gig <gig-id> --json
+```
 
 ### The `find-jobs.json` config
 
@@ -140,6 +199,9 @@ Without it, Exa discovery refuses to run; ATS-board acquisition is
 unaffected.
 
 ### Start the API
+
+Works from an installed package (`pip install gigai` / `uv tool install
+gigai`) — no source checkout needed:
 
 ```bash
 python -m gigai.scout.find_jobs.present_api --home ~/.gigai --target /path/to/target/repo
@@ -192,7 +254,7 @@ uv run --locked pytest tests/behaviors/scout_find_jobs -q   # a focused slice
 
 ## Status
 
-This is v0.1.8. Scout's `find-jobs` workflow is implemented and covered by
+This is v0.1.8.1. Scout's `find-jobs` workflow is implemented and covered by
 the test suite above, including a deterministic end-to-end path from
 acquisition through the present API. It has not yet had a live-provider or
 human user-acceptance pass; treat what's proven by tests as proven, and

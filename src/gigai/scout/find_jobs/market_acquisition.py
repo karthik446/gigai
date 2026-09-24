@@ -7,12 +7,14 @@ acquisition journal.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
+import gzip
 import json
 from pathlib import Path
 import re
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from ...canonical import canonical_json_bytes, digest_imported_bytes
 from ..acquisition_records import import_public_rows
@@ -40,7 +42,20 @@ from .contracts import (
     normalize_url,
     parse_board_url,
 )
+from .filters import exclusion_reason
 from ...workpad import ResolvedWorkpad, resolve_workpad
+
+# U26: cap on the total size of raw provider responses stored per run, so a
+# very large/unbounded response set can't fill the workpad disk unbounded.
+RAW_PAYLOAD_CAP_BYTES = 20 * 1024 * 1024
+
+# Query parameter names ATS boards use to carry a job id when the posting is
+# served from a custom career-site domain rather than the board's own
+# subdomain (U20 dedupe): e.g. "https://www.pinterestcareers.com/jobs?gh_jid=…"
+# is the same Greenhouse job as "https://job-boards.greenhouse.io/pinterest/
+# jobs/…" for the numeric id in the path.
+_JOB_ID_QUERY_KEYS = ("gh_jid", "lever_id", "job_id")
+_NUMERIC_PATH_SEGMENT = re.compile(r"^\d{4,}$")
 
 
 class AcquireAllSourcesFailedError(FindJobsContractError):
@@ -54,6 +69,99 @@ def _now() -> str:
 def _safe_batch_id(value: str) -> str:
     value = re.sub(r"[^A-Za-z0-9_.:-]+", "-", value).strip("-")
     return (value or "acquire")[:120]
+
+
+def _job_id_from_url(url: str) -> str | None:
+    """Best-effort ATS job id extracted from a posting URL (U20 dedupe).
+
+    Checks known job-id query parameters first (``gh_jid`` etc., used by
+    custom career-site domains that proxy a Greenhouse/Lever board), then the
+    last numeric path segment (the board-subdomain URL shape, e.g.
+    ``.../pinterest/jobs/7683977``). Returns ``None`` when neither is found
+    (e.g. Ashby's UUID-slug job ids, which are already unique per posting and
+    don't need this fallback -- the board_token + full path is enough).
+    """
+
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return None
+    query = dict(parse_qsl(parsed.query))
+    for key in _JOB_ID_QUERY_KEYS:
+        value = query.get(key)
+        if value:
+            return value
+    parts = [part for part in parsed.path.split("/") if part]
+    for part in reversed(parts):
+        if _NUMERIC_PATH_SEGMENT.match(part):
+            return part
+    return None
+
+
+def _dedupe_identity(row: PostingRow) -> str:
+    """The identity key used to dedupe an Exa row against its ATS row.
+
+    Same normalized URL is the strongest signal (handled by the caller's
+    ``seen`` set before this is even consulted); this is the fallback for
+    when the same job is served from two different URLs (a board subdomain
+    and a custom career-site domain proxying the same board). Falls back to
+    the row's own normalized URL when no job id can be parsed out, which
+    makes the row unique to itself (no false-positive dedupe).
+    """
+
+    job_id = _job_id_from_url(row.url) or _job_id_from_url(row.normalized_url)
+    if row.board_token and job_id:
+        return f"{row.provider.value}:{row.board_token}:{job_id}"
+    return f"self:{row.normalized_url}"
+
+
+def _merge_exa_and_ats_rows(rows: Sequence[PostingRow]) -> list[PostingRow]:
+    """Dedupe Exa vs ATS rows for the same job; the ATS row wins (U20).
+
+    Two dedupe passes:
+
+    1. Exact normalized-URL collision (unchanged from before this packet):
+       whichever row is seen first for that URL wins, but an ATS row is now
+       sorted first so ties resolve to it deterministically.
+    2. Identity collision (:func:`_dedupe_identity`: same board_token + job
+       id parsed from the URL, reached via two different hostnames -- e.g. a
+       Greenhouse-hosted board URL and the employer's custom career-site
+       domain proxying the same posting). When both an Exa and an ATS row
+       share an identity, the ATS row's fuller title/location/text/hash wins
+       and the Exa row is dropped entirely (not kept as a second entry).
+    """
+
+    # Sort ATS-sourced rows first so both passes prefer them on a tie.
+    ordered = sorted(rows, key=lambda row: 0 if row.source_kind is SourceKind.ATS else 1)
+
+    by_url: dict[str, PostingRow] = {}
+    order: list[str] = []
+    for row in ordered:
+        normalized = normalize_url(row.normalized_url or row.url)
+        if normalized != row.normalized_url:
+            row = PostingRow(row.url, normalized, row.provider, row.board_token, row.company, row.title, row.location, row.published_at, row.content_sha256, row.source_kind, row.query_key, row.text, row.sponsorship)
+        if normalized in by_url:
+            continue  # ATS-first ordering already means the first seen wins.
+        by_url[normalized] = row
+        order.append(normalized)
+
+    url_deduped = [by_url[key] for key in order]
+
+    by_identity: dict[str, PostingRow] = {}
+    identity_order: list[str] = []
+    for row in url_deduped:
+        identity = _dedupe_identity(row)
+        existing = by_identity.get(identity)
+        if existing is None:
+            by_identity[identity] = row
+            identity_order.append(identity)
+            continue
+        if existing.source_kind is not SourceKind.ATS and row.source_kind is SourceKind.ATS:
+            by_identity[identity] = row
+        # else: keep whichever ATS/first row is already stored; the Exa
+        # duplicate is dropped.
+
+    return [by_identity[key] for key in identity_order]
 
 
 def _role_match(row: PostingRow, roles: Sequence[str]) -> bool:
@@ -130,6 +238,129 @@ def _prior_observations(root: Path, current_batch: str) -> dict[str, str | None]
     return result
 
 
+class _CapturedResponse:
+    """Redacted record of one HTTP exchange, kept for U26 raw storage.
+
+    Only the response body, status, and the request URL with its query keys
+    stripped are kept -- never request headers (where API keys live) and
+    never response headers (which can carry rate-limit/auth echo values).
+    Request headers are never even read by :class:`_RecordingHTTPClient`.
+    """
+
+    __slots__ = ("source", "url", "status_code", "body")
+
+    def __init__(self, source: str, url: str, status_code: int, body: bytes) -> None:
+        self.source = source
+        self.url = url
+        self.status_code = status_code
+        self.body = body
+
+
+class _RecordingHTTPClient:
+    """Wraps an httpx-like client to capture every response body (U26).
+
+    Transparent pass-through: `exa.search()`/`ats.list_board()` call `.get`/
+    `.post` exactly as before and get the real response back unchanged; this
+    just also appends a redacted :class:`_CapturedResponse` to `captured` as
+    a side effect, with `source` derived from the request URL's hostname via
+    `source_for_url`, since the underlying protocols don't pass a source
+    name through explicitly.
+    """
+
+    def __init__(self, client: Any, *, source_for_url: "Callable[[str], str]") -> None:
+        self._client = client
+        self._source_for_url = source_for_url
+        self.captured: list[_CapturedResponse] = []
+
+    def _record(self, url: str, response: Any) -> Any:
+        try:
+            body = response.content
+        except Exception:  # noqa: BLE001 - never let capture break the real call
+            body = b""
+        source = self._source_for_url(url)
+        self.captured.append(_CapturedResponse(source, url, getattr(response, "status_code", 0), body))
+        return response
+
+    def get(self, url: str, *args: Any, **kwargs: Any) -> Any:
+        response = self._client.get(url, *args, **kwargs)
+        return self._record(url, response)
+
+    def post(self, url: str, *args: Any, **kwargs: Any) -> Any:
+        response = self._client.post(url, *args, **kwargs)
+        return self._record(url, response)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+
+def _strip_query(url: str) -> str:
+    parsed = urlsplit(url)
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+
+
+def _source_from_url(url: str) -> str:
+    host = (urlsplit(url).hostname or "").lower()
+    if "exa.ai" in host:
+        return "exa"
+    if "greenhouse.io" in host:
+        return "greenhouse"
+    if "lever.co" in host:
+        return "lever"
+    if "ashbyhq.com" in host:
+        return "ashby"
+    return "other"
+
+
+def _write_raw_payloads(resolved: ResolvedWorkpad, run_id: str, captured: Sequence[_CapturedResponse]) -> None:
+    """Persist redacted raw provider responses under runs/<run_id>/raw/ (U26).
+
+    Gzip-compressed, one file per response, plus an index.json listing
+    source/url/status/bytes/sha256 for every stored (and every skipped, once
+    the cap is hit) response. Never writes request headers, response
+    headers, or API keys -- only ``_CapturedResponse.body`` (the JSON
+    response bytes) and the query-stripped URL.
+    """
+
+    if not captured:
+        return
+    raw_root = resolved.path / "runs" / run_id / "raw"
+    per_source_counts: dict[str, int] = {}
+    index_entries: list[dict[str, object]] = []
+    total_bytes = 0
+    for item in captured:
+        gzipped = gzip.compress(item.body, compresslevel=6)
+        entry: dict[str, object] = {
+            "source": item.source,
+            "url": _strip_query(item.url),
+            "status": item.status_code,
+            "bytes": len(item.body),
+            "sha256": digest_imported_bytes(item.body),
+        }
+        if total_bytes + len(gzipped) > RAW_PAYLOAD_CAP_BYTES:
+            entry["stored"] = False
+            entry["skipped_reason"] = "raw_payload_cap_reached"
+            index_entries.append(entry)
+            continue
+        n = per_source_counts.get(item.source, 0)
+        per_source_counts[item.source] = n + 1
+        source_dir = raw_root / item.source
+        source_dir.mkdir(parents=True, exist_ok=True)
+        path = source_dir / f"{n}.json.gz"
+        path.write_bytes(gzipped)
+        entry["stored"] = True
+        entry["path"] = path.relative_to(resolved.path).as_posix()
+        total_bytes += len(gzipped)
+        index_entries.append(entry)
+    raw_root.mkdir(parents=True, exist_ok=True)
+    index = {
+        "schema_version": "scout-acquire-raw-index:1",
+        "cap_bytes": RAW_PAYLOAD_CAP_BYTES,
+        "cap_note": "gzip-compressed bytes counted against the cap; entries after the cap is reached are listed but not stored.",
+        "entries": index_entries,
+    }
+    (raw_root / "index.json").write_text(canonical_json_bytes(index).decode("utf-8"))
+
+
 def _public_row(row: PostingRow) -> dict[str, object]:
     digest = _digest(row)
     opportunity_digest = digest_imported_bytes(row.normalized_url.encode("utf-8"))
@@ -169,12 +400,14 @@ def acquire_node(
     rows: list[PostingRow] = list(input.rows)
     watchlist_refs: list[str] = []
     source_outcomes: dict[str, bool] = {}
+    recording_client = _RecordingHTTPClient(http_client, source_for_url=_source_from_url) if http_client is not None else None
+    active_client = recording_client if recording_client is not None else http_client
 
     if not rows:
         if input.config.sources.exa:
             exa_ok = False
             try:
-                discovered = tuple(exa.search(http_client, input.config))
+                discovered = tuple(exa.search(active_client, input.config))
                 rows.extend(discovered)
                 for row in discovered:
                     ref = _watchlist_add(watchlist, row, query_key=row.query_key, batch_id=batch_id)
@@ -192,7 +425,7 @@ def acquire_node(
                     ats_ok = True
                 for board in boards:
                     try:
-                        rows.extend(ats.list_board(http_client, board.provider.value, board.board_token, input.config))
+                        rows.extend(ats.list_board(active_client, board.provider.value, board.board_token, input.config))
                         ats_ok = True
                     except Exception as exc:
                         failures.append(FailureRow(SourceKind.ATS, board.board_token, None, type(exc).__name__.lower(), "ATS board fetch failed"))
@@ -208,17 +441,7 @@ def acquire_node(
                 f"every enabled acquisition source failed{detail}",
             )
 
-    unique: list[PostingRow] = []
-    seen: set[str] = set()
-    for row in rows:
-        normalized = normalize_url(row.normalized_url or row.url)
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        if normalized != row.normalized_url:
-            row = PostingRow(row.url, normalized, row.provider, row.board_token, row.company, row.title, row.location, row.published_at, row.content_sha256, row.source_kind, row.query_key)
-        unique.append(row)
-    rows = unique
+    rows = _merge_exa_and_ats_rows(rows)
     current = {row.normalized_url: _digest(row) for row in rows}
     resolved = _resolved(context, home_root, target)
     previous = _prior_observations(resolved.path, batch_id)
@@ -235,12 +458,27 @@ def acquire_node(
         else:
             outcome = RowOutcome.UNCHANGED
         results.append(PostingRowResult(row, outcome))
-        if input.selection_rule is SelectionRule.NEW_OR_EDITED_ROLE_MATCH and outcome in {RowOutcome.NEW, RowOutcome.EDITED} and _role_match(row, input.config.roles) and len(selected) < input.selection_cap:
+        # Selection = new/edited + role match + country ok + not visa-excluded,
+        # capped (U19/U12). A row that's new/edited and role-matched but fails
+        # country/visa stays fully visible in `results` above -- it's simply
+        # never added to `selected`, so it can't reach assess. The exact
+        # reason (location_mismatch/sponsorship_excluded) is re-derived by
+        # assess via the same pure `exclusion_reason` helper, not carried on
+        # this contract.
+        if (
+            input.selection_rule is SelectionRule.NEW_OR_EDITED_ROLE_MATCH
+            and outcome in {RowOutcome.NEW, RowOutcome.EDITED}
+            and _role_match(row, input.config.roles)
+            and exclusion_reason(row, input.config) is None
+            and len(selected) < input.selection_cap
+        ):
             selected.append(SelectedPosting(row.normalized_url, row.url, _digest(row), True))
 
     status = import_public_rows(resolved=resolved, batch_id=batch_id, rows=[_public_row(row) for row in rows] or [{
         "opportunity_id": "empty", "snapshot_id": digest_imported_bytes(b"empty")[:32], "source_kind": "agent_discovered", "title": "empty", "employer": "empty", "url": "https://example.invalid/empty", "acquisition_state": "excluded", "excluded_reason": "no_rows",
     }])
+    if recording_client is not None:
+        _write_raw_payloads(resolved, context.run_id, recording_client.captured)
     progress_files = sorted((resolved.path / "records" / "scout-acquisition" / batch_id / "progress").glob("*.json"))
     progress_ref = progress_files[-1].relative_to(resolved.path).as_posix() if progress_files else ""
     return AcquireOutput(

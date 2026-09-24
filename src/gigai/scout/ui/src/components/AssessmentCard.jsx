@@ -1,10 +1,13 @@
 import MatrixBadge from "./MatrixBadge.jsx";
+import SponsorshipBadge from "./SponsorshipBadge.jsx";
+import { displayCompanyName } from "../display.js";
 
 export default function AssessmentCard({ assessment, posting }) {
   return (
     <details className="assessment-card">
       <summary>
-        {posting ? `${posting.title} · ${posting.company}` : assessment.posting.normalized_url}
+        {posting ? `${posting.title} · ${displayCompanyName(posting.company)}` : assessment.posting.normalized_url}
+        <SponsorshipBadge sponsorship={assessment.sponsorship || (posting && posting.sponsorship)} />
       </summary>
 
       <table className="matrix-table">

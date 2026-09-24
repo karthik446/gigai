@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import uuid
 
 from .. import model_execution
@@ -25,6 +26,7 @@ from ..canonical import (
     parse_json_bytes,
     validate_entity_id,
 )
+from .find_jobs.contracts import FindJobsContractError
 from ..journal import (
     JournalArtifact,
     JournalConflictError,
@@ -128,34 +130,118 @@ def assess_node(
 
     root = Path(target) if isinstance(target, (Path, str)) and not isinstance(target, str) else Path(context.workpad_path)
     resume = _read_pinned_resume(home_root, root, context.gig_id, input.pinned_resume)
-    posting_packets = _read_pinned_postings(root, input.acquire_batch_ref, input.selected_postings)
-    postings = tuple(row for row, _text in posting_packets)
-    rows = tuple(PostingRowResult(posting, RowOutcome.NEW) for posting in postings)
+    acquire_rows = _read_acquire_rows(root, input.acquire_batch_ref)
     policy = assess_invocation_policy(model_target, input)
+    sealed_config = _read_sealed_config(root, context.run_id)
+    visa_sponsorship_required = bool(getattr(sealed_config, "visa_sponsorship_required", False))
+
+    # Candidate resolution mirrors acquire's own selection loop exactly
+    # (coordinator decision, P2 dispatch): a candidate is a new/edited,
+    # role-matched row. Every candidate that isn't selected gets a reason
+    # -- exclusion_reason() first (location_mismatch/sponsorship_excluded),
+    # then over_cap for an otherwise-eligible row acquire's cap left behind.
+    # Unchanged/duplicate/failed and role-mismatched rows are not
+    # candidates at all and never appear in candidate_rows.
+    from .find_jobs.filters import exclusion_reason
+    from .find_jobs.market_acquisition import _role_match
+
+    selected_by_url = {item.normalized_url: item for item in input.selected_postings}
+    roles = tuple(getattr(sealed_config, "roles", ())) if sealed_config is not None else ()
+    rows: list[object] = []
+    not_assessed: list[object] = []
+    to_assess: list[tuple[object, bytes | None]] = []
+    for posting, outcome in acquire_rows:
+        if outcome not in (RowOutcome.NEW, RowOutcome.EDITED):
+            continue
+        selected = selected_by_url.get(posting.normalized_url)
+        if selected is not None:
+            # Already-sealed selection authority (AssessInput validates
+            # every selected posting's role_match=True at construction) --
+            # never re-derive it here, so an assess call with no sealed
+            # config (older run dirs, most direct-call tests) still assesses
+            # every explicitly selected posting.
+            is_candidate = True
+        elif sealed_config is not None:
+            is_candidate = _role_match(posting, roles)
+        else:
+            # No sealed config and not selected: there is no config to
+            # derive role-match or exclusion from, so this row is simply
+            # not a candidate (matches the pre-existing behavior of only
+            # ever assessing the selected set when no run input is sealed).
+            is_candidate = False
+        if not is_candidate:
+            continue
+        rows.append(PostingRowResult(posting, outcome))
+        if selected is not None:
+            to_assess.append((posting, _posting_text_bytes(posting)))
+            continue
+        reason = exclusion_reason(posting, sealed_config) if sealed_config is not None else None
+        not_assessed.append(NotAssessedRow(posting, reason or NotAssessedReason.OVER_CAP))
+
     assessments = []
-    not_assessed = []
     revisions = []
     usage_values = []
+    attempted = 0
+    model_attempts = 0
     producer = Producer("scout.find_jobs.assess", "1", "scout-assess", ContractModelTarget(model_target), getattr(binding.port, "name", model_target))
     from ..workpad import resolve_workpad
     resolved = resolve_workpad(home_root=home_root, requested_target=root, gig_id=context.gig_id, allow_semantic_state=True)
-    selected_by_url = {item.normalized_url: item for item in input.selected_postings}
-    for posting, posting_text in posting_packets[: input.selection_cap]:
-        prompt = _assess_prompt(posting, resume, posting_text)
-        try:
-            request = binding.request(role="reviewer", prompt=prompt)
-            result = binding.port.invoke(request)
+    # B-1 owns parsing and persistence. Keep both imports lazy so the
+    # parallel packet can replace these exact seams in tests.
+    from .proposals import parse_assessment_proposal
+    from .proposal_records import save_assessment_revision
+
+    for posting, posting_text in to_assess[: input.selection_cap]:
+        if not posting_text:
+            # U25: an older acquire batch (or a row the acquirer genuinely
+            # could not fetch) has no captured posting text.  Guessing a
+            # requirements matrix from the title alone is worse than not
+            # assessing it, so this single posting is skipped and the rest
+            # of the batch continues (U22 per-posting isolation).
+            not_assessed.append(NotAssessedRow(posting, NotAssessedReason.FAILED))
+            continue
+        attempted += 1
+        validation_error: str | None = None
+        outcome_recorded = False
+        for attempt in range(2):
+            prompt = _assess_prompt(posting, resume, posting_text, visa_sponsorship_required, validation_error)
+            try:
+                request = binding.request(role="reviewer", prompt=prompt)
+                result = binding.port.invoke(request)
+                model_attempts += 1
+            except (ModelInvocationError, OSError, TimeoutError) as exc:
+                reason = NotAssessedReason.MODEL_DENIED if getattr(exc, "code", "") in {"network_denied", "model_denied", "credential_denied"} else NotAssessedReason.MODEL_UNAVAILABLE
+                not_assessed.append(NotAssessedRow(posting, reason))
+                outcome_recorded = True
+                break
+            except Exception as exc:
+                if getattr(exc, "code", "") in {"model_denied", "network_denied", "model_unavailable"}:
+                    not_assessed.append(NotAssessedRow(posting, NotAssessedReason.MODEL_DENIED if getattr(exc, "code", "") == "model_denied" else NotAssessedReason.MODEL_UNAVAILABLE))
+                    outcome_recorded = True
+                    break
+                raise
             raw = result.output_text
-            # B-1 owns parsing and persistence. Keep both imports lazy so the
-            # parallel packet can replace these exact seams in tests.
-            from .proposals import parse_assessment_proposal
-            from .proposal_records import save_assessment_revision
-            decoded = json.loads(raw) if isinstance(raw, str) else raw
-            if not isinstance(decoded, Mapping):
-                raise ValueError("assessment output is not an object")
-            decoded = {**dict(decoded), "posting": posting.to_json(), "proposal_revision_ref": None}
-            parsed = parse_assessment_proposal(decoded)
-            selected_posting = selected_by_url[posting.normalized_url]
+            try:
+                decoded = _extract_json_object(raw)
+                normalized = _normalize_assessment_payload(decoded)
+                # The frozen assessment_result.posting field is the narrower
+                # SelectedPosting DTO, not the full PostingRow the model was
+                # shown; use the sealed selected-posting identity so parsing
+                # never fails on PostingRow's extra keys (provider,
+                # board_token, text, ...).
+                selected_posting = selected_by_url[posting.normalized_url]
+                normalized = {**normalized, "posting": selected_posting.to_json(), "proposal_revision_ref": None}
+                parsed = parse_assessment_proposal(normalized)
+            except (FindJobsContractError, ValueError, TypeError) as exc:
+                if attempt == 0:
+                    # U22: one retry, with the validation error fed back so
+                    # the model can correct its own shape, before giving up
+                    # on this single posting.
+                    validation_error = str(exc)
+                    continue
+                not_assessed.append(NotAssessedRow(posting, NotAssessedReason.MODEL_OUTPUT_INVALID))
+                outcome_recorded = True
+                break
             saved = save_assessment_revision(
                 home_root=home_root,
                 target=resolved,
@@ -169,20 +255,229 @@ def assess_node(
             if revision_ref:
                 revisions.append(revision_ref)
             usage_values.append(result.normalized_usage)
-        except (ModelInvocationError, OSError, TimeoutError) as exc:
-            reason = NotAssessedReason.MODEL_DENIED if getattr(exc, "code", "") in {"network_denied", "model_denied", "credential_denied"} else NotAssessedReason.MODEL_UNAVAILABLE
-            not_assessed.append(NotAssessedRow(posting, reason))
-        except Exception as exc:
-            if getattr(exc, "code", "") in {"model_denied", "network_denied", "model_unavailable"}:
-                not_assessed.append(NotAssessedRow(posting, NotAssessedReason.MODEL_DENIED if getattr(exc, "code", "") == "model_denied" else NotAssessedReason.MODEL_UNAVAILABLE))
-            else:
-                raise
+            outcome_recorded = True
+            break
+        if not outcome_recorded:
+            # Defensive: every branch above either records an outcome or
+            # raises. Reached only if the loop body changes; fail closed
+            # per posting rather than silently dropping it from the
+            # candidate/assessed partition invariant.
+            not_assessed.append(NotAssessedRow(posting, NotAssessedReason.MODEL_OUTPUT_INVALID))
+
+    if attempted and model_attempts and not assessments:
+        # Every posting that had text and reached the model failed there.
+        # A single bad model answer must not silently drop the whole batch
+        # (U22); but if literally everything failed at the model, that is a
+        # real node-level failure the caller (and U21's failure receipt)
+        # must see, not a quiet empty result.
+        raise ScoutProposalExecutionError(
+            "assess_all_postings_failed",
+            "every selected posting failed at the model boundary",
+        )
+
     usage = _usage_block(usage_values, UsageBlock)
-    return AssessOutput(tuple(input.selected_postings), input.pinned_resume, input.target, input.selection_cap, SelectionRule.NEW_OR_EDITED_ROLE_MATCH, rows, tuple(assessments), tuple(not_assessed), tuple(revisions), ContractModelTarget(model_target), producer, usage, ())
+    return AssessOutput(tuple(input.selected_postings), input.pinned_resume, input.target, input.selection_cap, SelectionRule.NEW_OR_EDITED_ROLE_MATCH, tuple(rows), tuple(assessments), tuple(not_assessed), tuple(revisions), ContractModelTarget(model_target), producer, usage, ())
 
 
-def _assess_prompt(posting: object, resume: bytes, posting_text: bytes) -> str:
-    return "Return JSON only with keys matrix (requirement,resume_evidence,status met|partial|gap), suggestions (strings), questions (strings). Assess this posting against the pinned resume.\nPOSTING METADATA:\n" + json.dumps(posting.to_json(), sort_keys=True) + "\nPOSTING TEXT:\n" + posting_text.decode("utf-8") + "\nRESUME:\n" + resume.decode("utf-8")
+_MAX_PROMPT_POSTING_TEXT = 12_000
+_MAX_PROMPT_RESUME_TEXT = 12_000
+_MAX_PROMPT_VALIDATION_ERROR = 300
+
+
+def _assess_prompt(
+    posting: object,
+    resume: bytes,
+    posting_text: bytes,
+    visa_sponsorship_required: bool,
+    validation_error: str | None = None,
+) -> str:
+    """Build the real find-jobs assessment prompt (U25).
+
+    Includes the role/title/company/location, the bounded posting text, the
+    resume text, the candidate's sponsorship constraint, and a precise JSON
+    schema with a short worked example so the model returns a shape that
+    parses on the first try.  On a retry (U22), the prior validation error is
+    fed back so the model can correct its own output.
+    """
+    posting_json = posting.to_json()
+    title = posting_json.get("title", "")
+    company = posting_json.get("company", "")
+    location = posting_json.get("location", "") or "unspecified"
+    bounded_posting_text = posting_text.decode("utf-8", errors="replace")[:_MAX_PROMPT_POSTING_TEXT]
+    bounded_resume_text = resume.decode("utf-8", errors="replace")[:_MAX_PROMPT_RESUME_TEXT]
+    visa_line = "yes" if visa_sponsorship_required else "no"
+    schema = (
+        "Return JSON only (no prose, no markdown fences) matching exactly this shape:\n"
+        '{"matrix": [{"requirement": "<one concrete requirement drawn from the posting>", '
+        '"resume_evidence": ["<short quote or paraphrase from the resume>"], '
+        '"status": "met|partial|gap"}], '
+        '"suggestions": ["<short actionable suggestion>"], '
+        '"questions": ["<short clarifying question, if any>"], '
+        '"sponsorship": "offered|not_offered|unknown"}\n'
+        "Example:\n"
+        '{"matrix": [{"requirement": "5+ years backend Python", "resume_evidence": '
+        '["Built and operated Python services for 6 years"], "status": "met"}, '
+        '{"requirement": "Kubernetes production experience", "resume_evidence": [], "status": "gap"}], '
+        '"suggestions": ["Call out the on-call rotation experience explicitly."], '
+        '"questions": ["Is the Kubernetes requirement negotiable?"], "sponsorship": "unknown"}\n'
+        "Derive 5 to 12 concrete requirements FROM THE POSTING TEXT below (skills, years of "
+        "experience, clearance, location/remote terms, tooling) — do not invent generic "
+        "requirements not stated or clearly implied by the posting."
+    )
+    parts = [
+        "You are assessing one real job posting against one candidate's resume for GigAI Scout.",
+        schema,
+        f"ROLE: {title}\nCOMPANY: {company}\nLOCATION: {location}",
+        f"CANDIDATE CONSTRAINT: visa sponsorship required = {visa_line}. "
+        "Read the posting text for its own sponsorship stance and report it "
+        'as "sponsorship": "offered", "not_offered", or "unknown".',
+        "POSTING TEXT (may be truncated):\n" + bounded_posting_text,
+        "RESUME (may be truncated):\n" + bounded_resume_text,
+    ]
+    if validation_error:
+        bounded_error = validation_error[:_MAX_PROMPT_VALIDATION_ERROR]
+        parts.append(
+            "Your previous answer did not match the required JSON shape: "
+            + bounded_error
+            + ". Return corrected JSON only, matching the schema exactly."
+        )
+    return "\n\n".join(parts)
+
+
+def _extract_json_object(raw: object) -> Mapping[str, object]:
+    """Extract one JSON object from model output that may be fenced/prose-wrapped.
+
+    Tolerant boundary parsing (U22), applied before normalization and before
+    strict contract validation: models sometimes wrap JSON in ``` fences or
+    prepend/append prose. This never relaxes the frozen contract itself —
+    ``parse_assessment_proposal`` still validates strictly after normalization.
+    """
+    if isinstance(raw, Mapping):
+        return raw
+    if not isinstance(raw, str):
+        raise ValueError("assessment output is not text or an object")
+    text = raw.strip()
+    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        decoded = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError("assessment output contains no JSON object") from None
+        decoded = json.loads(text[start : end + 1])
+    if not isinstance(decoded, Mapping):
+        raise ValueError("assessment output is not a JSON object")
+    return decoded
+
+
+_STATUS_SYNONYMS = {
+    "met": "met",
+    "meets": "met",
+    "meet": "met",
+    "yes": "met",
+    "full": "met",
+    "partial": "partial",
+    "partially": "partial",
+    "partly": "partial",
+    "some": "partial",
+    "gap": "gap",
+    "missing": "gap",
+    "no": "gap",
+    "none": "gap",
+    "not_met": "gap",
+    "not met": "gap",
+}
+
+_SPONSORSHIP_SYNONYMS = {
+    "offered": "offered",
+    "offer": "offered",
+    "yes": "offered",
+    "available": "offered",
+    "not_offered": "not_offered",
+    "not offered": "not_offered",
+    "no": "not_offered",
+    "unavailable": "not_offered",
+    "unknown": "unknown",
+    "unclear": "unknown",
+    "n/a": "unknown",
+    "na": "unknown",
+}
+
+
+def _normalize_string_list(value: object) -> list[object]:
+    """A single string coerces to a one-item list; ``null``/missing to ``[]``."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return list(value)
+    return [value]
+
+
+def _normalize_status(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    key = value.strip().lower()
+    return _STATUS_SYNONYMS.get(key, value)
+
+
+def _normalize_sponsorship(value: object) -> object:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return value
+    key = value.strip().lower()
+    return _SPONSORSHIP_SYNONYMS.get(key, value)
+
+
+def _normalize_assessment_payload(decoded: Mapping[str, object]) -> dict[str, object]:
+    """Tolerant normalization at the model boundary, BEFORE strict validation (U22).
+
+    - extracts already happened in ``_extract_json_object``
+    - ``resume_evidence`` as a bare string becomes ``[string]``; ``null``/missing becomes ``[]``
+    - matrix ``status`` synonyms (yes/partially/no, meets/partial/missing, any case) map to met/partial/gap
+    - ``suggestions``/``questions`` as a bare string become ``[string]``; ``null``/missing become ``[]``
+    - unknown top-level keys are dropped so the frozen contract's closed-object check still applies cleanly
+    - ``sponsorship`` synonyms map to offered/not_offered/unknown; absent stays absent
+
+    This never loosens the frozen contract itself: ``parse_assessment_proposal``
+    still runs strict validation immediately after this step.
+    """
+    matrix = decoded.get("matrix")
+    normalized_matrix: list[object] = []
+    if isinstance(matrix, list):
+        for row in matrix:
+            if not isinstance(row, Mapping):
+                normalized_matrix.append(row)
+                continue
+            normalized_row: dict[str, object] = {
+                "requirement": row.get("requirement"),
+                "resume_evidence": [
+                    item for item in _normalize_string_list(row.get("resume_evidence")) if isinstance(item, str)
+                ],
+                "status": _normalize_status(row.get("status")),
+            }
+            normalized_matrix.append(normalized_row)
+    else:
+        normalized_matrix = matrix
+
+    result: dict[str, object] = {
+        "matrix": normalized_matrix,
+        "suggestions": [item for item in _normalize_string_list(decoded.get("suggestions")) if isinstance(item, str)],
+        "questions": [item for item in _normalize_string_list(decoded.get("questions")) if isinstance(item, str)],
+    }
+    if "sponsorship" in decoded:
+        sponsorship = _normalize_sponsorship(decoded.get("sponsorship"))
+        if sponsorship is not None:
+            result["sponsorship"] = sponsorship
+    # Drop any other unknown keys (e.g. a model echoing "posting" back, or
+    # inventing extra fields): the frozen contract is a closed object, and
+    # normalization's job is to fix shape, not to smuggle new keys through.
+    return result
 
 
 def assess_invocation_policy(model_target: str, input: object) -> InvocationPolicy:
@@ -213,24 +508,63 @@ def _read_pinned_resume(home_root: Path, root: Path, gig_id: str, pinned: object
     return content
 
 
-def _read_pinned_postings(root: Path, batch_ref: str, selected: tuple[object, ...]) -> tuple[tuple[object, bytes], ...]:
+def _read_sealed_config(root: Path, run_id: str) -> object | None:
+    """Read the sealed ``FindJobsConfig`` for this run, or ``None`` if unavailable.
+
+    Per orchestrator decision (coordinator ask, P2 dispatch): the sealed
+    ``FindJobsRunInput`` under ``runs/<run_id>/sealed/find-jobs-run-input.json``
+    is the authoritative per-run config; ``AssessInput`` itself carries no
+    config field and stays untouched.  Older run dirs, and callers that never
+    seal a find-jobs run input (most existing tests), get ``None`` back
+    rather than failing the node -- callers treat that as "no constraint"
+    (visa not required, no country filter).
+    """
+    from .find_jobs.contracts import FindJobsRunInput
+
+    path = root / "runs" / run_id / "sealed" / "find-jobs-run-input.json"
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        run_input = FindJobsRunInput.from_json(payload)
+    except (OSError, ValueError, TypeError):
+        return None
+    return run_input.config
+
+
+def _read_acquire_rows(root: Path, batch_ref: str) -> tuple[tuple[object, object], ...]:
+    """Return every acquired ``(PostingRow, RowOutcome)`` pair, in acquire's own order.
+
+    Assess needs the *full* acquire batch, not just the selected postings, so
+    it can classify every role-matched new/edited row -- selected or not --
+    with the same ``exclusion_reason``/over-cap accounting acquire itself
+    used (coordinator decision, P2 dispatch).
+    """
+    from .find_jobs.contracts import PostingRow, RowOutcome
+
     path = root / batch_ref
     value = json.loads(path.read_text(encoding="utf-8"))
     rows = value.get("rows", value.get("selected_postings", ())) if isinstance(value, Mapping) else ()
-    by_url = {item.get("posting", item).get("normalized_url"): item.get("posting", item) for item in rows if isinstance(item, Mapping)}
     result = []
-    from .find_jobs.contracts import PostingRow
-    for item in selected:
-        row = by_url.get(item.normalized_url)
-        if not isinstance(row, Mapping):
-            raise ScoutProposalExecutionError("acquisition_input_unavailable", "pinned posting is unavailable")
-        content = row.get("text", row.get("content", row.get("description", "")))
-        if isinstance(content, Mapping):
-            content = content.get("text", content.get("content", ""))
-        if not isinstance(content, str):
-            raise ScoutProposalExecutionError("acquisition_input_unavailable", "pinned posting text is unavailable")
-        result.append((PostingRow.from_json(row), content.encode("utf-8")))
+    for item in rows:
+        if not isinstance(item, Mapping):
+            continue
+        posting_json = item.get("posting", item)
+        if not isinstance(posting_json, Mapping):
+            continue
+        outcome_value = item.get("outcome") if isinstance(item, Mapping) and "outcome" in item else "new"
+        try:
+            outcome = RowOutcome(outcome_value) if isinstance(outcome_value, str) else RowOutcome.NEW
+        except ValueError:
+            outcome = RowOutcome.NEW
+        result.append((PostingRow.from_json(posting_json), outcome))
     return tuple(result)
+
+
+def _posting_text_bytes(posting: object) -> bytes | None:
+    """C0's ``PostingRow.text`` snapshot as bytes, or ``None`` when unavailable (U25)."""
+    text = getattr(posting, "text", None)
+    return text.encode("utf-8") if text else None
 
 
 def _revision_ref(value: object) -> str | None:

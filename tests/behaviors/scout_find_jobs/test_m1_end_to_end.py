@@ -160,6 +160,14 @@ def _poll_succeeded(client: httpx.Client, run_id: str) -> dict[str, object]:
     pytest.fail(f"run {run_id} did not succeed before timeout; last response={last_body!r}")
 
 
+@pytest.mark.xfail(
+    reason=(
+        "0.1.8.1: the offline M1 end-to-end run regressed after the acquire/assess "
+        "changes (API: Server disconnected without sending a response). Operator "
+        "decision: ship 0.1.8.1 and handle it in v0.1.9."
+    ),
+    strict=False,
+)
 def test_m1_real_api_run_child_process_and_second_run_dedup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

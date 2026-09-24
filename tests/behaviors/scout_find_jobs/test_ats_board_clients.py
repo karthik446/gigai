@@ -6,6 +6,7 @@ import pytest
 from gigai.scout.find_jobs.ats_board_clients import (
     ATSBoardClientError,
     ATSBoardClients,
+    html_to_text,
     list_ashby_board,
     list_greenhouse_board,
     list_lever_board,
@@ -16,6 +17,7 @@ from gigai.scout.find_jobs.contracts import (
     FindJobsConfig,
     SourceKind,
     SourceToggles,
+    SponsorshipStatus,
     content_hash,
     normalize_url,
     parse_board_url,
@@ -35,6 +37,39 @@ def _config(roles: tuple[str, ...] = ("software engineer",)) -> FindJobsConfig:
 
 def _client(handler) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+# --- html_to_text (U25) -------------------------------------------------
+
+
+def test_html_to_text_strips_tags_and_keeps_line_breaks() -> None:
+    html = "<div><p>Intro paragraph.</p><ul><li>Item one</li><li>Item two</li></ul></div>"
+    assert html_to_text(html) == "Intro paragraph.\nItem one\nItem two"
+
+
+def test_html_to_text_decodes_entities() -> None:
+    assert html_to_text("<p>Q&amp;A and R&amp;D</p>") == "Q&A and R&D"
+
+
+def test_html_to_text_drops_script_and_style_bodies() -> None:
+    html = "<p>Visible</p><script>var x = 'secret';</script><style>.a{color:red}</style><p>Also visible</p>"
+    assert html_to_text(html) == "Visible\nAlso visible"
+
+
+def test_html_to_text_passes_through_plain_text_unchanged() -> None:
+    assert html_to_text("Already plain text, no markup here.") == "Already plain text, no markup here."
+
+
+def test_html_to_text_handles_none_and_empty() -> None:
+    assert html_to_text(None) == ""
+    assert html_to_text("") == ""
+
+
+def test_html_to_text_tolerates_malformed_markup() -> None:
+    html = "<p>Unclosed paragraph <b>bold text"
+    # Never raises; degrades to the best-effort extracted text.
+    assert "Unclosed paragraph" in html_to_text(html)
+    assert "bold text" in html_to_text(html)
 
 
 # --- matches_roles -----------------------------------------------------
@@ -112,7 +147,11 @@ def test_greenhouse_url_and_mapping() -> None:
     assert row.location == "Denver, CO"
     assert row.published_at == "2026-09-20T00:00:00Z"
     assert row.source_kind is SourceKind.ATS
-    assert row.content_sha256 == content_hash("Software Engineer\n<p>Build things.</p>".encode("utf-8"))
+    # U25: the stored text is HTML converted to plain text, and the digest
+    # hashes that plain text (not the raw HTML markup).
+    assert row.text == "Build things."
+    assert row.content_sha256 == content_hash("Software Engineer\nBuild things.".encode("utf-8"))
+    assert row.sponsorship is SponsorshipStatus.UNKNOWN
 
 
 def test_greenhouse_both_hostnames_parse_via_contracts() -> None:
@@ -166,6 +205,30 @@ def test_greenhouse_unexpected_shape_is_redacted() -> None:
     assert exc_info.value.code == "bad_json"
 
 
+def test_greenhouse_sponsorship_derived_from_text() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "jobs": [
+                    {
+                        "id": 201,
+                        "title": "Software Engineer",
+                        "absolute_url": "https://boards.greenhouse.io/acme/jobs/201",
+                        "location": {"name": "Denver, CO"},
+                        "updated_at": "2026-09-20T00:00:00Z",
+                        "content": "<p>We are unable to sponsor work visas for this role.</p>",
+                    }
+                ]
+            },
+        )
+
+    with _client(handler) as client:
+        rows = list_greenhouse_board(client, "acme", _config())
+
+    assert rows[0].sponsorship is SponsorshipStatus.NOT_OFFERED
+
+
 # --- Lever -----------------------------------------------------------------
 
 
@@ -209,7 +272,62 @@ def test_lever_url_and_mapping() -> None:
     assert row.normalized_url == normalize_url(row.url)
     assert row.location == "Remote"
     assert row.published_at == "2025-09-20T00:00:00Z"
+    assert row.text == "Own the pipeline."
     assert row.content_sha256 == content_hash("Data Engineer\nOwn the pipeline.".encode("utf-8"))
+
+
+def test_lever_lists_are_appended_to_text() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "abc",
+                    "text": "Data Engineer",
+                    "hostedUrl": "https://jobs.lever.co/bright/202",
+                    "categories": {"location": "Remote"},
+                    "createdAt": 1758326400000,
+                    "descriptionPlain": "Own the pipeline.",
+                    "lists": [
+                        {"text": "Requirements", "content": "<ul><li>5+ years</li><li>Python</li></ul>"},
+                        {"text": "Benefits", "content": "<p>Visa sponsorship available.</p>"},
+                    ],
+                }
+            ],
+        )
+
+    with _client(handler) as client:
+        rows = list_lever_board(client, "bright", _config(("data engineer",)))
+
+    row = rows[0]
+    assert row.text is not None
+    assert "Own the pipeline." in row.text
+    assert "Requirements" in row.text
+    assert "5+ years" in row.text
+    assert "Benefits" in row.text
+    assert row.sponsorship is SponsorshipStatus.OFFERED
+
+
+def test_lever_missing_lists_is_fine() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "abc",
+                    "text": "Data Engineer",
+                    "hostedUrl": "https://jobs.lever.co/bright/202",
+                    "categories": {"location": "Remote"},
+                    "createdAt": 1758326400000,
+                    "descriptionPlain": "Own the pipeline.",
+                }
+            ],
+        )
+
+    with _client(handler) as client:
+        rows = list_lever_board(client, "bright", _config(("data engineer",)))
+
+    assert rows[0].text == "Own the pipeline."
 
 
 def test_lever_url_parses_via_contracts() -> None:
@@ -295,7 +413,32 @@ def test_ashby_url_and_mapping() -> None:
     assert row.normalized_url == normalize_url(row.url)
     assert row.location == "Remote"
     assert row.published_at == "2026-09-18T12:00:00Z"
+    assert row.text == "Build the platform."
     assert row.content_sha256 == content_hash("Platform Engineer\nBuild the platform.".encode("utf-8"))
+
+
+def test_ashby_sponsorship_derived_from_text() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "jobs": [
+                    {
+                        "id": "j3",
+                        "title": "Platform Engineer",
+                        "location": "Remote",
+                        "jobUrl": "https://jobs.ashbyhq.com/orbit/305",
+                        "publishedAt": "2026-09-18T12:00:00Z",
+                        "descriptionPlain": "You must be authorized to work without sponsorship.",
+                    }
+                ]
+            },
+        )
+
+    with _client(handler) as client:
+        rows = list_ashby_board(client, "orbit", _config(("platform engineer",)))
+
+    assert rows[0].sponsorship is SponsorshipStatus.NOT_OFFERED
 
 
 def test_ashby_url_parses_via_contracts() -> None:
