@@ -1,0 +1,4 @@
+TARGET (v020-roadmap-workbench-r2): one factual fix in docs/development/v0.2.0/roadmaps/v0.2.0-gig-workbench-roadmap.md. Wave 1 is committed and pushed to draft PR #37 (https://github.com/karthik446/gigai/pull/37), NOT merged. Replace every "done and merged" (grep -n merged) with "done, in draft PR #37 (not merged)" or equivalent. Add a one-line r2 Change log entry.
+OWNED FILES: the roadmap file; .orchestrator/workers/v020-roadmap-workbench.md (append one r2 line).
+ACCEPTANCE: grep -n merged shows no claim that wave 1 is merged.
+EXCLUSIONS: docs only; no git add/commit/stash/reset/clean. Then worker_done.

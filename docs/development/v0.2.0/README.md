@@ -83,6 +83,15 @@ core for cleanup ranked by risk, and describes what "library packaging"
 (typed surface, gig-author docs, an example gig, distribution, compatibility
 testing) requires.
 
+## Roadmap (proposed, not accepted)
+
+[`v0.2.0-gig-workbench-roadmap.md`](roadmaps/v0.2.0-gig-workbench-roadmap.md)
+is a **proposed, not accepted** sequencing for v0.2.0 as a personal gig
+workbench (operator decisions D-A..D-G, 2026-09-23), covering Workstreams
+0-7 plus a slimmer S20. It sequences S16/S17/S19/S20/S21; it does not
+replace their research, and nothing in it is authorized for implementation
+or for pulling into v0.1.9 without a separate operator decision.
+
 ## Open questions
 
 S20 collects the specific decisions this research surfaces (what "private"
@@ -97,8 +106,9 @@ to where they're asked.
 
 ## Non-claims
 
-- No v0.2.0 roadmap, release scope, or implementation is authorized by this
-  directory or any document inside it.
+- No v0.2.0 release scope or implementation is authorized by this
+  directory or any document inside it. A roadmap document exists
+  (linked above) but is explicitly proposed, not accepted.
 - No code, schema, or test changes were made while writing these documents.
 - This is not a blocker for v0.1.8; v0.1.8's roadmap and release work
   continue independently of anything recorded here.
