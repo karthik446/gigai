@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-23 22:18 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-23 22:27 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -18,10 +18,10 @@ _Updated 2026-09-23 22:18 MDT by Claude (coordinator of `run_7cba834cb817`, work
 ## In progress
 | Packet | Model | State | Task / dispatch | Next |
 | --- | --- | --- | --- | --- |
-| acquire-country-filter: B1 filter at acquire + country fix (Lever/Ashby structured, pycountry, region tokens), B3 sponsorship, B5 all-sources-failed | Sonnet 5 | running | `task_461018bb4fcc` / `ctx_28f685c01dc4` | verify → commit → wire selection.py + B4 |
-| exa-agent-spike r1 (S23): fix the 35x wording; replicate the winning cell ×3 incl. a 'week 2' exclusion (≤ $0.15) | Sonnet 5 | running | `task_c66feb7acb03` / `ctx_81f9e22bb467` | coordinator review → operator reviews S23 → stage 2 |
-| readme-scout-run (D part 1): README one-command flow, every step executed in a temp home | Sonnet 5 | running | `task_c4fa47e9e841` / `ctx_911c65e8b2cb` | verify → commit |
-| wire selection.py into acquire; B4 progressive cards; D part 2 installed-wheel acceptance | — | queued | | after acquire |
+| wire-selection: selection.py into acquire's loop (B2 end to end); labels DUPLICATE / OVER_CAP | Sonnet 5 | running | `task_cc839c5c7de9` / `ctx_33834e93d751` | verify → commit → B4 |
+| B4 progressive per-posting cards (UI + API progress + incremental outputs) | — | queued | | after wire-selection |
+| D part 2: installed-wheel acceptance of `gigai scout run` + README config fields (countries, visa) | — | queued | | after B4 |
+| S23 stage 2 (setup interview + Discover companies) | — | waiting on operator review of S23 | | |
 
 ## Next up
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
@@ -33,6 +33,7 @@ _Updated 2026-09-23 22:18 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - **secrets-core committed** `a915c24`: `gigai secrets add/list/rm`, env → ~/.gigai/.env resolver (python-dotenv, interpolation off, 0600 under umask 077). Coordinator reproduced + re-verified the 2 r0 bugs.
 - **README uv-only** `f1fb6c6` (+ API command via `uv tool run --from gigai`, verified on 0.1.8.1).
 - **Country-data research** accepted (`.orchestrator/research/country-data.md`): Lever/Ashby structured country fields unread; pycountry fallback. Implementation waits on the operator.
+- **acquire-country-filter** `80a2e98` (B1/B3/B5 + structured countries + pycountry + region-only → no match). **README one-command flow** `50a8d64`. **S23 spike** `998f6cc` (\$0.834 spent; low/strict/board-URL query; not deterministic; blended \$0.0125/usable board).
 - **scout-run-supervisor (C)** `65ce7b4`: `gigai scout run/stop/status` (coordinator real cycle in a temp home). **selection-diversity-u2** `0bf97c0`: selection.py (not yet wired) + U2. **v0.1.8.1 released** (PyPI + GitHub Release; post-release matrix all pass except macOS 3.12, which was cancelled; CI ignored per the operator).
 - **scout-setup-cmds (B)** `b0eea58`: `gig use`, `scout install`, `scout resume add` (coordinator CLI end-to-end, non-git target). **exa-query-errors** `5fec35d`.
 - **secrets-exa** `9e66428` (Workstream 0 P0-P3 done). **scout-ui-package (A)** `f4d0fb1`: UI in the wheel, served by the API; PR CI freshness job.
@@ -50,6 +51,7 @@ _Updated 2026-09-23 22:18 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - None started by this Run.
 
 ## Blocked on operator
+- Review S23 (`docs/development/v0.1.9/spikes/S23-scout-setup-interview-exa-agent.md`) before stage 2 starts.
 - After the roadmap draft: pull Workstream 0 (connect secrets: `gigai secrets add`, .env fallback, Exa through the resolver) into 0.1.9?
 - Post-release CI failures (Debian offline, macOS 3.12): operator said ignore for now.
 - Release checklist change: GitHub Release notes = the CHANGELOG `### X.Y.Z` section verbatim. Write 0.1.9's section for users before tagging.
