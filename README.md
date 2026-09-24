@@ -33,7 +33,7 @@ special runtime treatment.
 Requires Python 3.11+.
 
 ```bash
-pip install gigai        # or: uv tool install gigai
+uv tool install gigai
 gigai --version
 gigai --help
 ```
@@ -200,11 +200,10 @@ unaffected.
 
 ### Start the API
 
-Works from an installed package (`pip install gigai` / `uv tool install
-gigai`) — no source checkout needed:
+Works from an installed package (`uv tool install gigai`) — no source checkout needed:
 
 ```bash
-python -m gigai.scout.find_jobs.present_api --home ~/.gigai --target /path/to/target/repo
+uv tool run --from gigai python -m gigai.scout.find_jobs.present_api --home ~/.gigai --target /path/to/target/repo
 ```
 
 Loopback-only HTTP server (it refuses any non-loopback peer) that the Scout
