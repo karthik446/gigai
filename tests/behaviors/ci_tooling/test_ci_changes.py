@@ -30,7 +30,7 @@ PULL_REQUEST_WORKFLOW_USES = "./.github/workflows/pull_request.yaml"
         "README.md",
         "docs/README.markdown",
         "notes.txt",
-        "docs/development/evidence/phase-1/G01/terminal-handoff.md",
+        "docs/README.md",
         "docs/anything/at/any/depth.py",  # docs/** is non-code even for .py
         ".orchestrator/workers/ci-docs-skip.md",
         ".orchestrator/runs/v0.1.8/workers/ci-speed.md",

@@ -4,11 +4,11 @@ Research-only. No product code. Compares four company-discovery approaches
 on the same task S23 used (Exa Agent), after the operator judged S23's
 `low`-effort Exa Agent result too unreliable to build on alone (identical
 inputs returned 6 companies once, 0 the next time; 1 run in 4 found nothing
-usable -- see
-[S23's Repeatability section](../../docs/development/v0.1.9/spikes/S23-scout-setup-interview-exa-agent.md)).
+usable -- see S23's Repeatability section, kept in the maintainers' local
+orchestrator docs).
 
-Deliverable doc:
-[`docs/development/v0.1.9/spikes/S24-company-discovery-bakeoff.md`](../../docs/development/v0.1.9/spikes/S24-company-discovery-bakeoff.md).
+Deliverable doc: S24-company-discovery-bakeoff.md (kept in the maintainers'
+local orchestrator docs).
 
 ## Candidates
 

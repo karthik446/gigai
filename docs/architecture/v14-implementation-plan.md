@@ -16,11 +16,14 @@ This is the authoritative implementation-plan draft for GigAI. It replaces
 revision 12's engineering-workflow framing while retaining the provider,
 runtime-hardening, source-snapshot, and `check`/`doctor` evidence in:
 
-- `docs/research/phase-0-spikes.md`;
-- `docs/research/runtime-contract-hardening.md`;
-- `docs/research/check-doctor-command-spike.md`;
-- `docs/research/phase-0-contract-closure.md`;
+- `phase-0-spikes.md`;
+- `runtime-contract-hardening.md`;
+- `check-doctor-command-spike.md`;
+- `phase-0-contract-closure.md`;
 - `research/phase0_spike/`.
+
+(The four research docs above are kept in the maintainers' local
+orchestrator docs, not in this repo.)
 
 Revision 14 retains revision 13's private workpad, `RunDetails`, provider, and
 local-only contracts and corrects the execution model:
@@ -1959,9 +1962,9 @@ Completed in this draft before moving to the new repository:
 6. prove the contracts with golden hash vectors, valid and invalid schema
    cases, semantic graph checks, and an eight-process journal race.
 
-Evidence: `docs/research/phase-0-contract-closure.md`,
-`src/gigai/schemas/`, and `research/contract_spike/` (14 tests passing on the
-recorded baseline).
+Evidence: `phase-0-contract-closure.md` (kept in the maintainers' local
+orchestrator docs), `src/gigai/schemas/`, and `research/contract_spike/`
+(14 tests passing on the recorded baseline).
 
 Exit gate: satisfied for the document package. The plan and command sheet have
 no revision-12 Gig-as-Python, home-state-authority, overloaded-`plan`, bare
@@ -2598,15 +2601,19 @@ never auto-delete. Add retention only with a recoverable, audited caller.
 
 ### Binding GigAI records
 
-- `docs/research/phase-0-spikes.md` - executable Phase 0 evidence and
+- `phase-0-spikes.md` - executable Phase 0 evidence and
   decisions
-- `docs/research/runtime-contract-hardening.md` - safety, snapshot,
+- `runtime-contract-hardening.md` - safety, snapshot,
   lifecycle, planning, evidence, and public-contract research
-- `docs/research/check-doctor-command-spike.md` - CLI validation and
+- `check-doctor-command-spike.md` - CLI validation and
   diagnostic-command research
-- `docs/research/phase-0-contract-closure.md` - canonical bytes,
+- `phase-0-contract-closure.md` - canonical bytes,
   identifiers, schemas, command resolution, wait behavior, and interprocess
   journal-ordering decisions
+
+(The four research docs above are kept in the maintainers' local
+orchestrator docs, not in this repo.)
+
 - `src/gigai/schemas/` - binding Draft 2020-12 serialized contracts and canonical
   encoding profile
 - `research/phase0_spike/` - local feasibility code and fixtures

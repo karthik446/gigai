@@ -10,7 +10,7 @@ from gigai.question_generation import generate_model_questions
 from gigai.setup import build_config, run_setup
 
 
-CORPUS_PATH = Path(__file__).parents[3] / "docs/development/evidence/phase-3/S22-01/evaluation-corpus.json"
+CORPUS_PATH = Path(__file__).parents[2] / "fixtures/scout_assessment/s22-evaluation-corpus.json"
 SHA = "sha256:" + "1" * 64
 REQUESTS = {
     "repository-feature": "Review a repository feature proposal against selected local source files.",

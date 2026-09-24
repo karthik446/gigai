@@ -36,3 +36,8 @@ dist/
 # input, never committed -- only a small derived sample under
 # research/discovery_bakeoff/h1b_sample/ is tracked.
 research/discovery_bakeoff/h1b_scratch/
+
+# Local scratch reports (evaluation harnesses, verification tiers): dev docs
+# now live outside the repo in the orchestrator's own local git repo, so
+# these generated reports are never committed here.
+/.local-reports/

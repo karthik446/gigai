@@ -20,7 +20,8 @@ test: test-source test-behavior test-wheel
 # at 719 tests / ~6.6s wall on the 14-CPU reference host with -n 0; xdist
 # start-up cost exceeded its benefit at this lane's size, so it runs
 # unparallelized. Does not replace `make test`; see
-# docs/development/v0.1.9/spikes/S19-test-suite-diet.md's revision note.
+# S19-test-suite-diet spike's revision note (kept in the maintainers' local
+# orchestrator docs).
 unit-tests:
 	$(UV) run --locked --extra test pytest -m fast_unit -q --durations=25 -n 0
 

@@ -5,8 +5,8 @@ Research-only. No product code. See the operator-approved brief at
 dispatched task at `.orchestrator/workers/specs/exa-agent-spike.txt` for the
 full instructions this directory answers.
 
-Deliverable doc:
-[`docs/development/v0.1.9/spikes/S23-scout-setup-interview-exa-agent.md`](../../docs/development/v0.1.9/spikes/S23-scout-setup-interview-exa-agent.md).
+Deliverable doc: S23-scout-setup-interview-exa-agent.md (kept in the
+maintainers' local orchestrator docs).
 
 ## Layout
 
