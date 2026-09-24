@@ -241,8 +241,14 @@ stale.
 uv sync --locked --extra test
 make test              # source + behavior + wheel-resource suites
 make test-source       # source, unit, integration, and CLI tests only
+make api-e2e           # Scout's HTTP API end to end, against a real server
 uv run --locked pytest tests/behaviors/scout_find_jobs -q   # a focused slice
 ```
+
+`make api-e2e` drives the Scout find-jobs API only through HTTP, against the
+real supervised server, a temp home, and a real managed workpad; only the
+network edges (Exa/ATS, the local model) are faked. It's localhost-only,
+makes no live provider calls, and takes a couple of minutes.
 
 - `src/gigai/` — core runtime: setup, config, journal, proposal/approval
   lifecycle, catalog, package boundary. Never imports a Gig.

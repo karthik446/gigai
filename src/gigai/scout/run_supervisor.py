@@ -333,12 +333,22 @@ def start(
     port: int | None,
     foreground: bool,
     open_browser: bool,
+    allow_test_seams: bool = False,
 ) -> ScoutRunResult:
     """Ensure Scout is set up, then reuse or start the supervised API+UI.
 
     In ``foreground`` mode this call blocks running the server in-process
     (Ctrl-C stops it) after writing the state file; the state file is removed
     when the foreground server exits.
+
+    ``allow_test_seams`` is test-only: no CLI flag or env var reaches it (see
+    ``scout_cli.py``'s ``run`` command, which never passes it), so
+    ``gigai scout run`` can never set it. When ``True``, the spawned child's
+    argv gets ``--allow-test-seams`` appended, letting present_api.py's own
+    ``main()`` start with ``GIGAI_SCOUT_FIND_JOBS_TEST_HTTP``/``_TEST_MODEL``
+    active in the child's environment (double-gated: both the env var and
+    this flag are required) -- test-gap-001's API e2e suite is the only
+    caller that ever sets it.
     """
 
     home_root = home_root.expanduser().resolve(strict=False)
@@ -381,6 +391,8 @@ def start(
         "--port",
         str(requested_port),
     ]
+    if allow_test_seams:
+        argv.append("--allow-test-seams")
 
     if foreground:
         with log_path.open("ab") as log_file:

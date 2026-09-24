@@ -6,13 +6,27 @@ TEST_XDIST_WORKERS ?= auto
 TEST_XDIST_MAX_WORKERS ?= 14
 TEST_XDIST_DIST ?= worksteal
 
-.PHONY: test test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests
+.PHONY: test test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e
 
 # Complete portable offline coverage: one source discovery pass, the existing
 # deterministic behavior evaluation, and a fresh wheel plus every installed
 # verifier and installed test node.  Live/provider/UAT and Debian-container
 # gates are deliberately separate targets below.
 test: test-source test-behavior test-wheel
+
+# test-gap-001: an API end-to-end suite that drives Scout only through
+# HTTP, against the real supervisor (the same entry `gigai scout run
+# --no-browser` uses), a temp --home, and a real managed workpad. Fakes only
+# the network edges (a fixture ATS/Exa transport, a fake model adapter --
+# both existing, already-inert-unless-set bindings.py seams). Own lane, not
+# part of `make unit-tests` (see that target's own comment): each test
+# spawns a real child server process, so it is naturally excluded by the
+# fast_unit AST classifier (tests/conftest.py) rather than needing a
+# separate pytest marker or testpaths change. Localhost-only; no live
+# provider/network calls. Run at wave ends and before release, per the
+# coordinator's plan.
+api-e2e:
+	$(UV) run --locked --extra test pytest tests/api_e2e -q
 
 # Fast inner-loop lane: only tests tests/conftest.py's AST classifier marks
 # fast_unit (no filesystem, process, network, or mutable-workpad seam,
@@ -22,8 +36,14 @@ test: test-source test-behavior test-wheel
 # unparallelized. Does not replace `make test`; see
 # S19-test-suite-diet spike's revision note (kept in the maintainers' local
 # orchestrator docs).
+# --ignore=tests/api_e2e: test-gap-001's suite spawns a real child server
+# process per test, and every -m fast_unit selector here is otherwise
+# marker-based (never a path), so without this a handful of its tests that
+# happen to have no filesystem/process/network seam of their own (the
+# route-inventory AST-scan tests) would still get collected and run here,
+# even though the suite as a whole belongs in its own `make api-e2e` lane.
 unit-tests:
-	$(UV) run --locked --extra test pytest -m fast_unit -q --durations=25 -n 0
+	$(UV) run --locked --extra test pytest -m fast_unit -q --durations=25 -n 0 --ignore=tests/api_e2e
 
 # The unfiltered invocation is authoritative for source, unit, integration,
 # behavior-directory, CLI, and source-installed test discovery.  It uses a
