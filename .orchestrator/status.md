@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-24 10:18 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-24 10:35 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -15,9 +15,13 @@ _Updated 2026-09-24 10:18 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - The Release still has the **auto notes** (2 PR lines). The real notes (`/Users/kar/orca/workspaces/gigai/v0.1.8-release-notes.md`) are not applied. Waiting on the operator (it's outward-facing).
 - Post-release full matrix (run 35909539154) **finished with 2 failures**: Debian 12 offline container, and Source suite Python 3.12 on macos-latest. The other 9 passed (incl. macOS 3.11/3.13). PyPI and the Release are unaffected. Audit proposed, waiting on the operator.
 
-## In progress
-- **Operator UAT on the branch** (all PR #37 P0s fixed: eacc382, c642180 + the country-words commit).
-| P1s (before release): CSRF on POST /api/discover + /api/run; discovery hard-codes US; --home ignored by the secrets fallback; stale-pid kill in stop; empty source_url in merge; 'Berlin, DE' → US (DE-as-Delaware beats a known city) | — | queued | | alongside UAT fixes |
+## In progress (P1s the operator wants before UAT)
+| Packet | Model | State | Task / dispatch | Next |
+| --- | --- | --- | --- | --- |
+| p1-csrf: application/json + Origin/Host check on POST/PUT routes | Sonnet 5 | running | `task_3f45112525ab` / `ctx_2db12842bd1e` | verify → commit |
+| p1-secrets-home: `--home` reaches every key lookup | Sonnet 5 | running | `task_a9236c409bac` / `ctx_d5b0e4eec1ed` | verify → commit |
+| p1-stale-pid: stop/status verify the pid is our server | Sonnet 5 | running | `task_fa14a63dfacf` / `ctx_2895883fef97` | verify → commit → operator starts UAT |
+| HOLD until UAT: discovery hard-codes US; empty source_url in merge; 'Berlin, DE' → US | — | held | | batch with UAT discovery findings |
 
 ## Next up
 - Release path (operator 2026-09-24): interview-prep lands → operator UAT on the branch → fix UAT issues → user docs + README pass (NOT before UAT) → CHANGELOG 0.1.9 → set pyproject version 0.1.9 (from 0.1.9.dev0) + CATALOG_REVISION v0.1.9 + uv lock → one make test → release.
