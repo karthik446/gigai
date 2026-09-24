@@ -68,7 +68,7 @@ Anything over about 30s runs in a named Orca tab the operator can watch:
 
 ## 6. Worker spec: all five, always
 
-`TARGET … | OWNED FILES … (nothing else) | CHANGE … | ACCEPTANCE: observable check + exact command | EXCLUSIONS: no schema or storage migration, no git stash/reset/clean/broad add, no live/provider runs, focused tests only, write .orchestrator/workers/<title>.md on finish or question, say what you READ vs EXECUTED.` Keep file ownership disjoint. The worktree has heavy uncommitted work.
+`TARGET … | OWNED FILES … (nothing else) | CHANGE … | ACCEPTANCE: observable check + exact command | EXCLUSIONS: no schema or storage migration, no git stash/reset/clean/broad add, no live/provider runs, focused tests only, write .orchestrator/workers/<title>.md on finish or question, say what you READ vs EXECUTED. Ask questions ONLY with `orca orchestration ask` (to the coordinator), never a local AskUserQuestion prompt.` Keep file ownership disjoint. The worktree has heavy uncommitted work.
 
 ## 7. Bullshit detector: before accepting anything
 
