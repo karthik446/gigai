@@ -16,6 +16,11 @@ htmlcov/
 build/
 dist/
 *.egg-info/
+# ...except the packaged, committed Scout UI build (src/gigai/scout/ui/.gitignore
+# stopped ignoring it; this repo-root dist/ rule is unanchored and would
+# otherwise still shadow it).
+!src/gigai/scout/ui/dist/
+!src/gigai/scout/ui/dist/**
 
 # Editors and operating systems
 .DS_Store

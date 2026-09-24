@@ -164,6 +164,34 @@ jobs:
       - run: uv sync --locked --extra test --python "3.11"
       - run: make test-wheel
 
+  scout-ui-freshness:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
+    name: Scout UI bundle is up to date
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-node@v5
+        with:
+          # No "engines" field in src/gigai/scout/ui/package.json yet; pin to
+          # Node 22 LTS until one is added.
+          node-version: "22"
+      - name: Install UI dependencies
+        working-directory: src/gigai/scout/ui
+        run: yarn --frozen-lockfile install
+      - name: Build UI
+        working-directory: src/gigai/scout/ui
+        run: yarn build
+      - name: Fail if the built bundle differs from the committed one
+        run: |
+          if ! git diff --exit-code src/gigai/scout/ui/dist; then
+            echo "::error::src/gigai/scout/ui/dist is stale; run 'yarn build' in src/gigai/scout/ui and commit the result" >&2
+            exit 1
+          fi
+
   debian-offline:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') == 'full'
