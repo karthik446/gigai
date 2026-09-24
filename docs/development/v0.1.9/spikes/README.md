@@ -99,9 +99,37 @@ parsing. Requested and researched 2026-09-24. Documentation + scripts under
 `research/exa_agent_spike/` only; no product code added. Stage 2
 (implementation) requires a separate operator review.
 
+## Spike 24 — Company discovery bake-off: Exa Websets vs OpenAI web_search vs Tavily vs H-1B baseline
+
+[S24](S24-company-discovery-bakeoff.md) compares four company-discovery
+approaches on the same task S23 used, after the operator judged S23's Exa
+Agent `low`-effort result too unreliable alone (identical inputs returned 6
+companies once, 0 the next time). Exa Websets is blocked entirely (401,
+account has no Pro plan, $0 cost to confirm). OpenAI's Responses API
+`web_search` tool (`gpt-6-luna`, the cheapest model supporting it, with
+strict structured output) found 2, 2, and 4 companies across 3 runs (5
+unique, all new, 88% usable, 100% grounded) at $0.0253/new-usable-board
+blended -- worse per-dollar than S23's Exa Agent blended number but with no
+zero-company run, after widening the retry backoff to survive the
+account's 200k-token-per-minute limit against this query's 45-75k-token
+size. Tavily (search + extract, no agent/list-building endpoint of its
+own) found 0 new-and-usable companies across 3 runs -- its plain search
+mostly returns third-party aggregator pages, not ATS board roots, for this
+query shape. The free H-1B baseline (DOL OFLC LCA disclosure data, FY2026
+Q3, 19,796 certified-H-1B software/backend-SOC employers extracted, slug-
+guess-probed against live ATS boards) found 3 new, usable-board companies
+(Roblox, Airbnb, Coinbase) at $0, though the highest-sponsorship-volume
+employers are mostly mega-corps/outsourcing firms without a Greenhouse/
+Lever/Ashby board. Recommends the H-1B baseline (free) plus OpenAI
+`web_search` (for novelty/precision) run together, not a single winner.
+Actual spend $0.2957 of a $10 cap (worst-case reserved $3.06, including 7
+failed-but-unbilled OpenAI attempts), no call over $2. Requested and
+researched 2026-09-24. Documentation + scripts under
+`research/discovery_bakeoff/` only; no product code added.
+
 ## How these spikes finish
 
 Each spike produces a reviewable research record and a set of proposals, not
 a promise to implement any of them. The operator reviews before any v0.1.9
-implementation is scheduled. None of these five spikes claims v0.1.8 shipped,
+implementation is scheduled. None of these six spikes claims v0.1.8 shipped,
 authorizes a code change, or commits to a v0.1.9 scope.

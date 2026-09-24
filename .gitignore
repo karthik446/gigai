@@ -31,3 +31,8 @@ dist/
 .orchestrator/**/*.log
 .orchestrator/**/logs/
 !.orchestrator/decisions.log
+
+# S24 discovery bake-off: raw DOL H-1B LCA disclosure file (~250MB) is scratch
+# input, never committed -- only a small derived sample under
+# research/discovery_bakeoff/h1b_sample/ is tracked.
+research/discovery_bakeoff/h1b_scratch/
