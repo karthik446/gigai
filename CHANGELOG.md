@@ -2,7 +2,7 @@
 
 This is the external, capability-focused history of GigAI. It describes what
 an operator can do, not how the implementation works. The internal technical
-history lives in [docs/development/changelog-internal.md](docs/development/changelog-internal.md).
+history is kept in the maintainers' local notes, outside this repo.
 
 Goal labels are milestone references, not package-version numbers. Goal order,
 phase order, and release order are deliberately different; release notes must
