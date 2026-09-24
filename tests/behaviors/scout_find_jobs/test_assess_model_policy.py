@@ -7,7 +7,7 @@ import pytest
 
 from gigai.adapters.port import InvocationResult, ModelInvocationError, NormalizedUsage
 from gigai.canonical import digest_imported_bytes, parse_json_bytes
-from gigai.config import Endpoint, load_config
+from gigai.config import CredentialReference, Endpoint, load_config
 from gigai.config import ModelTarget as ConfigModelTarget
 from gigai.lifecycle import approve_offline, create_offline
 from gigai.private_records import create_record, import_reference, migrate_workpad_layout
@@ -722,6 +722,132 @@ def test_resolve_configured_target_name_for_adapter_fails_loudly_when_ambiguous(
     )
     with pytest.raises(ScoutProposalExecutionError, match="multiple configured model targets use adapter 'codex_cli'"):
         _resolve_configured_target_name_for_adapter(config, "codex_cli")
+
+
+def test_resolve_configured_target_name_for_adapter_exact_name_wins_over_ambiguous_scan(
+    tmp_path: Path,
+) -> None:
+    """uat-bug-005 repro: the 0.1.8.x README told users to create a target
+    literally named "codex_cli" alongside setup's own "codex-default", both
+    on the same codex endpoint. The sealed value "codex_cli" must resolve to
+    the exactly-named target instead of raising the adapter-scan ambiguity
+    error -- today (before the fix) this raises "multiple configured model
+    targets use adapter 'codex_cli'"."""
+    from gigai.scout.proposal_execution import _resolve_configured_target_name_for_adapter
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(
+            Endpoint(name="offline", adapter="deterministic"),
+            Endpoint(name="codex", adapter="codex_cli"),
+        ),
+        model_targets=(
+            ConfigModelTarget("offline-default", "offline", "fixture-v1", ("text",), 64),
+            ConfigModelTarget("codex-default", "codex", "default", ("text",), 512),
+            ConfigModelTarget("codex_cli", "codex", "default", ("text",), 512),
+        ),
+    )
+    assert _resolve_configured_target_name_for_adapter(config, "codex_cli") == "codex_cli"
+
+
+@pytest.mark.parametrize(
+    "sealed_value,exact_endpoint_name,exact_adapter,credential,base_url",
+    [
+        ("codex_cli", "codex", "codex_cli", None, None),
+        ("ollama_local", "ollama", "ollama_local", None, "http://127.0.0.1:11434"),
+        ("openrouter_api", "openrouter", "openrouter_api", "openrouter-api", None),
+    ],
+)
+def test_resolve_configured_target_name_for_adapter_exact_name_wins_for_every_sealed_value(
+    tmp_path: Path,
+    sealed_value: str,
+    exact_endpoint_name: str,
+    exact_adapter: str,
+    credential: str | None,
+    base_url: str | None,
+) -> None:
+    """Same exact-name-wins path for every sealed adapter kind, not just codex_cli."""
+    from gigai.scout.proposal_execution import _resolve_configured_target_name_for_adapter
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        credentials=(
+            (CredentialReference(name=credential, kind="environment", reference="OPENROUTER_API_KEY"),)
+            if credential
+            else ()
+        ),
+        endpoints=(
+            Endpoint(name="offline", adapter="deterministic"),
+            Endpoint(name=exact_endpoint_name, adapter=exact_adapter, credential=credential, base_url=base_url),
+            Endpoint(
+                name=f"{exact_endpoint_name}-alt",
+                adapter=exact_adapter,
+                credential=credential,
+                base_url=base_url,
+            ),
+        ),
+        model_targets=(
+            ConfigModelTarget("offline-default", "offline", "fixture-v1", ("text",), 64),
+            ConfigModelTarget(
+                f"{exact_endpoint_name}-default",
+                exact_endpoint_name,
+                "default",
+                ("text",),
+                512,
+                model_digest=("sha256:" + "c" * 64) if exact_adapter == "ollama_local" else None,
+            ),
+            ConfigModelTarget(
+                sealed_value,
+                f"{exact_endpoint_name}-alt",
+                "default",
+                ("text",),
+                512,
+                model_digest=("sha256:" + "d" * 64) if exact_adapter == "ollama_local" else None,
+            ),
+        ),
+    )
+    assert _resolve_configured_target_name_for_adapter(config, sealed_value) == sealed_value
+
+
+def test_resolve_configured_target_name_for_adapter_ambiguous_error_names_targets_and_fix(
+    tmp_path: Path,
+) -> None:
+    """When several enabled targets share an adapter and none is named the
+    sealed value, the error must name the targets and how to fix it (disable
+    or remove one via config.toml or `gigai setup`)."""
+    from gigai.scout.proposal_execution import (
+        ScoutProposalExecutionError,
+        _resolve_configured_target_name_for_adapter,
+    )
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(
+            Endpoint(name="offline", adapter="deterministic"),
+            Endpoint(name="codex", adapter="codex_cli"),
+            Endpoint(name="codex-alt", adapter="codex_cli"),
+        ),
+        model_targets=(
+            ConfigModelTarget("offline-default", "offline", "fixture-v1", ("text",), 64),
+            ConfigModelTarget("codex-default", "codex", "default", ("text",), 512),
+            ConfigModelTarget("codex-alt-default", "codex-alt", "default", ("text",), 512),
+        ),
+    )
+    with pytest.raises(ScoutProposalExecutionError) as excinfo:
+        _resolve_configured_target_name_for_adapter(config, "codex_cli")
+    message = str(excinfo.value)
+    assert "codex-default" in message
+    assert "codex-alt-default" in message
+    assert "config.toml" in message or "gigai setup" in message
 
 
 def test_resolve_configured_target_name_for_adapter_ignores_disabled_targets(tmp_path: Path) -> None:

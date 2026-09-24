@@ -131,9 +131,18 @@ def assess_node(
         output = _assess_node_body(
             context, input, home_root=home_root, target=target, config=config, progress=progress
         )
-    except BaseException:
+    except BaseException as exc:
         if progress is not None:
-            progress.finish_step("assess", ok=False)
+            # uat-bug-005 part 2: carry the failure's own message into
+            # progress/steps.json so /progress (the UI's live-status read)
+            # doesn't leave the operator looking at a bare "failed" with no
+            # explanation -- str(exc) matches what the sealed node-failure
+            # receipt (run.py's _redacted_failure_message) is built from for
+            # every other exception type; only BaseException subclasses that
+            # aren't a plain str-able message (rare: e.g. a bare
+            # KeyboardInterrupt) would give an empty string here, which
+            # finish_step already tolerates as "no message" via `or None`.
+            progress.finish_step("assess", ok=False, message=str(exc) or None)
         raise
     if progress is not None:
         progress.finish_step("assess", ok=True)
@@ -430,7 +439,23 @@ def _resolve_configured_target_name_for_adapter(config: GigAIConfig, adapter_kin
     this adapter kind (never silently falls back to another provider) and
     when more than one does (ambiguous: the caller must disable/remove one
     or the sealed enum cannot pick between them).
+
+    uat-bug-005: the 0.1.8.x README told users to create a target literally
+    named after the sealed value (e.g. ``codex_cli``) alongside ``gigai
+    setup``'s own ``codex-default``, both on the same endpoint. An enabled
+    target whose NAME equals the sealed value wins outright -- it is
+    unambiguous by construction, no adapter scan needed. Only when no target
+    is named exactly the sealed value does this fall back to the adapter
+    scan below (unchanged ambiguity behavior for everyone else).
     """
+
+    exact_name_matches = [
+        target.name
+        for target in config.model_targets
+        if target.enabled and target.name == adapter_kind
+    ]
+    if len(exact_name_matches) == 1:
+        return exact_name_matches[0]
 
     endpoint_names = {
         endpoint.name for endpoint in config.endpoints if endpoint.adapter == adapter_kind
@@ -452,8 +477,11 @@ def _resolve_configured_target_name_for_adapter(config: GigAIConfig, adapter_kin
         raise ScoutProposalExecutionError(
             "model_target_unavailable",
             f"multiple configured model targets use adapter {adapter_kind!r} "
-            f"({names}); disable all but one so the sealed target can resolve "
-            f"unambiguously",
+            f"({names}); only one may stay enabled -- disable or remove all "
+            f"but one, either by setting `enabled = false` on its "
+            f"`[[model_targets]]` entry in config.toml or deleting that "
+            f"entry, or by re-running `gigai setup` and unchecking it, so "
+            f"the sealed target {adapter_kind!r} can resolve unambiguously",
         )
     return matches[0]
 

@@ -179,8 +179,12 @@ class ProgressWriter:
     def start_step(self, step: str) -> None:
         self._guard(lambda: self._update_step(step, status="running", started_at=_now(), finished_at=None))
 
-    def finish_step(self, step: str, *, ok: bool) -> None:
-        self._guard(lambda: self._update_step(step, status="done" if ok else "failed", finished_at=_now()))
+    def finish_step(self, step: str, *, ok: bool, message: str | None = None) -> None:
+        self._guard(
+            lambda: self._update_step(
+                step, status="done" if ok else "failed", finished_at=_now(), message=message
+            )
+        )
 
     def _update_step(
         self,
@@ -189,6 +193,7 @@ class ProgressWriter:
         status: str,
         started_at: str | None = None,
         finished_at: str | None = None,
+        message: str | None = None,
     ) -> None:
         path = self._dir / _STEPS_FILENAME
         raw_steps = _read_json(path)
@@ -203,6 +208,15 @@ class ProgressWriter:
             entry["finished_at"] = finished_at
         elif "finished_at" not in entry:
             entry["finished_at"] = None
+        # uat-bug-005 part 2: a failed step must carry *why* so /progress (and
+        # any UI reading it) doesn't just show "failed" with nothing else --
+        # only ever set on failure; a successful finish never adds/clears it
+        # (there's nothing to say, and this step object is otherwise replaced
+        # wholesale each write, so an omitted message here would silently
+        # drop a still-relevant one from an earlier write, which never
+        # happens today since each step finishes exactly once).
+        if message is not None:
+            entry["message"] = message
         steps[step] = entry
         _replace_json(path, steps)
 
