@@ -19,7 +19,7 @@ _Updated 2026-09-23 23:19 MDT by Claude (coordinator of `run_7cba834cb817`, work
 | Packet | Model | State | Task / dispatch | Next |
 | --- | --- | --- | --- | --- |
 | discovery-bakeoff (S24): OpenAI web_search, Tavily, H-1B LCA baseline vs S23 Exa Agent low; ≤ $10 total, ≤ $2/call; Websets blocked (Exa plan: 401 'Upgrade to a Pro plan', $0) | Sonnet 5 | running | `task_9fa9042ca55a` / `ctx_1c85dd2548dd` | coordinator review → operator picks the discovery approach |
-| scout-run-acceptance (D part 2): installed-wheel proof of `gigai scout run` + README config fields | Sonnet 5 | running | `task_…` (see decisions.log) | verify → commit |
+| scout-ux-gaps: `resume add` auto-installs Scout; cwd inside a bound non-git target resolves without --target | Sonnet 5 | running | `task_9944d78dbfa8` / `ctx_b0ed98435b38` | verify → commit |
 | S23 stage 2: UI setup interview (11 questions) + weekly Discover (approach per S24) | — | queued (operator approved) | | after D part 2 + S24 |
 
 ## Next up
