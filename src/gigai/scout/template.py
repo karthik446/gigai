@@ -258,3 +258,104 @@ def scout_candidate_inventory() -> tuple[CatalogEntry, ...]:
     """Explicit non-release inventory for candidate preparation tests/integration."""
 
     return (scout_catalog_candidate(),)
+
+
+class ScoutInstallError(RuntimeError):
+    """Raised when ``install_scout`` finds an unexpected instance state."""
+
+    code = "scout_install_state_invalid"
+
+
+@dataclass(frozen=True)
+class ScoutInstallResult:
+    """Outcome of binding, approving, and activating Scout for one project."""
+
+    gig_id: str
+    bound: bool
+    approved: bool
+    activated: bool
+
+
+def install_scout(
+    *,
+    home_root: Path,
+    requested_target: Path | None,
+) -> ScoutInstallResult:
+    """Bind, approve, and activate Scout for the bound project in one call.
+
+    Idempotent: calling this again when Scout is already bound, approved, and
+    active reports that and changes nothing.  This wraps the same
+    ``initialize_defaults(inventory=scout_candidate_inventory())`` ->
+    ``approve_offline`` -> ``select_active_workpad`` path the UAT runbook used
+    by hand, as a normal function rather than a copy of that workaround.
+    """
+
+    # Deferred imports: default_init imports scout.materialization, which
+    # imports this module, so importing default_init/lifecycle/workpad at
+    # module load time here would be circular.
+    from ..default_init import initialize_defaults
+    from ..lifecycle import approve_offline
+    from ..registry import open_project_registry
+    from ..workpad import resolve_bound_project, select_active_workpad
+
+    # initialize_defaults() only recovers a saved username from
+    # <target>/.gigai/project.toml, which a non-git target never has; read
+    # the already-bound owner from the registry directly so scout install
+    # works for both target kinds without asking the operator to repeat
+    # --username on a project `gigai init` already bound.
+    bound_project = resolve_bound_project(home_root=home_root, requested_target=requested_target)
+    resolved_home = home_root.expanduser().resolve(strict=False)
+    registry, _ = open_project_registry(resolved_home, create=False)
+    with registry.transaction() as transaction:
+        owner = transaction.find_workspace_owner(bound_project.project_id)
+    if owner is None:
+        raise ScoutInstallError(
+            "scout_install_owner_missing: the bound project has no saved workspace owner; "
+            "run `gigai init --target <dir> --username <name>` first"
+        )
+
+    result = initialize_defaults(
+        home_root=home_root,
+        requested_target=requested_target,
+        username=owner.username,
+        inventory=scout_candidate_inventory(),
+    )
+    instance = next(row for row in result.instances if row.template_id == "scout")
+    newly_bound = instance.status not in {"existing", "capability_review_required"}
+
+    approved = False
+    if instance.status == "approval_required":
+        if instance.proposal_id is None:
+            raise ScoutInstallError(
+                "scout install requires a pending proposal but none was prepared"
+            )
+        approve_offline(
+            home_root=home_root,
+            requested_target=requested_target,
+            gig_id=instance.gig_id,
+            proposal_id=instance.proposal_id,
+        )
+        approved = True
+
+    # The registry's active_workpads table is the source of truth for both
+    # git targets (kept in sync with <target>/.gigai/project.toml) and
+    # non-git targets (which have no project.toml at all); checking it here
+    # keeps this idempotent for either target kind.
+    with registry.transaction() as transaction:
+        active = transaction.find_active_workpad(bound_project.project_id)
+    already_active = active is not None and active.gig_id == instance.gig_id
+    activated = not already_active
+    if activated:
+        select_active_workpad(
+            home_root=home_root,
+            requested_target=requested_target,
+            gig_id=instance.gig_id,
+            allow_semantic_state=True,
+        )
+
+    return ScoutInstallResult(
+        gig_id=instance.gig_id,
+        bound=newly_bound,
+        approved=approved,
+        activated=activated,
+    )

@@ -272,7 +272,8 @@ def resolve_workpad(
         selected = binding.active_gig_id
         if selected is None:
             raise NoActiveGigError(
-                "no_active_gig: the target has no explicitly selected active Gig"
+                "no_active_gig: the target has no explicitly selected active Gig; "
+                "run `gigai gig use <gig_id>` to select one"
             )
         with registry.transaction() as transaction:
             if transaction.find_project_workpad(bound.project_id, selected) is None:
@@ -287,7 +288,8 @@ def resolve_workpad(
             active = transaction.find_active_workpad(bound.project_id)
         if active is None:
             raise NoActiveGigError(
-                "no_active_gig: the target has no explicitly selected active Gig"
+                "no_active_gig: the target has no explicitly selected active Gig; "
+                "run `gigai gig use <gig_id>` to select one"
             )
         selected = active.gig_id
 

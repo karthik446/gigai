@@ -50,6 +50,7 @@ from .scout.documents_cli import document_group
 from .scout.answer_cli import answer_group
 from .scout.acquisition_cli import acquisition_group
 from .scout.interview_cli import interview_group
+from .scout.scout_cli import scout_group
 from .private_transfer_cli import transfer_group
 from .secrets_cli import secrets_group
 from .index import JournalIndexError, JournalProjection, read_index
@@ -121,7 +122,13 @@ from .private_records import (
     read_record,
 )
 from .target_binding import TargetBindingError, resolve_target
-from .workpad import ResolvedWorkpad, WorkpadError, open_locations, resolve_workpad
+from .workpad import (
+    ResolvedWorkpad,
+    WorkpadError,
+    open_locations,
+    resolve_workpad,
+    select_active_workpad,
+)
 
 
 class InvocationGroup(click.Group):
@@ -3591,6 +3598,66 @@ def gigs_command(
         )
 
 
+@cli.group("gig")
+def gig_group() -> None:
+    """Select which registered Gig is active for the bound project."""
+
+
+@gig_group.command("use")
+@click.argument("gig_id")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def gig_use_command(
+    gig_id: str,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Make one already-installed, approved Gig the active Gig for this project."""
+
+    _require_supported_platform()
+    home_root = home_value or default_home_root()
+    try:
+        listing = list_gigs(
+            home_root=home_root, requested_target=target_value, all_projects=False
+        )
+    except GigListingError as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=exc.code)
+        return
+    entry = next((item for item in listing.entries if item.gig_id == gig_id), None)
+    if entry is None:
+        _raise_cli_error(
+            f"{gig_id} is not a registered Gig for this project; "
+            "install it first (for example, `gigai scout install`)",
+            as_json=as_json,
+            code="gig_not_installed",
+        )
+        return
+    if entry.status != "Approved":
+        _raise_cli_error(
+            f"{gig_id} is not approved yet; run `gigai approve <proposal_id>` "
+            "(or `gigai scout install` for Scout) before selecting it",
+            as_json=as_json,
+            code="gig_not_approved",
+        )
+        return
+    try:
+        select_active_workpad(
+            home_root=home_root,
+            requested_target=target_value,
+            gig_id=gig_id,
+            allow_semantic_state=True,
+        )
+    except (WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "gig_use_failed"))
+        return
+    if as_json:
+        click.echo(json.dumps({"ok": True, "gig_id": gig_id, "active": True}, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"{gig_id} is now the active Gig for this project.")
+
+
 @cli.command("proposals")
 @_projection_options
 def proposals_command(
@@ -4048,6 +4115,11 @@ cli.add_command(answer_group)
 cli.add_command(acquisition_group)
 cli.add_command(acquisition_group, name="scout-import")
 cli.add_command(interview_group)
+# Debt: this registration seam (a core module importing and registering a
+# gig's Click group) is the accepted pattern for now, matching every other
+# scout_*_cli group above; a real gig-plugin registration mechanism is
+# 0.2.0 roadmap Workstream 3 scope, not built here.
+cli.add_command(scout_group)
 cli.add_command(transfer_group)
 cli.add_command(secrets_group)
 # Keep existing G45 wrapper create/read behavior while exposing native CRUD.
