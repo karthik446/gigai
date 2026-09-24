@@ -1,9 +1,14 @@
 """C-2: the localhost API server the Scout find-jobs UI talks to.
 
 Stdlib-only (``http.server.ThreadingHTTPServer``); binds loopback only and
-refuses any non-loopback peer with 403.  All business logic is injected
-through the ``Backend`` protocol below; this module owns routing, JSON
-(de)serialization against the frozen contracts, and the loopback guard.
+refuses any non-loopback peer with 403.  Every state-changing route (POST
+/PUT/PATCH/DELETE) also runs a same-origin CSRF guard (``_check_csrf``):
+loopback alone doesn't stop a malicious web page open in the operator's own
+browser, so writes additionally require ``Content-Type: application/json``,
+a matching ``Origin`` when present, and a matching ``Host``.  All business
+logic is injected through the ``Backend`` protocol below; this module owns
+routing, JSON (de)serialization against the frozen contracts, and both
+guards.
 """
 
 from __future__ import annotations
@@ -960,6 +965,66 @@ def _make_handler(
                 return False
             return True
 
+        def _bound_port(self) -> int:
+            return self.server.server_address[1]  # type: ignore[attr-defined]
+
+        def _check_csrf(self) -> bool:
+            """CSRF guard for every state-changing route (POST/PUT/PATCH/DELETE).
+
+            Loopback alone (``_check_loopback``) checks *who* the peer is, not
+            *where the request came from*: a malicious web page open in the
+            operator's own browser is also loopback. A "simple" cross-origin
+            request (the shape ``fetch(url, {mode: "no-cors"})`` is allowed to
+            send) cannot set ``Content-Type: application/json`` without
+            triggering a CORS preflight, and this server never answers a
+            preflight with ``Access-Control-Allow-Origin`` -- so requiring JSON
+            here is what actually blocks the browser, not the check itself.
+
+            Three checks, in order:
+            1. ``Content-Type`` must be ``application/json`` (ignoring any
+               ``; charset=...`` suffix) -> 415 ``unsupported_media_type`` if not.
+            2. ``Origin``, when the header is present at all, must equal this
+               server's own served origin for the bound port (``http://
+               127.0.0.1:<port>`` or ``http://localhost:<port>``) -> 403
+               ``forbidden_origin`` if not. No ``Origin`` header at all (a
+               same-origin fetch, curl, or the CLI) is allowed through --
+               browsers always send Origin on cross-origin writes, so its
+               absence here is not the attack this guards against.
+            3. ``Host`` must match the bound host:port (DNS-rebinding guard:
+               without this, a DNS name an attacker controls but that resolves
+               to 127.0.0.1 lets a real browser send a same-origin-looking,
+               honest ``Origin`` header that would otherwise pass check 2)
+               -> 403 ``forbidden_origin`` if not.
+
+            Never sets ``Access-Control-Allow-Origin`` -- there is no
+            cross-origin caller this API is meant to serve.
+            """
+
+            content_type = self.headers.get("Content-Type", "")
+            media_type = content_type.split(";", 1)[0].strip().lower()
+            if media_type != "application/json":
+                self._error(
+                    HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                    "unsupported_media_type",
+                    "Content-Type must be application/json",
+                )
+                return False
+
+            port = self._bound_port()
+            allowed_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+            origin = self.headers.get("Origin")
+            if origin is not None and origin not in allowed_origins:
+                self._error(HTTPStatus.FORBIDDEN, "forbidden_origin", "request Origin is not allowed")
+                return False
+
+            allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+            host = self.headers.get("Host")
+            if host not in allowed_hosts:
+                self._error(HTTPStatus.FORBIDDEN, "forbidden_origin", "request Host does not match the bound server")
+                return False
+
+            return True
+
         def _read_json_body(self) -> object | None:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
@@ -1036,6 +1101,8 @@ def _make_handler(
         def do_POST(self) -> None:  # noqa: N802
             if not self._check_loopback():
                 return
+            if not self._check_csrf():
+                return
             path = urlsplit(self.path).path
             try:
                 if path == "/api/run":
@@ -1051,6 +1118,8 @@ def _make_handler(
 
         def do_PUT(self) -> None:  # noqa: N802
             if not self._check_loopback():
+                return
+            if not self._check_csrf():
                 return
             path = urlsplit(self.path).path
             try:
