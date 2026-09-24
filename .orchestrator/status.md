@@ -1,65 +1,55 @@
-# Orchestrator status
+# Orchestrator status: FINAL CHECKPOINT (v0.1.9 coordinator, frozen)
 
-_Updated 2026-09-24 11:16 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Written 2026-09-24 by Claude, coordinator of Orca Run `run_7cba834cb817` (worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9`, draft PR #37 https://github.com/karthik446/gigai/pull/37). **This coordinator is FROZEN**: the orchestrator is moving to `/Users/kar/orca/workspaces/gigai/.orchestrator` (its own repo), the skill to `/Users/kar/orca/workspaces/gigai/.claude/skills/`, and a new coordinator runs from `/Users/kar/orca/workspaces/gigai`. Full history: `decisions.log` (newest last), `reviews/` (incl. `pr37-review-findings.md`), `research/`, `workers/` (reports) and `workers/specs/` (every spec)._
 
-## Coordinator
-- **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
-- **Parallel, not ours:** the v0.1.8 coordinator (`run_b12de8fdda28`, worktree `gigai-v0.1.8`) is running the operator's UAT of the published gigai 0.1.8. UAT bugs come here as fix requests. Don't touch that worktree or that Run.
+## Branch state
+- Pushed head: `b635bc4` fix(secrets): --home reaches every key lookup. Local-only orchestrator commits after it: `760738c`, `07fae32`, `be7e0d6`, + this checkpoint commit. Version `0.1.9.dev0` (pyproject + uv.lock). Main (0.1.8.1, #38) merged in at `8380102`.
+- Install for UAT: `uv tool install --force "git+https://github.com/karthik446/gigai@karthik446/gigai-v0.1.9"`, then `gigai --version` shows `gigai 0.1.9.dev0`.
+- Last PR CI the coordinator verified green: the merge push `ad88708`. Later pushes were not re-watched.
 
-## Goal
-- **Wave 1 (operator, 15:20): "fix the workflow and tests first, as I do UAT."** First-things 0–3 + CI job renames + testpaths drop + S19 steps 1–2. UAT fix requests jump the queue.
-- Later, not decided: S16/S17 stay deferred until find-jobs works live (decisions.log 10:40); S18 undecided; S20 questions stay open.
-
-## v0.1.8 release check (15:05 MDT)
-- PyPI 0.1.8 published (20:13Z). The rerun of the failed jobs passed PyPI clean install (ubuntu + macOS) and created the GitHub Release at 21:02Z: https://github.com/karthik446/gigai/releases/tag/v0.1.8
-- The Release still has the **auto notes** (2 PR lines). The real notes (`/Users/kar/orca/workspaces/gigai/v0.1.8-release-notes.md`) are not applied. Waiting on the operator (it's outward-facing).
-- Post-release full matrix (run 35909539154) **finished with 2 failures**: Debian 12 offline container, and Source suite Python 3.12 on macos-latest. The other 9 passed (incl. macOS 3.11/3.13). PyPI and the Release are unaffected. Audit proposed, waiting on the operator.
+## What v0.1.9 contains (all verified by the coordinator, committed)
+- Release/CI/tests: GitHub Release right after publish + CHANGELOG notes (merged with main's 0.1.8.1 design), docs-only CI skip (proven live), `make unit-tests` (~7 s), logs never committed.
+- Secrets: `gigai secrets add/list/rm` (python-dotenv, 0600, env first); Exa via secrets; `--home` threaded to every key lookup incl. the model adapters.
+- `gigai scout run/stop/status` (background, UI served from the wheel, install + active gig + resume in one step, works inside a non-git target without --target; proven on an installed wheel). `gig use`, `scout install`, `scout resume add` (content-keyed).
+- UAT 0.1.8.1 fixes: filter at acquire (Lever/Ashby structured country + pycountry; region-only ≠ US; codes only as uppercase tokens; 73-string location corpus), sponsorship decoding, all-sources-failed, company diversity (≤2/company), U2 codex_cli target, Exa date/country params + HTTP status, progressive per-posting cards + live step status.
+- Stage 2: setup interview (11 Qs) + Discover panel in the UI; `gigai scout discover` (OpenAI web_search ×3 + H-1B DOL data ONLY when sponsorship is required; evidence sidecar; budget guard).
+- Interview prep: `gigai scout prep <posting-url>` (company research w/ verified sources ≤ $0.50, role research, question categories, prep notes; the resume never goes to web search; plain JSON store).
+- PR #37 review fixes: P0-1..P0-5 and the P1s CSRF, stale pid, secrets --home.
+- Docs: README uv-only + one-command Scout flow; spikes S21, S23, S24; proposed v0.2.0 roadmap (not accepted).
 
 ## In progress
-- **Operator UAT on the branch** (P0s + pre-UAT P1s done: CSRF d8b6e74, stale pid 0c899e2, secrets --home).
-- HOLD until UAT: discovery hard-codes US; empty source_url in merge; 'Berlin, DE' → US.
+- Nothing dispatched. No coordinator waiter/watcher shells running (verified). All 47 workers settled; every worker terminal closed (Orca's list may still say "retained" for 24; the tabs were closed with `orca terminal close`).
+- Not ours, left running: the v0.1.8 worktree's UAT `yarn dev` tab; the reviewer session's git-poll loop.
+- The operator is starting UAT on the branch.
 
-## Next up
-- Release path (operator 2026-09-24): interview-prep lands → operator UAT on the branch → fix UAT issues → user docs + README pass (NOT before UAT) → CHANGELOG 0.1.9 → set pyproject version 0.1.9 (from 0.1.9.dev0) + CATALOG_REVISION v0.1.9 + uv lock → one make test → release.
-- After stage 2: make acquire watchlist-only by default (Exa optional, off by default); confirm with the operator first. Small config + README packet.
-- UAT fix requests from the v0.1.8 coordinator (they jump the queue).
-- After wave 1: S16/S17 stay deferred until find-jobs works live (UAT). S18 undecided.
+## Held (operator: batch with UAT findings)
+- Discovery hard-codes US (review P1).
+- Empty `source_url` rejected in discovery merge (review P1).
+- 'Berlin, DE' → US (the DE-as-Delaware policy beats a known non-US city; a false keep).
 
-## Done
-- Run `run_7cba834cb817` created.
-- Handoff + README "Handoffs" section committed as the first v0.1.9 commit.
-- **secrets-core committed** `a915c24`: `gigai secrets add/list/rm`, env → ~/.gigai/.env resolver (python-dotenv, interpolation off, 0600 under umask 077). Coordinator reproduced + re-verified the 2 r0 bugs.
-- **README uv-only** `f1fb6c6` (+ API command via `uv tool run --from gigai`, verified on 0.1.8.1).
-- **Country-data research** accepted (`.orchestrator/research/country-data.md`): Lever/Ashby structured country fields unread; pycountry fallback. Implementation waits on the operator.
-- **Stage 2** `8c3743f` (setup interview + Discover panel) + `c461869` (discovery engine; live smoke $0.088, 3 verified boards). **Interview prep** (`gigai scout prep <url>`; live smoke $0.056).
-- **S24 bake-off** `74512c3` ($0.30): OpenAI web_search most repeatable ($0.025/board, never empty); H-1B free (1.5% slug hits); Tavily none; Websets needs Exa Pro. Operator chose OpenAI + H-1B.
-- **`gigai scout run` feature complete** (brief acceptance met from an installed wheel, `d82b9a0` report; flow gaps fixed in scout-ux-gaps): setup → init → secrets add exa → resume add → scout run/status/stop, from inside the target, no --target, no Python/TOML/record create.
-- **B4 progressive cards** `546b346`: progress/ files + /api/runs/{id}/progress + card UI + live step status; writes best-effort (r1).
-- **wire-selection** `8856b1d`: B2 end to end (≤2 per company, dedupe, round-robin; DUPLICATE/OVER_CAP labels).
-- **acquire-country-filter** `80a2e98` (B1/B3/B5 + structured countries + pycountry + region-only → no match). **README one-command flow** `50a8d64`. **S23 spike** `998f6cc` ($0.834 spent; low/strict/board-URL query; not deterministic; blended $0.0125/usable board).
-- **scout-run-supervisor (C)** `65ce7b4`: `gigai scout run/stop/status` (coordinator real cycle in a temp home). **selection-diversity-u2** `0bf97c0`: selection.py (not yet wired) + U2. **v0.1.8.1 released** (PyPI + GitHub Release; post-release matrix all pass except macOS 3.12, which was cancelled; CI ignored per the operator).
-- **scout-setup-cmds (B)** `b0eea58`: `gig use`, `scout install`, `scout resume add` (coordinator CLI end-to-end, non-git target). **exa-query-errors** `5fec35d`.
-- **secrets-exa** `9e66428` (Workstream 0 P0-P3 done). **scout-ui-package (A)** `f4d0fb1`: UI in the wheel, served by the API; PR CI freshness job.
-- **Merged main (0.1.8.1, #38)** at `8380102`: the release.yml conflict was resolved as main's shipped release design + `actions: read` on the pull_request.yaml callers; our preflight notes hard-fail was dropped for main's fallback (worker `workers/merge-main-release.md`; coordinator re-ran 63 focused tests + make unit-tests 869). 0.1.8.1 worker reports archived to `runs/v0.1.8.1/`.
-- **S21 spike** (`docs/development/v0.2.0/spikes/S21-gig-repos-and-data-ownership.md`) accepted after r1-r3 (reviews `reviews/s21-r0.md`; r3 fixed a coordinator over-attribution) and committed.
-- **Proposed v0.2.0 gig-workbench roadmap** (`docs/development/v0.2.0/roadmaps/v0.2.0-gig-workbench-roadmap.md`) accepted as a proposed doc after r1-r2 (review `reviews/roadmap-workbench-r0.md`), committed `939c5b3`.
-- **Docs-only CI skip proven live** (run 35924315765 on `aa9d06a`: only `changes` ran; the `before` run succeeded).
-- **release-pipeline verified + committed** (`c4cc1b3`, r1): Release right after publish; install retried ~10 min; notes from CHANGELOG. Fully proven only by the next tag.
-- **ci-docs-skip verified + committed** (`384234e`, r1): docs-only skip when `before` passed; callers grant `actions: read`; job renames.
-- Wave 1 pushed; PR #37 body updated; workers released and tabs closed (sweep).
-- **test-lanes verified + committed** (`acb7728`): `make unit-tests` 729 passed / 6.9s (coordinator re-run); testpaths −41; S19 revision note; skill §4 allows `make unit-tests` for workers.
-- Git workflow adopted (skill §9, memory updated); branch pushed; draft PR #37 opened.
+## Next up (release path, operator order)
+1. Operator UAT → fix UAT issues (+ the held items above).
+2. "Prep for interview" button on the posting card (UI follow-up to `gigai scout prep`).
+3. Confirm with the operator: acquire watchlist-only by default (Exa optional/off) now that discovery fills the watchlist.
+4. User docs + README pass (AFTER the UAT fixes, not before).
+5. CHANGELOG `### 0.1.9` (it becomes the GitHub Release notes; write it for users).
+6. Set pyproject version `0.1.9` (from 0.1.9.dev0) + `CATALOG_REVISION = "v0.1.9"` (src/gigai/catalog.py:20; stays v0.1.8.1 until then) + `uv lock`.
+7. One full `make test` by the coordinator → operator squash-merges #37 → `git tag -a v0.1.9 -m "GigAI v0.1.9" && git push origin v0.1.9`.
 
-## Open tabs
-- None started by this Run.
+## Follow-up debt (recorded, not scheduled)
+- A shared `scout/websearch.py` to replace the two OpenAI clients (discovery/openai_source.py + interview_prep/websearch.py).
+- `scout-watchlist:2` with native evidence fields (replaces the discovery evidence sidecar).
+- Unify posting identities (application_events opportunity_ref vs find-jobs normalized_url) so interview_scheduled can trigger prep automatically.
+- Core→scout import added by design this version: cli.py registers scout_group (S16 debt).
+- Post-release CI: macOS 3.12 cancelled on the v0.1.8/0.1.8.1 post-release matrix (operator: ignore for now).
+- `tools/s11_inventory.py` still lists the research spike test roots.
+
+## Lessons for the next coordinator
+- Workers ask ONLY via `orca orchestration ask` (now in skill §6); one still used a local prompt this version.
+- Workers repeatedly ran whole test directories despite the test budget: restate it in every spec, and kill a worker that loops on no-op waits after its code is done (verify the change yourself).
+- uv only, never pip (memory `gigai_uv_only_no_pip`).
+- Discussions aren't decisions: the interview-prep auto-trigger and the resume "market roll-up" are ideas, not scheduled.
 
 ## Blocked on operator
-- After the roadmap draft: pull Workstream 0 (connect secrets: `gigai secrets add`, .env fallback, Exa through the resolver) into 0.1.9?
-- Post-release CI failures (Debian offline, macOS 3.12): operator said ignore for now.
-- Release checklist change: GitHub Release notes = the CHANGELOG `### X.Y.Z` section verbatim. Write 0.1.9's section for users before tagging.
-- v0.1.8 release notes: operator will apply later (deferred).
-
-## Flagged
-- S16 counts disagree: 45 strict rows in its inventory and in S20, but open question 2 says "the existing 34". Fix before S16 is used for sizing.
-- The first-things note cites `release.yml:62-67` for `--generate-notes`; it's at `release.yml:303` today. `github-release` needs `verify-pypi` (`release.yml:239`), which confirms item 0.
-- Codex weekly quota was ~23% at the end of v0.1.8.
+- UAT.
+- v0.1.8 release notes: the operator will apply them later.
