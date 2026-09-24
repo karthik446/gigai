@@ -79,7 +79,7 @@ gigai setup --non-interactive \
 secret value. Run `gigai setup --help` for the full reference, including
 Ollama loopback endpoints and per-target reasoning-effort options.
 
-> **0.1.8.x workaround; v0.1.9 replaces this with `gigai scout setup/run`.**
+> **0.1.8.x limit.**
 > Scout's find-jobs resolves a model target by its *name*, using the target
 > name `codex_cli` (or `ollama_local`) literally — an auto-named target like
 > `codex-default` will not be found. Name the target explicitly and raise its
@@ -103,73 +103,20 @@ gigai init --username "agent" --json
 `--target` accepts a path instead of the current directory. `gigai init` is
 idempotent for an already-bound project.
 
-### Scout: install and approve
+### Scout: install and run
 
-> **0.1.8.x workaround; v0.1.9 replaces this with `gigai scout setup/run`.**
-
-Binding a project does **not** auto-materialize Scout as a candidate Gig, and
-Scout is not in `gigai catalog list` either. The only current path is the
-package's own Python interpreter running the internal helper, then approving
-the resulting proposal:
+Everything below runs from an installed package (`uv tool install gigai`) —
+no source checkout needed.
 
 ```bash
-"$(uv tool dir)/gigai/bin/python" -c '
-from gigai.default_init import initialize_defaults
-from gigai.scout.template import scout_candidate_inventory
-initialize_defaults(inventory=scout_candidate_inventory())
-'
-gigai approve <proposal-id> --gig <gig-id> --json
+gigai scout install --json                    # bind, approve, and activate Scout for this project
+gigai secrets add exa                         # store EXA_API_KEY locally — see "Exa search" below
+gigai scout resume add ./resume.txt --json    # import + wrap your resume for find-jobs
 ```
 
-Run `gigai approve --help` for the exact required IDs, and `gigai gigs
---json` to confirm Scout is active once approved.
-
-### Add a resume reference
-
-> **0.1.8.x limit:** only `.txt`/`.md`/`.markdown` files up to 1 MB are
-> accepted; a `.pdf` or `.docx` resume is rejected (`media_type_unsupported`).
-> Convert it first, e.g.:
->
-> ```bash
-> pdftotext resume.pdf resume.txt          # Linux, or macOS with poppler
-> textutil -convert txt resume.docx        # macOS built-in, .docx only
-> ```
-
-```bash
-gigai reference add --kind resume --file ./resume.txt --json
-```
-
-`--kind` also accepts `project_evidence`, `role_history`, `cover_letter`.
-
-### Setting the active Gig
-
-> **0.1.8.x workaround; v0.1.9 replaces this with `gigai scout setup/run`.**
-
-The Scout API resolves the bound project's active Gig, but no CLI command
-sets it after approval. Until v0.1.9, edit
-`<target_root>/.gigai/project.toml` directly and add:
-
-```toml
-active_gig_id = "<scout gig id>"
-```
-
-### Wrapping an imported resume for find-jobs
-
-> **0.1.8.x workaround; v0.1.9 replaces this with `gigai scout setup/run`.**
-
-`gigai reference add` alone is not enough: find-jobs only reads a resume
-wrapped as a private record. After adding the reference, wrap it:
-
-```bash
-gigai record create --kind imported_reference --content-family g45_reference \
-  --content-id <reference-id> --operation-key <operation-key> \
-  --gig <gig-id> --json
-```
-
-### The `find-jobs.json` config
-
-Scout's find-jobs run reads an operator-authored config from
-`<target_root>/find-jobs.json`:
+`gigai scout install` writes a starter `<target_root>/find-jobs.json` the
+first time it runs (never overwrites an existing one). Edit it before
+starting Scout:
 
 ```json
 {
@@ -189,6 +136,39 @@ Scout's find-jobs run reads an operator-authored config from
 `openrouter_api`. `hiringcafe` is defined in the schema but not a live source
 in this release; leave it `false`.
 
+Then start it:
+
+```bash
+gigai scout run --json     # installs/activates if needed, starts the API + UI, opens a browser tab
+gigai scout status --json  # running / stopped / crashed, with url/pid/log path
+gigai scout stop --json    # stop it; safe to rerun
+```
+
+`gigai scout run` is backgrounded by default — it prints the URL and log
+path and returns. Pass `--foreground` to run it in the current process
+instead (Ctrl-C stops it), `--no-browser` to skip opening a tab, and `--port`
+if 8765 is taken. Logs live at `<home>/logs/scout-<project_id>.log`; run
+state at `<home>/run/scout/<project_id>.json`.
+
+If a project has more than one installed, approved Gig, switch which one is
+active with:
+
+```bash
+gigai gig use <gig-id> --json
+```
+
+`gigai scout install` already activates Scout when it's the only Gig bound,
+so this is only needed when switching between Gigs.
+
+> **0.1.8.x limit:** `gigai scout resume add` only accepts `.txt`/`.md`/
+> `.markdown` files up to 1 MB; a `.pdf` or `.docx` resume is rejected
+> (`media_type_unsupported`). Convert it first, e.g.:
+>
+> ```bash
+> pdftotext resume.pdf resume.txt          # Linux, or macOS with poppler
+> textutil -convert txt resume.docx        # macOS built-in, .docx only
+> ```
+
 ### Exa search
 
 ```bash
@@ -205,31 +185,23 @@ export EXA_API_KEY=...
 Without either, Exa discovery refuses to run; ATS-board acquisition is
 unaffected.
 
-### Start the API
+### From a source checkout (contributors)
 
-Works from an installed package (`uv tool install gigai`) — no source checkout needed:
-
-```bash
-uv tool run --from gigai python -m gigai.scout.find_jobs.present_api --home ~/.gigai --target /path/to/target/repo
-```
-
-Loopback-only HTTP server (it refuses any non-loopback peer) that the Scout
-UI talks to.
-
-### The UI is not in the wheel
-
-The Scout web UI is **not bundled in the published package**. It runs from a
-source checkout only:
+The Scout UI ships prebuilt inside the wheel (`gigai scout run` serves it
+directly — nothing above needs a source checkout or a Vite dev server). If
+you're editing `src/gigai/scout/ui/` itself, run its dev server against a
+`gigai scout run` (or standalone `present_api`) instance for hot reload:
 
 ```bash
-git clone https://github.com/karthik446/gigai.git
-cd gigai/src/gigai/scout/ui
+cd src/gigai/scout/ui
 yarn install
 yarn dev
 ```
 
-Point the dev server at the localhost API started above. PyPI gives you the
-CLI and API server, not a built UI.
+Point it at the running API's loopback URL (`gigai scout status` prints it).
+Rebuild the shipped bundle with `yarn build` before committing UI changes —
+CI's `scout-ui-freshness` job fails the PR if `src/gigai/scout/ui/dist` is
+stale.
 
 ### Reading results and failures
 
