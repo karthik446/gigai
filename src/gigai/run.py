@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import threading
 import traceback
 import uuid
 from typing import Callable, Mapping
@@ -180,6 +181,38 @@ class ResumeDetails:
     created_at: str | None
 
 
+_RESUME_DETAILS_CACHE_LOCK = threading.Lock()
+# uat-bug-008: resolving the newest resume replays every committed
+# records/references/run-inputs artifact (one `git log` per path -- see
+# journal._capture_committed_snapshot) each time it runs, so a few dozen
+# journal commits made this take seconds, and /api/config called it twice
+# (once via resume_preview, once via resume_metadata). Cache the resolved
+# ResumeDetails per workpad, keyed by the workpad's exact git HEAD: any new
+# commit (including `gigai scout resume add`) changes HEAD and misses the
+# cache, so a cached entry can never serve a resume that predates the
+# newest commit. The HEAD read itself is one cheap `git rev-parse`, not the
+# expensive snapshot walk.
+_resume_details_cache: dict[tuple[str, str], "ResumeDetails | RunError"] = {}
+
+
+def _cheap_workpad_head(root: Path) -> str | None:
+    """One cheap ``git rev-parse HEAD`` against the workpad -- never the
+
+    expensive committed-artifact snapshot walk. Returns ``None`` (never
+    cached) if the workpad has no commits yet or git is unavailable, so a
+    lookup failure always falls through to the real resolution below.
+    """
+
+    try:
+        result = _git(root, "rev-parse", "--verify", "HEAD", check=False)
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    head = result.stdout.strip()
+    return head or None
+
+
 def resolve_newest_resume_details(
     home_root: Path, target: Path | None
 ) -> ResumeDetails:
@@ -188,6 +221,9 @@ def resolve_newest_resume_details(
     and the reference's display metadata (label + created date). The single
     implementation of "which resume wins" lives here; ``resolve_newest_resume``
     is a thin wrapper returning just the sealed ``PinnedResume`` piece.
+
+    Cached per workpad, keyed by its exact git HEAD (see
+    ``_resume_details_cache``) -- a fresh commit always misses.
     """
 
     from . import private_records
@@ -200,6 +236,28 @@ def resolve_newest_resume_details(
             gig_id=None,
             allow_semantic_state=True,
         )
+    except Exception as exc:
+        raise RunError("find_jobs_resume_required: committed resume records are unavailable") from exc
+
+    cache_key: tuple[str, str] | None = None
+    head = _cheap_workpad_head(resolved.path)
+    if head is not None:
+        cache_key = (str(resolved.path), head)
+        with _RESUME_DETAILS_CACHE_LOCK:
+            cached = _resume_details_cache.get(cache_key)
+        if cached is not None:
+            if isinstance(cached, RunError):
+                raise cached
+            return cached
+
+    def _cache_error(message: str) -> RunError:
+        error = RunError(message)
+        if cache_key is not None:
+            with _RESUME_DETAILS_CACHE_LOCK:
+                _resume_details_cache[cache_key] = error
+        return error
+
+    try:
         imports = private_records.list_imports(
             home_root=home_root,
             requested_target=target,
@@ -207,14 +265,17 @@ def resolve_newest_resume_details(
             gig_id=resolved.gig_id,
         )
     except Exception as exc:
-        raise RunError("find_jobs_resume_required: committed resume records are unavailable") from exc
+        raise _cache_error(
+            "find_jobs_resume_required: committed resume records are unavailable"
+        ) from exc
+
     resume_imports = [
         item
         for item in imports
         if item.get("kind") == "resume" and isinstance(item.get("reference_id"), str)
     ]
     if not resume_imports:
-        raise RunError("find_jobs_resume_required: no committed resume is available")
+        raise _cache_error("find_jobs_resume_required: no committed resume is available")
     resume_imports.sort(
         key=lambda item: (str(item.get("created_at", "")), str(item.get("reference_id", "")))
     )
@@ -253,7 +314,9 @@ def resolve_newest_resume_details(
                 continue
             linked.append((imported, record_id, revision_id, dict(content)))
     if not linked:
-        raise RunError("find_jobs_resume_required: no committed resume record revision is available")
+        raise _cache_error(
+            "find_jobs_resume_required: no committed resume record revision is available"
+        )
     imported, record_id, revision_id, content_ref = max(
         linked,
         key=lambda item: (
@@ -287,13 +350,19 @@ def resolve_newest_resume_details(
             raise ValueError("resume content digest differs from its committed snapshot")
         label = imported.get("label")
         created_at = imported.get("created_at")
-        return ResumeDetails(
+        result = ResumeDetails(
             pinned=PinnedResume(record_id, revision_id, digest),
             label=label if isinstance(label, str) else None,
             created_at=created_at if isinstance(created_at, str) else None,
         )
     except Exception as exc:
-        raise RunError("find_jobs_resume_required: selected resume is unavailable") from exc
+        raise _cache_error(
+            "find_jobs_resume_required: selected resume is unavailable"
+        ) from exc
+    if cache_key is not None:
+        with _RESUME_DETAILS_CACHE_LOCK:
+            _resume_details_cache[cache_key] = result
+    return result
 
 
 def resolve_newest_resume(

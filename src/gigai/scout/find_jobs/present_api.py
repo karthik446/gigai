@@ -33,7 +33,7 @@ from typing import Callable, Protocol
 from urllib.parse import urlsplit
 
 from ...canonical import canonical_json_bytes, parse_json_bytes
-from ...run import RunError
+from ...run import ResumeDetails, RunError
 from .contracts import (
     API_BIND,
     AggregateStatus,
@@ -116,6 +116,14 @@ class Backend(Protocol):
         """
         ...
 
+    def resume_details(self) -> "ResumeDetails | None":
+        """One resolution for both ``resume_preview()`` and ``resume_metadata()``.
+
+        uat-bug-008: a caller that needs both no longer resolves the newest
+        resume twice per request; see ``ScoutFindJobsBackend.resume_details``.
+        """
+        ...
+
     def start_run(
         self,
         run_request: RunRequest,
@@ -195,6 +203,10 @@ class NotWiredBackend:
         raise AssertionError("unreachable")
 
     def resume_metadata(self) -> tuple[str | None, str | None] | None:
+        self._not_wired()
+        raise AssertionError("unreachable")
+
+    def resume_details(self) -> ResumeDetails | None:
         self._not_wired()
         raise AssertionError("unreachable")
 
@@ -575,6 +587,24 @@ class ScoutFindJobsBackend:
                 return None
             raise
         return (details.label, details.created_at)
+
+    def resume_details(self) -> ResumeDetails | None:
+        """One resolution for both the pinned preview and its display fields.
+
+        uat-bug-008: ``resume_preview()`` and ``resume_metadata()`` both
+        call ``run.resolve_newest_resume_details`` -- calling it twice per
+        request is wasteful even with that resolver's own per-journal-head
+        cache (present_api.py:1371 GET /api/config). Callers that need both
+        ``pinned`` and the label/date use this instead of calling both.
+        """
+        from ... import run
+
+        try:
+            return run.resolve_newest_resume_details(self.home_root, self._target_root())
+        except RunError as exc:
+            if str(exc).startswith("find_jobs_resume_required:"):
+                return None
+            raise
 
     def start_run(
         self,
@@ -1464,15 +1494,17 @@ def _make_handler(
             except LookupError:
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "config not found")
                 return
-            resume_preview = backend.resume_preview()
-            # uat-bug-004: additive display fields alongside resume_preview's
-            # raw ids -- the Configuration card shows "<label> · added <date>"
-            # with the ids moved to a tooltip. Resolved separately from
-            # resume_preview() (see ScoutFindJobsBackend.resume_metadata) so
-            # the sealed PinnedResume shape itself never grows display-only
-            # fields.
-            resume_metadata = backend.resume_metadata() if resume_preview is not None else None
-            resume_label, resume_created_at = resume_metadata if resume_metadata is not None else (None, None)
+            # uat-bug-004: additive display fields ("<label> · added <date>")
+            # alongside resume_preview's raw ids -- the sealed PinnedResume
+            # shape itself never grows display-only fields.
+            # uat-bug-008: one resolution instead of resume_preview() +
+            # resume_metadata() (each independently replaying committed
+            # journal artifacts via run.resolve_newest_resume_details) --
+            # see ScoutFindJobsBackend.resume_details.
+            resume_result = backend.resume_details()
+            resume_preview = resume_result.pinned if resume_result is not None else None
+            resume_label = resume_result.label if resume_result is not None else None
+            resume_created_at = resume_result.created_at if resume_result is not None else None
             config_digest = config.digest()
             payload = {
                 "schema_version": "scout-find-jobs-config-response:1",

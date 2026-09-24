@@ -11,6 +11,7 @@ from typing import Any, Callable
 import httpx
 import pytest
 
+from gigai.run import ResumeDetails
 from gigai.scout.find_jobs.contracts import (
     FindJobsConfig,
     FindJobsContractError,
@@ -104,6 +105,19 @@ class FakeBackend:
 
     def resume_metadata(self) -> tuple[str | None, str | None] | None:
         return self.resume_metadata_value
+
+    def resume_details(self) -> ResumeDetails | None:
+        # uat-bug-008: mirrors ScoutFindJobsBackend.resume_details -- one
+        # combined lookup instead of resume_preview()+resume_metadata().
+        # Built from the (possibly overridden, e.g. by _NoResumeBackend)
+        # methods themselves, not the raw self.resume/self.resume_metadata_value
+        # fields, so a subclass overriding just those two methods still gets
+        # a consistent resume_details().
+        pinned = self.resume_preview()
+        if pinned is None:
+            return None
+        label, created_at = self.resume_metadata() or (None, None)
+        return ResumeDetails(pinned=pinned, label=label, created_at=created_at)
 
     def start_run(
         self,
