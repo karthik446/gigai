@@ -215,6 +215,61 @@ def test_stale_state_file_is_cleaned_and_a_fresh_instance_starts(stop_after) -> 
     assert _process_is_alive(int(run_payload["pid"]))  # type: ignore[arg-type]
 
 
+def test_stop_and_status_do_not_trust_a_pid_reused_by_an_unrelated_process(bound_project) -> None:
+    """P1 (pr37-review-findings.md #9): a state file's pid can outlive our
+    server and be reused by the OS for an unrelated process. stop/status must
+    confirm the pid is actually our Scout server (identity, not just
+    liveness) before treating it as running or signalling it.
+    """
+
+    home, target = bound_project
+    port = _free_port()
+
+    # A harmless long-lived process standing in for "OS reused our old pid".
+    unrelated = subprocess.Popen(
+        ["sleep", "300"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        run_supervisor.ensure_scout_ready(home_root=home, requested_target=target)
+        from gigai.workpad import resolve_bound_project
+
+        bound = resolve_bound_project(home_root=home, requested_target=target)
+        fake = run_supervisor.ScoutRunState(
+            project_id=bound.project_id,
+            pid=unrelated.pid,
+            port=port,
+            url=f"http://127.0.0.1:{port}",
+            log_path=str(home / "logs" / "fake.log"),
+            started_at="2020-01-01T00:00:00+00:00",
+        )
+        run_supervisor._write_state(home, fake)
+        assert _process_is_alive(unrelated.pid)
+
+        status_payload = _run_cli(home, target, "status")
+        assert status_payload["state"] != "running"
+
+        stop_payload = _run_cli(home, target, "stop")
+        assert stop_payload["stopped"] is False
+
+        # The unrelated process must still be alive -- never signalled.
+        assert _process_is_alive(unrelated.pid)
+
+        # The stale state must have been cleaned up.
+        final_status = _run_cli(home, target, "status")
+        assert final_status["state"] == "stopped"
+        assert final_status["pid"] is None
+    finally:
+        unrelated.terminate()
+        try:
+            unrelated.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            unrelated.kill()
+            unrelated.wait(timeout=5.0)
+
+
 def test_health_check_failure_reports_log_and_exits_nonzero(bound_project, monkeypatch) -> None:
     home, target = bound_project
     port = _free_port()

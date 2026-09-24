@@ -122,6 +122,75 @@ def _process_is_alive(pid: int) -> bool:
     return True
 
 
+# Command-line markers that identify a pid as *our* Scout server. There are
+# two shapes: the detached child `start()` spawns (runs the present_api
+# module directly -- see the `argv` built below) and, in --foreground mode,
+# the pid *is* the `gigai scout run --foreground` CLI process itself, which
+# never mentions present_api. Matching either marker is enough; a stranger
+# process is vanishingly unlikely to contain both "scout" and "run"/
+# "present_api" together on its command line. Used so a pid the OS reused
+# for an unrelated process is never mistaken for a live Scout server --
+# liveness alone (``_process_is_alive``) is not identity. Portable in the two
+# ways we actually run: /proc on Linux, ``ps -o command=`` on macOS/BSD;
+# psutil is deliberately not a dependency.
+_SERVER_MODULE_MARKER = "gigai.scout.find_jobs.present_api"
+_FOREGROUND_MARKERS = ("scout", "run", "--foreground")
+
+
+def _command_line_for_pid(pid: int) -> str | None:
+    """Best-effort full command line for ``pid``, or ``None`` if unavailable.
+
+    Returns ``None`` (never raises) when the pid is gone, permission is
+    denied, or the platform has neither ``/proc`` nor ``ps`` -- callers must
+    treat that as "identity unknown", not as "identity confirmed".
+    """
+
+    proc_cmdline = Path("/proc") / str(pid) / "cmdline"
+    if proc_cmdline.exists():
+        try:
+            raw = proc_cmdline.read_bytes()
+        except OSError:
+            return None
+        if not raw:
+            return None
+        parts = [part.decode(errors="replace") for part in raw.split(b"\0") if part]
+        return " ".join(parts)
+
+    try:
+        result = subprocess.run(  # noqa: S603, S607 - fixed argv, no shell
+            ["ps", "-o", "command=", "-p", str(pid)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=2.0,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    output = result.stdout.decode(errors="replace").strip()
+    return output or None
+
+
+def _pid_is_our_server(pid: int) -> bool:
+    """True only if ``pid`` is alive *and* its command line is our server.
+
+    Liveness (``_process_is_alive``) is necessary but not sufficient: after
+    pid reuse an unrelated process can hold the same pid. When the command
+    line can't be determined (permission denied, unsupported platform) this
+    conservatively returns ``False`` rather than risk signalling a stranger.
+    """
+
+    if not _process_is_alive(pid):
+        return False
+    command_line = _command_line_for_pid(pid)
+    if command_line is None:
+        return False
+    if _SERVER_MODULE_MARKER in command_line:
+        return True
+    return all(marker in command_line for marker in _FOREGROUND_MARKERS)
+
+
 def _read_state(home_root: Path, project_id: str) -> ScoutRunState | None:
     path = _state_path(home_root, project_id)
     if path.is_symlink() or not path.is_file():
@@ -197,7 +266,7 @@ def _existing_live_state(home_root: Path, project_id: str) -> tuple[ScoutRunStat
     state = _read_state(home_root, project_id)
     if state is None:
         return None, False
-    if not _process_is_alive(state.pid) or not _health_ok(state.port):
+    if not _pid_is_our_server(state.pid) or not _health_ok(state.port):
         _remove_state(home_root, project_id)
         return None, True
     return state, False
@@ -361,11 +430,14 @@ def stop(*, home_root: Path, requested_target: Path | None) -> bool:
     state = _read_state(home_root, bound_project.project_id)
     if state is None:
         return False
-    was_alive = _process_is_alive(state.pid)
-    if was_alive:
+    # Identity, not just liveness: never signal a pid the OS may have reused
+    # for an unrelated process since our server last held it (P1 #9,
+    # pr37-review-findings.md).
+    is_ours = _pid_is_our_server(state.pid)
+    if is_ours:
         _stop_pid(state.pid)
     _remove_state(home_root, bound_project.project_id)
-    return was_alive
+    return is_ours
 
 
 @dataclass(frozen=True)
@@ -404,6 +476,12 @@ def status(*, home_root: Path, requested_target: Path | None) -> ScoutStatus:
             log_path=saved.log_path,
             started_at=saved.started_at,
         )
+    if not _pid_is_our_server(saved.pid):
+        # The pid is alive but isn't our server -- the OS reused it for an
+        # unrelated process since we last held it. Clean up the stale state
+        # rather than reporting "running" (P1 #9, pr37-review-findings.md).
+        _remove_state(home_root, project_id)
+        return ScoutStatus(state="stopped", project_id=project_id)
     return ScoutStatus(
         state="running",
         project_id=project_id,
