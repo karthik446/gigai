@@ -23,6 +23,7 @@ _Updated 2026-09-24 09:05 MDT by Claude (coordinator of `run_7cba834cb817`, work
 | interview-prep-engine: `gigai scout prep` on interview_scheduled (company research w/ sources ≤ $0.50, role research, question categories, prep notes); reuses S2-A helpers read-only | Sonnet 5 | running | `task_9751514825bf` / `ctx_c6d135336247` | verify → commit → UI prep card after S2-B |
 
 ## Next up
+- Release path (operator 2026-09-24): interview-prep lands → operator UAT on the branch → fix UAT issues → user docs + README pass (NOT before UAT) → CHANGELOG 0.1.9 → one make test → release.
 - After stage 2: make acquire watchlist-only by default (Exa optional, off by default); confirm with the operator first. Small config + README packet.
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
 - After wave 1: S16/S17 stay deferred until find-jobs works live (UAT). S18 undecided.
