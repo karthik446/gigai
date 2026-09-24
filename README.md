@@ -192,10 +192,17 @@ in this release; leave it `false`.
 ### Exa search
 
 ```bash
+gigai secrets add exa
+```
+
+Or export it directly instead (environment takes precedence over a stored
+secret):
+
+```bash
 export EXA_API_KEY=...
 ```
 
-Without it, Exa discovery refuses to run; ATS-board acquisition is
+Without either, Exa discovery refuses to run; ATS-board acquisition is
 unaffected.
 
 ### Start the API

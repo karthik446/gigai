@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import httpx
 import pytest
 
+from gigai import secrets_store
 from gigai.scout.find_jobs.exa_client import (
     ATS_INCLUDE_DOMAINS,
     EXA_API_KEY_ENV_VAR,
@@ -42,8 +44,11 @@ def _client(handler) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
-def test_missing_api_key_raises_without_leaking(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_api_key_raises_without_leaking(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.delenv(EXA_API_KEY_ENV_VAR, raising=False)
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path))
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("no HTTP request should be made without an API key")
@@ -53,7 +58,65 @@ def test_missing_api_key_raises_without_leaking(monkeypatch: pytest.MonkeyPatch)
 
     assert excinfo.value.code == "exa_missing_key"
     assert EXA_API_KEY_ENV_VAR in str(excinfo.value)
+    assert "gigai secrets add exa" in str(excinfo.value)
     assert "sk-" not in str(excinfo.value)
+
+
+def test_api_key_used_from_secrets_store_when_env_unset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv(EXA_API_KEY_ENV_VAR, raising=False)
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path))
+    secrets_store.set(EXA_API_KEY_ENV_VAR, "dotenv-exa-key")
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config())
+
+    assert len(captured) == 1
+    assert captured[0].headers["x-api-key"] == "dotenv-exa-key"
+
+
+def test_env_api_key_wins_over_secrets_store(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path))
+    secrets_store.set(EXA_API_KEY_ENV_VAR, "dotenv-exa-key")
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "env-exa-key")
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config())
+
+    assert len(captured) == 1
+    assert captured[0].headers["x-api-key"] == "env-exa-key"
+
+
+def test_empty_env_api_key_falls_back_to_secrets_store(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path))
+    secrets_store.set(EXA_API_KEY_ENV_VAR, "dotenv-exa-key")
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "")
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config())
+
+    assert len(captured) == 1
+    assert captured[0].headers["x-api-key"] == "dotenv-exa-key"
 
 
 def test_request_shape_and_mapping(monkeypatch: pytest.MonkeyPatch) -> None:

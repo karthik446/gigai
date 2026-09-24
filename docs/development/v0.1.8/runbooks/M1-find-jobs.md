@@ -143,9 +143,16 @@ cat > "$TARGET_DIR/find-jobs.json" <<'JSON'
 JSON
 ```
 
-Export the Exa credential in the API process environment. The key is read by
+Store the Exa credential so the API process can read it. The key is read by
 the Exa client at request time and is never stored in the graph binding or in
 run outputs.
+
+```bash
+gigai secrets add exa
+```
+
+Alternatively, export it directly in the API process environment instead
+(environment takes precedence over a stored secret):
 
 ```bash
 export EXA_API_KEY="<your Exa API key>"
@@ -159,8 +166,9 @@ running as well.
 ### Before you click
 
 * [ ] `ollama serve` is running (terminal from step 1).
-* [ ] `EXA_API_KEY` is exported in the **API terminal's** environment (the
-  API process reads it at request time; the UI and browser never see it).
+* [ ] `EXA_API_KEY` is set via `gigai secrets add exa` (or exported in the
+  **API terminal's** environment) — the API process reads it at request
+  time; the UI and browser never see it.
 * [ ] A resume was committed with `gigai reference add --kind resume ...`
   (step 2) — the UI disables **Run workflow** without one.
 * [ ] `<target>/find-jobs.json` exists and matches the roles/sources you

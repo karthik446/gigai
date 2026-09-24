@@ -33,6 +33,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+from gigai import secrets_store
+
 from .contracts import (
     ATSProvider,
     FindJobsConfig,
@@ -81,11 +83,11 @@ class ExaClientError(FindJobsContractError):
 
 
 def _require_api_key() -> str:
-    api_key = os.environ.get(EXA_API_KEY_ENV_VAR)
+    api_key = os.environ.get(EXA_API_KEY_ENV_VAR) or secrets_store.get(EXA_API_KEY_ENV_VAR)
     if not api_key:
         raise ExaClientError(
             "exa_missing_key",
-            f"{EXA_API_KEY_ENV_VAR} is not set in the environment; Exa discovery cannot run",
+            "EXA_API_KEY is not set; run `gigai secrets add exa` (or export EXA_API_KEY)",
         )
     return api_key
 
