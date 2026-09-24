@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-23 21:18 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-23 21:29 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -18,9 +18,10 @@ _Updated 2026-09-23 21:18 MDT by Claude (coordinator of `run_7cba834cb817`, work
 ## In progress
 | Packet | Model | State | Task / dispatch | Next |
 | --- | --- | --- | --- | --- |
-| secrets-core: Workstream 0 P0-P2, pulled into 0.1.9 (secrets store on python-dotenv, service map, `gigai secrets add/list/rm`, env-then-.env resolver, roadmap placement) | Sonnet 5 | running | `task_56b12b13b1b9` / `ctx_119a0a1693fd` | verify → commit → dispatch secrets-exa (P3) |
-| country-data-research: replace the hand-made country/city tables in `scout/find_jobs/filters.py` with libraries/data or structured ATS fields? research only | Sonnet 5 | running | `task_9b8d138e10f0` / `ctx_1cc00426c3f0` | coordinator review → operator decides the fix |
-| PR CI (`ad88708`) + v0.1.8.1 release run 35948069799 | — | background watcher | | report |
+| secrets-exa: Workstream 0 P3, Exa key via env → ~/.gigai/.env; runbook says `gigai secrets add exa` | Sonnet 5 | running | `task_fceb4498ae5d` / `ctx_0cd0935d3e6d` | verify → commit |
+| scout-ui-package (A): commit ui/dist, package it, API serves the UI, PR CI freshness job (U13) | Sonnet 5 | running | `task_040b11411e45` / `ctx_5f062e43606a` | verify → commit; C after A+B |
+| scout-setup-cmds (B): `gigai gig use`, `gigai scout install`, `gigai scout resume add`, starter find-jobs.json (U6/U14/U15) | Sonnet 5 | running | `task_cad6f78f0a42` / `ctx_a2d9209ba65b` | verify → commit; C after A+B |
+| C scout-run-supervisor (`gigai scout run/stop/status`, background + logs) → D acceptance (README + installed wheel) | — | not started | | after A+B |
 
 ## Next up
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
@@ -29,6 +30,9 @@ _Updated 2026-09-23 21:18 MDT by Claude (coordinator of `run_7cba834cb817`, work
 ## Done
 - Run `run_7cba834cb817` created.
 - Handoff + README "Handoffs" section committed as the first v0.1.9 commit.
+- **secrets-core committed** `a915c24`: `gigai secrets add/list/rm`, env → ~/.gigai/.env resolver (python-dotenv, interpolation off, 0600 under umask 077). Coordinator reproduced + re-verified the 2 r0 bugs.
+- **README uv-only** `f1fb6c6` (+ API command via `uv tool run --from gigai`, verified on 0.1.8.1).
+- **Country-data research** accepted (`.orchestrator/research/country-data.md`): Lever/Ashby structured country fields unread; pycountry fallback. Implementation waits on the operator.
 - **Merged main (0.1.8.1, #38)** at `8380102`: the release.yml conflict was resolved as main's shipped release design + `actions: read` on the pull_request.yaml callers; our preflight notes hard-fail was dropped for main's fallback (worker `workers/merge-main-release.md`; coordinator re-ran 63 focused tests + make unit-tests 869). 0.1.8.1 worker reports archived to `runs/v0.1.8.1/`.
 - **S21 spike** (`docs/development/v0.2.0/spikes/S21-gig-repos-and-data-ownership.md`) accepted after r1-r3 (reviews `reviews/s21-r0.md`; r3 fixed a coordinator over-attribution) and committed.
 - **Proposed v0.2.0 gig-workbench roadmap** (`docs/development/v0.2.0/roadmaps/v0.2.0-gig-workbench-roadmap.md`) accepted as a proposed doc after r1-r2 (review `reviews/roadmap-workbench-r0.md`), committed `939c5b3`.
