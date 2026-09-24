@@ -46,7 +46,7 @@ mechanics here. Those belong in the internal changelog.
 - Fixes the release pipeline: the GitHub Release now publishes right after
   PyPI, and PyPI/TestPyPI clean-install checks run as non-blocking
   post-publish checks with a bounded wait for the index instead of racing
-  it (see `docs/development/v0.1.9` release-pipeline notes).
+  it.
 
 ### 0.1.8
 
