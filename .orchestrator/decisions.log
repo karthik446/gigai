@@ -51,3 +51,5 @@
 - 2026-09-23 21:14 Operator: apply the v0.1.8 release notes later (not now).
 - 2026-09-23 21:18 Operator: pull Workstream 0 (secrets) into 0.1.9 ("if it's small it's fine; UAT runs on 0.1.8.1"). secrets-core (P0-P2 + CLI + roadmap placement; adds python-dotenv rather than a hand-rolled parser) → Sonnet 5 task_56b12b13b1b9 / ctx_119a0a1693fd. secrets-exa (P3) follows once the resolver exists.
 - 2026-09-23 21:18 Operator: the hand-made country/city tables in scout/find_jobs/filters.py (0.1.8.1) are unacceptable; research existing libraries/data (and structured ATS fields) before changing anything → country-data-research, Sonnet 5 task_9b8d138e10f0 / ctx_1cc00426c3f0.
+- 2026-09-23 21:20 Operator rule (via the v0.1.8-worktree session): never pip, uv only, in user-facing docs. The relayed task wasn't in this Run, so the coordinator wrote the spec: readme-uv-only → Haiku 4.5. Historical docs are reported, not edited.
+- 2026-09-23 21:20 readme-uv-only: the v0.1.8 session's task-create was fenced (consumer_fenced); already dispatched by this coordinator (task_45dfed4ab5dd). Also gitignored .orchestrator/**/logs/ (2 json run logs were left untracked).
