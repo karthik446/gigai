@@ -35,6 +35,7 @@ def _config(**overrides: object) -> FindJobsConfig:
         "remote": True,
         "published_after": "2026-09-15T00:00:00Z",
         "sources": SourceToggles(exa=True, ats=True, hiringcafe=False),
+        "countries": ("US",),
     }
     values.update(overrides)
     return FindJobsConfig(**values)
@@ -159,6 +160,7 @@ def test_request_shape_and_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["numResults"] == NUM_RESULTS
     assert body["includeDomains"] == list(ATS_INCLUDE_DOMAINS)
     assert body["startPublishedDate"] == "2026-09-15T00:00:00Z"
+    assert body["userLocation"] == "US"
     assert body["contents"] == {"text": {"maxCharacters": EXA_TEXT_MAX_CHARACTERS}}
 
     assert len(rows) == 2
@@ -283,6 +285,48 @@ def test_omits_start_published_date_when_not_set(monkeypatch: pytest.MonkeyPatch
     assert "startPublishedDate" not in body
 
 
+def test_omits_user_location_when_countries_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "secret-exa-key")
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config(countries=()))
+
+    body = json.loads(captured[0].content)
+    assert "userLocation" not in body
+
+
+def test_omits_user_location_when_multiple_countries(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "secret-exa-key")
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config(countries=("US", "CA")))
+
+    body = json.loads(captured[0].content)
+    assert "userLocation" not in body
+
+
+def test_sends_user_location_for_single_country(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "secret-exa-key")
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config(countries=("GB",)))
+
+    body = json.loads(captured[0].content)
+    assert body["userLocation"] == "GB"
+
+
 def test_multiple_merged_queries_issue_one_request_each(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "secret-exa-key")
     captured: list[httpx.Request] = []
@@ -301,7 +345,7 @@ def test_multiple_merged_queries_issue_one_request_each(monkeypatch: pytest.Monk
     assert queries == {"software engineer", "platform engineer"}
 
 
-@pytest.mark.parametrize("status_code", [400, 401, 429, 500, 503])
+@pytest.mark.parametrize("status_code", [400, 401, 402, 429, 500, 503])
 def test_http_error_status_raises_redacted_error(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None:
     monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "super-secret-value")
 
@@ -312,7 +356,42 @@ def test_http_error_status_raises_redacted_error(monkeypatch: pytest.MonkeyPatch
         ExaSearchClient().search(_client(handler), _config())
 
     assert excinfo.value.code == f"exa_http_{status_code}"
+    assert str(status_code) in str(excinfo.value)
     assert "super-secret-value" not in str(excinfo.value)
+    assert "x-api-key" not in str(excinfo.value).lower()
+
+
+def test_402_error_names_payment_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "super-secret-value")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(402, json={"error": "payment required"})
+
+    with pytest.raises(ExaClientError) as excinfo:
+        ExaSearchClient().search(_client(handler), _config())
+
+    assert excinfo.value.code == "exa_http_402"
+    message = str(excinfo.value)
+    assert "402" in message
+    assert "payment required" in message.lower()
+    assert "out of credits" in message.lower()
+    assert "super-secret-value" not in message
+
+
+def test_429_error_names_rate_limited(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "super-secret-value")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": "slow down"})
+
+    with pytest.raises(ExaClientError) as excinfo:
+        ExaSearchClient().search(_client(handler), _config())
+
+    assert excinfo.value.code == "exa_http_429"
+    message = str(excinfo.value)
+    assert "429" in message
+    assert "rate limited" in message.lower()
+    assert "super-secret-value" not in message
 
 
 def test_bad_json_response_raises_redacted_error(monkeypatch: pytest.MonkeyPatch) -> None:

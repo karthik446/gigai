@@ -5,16 +5,46 @@ issues one HTTP request per merged query against Exa's public search API and
 maps the response into frozen :class:`PostingRow` DTOs; it never fetches a
 board, writes a workpad, or touches private data.
 
-Exa API shape assumed (not verified live; no network access during
-development). Documented here since it cannot be pinned by a fixture:
+Exa API shape verified against the documented ``/search`` reference
+(https://docs.exa.ai/reference/search, OpenAPI ``SearchRequest`` schema
+current as of 2026-09; no network access during development, so the field
+list -- not live response bodies -- is what's confirmed):
 
 - ``POST https://api.exa.ai/search``
 - Header ``x-api-key: <EXA_API_KEY>``
 - JSON body: ``{"query": str, "numResults": int, "includeDomains": [str, ...],
-  "startPublishedDate": str | omitted, "contents": {"text":
-  {"maxCharacters": int}}}``
+  "startPublishedDate": str | omitted, "userLocation": str | omitted,
+  "contents": {"text": {"maxCharacters": int}}}``
 - JSON response: ``{"results": [{"url": str, "title": str,
   "publishedDate": str | null, "text": str | omitted, ...}, ...]}``
+
+C1 (v0.1.8.1, B1/B5 addendum): query shaping maps two ``FindJobsConfig``
+fields onto documented Exa request params so fewer irrelevant boards come
+back in the first place (selection/UI filtering, B1, still applies after):
+
+- ``config.published_after`` -> ``startPublishedDate`` (already present
+  before this change; ISO-8601 datetime string per the docs).
+- ``config.countries`` -> ``userLocation``, Exa's *only* documented location
+  knob (a single two-letter ISO-3166-1 alpha-2 country code -- there is no
+  free-text or multi-value location parameter in the schema). Sent only
+  when ``countries`` has exactly one code: ``FindJobsConfig`` already
+  validates each entry as ``[A-Z]{2}`` (contracts.py's ``_COUNTRY_CODE``),
+  so no reformatting is needed. Left off the request when ``countries`` is
+  empty (no constraint requested) or has more than one code (``userLocation``
+  cannot express an OR of countries; inventing a multi-value encoding the
+  docs don't define would violate the "don't invent params" instruction).
+  Exa's search index has no per-posting country field to filter by
+  server-side, so this is a soft geo signal, not a guarantee -- B1's hard
+  country filter still runs downstream in market_acquisition.py.
+- ``config.location`` (free-text, e.g. "Denver, CO") has no documented Exa
+  request field at all (checked: no ``location`` key in the schema, only
+  ``userLocation``'s two-letter country code). ``FindJobsConfig`` is
+  operator-authored (``find-jobs.json``) and ``merged_queries`` is
+  authored/derived elsewhere, not by this client, so this module cannot
+  invent a query-text splice for ``location`` without duplicating logic
+  that belongs to whatever builds ``merged_queries``. It is intentionally
+  left out of the Exa request; only ``countries`` -> ``userLocation`` is
+  wired here, matching a documented param.
 
 C0/P1 (v0.1.8.1, U25, U19): the ``contents.text`` request option is Exa's
 documented "get me the page's text along with search results" knob (assumed
@@ -69,6 +99,25 @@ _PROVIDER_BY_NAME = {
     "lever": ATSProvider.LEVER,
     "ashby": ATSProvider.ASHBY,
 }
+
+# Short, redacted reasons for the status codes Exa is documented to return
+# for auth/quota/availability failures. Never derived from the response
+# body (which may echo request details) -- just the status code.
+_EXA_HTTP_REASONS: dict[int, str] = {
+    401: "invalid or revoked API key",
+    402: "payment required / out of credits",
+    403: "forbidden",
+    404: "not found",
+    429: "rate limited",
+    500: "Exa server error",
+    502: "Exa server error",
+    503: "Exa unavailable",
+    504: "Exa timed out",
+}
+
+
+def _exa_http_reason(status_code: int) -> str:
+    return _EXA_HTTP_REASONS.get(status_code, "request failed")
 
 
 class ExaClientError(FindJobsContractError):
@@ -155,6 +204,8 @@ class ExaSearchClient:
             }
             if config.published_after is not None:
                 body["startPublishedDate"] = config.published_after
+            if len(config.countries) == 1:
+                body["userLocation"] = config.countries[0]
             try:
                 response = client.post(
                     EXA_SEARCH_URL,
@@ -169,7 +220,7 @@ class ExaSearchClient:
             if response.status_code >= 400:
                 raise ExaClientError(
                     f"exa_http_{response.status_code}",
-                    f"Exa request returned HTTP {response.status_code}",
+                    f"Exa returned {response.status_code} ({_exa_http_reason(response.status_code)})",
                 )
             try:
                 payload = response.json()
