@@ -22,6 +22,7 @@ _Updated 2026-09-24 08:43 MDT by Claude (coordinator of `run_7cba834cb817`, work
 | S2-B setup interview (11 Qs) in the Scout UI + Discover panel; /api/setup, /api/discover | Sonnet 5 | running | `task_f951e3e00855` / `ctx_1f13631aa84c` | verify → commit → end-to-end check with A |
 
 ## Next up
+- After stage 2: make acquire watchlist-only by default (Exa optional, off by default); confirm with the operator first. Small config + README packet.
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
 - After wave 1: S16/S17 stay deferred until find-jobs works live (UAT). S18 undecided.
 
