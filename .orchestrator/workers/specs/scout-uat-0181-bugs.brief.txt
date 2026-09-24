@@ -1,0 +1,20 @@
+BUG TICKETS from the operator's live 0.1.8.1 UAT (2026-09-24), from the v0.1.8-worktree session. The v0.1.9 coordinator turns these into tickets/packets. Evidence run: ~/.gigai/workpads/projects/project_e12ab112-…/gigs/gig_015b1fc0-…/runs/run_d73cb030-62a3-4d5e-9629-a33977d90194 (outputs/acquire.json, raw/{exa,greenhouse,ashby}).
+
+VERIFIED GOOD (record as UAT evidence): acquire 69 postings, 0 source failures, raw payloads saved (U26 fixed). Assess ran 5/5 on codex_cli with real posting text and a grounded requirement×resume matrix, suggestions and questions (U22 + U25 fixed on a live run). The operator: "accurate enough".
+
+B1. FILTER AT ACQUIRE, NOT IN THE UI (operator: "why are we doing filtering on fucking ui?")
+- Config countries=["US"], but the result list shows Bengaluru, Hyderabad, India, Seoul, Singapore, Australia, Canada. Rows carry no country field (posting keys: board_token, company, content_sha256, location, normalized_url, provider, published_at, query_key, source_kind, sponsorship, text, title, url). The country filter appears to affect only SELECTION; UI chips do the rest.
+- Why it lands here: Exa finds company boards; the ATS APIs (Greenhouse/Ashby/Lever) return ALL of a company's jobs worldwide with no country param. So acquire must apply country/location/remote (and role) filters right after fetch. Non-matching rows are dropped from results (kept in raw/ for audit/replay), not left for UI chips.
+- Also shape Exa queries with the location/country and published-after (startPublishedDate) so fewer irrelevant boards come back.
+- Region strings: "AMER" passed the US-only filter. Region tokens (AMER, EMEA, APAC, LATAM, "Remote - Americas") must not count as US. Decide the policy for multi-location strings ("Mountain View, USA; Seattle, USA" ok; "Seoul, South Korea; z-Test & Templates Only" not).
+B2. SELECTION QUALITY
+- All 5 assessed picks were ClickHouse (rows: clickhouse 36, coupang 31, gen-digital 2). There's no company diversity: cap per company (e.g. max 2).
+- 3 of 5 had the same title "Senior Software Engineer - Cloud Infrastructure" (AMER). Dedupe same company + normalized title (+ same-country locations) before selection.
+B3. SPONSORSHIP DETECTION: 69/69 rows are "Sponsorship unknown" although posting text is present. Check the detector (phrases like "will not sponsor", "must be authorized to work … without sponsorship", "visa sponsorship available") and that visa_sponsorship_required=true actually excludes "not offered".
+B4. PROGRESSIVE UX (operator: "load ui sooner, one search -> assess load, as a card … this list isn't going to work … we load as we get")
+- Replace the long table with cards, one per posting, carrying its assessment details (matrix, suggestions, questions). Each card appears as soon as its posting is acquired and fills in when its assess finishes: stream per posting, don't wait for the whole run.
+- Live step status while running (U18: cards show "waiting" during acquire because status comes only from receipts written at step end).
+- The number assessed (5) came from the operator's per-run cap choice. Make that visible on the run.
+B5. (already in scout-run-command.brief addendum) A run where every source fails shows "succeeded" with 0 postings; Exa errors hide the HTTP status.
+
+SCOPE NOTE: B1–B3 are acquire/select logic in scout/find_jobs (market_acquisition.py, ats_board_clients.py, exa_client.py, contracts selection). B4 is UI + API (present_api progress endpoint). Suggest B1+B2+B3 as one packet and B4 as a separate one (it overlaps roadmap workstream 5 / the hub UI; keep it Scout-local for now).

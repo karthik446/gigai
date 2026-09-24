@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-23 21:29 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-23 21:42 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -18,10 +18,11 @@ _Updated 2026-09-23 21:29 MDT by Claude (coordinator of `run_7cba834cb817`, work
 ## In progress
 | Packet | Model | State | Task / dispatch | Next |
 | --- | --- | --- | --- | --- |
-| secrets-exa: Workstream 0 P3, Exa key via env → ~/.gigai/.env; runbook says `gigai secrets add exa` | Sonnet 5 | running | `task_fceb4498ae5d` / `ctx_0cd0935d3e6d` | verify → commit |
-| scout-ui-package (A): commit ui/dist, package it, API serves the UI, PR CI freshness job (U13) | Sonnet 5 | running | `task_040b11411e45` / `ctx_5f062e43606a` | verify → commit; C after A+B |
-| scout-setup-cmds (B): `gigai gig use`, `gigai scout install`, `gigai scout resume add`, starter find-jobs.json (U6/U14/U15) | Sonnet 5 | running | `task_cad6f78f0a42` / `ctx_a2d9209ba65b` | verify → commit; C after A+B |
-| C scout-run-supervisor (`gigai scout run/stop/status`, background + logs) → D acceptance (README + installed wheel) | — | not started | | after A+B |
+| scout-setup-cmds (B): `gig use` (git + non-git), `scout install`, `scout resume add`, starter config (U6/U14/U15) | Sonnet 5 | running | `task_cad6f78f0a42` / `ctx_a2d9209ba65b` | verify → commit → C |
+| acquire-country-filter: B1 filter at acquire + country fix (Lever/Ashby structured, pycountry, region tokens), B3 sponsorship, B5 all-sources-failed | Sonnet 5 | running | `task_461018bb4fcc` / `ctx_28f685c01dc4` | verify → commit |
+| exa-query-errors: Exa date/location params; HTTP status in errors (B1/B5 Exa part) | Sonnet 5 | running | `task_114750d4d9da` / `ctx_ba6f20f452f2` | verify → commit |
+| selection-diversity-u2: B2 per-company cap + dedupe + round-robin; U2 codex_cli → setup target | Sonnet 5 | running | `task_044fd792fd34` / `ctx_e8c7d3383e77` | verify → commit |
+| C scout-run-supervisor (+ missing-config message) → B4 progressive cards → D acceptance (README + installed wheel) | — | not started | | after B |
 
 ## Next up
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
@@ -33,6 +34,7 @@ _Updated 2026-09-23 21:29 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - **secrets-core committed** `a915c24`: `gigai secrets add/list/rm`, env → ~/.gigai/.env resolver (python-dotenv, interpolation off, 0600 under umask 077). Coordinator reproduced + re-verified the 2 r0 bugs.
 - **README uv-only** `f1fb6c6` (+ API command via `uv tool run --from gigai`, verified on 0.1.8.1).
 - **Country-data research** accepted (`.orchestrator/research/country-data.md`): Lever/Ashby structured country fields unread; pycountry fallback. Implementation waits on the operator.
+- **secrets-exa** `9e66428` (Workstream 0 P0-P3 done). **scout-ui-package (A)** `f4d0fb1`: UI in the wheel, served by the API; PR CI freshness job.
 - **Merged main (0.1.8.1, #38)** at `8380102`: the release.yml conflict was resolved as main's shipped release design + `actions: read` on the pull_request.yaml callers; our preflight notes hard-fail was dropped for main's fallback (worker `workers/merge-main-release.md`; coordinator re-ran 63 focused tests + make unit-tests 869). 0.1.8.1 worker reports archived to `runs/v0.1.8.1/`.
 - **S21 spike** (`docs/development/v0.2.0/spikes/S21-gig-repos-and-data-ownership.md`) accepted after r1-r3 (reviews `reviews/s21-r0.md`; r3 fixed a coordinator over-attribution) and committed.
 - **Proposed v0.2.0 gig-workbench roadmap** (`docs/development/v0.2.0/roadmaps/v0.2.0-gig-workbench-roadmap.md`) accepted as a proposed doc after r1-r2 (review `reviews/roadmap-workbench-r0.md`), committed `939c5b3`.
@@ -48,7 +50,7 @@ _Updated 2026-09-23 21:29 MDT by Claude (coordinator of `run_7cba834cb817`, work
 
 ## Blocked on operator
 - After the roadmap draft: pull Workstream 0 (connect secrets: `gigai secrets add`, .env fallback, Exa through the resolver) into 0.1.9?
-- Go-ahead for a read-only audit of the 2 v0.1.8 post-release failures (Debian offline; macOS 3.12)?
+- Post-release CI failures (Debian offline, macOS 3.12): operator said ignore for now.
 - Release checklist change: GitHub Release notes = the CHANGELOG `### X.Y.Z` section verbatim. Write 0.1.9's section for users before tagging.
 - v0.1.8 release notes: operator will apply later (deferred).
 
