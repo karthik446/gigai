@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-23 20:36 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` rebased onto `main` at `c36f182`, the #36 hotfix; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-23 20:51 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` rebased onto `main` at `c36f182`, the #36 hotfix; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -18,7 +18,8 @@ _Updated 2026-09-23 20:36 MDT by Claude (coordinator of `run_7cba834cb817`, work
 ## In progress
 | Packet | Model | State | Task / dispatch | Next |
 | --- | --- | --- | --- | --- |
-| v020-s21-gig-repos: v0.2.0 spike S21 (gigs in own repos, gig-owned data, gigai as library + CLI); operator request relayed by the v0.1.8 coordinator; spec `workers/specs/v020-s21-gig-repos.txt` | Sonnet 5 | running | `task_e91ef640f8ae` / `ctx_5d52c541ac60` | coordinator content review → commit |
+| v020-s21-gig-repos: v0.2.0 spike S21 (gig repos, gig-owned data, gigai as library + CLI). r1 accepted on content; **r2 folds in D-B (monorepo for now)** | Sonnet 5 | running r2 | `task_52676e838fca` / `ctx_3f464ccb9701` | review → commit |
+| v020-roadmap-workbench: PROPOSED v0.2.0 roadmap, gigai as a personal gig workbench (D-A..D-G; workstreams 0-7; brief `workers/specs/v020-roadmap-workbench.brief.txt`) | Sonnet 5 | running | `task_31d88fb71133` / `ctx_77db0d7b9906` | coordinator content review → commit; operator decides whether Workstream 0 (secrets) is pulled into 0.1.9 |
 
 ## Next up
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
@@ -38,6 +39,7 @@ _Updated 2026-09-23 20:36 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - None started by this Run.
 
 ## Blocked on operator
+- After the roadmap draft: pull Workstream 0 (connect secrets: `gigai secrets add`, .env fallback, Exa through the resolver) into 0.1.9?
 - Go-ahead for a read-only audit of the 2 v0.1.8 post-release failures (Debian offline; macOS 3.12)?
 - Release checklist change: GitHub Release notes = the CHANGELOG `### X.Y.Z` section verbatim. Write 0.1.9's section for users before tagging.
 - Apply the v0.1.8 release notes? (`gh release edit v0.1.8 --repo karthik446/gigai --notes-file /Users/kar/orca/workspaces/gigai/v0.1.8-release-notes.md`)

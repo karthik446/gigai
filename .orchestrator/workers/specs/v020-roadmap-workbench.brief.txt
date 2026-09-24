@@ -1,0 +1,34 @@
+BRIEF from the v0.1.8-worktree session (operator-approved 2026-09-23). The v0.1.9 coordinator turns this into a worker spec and dispatches it.
+
+ASK (operator): write a PROPOSED, NOT ACCEPTED v0.2.0 roadmap. "we don't have a roadmap for 2.0 this could be that roadmap… if we find we can do this in 1.9 we can pull in". Suggested path: docs/development/v0.2.0/roadmaps/v0.2.0-gig-workbench-roadmap.md (the coordinator decides; match the v0.1.8 roadmaps' style). First line: **Status:** Proposed — not accepted. Docs only.
+
+OPERATOR DECISIONS (2026-09-23, record; do not re-open):
+D-A. Product framing: gigai is a personal software workhorse to develop, run and publish MANY gigs (about 10 ideas), all open source. Audience: the operator, plus at most ~5 people. It tracks, runs and uses AIs. Optimize for "add or extend a gig easily" and "run it with one command", not for third-party API stability.
+D-B. MONOREPO FOR NOW: gigs live in one repo until there are 4–5 gigs with clear separation, then split. **This amends S21's decision 1 ("Scout moves to its own repo"): fold it into the S21 r1 revision.**
+D-C. `gigai <gig> run` (e.g. `gigai scout run`) opens everything for that gig: all its goal graphs and its UI. No manual workpad, binding or config ceremony.
+D-D. Secrets: `gigai secrets add exa` prompts for the API key and stores it in the gigai root folder (~/.gigai), where every gig can use it.
+D-E. Cost is shown at the gig-dashboard level (search cost etc.).
+D-F. gigai has its own UI; each gig has its own UI, added when the gig is running; gigai's server enforces the API rules.
+D-G. Python only. Gig data is gig-owned (S21).
+
+EVIDENCE FOR WORKSTREAM 0 (secrets), from the coordinator's reads/greps. Re-verify before citing:
+- Home root is ~/.gigai or $GIGAI_HOME: src/gigai/setup.py:47-48. setup.py:199 creates home_root/credentials, which nothing reads or writes (grep).
+- ~/.gigai/.env exists (mode 0600) and holds the provider key NAMES (EXA_API_KEY, OPENROUTER_API_KEY, …). Its header says GigAI reads them, but NO code loads .env: the only reference is src/gigai/private_transfer.py:102, which excludes it from transfers. Never read the values.
+- Credential refs: config.toml [[credentials]] name/kind/reference. Only kind=environment resolves (src/gigai/credentials.py:55-72); keychain/op/vault validate (:12) but can't resolve.
+- Exa bypasses the credential system: src/gigai/scout/find_jobs/exa_client.py:38,66-73 reads os.environ["EXA_API_KEY"] directly. The runbook makes the operator export it by hand: docs/development/v0.1.8/runbooks/M1-find-jobs.md:151,162.
+
+WORKSTREAMS (proposed order; size; target)
+0. Connect secrets. `gigai secrets add|list|rm <service>` (hidden prompt; list shows set/unset only). Lookup: env var first, then ~/.gigai/.env (file stays 0600). A small known-service map (exa→EXA_API_KEY, openrouter→…). Exa goes through the credential resolver. Gigs declare required secrets; gigai checks before a run. — S — CANDIDATE TO PULL INTO 0.1.9.
+1. Decouple core from Scout (S16): remove the core→scout imports (36 grep lines / 45 S16 AST sites; S21 reconciles them); entry-point gig discovery; a gig manifest (name, graphs, required secrets, UI bundle, API routes, schemas). — L
+2. Gig-owned data (S21): Scout records move out of gigai's journal into Scout's store; split state.sqlite so core keeps the G22 interview trace; move the Scout parts of private_records/application_events/external_recording; gig records store the gigai run_id; existing workpads: migrate or fresh start (open). — L
+3. Generic runner + one command: run.py loses find-jobs specifics; `gigai <gig> run [graph]` through gigai's runner; auto-provision anything missing. — M–L
+4. Metered services: gigai clients for model calls and search APIs (Exa first) that record usage per gig/run/provider. Units first; dollars later is open. — M
+5. Hub server + UI: one local server; the gigai hub shows gigs, runs, costs and secret status; gigs mount UI + API under /gigs/<name>/; loopback/consent enforced by the server; Scout's present_api moves under it. — L
+6. Gig authoring: `gigai new gig <name>` from an example gig that is also core's contract test; `gigai <gig> add-graph`. Target: idea to first run in under 30 minutes. — M
+7. Monorepo layout for gigs (per D-B): e.g. gigs/<name>/ packages in this repo, each publishable on its own; split out at 4–5 gigs. — M, last
+—. Slimmer S20: the public surface = what the example gig uses; drop heavy semver/deprecation. — S
+Order: 0 now/early; then 1 → 2 → 3 (core path); 4, 5, 6 in parallel after 1; 7 last. For every workstream, the roadmap says whether it could be pulled into 0.1.9 and why.
+
+STILL OPEN (list in the roadmap): units vs dollars for cost; gig UIs mounted in one app vs separate apps linked from the hub; migrate existing workpads vs fresh start; how much consent/sealing/journal ceremony stays visible vs hidden behind defaults; S21's execution question (the lean now is that gigai's runner executes gig graphs, given D-C/D-F).
+
+RELATIONSHIP: this roadmap sequences S16/S17/S19/S20/S21; it doesn't replace them. Cite them and don't edit them, except for the S21 r1 fold-in of D-B, which the coordinator routes.
