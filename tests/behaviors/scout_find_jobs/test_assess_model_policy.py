@@ -223,14 +223,16 @@ def _posting(
     text: str | None,
     location: str = "Denver, CO",
     sponsorship: SponsorshipStatus | None = None,
+    company: str = "Acme",
+    title: str = "Software Engineer",
 ) -> PostingRow:
     return PostingRow(
         url=normalized_url,
         normalized_url=normalized_url,
         provider=ATSProvider.GREENHOUSE,
         board_token="acme",
-        company="Acme",
-        title="Software Engineer",
+        company=company,
+        title=title,
         location=location,
         published_at="2026-09-20T00:00:00Z",
         content_sha256="sha256:" + "a" * 64,
@@ -529,6 +531,14 @@ def test_candidate_partition_mixes_assessed_over_cap_and_exclusions(
     over_cap_posting = _posting(
         normalized_url="https://boards.greenhouse.io/acme/jobs/1002",
         text="We need Rust experience.",
+        # wire-selection: a distinct company+title from assessed_posting so
+        # this row is genuinely over the cap once select_for_assessment is
+        # wired in, not a "duplicate" of assessed_posting (the shared "Acme"
+        # / "Software Engineer" defaults would otherwise dedupe the two).
+        # Title keeps "Software Engineer" so it still role-matches the
+        # sealed config's roles=["Software Engineer"].
+        company="Globex",
+        title="Senior Software Engineer",
     )
     location_mismatch_posting = _posting(
         normalized_url="https://boards.greenhouse.io/acme/jobs/1003",
@@ -599,6 +609,51 @@ def test_candidate_partition_mixes_assessed_over_cap_and_exclusions(
     from gigai.scout.find_jobs.contracts import AssessOutput
 
     assert AssessOutput.from_json(output.to_json()) == output
+
+
+def test_candidate_dropped_as_duplicate_is_labelled_duplicate_not_over_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """wire-selection (B2): a candidate that select_for_assessment drops for
+    being a near-identical duplicate of the selected posting -- same
+    company + normalized title + country -- must be labelled
+    NotAssessedReason.DUPLICATE, not the OVER_CAP fallback the un-wired
+    code used for every unselected row regardless of why it was dropped.
+    """
+    fixture, target = _assess_fixture(tmp_path)
+
+    assessed_posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/2001",
+        text="We need Go experience.",
+    )
+    duplicate_posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/2002",
+        text="We need Rust experience.",
+        # Same company + title + location as assessed_posting (and the
+        # fixture's shared published_at) -- select_for_assessment's dedupe
+        # key, so this is a genuine duplicate, not an over-cap drop.
+    )
+
+    good = json.dumps({
+        "matrix": [{"requirement": "Go", "resume_evidence": ["Built Go services"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+
+    output, _binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000202",
+        postings=[assessed_posting, duplicate_posting],
+        selected_postings=[assessed_posting],
+        selection_cap=1,
+        countries=["US"],
+        visa_sponsorship_required=False,
+        outputs=[good],
+        monkeypatch=monkeypatch,
+    )
+
+    by_url = {row.posting.normalized_url: row for row in output.not_assessed}
+    assert len(output.assessments) == 1
+    assert by_url[duplicate_posting.normalized_url].reason is NotAssessedReason.DUPLICATE
 
 
 # --- U2: sealed enum -> configured target resolution (0.1.8.1 UAT) ---

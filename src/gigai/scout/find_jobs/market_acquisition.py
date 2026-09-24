@@ -14,7 +14,7 @@ import gzip
 import json
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qsl, urlsplit
 
 from ...canonical import canonical_json_bytes, digest_imported_bytes
@@ -46,6 +46,7 @@ from .contracts import (
     parse_board_url,
 )
 from .filters import exclusion_reason, location_mismatch_detail
+from .selection import select_for_assessment
 from ...workpad import ResolvedWorkpad, resolve_workpad
 
 # U26: cap on the total size of raw provider responses stored per run, so a
@@ -507,7 +508,7 @@ def acquire_node(
     added = {item.url for item in url_diff.added}
     edited = {item.url for item in url_diff.edited}
     results: list[PostingRowResult] = []
-    selected: list[SelectedPosting] = []
+    candidates: list[PostingRow] = []
     for row in rows:
         if row.normalized_url in added:
             outcome = RowOutcome.NEW
@@ -516,20 +517,35 @@ def acquire_node(
         else:
             outcome = RowOutcome.UNCHANGED
         results.append(PostingRowResult(row, outcome))
-        # Selection = new/edited + capped (U19/U12's country/visa and role
-        # checks now already happened above, as a drop -- every row reaching
-        # this loop already passed them). A row that's new/edited but over
-        # the cap stays fully visible in `results` above -- it's simply
-        # never added to `selected`, so it can't reach assess.
-        # `exclusion_reason` is still re-derived by assess (via the same
-        # pure helper) for its own not-assessed labeling, and remains
-        # correct for an older run's acquire.json that predates this drop.
-        if (
-            input.selection_rule is SelectionRule.NEW_OR_EDITED_ROLE_MATCH
-            and outcome in {RowOutcome.NEW, RowOutcome.EDITED}
-            and len(selected) < input.selection_cap
-        ):
-            selected.append(SelectedPosting(row.normalized_url, row.url, _digest(row), True))
+        if input.selection_rule is SelectionRule.NEW_OR_EDITED_ROLE_MATCH and outcome in {RowOutcome.NEW, RowOutcome.EDITED}:
+            candidates.append(row)
+
+    # B2 (0.1.8.1 live UAT): the naive first-N-in-batch-order walk let one
+    # board's postings fill the entire selection (a run saw 5/5 picks from
+    # ClickHouse alone, 3 sharing a title). `select_for_assessment` (a pure,
+    # independently-tested module) replaces that walk: dedupe near-identical
+    # postings, cap how many one company can contribute, then round-robin
+    # fill the remaining cap across companies -- deterministic regardless of
+    # `candidates`' order, so re-running on the same batch is a no-op.
+    selection = select_for_assessment(candidates, cap=input.selection_cap)
+    # `select_for_assessment` returns the same `PostingRow` objects it was
+    # given (see selection.py's `ordered_selected`); the narrower `Candidate`
+    # protocol is only its own input/output typing, so cast back for the
+    # richer fields (`.url`, `_digest`) this module needs.
+    selected_rows = cast("tuple[PostingRow, ...]", selection.selected)
+    selected = [SelectedPosting(row.normalized_url, row.url, _digest(row), True) for row in selected_rows]
+    # `selection.dropped`'s "duplicate"/"company_cap"/"over_cap" reasons feed
+    # the same additive per-reason accounting as the exclusion-based drops
+    # above (coordinator decision): "duplicate" maps onto the existing
+    # NotAssessedReason.DUPLICATE; "company_cap" and "over_cap" both mean "an
+    # otherwise-eligible row didn't fit under the cap" and fold onto the
+    # existing NotAssessedReason.OVER_CAP -- no new enum value. Assess
+    # re-derives the same per-row reason from the same pure helper for its
+    # own not-assessed labeling (see proposal_execution.py), so the two can
+    # never disagree.
+    for selection_reason in selection.dropped.values():
+        reason = NotAssessedReason.DUPLICATE if selection_reason == "duplicate" else NotAssessedReason.OVER_CAP
+        drop_counts[reason] = drop_counts.get(reason, 0) + 1
 
     status = import_public_rows(resolved=resolved, batch_id=batch_id, rows=[_public_row(row) for row in rows] or [{
         "opportunity_id": "empty", "snapshot_id": digest_imported_bytes(b"empty")[:32], "source_kind": "agent_discovered", "title": "empty", "employer": "empty", "url": "https://example.invalid/empty", "acquisition_state": "excluded", "excluded_reason": "no_rows",

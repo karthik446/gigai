@@ -145,17 +145,20 @@ def assess_node(
     # (coordinator decision, P2 dispatch): a candidate is a new/edited,
     # role-matched row. Every candidate that isn't selected gets a reason
     # -- exclusion_reason() first (location_mismatch/sponsorship_excluded),
-    # then over_cap for an otherwise-eligible row acquire's cap left behind.
-    # Unchanged/duplicate/failed and role-mismatched rows are not
-    # candidates at all and never appear in candidate_rows.
+    # then B2's selection helper (duplicate/over_cap) for an otherwise-
+    # eligible row acquire's diversity selection left behind. Unchanged/
+    # duplicate/failed and role-mismatched rows are not candidates at all
+    # and never appear in candidate_rows.
     from .find_jobs.filters import exclusion_reason
     from .find_jobs.market_acquisition import _role_match
+    from .find_jobs.selection import select_for_assessment
 
     selected_by_url = {item.normalized_url: item for item in input.selected_postings}
     roles = tuple(getattr(sealed_config, "roles", ())) if sealed_config is not None else ()
     rows: list[object] = []
     not_assessed: list[object] = []
     to_assess: list[tuple[object, bytes | None]] = []
+    eligible_postings: list[object] = []
     for posting, outcome in acquire_rows:
         if outcome not in (RowOutcome.NEW, RowOutcome.EDITED):
             continue
@@ -182,7 +185,45 @@ def assess_node(
             to_assess.append((posting, _posting_text_bytes(posting)))
             continue
         reason = exclusion_reason(posting, sealed_config) if sealed_config is not None else None
-        not_assessed.append(NotAssessedRow(posting, reason or NotAssessedReason.OVER_CAP))
+        if reason is not None:
+            not_assessed.append(NotAssessedRow(posting, reason))
+            continue
+        # Not excluded by location/visa/role -- an otherwise-eligible row
+        # that acquire's diversity selection (B2) didn't pick. Recorded
+        # provisionally; the actual duplicate/over_cap split is resolved
+        # below by re-running the same pure helper over the same eligible
+        # set, so this can never disagree with what acquire itself dropped.
+        eligible_postings.append(posting)
+        not_assessed.append(NotAssessedRow(posting, NotAssessedReason.OVER_CAP))
+
+    if eligible_postings:
+        # Recompute B2's selection over every eligible (not excluded,
+        # role-matched, new/edited) row -- selected postings plus the
+        # not-yet-labeled ones above -- from the same inputs acquire itself
+        # used (selection_cap; per_company stays at select_for_assessment's
+        # own default, matching acquire). Same pure helper, same inputs:
+        # its `dropped` map can only ever agree with acquire's own drop, so
+        # a selected posting recomputing as "dropped" here (e.g. an older
+        # sealed AssessInput from before this helper existed) never
+        # overrides the sealed selection authority above -- only the
+        # provisional OVER_CAP labels just added are refined.
+        selected_postings_as_rows = [
+            posting for posting, _outcome in acquire_rows if posting.normalized_url in selected_by_url
+        ]
+        recomputed = select_for_assessment(
+            [*selected_postings_as_rows, *eligible_postings],
+            cap=input.selection_cap,
+        )
+        drop_reason_by_url = {
+            url: (NotAssessedReason.DUPLICATE if reason == "duplicate" else NotAssessedReason.OVER_CAP)
+            for url, reason in recomputed.dropped.items()
+        }
+        not_assessed = [
+            NotAssessedRow(row.posting, drop_reason_by_url.get(row.posting.normalized_url, row.reason))
+            if row.posting.normalized_url in drop_reason_by_url
+            else row
+            for row in not_assessed
+        ]
 
     assessments = []
     revisions = []

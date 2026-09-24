@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import gzip
 import json
 from dataclasses import replace
@@ -27,6 +28,7 @@ from gigai.scout.find_jobs.contracts import (
 )
 from gigai.scout.find_jobs.exa_client import EXA_API_KEY_ENV_VAR, ExaClientError, ExaSearchClient
 from gigai.scout.find_jobs.market_acquisition import AcquireAllSourcesFailedError, acquire_node
+from gigai.scout.find_jobs.selection import normalize_title
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -672,10 +674,103 @@ def test_replay_uat_0181_evidence_run_country_filter(monkeypatch, tmp_path):
     # definite non-US-country rows (India/Australia/Canada/Singapore/Seoul)
     # under LOCATION_MISMATCH, and the 3 region-only rows (AMER/EMEA/APAC)
     # under their own REGION_ONLY key (0.1.8.1 r1), distinct and auditable.
-    total_dropped = sum(item.count for item in after.dropped_counts)
-    assert total_dropped == len(before.rows) - len(after.rows) == 8
+    exclusion_dropped = len(before.rows) - len(after.rows)
+    assert exclusion_dropped == 8
     by_reason = {item.reason: item.count for item in after.dropped_counts}
-    assert by_reason == {
-        NotAssessedReason.LOCATION_MISMATCH: 5,
-        NotAssessedReason.REGION_ONLY: 3,
-    }
+    assert by_reason[NotAssessedReason.LOCATION_MISMATCH] == 5
+    assert by_reason[NotAssessedReason.REGION_ONLY] == 3
+    # B2 wiring (0.1.8.1 UAT): all 3 surviving rows are the same company
+    # ("acme", from both Ashby and Greenhouse), so the per-company diversity
+    # cap (default 2, well under the un-hit selection_cap of 10) drops the
+    # third -- an *additional*, selection-stage drop, folded onto the
+    # existing OVER_CAP reason, distinct from the exclusion-stage drops
+    # counted above.
+    total_dropped = sum(item.count for item in after.dropped_counts)
+    assert total_dropped == exclusion_dropped + 1
+    assert by_reason[NotAssessedReason.OVER_CAP] == 1
+
+
+# --- wire-selection: B2's diversity helper wired into acquire's selection loop ---
+
+
+def _uat_shape_rows() -> list[PostingRow]:
+    """36 ClickHouse + 31 Coupang + 2 gen-digital role-matched rows.
+
+    Mirrors ``test_selection_diversity.py``'s fixture shape (the live UAT
+    batch B2 fixed), but as real ``PostingRow``s so this test exercises
+    ``select_for_assessment`` wired into ``acquire_node`` end-to-end, not
+    the pure helper directly. Every title includes "Software Engineer" so
+    all 69 rows role-match the fixture config's roles.
+    """
+
+    rows: list[PostingRow] = []
+    for i in range(36):
+        title = "Senior Software Engineer - Cloud Infrastructure" if i < 20 else f"Software Engineer - Backend {i}"
+        url = f"https://boards.example/clickhouse/{i}"
+        rows.append(PostingRow(
+            url=url, normalized_url=url, provider=ATSProvider.GREENHOUSE, board_token="clickhouse",
+            company="ClickHouse", title=title, location="Remote, United States",
+            published_at=f"2026-09-{(i % 28) + 1:02d}T00:00:00Z", content_sha256=None,
+            source_kind=SourceKind.ATS, query_key="software engineer",
+        ))
+    for i in range(31):
+        url = f"https://boards.example/coupang/{i}"
+        rows.append(PostingRow(
+            url=url, normalized_url=url, provider=ATSProvider.GREENHOUSE, board_token="coupang",
+            company="Coupang", title=f"Software Engineer {i}", location="Seoul, South Korea",
+            published_at=f"2026-09-{(i % 28) + 1:02d}T00:00:00Z", content_sha256=None,
+            source_kind=SourceKind.ATS, query_key="software engineer",
+        ))
+    for i in range(2):
+        url = f"https://boards.example/gen-digital/{i}"
+        rows.append(PostingRow(
+            url=url, normalized_url=url, provider=ATSProvider.GREENHOUSE, board_token="gen-digital",
+            company="Gen Digital", title=f"Software Engineer - Platform {i}", location="Remote, United States",
+            published_at=f"2026-09-{(i % 28) + 1:02d}T00:00:00Z", content_sha256=None,
+            source_kind=SourceKind.ATS, query_key="software engineer",
+        ))
+    return rows
+
+
+def test_uat_shape_selection_is_diverse_and_unselected_rows_are_labelled(monkeypatch, tmp_path):
+    # ACCEPTANCE (wire-selection): the live UAT shape (36 ClickHouse + 31
+    # Coupang + 2 gen-digital role-matched rows), cap 5 -- acquire's
+    # selection loop must call ``select_for_assessment`` instead of the old
+    # naive first-N walk, so the selection is diverse and every unselected
+    # row is accounted for by a per-reason drop count.
+    rows = _uat_shape_rows()
+    status = SimpleNamespace(complete=True, input_ref={"path": "input.json"})
+    monkeypatch.setattr("gigai.scout.find_jobs.market_acquisition.import_public_rows", lambda **_: status)
+    input = AcquireInput(_config(exa=False, ats=False), "sha256:" + "c" * 64, None, tuple(rows), 5, SelectionRule.NEW_OR_EDITED_ROLE_MATCH)
+    out = acquire_node(
+        _context(tmp_path, "acquire-uat-shape-1"), input,
+        http_client=None, exa=_Exa(()), ats=_ATS(), watchlist=_Watchlist(),
+    )
+
+    assert len(out.selected_postings) == 5
+    selected_urls = {sp.normalized_url for sp in out.selected_postings}
+    selected_rows = [row.posting for row in out.rows if row.posting.normalized_url in selected_urls]
+
+    counts = Counter(row.company for row in selected_rows)
+    assert all(count <= 2 for count in counts.values())
+    normalized_titles = [normalize_title(row.title) for row in selected_rows]
+    assert len(normalized_titles) == len(set(normalized_titles))
+
+    # Every not-selected new/edited/role-matched row is dropped for
+    # DUPLICATE (near-identical postings) or OVER_CAP (didn't fit under the
+    # per-company/global cap) -- the two labels B2's helper produces --
+    # additively tallied on `dropped_counts`, no new enum value.
+    by_reason = {item.reason: item.count for item in out.dropped_counts}
+    assert set(by_reason) <= {NotAssessedReason.DUPLICATE, NotAssessedReason.OVER_CAP}
+    assert sum(by_reason.values()) == len(rows) - 5
+    assert by_reason.get(NotAssessedReason.DUPLICATE, 0) > 0  # the 20 shared-title ClickHouse rows
+
+
+# Assess's own DUPLICATE/OVER_CAP not-assessed labeling (recomputed from
+# the same select_for_assessment helper acquire used) is covered directly
+# in tests/behaviors/scout_find_jobs/test_assess_model_policy.py --
+# test_candidate_partition_mixes_assessed_over_cap_and_exclusions (OVER_CAP)
+# and test_candidate_dropped_as_duplicate_is_labelled_duplicate_not_over_cap
+# (DUPLICATE) -- since assess_node's real candidate-resolution path needs a
+# full assess fixture (sealed config, resolved workpad, adapter) that lives
+# there, not here.
