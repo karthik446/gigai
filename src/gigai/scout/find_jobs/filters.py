@@ -55,6 +55,7 @@ the research doc §5 "Optional").
 
 from __future__ import annotations
 
+import re
 import unicodedata
 
 import pycountry
@@ -87,33 +88,69 @@ _US_STATE_ABBREVIATIONS = frozenset(
     subdivision.code.split("-", 1)[1].lower() for subdivision in _US_STATE_SUBDIVISIONS
 )
 _US_STATE_NAMES = frozenset(subdivision.name.lower() for subdivision in _US_STATE_SUBDIVISIONS)
+_US_STATE_ABBREVIATIONS_UPPER = frozenset(code.upper() for code in _US_STATE_ABBREVIATIONS)
 
 
 def _build_country_aliases() -> dict[str, tuple[str, ...]]:
+    """Case-insensitive, multi-character name/demonym aliases (never bare codes).
+
+    PR #37 review P0-1: the bare alpha-2/alpha-3 code used to live in this
+    same case-insensitive table, so it matched ordinary lowercase English
+    words that happen to collide with a code ("and" -> AD/Andorra, "per" ->
+    PE/Peru, "est" -> EE/Estonia's alpha-3). Bare codes are now handled
+    separately by :data:`_CODE_ALIASES` / :func:`_code_countries_in_original`,
+    matched only as an uppercase, delimited token in the *original*
+    (unfolded) string. This table keeps only names/official names/common
+    names, which ATS postings always write out in full and which are safe to
+    fold case-insensitively (nobody writes "GERMANY" meaning the letters
+    G-E-R-M-A-N-Y as an unrelated word).
+    """
+
     table: dict[str, tuple[str, ...]] = {}
     for country in pycountry.countries:
         code = country.alpha_2
-        aliases: set[str] = {country.alpha_3.lower(), country.name.lower()}
+        aliases: set[str] = {country.name.lower()}
         official_name = getattr(country, "official_name", None)
         if official_name:
             aliases.add(official_name.lower())
         common_name = getattr(country, "common_name", None)
         if common_name:
             aliases.add(common_name.lower())
-        bare_code = code.lower()
-        if bare_code not in _US_STATE_ABBREVIATIONS:
-            aliases.add(bare_code)
         table[code] = tuple(sorted(aliases))
+    return table
+
+
+def _build_code_aliases() -> dict[str, tuple[str, ...]]:
+    """Bare alpha-2/alpha-3 codes, matched uppercase-only in the original string.
+
+    The alpha-2 code is dropped when it collides with a US state's postal
+    abbreviation (e.g. "ca" collides with California, "in" with Indiana, "de"
+    with Delaware) -- comment preserved from the original hand-typed table --
+    so a state-abbreviation-only segment doesn't get misread as the foreign
+    country. Unlike the old table, collision is checked against the
+    *uppercase* code (states are matched case-insensitively via
+    ``_US_STATE_ABBREVIATIONS`` on folded text, but this table's codes are
+    only ever compared uppercase-to-uppercase against the original string --
+    see :func:`_code_countries_in_original`), so the comparison is still
+    correct: an uppercase "CA"/"IN"/"DE" token is ambiguous the same way.
+    """
+
+    table: dict[str, tuple[str, ...]] = {}
+    for country in pycountry.countries:
+        code = country.alpha_2
+        codes: set[str] = {country.alpha_3.upper()}
+        if code.upper() not in _US_STATE_ABBREVIATIONS_UPPER:
+            codes.add(code.upper())
+        table[code] = tuple(sorted(codes))
     return table
 
 
 _COUNTRY_ALIASES: dict[str, tuple[str, ...]] = _build_country_aliases()
 
 # "US" additionally carries the common colloquial forms ATS postings use
-# that ISO-3166 data itself doesn't encode (periods, "U.S.A.", etc.).
-_COUNTRY_ALIASES["US"] = tuple(
-    sorted(set(_COUNTRY_ALIASES["US"]) | {"us", "usa", "u.s.", "u.s.a."})
-)
+# that ISO-3166 data itself doesn't encode ("U.S.", "U.S.A."; "US"/"USA"
+# moved to _CODE_ALIASES/_US_EXTRA_CODES below since they're bare codes).
+_COUNTRY_ALIASES["US"] = tuple(sorted(set(_COUNTRY_ALIASES["US"]) | {"u.s.", "u.s.a."}))
 
 # UK constituent-country fold: a product decision about how to bucket
 # mentions of England/Scotland/Wales (and the "Great Britain" demonym) under
@@ -122,6 +159,33 @@ _COUNTRY_ALIASES["US"] = tuple(
 # (research doc §5 "What would stay hand-made, and why").
 _UK_FOLD_ALIASES: tuple[str, ...] = ("uk", "u.k.", "great britain", "england", "scotland", "wales")
 _COUNTRY_ALIASES["GB"] = tuple(sorted(set(_COUNTRY_ALIASES["GB"]) | set(_UK_FOLD_ALIASES)))
+
+_CODE_ALIASES: dict[str, tuple[str, ...]] = _build_code_aliases()
+
+# US additionally carries "US"/"USA" as bare uppercase codes (PR #37 P0:
+# these used to be case-insensitive aliases; moved here so lowercase "us"/
+# "usa" inside an ordinary word/phrase is never misread as a country).
+_CODE_ALIASES["US"] = tuple(sorted(set(_CODE_ALIASES["US"]) | {"US", "USA"}))
+
+# North American and other timezone abbreviations that must never be read
+# as a country code even though they're uppercase and delimited (PR #37
+# review P0-1: "Remote - EST timezone" was misread as Estonia via EST's
+# alpha-3 collision; ET/PT also collide with real alpha-2 codes,
+# Ethiopia/Portugal). Deliberately NOT treated as a positive US signal
+# either (coordinator review): EST/ET/CST/PST etc. are shared with Canada
+# (Ontario/Quebec observes ET/EST) and other countries, so reading them as
+# US would create a new false positive for non-US remote roles that also
+# mention a North American-overlapping timezone. A location carrying only a
+# timezone token, with no other country/state/city signal, stays whatever
+# it already resolved to -- ambiguous (None), same as "Remote" alone --
+# never a definite match either way.
+_TIMEZONE_TOKENS: frozenset[str] = frozenset(
+    {
+        "EST", "EDT", "CST", "CDT", "MST", "MDT", "PST", "PDT",
+        "ET", "CT", "MT", "PT", "GMT", "UTC", "CET", "CEST",
+        "AEST", "AEDT", "BST",
+    }
+)
 
 
 # Region tokens: named explicitly in the operator's UAT ticket (B1) as
@@ -179,6 +243,13 @@ _CITY_COUNTRIES: dict[str, str] = {
     "singapore": "SG", "seoul": "KR", "tokyo": "JP",
     "sydney": "AU", "melbourne": "AU",
 }
+
+# Common US colloquial location forms ATS postings use that the pycountry
+# name/official-name/common-name table doesn't cover (PR #37 review P0-1's
+# required additions): "New York City"/"NYC" name the city, not the country,
+# so they're never in ISO-3166 data at all; matched the same substring/
+# whole-segment way ``_CITY_COUNTRIES`` is (see ``_segment_countries``).
+_US_CITY_ALIASES: dict[str, str] = {"new york city": "US", "nyc": "US"}
 
 _NOT_OFFERED_PHRASES: tuple[str, ...] = (
     "unable to sponsor",
@@ -248,6 +319,41 @@ def _segments(location: str) -> list[str]:
     return parts
 
 
+# A code token is delimited by start/end of string, whitespace, or common
+# ATS punctuation (comma, semicolon, hyphen, slash, parentheses). Matched
+# against the *original*, unfolded location string -- see
+# ``_code_countries_in_original`` -- so only an actually-uppercase token
+# ("US", "DE", "CZE") can match, never a lowercase word that happens to
+# spell the same letters ("and", "per", "de facto").
+_CODE_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])([A-Z]{2,3})(?![A-Za-z0-9])")
+
+
+def _code_countries_in_original(location: str) -> set[str]:
+    """ISO codes from bare alpha-2/alpha-3 codes in the *original* string.
+
+    PR #37 review P0-1: a bare code only counts when it appears as an
+    actually-uppercase token, delimited by punctuation/whitespace/
+    parentheses/start/end -- never as a lowercase (or mixed-case) word, and
+    never as a substring of a longer word. This is checked against
+    ``location`` before any lowercasing (``_fold``/``_segments`` fold the
+    string for the name/city/state checks in ``_segment_countries``, which
+    would destroy the case signal a bare code needs). A timezone
+    abbreviation (EST/PST/ET/PT/GMT/...) is explicitly excluded even though
+    some collide with a real alpha-2/alpha-3 code (EST/Estonia, ET/Ethiopia,
+    PT/Portugal) -- see ``_TIMEZONE_TOKENS``.
+    """
+
+    found: set[str] = set()
+    for match in _CODE_TOKEN_RE.finditer(location):
+        token = match.group(1)
+        if token in _TIMEZONE_TOKENS:
+            continue
+        for code, codes in _CODE_ALIASES.items():
+            if token in codes:
+                found.add(code)
+    return found
+
+
 def _segment_countries(segment: str) -> set[str]:
     """ISO codes this one folded comma/semicolon segment identifies, if any.
 
@@ -275,9 +381,20 @@ def _segment_countries(segment: str) -> set[str]:
                 break
     if segment in _US_STATE_NAMES or segment in _US_STATE_ABBREVIATIONS:
         found.add("US")
-    city_country = _CITY_COUNTRIES.get(segment)
+    city_country = _CITY_COUNTRIES.get(segment) or _US_CITY_ALIASES.get(segment)
     if city_country:
         found.add(city_country)
+    else:
+        # A multi-word city name ("new york city") can appear inside a
+        # longer, non-comma-delimited phrase ("new york city and remote"),
+        # the same way a multi-word country alias is substring-matched
+        # above -- a single-word city stays a whole-token/whole-segment
+        # match only (avoids a short city name matching inside an
+        # unrelated longer word).
+        for city, code in {**_CITY_COUNTRIES, **_US_CITY_ALIASES}.items():
+            if " " in city and city in segment:
+                found.add(code)
+                break
     return found
 
 
@@ -287,11 +404,17 @@ def location_countries(location: str) -> set[str]:
     Returns an empty set when no known country/US-state signal is found
     (ambiguous, e.g. a bare city name never seen in ``_COUNTRY_ALIASES``, a
     region token like "AMER"/"EMEA"/"APAC"/"LATAM", or the empty string).
+
+    Bare alpha-2/alpha-3 codes (PR #37 review P0-1) are checked separately,
+    against the original unfolded string via ``_code_countries_in_original``
+    -- everything else (names, US states, the bare tech-hub city table) is
+    checked case-insensitively via the folded ``_segments``/
+    ``_segment_countries`` path, unchanged.
     """
 
     if not location:
         return set()
-    found: set[str] = set()
+    found: set[str] = _code_countries_in_original(location)
     for segment in _segments(location):
         found |= _segment_countries(segment)
         # Also check whole-segment "usa - tempe" style joins where a country

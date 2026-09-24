@@ -116,3 +116,4 @@
 - 2026-09-24 10:10 p0-ui-setup-discover verified (34 tests re-run; App.jsx reloadConfig after setup save; the discover snapshot keeps the DiscoveryResult shape with the event nested under progress; DiscoverPanel shows — not undefined). Committed.
 - 2026-09-24 10:13 p0-country-words Q: 'Hybrid (3 days per week)' → None (kept) accepted; the coordinator overruled 'EST → US': timezone tokens carry no country signal (None, kept), since EST is shared with Canada.
 - 2026-09-24 10:17 p0-assess-resume verified (44 tests re-run; assess progress uses workpad_path only; resume-add key = name + content digest). Committed.
+- 2026-09-24 10:18 p0-country-words verified (coordinator probe of 16 strings; 279 tests incl. a 73-string real-location corpus). P0s all done → branch ready for UAT. New P1: 'Berlin, DE' → US true (the DE-as-Delaware policy beats a known non-US city; pre-existing, a false keep).
