@@ -27,6 +27,7 @@ from ..canonical import (
     validate_entity_id,
 )
 from .find_jobs.contracts import FindJobsContractError
+from .find_jobs.progress import ProgressWriter
 from ..journal import (
     JournalArtifact,
     JournalConflictError,
@@ -83,6 +84,28 @@ class ScoutProposalExecutionError(ValueError):
         self.code = code
 
 
+def _assess_progress_writer(context: "NodeContext", target: Path | None) -> ProgressWriter | None:
+    """Best-effort ``ProgressWriter`` for this run, mirroring acquire's own.
+
+    Assess's ``NodeContext`` always carries ``workpad_path`` (unlike acquire,
+    which may resolve through ``home_root``/``target``), so this reads that
+    directly rather than re-resolving the workpad -- one less way for a
+    progress-only failure to diverge from the sealed node's own resolution.
+    """
+
+    try:
+        run_id = getattr(context, "run_id", None)
+        workpad_path = getattr(context, "workpad_path", None)
+        root = Path(target) if isinstance(target, Path) else (
+            Path(workpad_path) if isinstance(workpad_path, str) else None
+        )
+        if root is None or not isinstance(run_id, str) or not run_id:
+            return None
+        return ProgressWriter(root / "runs" / run_id)
+    except Exception:  # noqa: BLE001 - progress must never break the sealed run
+        return None
+
+
 def assess_node(
     context: "NodeContext",
     input: "AssessInput",
@@ -90,6 +113,33 @@ def assess_node(
     home_root: Path,
     target: Path | None,
     config: GigAIConfig,
+) -> "AssessOutput":
+    """Run the bounded find-jobs assess node (progress-wrapped; see ``_assess_node_body``)."""
+
+    progress = _assess_progress_writer(context, target)
+    if progress is not None:
+        progress.start_step("assess")
+    try:
+        output = _assess_node_body(
+            context, input, home_root=home_root, target=target, config=config, progress=progress
+        )
+    except BaseException:
+        if progress is not None:
+            progress.finish_step("assess", ok=False)
+        raise
+    if progress is not None:
+        progress.finish_step("assess", ok=True)
+    return output
+
+
+def _assess_node_body(
+    context: "NodeContext",
+    input: "AssessInput",
+    *,
+    home_root: Path,
+    target: Path | None,
+    config: GigAIConfig,
+    progress: ProgressWriter | None,
 ) -> "AssessOutput":
     """Run the bounded find-jobs assess node.
 
@@ -225,6 +275,15 @@ def assess_node(
             for row in not_assessed
         ]
 
+    if progress is not None:
+        # B4: every row/posting that is definitively not going to the model
+        # (unchanged, role-mismatch never even reaches this list, excluded,
+        # duplicate/over_cap) is recorded now, before the model loop even
+        # starts -- the UI's "why wasn't this assessed" text doesn't have to
+        # wait for the whole assess step to finish.
+        for entry in not_assessed:
+            progress.not_assessed(entry.posting.normalized_url, reason=entry.reason.value)
+
     assessments = []
     revisions = []
     usage_values = []
@@ -246,8 +305,15 @@ def assess_node(
             # assessing it, so this single posting is skipped and the rest
             # of the batch continues (U22 per-posting isolation).
             not_assessed.append(NotAssessedRow(posting, NotAssessedReason.FAILED))
+            if progress is not None:
+                progress.not_assessed(posting.normalized_url, reason=NotAssessedReason.FAILED.value)
             continue
         attempted += 1
+        if progress is not None:
+            # B4: a "started" line the instant this posting is handed to the
+            # model, so its card can show "assessing…" instead of sitting on
+            # "waiting" for however long the model call + retry takes.
+            progress.assessment_started(posting.normalized_url)
         validation_error: str | None = None
         outcome_recorded = False
         for attempt in range(2):
@@ -259,11 +325,16 @@ def assess_node(
             except (ModelInvocationError, OSError, TimeoutError) as exc:
                 reason = NotAssessedReason.MODEL_DENIED if getattr(exc, "code", "") in {"network_denied", "model_denied", "credential_denied"} else NotAssessedReason.MODEL_UNAVAILABLE
                 not_assessed.append(NotAssessedRow(posting, reason))
+                if progress is not None:
+                    progress.assessment_finished(posting.normalized_url, ok=False, reason=reason.value)
                 outcome_recorded = True
                 break
             except Exception as exc:
                 if getattr(exc, "code", "") in {"model_denied", "network_denied", "model_unavailable"}:
-                    not_assessed.append(NotAssessedRow(posting, NotAssessedReason.MODEL_DENIED if getattr(exc, "code", "") == "model_denied" else NotAssessedReason.MODEL_UNAVAILABLE))
+                    reason = NotAssessedReason.MODEL_DENIED if getattr(exc, "code", "") == "model_denied" else NotAssessedReason.MODEL_UNAVAILABLE
+                    not_assessed.append(NotAssessedRow(posting, reason))
+                    if progress is not None:
+                        progress.assessment_finished(posting.normalized_url, ok=False, reason=reason.value)
                     outcome_recorded = True
                     break
                 raise
@@ -287,6 +358,10 @@ def assess_node(
                     validation_error = str(exc)
                     continue
                 not_assessed.append(NotAssessedRow(posting, NotAssessedReason.MODEL_OUTPUT_INVALID))
+                if progress is not None:
+                    progress.assessment_finished(
+                        posting.normalized_url, ok=False, reason=NotAssessedReason.MODEL_OUTPUT_INVALID.value
+                    )
                 outcome_recorded = True
                 break
             saved = save_assessment_revision(
@@ -302,6 +377,8 @@ def assess_node(
             if revision_ref:
                 revisions.append(revision_ref)
             usage_values.append(result.normalized_usage)
+            if progress is not None:
+                progress.assessment_finished(posting.normalized_url, ok=True, assessment_json=parsed.to_json())
             outcome_recorded = True
             break
         if not outcome_recorded:
@@ -310,6 +387,10 @@ def assess_node(
             # per posting rather than silently dropping it from the
             # candidate/assessed partition invariant.
             not_assessed.append(NotAssessedRow(posting, NotAssessedReason.MODEL_OUTPUT_INVALID))
+            if progress is not None:
+                progress.assessment_finished(
+                    posting.normalized_url, ok=False, reason=NotAssessedReason.MODEL_OUTPUT_INVALID.value
+                )
 
     if attempted and model_attempts and not assessments:
         # Every posting that had text and reached the model failed there.

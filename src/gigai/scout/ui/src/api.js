@@ -82,6 +82,14 @@ export function getRunResults(runId) {
   return request("GET", `/api/runs/${encodeURIComponent(runId)}/results`);
 }
 
+// B4: the non-authoritative live-progress view (steps + postings +
+// assessments as they happen). Never the final-results authority -- see
+// present_api.py's run_progress docstring -- but lets the UI render cards
+// well before the sealed outputs exist.
+export function getRunProgress(runId) {
+  return request("GET", `/api/runs/${encodeURIComponent(runId)}/progress`);
+}
+
 // Builds the fixed-shape consent envelope (D5). Every field except the two
 // generated IDs is a frozen constant from UIConsentEnvelope.
 export function buildConsentEnvelope() {

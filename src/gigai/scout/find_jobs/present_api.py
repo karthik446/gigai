@@ -65,6 +65,8 @@ class Backend(Protocol):
 
     def run_results(self, run_id: str) -> RunResultsResponse: ...
 
+    def run_progress(self, run_id: str) -> dict[str, object]: ...
+
 
 class NotWiredBackend:
     """Explicit test fallback; ``__main__`` installs ``ScoutFindJobsBackend``."""
@@ -93,6 +95,10 @@ class NotWiredBackend:
         raise AssertionError("unreachable")
 
     def run_results(self, run_id: str) -> RunResultsResponse:
+        self._not_wired()
+        raise AssertionError("unreachable")
+
+    def run_progress(self, run_id: str) -> dict[str, object]:
         self._not_wired()
         raise AssertionError("unreachable")
 
@@ -250,6 +256,93 @@ class ScoutFindJobsBackend:
         payload = self._payload(run_id)
         return RunResultsResponse(run_id, payload)
 
+    def run_progress(self, run_id: str) -> dict[str, object]:
+        """B4: the non-authoritative live-progress view for one run.
+
+        Reads the ``progress/`` files (``.progress.read_progress``) plus
+        whatever sealed outputs already exist (via ``_payload``, which
+        degrades to empty when a node hasn't produced its output yet) so a
+        posting that's already in the sealed ``outputs/acquire.json`` is
+        never missing here just because acquire finished between two polls
+        and its progress line predates this read. The sealed payload is
+        folded in additively -- it never overrides a progress-only field
+        (e.g. an in-flight "assessing" status) with a stale/absent one.
+        """
+        from .progress import read_progress
+
+        resolved = self._require_run(run_id)
+        run_root = resolved.path / "runs" / run_id
+        snapshot = read_progress(run_root)
+
+        payload = self._payload(run_id)
+
+        already_recorded: set[object] = {
+            item.get("normalized_url") for item in snapshot.assessments if item.get("status") == "not_assessed"
+        }
+
+        postings_by_url: dict[str, dict[str, object]] = {}
+        for item in snapshot.postings:
+            url = item.get("normalized_url")
+            if isinstance(url, str):
+                postings_by_url[url] = item
+        for row in payload.rows:
+            url = row.posting.normalized_url
+            if url not in postings_by_url:
+                postings_by_url[url] = {**row.posting.to_json(), "outcome": row.outcome.value}
+
+        assessments_by_url: dict[str, dict[str, object]] = {}
+        for item in snapshot.assessments:
+            url = item.get("normalized_url")
+            if isinstance(url, str):
+                assessments_by_url[url] = dict(item)
+        for assessment in payload.assessments:
+            url = assessment.posting.normalized_url
+            entry = assessments_by_url.setdefault(url, {"normalized_url": url})
+            entry["status"] = "assessed"
+            entry["assessment"] = assessment.to_json()
+        not_assessed_counts = dict(snapshot.not_assessed_counts)
+        for row in payload.not_assessed:
+            url = row.posting.normalized_url
+            entry = assessments_by_url.setdefault(url, {"normalized_url": url})
+            if entry.get("status") != "assessed":
+                entry["status"] = "not_assessed"
+                entry["reason"] = row.reason.value
+            # Only count a sealed not-assessed row that assess.jsonl never
+            # recorded (e.g. an older run dir, or a race where the sealed
+            # output landed between two polls) -- otherwise this would
+            # double-count against snapshot.not_assessed_counts.
+            if url not in already_recorded:
+                reason_value = row.reason.value
+                not_assessed_counts[reason_value] = not_assessed_counts.get(reason_value, 0) + 1
+
+        cap = snapshot.cap if snapshot.cap is not None else self._sealed_selection_cap(run_id)
+
+        return {
+            "schema_version": "scout-find-jobs-progress:1",
+            "run_id": run_id,
+            "steps": dict(snapshot.steps),
+            "postings": list(postings_by_url.values()),
+            "assessments": list(assessments_by_url.values()),
+            "cap": cap,
+            "candidate_count": snapshot.candidate_count,
+            "not_assessed_counts": not_assessed_counts,
+        }
+
+    def _sealed_selection_cap(self, run_id: str) -> int | None:
+        """Fall back to the sealed run input's cap if acquire hasn't written cap.json yet."""
+
+        from ...canonical import parse_json_bytes
+
+        path = self._target_root() / "runs" / run_id / "sealed" / "find-jobs-run-input.json"
+        if path.is_symlink() or not path.is_file():
+            return None
+        try:
+            payload = parse_json_bytes(path.read_bytes())
+        except (OSError, ValueError):
+            return None
+        cap = payload.get("selection_cap") if isinstance(payload, dict) else None
+        return cap if isinstance(cap, int) else None
+
 
 RUN_START_TIMEOUT_SECONDS = 30.0
 
@@ -402,13 +495,17 @@ def _make_handler(
                     if path == "/api/config":
                         self._handle_get_config()
                         return
-                    run_id = _match_run_id(path, suffix="")
-                    if run_id is not None:
-                        self._handle_get_run_status(run_id)
-                        return
                     run_id = _match_run_id(path, suffix="/results")
                     if run_id is not None:
                         self._handle_get_run_results(run_id)
+                        return
+                    run_id = _match_run_id(path, suffix="/progress")
+                    if run_id is not None:
+                        self._handle_get_run_progress(run_id)
+                        return
+                    run_id = _match_run_id(path, suffix="")
+                    if run_id is not None:
+                        self._handle_get_run_status(run_id)
                         return
                     self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
                     return
@@ -567,6 +664,14 @@ def _make_handler(
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "run not found")
                 return
             self._write_json(HTTPStatus.OK, results_response.to_json())
+
+        def _handle_get_run_progress(self, run_id: str) -> None:
+            try:
+                progress_response = backend.run_progress(run_id)
+            except LookupError:
+                self._error(HTTPStatus.NOT_FOUND, "not_found", "run not found")
+                return
+            self._write_json(HTTPStatus.OK, progress_response)
 
     return Handler
 

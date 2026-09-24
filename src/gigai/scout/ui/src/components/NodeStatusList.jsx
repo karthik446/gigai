@@ -4,17 +4,39 @@ function nodeReceiptFor(nodeReceipts, slug) {
   return nodeReceipts.find((receipt) => receipt.node_slug === slug) || null;
 }
 
-export default function NodeStatusList({ status, nodeReceipts }) {
+// U18 (0.1.8.1 UAT): a receipt only exists once a step *finishes*, so before
+// this packet every step showed "waiting" for its entire duration, even
+// while acquire had live HTTPS connections open. `progressSteps` (from
+// GET /progress's non-authoritative steps.json, keyed by step name to
+// {status, started_at, finished_at}) fills that gap: "running" the instant
+// the step starts, "done"/"failed" once it finishes -- the receipt (when
+// present) still wins for the terminal label, since it's the sealed
+// authority and progress is best-effort.
+function stepLabel(receipt, progressStep) {
+  if (receipt) {
+    return receipt.status;
+  }
+  if (progressStep?.status === "running") {
+    return "running";
+  }
+  if (progressStep?.status === "failed") {
+    return "failed";
+  }
+  return "waiting";
+}
+
+export default function NodeStatusList({ status, nodeReceipts, progressSteps }) {
   return (
     <section className="panel">
       <h2>Run status: {status}</h2>
       <div className="node-status-list">
         {NODE_ORDER.map((slug) => {
           const receipt = nodeReceiptFor(nodeReceipts, slug);
+          const progressStep = progressSteps && progressSteps[slug];
           return (
             <div className="node-status-pill" key={slug}>
               <div className="node-name">{slug}</div>
-              <div className="node-state">{receipt ? receipt.status : "waiting"}</div>
+              <div className="node-state">{stepLabel(receipt, progressStep)}</div>
               {receipt && receipt.failure && (
                 <div className="node-failure-message">{receipt.failure.message}</div>
               )}

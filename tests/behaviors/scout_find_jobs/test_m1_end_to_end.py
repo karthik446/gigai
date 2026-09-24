@@ -224,6 +224,29 @@ def test_m1_real_api_run_child_process_and_second_run_dedup(
             assert len(first_payload["node_receipts"]) == 3
             assert first_payload["pinned_resume"] == config_body["resume_preview"]
 
+            # B4: the non-authoritative progress files must exist once the
+            # real acquire->assess->present traversal has finished, and must
+            # agree with the sealed outputs -- every acquired posting is a
+            # progress line, and every sealed assessment shows up assessed.
+            progress_response = client.get(f"/api/runs/{run_id}/progress")
+            assert progress_response.status_code == 200, progress_response.text
+            progress_body = progress_response.json()
+            assert progress_body["steps"]["acquire"]["status"] == "done"
+            assert progress_body["steps"]["assess"]["status"] == "done"
+            sealed_urls = {row["posting"]["normalized_url"] for row in first_payload["rows"]}
+            progress_urls = {item["normalized_url"] for item in progress_body["postings"]}
+            assert sealed_urls <= progress_urls
+            sealed_assessed_urls = {
+                item["posting"]["normalized_url"] for item in first_payload["assessments"]
+            }
+            progress_assessed_urls = {
+                item["normalized_url"]
+                for item in progress_body["assessments"]
+                if item.get("status") == "assessed"
+            }
+            assert sealed_assessed_urls <= progress_assessed_urls
+            assert progress_body["cap"] is not None
+
             second_response = client.post("/api/run", json=request_body)
             assert second_response.status_code == 202, second_response.text
             second_run_id = second_response.json()["run_id"]

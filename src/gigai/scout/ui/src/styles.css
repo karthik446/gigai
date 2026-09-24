@@ -380,6 +380,86 @@ table.matrix-table td {
   color: var(--muted);
 }
 
+/* B4: progressive posting cards -- replaces the long postings table. */
+.posting-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.posting-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+
+.posting-card summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.posting-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.posting-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.posting-card-heading a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.posting-card-heading a:hover {
+  text-decoration: underline;
+}
+
+.posting-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  align-items: center;
+}
+
+.status-badge.posting-status-acquired {
+  background: #eef0f4;
+  color: var(--muted);
+}
+
+.status-badge.posting-status-assessing {
+  background: #eaf0ff;
+  color: #1a3aa3;
+}
+
+.status-badge.posting-status-assessed {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.status-badge.posting-status-not_assessed {
+  background: #eef0f4;
+  color: var(--muted);
+}
+
+.status-badge.posting-status-failed {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.chip-group select {
+  padding: 4px 8px;
+  font-size: 0.85rem;
+  border-radius: 6px;
+}
+
 @media (max-width: 480px) {
   .field-row {
     flex-direction: column;

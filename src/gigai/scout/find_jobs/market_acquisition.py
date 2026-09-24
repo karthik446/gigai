@@ -46,6 +46,7 @@ from .contracts import (
     parse_board_url,
 )
 from .filters import exclusion_reason, location_mismatch_detail
+from .progress import ProgressWriter
 from .selection import select_for_assessment
 from ...workpad import ResolvedWorkpad, resolve_workpad
 
@@ -179,6 +180,28 @@ def _role_match(row: PostingRow, roles: Sequence[str]) -> bool:
 
 def _digest(row: PostingRow) -> str:
     return row.content_sha256 or digest_imported_bytes(canonical_json_bytes(row.to_json()))
+
+
+def _progress_writer(
+    context: NodeContext, home_root: Path | None, target: Path | None
+) -> ProgressWriter | None:
+    """Best-effort ``ProgressWriter`` for this run, or ``None`` if unresolvable.
+
+    Progress is purely additive UX; a caller that can't resolve a workpad
+    (most direct-call unit tests construct ``NodeContext`` without a real
+    on-disk run) must still get the exact same sealed ``AcquireOutput`` as
+    before this packet, so every failure mode here degrades to ``None``
+    rather than raising.
+    """
+
+    try:
+        resolved = _resolved(context, home_root, target)
+        run_id = context.run_id
+        if not run_id:
+            return None
+        return ProgressWriter(resolved.path / "runs" / run_id)
+    except Exception:  # noqa: BLE001 - progress must never break the sealed run
+        return None
 
 
 def _resolved(context: NodeContext, home_root: Path | None, target: Path | None) -> ResolvedWorkpad:
@@ -403,6 +426,46 @@ def acquire_node(
     home_root: Path | None = None,
     target: Path | None = None,
 ) -> AcquireOutput:
+    # B4: `progress.finish_step("acquire", ...)` must run on every exit path
+    # (success or a raised AcquireAllSourcesFailedError/other exception), so
+    # the real body is a nested function and this outer frame is the single
+    # try/finally around it -- the sealed control flow inside is untouched.
+    progress = _progress_writer(context, home_root, target)
+    if progress is not None:
+        progress.start_step("acquire")
+    try:
+        output = _acquire_node_body(
+            context,
+            input,
+            http_client=http_client,
+            exa=exa,
+            ats=ats,
+            watchlist=watchlist,
+            home_root=home_root,
+            target=target,
+            progress=progress,
+        )
+    except BaseException:
+        if progress is not None:
+            progress.finish_step("acquire", ok=False)
+        raise
+    if progress is not None:
+        progress.finish_step("acquire", ok=True)
+    return output
+
+
+def _acquire_node_body(
+    context: NodeContext,
+    input: AcquireInput,
+    *,
+    http_client: Any,
+    exa: ExaSearchClient,
+    ats: ATSBoardClient,
+    watchlist: WatchlistClient,
+    home_root: Path | None,
+    target: Path | None,
+    progress: ProgressWriter | None,
+) -> AcquireOutput:
     batch_id = _safe_batch_id(context.operation_key)
     failures: list[FailureRow] = []
     rows: list[PostingRow] = list(input.rows)
@@ -517,6 +580,11 @@ def acquire_node(
         else:
             outcome = RowOutcome.UNCHANGED
         results.append(PostingRowResult(row, outcome))
+        if progress is not None:
+            # B4: one line per posting kept after the B1 filter, appended as
+            # acquire produces it -- this is what lets a card render before
+            # the whole run (or even the whole acquire step) finishes.
+            progress.posting_acquired(row.to_json(), outcome=outcome.value)
         if input.selection_rule is SelectionRule.NEW_OR_EDITED_ROLE_MATCH and outcome in {RowOutcome.NEW, RowOutcome.EDITED}:
             candidates.append(row)
 
@@ -546,6 +614,12 @@ def acquire_node(
     for selection_reason in selection.dropped.values():
         reason = NotAssessedReason.DUPLICATE if selection_reason == "duplicate" else NotAssessedReason.OVER_CAP
         drop_counts[reason] = drop_counts.get(reason, 0) + 1
+
+    if progress is not None:
+        # B4: the run's assess cap plus how many candidates it applies to
+        # (operator: show "assessing 5 of 42 matches, cap 5"), known as soon
+        # as acquire finishes selecting -- well before assess starts.
+        progress.cap_known(cap=input.selection_cap, candidate_count=len(candidates))
 
     status = import_public_rows(resolved=resolved, batch_id=batch_id, rows=[_public_row(row) for row in rows] or [{
         "opportunity_id": "empty", "snapshot_id": digest_imported_bytes(b"empty")[:32], "source_kind": "agent_discovered", "title": "empty", "employer": "empty", "url": "https://example.invalid/empty", "acquisition_state": "excluded", "excluded_reason": "no_rows",
