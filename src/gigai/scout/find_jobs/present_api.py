@@ -12,27 +12,33 @@ import argparse
 import json
 import os
 import posixpath
+import re
 import sys
+import tempfile
+import threading
 import traceback
+import uuid
+from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
-import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Protocol
 from urllib.parse import urlsplit
 
-from ...canonical import canonical_json_bytes
+from ...canonical import canonical_json_bytes, parse_json_bytes
 from ...run import RunError
 from .contracts import (
     API_BIND,
     AggregateStatus,
     FindJobsConfig,
     FindJobsContractError,
+    ModelTarget,
     PinnedResume,
     RunRequest,
     RunResultsResponse,
     RunStatusResponse,
+    SourceToggles,
 )
 
 _TEST_HTTP_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_HTTP"
@@ -66,6 +72,38 @@ class Backend(Protocol):
     def run_results(self, run_id: str) -> RunResultsResponse: ...
 
     def run_progress(self, run_id: str) -> dict[str, object]: ...
+
+    # S2-B: the setup interview + "Discover companies" panel. These four
+    # methods are a thin pass-through onto the S2-A discovery package
+    # (``gigai.scout.find_jobs.discovery``), imported lazily inside each
+    # method body -- see ``ScoutFindJobsBackend`` below for why (the module
+    # may not exist yet, and the API must still start without it). Prefs and
+    # results are always exchanged as plain JSON-able dicts across this
+    # boundary (``.to_json()``/``.from_json()`` on S2-A's dataclasses), never
+    # as the dataclass types themselves, so this module never needs an eager
+    # import of a package that may not exist.
+
+    def read_setup(self) -> dict[str, object] | None:
+        """Return the saved prefs' JSON, or ``None`` if none are saved yet."""
+        ...
+
+    def write_setup(self, prefs_fields: dict[str, object]) -> dict[str, object]:
+        """Validate, then ``save_prefs`` + update ``find-jobs.json`` atomically.
+
+        Returns the saved prefs' JSON. ``prefs_fields`` is already validated
+        (see ``_validate_setup_body``) by the time this is called.
+        """
+        ...
+
+    def start_discovery(self, on_progress: Callable[[dict[str, object]], None]) -> str:
+        """Start a background discovery run; return its ``discovery_id``."""
+        ...
+
+    def latest_discovery(self) -> dict[str, object] | None:
+        """Return the latest ``DiscoveryResult``'s JSON, or ``None`` if none exists."""
+        ...
+
+    def discovery_running(self) -> bool: ...
 
 
 class NotWiredBackend:
@@ -102,6 +140,26 @@ class NotWiredBackend:
         self._not_wired()
         raise AssertionError("unreachable")
 
+    def read_setup(self) -> dict[str, object] | None:
+        self._not_wired()
+        raise AssertionError("unreachable")
+
+    def write_setup(self, prefs_fields: dict[str, object]) -> dict[str, object]:
+        self._not_wired()
+        raise AssertionError("unreachable")
+
+    def start_discovery(self, on_progress: Callable[[dict[str, object]], None]) -> str:
+        self._not_wired()
+        raise AssertionError("unreachable")
+
+    def latest_discovery(self) -> dict[str, object] | None:
+        self._not_wired()
+        raise AssertionError("unreachable")
+
+    def discovery_running(self) -> bool:
+        self._not_wired()
+        raise AssertionError("unreachable")
+
 
 class _RunBoundaryError(FindJobsContractError):
     """A typed pre-allocation error with its route-level HTTP status."""
@@ -126,6 +184,229 @@ class ConfigMissingError(LookupError):
         super().__init__(str(path))
 
 
+class DiscoveryUnavailableError(RuntimeError):
+    """``gigai.scout.find_jobs.discovery`` (S2-A) is not importable yet.
+
+    Raised by ``ScoutFindJobsBackend`` so the HTTP layer can return 503
+    ``discovery_unavailable`` instead of a raw import error -- the setup/
+    discover routes must not prevent the rest of the API from starting or
+    serving while S2-A hasn't landed (see the CHANGE #3 packet note).
+    """
+
+
+class SetupPrefsMissingError(LookupError):
+    """No discovery prefs have been saved for this target yet."""
+
+
+class SetupValidationError(FindJobsContractError):
+    """A ``PUT /api/setup`` body failed field-level validation.
+
+    ``field_errors`` maps a field name to a human-readable message so the
+    UI can show per-field errors instead of one opaque string (CHANGE #1:
+    "field errors as 400 with per-field messages").
+    """
+
+    def __init__(self, field_errors: dict[str, str]) -> None:
+        self.field_errors = dict(field_errors)
+        joined = "; ".join(f"{field}: {message}" for field, message in self.field_errors.items())
+        super().__init__("invalid_value", joined or "invalid setup")
+
+
+class DiscoveryConflictError(RuntimeError):
+    """A discovery run is already in progress (one-at-a-time)."""
+
+
+_WORK_MODES = ("remote", "hybrid", "onsite", "any")
+_COUNTRY_CODE = re.compile(r"\A[A-Z]{2}\Z")
+
+
+def _setup_field_string_list(body: dict[str, object], field: str, errors: dict[str, str]) -> tuple[str, ...]:
+    value = body.get(field, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        errors[field] = f"{field} must be an array of strings"
+        return ()
+    return tuple(value)
+
+
+def _setup_field_optional_string(body: dict[str, object], field: str, errors: dict[str, str]) -> str | None:
+    value = body.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        errors[field] = f"{field} must be a non-empty string or null"
+        return None
+    return value
+
+
+def _setup_field_bool(body: dict[str, object], field: str, errors: dict[str, str], *, default: bool) -> bool:
+    if field not in body:
+        return default
+    value = body[field]
+    if not isinstance(value, bool):
+        errors[field] = f"{field} must be a boolean"
+        return default
+    return value
+
+
+def _setup_countries(body: dict[str, object], errors: dict[str, str]) -> tuple[str, ...]:
+    codes = _setup_field_string_list(body, "countries", errors)
+    if "countries" in errors:
+        return ()
+    for index, code in enumerate(codes):
+        if not _COUNTRY_CODE.fullmatch(code):
+            errors["countries"] = f"countries[{index}] must be an ISO-3166 alpha-2 code"
+            return ()
+    return codes
+
+
+def _setup_work_mode(body: dict[str, object], errors: dict[str, str]) -> str:
+    value = body.get("work_mode")
+    if value not in _WORK_MODES:
+        errors["work_mode"] = f"work_mode must be one of {', '.join(_WORK_MODES)}"
+        return "any"
+    return value
+
+
+def _setup_cadence_days(body: dict[str, object], errors: dict[str, str]) -> int:
+    if "cadence_days" not in body:
+        return 7
+    value = body["cadence_days"]
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        errors["cadence_days"] = "cadence_days must be a positive integer"
+        return 7
+    return value
+
+
+def _setup_budget_usd_per_session(body: dict[str, object], errors: dict[str, str]) -> float:
+    if "budget_usd_per_session" not in body:
+        return 0.50
+    value = body["budget_usd_per_session"]
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        errors["budget_usd_per_session"] = "budget_usd_per_session must be a positive number"
+        return 0.50
+    return float(value)
+
+
+def _validate_setup_body(body: object) -> dict[str, object]:
+    """Validate a ``PUT /api/setup`` body against the 11 S23 interview fields.
+
+    Returns a plain dict shaped exactly like ``DiscoveryPrefs`` fields
+    (S2-A's frozen dataclass); the caller constructs the real dataclass so
+    this module never has to import it eagerly (see CHANGE #3). Raises
+    ``SetupValidationError`` (-> 400 with per-field messages) on any bad
+    field; unknown top-level keys are also rejected to fail closed on typos.
+    """
+
+    if not isinstance(body, dict):
+        raise SetupValidationError({"_": "request body must be a JSON object"})
+    known_keys = {
+        "roles",
+        "titles_to_avoid",
+        "countries",
+        "work_mode",
+        "city",
+        "visa_sponsorship_required",
+        "exclude_companies",
+        "watch_companies",
+        "company_stage_size",
+        "industries_include",
+        "industries_exclude",
+        "must_have_stack",
+        "dealbreaker_stack",
+        "cadence_days",
+        "budget_usd_per_session",
+    }
+    errors: dict[str, str] = {}
+    unknown = set(body) - known_keys
+    if unknown:
+        errors["_"] = f"unknown field(s): {sorted(unknown)}"
+
+    roles = _setup_field_string_list(body, "roles", errors)
+    if "roles" not in errors and not roles:
+        errors["roles"] = "roles must not be empty"
+    titles_to_avoid = _setup_field_string_list(body, "titles_to_avoid", errors)
+    countries = _setup_countries(body, errors)
+    work_mode = _setup_work_mode(body, errors)
+    city = _setup_field_optional_string(body, "city", errors)
+    visa_sponsorship_required = _setup_field_bool(body, "visa_sponsorship_required", errors, default=False)
+    exclude_companies = _setup_field_string_list(body, "exclude_companies", errors)
+    watch_companies = _setup_field_string_list(body, "watch_companies", errors)
+    company_stage_size = _setup_field_optional_string(body, "company_stage_size", errors)
+    industries_include = _setup_field_string_list(body, "industries_include", errors)
+    industries_exclude = _setup_field_string_list(body, "industries_exclude", errors)
+    must_have_stack = _setup_field_string_list(body, "must_have_stack", errors)
+    dealbreaker_stack = _setup_field_string_list(body, "dealbreaker_stack", errors)
+    cadence_days = _setup_cadence_days(body, errors)
+    budget_usd_per_session = _setup_budget_usd_per_session(body, errors)
+
+    if errors:
+        raise SetupValidationError(errors)
+
+    return {
+        "roles": roles,
+        "titles_to_avoid": titles_to_avoid,
+        "countries": countries,
+        "work_mode": work_mode,
+        "city": city,
+        "visa_sponsorship_required": visa_sponsorship_required,
+        "exclude_companies": exclude_companies,
+        "watch_companies": watch_companies,
+        "company_stage_size": company_stage_size,
+        "industries_include": industries_include,
+        "industries_exclude": industries_exclude,
+        "must_have_stack": must_have_stack,
+        "dealbreaker_stack": dealbreaker_stack,
+        "cadence_days": cadence_days,
+        "budget_usd_per_session": budget_usd_per_session,
+    }
+
+
+def _prefs_prefill_from_config(config: FindJobsConfig) -> dict[str, object]:
+    """Derive a ``PUT /api/setup``-shaped pre-fill from the current find-jobs.json.
+
+    Used for the 404 ``prefs_missing`` response's pre-fill payload (CHANGE
+    #1) -- only the fields ``FindJobsConfig`` actually carries are filled;
+    the rest default the same way ``_validate_setup_body`` would.
+    """
+
+    work_mode = "remote" if config.remote else ("any" if config.location is None else "onsite")
+    return {
+        "roles": list(config.roles),
+        "titles_to_avoid": [],
+        "countries": list(config.countries),
+        "work_mode": work_mode,
+        "city": config.location,
+        "visa_sponsorship_required": config.visa_sponsorship_required,
+        "exclude_companies": [],
+        "watch_companies": [],
+        "company_stage_size": None,
+        "industries_include": [],
+        "industries_exclude": [],
+        "must_have_stack": [],
+        "dealbreaker_stack": [],
+        "cadence_days": 7,
+        "budget_usd_per_session": 0.50,
+    }
+
+
+def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
+    """Write ``payload`` to ``path`` atomically (write-temp, fsync, replace)."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    encoded = canonical_json_bytes(payload)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 class ScoutFindJobsBackend:
     """The production localhost backend for the Scout find-jobs API."""
 
@@ -136,6 +417,15 @@ class ScoutFindJobsBackend:
             if target is not None
             else None
         )
+        # CHANGE #1: "one at a time -> 409 if running". A single process-wide
+        # lock plus an in-memory progress snapshot for the currently (or most
+        # recently) running discovery -- ``run_discovery`` itself is
+        # synchronous, so the handler thread that calls it holds this lock
+        # for the run's whole duration; a second POST while held is refused
+        # before a second background thread is even started.
+        self._discovery_lock = threading.Lock()
+        self._discovery_running = False
+        self._discovery_progress: dict[str, object] | None = None
 
     def _target_root(self) -> Path:
         if self.target is None:
@@ -343,12 +633,195 @@ class ScoutFindJobsBackend:
         cap = payload.get("selection_cap") if isinstance(payload, dict) else None
         return cap if isinstance(cap, int) else None
 
+    @staticmethod
+    def _discovery_module():
+        """Lazily import S2-A's discovery package.
+
+        CHANGE #3: "Import it as ``from gigai.scout.find_jobs import
+        discovery`` lazily inside the handlers so the API still starts if the
+        module is absent." Every setup/discover backend method routes
+        through this so a missing package degrades to
+        ``DiscoveryUnavailableError`` (-> 503 ``discovery_unavailable``)
+        rather than an import error at module load time.
+        """
+
+        try:
+            from gigai.scout.find_jobs import discovery
+        except ModuleNotFoundError as exc:
+            raise DiscoveryUnavailableError("the discovery module is not available yet") from exc
+        return discovery
+
+    def read_setup(self) -> dict[str, object] | None:
+        discovery = self._discovery_module()
+        prefs = discovery.load_prefs(home_root=self.home_root, target=self._target_root())
+        return prefs.to_json() if prefs is not None else None
+
+    def write_setup(self, prefs_fields: dict[str, object]) -> dict[str, object]:
+        discovery = self._discovery_module()
+        prefs = discovery.DiscoveryPrefs(**prefs_fields)
+        discovery.save_prefs(home_root=self.home_root, target=self._target_root(), prefs=prefs)
+        self._update_find_jobs_config(prefs_fields)
+        return prefs.to_json()
+
+    def _update_find_jobs_config(self, prefs_fields: dict[str, object]) -> None:
+        """Apply the setup answers onto ``find-jobs.json``, keeping every other field.
+
+        CHANGE #1: writes ``roles``, ``merged_queries`` (mirrored from
+        ``roles``, matching the starter config's own convention -- see
+        ``scout_cli.STARTER_FIND_JOBS_CONFIG``), ``location`` (from
+        ``city``), ``remote`` (derived from ``work_mode``), ``countries``,
+        and ``visa_sponsorship_required``. Every other ``FindJobsConfig``
+        field (``published_after``, ``sources``, ``default_assess_cap``,
+        ``default_model_target``) is read from the existing file and kept
+        unchanged. If no ``find-jobs.json`` exists yet, one is written from
+        ``FindJobsConfig``'s own defaults for the untouched fields plus the
+        interview answers -- the interview is allowed to run before a target
+        has ever been configured.
+        """
+
+        path = self._target_root() / "find-jobs.json"
+        roles: tuple[str, ...] = tuple(prefs_fields["roles"])  # type: ignore[arg-type]
+        work_mode = prefs_fields["work_mode"]
+        remote = work_mode in ("remote", "any")
+        city: str | None = prefs_fields["city"]  # type: ignore[assignment]
+        countries: tuple[str, ...] = tuple(prefs_fields["countries"])  # type: ignore[arg-type]
+        visa_sponsorship_required = bool(prefs_fields["visa_sponsorship_required"])
+
+        if path.is_symlink() or not path.is_file():
+            config = FindJobsConfig(
+                roles=roles,
+                merged_queries=roles,
+                location=city,
+                remote=remote,
+                published_after=None,
+                sources=SourceToggles(exa=True, ats=True, hiringcafe=False),
+                default_assess_cap=10,
+                default_model_target=ModelTarget.OLLAMA_LOCAL,
+                countries=countries,
+                visa_sponsorship_required=visa_sponsorship_required,
+            )
+        else:
+            existing = FindJobsConfig.from_json(parse_json_bytes(path.read_bytes()))
+            config = FindJobsConfig(
+                roles=roles,
+                merged_queries=roles,
+                location=city,
+                remote=remote,
+                published_after=existing.published_after,
+                sources=existing.sources,
+                default_assess_cap=existing.default_assess_cap,
+                default_model_target=existing.default_model_target,
+                countries=countries,
+                visa_sponsorship_required=visa_sponsorship_required,
+            )
+        _atomic_write_json(path, config.to_json())
+
+    def start_discovery(self, on_progress: Callable[[dict[str, object]], None]) -> str:
+        """Start ``run_discovery`` on a background thread; return a request id.
+
+        ``run_discovery`` is synchronous and may run 5-30 minutes (contract),
+        so this cannot wait for it to return a real ``discovery_id`` before
+        answering the POST (CHANGE #1: "202 {discovery_id}"). The id handed
+        back here is a request-scoped tracking token, not
+        ``DiscoveryResult.discovery_id`` (which the contract only produces
+        once the run finishes) -- ``GET /api/discover/latest`` is the
+        authority for the real id and the run's live progress, exactly like
+        ``/api/run``'s ``run_id`` vs. ``/api/runs/{id}`` status pattern this
+        mirrors. Refuses with ``DiscoveryConflictError`` (-> 409) if a run is
+        already in progress, and ``SetupPrefsMissingError`` (-> 404-ish) if
+        no prefs have been saved yet.
+        """
+
+        discovery = self._discovery_module()
+        acquired = self._discovery_lock.acquire(blocking=False)
+        if not acquired:
+            raise DiscoveryConflictError("a discovery run is already in progress")
+        try:
+            prefs = discovery.load_prefs(home_root=self.home_root, target=self._target_root())
+            if prefs is None:
+                raise SetupPrefsMissingError("no discovery prefs saved yet")
+        except BaseException:
+            self._discovery_lock.release()
+            raise
+
+        request_id = f"discovery_req_{uuid.uuid4().hex}"
+        started_at = datetime.now(timezone.utc).isoformat()
+        self._discovery_running = True
+        self._discovery_progress = {"discovery_id": request_id, "status": "running", "started_at": started_at}
+
+        def _capture_progress(event: dict[str, object]) -> None:
+            self._discovery_progress = dict(event)
+            on_progress(event)
+
+        def _run() -> None:
+            try:
+                result = discovery.run_discovery(
+                    home_root=self.home_root,
+                    target=self._target_root(),
+                    prefs=prefs,
+                    on_progress=_capture_progress,
+                )
+                self._discovery_progress = result.to_json()
+            except Exception as exc:
+                # run_discovery's own contract is "never raises for a
+                # provider error"; anything that does escape it (e.g. S2-A's
+                # DiscoveryBudgetExceeded, raised before any spend) is a
+                # pre-flight failure this thread must still record instead
+                # of silently dropping -- nothing else observes this thread,
+                # so an uncaught exception here would otherwise vanish and
+                # leave the UI's Discover panel stuck on "running" forever.
+                self._discovery_progress = {
+                    "discovery_id": request_id,
+                    "status": "failed",
+                    "started_at": started_at,
+                    "finished_at": None,
+                    "cost_usd": 0.0,
+                    "sources": [],
+                    "new_boards": [],
+                    "skipped": {},
+                    "error": str(exc),
+                }
+            finally:
+                self._discovery_running = False
+                self._discovery_lock.release()
+
+        threading.Thread(target=_run, daemon=True).start()
+        return request_id
+
+    def latest_discovery(self) -> dict[str, object] | None:
+        discovery = self._discovery_module()
+        if self._discovery_running and self._discovery_progress is not None:
+            return dict(self._discovery_progress)
+        result = discovery.latest_discovery(home_root=self.home_root, target=self._target_root())
+        return result.to_json() if result is not None else None
+
+    def discovery_running(self) -> bool:
+        return self._discovery_running
+
 
 RUN_START_TIMEOUT_SECONDS = 30.0
 
 
 def _error_body(code: str, message: str) -> dict[str, object]:
     return {"error": {"code": code, "message": message}}
+
+
+def _days_ago(iso_timestamp: str) -> int | None:
+    """Whole days between ``iso_timestamp`` and now, for the Discover panel's
+
+    "last run N days ago". Returns ``None`` (rather than raising) for a
+    timestamp this process can't parse -- a display-only convenience field
+    should never break the route over a malformed/foreign timestamp.
+    """
+
+    try:
+        parsed = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - parsed
+    return max(0, delta.days)
 
 
 # The packaged UI: built by `yarn build` in src/gigai/scout/ui and committed
@@ -458,6 +931,11 @@ def _make_handler(
         def _error(self, status: int, code: str, message: str) -> None:
             self._write_json(status, _error_body(code, message))
 
+        def _error_with_extra(self, status: int, code: str, message: str, extra: dict[str, object]) -> None:
+            body = _error_body(code, message)
+            body["error"] = {**body["error"], **extra}  # type: ignore[dict-item]
+            self._write_json(status, body)
+
         def _check_loopback(self) -> bool:
             peer_host = self.client_address[0]
             if peer_host not in {"127.0.0.1", "::1"}:
@@ -494,6 +972,12 @@ def _make_handler(
                         return
                     if path == "/api/config":
                         self._handle_get_config()
+                        return
+                    if path == "/api/setup":
+                        self._handle_get_setup()
+                        return
+                    if path == "/api/discover/latest":
+                        self._handle_get_discover_latest()
                         return
                     run_id = _match_run_id(path, suffix="/results")
                     if run_id is not None:
@@ -536,10 +1020,30 @@ def _make_handler(
             if not self._check_loopback():
                 return
             path = urlsplit(self.path).path
-            if path == "/api/run":
-                self._handle_post_run()
+            try:
+                if path == "/api/run":
+                    self._handle_post_run()
+                    return
+                if path == "/api/discover":
+                    self._handle_post_discover()
+                    return
+                self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
+            except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET
+                traceback.print_exc(file=sys.stderr)
+                self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
+
+        def do_PUT(self) -> None:  # noqa: N802
+            if not self._check_loopback():
                 return
-            self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
+            path = urlsplit(self.path).path
+            try:
+                if path == "/api/setup":
+                    self._handle_put_setup()
+                    return
+                self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
+            except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET
+                traceback.print_exc(file=sys.stderr)
+                self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
 
         def _handle_get_config(self) -> None:
             try:
@@ -570,6 +1074,103 @@ def _make_handler(
                 "config_digest": config_digest,
             }
             self._write_json(HTTPStatus.OK, payload)
+
+        def _handle_get_setup(self) -> None:
+            try:
+                prefs_json = backend.read_setup()
+            except DiscoveryUnavailableError as exc:
+                self._error(HTTPStatus.SERVICE_UNAVAILABLE, "discovery_unavailable", str(exc))
+                return
+            if prefs_json is not None:
+                self._write_json(
+                    HTTPStatus.OK,
+                    {"schema_version": "scout-find-jobs-setup-response:1", "prefs": prefs_json},
+                )
+                return
+            # CHANGE #1: 404 prefs_missing carries a pre-fill derived from the
+            # current find-jobs.json where possible, so the UI's first-run
+            # interview starts from the operator's existing config instead of
+            # a blank form.
+            try:
+                config, _config_bytes = backend.read_config()
+                prefill = _prefs_prefill_from_config(config)
+            except (ConfigMissingError, FindJobsContractError, LookupError):
+                prefill = _prefs_prefill_from_config(
+                    FindJobsConfig(
+                        roles=(),
+                        merged_queries=(),
+                        location=None,
+                        remote=True,
+                        published_after=None,
+                        sources=SourceToggles(exa=True, ats=True, hiringcafe=False),
+                    )
+                )
+            self._error_with_extra(
+                HTTPStatus.NOT_FOUND,
+                "prefs_missing",
+                "no discovery preferences saved yet; complete the setup interview",
+                {"prefill": prefill},
+            )
+
+        def _handle_put_setup(self) -> None:
+            body = self._read_json_body()
+            if body is None:
+                return
+            try:
+                prefs_fields = _validate_setup_body(body)
+            except SetupValidationError as exc:
+                self._error_with_extra(
+                    HTTPStatus.BAD_REQUEST,
+                    exc.code,
+                    str(exc),
+                    {"field_errors": exc.field_errors},
+                )
+                return
+            try:
+                prefs_json = backend.write_setup(prefs_fields)
+            except DiscoveryUnavailableError as exc:
+                self._error(HTTPStatus.SERVICE_UNAVAILABLE, "discovery_unavailable", str(exc))
+                return
+            self._write_json(
+                HTTPStatus.OK,
+                {"schema_version": "scout-find-jobs-setup-response:1", "prefs": prefs_json},
+            )
+
+        def _handle_post_discover(self) -> None:
+            try:
+                request_id = backend.start_discovery(lambda _event: None)
+            except DiscoveryUnavailableError as exc:
+                self._error(HTTPStatus.SERVICE_UNAVAILABLE, "discovery_unavailable", str(exc))
+                return
+            except DiscoveryConflictError as exc:
+                self._error(HTTPStatus.CONFLICT, "discovery_running", str(exc))
+                return
+            except SetupPrefsMissingError as exc:
+                self._error(HTTPStatus.NOT_FOUND, "prefs_missing", str(exc))
+                return
+            self._write_json(HTTPStatus.ACCEPTED, {"discovery_id": request_id})
+
+        def _handle_get_discover_latest(self) -> None:
+            try:
+                result_json = backend.latest_discovery()
+                running = backend.discovery_running()
+            except DiscoveryUnavailableError as exc:
+                self._error(HTTPStatus.SERVICE_UNAVAILABLE, "discovery_unavailable", str(exc))
+                return
+            days_ago = None
+            if result_json is not None:
+                finished_at = result_json.get("finished_at")
+                if isinstance(finished_at, str):
+                    days_ago = _days_ago(finished_at)
+            self._write_json(
+                HTTPStatus.OK,
+                {
+                    "schema_version": "scout-find-jobs-discover-latest-response:1",
+                    "result": result_json,
+                    "running": running,
+                    "days_ago": days_ago,
+                },
+            )
 
         def _handle_post_run(self) -> None:
             body = self._read_json_body()

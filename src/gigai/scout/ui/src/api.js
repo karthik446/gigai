@@ -9,6 +9,7 @@ const STATUS_MESSAGES = {
   404: "That run could not be found.",
   409: "The configuration changed since it was loaded. Reload the config and try again.",
   422: "The server rejected this request as invalid. Reload and try again.",
+  503: "This feature is not available yet.",
   504: "The server timed out handling this request. It may still be running; try checking status again shortly.",
 };
 
@@ -16,14 +17,25 @@ const STATUS_MESSAGES = {
 // instead of the generic per-status text above. config_missing in
 // particular used to fall through to the 404 default ("That run could not
 // be found."), which is wrong: no run is missing, the config file is.
-const CODES_WITH_OWN_MESSAGE = new Set(["config_missing"]);
+// prefs_missing/discovery_unavailable/discovery_running are the S2-B setup/
+// discover routes' own named error codes, same reasoning.
+const CODES_WITH_OWN_MESSAGE = new Set([
+  "config_missing",
+  "prefs_missing",
+  "discovery_unavailable",
+  "discovery_running",
+]);
 
 class ApiError extends Error {
-  constructor(status, message, code) {
+  // `extra` carries any additional error-body fields beyond code/message --
+  // PUT /api/setup's `field_errors` and GET /api/setup's 404 `prefill`, so
+  // callers don't have to re-parse the response body to reach them.
+  constructor(status, message, code, extra) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    Object.assign(this, extra || {});
   }
 }
 
@@ -60,7 +72,8 @@ async function request(method, path, body) {
     const errorBody = payload && typeof payload.error === "object" ? payload.error : null;
     const code = errorBody && typeof errorBody.code === "string" ? errorBody.code : undefined;
     const detail = errorBody && typeof errorBody.message === "string" ? errorBody.message : undefined;
-    throw new ApiError(response.status, messageForStatus(response.status, code, detail), code);
+    const { code: _code, message: _message, ...extra } = errorBody || {};
+    throw new ApiError(response.status, messageForStatus(response.status, code, detail), code, extra);
   }
 
   return payload;
@@ -114,6 +127,27 @@ export function buildRunRequest({ configDigest, selectionCap, modelTarget }) {
     selection_rule: "new_or_edited_role_match",
     model_target: modelTarget,
   };
+}
+
+// S2-B: the setup interview + "Discover companies" panel routes
+// (present_api.py's GET/PUT /api/setup, POST /api/discover, GET
+// /api/discover/latest). A 404 from getSetup carries `prefill` on the
+// thrown ApiError (see present_api.py's _handle_get_setup); a 400 from
+// putSetup carries `field_errors`, one message per invalid field.
+export function getSetup() {
+  return request("GET", "/api/setup");
+}
+
+export function putSetup(prefsFields) {
+  return request("PUT", "/api/setup", prefsFields);
+}
+
+export function startDiscovery() {
+  return request("POST", "/api/discover", {});
+}
+
+export function getDiscoverLatest() {
+  return request("GET", "/api/discover/latest");
 }
 
 export { ApiError };
