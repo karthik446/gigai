@@ -494,6 +494,16 @@ class ScoutFindJobsBackend:
         self._discovery_lock = threading.Lock()
         self._discovery_running = False
         self._discovery_progress: dict[str, object] | None = None
+        # uat-bug-003 follow-up: find-jobs runs execute in a spawned child
+        # process (run.py's own worker), so this API only ever *observes*
+        # a run's terminal status through polling -- there is no single
+        # in-process call that "is" the run to log around. Track which
+        # run_ids have already had their terminal status logged so a
+        # multi-poll UI (or several concurrent pollers) logs "run
+        # finished"/"run failed" exactly once per run, the first time this
+        # process sees it go terminal, never once per poll.
+        self._logged_terminal_runs: set[str] = set()
+        self._logged_terminal_runs_lock = threading.Lock()
 
     def _target_root(self) -> Path:
         if self.target is None:
@@ -597,11 +607,34 @@ class ScoutFindJobsBackend:
         from ... import run
 
         self._require_run(run_id)
-        details = run.read_run_details(
-            home_root=self.home_root,
-            requested_target=self._target_root(),
-            run_id=run_id,
-        )
+        try:
+            details = run.read_run_details(
+                home_root=self.home_root,
+                requested_target=self._target_root(),
+                run_id=run_id,
+            )
+        except run.RunError as exc:
+            if _is_transient_run_error(exc):
+                # r1 (uat-bug-003/005 follow-up): run.read_run_details's own
+                # docstring/comment calls this "a transient, retryable
+                # refusal" -- a concurrent journal writer (the run's own
+                # child process, mid-commit) can make one poll observe an
+                # uncommitted or in-flight write. This is not a real error
+                # the UI should ever see: report the same "running" the UI
+                # already polls through for an ordinary in-flight run,
+                # rather than a 500 that kills App.jsx's pollStatus loop
+                # outright (its own comment: "must not spin forever... stop
+                # rather than silently retrying" -- correct for a *real*
+                # failure, wrong for a transient race this process caused).
+                # Logged at info, not as an unhandled exception: this is an
+                # expected, self-healing race, not a bug to alarm on.
+                _logger.info(
+                    "run status transiently unavailable, reporting running: run_id=%s (%s)",
+                    run_id,
+                    exc,
+                )
+                return RunStatusResponse(run_id, AggregateStatus.RUNNING, ())
+            raise
         payload = self._payload(run_id)
         detail_status = str(details.get("status", "running"))
         if detail_status == "preparing":
@@ -619,7 +652,54 @@ class ScoutFindJobsBackend:
         # receipts and the C-1 payload remains the result authority.
         if status in {AggregateStatus.PENDING, AggregateStatus.RUNNING}:
             receipts = ()
+        else:
+            self._log_run_terminal_once(run_id, status, payload)
         return RunStatusResponse(run_id, status, receipts)
+
+    def _log_run_terminal_once(
+        self, run_id: str, status: "AggregateStatus", payload
+    ) -> None:
+        """Log "find-jobs run finished/failed" the first time this process
+        observes ``run_id`` go terminal (uat-bug-003 follow-up).
+
+        The run itself executes in a spawned child process (``run.py``'s own
+        worker) -- this API only ever *polls* ``run.read_run_details`` and
+        never calls or awaits the run directly, so there is no single
+        in-process call to log around the way ``start_run``'s allocation is.
+        A ``set`` guarded by a lock makes this idempotent across repeated
+        polls (and concurrent pollers) without a durable write of its own;
+        it resets on server restart, which only means a run whose terminal
+        status was already logged before a restart may log once more after
+        one -- never a duplicate within one server's lifetime, and never a
+        silent drop.
+        """
+
+        with self._logged_terminal_runs_lock:
+            if run_id in self._logged_terminal_runs:
+                return
+            self._logged_terminal_runs.add(run_id)
+        posting_count = len(payload.rows)
+        assessed_count = len(payload.assessments)
+        duration_ms = _receipt_span_ms(payload.node_receipts)
+        if status == AggregateStatus.FAILED:
+            message = _failure_message(payload.node_receipts)
+            _logger.warning(
+                "find-jobs run failed: run_id=%s postings=%d assessed=%d duration_ms=%s error=%s",
+                run_id,
+                posting_count,
+                assessed_count,
+                duration_ms if duration_ms is not None else "unknown",
+                message,
+            )
+        else:
+            _logger.info(
+                "find-jobs run finished: run_id=%s status=%s postings=%d assessed=%d duration_ms=%s",
+                run_id,
+                status.value,
+                posting_count,
+                assessed_count,
+                duration_ms if duration_ms is not None else "unknown",
+            )
 
     def run_results(self, run_id: str) -> RunResultsResponse:
         payload = self._payload(run_id)
@@ -858,6 +938,26 @@ class ScoutFindJobsBackend:
                     on_progress=_capture_progress,
                 )
                 self._discovery_progress = result.to_json()
+                # uat-bug-003 follow-up: logged here (after run_discovery
+                # returns), not in _on_progress's "discovery_done" handling
+                # above -- that raw progress event has no cost_usd (see
+                # discovery.run_discovery's own _progress call), while the
+                # returned DiscoveryResult does.
+                if result.status == "failed":
+                    _logger.warning(
+                        "discover failed: discovery_id=%s new_boards=%d cost_usd=%.6f",
+                        result.discovery_id,
+                        len(result.new_boards),
+                        result.cost_usd,
+                    )
+                else:
+                    _logger.info(
+                        "discover finished: discovery_id=%s status=%s new_boards=%d cost_usd=%.6f",
+                        result.discovery_id,
+                        result.status,
+                        len(result.new_boards),
+                        result.cost_usd,
+                    )
             except Exception as exc:
                 # run_discovery's own contract is "never raises for a
                 # provider error"; anything that does escape it (e.g. S2-A's
@@ -866,6 +966,7 @@ class ScoutFindJobsBackend:
                 # of silently dropping -- nothing else observes this thread,
                 # so an uncaught exception here would otherwise vanish and
                 # leave the UI's Discover panel stuck on "running" forever.
+                _logger.warning("discover failed: discovery_id=%s cost_usd=0.0 error=%s", request_id, exc)
                 self._discovery_progress = {
                     "discovery_id": request_id,
                     "status": "failed",
@@ -918,6 +1019,64 @@ def _days_ago(iso_timestamp: str) -> int | None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     delta = datetime.now(timezone.utc) - parsed
     return max(0, delta.days)
+
+
+def _parse_iso(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+# r1: the only RunError prefix run.py's own docstrings/comments mark as "a
+# transient, retryable refusal" (see run.read_run_details ->
+# _read_committed_run_details): a concurrent journal writer -- the run's own
+# child process, mid-commit -- can make one poll observe an uncommitted or
+# in-flight run-details write. occurrence.py already treats this exact
+# prefix the same way (still-running, not a real failure) at its own
+# read_run_details call site; this mirrors that established convention
+# rather than inventing a new one. Every other RunError message in run.py is
+# either explicitly marked non-retryable (goal-level "retryable": False
+# error entries, a different, non-RunError concept) or names a genuine
+# setup/authority/validation refusal that must keep failing loudly.
+_TRANSIENT_RUN_ERROR_PREFIX = "run_details_reconciliation_required:"
+
+
+def _is_transient_run_error(exc: BaseException) -> bool:
+    return str(exc).startswith(_TRANSIENT_RUN_ERROR_PREFIX)
+
+
+def _receipt_span_ms(node_receipts: tuple) -> int | None:
+    """Wall-clock milliseconds from the earliest receipt's ``started_at`` to
+    the latest ``finished_at``, for the "run finished/failed" log line's
+    ``duration_ms`` -- ``None`` (never a raise) if there are no receipts yet
+    or their timestamps don't parse, since a display-only duration must
+    never break the status route itself."""
+
+    starts = [ts for ts in (_parse_iso(receipt.started_at) for receipt in node_receipts) if ts is not None]
+    finishes = [ts for ts in (_parse_iso(receipt.finished_at) for receipt in node_receipts) if ts is not None]
+    if not starts or not finishes:
+        return None
+    delta = max(finishes) - min(starts)
+    return max(0, round(delta.total_seconds() * 1000))
+
+
+def _failure_message(node_receipts: tuple) -> str:
+    """The first failed node receipt's own failure message, for the "run
+    failed" log line -- falls back to a generic message if no receipt
+    carries one (for example, a run rejected before any node ran)."""
+
+    for receipt in node_receipts:
+        failure = getattr(receipt, "failure", None)
+        message = getattr(failure, "message", None)
+        if message:
+            return str(message)
+    return "no node failure detail available"
 
 
 # The packaged UI: built by `yarn build` in src/gigai/scout/ui and committed
@@ -1348,20 +1507,15 @@ def _make_handler(
             )
 
         def _handle_post_discover(self) -> None:
+            # uat-bug-003 follow-up: "discover finished"/"discover failed" is
+            # logged by the backend's start_discovery, once run_discovery
+            # returns (or raises) -- that is the first point cost_usd is
+            # known at all; this progress callback only ever sees
+            # run_discovery's raw, small progress-step events (no cost_usd),
+            # so it is never the right place to log the terminal outcome and
+            # no longer duplicates it here.
             def _on_progress(event: dict[str, object]) -> None:
-                # ``run_discovery`` (gigai.scout.find_jobs.discovery) never
-                # raises for a provider error; it reports success/partial/
-                # failure through the "discovery_done" progress event's
-                # "status" field instead of an exception, so "finished" and
-                # "failed" are both observed here rather than as a caught
-                # exception around start_discovery.
-                if event.get("stage") == "discovery_done":
-                    status = event.get("status")
-                    new_boards = event.get("new_boards")
-                    if status == "failed":
-                        _logger.warning("discover failed: status=%s new_boards=%s", status, new_boards)
-                    else:
-                        _logger.info("discover finished: status=%s new_boards=%s", status, new_boards)
+                pass
 
             try:
                 request_id = backend.start_discovery(_on_progress)

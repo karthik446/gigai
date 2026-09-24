@@ -1132,7 +1132,7 @@ def setup_command(
                         endpoint=endpoint_name,
                         model="default",
                         capabilities=("text",),
-                        max_output_tokens=512,
+                        max_output_tokens=_DEFAULT_MODEL_TARGET_OUTPUT_TOKENS,
                     )
                 )
                 target_names.add(target_name)
@@ -1783,7 +1783,11 @@ def _browser_preview_config(config, detected_models):
         if provider not in endpoint_names:
             endpoints.append(Endpoint(provider, adapter, credential=credential_name))
         if f"{provider}-default" not in target_names:
-            targets.append(ModelTarget(f"{provider}-default", provider, model, ("text",), 512))
+            targets.append(
+                ModelTarget(
+                    f"{provider}-default", provider, model, ("text",), _DEFAULT_MODEL_TARGET_OUTPUT_TOKENS
+                )
+            )
 
     for detected in detected_models:
         if detected.executable is None or detected.name in endpoint_names:
@@ -1792,7 +1796,11 @@ def _browser_preview_config(config, detected_models):
         target_name = f"{detected.name}-default"
         endpoints.append(Endpoint(detected.name, adapter))
         if target_name not in target_names:
-            targets.append(ModelTarget(target_name, detected.name, "default", ("text",), 512))
+            targets.append(
+                ModelTarget(
+                    target_name, detected.name, "default", ("text",), _DEFAULT_MODEL_TARGET_OUTPUT_TOKENS
+                )
+            )
 
     return build_config(
         home_root=config.home_root,
@@ -1867,7 +1875,15 @@ def _browser_provider_config(config, draft: SetupDraft):
             continue
         credentials.append(CredentialReference(credential_name, "environment", environment_name))
         endpoints.append(Endpoint(provider, adapter, credential=credential_name))
-        targets.append(ModelTarget(f"{provider}-default", provider, model or default_model, ("text",), 512))
+        targets.append(
+            ModelTarget(
+                f"{provider}-default",
+                provider,
+                model or default_model,
+                ("text",),
+                _DEFAULT_MODEL_TARGET_OUTPUT_TOKENS,
+            )
+        )
     return tuple(credentials), tuple(endpoints), tuple(targets)
 
 
@@ -4031,6 +4047,23 @@ def _parse_endpoint_spec(value: str) -> Endpoint:
     )
 
 
+# uat-bug-005 part B: a find-jobs assessment's own output schema (5-12
+# requirement-matrix rows plus suggestions/questions, see
+# proposal_execution._assess_prompt) can run well past a few hundred tokens.
+# ollama_local and openrouter_api both genuinely cap generation at a
+# target's own max_output_tokens (see adapters/ollama_local.py's
+# "num_predict" and adapters/openrouter_api.py's "max_tokens"), so a target
+# defaulted too low truncates a real assessment; codex_cli/claude_cli never
+# read this field at all, so raising it for them is inert, never surprising.
+# 4096 matches what an explicit `--model-target NAME=ENDPOINT:MODEL` has
+# always defaulted to (`_parse_model_target_spec` below) -- setup's own
+# auto-discovered targets (codex/claude CLI detection, the browser preview's
+# openai/openrouter defaults) previously used a separate, lower 512 default,
+# which is what made the pre-0.1.9 README tell operators to raise it by hand
+# via `--target-output-limit`. One shared default removes that surprise.
+_DEFAULT_MODEL_TARGET_OUTPUT_TOKENS = 4096
+
+
 def _parse_target_output_limits(values: tuple[str, ...]) -> dict[str, int]:
     limits: dict[str, int] = {}
     for value in values:
@@ -4087,7 +4120,7 @@ def _parse_model_target_spec(
             raise click.BadParameter(
                 "local model digests use @sha256:<64 lowercase hex digits>"
             )
-    maximum = output_limits.get(name, 4096)
+    maximum = output_limits.get(name, _DEFAULT_MODEL_TARGET_OUTPUT_TOKENS)
     return ModelTarget(
         name=name,
         endpoint=endpoint,

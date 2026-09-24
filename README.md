@@ -79,19 +79,23 @@ gigai setup --non-interactive \
 secret value. Run `gigai setup --help` for the full reference, including
 Ollama loopback endpoints and per-target reasoning-effort options.
 
-> **0.1.8.x limit.**
-> Scout's find-jobs resolves a model target by its *name*, using the target
-> name `codex_cli` (or `ollama_local`) literally — an auto-named target like
-> `codex-default` will not be found. Name the target explicitly and raise its
-> output limit (512 is too small for an assessment):
->
-> ```bash
-> gigai setup --non-interactive --home ~/.gigai --workpad-root ~/gigai-workpads --editor /usr/bin/true \
->   --endpoint codex=codex_cli \
->   --model-target codex_cli=codex:default \
->   --target-output-limit codex_cli=4096 \
->   --json
-> ```
+Scout's find-jobs resolves a sealed model target (`ollama_local`, `codex_cli`,
+`openrouter_api`) to whichever enabled configured target uses that adapter —
+`gigai setup`'s auto-named target (e.g. `codex-default`) just works, no
+special naming needed. If you followed an older 0.1.8.x version of this
+README and already have a target literally named `codex_cli` (or
+`ollama_local`/`openrouter_api`), that still resolves correctly too. Only
+having *two* enabled targets on the same adapter with neither named exactly
+the sealed value is an error — disable or remove one (`gigai setup` or edit
+`config.toml`).
+
+`gigai setup`'s auto-created targets default to a 4096-token output
+allowance, enough headroom for a real assessment's JSON output (5-12
+requirement-matrix rows plus suggestions/questions); `codex-default` just
+works here too, no `--target-output-limit` needed. If you configure a
+target by hand with a small custom limit, raise it with `gigai setup
+--target-output-limit codex-default=4096` (or a higher value) if assess
+responses come back truncated.
 
 ### Bind a project
 

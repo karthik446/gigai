@@ -29,8 +29,43 @@ from tests.support.workpad_assertions import assert_managed_workpad_clean
 from .conftest import load_fixture
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
+_DEFAULT_ENDPOINTS = (Endpoint("local-test", "ollama_local", base_url="http://127.0.0.1:11434"),)
+_DEFAULT_MODEL_TARGETS = (
+    ConfigModelTarget(
+        name="ollama_local",
+        endpoint="local-test",
+        model=TEST_MODEL_NAME,
+        capabilities=("text",),
+        max_output_tokens=512,
+        reasoning_effort=None,
+        model_digest=TEST_MODEL_DIGEST,
+        context_tokens=2048,
+        max_response_bytes=65536,
+    ),
+)
+_DEFAULT_PROFILES = (Profile("default", "ollama_local", "ollama_local", "ollama_local"),)
+
+
+def _fixture(
+    tmp_path: Path,
+    *,
+    endpoints: tuple[Endpoint, ...] = _DEFAULT_ENDPOINTS,
+    model_targets: tuple[ConfigModelTarget, ...] = _DEFAULT_MODEL_TARGETS,
+    profiles: tuple[Profile, ...] = _DEFAULT_PROFILES,
+) -> tuple[Path, Path, Path]:
     """Create and approve a fresh Scout candidate through the normal path.
+
+    ``endpoints``/``model_targets``/``profiles`` default to the fixed
+    single-``ollama_local`` config every existing caller here relies on
+    (reached in the test child process only when
+    ``GIGAI_SCOUT_FIND_JOBS_TEST_MODEL=1`` swaps in a ``MockTransport`` --
+    see ``bindings._patch_test_model_transport``). A caller can override them
+    to build a different sealed-config shape -- for example, two enabled
+    targets on the same adapter with neither named the sealed enum value, so
+    the real assess node's adapter-resolution ambiguity error
+    (``proposal_execution._resolve_configured_target_name_for_adapter``)
+    fires for real, end to end, through the HTTP API and a spawned child
+    process (run-status-and-logs' assess-failure repro).
 
     Returns ``(home, target, workpad_path)``.
     """
@@ -57,21 +92,9 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         workpad_root=tmp_path / "workpads",
         editor_argv=("/usr/bin/true",),
         open_with_target=False,
-        endpoints=(Endpoint("local-test", "ollama_local", base_url="http://127.0.0.1:11434"),),
-        model_targets=(
-            ConfigModelTarget(
-                name="ollama_local",
-                endpoint="local-test",
-                model=TEST_MODEL_NAME,
-                capabilities=("text",),
-                max_output_tokens=512,
-                reasoning_effort=None,
-                model_digest=TEST_MODEL_DIGEST,
-                context_tokens=2048,
-                max_response_bytes=65536,
-            ),
-        ),
-        profiles=(Profile("default", "ollama_local", "ollama_local", "ollama_local"),),
+        endpoints=endpoints,
+        model_targets=model_targets,
+        profiles=profiles,
     )
     run_setup(config)
     initialized = initialize_defaults(
