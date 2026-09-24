@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-23 21:55 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-23 22:18 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -18,10 +18,10 @@ _Updated 2026-09-23 21:55 MDT by Claude (coordinator of `run_7cba834cb817`, work
 ## In progress
 | Packet | Model | State | Task / dispatch | Next |
 | --- | --- | --- | --- | --- |
-| scout-run-supervisor (C): `gigai scout run/stop/status` (background, logs, health, browser) + config/resume-missing messages | Sonnet 5 | running | `task_0391b3958264` / `ctx_a64a205ef6d5` | verify → commit → B4 cards → D |
-| acquire-country-filter: B1 filter at acquire + country fix (Lever/Ashby structured, pycountry, region tokens), B3 sponsorship, B5 all-sources-failed | Sonnet 5 | running | `task_461018bb4fcc` / `ctx_28f685c01dc4` | verify → commit |
-| selection-diversity-u2: B2 per-company cap + dedupe + round-robin; U2 codex_cli → setup target | Sonnet 5 | running | `task_044fd792fd34` / `ctx_e8c7d3383e77` | verify → commit |
-| wire selection.py into acquire's selection loop; B4 progressive cards; D acceptance (README + installed wheel) | — | not started | | after acquire / C |
+| acquire-country-filter: B1 filter at acquire + country fix (Lever/Ashby structured, pycountry, region tokens), B3 sponsorship, B5 all-sources-failed | Sonnet 5 | running | `task_461018bb4fcc` / `ctx_28f685c01dc4` | verify → commit → wire selection.py + B4 |
+| exa-agent-spike r1 (S23): fix the 35x wording; replicate the winning cell ×3 incl. a 'week 2' exclusion (≤ $0.15) | Sonnet 5 | running | `task_c66feb7acb03` / `ctx_81f9e22bb467` | coordinator review → operator reviews S23 → stage 2 |
+| readme-scout-run (D part 1): README one-command flow, every step executed in a temp home | Sonnet 5 | running | `task_c4fa47e9e841` / `ctx_911c65e8b2cb` | verify → commit |
+| wire selection.py into acquire; B4 progressive cards; D part 2 installed-wheel acceptance | — | queued | | after acquire |
 
 ## Next up
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
@@ -33,6 +33,7 @@ _Updated 2026-09-23 21:55 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - **secrets-core committed** `a915c24`: `gigai secrets add/list/rm`, env → ~/.gigai/.env resolver (python-dotenv, interpolation off, 0600 under umask 077). Coordinator reproduced + re-verified the 2 r0 bugs.
 - **README uv-only** `f1fb6c6` (+ API command via `uv tool run --from gigai`, verified on 0.1.8.1).
 - **Country-data research** accepted (`.orchestrator/research/country-data.md`): Lever/Ashby structured country fields unread; pycountry fallback. Implementation waits on the operator.
+- **scout-run-supervisor (C)** `65ce7b4`: `gigai scout run/stop/status` (coordinator real cycle in a temp home). **selection-diversity-u2** `0bf97c0`: selection.py (not yet wired) + U2. **v0.1.8.1 released** (PyPI + GitHub Release; post-release matrix all pass except macOS 3.12, which was cancelled; CI ignored per the operator).
 - **scout-setup-cmds (B)** `b0eea58`: `gig use`, `scout install`, `scout resume add` (coordinator CLI end-to-end, non-git target). **exa-query-errors** `5fec35d`.
 - **secrets-exa** `9e66428` (Workstream 0 P0-P3 done). **scout-ui-package (A)** `f4d0fb1`: UI in the wheel, served by the API; PR CI freshness job.
 - **Merged main (0.1.8.1, #38)** at `8380102`: the release.yml conflict was resolved as main's shipped release design + `actions: read` on the pull_request.yaml callers; our preflight notes hard-fail was dropped for main's fallback (worker `workers/merge-main-release.md`; coordinator re-ran 63 focused tests + make unit-tests 869). 0.1.8.1 worker reports archived to `runs/v0.1.8.1/`.
