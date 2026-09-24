@@ -15,13 +15,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import posixpath
 import re
 import sys
 import tempfile
 import threading
-import traceback
+import time
 import uuid
 from datetime import datetime, timezone
 from importlib import resources
@@ -48,6 +49,52 @@ from .contracts import (
 
 _TEST_HTTP_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_HTTP"
 _TEST_MODEL_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_MODEL"
+
+# uat-bug-003: one stdlib logger for the whole Scout server. Never configured
+# at import time and never touching the root logger -- a library caller that
+# imports this module must not have its own logging config hijacked. The
+# handler is attached only where the server actually starts (``serve()``),
+# and points at stderr because ``run_supervisor.py`` already redirects the
+# child process's stderr to the operator-visible log file; ``--foreground``
+# gets the same lines on the terminal for free. Tests capture this logger
+# via ``caplog`` (or raise its level) instead of relying on stderr, which is
+# what keeps this suite's own output quiet without silencing production.
+LOGGER_NAME = "gigai.scout.server"
+_logger = logging.getLogger(LOGGER_NAME)
+
+
+def _gigai_version() -> str:
+    """Best-effort package version for the "server start" log line.
+
+    Mirrors ``diagnostics.py``'s own ``importlib.metadata.version`` lookup;
+    falls back to "unknown" for an editable/source checkout without
+    distribution metadata rather than let a log line crash the server.
+    """
+
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("gigai")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def _configure_logging(logger: logging.Logger = _logger) -> None:
+    """Attach a stderr handler to ``logger`` if it doesn't already have one.
+
+    Idempotent so repeated ``serve()`` calls in the same process (e.g. two
+    tests, or a test harness that starts several servers) never accumulate
+    duplicate handlers and log each line multiple times.
+    """
+
+    if any(getattr(handler, "_gigai_scout_server", False) for handler in logger.handlers):
+        return
+    handler = logging.StreamHandler(stream=sys.stderr)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    handler._gigai_scout_server = True  # type: ignore[attr-defined]
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 
 class Backend(Protocol):
@@ -939,8 +986,35 @@ def _make_handler(
     run_start_timeout_seconds: float = RUN_START_TIMEOUT_SECONDS,
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
-        def log_message(self, _format: str, *_args: object) -> None:
-            return
+        def handle_one_request(self) -> None:
+            self._gigai_request_started_at = time.monotonic()
+            super().handle_one_request()
+
+        def log_message(self, _format: str, *args: object) -> None:
+            """Replace stdlib's stderr-only request log with one via ``_logger``.
+
+            Never uses ``_format``/``self.requestline``/``args`` directly for
+            the path -- ``log_request`` (the only real caller, from
+            ``send_response``) passes ``(self.requestline, code, size)``, and
+            ``requestline`` is the raw ``"GET /api/health?x=y HTTP/1.1"``
+            line built straight from the wire before any of this module's
+            own parsing runs. This rebuilds the line from ``self.command``
+            and a query-stripped ``self.path`` instead, and reads the status
+            out of ``args[1]`` (the one field ``log_request`` guarantees),
+            never out of the free-form ``requestline``.
+            """
+
+            status = args[1] if len(args) > 1 else "-"
+            path = urlsplit(self.path).path if self.path else "-"
+            started_at = getattr(self, "_gigai_request_started_at", None)
+            duration_ms = (time.monotonic() - started_at) * 1000 if started_at is not None else -1.0
+            _logger.info(
+                "%s %s %s %.1fms",
+                self.command or "-",
+                path,
+                status,
+                duration_ms,
+            )
 
         def _write_json(self, status: int, payload: dict[str, object]) -> None:
             body = json.dumps(payload).encode("utf-8")
@@ -958,9 +1032,16 @@ def _make_handler(
             body["error"] = {**body["error"], **extra}  # type: ignore[dict-item]
             self._write_json(status, body)
 
+        def _log_rejection(self, reason: str) -> None:
+            """Log a loopback/CSRF/Origin rejection: route + reason, never headers."""
+
+            path = urlsplit(self.path).path if self.path else "-"
+            _logger.warning("rejected %s %s: %s", self.command or "-", path, reason)
+
         def _check_loopback(self) -> bool:
             peer_host = self.client_address[0]
             if peer_host not in {"127.0.0.1", "::1"}:
+                self._log_rejection("forbidden: peer is not loopback")
                 self._error(HTTPStatus.FORBIDDEN, "forbidden", "peer must be loopback")
                 return False
             return True
@@ -1003,6 +1084,7 @@ def _make_handler(
             content_type = self.headers.get("Content-Type", "")
             media_type = content_type.split(";", 1)[0].strip().lower()
             if media_type != "application/json":
+                self._log_rejection("unsupported_media_type: Content-Type must be application/json")
                 self._error(
                     HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
                     "unsupported_media_type",
@@ -1014,12 +1096,14 @@ def _make_handler(
             allowed_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
             origin = self.headers.get("Origin")
             if origin is not None and origin not in allowed_origins:
+                self._log_rejection("forbidden_origin: request Origin is not allowed")
                 self._error(HTTPStatus.FORBIDDEN, "forbidden_origin", "request Origin is not allowed")
                 return False
 
             allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
             host = self.headers.get("Host")
             if host not in allowed_hosts:
+                self._log_rejection("forbidden_origin: request Host does not match the bound server")
                 self._error(HTTPStatus.FORBIDDEN, "forbidden_origin", "request Host does not match the bound server")
                 return False
 
@@ -1077,7 +1161,7 @@ def _make_handler(
                     return
                 self._handle_get_static(path)
             except Exception:  # noqa: BLE001 - last-resort boundary so the connection never just drops
-                traceback.print_exc(file=sys.stderr)
+                _logger.exception("unhandled exception in GET %s", path)
                 self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
 
         def _handle_get_static(self, path: str) -> None:
@@ -1113,7 +1197,7 @@ def _make_handler(
                     return
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
             except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET
-                traceback.print_exc(file=sys.stderr)
+                _logger.exception("unhandled exception in POST %s", path)
                 self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
 
         def do_PUT(self) -> None:  # noqa: N802
@@ -1128,7 +1212,7 @@ def _make_handler(
                     return
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
             except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET
-                traceback.print_exc(file=sys.stderr)
+                _logger.exception("unhandled exception in PUT %s", path)
                 self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
 
         def _handle_get_config(self) -> None:
@@ -1217,23 +1301,46 @@ def _make_handler(
             except DiscoveryUnavailableError as exc:
                 self._error(HTTPStatus.SERVICE_UNAVAILABLE, "discovery_unavailable", str(exc))
                 return
+            # Field *names* only -- prefs_fields carries the operator's actual
+            # roles/companies/etc, which must never reach the log (ticket:
+            # "setup saved (which fields changed, not values)").
+            _logger.info("setup saved: fields=%s", sorted(prefs_fields))
             self._write_json(
                 HTTPStatus.OK,
                 {"schema_version": "scout-find-jobs-setup-response:1", "prefs": prefs_json},
             )
 
         def _handle_post_discover(self) -> None:
+            def _on_progress(event: dict[str, object]) -> None:
+                # ``run_discovery`` (gigai.scout.find_jobs.discovery) never
+                # raises for a provider error; it reports success/partial/
+                # failure through the "discovery_done" progress event's
+                # "status" field instead of an exception, so "finished" and
+                # "failed" are both observed here rather than as a caught
+                # exception around start_discovery.
+                if event.get("stage") == "discovery_done":
+                    status = event.get("status")
+                    new_boards = event.get("new_boards")
+                    if status == "failed":
+                        _logger.warning("discover failed: status=%s new_boards=%s", status, new_boards)
+                    else:
+                        _logger.info("discover finished: status=%s new_boards=%s", status, new_boards)
+
             try:
-                request_id = backend.start_discovery(lambda _event: None)
+                request_id = backend.start_discovery(_on_progress)
             except DiscoveryUnavailableError as exc:
+                _logger.warning("discover failed to start: discovery_unavailable (%s)", exc)
                 self._error(HTTPStatus.SERVICE_UNAVAILABLE, "discovery_unavailable", str(exc))
                 return
             except DiscoveryConflictError as exc:
+                _logger.warning("discover failed to start: discovery_running (%s)", exc)
                 self._error(HTTPStatus.CONFLICT, "discovery_running", str(exc))
                 return
             except SetupPrefsMissingError as exc:
+                _logger.warning("discover failed to start: prefs_missing (%s)", exc)
                 self._error(HTTPStatus.NOT_FOUND, "prefs_missing", str(exc))
                 return
+            _logger.info("discover started: discovery_id=%s", request_id)
             self._write_json(HTTPStatus.ACCEPTED, {"discovery_id": request_id})
 
         def _handle_get_discover_latest(self) -> None:
@@ -1315,6 +1422,11 @@ def _make_handler(
                 return
             if pre_allocation_error is not None:
                 if isinstance(pre_allocation_error, _RunBoundaryError):
+                    _logger.warning(
+                        "find-jobs run failed to start: %s (%s)",
+                        pre_allocation_error.code,
+                        pre_allocation_error,
+                    )
                     self._error(
                         pre_allocation_error.status,
                         pre_allocation_error.code,
@@ -1322,12 +1434,21 @@ def _make_handler(
                     )
                     return
                 if isinstance(pre_allocation_error, FindJobsContractError):
+                    _logger.warning(
+                        "find-jobs run failed to start: %s (%s)",
+                        pre_allocation_error.code,
+                        pre_allocation_error,
+                    )
                     self._error(HTTPStatus.UNPROCESSABLE_ENTITY, pre_allocation_error.code, str(pre_allocation_error))
                     return
+                _logger.exception("find-jobs run failed to start", exc_info=pre_allocation_error)
                 raise pre_allocation_error
             # post_allocation_error (if any) surfaces via run_status, not here: the POST
-            # response is already committed to a run_id once allocation happened.
+            # response is already committed to a run_id once allocation happened. A
+            # "run finished" event belongs at that same layer (this handler only ever
+            # observes allocation, not completion) -- out of scope for this module.
             run_id = allocation["run_id"]
+            _logger.info("find-jobs run started: run_id=%s", run_id)
             payload = {
                 "schema_version": "scout-find-jobs-run-response:1",
                 "run_id": run_id,
@@ -1396,9 +1517,23 @@ def serve(
 
     if backend is None:
         backend = NotWiredBackend()
+    _configure_logging()
     handler = _make_handler(backend, run_start_timeout_seconds=run_start_timeout_seconds)
     server = ThreadingHTTPServer(bind, handler)
     server.daemon_threads = True
+    host, port = server.server_address[0], server.server_address[1]
+    # "project id" here is the target root path -- the closest thing this
+    # module has to a project identifier (see ``Backend``/``ScoutFindJobsBackend``:
+    # there's no separate project-id concept, only home_root + target).
+    project = getattr(backend, "target", None)
+    _logger.info(
+        "scout server starting: host=%s port=%s gigai_version=%s project=%s pid=%s",
+        host,
+        port,
+        _gigai_version(),
+        project if project is not None else "-",
+        os.getpid(),
+    )
     return server
 
 
