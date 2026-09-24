@@ -19,7 +19,7 @@ _Updated 2026-09-24 09:48 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - Nothing dispatched. **Operator UAT on the branch** (all of 0.1.9 incl. discovery + interview prep).
 
 ## Next up
-- Release path (operator 2026-09-24): interview-prep lands → operator UAT on the branch → fix UAT issues → user docs + README pass (NOT before UAT) → CHANGELOG 0.1.9 → one make test → release.
+- Release path (operator 2026-09-24): interview-prep lands → operator UAT on the branch → fix UAT issues → user docs + README pass (NOT before UAT) → CHANGELOG 0.1.9 → set pyproject version 0.1.9 (from 0.1.9.dev0) + CATALOG_REVISION v0.1.9 + uv lock → one make test → release.
 - After stage 2: make acquire watchlist-only by default (Exa optional, off by default); confirm with the operator first. Small config + README packet.
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
 - After wave 1: S16/S17 stay deferred until find-jobs works live (UAT). S18 undecided.
