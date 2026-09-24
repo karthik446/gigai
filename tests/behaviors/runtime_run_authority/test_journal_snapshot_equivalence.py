@@ -6,13 +6,19 @@ IDENTICAL results to the pre-change implementation.
 ``gigai.journal`` were rewritten (uat-bug-008) to batch their git plumbing
 (one ``git log`` walk + one ``git show --name-only`` + one ``git cat-file
 --batch`` instead of ~4 subprocess spawns per committed artifact). This
-file loads the pre-change implementation straight from git history
-(``git show HEAD:src/gigai/journal.py``, exec'd as a standalone module --
-never vendored into ``src/``) and runs both implementations against the
-same committed git histories, comparing every field of every returned
-structure -- not counts, not "no exception raised" -- byte-for-byte on
-snapshot artifacts, field-for-field on read results, and exception
-type+code+message on every error case the old code raised.
+file loads the pre-change implementation from a frozen fixture file
+(``fixtures/journal_reference_pre_uat_bug_008.py``, exec'd as a standalone
+module -- never vendored into ``src/``) instead of from git history: HEAD
+now IS the post-change code (78fcbf2 committed it), a squash-merge drops
+individual commits, and CI checkouts are often shallow, so a live
+``git show``/``git cat-file`` lookup of any sha is not durable. The fixture
+is a byte-exact copy of ``src/gigai/journal.py`` as of 78fcbf2^ (=
+0da8fc4), the commit immediately before uat-bug-008, plus a 3-line header
+comment; see that file's header for provenance. This suite runs both
+implementations against the same committed git histories, comparing every
+field of every returned structure -- not counts, not "no exception raised"
+-- byte-for-byte on snapshot artifacts, field-for-field on read results,
+and exception type+code+message on every error case the old code raised.
 
 Fixtures:
   - an operator-shaped multi-commit workpad (several records, references,
@@ -35,7 +41,6 @@ fails, then restoring it.
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 import sys
 import types
 import uuid
@@ -56,34 +61,39 @@ GIG_ID = "gig_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 _PREFIXES = ("records/", "references/", "run-inputs/")
 
 
-def _load_head_journal_reference() -> types.ModuleType:
-    """The pre-uat-bug-008 ``gigai.journal`` -- loaded from git history's
+_FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "journal_reference_pre_uat_bug_008.py"
 
-    exact source text, exec'd as a standalone module registered under the
-    real ``gigai`` package (so its relative imports -- ``.canonical``,
+
+def _load_frozen_journal_reference() -> types.ModuleType:
+    """The pre-uat-bug-008 ``gigai.journal`` -- loaded from the frozen
+
+    fixture file (byte-exact copy of ``src/gigai/journal.py`` as of
+    78fcbf2^ = 0da8fc4, the commit immediately before uat-bug-008, plus a
+    3-line header comment), exec'd as a standalone module registered under
+    the real ``gigai`` package (so its relative imports -- ``.canonical``,
     ``.workpad``, ``.diagnostics`` -- resolve to the same, unmodified
     modules the current code uses). Never written to ``src/``.
+
+    Loaded from the fixture file rather than ``git show``: HEAD is now the
+    post-change code, and a squash-merge/shallow-checkout can drop the
+    pre-change commit entirely, so a live git lookup of any sha is not a
+    durable reference.
     """
 
-    source = subprocess.run(
-        ["git", "show", "HEAD:src/gigai/journal.py"],
-        capture_output=True, text=True, check=True, shell=False,
-        cwd=Path(__file__).resolve().parents[3],
-    ).stdout
-    module_name = "gigai._journal_head_reference_uat_bug_008_r1"
-    spec = importlib.util.spec_from_loader(module_name, loader=None)
-    assert spec is not None
+    module_name = "gigai_journal_reference_pre_008"
+    spec = importlib.util.spec_from_file_location(module_name, _FIXTURE_PATH)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     module.__package__ = "gigai"
     module.__name__ = module_name
     sys.modules[module_name] = module
-    exec(compile(source, "<HEAD:src/gigai/journal.py>", "exec"), module.__dict__)
+    spec.loader.exec_module(module)
     return module
 
 
 @pytest.fixture(scope="module")
 def old_journal() -> types.ModuleType:
-    return _load_head_journal_reference()
+    return _load_frozen_journal_reference()
 
 
 def _handoff(tag: str) -> str:
@@ -387,9 +397,10 @@ def test_equivalence_on_a_unicode_path_documented_divergence(
 ) -> None:
     """The ONE intentional, narrow divergence from strict old == new equality.
 
-    HEAD is fixed (it's the reference we're proving equivalence against,
-    and cannot change) and its OLD ``read_committed_artifact`` has always
-    C-quoted/octal-escaped non-ASCII path bytes in its ``git show
+    The frozen reference is fixed (it's the pre-uat-bug-008 code we're
+    proving equivalence against, and never changes) and its OLD
+    ``read_committed_artifact`` has always C-quoted/octal-escaped
+    non-ASCII path bytes in its ``git show
     --name-only`` output without ``-z`` (uat-bug-008-r1: found by this very
     equivalence test), so it raises on a legitimately committed unicode
     path where the checked (unquoted) path never matches the quoted names
