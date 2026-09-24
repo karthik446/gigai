@@ -468,6 +468,41 @@ def test_health_check_failure_reports_log_and_exits_nonzero(bound_project, monke
     assert status_after.state == "stopped"
 
 
+def test_port_is_free_after_time_wait_from_our_own_closed_connection() -> None:
+    """uat-bug-007: a port left in TIME_WAIT must read as free, like the real server would bind it.
+
+    Reproduce TIME_WAIT the same way the ticket describes: a listener accepts
+    one connection, the server side closes first (leaving the local
+    ephemeral<->port pair in TIME_WAIT on the *server* port), then we ask
+    ``_port_is_free`` about that port while the OS still has it quarantined.
+    """
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client.connect(("127.0.0.1", port))
+    server_side, _addr = listener.accept()
+    server_side.close()  # server side closes first (active close)
+    client.close()
+    listener.close()  # the (addr, port) pair now sits in TIME_WAIT
+
+    assert run_supervisor._port_is_free(port) is True
+
+
+def test_port_is_free_is_false_for_an_active_listener() -> None:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+        assert run_supervisor._port_is_free(port) is False
+    finally:
+        listener.close()
+
+
 def test_no_orphan_process_left_after_health_failure(bound_project, monkeypatch) -> None:
     home, target = bound_project
     port = _free_port()

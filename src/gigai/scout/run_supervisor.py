@@ -260,8 +260,15 @@ def _health_ok(port: int, *, timeout: float = 1.0) -> bool:
 
 
 def _port_is_free(port: int) -> bool:
+    # uat-bug-007: match how the real server binds. ``HTTPServer`` (via
+    # ``socketserver.TCPServer``) sets ``SO_REUSEADDR`` before binding, so a
+    # port left in TIME_WAIT by a since-closed connection binds fine there.
+    # A plain bind here without it fails on macOS for the ~30s TIME_WAIT
+    # window even though the server itself would start cleanly, producing a
+    # false "port already in use" right after stopping/restarting Scout.
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("127.0.0.1", port))
     except OSError:
         return False
