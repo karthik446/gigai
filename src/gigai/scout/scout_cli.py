@@ -20,6 +20,13 @@ from ..private_records import PrivateRecordError, create_record, import_referenc
 from ..setup import default_home_root
 from ..workpad import WorkpadError, resolve_bound_project
 from .find_jobs.contracts import FindJobsConfig, SourceToggles
+from .find_jobs.discovery import (
+    DiscoveryBudgetExceeded,
+    DiscoveryPrefsError,
+    latest_discovery,
+    load_prefs,
+    run_discovery,
+)
 from .template import ScoutInstallError, install_scout
 
 
@@ -343,6 +350,129 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
         )
     else:
         click.echo("stopped")
+
+
+def _relative_days_ago(iso_timestamp: str) -> str:
+    from datetime import UTC, datetime
+
+    try:
+        then = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return iso_timestamp
+    delta = datetime.now(UTC) - then
+    days = delta.days
+    if days <= 0:
+        return "today"
+    if days == 1:
+        return "1 day ago"
+    return f"{days} days ago"
+
+
+@scout_group.command("discover")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--runs", "runs", type=int, default=3, help="Number of OpenAI web_search runs to merge (default 3).")
+@click.option("--status", "show_status", is_flag=True, help="Show the last discovery run instead of starting a new one.")
+@click.option("--json", "as_json", is_flag=True)
+def discover_command(
+    target_value: Path | None,
+    home_value: Path | None,
+    runs: int,
+    show_status: bool,
+    as_json: bool,
+) -> None:
+    """Run the weekly company-discovery engine (OpenAI web_search + H-1B baseline).
+
+    Runs in the foreground -- this can take 5-30 minutes (OpenAI web_search
+    latency under TPM backoff). Prints a summary of new watchlist boards,
+    cost, and where results are stored. Requires `gigai scout discover`'s
+    prefs to already be set (the setup interview -- packet S2-B); use
+    `--status` to see the last run without starting a new one.
+    """
+
+    home_root = home_value or default_home_root()
+    resolved_target = _resolved_target(target_value, home_root)
+    target = (resolved_target or Path.cwd()).expanduser().resolve(strict=True)
+
+    if show_status:
+        try:
+            result = latest_discovery(home_root=home_root, target=target)
+        except (WorkpadError, OSError, ValueError) as exc:
+            _fail(exc, as_json=as_json, fallback="scout_discover_status_failed")
+            return
+        if result is None:
+            payload: dict[str, object] = {"ok": True, "has_run": False}
+            if as_json:
+                _emit(payload, True, "")
+                return
+            click.echo("No discovery run yet. Run `gigai scout discover` to start one.")
+            return
+        payload = {"ok": True, "has_run": True, **result.to_json()}
+        if as_json:
+            _emit(payload, True, "")
+            return
+        when = _relative_days_ago(result.started_at)
+        click.echo(
+            f"Last discovery run: {result.status} ({when}), "
+            f"{len(result.new_boards)} new board(s), cost ${result.cost_usd:.4f}."
+        )
+        return
+
+    try:
+        prefs = load_prefs(home_root=home_root, target=target)
+    except (DiscoveryPrefsError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_discover_failed")
+        return
+    if prefs is None:
+        _fail(
+            DiscoveryPrefsError(
+                "discovery_prefs_missing",
+                "no discovery preferences set yet; run the Scout setup interview first",
+            ),
+            as_json=as_json,
+            fallback="scout_discover_failed",
+        )
+        return
+
+    def _on_progress(event: dict) -> None:
+        if as_json:
+            return
+        stage = event.get("stage", "")
+        if stage == "discovery_start":
+            click.echo(f"Starting discovery ({event.get('runs')} OpenAI run(s))...")
+        elif stage == "openai_call":
+            click.echo(f"OpenAI web_search run {event.get('run_index', 0) + 1}/{event.get('of')}...")
+        elif stage == "openai_retry":
+            click.echo(f"  rate limited, waiting {event.get('wait_seconds', 0):.0f}s...")
+        elif stage == "h1b_download_start":
+            size = event.get("size_bytes")
+            size_text = f"{size / 1_000_000:.1f}MB" if isinstance(size, int) else "unknown size"
+            click.echo(f"Downloading DOL H-1B disclosure file ({size_text})...")
+        elif stage == "merge_board_check":
+            click.echo(f"Checking board {event.get('index', 0) + 1}/{event.get('of')}: {event.get('company')}")
+
+    try:
+        result = run_discovery(home_root=home_root, target=target, prefs=prefs, runs=runs, on_progress=_on_progress)
+    except (DiscoveryBudgetExceeded, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_discover_failed")
+        return
+
+    payload = {"ok": True, **result.to_json()}
+    if as_json:
+        _emit(payload, True, "")
+        return
+    click.echo(f"Discovery {result.status}: {len(result.new_boards)} new board(s) added to the watchlist.")
+    for board in result.new_boards:
+        click.echo(f"  + {board['company']} ({board['provider']}:{board['board_token']})")
+    click.echo(f"Cost: ${result.cost_usd:.4f}. Stored under discovery/runs/{result.discovery_id}.json (GigAI home).")
+    if result.skipped:
+        skipped_text = ", ".join(f"{reason}: {count}" for reason, count in sorted(result.skipped.items()))
+        click.echo(f"Skipped: {skipped_text}")
+    for source in result.sources:
+        if source.error:
+            click.echo(f"Warning: {source.name} had an error: {source.error}")
+        if source.skip_reason:
+            click.echo(f"Note: {source.name} was skipped: {source.skip_reason}")
 
 
 __all__ = ["scout_group", "write_starter_find_jobs_config", "STARTER_FIND_JOBS_CONFIG"]
