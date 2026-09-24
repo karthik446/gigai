@@ -27,6 +27,7 @@ from .find_jobs.discovery import (
     load_prefs,
     run_discovery,
 )
+from .interview_prep import InterviewPrepError, build_prep
 from .template import ScoutInstallError, install_scout
 
 
@@ -473,6 +474,82 @@ def discover_command(
             click.echo(f"Warning: {source.name} had an error: {source.error}")
         if source.skip_reason:
             click.echo(f"Note: {source.name} was skipped: {source.skip_reason}")
+
+
+@scout_group.command("prep")
+@click.argument("posting_url")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--run", "run_id", help="Find-jobs run ID to resolve the posting from (default: newest run that has it).")
+@click.option("--refresh", is_flag=True, help="Re-run prep even if one is already stored for this posting and resume revision.")
+@click.option("--budget", "budget_usd", type=float, default=0.50, show_default=True, help="Max USD to spend on company-research web search.")
+@click.option("--json", "as_json", is_flag=True)
+def prep_command(
+    posting_url: str,
+    target_value: Path | None,
+    home_value: Path | None,
+    run_id: str | None,
+    refresh: bool,
+    budget_usd: float,
+    as_json: bool,
+) -> None:
+    """Prepare for an interview at POSTING_URL (a find-jobs-acquired posting).
+
+    Foreground -- company research (OpenAI web_search, ~seconds) plus one
+    model call for likely question categories. Idempotent per (posting,
+    resume revision); pass --refresh to re-run. The resume is sent only to
+    the question-category model call, never to the company-research web
+    search. Prints a summary and where the prep is stored.
+    """
+
+    home_root = home_value or default_home_root()
+    resolved_target = _resolved_target(target_value, home_root)
+    target = (resolved_target or Path.cwd()).expanduser().resolve(strict=True)
+
+    def _on_progress(event: dict) -> None:
+        if as_json:
+            return
+        stage = event.get("stage", "")
+        if stage == "resolve_posting":
+            click.echo("Resolving posting from find-jobs acquire output...")
+        elif stage == "company_research":
+            click.echo("Researching company (OpenAI web_search)...")
+        elif stage == "openai_retry":
+            click.echo(f"  rate limited, waiting {event.get('wait_seconds', 0):.0f}s...")
+        elif stage == "role_research":
+            click.echo("Reading role research from the posting text...")
+        elif stage == "question_categories":
+            click.echo("Predicting likely question categories...")
+
+    try:
+        prep = build_prep(
+            home_root=home_root, target=target, posting_url=posting_url,
+            run_id=run_id, refresh=refresh, budget_usd=budget_usd,
+            on_progress=_on_progress,
+        )
+    except InterviewPrepError as exc:
+        _fail(exc, as_json=as_json, fallback="scout_prep_failed")
+        return
+
+    prep_json = prep.to_json()
+    payload = {"ok": True, **prep_json}
+    if as_json:
+        _emit(payload, True, "")
+        return
+    click.echo(f"Interview prep for {prep.title} at {prep.company}:")
+    if prep.company_research.skipped:
+        click.echo(f"  Company research skipped: {prep.company_research.skipped}")
+    else:
+        click.echo(f"  Company research: {len(prep.company_research.claims)} sourced claim(s), ${prep.company_research.cost_usd:.4f}")
+    click.echo(f"  Role research: {len(prep.role_research.responsibilities)} responsibilit(y/ies), {len(prep.role_research.requirements)} requirement(s)")
+    click.echo(f"  Likely question categories ({prep.model_target}):")
+    for category in prep.question_categories:
+        click.echo(f"    - {category.category}: {category.why}")
+    if prep.prep_notes.matrix_source == "assess":
+        click.echo(f"  Prep notes: {len(prep.prep_notes.resume_points)} resume point(s) to lead with, {len(prep.prep_notes.gaps)} gap(s) to prepare for.")
+    else:
+        click.echo("  Prep notes: no assess matrix found for this posting yet; run `gigai scout run` to assess it for richer notes.")
+    click.echo(f"  Total cost: ${prep.cost_usd:.4f}. Stored under scout/interview_prep/{prep.posting_id}.json (GigAI home).")
 
 
 __all__ = ["scout_group", "write_starter_find_jobs_config", "STARTER_FIND_JOBS_CONFIG"]
