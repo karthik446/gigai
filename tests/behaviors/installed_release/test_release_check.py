@@ -87,6 +87,14 @@ def test_project_metadata_and_exact_release_tag(tmp_path: Path) -> None:
         release_check.assert_release_tag(version, "v0.1.1")
 
 
+def test_four_part_hotfix_version_is_a_valid_release_tag(tmp_path: Path) -> None:
+    name, version = release_check.project_metadata(_write_project(tmp_path, "0.1.8.1"))
+    assert (name, version) == ("gigai", "0.1.8.1")
+    release_check.assert_release_tag(version, "v0.1.8.1")
+    with pytest.raises(release_check.ReleaseCheckError, match="does not match"):
+        release_check.assert_release_tag(version, "v0.1.8")
+
+
 def test_lockfile_project_version_must_match_static_project_version(tmp_path: Path) -> None:
     release_check.verify_lockfile_project(_write_lock(tmp_path), "gigai", "0.1.0")
     with pytest.raises(release_check.ReleaseCheckError, match="project version"):

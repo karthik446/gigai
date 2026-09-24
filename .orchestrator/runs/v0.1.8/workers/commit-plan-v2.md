@@ -91,7 +91,7 @@ the delta precisely (unassigned/extra lists).
 Scanned all 510 non-deleted changed/untracked files (deleted files can't leak, weren't
 scanned) as text for: `dcap_` Orca dispatch-capability tokens, `sk-`/`ghp_`/`gho_` API-key
 shapes, `BEGIN ... PRIVATE KEY` blocks, `Bearer <token>` patterns, generic `api_key`/
-`API_KEY` assignments to real-looking values, and the operator's email (`skarthikc...`).
+`API_KEY` assignments to real-looking values, and the operator's email (`[operator-email]`).
 **Zero hits on all patterns, in `.orchestrator/**` and everywhere else.** No redaction was
 needed. (Re-confirmed with a fresh scan of the final 510-file list right before writing this
 report, after the drift above settled.)

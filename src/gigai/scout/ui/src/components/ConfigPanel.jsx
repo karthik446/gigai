@@ -1,3 +1,5 @@
+import { resumeDisplayLabel } from "../display.js";
+
 function SourceList({ sources }) {
   const active = Object.entries(sources)
     .filter(([, enabled]) => enabled)
@@ -74,9 +76,7 @@ export default function ConfigPanel({ config, resumePreview }) {
         <div className="field">
           <div className="label">Resume</div>
           {resumePreview ? (
-            <div className="value">
-              {resumePreview.record_id} ({resumePreview.revision_id})
-            </div>
+            <div className="value">{resumeDisplayLabel(resumePreview)}</div>
           ) : (
             <div className="callout warn" style={{ marginBottom: 0 }}>
               No resume saved: run <code>gigai reference add --kind resume ...</code> before running.

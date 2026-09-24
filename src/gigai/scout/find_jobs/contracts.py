@@ -140,6 +140,20 @@ class MatrixStatus(StrEnum):
     GAP = "gap"
 
 
+class SponsorshipStatus(StrEnum):
+    """Visa sponsorship read for one posting; C0 adds this for U12/U25.
+
+    ``PostingRow.sponsorship`` is derived from the posting text at acquire
+    time; ``AssessmentResult.sponsorship`` is the model's read at assess
+    time.  Both are optional and default to ``None`` (unknown / not derived)
+    so old serialized rows without this field keep parsing.
+    """
+
+    OFFERED = "offered"
+    NOT_OFFERED = "not_offered"
+    UNKNOWN = "unknown"
+
+
 class NotAssessedReason(StrEnum):
     UNCHANGED = "unchanged"
     DUPLICATE = "duplicate"
@@ -149,6 +163,9 @@ class NotAssessedReason(StrEnum):
     NO_RESUME = "no_resume"
     MODEL_UNAVAILABLE = "model_unavailable"
     MODEL_DENIED = "model_denied"
+    LOCATION_MISMATCH = "location_mismatch"
+    SPONSORSHIP_EXCLUDED = "sponsorship_excluded"
+    MODEL_OUTPUT_INVALID = "model_output_invalid"
 
 
 class _Contract:
@@ -186,6 +203,32 @@ def _object(value: object, keys: Iterable[str], name: str) -> dict[str, object]:
     if unknown:
         _fail("unknown_key", f"{name} contains unknown key(s): {sorted(unknown)}")
     missing = expected - set(result)
+    if missing:
+        _fail("missing_key", f"{name} is missing key(s): {sorted(missing)}")
+    return result
+
+
+def _object_with_optional(
+    value: object, required: Iterable[str], optional: Iterable[str], name: str
+) -> dict[str, object]:
+    """Like ``_object`` but ``optional`` keys may be absent entirely.
+
+    Used only for wave-1a-frozen DTOs that gained new optional fields after
+    their first release (C0, v0.1.8.1): an old serialized payload that never
+    had the key must still parse.  Keys outside ``required | optional`` are
+    still rejected, so the object stays closed against typos and drift.
+    """
+
+    if type(value) is not dict:
+        _fail("wrong_type", f"{name} must be an object")
+    result = value
+    required_set = frozenset(required)
+    optional_set = frozenset(optional)
+    expected = required_set | optional_set
+    unknown = set(result) - expected
+    if unknown:
+        _fail("unknown_key", f"{name} contains unknown key(s): {sorted(unknown)}")
+    missing = required_set - set(result)
     if missing:
         _fail("missing_key", f"{name} is missing key(s): {sorted(missing)}")
     return result
@@ -265,6 +308,19 @@ def _strings(value: object, name: str, *, allow_empty: bool = False) -> tuple[st
     return result
 
 
+_COUNTRY_CODE = re.compile(r"\A[A-Z]{2}\Z")
+
+
+def _country_codes(value: object, name: str) -> tuple[str, ...]:
+    """ISO-3166-1 alpha-2 codes for ``FindJobsConfig.countries`` (U19)."""
+
+    codes = _strings(value, name, allow_empty=True)
+    for index, code in enumerate(codes):
+        if not _COUNTRY_CODE.fullmatch(code):
+            _fail("invalid_value", f"{name}[{index}] must be an ISO-3166 alpha-2 code")
+    return codes
+
+
 def _enum_list(value: object, enum_type: type[StrEnum], name: str) -> tuple[StrEnum, ...]:
     if type(value) is not list:
         _fail("wrong_type", f"{name} must be an array")
@@ -321,6 +377,8 @@ class FindJobsConfig(_Contract):
     sources: SourceToggles
     default_assess_cap: int = 10
     default_model_target: ModelTarget = ModelTarget.OLLAMA_LOCAL
+    countries: tuple[str, ...] = ()
+    visa_sponsorship_required: bool = False
 
     @property
     def source_toggles(self) -> SourceToggles:
@@ -335,7 +393,7 @@ class FindJobsConfig(_Contract):
         return self.merged_queries
 
     def to_json(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "schema_version": self.schema_version,
             "roles": _json_strings(self.roles),
             "merged_queries": _json_strings(self.merged_queries),
@@ -346,12 +404,30 @@ class FindJobsConfig(_Contract):
             "default_assess_cap": self.default_assess_cap,
             "default_model_target": _json_enum(self.default_model_target),
         }
+        # C0 (v0.1.8.1, U12): countries/visa_sponsorship_required are new,
+        # optional find-jobs-config:1 keys.  Omitting them at their default
+        # keeps to_json() byte-identical to a pre-C0 config, so an old file's
+        # digest stays stable when parsed unchanged.  A non-default value
+        # (an operator who opted in) does add the key, changing the digest —
+        # which is correct, since the logical config actually changed.
+        if self.countries:
+            value["countries"] = _json_strings(self.countries)
+        if self.visa_sponsorship_required:
+            value["visa_sponsorship_required"] = self.visa_sponsorship_required
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "FindJobsConfig":
-        value = _object(obj, ("schema_version", "roles", "merged_queries", "location", "remote", "published_after", "sources", "default_assess_cap", "default_model_target"), "find_jobs_config")
+        value = _object_with_optional(
+            obj,
+            ("schema_version", "roles", "merged_queries", "location", "remote", "published_after", "sources", "default_assess_cap", "default_model_target"),
+            ("countries", "visa_sponsorship_required"),
+            "find_jobs_config",
+        )
         if value["schema_version"] != cls.schema_version:
             _fail("bad_enum", "find_jobs_config.schema_version is unsupported")
+        countries = () if "countries" not in value else _country_codes(value["countries"], "countries")
+        visa_sponsorship_required = False if "visa_sponsorship_required" not in value else _bool(value["visa_sponsorship_required"], "visa_sponsorship_required")
         return cls(
             _strings(value["roles"], "roles"),
             _strings(value["merged_queries"], "merged_queries"),
@@ -361,6 +437,8 @@ class FindJobsConfig(_Contract):
             SourceToggles.from_json(value["sources"]),
             _integer(value["default_assess_cap"], "default_assess_cap", minimum=1, maximum=50),
             _enum(value["default_model_target"], ModelTarget, "default_model_target"),
+            countries,
+            visa_sponsorship_required,
         )
 
 
@@ -380,9 +458,11 @@ class PostingRow(_Contract):
     content_sha256: str | None
     source_kind: SourceKind
     query_key: str
+    text: str | None = None
+    sponsorship: SponsorshipStatus | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "url": self.url,
             "normalized_url": self.normalized_url,
             "provider": _json_enum(self.provider),
@@ -395,10 +475,24 @@ class PostingRow(_Contract):
             "source_kind": _json_enum(self.source_kind),
             "query_key": self.query_key,
         }
+        # C0 (v0.1.8.1, U25): text/sponsorship are new, optional fields.
+        # Omitted at their None default, an old acquire row's to_json() is
+        # byte-identical to before, so its digest is unaffected.
+        if self.text is not None:
+            value["text"] = self.text
+        if self.sponsorship is not None:
+            value["sponsorship"] = _json_enum(self.sponsorship)
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "PostingRow":
-        value = _object(obj, ("url", "normalized_url", "provider", "board_token", "company", "title", "location", "published_at", "content_sha256", "source_kind", "query_key"), "posting_row")
+        value = _object_with_optional(
+            obj,
+            ("url", "normalized_url", "provider", "board_token", "company", "title", "location", "published_at", "content_sha256", "source_kind", "query_key"),
+            ("text", "sponsorship"),
+            "posting_row",
+        )
+        sponsorship = None if "sponsorship" not in value else _enum(value["sponsorship"], SponsorshipStatus, "posting_row.sponsorship")
         return cls(
             _string(value["url"], "url"),
             _string(value["normalized_url"], "normalized_url"),
@@ -411,6 +505,8 @@ class PostingRow(_Contract):
             _optional_digest(value["content_sha256"], "content_sha256"),
             _enum(value["source_kind"], SourceKind, "source_kind"),
             _string(value["query_key"], "query_key"),
+            _optional_string(value.get("text"), "posting_row.text") if "text" in value else None,
+            sponsorship,
         )
 
 
@@ -891,16 +987,24 @@ class AssessmentResult(_Contract):
     suggestions: tuple[str, ...]
     questions: tuple[str, ...]
     proposal_revision_ref: str | None
+    sponsorship: SponsorshipStatus | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {"posting": self.posting.to_json(), "matrix": [row.to_json() for row in self.matrix], "suggestions": _json_strings(self.suggestions), "questions": _json_strings(self.questions), "proposal_revision_ref": self.proposal_revision_ref}
+        value: dict[str, object] = {"posting": self.posting.to_json(), "matrix": [row.to_json() for row in self.matrix], "suggestions": _json_strings(self.suggestions), "questions": _json_strings(self.questions), "proposal_revision_ref": self.proposal_revision_ref}
+        # C0 (v0.1.8.1, U12): sponsorship is a new, optional field (the
+        # model's read, for the UI badge).  Omitted at its None default, an
+        # old assessment result's to_json() is byte-identical to before.
+        if self.sponsorship is not None:
+            value["sponsorship"] = _json_enum(self.sponsorship)
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "AssessmentResult":
-        value = _object(obj, ("posting", "matrix", "suggestions", "questions", "proposal_revision_ref"), "assessment_result")
+        value = _object_with_optional(obj, ("posting", "matrix", "suggestions", "questions", "proposal_revision_ref"), ("sponsorship",), "assessment_result")
         if type(value["matrix"]) is not list:
             _fail("wrong_type", "assessment_result.matrix must be an array")
-        return cls(SelectedPosting.from_json(value["posting"]), tuple(RequirementMatrixRow.from_json(item) for item in value["matrix"]), _strings(value["suggestions"], "suggestions", allow_empty=True), _strings(value["questions"], "questions", allow_empty=True), _optional_string(value["proposal_revision_ref"], "proposal_revision_ref"))
+        sponsorship = None if "sponsorship" not in value else _enum(value["sponsorship"], SponsorshipStatus, "assessment_result.sponsorship")
+        return cls(SelectedPosting.from_json(value["posting"]), tuple(RequirementMatrixRow.from_json(item) for item in value["matrix"]), _strings(value["suggestions"], "suggestions", allow_empty=True), _strings(value["questions"], "questions", allow_empty=True), _optional_string(value["proposal_revision_ref"], "proposal_revision_ref"), sponsorship)
 
 
 @dataclass(frozen=True)
@@ -1775,7 +1879,7 @@ __all__ = [
     "NotAssessedRow", "PRESENT_CAPABILITY", "PRESENT_CAPABILITY_ID", "PRESENT_DECLARED_EFFECTS", "PRESENT_EFFECTS", "PresentInput",
     "PresentNodeCallable", "PresentOutput", "PresentPayload", "PinnedResume", "PostingRow", "PostingRowResult", "Producer", "ROUTES",
     "ProgressStatus", "RequirementMatrixRow", "RowOutcome", "RouteSpec", "RunLookupRequest", "RunRequest", "RunResponse", "RunResultsResponse", "RunStatusResponse",
-    "SelectedPosting", "SelectionReason", "SelectionReasonCode", "SelectionRule", "SourceKind", "SourceToggles", "UIConsentEnvelope", "URLChangeDetectionClient", "URLObservation", "URLSetDiff",
+    "SelectedPosting", "SelectionReason", "SelectionReasonCode", "SelectionRule", "SourceKind", "SourceToggles", "SponsorshipStatus", "UIConsentEnvelope", "URLChangeDetectionClient", "URLObservation", "URLSetDiff",
     "UsageBlock", "WatchlistClient", "WatchlistEntry", "WatchlistFixture", "WatchlistFirstSeen", "aggregate_status", "content_hash",
     "diff_url_sets", "normalize_url", "parse_board_url",
 ]

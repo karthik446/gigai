@@ -20,3 +20,7 @@
 - 11:52 Operator: optimize GitHub Actions release time (v0.1.7 exact-tag CI ~1h20m before publish). ci-speed worker dispatched; the coordinator will measure via a workflow_dispatch full-matrix run on the PR branch before tagging.
 - 12:00 Operator: macOS is the release-gating platform (everyone uses macOS). CI profiles: pr (ubuntu 3.11) · release (macOS 3.12 + ubuntu 3.12, blocking) · full (3x3 + Debian, nightly + post-release). Also fixes the nightly job narrowed by ci-speed.
 - 12:16 Operator: close workers idle 5 min. sweep_workers.py (in skill) + wait.sh runs it every loop; skill §5 updated. Closed 6 leftover tabs (5 released Claude workers + the final make test tab).
+- 15:38 Operator authorized 0.1.8.1 from UAT: posting text + real prompt (U25), raw payloads (U26), tolerant parse + isolation + recorded causes (U22/U21), country filter + prefer ATS (U19/U20), visa (U12), UI search (operator), release race fix + README corrections. Branch karthik446/gigai-v0.1.8.1; packets C0, R, then P1/P2/P3.
+- 15:45 Exclusion reasons: P1 owns the pure helper scout/find_jobs/filters.py (country_match, sponsorship_from_text, exclusion_reason); P2 labels not_assessed via exclusion_reason. AcquireOutput shape unchanged.
+- 15:46 P2 reads the sealed run input (runs/<id>/sealed/find-jobs-run-input.json via FindJobsRunInput) for visa + exclusion labels; no contract change.
+- 16:03 Candidates = new/edited + role match; not_assessed reasons by priority: exclusion_reason → over_cap → model_output_invalid → others. P2 reads the full acquire rows.

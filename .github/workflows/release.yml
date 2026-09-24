@@ -145,45 +145,9 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
 
-  verify-testpypi:
-    name: TestPyPI clean install on ${{ matrix.os }}
-    needs: [preflight, publish-testpypi]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-latest]
-    steps:
-      - uses: astral-sh/setup-uv@v8.0.0
-        with:
-          enable-cache: true
-      - env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          root="$(mktemp -d)"
-          export HOME="${root}/home"
-          export XDG_BIN_HOME="${root}/bin"
-          export XDG_DATA_HOME="${root}/data"
-          export PATH="${XDG_BIN_HOME}:${PATH}"
-          uv tool install \
-            --index https://test.pypi.org/simple \
-            --index https://pypi.org/simple \
-            --index-strategy unsafe-best-match \
-            "gigai==${VERSION}"
-          gigai --version | grep -Fx "gigai ${VERSION}"
-          gigai --help >/dev/null
-          gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true \
-            --credential-ref provider=environment:GIGAI_PROVIDER_TOKEN \
-            --endpoint remote=openai_api:provider:https://api.example.test \
-            --model-target remote=remote:smoke-test \
-            --create-model-target remote \
-            --json >/dev/null
-          gigai doctor --home "${root}/gigai-home" --json >/dev/null
-
   publish-pypi:
     name: Publish to PyPI
-    needs: [preflight, verify-testpypi]
+    needs: [preflight, publish-testpypi]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: pypi
@@ -202,47 +166,21 @@ jobs:
         with:
           packages-dir: publish/
 
-  verify-pypi:
-    name: PyPI clean install on ${{ matrix.os }}
-    needs: [preflight, publish-pypi]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-latest]
-    steps:
-      - uses: astral-sh/setup-uv@v8.0.0
-        with:
-          enable-cache: true
-      - env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          root="$(mktemp -d)"
-          export HOME="${root}/home"
-          export XDG_BIN_HOME="${root}/bin"
-          export XDG_DATA_HOME="${root}/data"
-          export PATH="${XDG_BIN_HOME}:${PATH}"
-          uv tool install "gigai==${VERSION}"
-          gigai --version | grep -Fx "gigai ${VERSION}"
-          gigai --help >/dev/null
-          gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true \
-            --credential-ref provider=environment:GIGAI_PROVIDER_TOKEN \
-            --endpoint remote=openai_api:provider:https://api.example.test \
-            --model-target remote=remote:smoke-test \
-            --create-model-target remote \
-            --json >/dev/null
-          gigai doctor --home "${root}/gigai-home" --json >/dev/null
-
   github-release:
     name: Verify provenance and create GitHub Release
-    needs: [preflight, build, verify-pypi]
+    needs: [preflight, build, publish-pypi]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       attestations: read
       contents: write
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ github.ref_name }}
+          sparse-checkout: |
+            CHANGELOG.md
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           name: release-dist
@@ -289,18 +227,53 @@ jobs:
               json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
           )
           PY
+      - name: Extract this version's CHANGELOG section
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          # Sections are "### X.Y.Z" headings under "## Released versions".
+          pattern = re.compile(
+              rf"^### {re.escape(version)}$\n(.*?)(?=^### |\Z)",
+              re.MULTILINE | re.DOTALL,
+          )
+          match = pattern.search(changelog)
+          notes_path = Path("release-notes.md")
+          if match:
+              body = match.group(1).strip("\n")
+              notes_path.write_text(body + "\n", encoding="utf-8")
+              print(f"extracted CHANGELOG section for {version}")
+          else:
+              notes_path.write_text("", encoding="utf-8")
+              print(f"no CHANGELOG section found for {version}; falling back to --generate-notes")
+          PY
       - env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          gh release create "${TAG}" \
-            --repo "${REPOSITORY}" \
-            --verify-tag \
-            dist/*.whl dist/*.tar.gz dist/SHA256SUMS dist/release-manifest.json \
-            --title "GigAI ${VERSION}" \
-            --generate-notes
+          if [ -s release-notes.md ]; then
+            gh release create "${TAG}" \
+              --repo "${REPOSITORY}" \
+              --verify-tag \
+              dist/*.whl dist/*.tar.gz dist/SHA256SUMS dist/release-manifest.json \
+              --title "GigAI ${VERSION}" \
+              --notes-file release-notes.md
+          else
+            gh release create "${TAG}" \
+              --repo "${REPOSITORY}" \
+              --verify-tag \
+              dist/*.whl dist/*.tar.gz dist/SHA256SUMS dist/release-manifest.json \
+              --title "GigAI ${VERSION}" \
+              --generate-notes
+          fi
 
   post-release-compatibility:
     name: Full compatibility matrix (post-release)
@@ -309,3 +282,93 @@ jobs:
     with:
       profile: full
       ref: refs/tags/${{ github.ref_name }}
+
+  verify-testpypi:
+    name: TestPyPI clean install on ${{ matrix.os }} (post-publish)
+    needs: [preflight, publish-testpypi]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+    steps:
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+      - env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          root="$(mktemp -d)"
+          export HOME="${root}/home"
+          export XDG_BIN_HOME="${root}/bin"
+          export XDG_DATA_HOME="${root}/data"
+          export PATH="${XDG_BIN_HOME}:${PATH}"
+
+          deadline=$((SECONDS + 600))
+          until uv tool install --refresh \
+            --index https://test.pypi.org/simple \
+            --index https://pypi.org/simple \
+            --index-strategy unsafe-best-match \
+            "gigai==${VERSION}"; do
+            if [ "${SECONDS}" -ge "${deadline}" ]; then
+              echo "gigai==${VERSION} did not appear on TestPyPI within 10 minutes" >&2
+              exit 1
+            fi
+            echo "gigai==${VERSION} not yet available on TestPyPI; retrying in 15s"
+            sleep 15
+          done
+
+          gigai --version | grep -Fx "gigai ${VERSION}"
+          gigai --help >/dev/null
+          gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true \
+            --credential-ref provider=environment:GIGAI_PROVIDER_TOKEN \
+            --endpoint remote=openai_api:provider:https://api.example.test \
+            --model-target remote=remote:smoke-test \
+            --create-model-target remote \
+            --json >/dev/null
+          gigai doctor --home "${root}/gigai-home" --json >/dev/null
+
+  verify-pypi:
+    name: PyPI clean install on ${{ matrix.os }} (post-publish)
+    needs: [preflight, github-release]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+    steps:
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+      - env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          root="$(mktemp -d)"
+          export HOME="${root}/home"
+          export XDG_BIN_HOME="${root}/bin"
+          export XDG_DATA_HOME="${root}/data"
+          export PATH="${XDG_BIN_HOME}:${PATH}"
+
+          deadline=$((SECONDS + 600))
+          until uv tool install --refresh "gigai==${VERSION}"; do
+            if [ "${SECONDS}" -ge "${deadline}" ]; then
+              echo "gigai==${VERSION} did not appear on PyPI within 10 minutes" >&2
+              exit 1
+            fi
+            echo "gigai==${VERSION} not yet available on PyPI; retrying in 15s"
+            sleep 15
+          done
+
+          gigai --version | grep -Fx "gigai ${VERSION}"
+          gigai --help >/dev/null
+          gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true \
+            --credential-ref provider=environment:GIGAI_PROVIDER_TOKEN \
+            --endpoint remote=openai_api:provider:https://api.example.test \
+            --model-target remote=remote:smoke-test \
+            --create-model-target remote \
+            --json >/dev/null
+          gigai doctor --home "${root}/gigai-home" --json >/dev/null

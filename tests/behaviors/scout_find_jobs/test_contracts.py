@@ -31,6 +31,7 @@ from gigai.scout.find_jobs.contracts import (
     NodeFailure,
     NodeReceipt,
     NodeReceiptFixture,
+    NotAssessedReason,
     NotAssessedRow,
     PinnedResume,
     PostingRow,
@@ -50,6 +51,7 @@ from gigai.scout.find_jobs.contracts import (
     SelectedPosting,
     SelectionReason,
     SourceToggles,
+    SponsorshipStatus,
     UIConsentEnvelope,
     URLObservation,
     URLSetDiff,
@@ -147,6 +149,118 @@ def test_contract_dataclasses_are_frozen() -> None:
     config = FindJobsConfig.from_json(load_fixture("fixture-find-jobs-config-v1.json"))
     with pytest.raises(FrozenInstanceError):
         config.roles = ("changed",)  # type: ignore[misc]
+
+
+# --- C0 (v0.1.8.1): old-shape parsing and digest stability -----------------
+#
+# U12/U19/U20/U22/U25 add optional fields to frozen find-jobs contracts.
+# Every existing serialized find-jobs-config:1 / acquire / assess payload
+# (an operator's already-written find-jobs.json, or a prior run's on-disk
+# JSON) must keep parsing with defaults, and an old config's digest must
+# stay byte-for-byte the same so the graph doesn't think it changed.
+
+
+def test_old_shape_config_without_new_keys_parses_with_defaults() -> None:
+    old_value = load_fixture("fixture-find-jobs-config-v1.json")
+    assert "countries" not in old_value and "visa_sponsorship_required" not in old_value
+    config = FindJobsConfig.from_json(old_value)
+    assert config.countries == ()
+    assert config.visa_sponsorship_required is False
+    assert config.to_json() == old_value
+
+
+def test_old_shape_config_digest_is_unchanged_by_c0() -> None:
+    old_value = load_fixture("fixture-find-jobs-config-v1.json")
+    config = FindJobsConfig.from_json(old_value)
+    # Frozen before C0 (v0.1.8.1); a regression here would mean an
+    # unmodified operator find-jobs.json now digests differently.
+    assert config.digest() == "sha256:e14f80205b4dda9cdcd2f594c2eb341c224c4ee2a10d5765e0848df1db6e4dee"
+
+
+def test_config_countries_and_visa_sponsorship_round_trip() -> None:
+    new_value = load_fixture("fixture-find-jobs-config-v1-sponsorship.json")
+    config = FindJobsConfig.from_json(new_value)
+    assert config.countries == ("US",)
+    assert config.visa_sponsorship_required is True
+    assert config.to_json() == new_value
+    # A non-default value changes the digest relative to the old shape,
+    # since the logical config actually differs.
+    old_config = FindJobsConfig.from_json(load_fixture("fixture-find-jobs-config-v1.json"))
+    assert config.digest() != old_config.digest()
+
+
+def test_config_countries_rejects_non_iso_codes() -> None:
+    value = deepcopy(load_fixture("fixture-find-jobs-config-v1.json"))
+    value["countries"] = ["USA"]
+    with pytest.raises(FindJobsContractError) as raised:
+        FindJobsConfig.from_json(value)
+    assert raised.value.code == "invalid_value"
+
+
+def test_config_visa_sponsorship_required_rejects_wrong_type() -> None:
+    value = deepcopy(load_fixture("fixture-find-jobs-config-v1.json"))
+    value["visa_sponsorship_required"] = "yes"
+    with pytest.raises(FindJobsContractError) as raised:
+        FindJobsConfig.from_json(value)
+    assert raised.value.code == "wrong_type"
+
+
+def test_old_shape_posting_row_without_text_or_sponsorship_parses() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    old_posting = acquire["rows"][0]["posting"]  # type: ignore[index]
+    assert "text" not in old_posting and "sponsorship" not in old_posting
+    row = PostingRow.from_json(old_posting)
+    assert row.text is None
+    assert row.sponsorship is None
+    assert row.to_json() == old_posting
+
+
+def test_posting_row_text_and_sponsorship_round_trip() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    old_posting = deepcopy(acquire["rows"][0]["posting"])  # type: ignore[index]
+    old_posting["text"] = "We are hiring a Software Engineer. No sponsorship available."
+    old_posting["sponsorship"] = "not_offered"
+    row = PostingRow.from_json(old_posting)
+    assert row.text == "We are hiring a Software Engineer. No sponsorship available."
+    assert row.sponsorship is SponsorshipStatus.NOT_OFFERED
+    assert row.to_json() == old_posting
+
+
+def test_posting_row_sponsorship_rejects_bad_enum() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    posting = deepcopy(acquire["rows"][0]["posting"])  # type: ignore[index]
+    posting["sponsorship"] = "maybe"
+    with pytest.raises(FindJobsContractError) as raised:
+        PostingRow.from_json(posting)
+    assert raised.value.code == "bad_enum"
+
+
+def test_old_shape_assessment_result_without_sponsorship_parses() -> None:
+    assessment = load_fixture("fixture-assessment-v1.json")
+    old_result = assessment["assessments"][0]  # type: ignore[index]
+    assert "sponsorship" not in old_result
+    result = AssessmentResult.from_json(old_result)
+    assert result.sponsorship is None
+    assert result.to_json() == old_result
+
+
+def test_assessment_result_sponsorship_round_trips() -> None:
+    assessment = load_fixture("fixture-assessment-v1.json")
+    value = deepcopy(assessment["assessments"][0])  # type: ignore[index]
+    value["sponsorship"] = "offered"
+    result = AssessmentResult.from_json(value)
+    assert result.sponsorship is SponsorshipStatus.OFFERED
+    assert result.to_json() == value
+
+
+def test_not_assessed_reason_accepts_new_c0_values() -> None:
+    assessment = load_fixture("fixture-assessment-v1.json")
+    for reason in ("location_mismatch", "sponsorship_excluded", "model_output_invalid"):
+        value = deepcopy(assessment["not_assessed"][0])  # type: ignore[index]
+        value["reason"] = reason
+        row = NotAssessedRow.from_json(value)
+        assert row.reason is NotAssessedReason(reason)
+        assert row.to_json() == value
 
 
 def _public_dto_cases() -> list[tuple[str, type[Any], dict[str, Any]]]:

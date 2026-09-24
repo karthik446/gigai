@@ -11,11 +11,18 @@ from gigai.scout.find_jobs.exa_client import (
     ATS_INCLUDE_DOMAINS,
     EXA_API_KEY_ENV_VAR,
     EXA_SEARCH_URL,
+    EXA_TEXT_MAX_CHARACTERS,
     NUM_RESULTS,
     ExaClientError,
     ExaSearchClient,
 )
-from gigai.scout.find_jobs.contracts import ATSProvider, FindJobsConfig, PostingRow, SourceToggles
+from gigai.scout.find_jobs.contracts import (
+    ATSProvider,
+    FindJobsConfig,
+    PostingRow,
+    SourceToggles,
+    SponsorshipStatus,
+)
 
 
 def _config(**overrides: object) -> FindJobsConfig:
@@ -89,6 +96,7 @@ def test_request_shape_and_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["numResults"] == NUM_RESULTS
     assert body["includeDomains"] == list(ATS_INCLUDE_DOMAINS)
     assert body["startPublishedDate"] == "2026-09-15T00:00:00Z"
+    assert body["contents"] == {"text": {"maxCharacters": EXA_TEXT_MAX_CHARACTERS}}
 
     assert len(rows) == 2
     greenhouse_row = next(row for row in rows if row.provider is ATSProvider.GREENHOUSE)
@@ -108,6 +116,54 @@ def test_request_shape_and_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
     assert lever_row.published_at is None
 
     assert all("example.com" not in row.url for row in rows)
+
+
+def test_result_text_is_mapped_onto_posting_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "secret-exa-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "url": "https://boards.greenhouse.io/acme/jobs/12345",
+                        "title": "Software Engineer",
+                        "publishedDate": "2026-09-20T00:00:00Z",
+                        "text": "We are unable to sponsor work visas for this role.",
+                    },
+                    {
+                        "url": "https://jobs.lever.co/beta/abcde",
+                        "title": "Data Engineer",
+                        "publishedDate": None,
+                        # no `text` key at all -- Exa didn't have page text for this result
+                    },
+                ]
+            },
+        )
+
+    rows = ExaSearchClient().search(_client(handler), _config())
+
+    greenhouse_row = next(row for row in rows if row.provider is ATSProvider.GREENHOUSE)
+    assert greenhouse_row.text == "We are unable to sponsor work visas for this role."
+    assert greenhouse_row.sponsorship is SponsorshipStatus.NOT_OFFERED
+
+    lever_row = next(row for row in rows if row.provider is ATSProvider.LEVER)
+    assert lever_row.text is None
+    assert lever_row.sponsorship is SponsorshipStatus.UNKNOWN
+
+
+def test_result_blank_text_is_treated_as_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "secret-exa-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"results": [{"url": "https://boards.greenhouse.io/acme/jobs/1", "title": "SE", "text": ""}]},
+        )
+
+    rows = ExaSearchClient().search(_client(handler), _config())
+    assert rows[0].text is None
 
 
 def test_every_emitted_row_round_trips_through_json(monkeypatch: pytest.MonkeyPatch) -> None:

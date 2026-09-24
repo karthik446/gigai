@@ -1,0 +1,304 @@
+uv run --locked --extra test python tools/run_ci_tests.py source \
+		--xdist-workers "auto" \
+		--xdist-max-workers "14" \
+		--xdist-dist "worksteal"
+{"actual_workers": 14, "bounded": true, "cpu_count": 14, "distribution": "worksteal", "kind": "xdist-plan", "lane": "source", "max_workers": 14, "offline_gigai_g30_uat": "0", "requested_workers": "auto"}
++ /Users/kar/orca/workspaces/gigai/gigai-v0.1.8.1/.venv/bin/python3 -m pytest -n 14 --dist=worksteal
+============================= test session starts ==============================
+platform darwin -- Python 3.13.1, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kar/orca/workspaces/gigai/gigai-v0.1.8.1
+configfile: pyproject.toml
+testpaths: tests, research/contract_spike/tests, research/phase0_spike/tests
+plugins: xdist-3.8.0, anyio-4.14.2
+created: 14/14 workers
+14 workers [2063 items]
+
+........................................................................ [  3%]
+........................................................................ [  6%]
+........................................................................ [ 10%]
+........................................................................ [ 13%]
+........................................................................ [ 17%]
+........................................................................ [ 20%]
+........................................................................ [ 24%]
+........................................................................ [ 27%]
+.............s............................F............................. [ 31%]
+........................................................................ [ 34%]
+........................................................................ [ 38%]
+........................................................................ [ 41%]
+........................................................................ [ 45%]
+........................................................................ [ 48%]
+........................................................................ [ 52%]
+........................................................................ [ 55%]
+........................................................................ [ 59%]
+........................................................................ [ 62%]
+........................................................................ [ 66%]
+........................................................................ [ 69%]
+........................................................................ [ 73%]
+........................................................................ [ 76%]
+........................................................................ [ 80%]
+........................................................................ [ 83%]
+........................................................................ [ 87%]
+........................................................................ [ 90%]
+........................................................................ [ 94%]
+........................................................................ [ 97%]
+...............................................                          [100%]
+=================================== FAILURES ===================================
+___________ test_m1_real_api_run_child_process_and_second_run_dedup ____________
+[gw8] darwin -- Python 3.13.1 /Users/kar/orca/workspaces/gigai/gigai-v0.1.8.1/.venv/bin/python3
+
+    @contextlib.contextmanager
+    def map_httpcore_exceptions() -> typing.Iterator[None]:
+        global HTTPCORE_EXC_MAP
+        if len(HTTPCORE_EXC_MAP) == 0:
+            HTTPCORE_EXC_MAP = _load_httpcore_exceptions()
+        try:
+>           yield
+
+.venv/lib/python3.13/site-packages/httpx/_transports/default.py:101: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.13/site-packages/httpx/_transports/default.py:250: in handle_request
+    resp = self._pool.handle_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/httpcore/_sync/connection_pool.py:256: in handle_request
+    raise exc from None
+.venv/lib/python3.13/site-packages/httpcore/_sync/connection_pool.py:236: in handle_request
+    response = connection.handle_request(
+.venv/lib/python3.13/site-packages/httpcore/_sync/connection.py:103: in handle_request
+    return self._connection.handle_request(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/httpcore/_sync/http11.py:136: in handle_request
+    raise exc
+.venv/lib/python3.13/site-packages/httpcore/_sync/http11.py:106: in handle_request
+    ) = self._receive_response_headers(**kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/httpcore/_sync/http11.py:177: in _receive_response_headers
+    event = self._receive_event(timeout=timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <HTTP11Connection ['http://127.0.0.1:62477', CLOSED, Request Count: 1]>
+timeout = 90.0
+
+    def _receive_event(
+        self, timeout: float | None = None
+    ) -> h11.Event | type[h11.PAUSED]:
+        while True:
+            with map_exceptions({h11.RemoteProtocolError: RemoteProtocolError}):
+                event = self._h11_state.next_event()
+    
+            if event is h11.NEED_DATA:
+                data = self._network_stream.read(
+                    self.READ_NUM_BYTES, timeout=timeout
+                )
+    
+                # If we feed this case through h11 we'll raise an exception like:
+                #
+                #     httpcore.RemoteProtocolError: can't handle event type
+                #     ConnectionClosed when role=SERVER and state=SEND_RESPONSE
+                #
+                # Which is accurate, but not very informative from an end-user
+                # perspective. Instead we handle this case distinctly and treat
+                # it as a ConnectError.
+                if data == b"" and self._h11_state.their_state == h11.SEND_RESPONSE:
+                    msg = "Server disconnected without sending a response."
+>                   raise RemoteProtocolError(msg)
+E                   httpcore.RemoteProtocolError: Server disconnected without sending a response.
+
+.venv/lib/python3.13/site-packages/httpcore/_sync/http11.py:231: RemoteProtocolError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = PosixPath('/private/var/folders/bd/84nzd4j57q38v18c2mwz35tc0000gn/T/pytest-of-kar/pytest-1633/popen-gw8/test_m1_real_api_run_child_pro0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x108f21e50>
+
+    def test_m1_real_api_run_child_process_and_second_run_dedup(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The child registry hook is proven by requiring all real node receipts."""
+    
+        home, target = _fixture(tmp_path)
+        monkeypatch.setenv("EXA_API_KEY", "m1-test-key")
+        # The bindings construct these MockTransports in the spawned child.  A
+        # parent transport cannot be pickled through multiprocessing.spawn.
+        monkeypatch.setenv("GIGAI_SCOUT_FIND_JOBS_TEST_HTTP", "1")
+        monkeypatch.setenv("GIGAI_SCOUT_FIND_JOBS_TEST_MODEL", "1")
+    
+        backend = ScoutFindJobsBackend(home_root=home, target=target)
+        server = serve(backend=backend, bind=("127.0.0.1", 0))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address[0], server.server_address[1]
+        try:
+            with httpx.Client(base_url=f"http://{host}:{port}", timeout=_CLIENT_TIMEOUT_SECONDS) as client:
+                config_response = client.get("/api/config")
+                assert config_response.status_code == 200, config_response.text
+                config_body = config_response.json()
+                assert config_body["resume_preview"] is not None
+                request_body = _run_request(config_body["config_digest"])
+    
+                started = time.monotonic()
+                response = client.post("/api/run", json=request_body)
+                elapsed = time.monotonic() - started
+                assert response.status_code == 202, response.text
+                # This only proves the POST returns before the run finishes (an
+                # allocation ack, not a synchronous wait for the whole traversal);
+                # it is intentionally far looser than the server's own
+                # RUN_START_TIMEOUT_SECONDS budget so heavy parallel CPU
+                # contention cannot turn a correct allocation into a flaky
+                # failure.
+                assert elapsed < _POST_RUN_SANITY_SECONDS, f"POST /api/run waited {elapsed:.3f}s"
+                run_id = response.json()["run_id"]
+    
+                status_body = _poll_succeeded(client, run_id)
+                assert [item["node_slug"] for item in status_body["node_receipts"]] == [
+                    "acquire",
+                    "assess",
+                    "present",
+                ]
+    
+                results_response = client.get(f"/api/runs/{run_id}/results")
+                assert results_response.status_code == 200, results_response.text
+                first_payload = results_response.json()["payload"]
+                assert first_payload["rows"]
+                assert first_payload["assessments"]
+                assert first_payload["assessments"][0]["matrix"]
+                assert first_payload["assessments"][0]["suggestions"]
+                assert first_payload["assessments"][0]["questions"]
+                assert len(first_payload["node_receipts"]) == 3
+                assert first_payload["pinned_resume"] == config_body["resume_preview"]
+    
+>               second_response = client.post("/api/run", json=request_body)
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/behaviors/scout_find_jobs/test_m1_end_to_end.py:219: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.13/site-packages/httpx/_client.py:1144: in post
+    return self.request(
+.venv/lib/python3.13/site-packages/httpx/_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/httpx/_client.py:914: in send
+    response = self._send_handling_auth(
+.venv/lib/python3.13/site-packages/httpx/_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+.venv/lib/python3.13/site-packages/httpx/_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/httpx/_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/httpx/_transports/default.py:249: in handle_request
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/contextlib.py:162: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    @contextlib.contextmanager
+    def map_httpcore_exceptions() -> typing.Iterator[None]:
+        global HTTPCORE_EXC_MAP
+        if len(HTTPCORE_EXC_MAP) == 0:
+            HTTPCORE_EXC_MAP = _load_httpcore_exceptions()
+        try:
+            yield
+        except Exception as exc:
+            mapped_exc = None
+    
+            for from_exc, to_exc in HTTPCORE_EXC_MAP.items():
+                if not isinstance(exc, from_exc):
+                    continue
+                # We want to map to the most specific exception we can find.
+                # Eg if `exc` is an `httpcore.ReadTimeout`, we want to map to
+                # `httpx.ReadTimeout`, not just `httpx.TimeoutException`.
+                if mapped_exc is None or issubclass(to_exc, mapped_exc):
+                    mapped_exc = to_exc
+    
+            if mapped_exc is None:  # pragma: no cover
+                raise
+    
+            message = str(exc)
+>           raise mapped_exc(message) from exc
+E           httpx.RemoteProtocolError: Server disconnected without sending a response.
+
+.venv/lib/python3.13/site-packages/httpx/_transports/default.py:118: RemoteProtocolError
+----------------------------- Captured stderr call -----------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 62509)
+Traceback (most recent call last):
+  File "/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/socketserver.py", line 692, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/socketserver.py", line 761, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/http/server.py", line 436, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/http/server.py", line 424, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8.1/src/gigai/scout/find_jobs/present_api.py", line 315, in do_POST
+    self._handle_post_run()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8.1/src/gigai/scout/find_jobs/present_api.py", line 396, in _handle_post_run
+    raise pre_allocation_error
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8.1/src/gigai/scout/find_jobs/present_api.py", line 371, in _run
+    backend.start_run(run_request, config_bytes, _on_run_allocated)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8.1/src/gigai/scout/find_jobs/present_api.py", line 177, in start_run
+    run_id = run.launch_find_jobs_run(
+        home_root=self.home_root,
+    ...<3 lines>...
+        ui_loopback_verified=True,
+    )
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8.1/src/gigai/run.py", line 962, in launch_find_jobs_run
+    result = launch_run(
+        home_root=home_root,
+    ...<5 lines>...
+        wait=False,
+    )
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8.1/src/gigai/run.py", line 330, in launch_run
+    projection = read_index(
+        workpad=resolved.path,
+        project_id=resolved.project_id,
+        gig_id=resolved.gig_id,
+    )
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8.1/src/gigai/index.py", line 136, in read_index
+    authoritative = _authoritative_projection(
+        root=root, project_id=project_id, gig_id=gig_id
+    )
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8.1/src/gigai/index.py", line 71, in _authoritative_projection
+    _require_clean_authority(root)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/Users/kar/orca/workspaces/gigai/gigai-v0.1.8.1/src/gigai/index.py", line 386, in _require_clean_authority
+    raise JournalIndexError("authoritative workpad has uncommitted divergence")
+gigai.index.JournalIndexError: authoritative workpad has uncommitted divergence
+----------------------------------------
+=============================== warnings summary ===============================
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_provider_process_death_is_recovered_once_without_offline_work
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_terminal_publication_crash_never_exposes_uncommitted_success[after_artifact_replace]
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_terminal_publication_crash_never_exposes_uncommitted_success[after_replace]
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_terminal_publication_crash_never_exposes_uncommitted_success[before_commit]
+tests/behaviors/runtime_model_boundary/test_g43_provider_run_status.py::test_terminal_publication_crash_never_exposes_uncommitted_success[after_commit]
+  /Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/multiprocessing/popen_fork.py:67: DeprecationWarning: This process (pid=10186) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/behaviors/runtime_run_authority/test_jsl_closeout_regressions.py::test_concurrent_identical_closeout_publishes_once_and_replays_once
+tests/behaviors/runtime_run_authority/test_jsl_closeout_regressions.py::test_concurrent_identical_closeout_publishes_once_and_replays_once
+  /Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/multiprocessing/popen_fork.py:67: DeprecationWarning: This process (pid=10191) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/behaviors/scout_tracking_reporting/test_scout_r5_transfer_corrections.py::test_import_rejects_duplicate_members_before_last_entry_wins
+  /Users/kar/.local/share/uv/python/cpython-3.13.1-macos-aarch64-none/lib/python3.13/zipfile/__init__.py:1638: UserWarning: Duplicate name: 'README.md'
+    return self._open_to_write(zinfo, force_zip64=force_zip64)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/behaviors/runtime_model_boundary/test_g30_live_cli.py:19: set GIGAI_G30_UAT=1 to invoke real local model CLIs
+FAILED tests/behaviors/scout_find_jobs/test_m1_end_to_end.py::test_m1_real_api_run_child_process_and_second_run_dedup
+====== 1 failed, 2061 passed, 1 skipped, 8 warnings in 527.26s (0:08:47) =======
+make: *** [test-source] Error 1
+=== EXIT 2 ===

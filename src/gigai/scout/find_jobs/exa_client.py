@@ -11,9 +11,21 @@ development). Documented here since it cannot be pinned by a fixture:
 - ``POST https://api.exa.ai/search``
 - Header ``x-api-key: <EXA_API_KEY>``
 - JSON body: ``{"query": str, "numResults": int, "includeDomains": [str, ...],
-  "startPublishedDate": str | omitted}``
+  "startPublishedDate": str | omitted, "contents": {"text":
+  {"maxCharacters": int}}}``
 - JSON response: ``{"results": [{"url": str, "title": str,
-  "publishedDate": str | null, ...}, ...]}``
+  "publishedDate": str | null, "text": str | omitted, ...}, ...]}``
+
+C0/P1 (v0.1.8.1, U25, U19): the ``contents.text`` request option is Exa's
+documented "get me the page's text along with search results" knob (assumed
+shape below, not verified live -- same caveat as the rest of this module).
+It's requested with a bounded ``maxCharacters`` so a very large job page
+can't blow out the acquisition record; the returned ``text`` (when present)
+is mapped straight into ``PostingRow.text`` so an Exa-only row (no ATS board
+watchlisted yet) still carries a real posting body for assess and for the
+country/visa filters in ``market_acquisition.py``, instead of the empty
+string. When the ATS row for the same job exists, ``market_acquisition.py``
+prefers it over this Exa row (fuller title/location/text; U20).
 """
 
 from __future__ import annotations
@@ -30,6 +42,7 @@ from .contracts import (
     normalize_url,
     parse_board_url,
 )
+from .filters import sponsorship_from_text
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
     import httpx
@@ -37,6 +50,10 @@ if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
 EXA_SEARCH_URL = "https://api.exa.ai/search"
 EXA_API_KEY_ENV_VAR = "EXA_API_KEY"
 NUM_RESULTS = 25
+# Bounded page-text request size (U25): enough for a full job description,
+# small enough that one Exa response can't balloon the raw-payload store
+# (market_acquisition.py's U26 gzip cap) or the assess prompt (P2).
+EXA_TEXT_MAX_CHARACTERS = 8000
 
 ATS_INCLUDE_DOMAINS: tuple[str, ...] = (
     "boards.greenhouse.io",
@@ -102,6 +119,8 @@ def _row_from_result(result: object, query: str) -> PostingRow | None:
         return None
     title = result.get("title")
     published_at = result.get("publishedDate")
+    text_value = result.get("text")
+    text = text_value if type(text_value) is str and text_value else None
     return PostingRow(
         url=url,
         normalized_url=normalized,
@@ -114,6 +133,8 @@ def _row_from_result(result: object, query: str) -> PostingRow | None:
         content_sha256=None,
         source_kind=SourceKind.EXA,
         query_key=query,
+        text=text,
+        sponsorship=sponsorship_from_text(text),
     )
 
 
@@ -128,6 +149,7 @@ class ExaSearchClient:
                 "query": query,
                 "numResults": NUM_RESULTS,
                 "includeDomains": list(ATS_INCLUDE_DOMAINS),
+                "contents": {"text": {"maxCharacters": EXA_TEXT_MAX_CHARACTERS}},
             }
             if config.published_after is not None:
                 body["startPublishedDate"] = config.published_after

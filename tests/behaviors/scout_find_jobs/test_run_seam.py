@@ -170,6 +170,76 @@ def test_registered_callable_writes_dto_output_receipt_and_evidence(tmp_path: Pa
     assert not (resolved.path / "runs" / run_id / "evidence" / f"{goal['goal_id']}.txt").exists()
 
 
+def test_registered_node_failure_receipt_carries_redacted_message_and_writes_a_log(
+    tmp_path: Path,
+) -> None:
+    """U21: a registered node failure must be diagnosable from GigAI's own records.
+
+    The receipt/goal error carries the exception class + a bounded, redacted
+    message (never resume/posting text or secrets); the full traceback goes
+    to a local log file instead.
+    """
+    home, target, gig_id = _fixture(tmp_path)
+    resolved = resolve_workpad(
+        home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True
+    )
+    goal = _goal(slug="assess", capability="scout.test.assess-fail", effects=["write_workpad"])
+    graph = _graph(goal)
+    # A realistically long fragment (well past the 300-char bound) standing
+    # in for posting/resume text an exception message might otherwise quote.
+    secret_marker = "ZORBNAXX-SECRET-MARKER"
+    secret_posting_text = ("Confidential posting text. " * 20) + secret_marker
+
+    def stub(context: object, node_input: object) -> None:
+        raise ValueError(f"resume_evidence must be an array (saw: {secret_posting_text!r})")
+
+    register("graph_find_jobs_test", 1, "assess", "scout.test.assess-fail", {"write_workpad"}, stub)
+    run_id = "run_00000000-0000-4000-8000-000000000002"
+    (resolved.path / "runs" / run_id).mkdir(parents=True)
+    target_before = _target_observation(resolved)
+
+    with pytest.raises(RunError, match="registered node execution failed"):
+        _execute_goal(
+            resolved,
+            run_id,
+            goal["goal_id"],
+            target_before,
+            goal=goal,
+            graph=graph,
+            manifest_digest="sha256:" + "0" * 64,
+            started_at="2026-09-23T00:00:00+00:00",
+        )
+
+    receipt_path = resolved.path / "runs" / run_id / "receipts" / "assess.json"
+    receipt = NodeReceipt.from_json(parse_json_bytes(receipt_path.read_bytes()))
+    assert receipt.status is NodeStatus.FAILED
+    assert receipt.failure is not None
+    assert receipt.failure.code == "node_execution_failed"
+    # The exception class is named, so an operator/agent can tell "a parse
+    # error" from "a timeout" from the receipt alone.
+    assert "ValueError" in receipt.failure.message
+    assert len(receipt.failure.message) <= 300
+    # The bound truncates well before a quoted posting/resume fragment's
+    # tail end would survive into the receipt.
+    assert secret_marker not in receipt.failure.message
+    assert receipt.errors[0].code == "node_execution_failed"
+    assert "ValueError" in receipt.errors[0].message
+
+    detail: dict[str, object] = {}
+    _apply_registered_receipt_to_detail(
+        resolved, run_id, goal, detail, expected_status=NodeStatus.FAILED.value
+    )
+    assert detail["errors"][0]["message"] == receipt.failure.message
+
+    log_path = resolved.path / "runs" / run_id / "logs" / "assess.log"
+    assert log_path.is_file()
+    log_text = log_path.read_text(encoding="utf-8")
+    assert "Traceback" in log_text
+    assert "ValueError" in log_text
+    # The full, unredacted detail belongs only in the local log, not the receipt.
+    assert secret_posting_text in log_text
+
+
 def test_unregistered_capability_and_undeclared_effect_are_refused() -> None:
     unregistered = _graph(
         _goal(slug="acquire", capability="scout.missing", effects=["write_workpad"])
