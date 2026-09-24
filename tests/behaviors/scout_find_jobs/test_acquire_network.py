@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 import gzip
 import json
+import uuid
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from gigai.lifecycle import create_offline
 from gigai.scout.find_jobs.ats_board_clients import ATSBoardClients
 from gigai.scout.find_jobs.contracts import (
     AcquireInput,
@@ -29,6 +31,10 @@ from gigai.scout.find_jobs.contracts import (
 from gigai.scout.find_jobs.exa_client import EXA_API_KEY_ENV_VAR, ExaClientError, ExaSearchClient
 from gigai.scout.find_jobs.market_acquisition import AcquireAllSourcesFailedError, acquire_node
 from gigai.scout.find_jobs.selection import normalize_title
+from gigai.setup import build_config, run_setup
+from gigai.target_binding import initialize_target
+
+from tests.support.workpad_assertions import assert_managed_workpad_clean
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -43,6 +49,38 @@ def _context(tmp_path: Path, key: str = "acquire-001") -> NodeContext:
         workpad_path=str(tmp_path), redeemed_consent_ref="consent",
         model_target="ollama_local",
     )
+
+
+def _managed_workpad(tmp_path: Path, name: str = "u26-raw-proof") -> Path:
+    """A real, git-initialized, journaled workpad (the same substrate a live
+    run uses) -- regression-001: U26's raw/ writes must leave this clean."""
+
+    home, target = tmp_path / "home", tmp_path / "target"
+    target.mkdir()
+    run_setup(
+        build_config(
+            home_root=home,
+            workpad_root=tmp_path / "workpads",
+            editor_argv=("/usr/bin/true",),
+            open_with_target=False,
+        )
+    )
+    initialize_target(
+        home_root=home,
+        requested_target=target,
+        uuid_factory=lambda: uuid.UUID("12345678-1234-4234-9234-123456789abc"),
+    )
+    values = iter(
+        uuid.UUID(f"00000000-0000-4000-8000-{value:012x}") for value in range(1, 32)
+    )
+    created = create_offline(
+        home_root=home,
+        requested_target=target,
+        name=name,
+        open_editor=False,
+        uuid_factory=lambda: next(values),
+    )
+    return created.workpad
 
 
 def _config(*, exa: bool = True, ats: bool = True) -> FindJobsConfig:
@@ -487,7 +525,8 @@ def test_raw_ats_and_exa_responses_are_stored_gzip_with_index(monkeypatch, tmp_p
             first_seen=WatchlistFirstSeen(SourceKind.ATS, "https://boards.greenhouse.io/acme/jobs/1", "software engineer", "acquire-raw-1", "2026-09-22T00:00:00Z"),
         )
     )
-    context = _context(tmp_path, "acquire-raw-1")
+    workpad = _managed_workpad(tmp_path)
+    context = _context(workpad, "acquire-raw-1")
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         out = acquire_node(
             context, _input(config=_config(exa=True, ats=True)),
@@ -495,7 +534,7 @@ def test_raw_ats_and_exa_responses_are_stored_gzip_with_index(monkeypatch, tmp_p
         )
     assert out  # sanity: the run completed
 
-    raw_root = tmp_path / "runs" / context.run_id / "raw"
+    raw_root = workpad / "runs" / context.run_id / "raw"
     index = json.loads((raw_root / "index.json").read_text())
     assert index["cap_bytes"] == 20 * 1024 * 1024
     assert len(index["entries"]) == 2
@@ -504,7 +543,7 @@ def test_raw_ats_and_exa_responses_are_stored_gzip_with_index(monkeypatch, tmp_p
     for entry in index["entries"]:
         assert entry["stored"] is True
         assert "path" in entry
-        gz_path = tmp_path / entry["path"]
+        gz_path = workpad / entry["path"]
         assert gz_path.suffix == ".gz"
         raw_bytes = gzip.decompress(gz_path.read_bytes())
         # No key material anywhere in the stored bytes.
@@ -513,6 +552,10 @@ def test_raw_ats_and_exa_responses_are_stored_gzip_with_index(monkeypatch, tmp_p
         assert entry["bytes"] == len(raw_bytes)
         # No request headers/query keys leak into the recorded URL.
         assert "super-secret" not in entry["url"]
+
+    # regression-001: the recording client's raw/ write must never leave a
+    # managed workpad divergent.
+    assert_managed_workpad_clean(workpad)
 
 
 def test_raw_payload_cap_stops_storing_further_entries(monkeypatch, tmp_path):
@@ -539,14 +582,15 @@ def test_raw_payload_cap_stops_storing_further_entries(monkeypatch, tmp_path):
             first_seen=WatchlistFirstSeen(SourceKind.ATS, "https://boards.greenhouse.io/beta/jobs/1", "software engineer", "acquire-raw-2", "2026-09-22T00:00:00Z"),
         )
     )
-    context = _context(tmp_path, "acquire-raw-2")
+    workpad = _managed_workpad(tmp_path, name="u26-raw-cap-proof")
+    context = _context(workpad, "acquire-raw-2")
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         acquire_node(
             context, _input(config=_config(exa=False, ats=True)),
             http_client=client, exa=_Exa(()), ats=ATSBoardClients(), watchlist=watchlist,
         )
 
-    raw_root = tmp_path / "runs" / context.run_id / "raw"
+    raw_root = workpad / "runs" / context.run_id / "raw"
     index = json.loads((raw_root / "index.json").read_text())
     assert len(index["entries"]) == 2
     stored = [entry for entry in index["entries"] if entry["stored"]]
@@ -554,6 +598,10 @@ def test_raw_payload_cap_stops_storing_further_entries(monkeypatch, tmp_path):
     assert len(stored) == 1
     assert len(skipped) == 1
     assert skipped[0]["skipped_reason"] == "raw_payload_cap_reached"
+
+    # regression-001: even with the cap truncating storage, the workpad must
+    # still end up clean.
+    assert_managed_workpad_clean(workpad)
 
 
 def test_missing_exa_api_key_with_only_exa_enabled_raises(monkeypatch, tmp_path):

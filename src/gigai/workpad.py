@@ -41,6 +41,16 @@ WORKPAD_V2_GITIGNORE = (
     b"/README.md\n/CHANGELOG.md\n/gig.py\n/tools/\n/goalgraphs/\n/ui/\n"
 )
 WORKPAD_LAYOUT_PATH = "manifests/workpad-layout.json"
+# Run-local artifacts that are additive, never journaled, and never named
+# explicitly by any commit: unlike WORKPAD_GITIGNORE/WORKPAD_V2_GITIGNORE
+# (a tracked, byte-exact layout declaration every caller validates), these
+# patterns live in the untracked `.git/info/exclude` so they can be extended
+# without disturbing that committed contract or its hash. Generic run-local
+# artifact roots (not gig-specific names) so core stays free of gig imports.
+RUN_LOCAL_ARTIFACT_EXCLUDES = (
+    "/runs/*/raw/",
+    "/runs/*/progress/",
+)
 _V2_ROOTS = frozenset({
     "README.md", "CHANGELOG.md", "gig.py", "tools", "goalgraphs", "ui",
     "docs", "references", "run-inputs", "records", "indexes", "reports",
@@ -459,7 +469,42 @@ def _initialize_workpad_repository(root: Path, project_id: str, gig_id: str) -> 
         stream.flush()
         os.fsync(stream.fileno())
     ignore.chmod(0o600)
+    ensure_run_local_artifact_excludes(root)
     _validate_workpad_repository(root, project_id, gig_id)
+
+
+def ensure_run_local_artifact_excludes(root: Path) -> bool:
+    """Add any missing ``RUN_LOCAL_ARTIFACT_EXCLUDES`` lines to ``.git/info/exclude``.
+
+    Idempotent and additive-only: existing lines (including ones an operator
+    or a future packet added) are never rewritten or reordered, only
+    appended to. Safe to call on every workpad creation and, cheaply, before
+    every clean-authority check on an existing workpad -- it does one
+    ``read_text``/``write_text`` and never touches tracked history or the
+    journal/database locks. Returns True if the file was changed.
+    """
+
+    exclude_path = root / ".git" / "info" / "exclude"
+    try:
+        existing = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
+    except OSError:
+        return False
+    existing_lines = set(existing.splitlines())
+    missing = [line for line in RUN_LOCAL_ARTIFACT_EXCLUDES if line not in existing_lines]
+    if not missing:
+        return False
+    exclude_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    addition = "".join(f"{line}\n" for line in missing)
+    if existing and not existing.endswith("\n"):
+        addition = "\n" + addition
+    try:
+        with exclude_path.open("a", encoding="utf-8") as stream:
+            stream.write(addition)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError:
+        return False
+    return True
 
 
 def _validate_workpad_repository(
@@ -825,6 +870,7 @@ __all__ = [
     "OpenResult",
     "PROVISION_FAILPOINTS",
     "ProvisionedWorkpad",
+    "RUN_LOCAL_ARTIFACT_EXCLUDES",
     "ResolvedWorkpad",
     "WORKPAD_GITIGNORE",
     "WORKPAD_V2_GITIGNORE",
@@ -835,6 +881,7 @@ __all__ = [
     "WorkpadError",
     "WorkpadPermissionError",
     "WorkpadUnavailableError",
+    "ensure_run_local_artifact_excludes",
     "open_locations",
     "provision_workpad",
     "register_existing_workpad",

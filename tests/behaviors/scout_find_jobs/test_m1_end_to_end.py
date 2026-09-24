@@ -24,11 +24,16 @@ from gigai.scout.template import scout_candidate_inventory
 from gigai.setup import build_config, run_setup
 from gigai.workpad import select_active_workpad
 
+from tests.support.workpad_assertions import assert_managed_workpad_clean
+
 from .conftest import load_fixture
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, Path]:
-    """Create and approve a fresh Scout candidate through the normal path."""
+def _fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Create and approve a fresh Scout candidate through the normal path.
+
+    Returns ``(home, target, workpad_path)``.
+    """
 
     home, target = tmp_path / "home", tmp_path / "target"
     target.mkdir()
@@ -83,7 +88,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path]:
         gig_id=instance.gig_id,
         proposal_id=str(instance.proposal_id),
     )
-    select_active_workpad(
+    resolved = select_active_workpad(
         home_root=home,
         requested_target=target,
         gig_id=instance.gig_id,
@@ -125,7 +130,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path]:
         sources=SourceToggles(exa=True, ats=True, hiringcafe=False),
     )
     config_path.write_bytes(canonical_json_bytes(find_jobs_config.to_json()))
-    return home, target
+    return home, target, resolved.path
 
 
 # Generous headroom over the server's own documented allocation budget
@@ -173,7 +178,7 @@ def test_m1_real_api_run_child_process_and_second_run_dedup(
 ) -> None:
     """The child registry hook is proven by requiring all real node receipts."""
 
-    home, target = _fixture(tmp_path)
+    home, target, workpad = _fixture(tmp_path)
     monkeypatch.setenv("EXA_API_KEY", "m1-test-key")
     # The bindings construct these MockTransports in the spawned child.  A
     # parent transport cannot be pickled through multiprocessing.spawn.
@@ -271,3 +276,8 @@ def test_m1_real_api_run_child_process_and_second_run_dedup(
     # The reference-add path pinned the exact committed revision that the run
     # sealed; this also prevents a successful run from hiding a mutable resume.
     assert backend.resume_preview() == resolve_newest_resume(home, target)
+
+    # regression-001: two real find-jobs runs (each through the recording
+    # HTTP client and each writing progress files) must never leave the
+    # managed workpad divergent.
+    assert_managed_workpad_clean(workpad)

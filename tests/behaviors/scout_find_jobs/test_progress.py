@@ -24,10 +24,12 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import threading
+import uuid
 
 import httpx
 import pytest
 
+from gigai.lifecycle import create_offline
 from gigai.scout.find_jobs.contracts import (
     AcquireInput,
     ATSProvider,
@@ -41,6 +43,10 @@ from gigai.scout.find_jobs.contracts import FindJobsConfig
 from gigai.scout.find_jobs.market_acquisition import acquire_node
 from gigai.scout.find_jobs.present_api import NotWiredBackend, serve
 from gigai.scout.find_jobs.progress import ProgressWriter, progress_dir, read_progress
+from gigai.setup import build_config, run_setup
+from gigai.target_binding import initialize_target
+
+from tests.support.workpad_assertions import assert_managed_workpad_clean
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +328,38 @@ def _context(tmp_path: Path, key: str = "acquire-001") -> NodeContext:
     )
 
 
+def _managed_workpad(tmp_path: Path, name: str = "b4-progress-proof") -> Path:
+    """A real, git-initialized, journaled workpad (the same substrate a live
+    run uses) -- regression-001: B4's progress/ writes must leave this clean."""
+
+    home, target = tmp_path / "home", tmp_path / "target"
+    target.mkdir()
+    run_setup(
+        build_config(
+            home_root=home,
+            workpad_root=tmp_path / "workpads",
+            editor_argv=("/usr/bin/true",),
+            open_with_target=False,
+        )
+    )
+    initialize_target(
+        home_root=home,
+        requested_target=target,
+        uuid_factory=lambda: uuid.UUID("12345678-1234-4234-9234-123456789abc"),
+    )
+    values = iter(
+        uuid.UUID(f"00000000-0000-4000-8000-{value:012x}") for value in range(1, 32)
+    )
+    created = create_offline(
+        home_root=home,
+        requested_target=target,
+        name=name,
+        open_editor=False,
+        uuid_factory=lambda: next(values),
+    )
+    return created.workpad
+
+
 def _acquire_config() -> FindJobsConfig:
     return FindJobsConfig(
         roles=("software engineer",),
@@ -368,20 +406,25 @@ def test_acquire_node_writes_progress_for_every_kept_posting(tmp_path: Path, mon
     status = SimpleNamespace(complete=True, input_ref={"path": "input.json"})
     monkeypatch.setattr("gigai.scout.find_jobs.market_acquisition.import_public_rows", lambda **_: status)
 
+    workpad = _managed_workpad(tmp_path)
     acquire_input = AcquireInput(
         _acquire_config(), "sha256:" + "c" * 64, None, (row,), 10, SelectionRule.NEW_OR_EDITED_ROLE_MATCH,
     )
     output = acquire_node(
-        _context(tmp_path), acquire_input, http_client=None, exa=_Exa(), ats=_ATS(), watchlist=_Watchlist(),
+        _context(workpad), acquire_input, http_client=None, exa=_Exa(), ats=_ATS(), watchlist=_Watchlist(),
     )
     assert output.rows  # sealed output unaffected by progress wiring
 
-    run_root = tmp_path / "runs" / "run_01"
+    run_root = workpad / "runs" / "run_01"
     snapshot = read_progress(run_root)
     assert snapshot.steps["acquire"]["status"] == "done"
     assert [item["normalized_url"] for item in snapshot.postings] == [row.normalized_url]
     assert snapshot.cap == 10
     assert snapshot.candidate_count == 1
+
+    # regression-001: B4's progress/ writes must never leave a managed
+    # workpad divergent.
+    assert_managed_workpad_clean(workpad)
 
 
 def test_acquire_node_marks_the_step_failed_when_every_source_fails(
