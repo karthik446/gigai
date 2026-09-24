@@ -244,7 +244,19 @@ def _assess_node_body(
     eligible_postings: list[object] = []
     for posting, outcome in acquire_rows:
         selected = selected_by_url.get(posting.normalized_url)
-        if outcome is RowOutcome.UNCHANGED and selected is None:
+        # uat-bug-009-r1: a selected row is already-sealed selection
+        # authority (see the `is_candidate` branch below) regardless of its
+        # acquire outcome -- a selected UNCHANGED row must fall through to
+        # be assessed, the same as a selected NEW/EDITED row, so this check
+        # comes first and never routes a selected row into the outcome
+        # branches below. Twin predicate: market_acquisition.py's own
+        # candidates loop (acquire side) applies the identical
+        # selected-first / unchanged-valid-prior-skip / other-outcomes-skip
+        # ordering; keep the two in sync by hand since assess doesn't import
+        # acquire's candidate loop.
+        if selected is not None:
+            pass
+        elif outcome is RowOutcome.UNCHANGED:
             prior = prior_assessments.get(posting.normalized_url)
             if (
                 prior is not None

@@ -38,6 +38,8 @@ from pathlib import Path
 import json
 import uuid
 
+import pytest
+
 from gigai.canonical import canonical_json_bytes
 from gigai.lifecycle import create_offline
 from gigai.scout.find_jobs.contracts import (
@@ -64,6 +66,11 @@ from gigai.scout.find_jobs.contracts import (
 from gigai.scout.find_jobs.market_acquisition import acquire_node
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
+from tests.behaviors.scout_find_jobs.test_assess_model_policy import (
+    _assess_fixture,
+    _posting,
+    _run_assess,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -330,3 +337,184 @@ def test_missing_sealed_run_input_never_carries_forward(tmp_path: Path) -> None:
 
     assert len(out2.selected_postings) == 1
     assert out2.carried_forward_assessments == ()
+
+
+# --- uat-bug-009-r1: 5b0029e fixed acquire's own candidates loop but
+# proposal_execution.py's *assess*-node loop kept a bug of its own: its
+# `if outcome is UNCHANGED and selected is None: ... elif outcome not in
+# (NEW, EDITED): continue` is a single if/elif chain, so a selected UNCHANGED
+# row (selected is not None) falls out of the first branch and straight into
+# the elif's `continue` -- it is never assessed, even though acquire itself
+# already decided the row was worth assessing by selecting it. The tests
+# above only ever call `acquire_node` and check `out.selected_postings`
+# (the coordinator's own gigai-verify-end-outcome lesson from this exact
+# bug); the tests below call `assess_node` itself and check the actual
+# symptom the operator sees -- the posting lands in `output.assessments`,
+# not silently dropped.
+
+
+def _run2_selected_unchanged_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A selected UNCHANGED row with no prior successful assessment anywhere.
+
+    Mirrors acceptance test 1 above (run 1 fails at assess, run 2 re-acquires
+    the identical posting as UNCHANGED and re-selects it, since
+    `_prior_assessments` finds nothing) but drives the *assess* node itself
+    via `_run_assess`'s fixture, rather than stopping at `acquire_node`.
+    """
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/501",
+        text="We need Python experience.",
+    )
+    good = json.dumps({
+        "matrix": [{"requirement": "Python", "resume_evidence": ["Built APIs"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+    # No outputs/assess.json anywhere on disk for any run -- the exact shape
+    # a run that failed at assess (uat-bug-005) leaves behind, so
+    # `_prior_assessments` finds nothing for this URL.
+    output, _binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000501",
+        postings=[posting],
+        outcomes={posting.normalized_url: "unchanged"},
+        selected_postings=[posting],
+        outputs=[good],
+        monkeypatch=monkeypatch,
+    )
+    return output, posting
+
+
+def test_assess_node_assesses_a_selected_unchanged_posting_with_no_prior(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ticket's repro, through assess_node: a selected UNCHANGED row with
+    no successful prior assessment must land in `assessments`, not be
+    silently dropped by the `elif outcome not in (NEW, EDITED): continue`
+    branch. FAILS on HEAD's pre-r1 proposal_execution.py (0 assessments,
+    posting entirely absent from candidate_rows)."""
+    output, posting = _run2_selected_unchanged_fixture(tmp_path, monkeypatch)
+
+    assert len(output.assessments) == 1
+    assert output.assessments[0].posting.normalized_url == posting.normalized_url
+    assert output.not_assessed == ()
+    candidate_urls = {row.posting.normalized_url for row in output.candidate_rows}
+    assert posting.normalized_url in candidate_urls
+
+
+def test_assess_node_skips_a_genuinely_assessed_unchanged_posting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An UNCHANGED row that already has a successful prior assessment (same
+    content digest, same resume revision) is not selected by acquire and
+    must stay out of assess's own candidate set entirely -- it is carried
+    forward by present_api.py from acquire's own output, not re-assessed
+    here. This is the "still skipped" half of the acceptance criteria: the
+    r1 fix must not turn every UNCHANGED row into a re-assess."""
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/502",
+        text="We need Python experience.",
+    )
+    prior_run_id = "run_00000000-0000-4000-8000-000000000510"
+    selected = SelectedPosting(posting.normalized_url, posting.url, posting.content_sha256, True)
+    assessment = AssessmentResult(
+        posting=selected,
+        matrix=(RequirementMatrixRow("Python", ("Built APIs",), MatrixStatus.MET),),
+        suggestions=(), questions=(), proposal_revision_ref=None,
+    )
+    prior_output = AssessOutput(
+        selected_postings=(selected,), pinned_resume=fixture["pinned"], target=str(target),
+        selection_cap=10, selection_rule=SelectionRule.NEW_OR_EDITED_ROLE_MATCH,
+        candidate_rows=(PostingRowResult(posting, RowOutcome.NEW),),
+        assessments=(assessment,), not_assessed=(), proposal_revision_refs=(),
+        model_target=ModelTarget.OLLAMA_LOCAL,
+        producer=Producer("scout.find_jobs.assess", "1", "scout-assess", ModelTarget.OLLAMA_LOCAL, "fixture"),
+        usage=None, failures=(),
+    )
+    prior_outputs_dir = target / "runs" / prior_run_id / "outputs"
+    prior_outputs_dir.mkdir(parents=True)
+    (prior_outputs_dir / "assess.json").write_bytes(canonical_json_bytes(prior_output.to_json()))
+
+    # run 2: the posting is UNCHANGED and NOT selected (acquire itself would
+    # not have selected it, since a valid prior assessment already exists
+    # for the same content digest + resume revision).
+    output, _binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000511",
+        postings=[posting],
+        outcomes={posting.normalized_url: "unchanged"},
+        selected_postings=[],
+        outputs=[],
+        monkeypatch=monkeypatch,
+    )
+
+    assert output.assessments == ()
+    assert output.not_assessed == ()
+    candidate_urls = {row.posting.normalized_url for row in output.candidate_rows}
+    assert posting.normalized_url not in candidate_urls
+
+
+def test_assess_node_partitions_a_mixed_selected_and_skippable_unchanged_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One selected UNCHANGED row (no prior -- must be assessed) alongside one
+    skippable UNCHANGED row (valid prior -- must stay out of candidate_rows)
+    in the same run: the two must partition correctly, neither one bleeding
+    into the other's outcome."""
+    fixture, target = _assess_fixture(tmp_path)
+    selected_posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/521",
+        text="We need Go experience.",
+        company="Acme", title="Software Engineer",
+    )
+    skippable_posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/522",
+        text="We need Rust experience.",
+        company="Globex", title="Staff Software Engineer",
+    )
+
+    prior_run_id = "run_00000000-0000-4000-8000-000000000530"
+    selected_ref = SelectedPosting(
+        skippable_posting.normalized_url, skippable_posting.url, skippable_posting.content_sha256, True
+    )
+    assessment = AssessmentResult(
+        posting=selected_ref,
+        matrix=(RequirementMatrixRow("Rust", ("Built systems",), MatrixStatus.MET),),
+        suggestions=(), questions=(), proposal_revision_ref=None,
+    )
+    prior_output = AssessOutput(
+        selected_postings=(selected_ref,), pinned_resume=fixture["pinned"], target=str(target),
+        selection_cap=10, selection_rule=SelectionRule.NEW_OR_EDITED_ROLE_MATCH,
+        candidate_rows=(PostingRowResult(skippable_posting, RowOutcome.NEW),),
+        assessments=(assessment,), not_assessed=(), proposal_revision_refs=(),
+        model_target=ModelTarget.OLLAMA_LOCAL,
+        producer=Producer("scout.find_jobs.assess", "1", "scout-assess", ModelTarget.OLLAMA_LOCAL, "fixture"),
+        usage=None, failures=(),
+    )
+    prior_outputs_dir = target / "runs" / prior_run_id / "outputs"
+    prior_outputs_dir.mkdir(parents=True)
+    (prior_outputs_dir / "assess.json").write_bytes(canonical_json_bytes(prior_output.to_json()))
+
+    good = json.dumps({
+        "matrix": [{"requirement": "Go", "resume_evidence": ["Built Go services"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+    output, _binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000531",
+        postings=[selected_posting, skippable_posting],
+        outcomes={
+            selected_posting.normalized_url: "unchanged",
+            skippable_posting.normalized_url: "unchanged",
+        },
+        selected_postings=[selected_posting],
+        outputs=[good],
+        monkeypatch=monkeypatch,
+    )
+
+    assert len(output.assessments) == 1
+    assert output.assessments[0].posting.normalized_url == selected_posting.normalized_url
+    assert output.not_assessed == ()
+    candidate_urls = {row.posting.normalized_url for row in output.candidate_rows}
+    assert candidate_urls == {selected_posting.normalized_url}
+    assert skippable_posting.normalized_url not in candidate_urls
