@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-23 23:19 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-23 23:46 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -19,7 +19,6 @@ _Updated 2026-09-23 23:19 MDT by Claude (coordinator of `run_7cba834cb817`, work
 | Packet | Model | State | Task / dispatch | Next |
 | --- | --- | --- | --- | --- |
 | discovery-bakeoff (S24): OpenAI web_search, Tavily, H-1B LCA baseline vs S23 Exa Agent low; ≤ $10 total, ≤ $2/call; Websets blocked (Exa plan: 401 'Upgrade to a Pro plan', $0) | Sonnet 5 | running | `task_9fa9042ca55a` / `ctx_1c85dd2548dd` | coordinator review → operator picks the discovery approach |
-| scout-ux-gaps: `resume add` auto-installs Scout; cwd inside a bound non-git target resolves without --target | Sonnet 5 | running | `task_9944d78dbfa8` / `ctx_b0ed98435b38` | verify → commit |
 | S23 stage 2: UI setup interview (11 questions) + weekly Discover (approach per S24) | — | queued (operator approved) | | after D part 2 + S24 |
 
 ## Next up
@@ -32,6 +31,7 @@ _Updated 2026-09-23 23:19 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - **secrets-core committed** `a915c24`: `gigai secrets add/list/rm`, env → ~/.gigai/.env resolver (python-dotenv, interpolation off, 0600 under umask 077). Coordinator reproduced + re-verified the 2 r0 bugs.
 - **README uv-only** `f1fb6c6` (+ API command via `uv tool run --from gigai`, verified on 0.1.8.1).
 - **Country-data research** accepted (`.orchestrator/research/country-data.md`): Lever/Ashby structured country fields unread; pycountry fallback. Implementation waits on the operator.
+- **`gigai scout run` feature complete** (brief acceptance met from an installed wheel, `d82b9a0` report; flow gaps fixed in scout-ux-gaps): setup → init → secrets add exa → resume add → scout run/status/stop, from inside the target, no --target, no Python/TOML/record create.
 - **B4 progressive cards** `546b346`: progress/ files + /api/runs/{id}/progress + card UI + live step status; writes best-effort (r1).
 - **wire-selection** `8856b1d`: B2 end to end (≤2 per company, dedupe, round-robin; DUPLICATE/OVER_CAP labels).
 - **acquire-country-filter** `80a2e98` (B1/B3/B5 + structured countries + pycountry + region-only → no match). **README one-command flow** `50a8d64`. **S23 spike** `998f6cc` ($0.834 spent; low/strict/board-URL query; not deterministic; blended $0.0125/usable board).
