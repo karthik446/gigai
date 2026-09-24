@@ -117,10 +117,16 @@ def assess_node(
     model_target = input.model_target.value
     if model_target not in {"ollama_local", "codex_cli", "openrouter_api"}:
         raise ScoutProposalExecutionError("model_target_invalid", "unsupported model target")
-    # ``target`` is the workpad root.  A configured target name, when supplied
-    # by callers, is preferred only if it is a string; the sealed enum remains
-    # the authority for routing and never falls back to another provider.
-    adapter_target = target if isinstance(target, str) else model_target
+    # U2 (0.1.8.1 UAT): the sealed enum value (ollama_local/codex_cli/
+    # openrouter_api) is an *adapter kind*, never a configured target's own
+    # name -- ``gigai setup`` names its targets "codex-default",
+    # "claude-default", etc, so ``resolve_model_adapter(config, "codex_cli")``
+    # (a literal lookup by name) always failed. Resolve the adapter kind
+    # through the operator's own configuration -- the configured target whose
+    # endpoint's adapter matches -- instead of hard-coding target name
+    # strings. No silent fallback to another provider (existing rule): an
+    # unmatched adapter kind fails loudly, naming the fix.
+    adapter_target = _resolve_configured_target_name_for_adapter(config, model_target)
     try:
         binding = resolve_model_adapter(config, adapter_target)
     except (AdapterFactoryError, ModelTargetResolutionError, KeyError) as exc:
@@ -128,7 +134,7 @@ def assess_node(
         # level model outage: callers must see them loudly.
         raise ScoutProposalExecutionError("model_target_unavailable", "sealed model target or credential is unavailable") from exc
 
-    root = Path(target) if isinstance(target, (Path, str)) and not isinstance(target, str) else Path(context.workpad_path)
+    root = Path(target) if isinstance(target, Path) else Path(context.workpad_path)
     resume = _read_pinned_resume(home_root, root, context.gig_id, input.pinned_resume)
     acquire_rows = _read_acquire_rows(root, input.acquire_batch_ref)
     policy = assess_invocation_policy(model_target, input)
@@ -277,6 +283,49 @@ def assess_node(
 
     usage = _usage_block(usage_values, UsageBlock)
     return AssessOutput(tuple(input.selected_postings), input.pinned_resume, input.target, input.selection_cap, SelectionRule.NEW_OR_EDITED_ROLE_MATCH, tuple(rows), tuple(assessments), tuple(not_assessed), tuple(revisions), ContractModelTarget(model_target), producer, usage, ())
+
+
+def _resolve_configured_target_name_for_adapter(config: GigAIConfig, adapter_kind: str) -> str:
+    """The name of the configured, enabled target whose endpoint uses ``adapter_kind``.
+
+    U2 (0.1.8.1 UAT): the sealed model-target enum (``ollama_local`` /
+    ``codex_cli`` / ``openrouter_api``) names an *adapter kind*, not a
+    configured target -- ``gigai setup`` always names its targets
+    ``"<provider>-default"`` (``codex-default``, ``claude-default``, ...).
+    This maps through the operator's own configuration rather than a
+    hard-coded string list, so it keeps working whichever name setup or the
+    operator gave the target.
+
+    Fails loudly, naming the fix, when no configured+enabled target uses
+    this adapter kind (never silently falls back to another provider) and
+    when more than one does (ambiguous: the caller must disable/remove one
+    or the sealed enum cannot pick between them).
+    """
+
+    endpoint_names = {
+        endpoint.name for endpoint in config.endpoints if endpoint.adapter == adapter_kind
+    }
+    matches = [
+        target.name
+        for target in config.model_targets
+        if target.enabled and target.endpoint in endpoint_names
+    ]
+    if not matches:
+        raise ScoutProposalExecutionError(
+            "model_target_unavailable",
+            f"no configured model target uses adapter {adapter_kind!r}; "
+            f"run `gigai setup` to configure one (e.g. via --model-target "
+            f"NAME=ENDPOINT:MODEL) before assessing with this target",
+        )
+    if len(matches) > 1:
+        names = ", ".join(sorted(matches))
+        raise ScoutProposalExecutionError(
+            "model_target_unavailable",
+            f"multiple configured model targets use adapter {adapter_kind!r} "
+            f"({names}); disable all but one so the sealed target can resolve "
+            f"unambiguously",
+        )
+    return matches[0]
 
 
 _MAX_PROMPT_POSTING_TEXT = 12_000

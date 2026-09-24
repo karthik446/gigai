@@ -1,0 +1,30 @@
+BRIEF (operator-approved 2026-09-24, from the v0.1.8-worktree session): Scout setup interview + weekly Exa Agent company discovery. The v0.1.9 coordinator turns this into specs. TWO STAGES: (1) a SPIKE (research, capped live spend), then (2) an IMPLEMENTATION packet after the operator reviews the spike results.
+
+OPERATOR DECISIONS (record; don't re-open):
+- Scout setup asks the user questions ONCE, and the answers drive the product: roles/level (+ titles to avoid), countries + remote-only/hybrid/onsite + city, NEEDS VISA SPONSORSHIP (plain yes/no; hard filter), companies to exclude (not interested, current employer), companies to always watch, company stage/size + industries in/out, must-have / deal-breaker stack, cadence + budget. Operator: "this serves a better product … this will be the major advantage".
+- WEEKLY Exa Agent run discovers NEW companies. The known-company list is passed so the agent excludes it (Agent `input.data`, bring your own data). Daily/on-click ATS polling stays as today; posting text comes ONLY from the ATS APIs, never from the agent.
+- Budget: the operator authorizes $20–30 of live Exa spend to learn the right questions and the structured answers to expect ("we can burn 20-30$ and learn the right way"). This explicitly authorizes live provider calls for the spike, within the cap.
+
+FACTS (exa.ai/pricing + exa.ai/docs/reference/agent-api-guide, read 2026-09-24):
+- Search $7/1k requests (≤10 results). Agent fixed effort per run: minimal $0.012, low $0.025, medium $0.10, high $0.50, xhigh $1.00. auto/max are metered at $0.10/ACU + $0.005/search, capped by default at $5 (auto) / $20 (max). Monitors $15/1k runs (schedule ≥1h, webhook delivery, dedup of new results). Free tier: $10/month credits.
+- Agent: async (poll or SSE), output_schema for structured output, `output.grounding` maps items to source URLs, and the docs recommend `auto` for list building. Fixed effort costs the same per run regardless of exclusions; with auto, a smaller search space should cost less. Either way the win is novelty.
+- Monitors are parked: webhook delivery needs a public endpoint and gigai is local-only.
+- Scout's exa_client.py already calls Exa's HTTP API with httpx. Use REST for the agent too; don't add the exa_py SDK unless justified. Verify the agent endpoint path from the docs.
+- Why: acquire today finds boards via Exa search, and the ATS APIs return ALL of a company's jobs worldwide. The discovery quality (which companies, sponsorship) is the weak part, and sponsorship is unknown on 69/69 rows (see scout-uat-0181-bugs.brief.txt B3). The agent can find sponsorship evidence with sources (H-1B filings, careers pages).
+
+STAGE 1 — SPIKE (docs + scripts only; no product code)
+- Inputs (defaults; the operator may override): the operator's UAT config (roles staff/senior backend; Denver, CO or remote; countries US; sponsorship yes). Initial exclusion list: coupang, clickhouse, gen-digital (from run_d73cb030).
+- Vary: 3–4 query phrasings built from the interview answers × 2 schema shapes (e.g. {company, careers_url, ats_provider, board_token, sponsorship: yes|no|unknown, sponsorship_evidence, source} vs a looser free-text one) × effort (low, medium, auto with a $1–2 cap).
+- PRIMARY METRIC: cost per NEW USABLE BOARD = a Greenhouse/Ashby/Lever board our existing ATS clients can poll that has ≥1 posting matching the roles in the US. Also record per run: cost, latency, companies returned, % new vs the exclusion list, % actually US, % sponsorship claims with a real grounding source, % board URLs that resolve and poll.
+- Budget guard: hard cap per run ($2) and total ($30); a running spend tally file; stop at the cap.
+- Save every raw agent response as a fixture (redact the key/headers) for later tests.
+- Key: read EXA_API_KEY from the environment (~/.gigai/.env). Never print, log or commit it. (It was rotated on 2026-09-24 after a paste leak.)
+- DELIVERABLES: the setup question list (final wording), the answers→query template, the output schema, the default effort + cap, and a metrics table, plus a short recommendation. Put it where v0.1.9/v0.2.0 spikes live (coordinator decides; next S-number).
+
+STAGE 2 — IMPLEMENTATION (only after the operator reviews stage 1)
+- The setup interview is part of first run (ties to the scout-run-command.brief `gigai scout run`: ask when no config exists; answers write find-jobs config + discovery prefs).
+- The answers drive (a) the agent query + schema, (b) acquire filters (B1: country/remote/sponsorship at acquire), (c) the exclusion/watch lists.
+- A "Discover companies" step/command: weekly cadence shown as "last run N days ago" (gigai has NO scheduler; D8 = button-only; a real scheduler is a roadmap item). New boards merge into the watchlist with sponsorship evidence + source.
+- Record agent cost per run so it can show on the gig dashboard later (roadmap workstream 4).
+
+CONSTRAINTS: uv only (never pip). Posting text only from ATS. Core never imports a gig: keep this in scout/. Focused tests only; the stage-2 tests use the stage-1 fixtures (no live calls in tests).

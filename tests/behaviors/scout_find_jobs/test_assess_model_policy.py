@@ -7,7 +7,8 @@ import pytest
 
 from gigai.adapters.port import InvocationResult, ModelInvocationError, NormalizedUsage
 from gigai.canonical import digest_imported_bytes, parse_json_bytes
-from gigai.config import load_config
+from gigai.config import Endpoint, load_config
+from gigai.config import ModelTarget as ConfigModelTarget
 from gigai.lifecycle import approve_offline, create_offline
 from gigai.private_records import create_record, import_reference, migrate_workpad_layout
 from gigai.scout.find_jobs.contracts import (
@@ -148,12 +149,37 @@ def _assess_fixture(tmp_path: Path) -> tuple[dict, Path]:
     home = tmp_path / "home"
     target = tmp_path / "target"
     target.mkdir()
+    # U2: assess_node resolves the sealed "ollama_local" enum to whichever
+    # configured target uses that adapter kind, so the fixture needs a real
+    # one (named however setup would name it) even though the model call
+    # itself is scripted via the resolve_model_adapter monkeypatch below.
     run_setup(
         build_config(
             home_root=home,
             workpad_root=tmp_path / "workpads",
             editor_argv=("/usr/bin/true",),
             open_with_target=False,
+            endpoints=(
+                Endpoint(name="offline", adapter="deterministic"),
+                Endpoint(name="ollama", adapter="ollama_local", base_url="http://127.0.0.1:11434"),
+            ),
+            model_targets=(
+                ConfigModelTarget(
+                    name="offline-default",
+                    endpoint="offline",
+                    model="fixture-v1",
+                    capabilities=("text",),
+                    max_output_tokens=64,
+                ),
+                ConfigModelTarget(
+                    name="ollama-default",
+                    endpoint="ollama",
+                    model="fixture-model",
+                    capabilities=("text",),
+                    max_output_tokens=512,
+                    model_digest="sha256:" + "c" * 64,
+                ),
+            ),
         )
     )
     initialize_target(
@@ -573,3 +599,152 @@ def test_candidate_partition_mixes_assessed_over_cap_and_exclusions(
     from gigai.scout.find_jobs.contracts import AssessOutput
 
     assert AssessOutput.from_json(output.to_json()) == output
+
+
+# --- U2: sealed enum -> configured target resolution (0.1.8.1 UAT) ---
+
+
+def test_resolve_configured_target_name_for_adapter_finds_setup_named_target(tmp_path: Path) -> None:
+    """setup names targets "codex-default" etc; the sealed enum is "codex_cli"."""
+    from gigai.scout.proposal_execution import _resolve_configured_target_name_for_adapter
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(
+            Endpoint(name="offline", adapter="deterministic"),
+            Endpoint(name="codex", adapter="codex_cli"),
+        ),
+        model_targets=(
+            ConfigModelTarget("offline-default", "offline", "fixture-v1", ("text",), 64),
+            ConfigModelTarget("codex-default", "codex", "default", ("text",), 512),
+        ),
+    )
+    assert _resolve_configured_target_name_for_adapter(config, "codex_cli") == "codex-default"
+
+
+def test_resolve_configured_target_name_for_adapter_fails_loudly_when_unmatched(tmp_path: Path) -> None:
+    from gigai.scout.proposal_execution import (
+        ScoutProposalExecutionError,
+        _resolve_configured_target_name_for_adapter,
+    )
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+    )
+    with pytest.raises(ScoutProposalExecutionError, match="no configured model target uses adapter 'openrouter_api'"):
+        _resolve_configured_target_name_for_adapter(config, "openrouter_api")
+
+
+def test_resolve_configured_target_name_for_adapter_fails_loudly_when_ambiguous(tmp_path: Path) -> None:
+    """No silent fallback: two targets of the same adapter kind is also an error."""
+    from gigai.scout.proposal_execution import (
+        ScoutProposalExecutionError,
+        _resolve_configured_target_name_for_adapter,
+    )
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(
+            Endpoint(name="offline", adapter="deterministic"),
+            Endpoint(name="codex", adapter="codex_cli"),
+            Endpoint(name="codex-alt", adapter="codex_cli"),
+        ),
+        model_targets=(
+            ConfigModelTarget("offline-default", "offline", "fixture-v1", ("text",), 64),
+            ConfigModelTarget("codex-default", "codex", "default", ("text",), 512),
+            ConfigModelTarget("codex-alt-default", "codex-alt", "default", ("text",), 512),
+        ),
+    )
+    with pytest.raises(ScoutProposalExecutionError, match="multiple configured model targets use adapter 'codex_cli'"):
+        _resolve_configured_target_name_for_adapter(config, "codex_cli")
+
+
+def test_resolve_configured_target_name_for_adapter_ignores_disabled_targets(tmp_path: Path) -> None:
+    from gigai.scout.proposal_execution import _resolve_configured_target_name_for_adapter
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(
+            Endpoint(name="offline", adapter="deterministic"),
+            Endpoint(name="codex", adapter="codex_cli"),
+            Endpoint(name="codex-alt", adapter="codex_cli"),
+        ),
+        model_targets=(
+            ConfigModelTarget("offline-default", "offline", "fixture-v1", ("text",), 64),
+            ConfigModelTarget("codex-default", "codex", "default", ("text",), 512, enabled=False),
+            ConfigModelTarget("codex-alt-default", "codex-alt", "default", ("text",), 512),
+        ),
+    )
+    assert _resolve_configured_target_name_for_adapter(config, "codex_cli") == "codex-alt-default"
+
+
+def test_assess_node_resolves_the_real_adapter_without_a_literal_enum_named_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: assess_node must not call resolve_model_adapter with the
+    literal enum string "ollama_local" -- it must pass the configured
+    target's own name ("ollama-default" in this fixture)."""
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/u2",
+        text="We need Python experience.",
+    )
+    good = json.dumps({
+        "matrix": [{"requirement": "Python", "resume_evidence": ["Built APIs"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+    run_id = "run_00000000-0000-4000-8000-000000000901"
+    run_dir = target / "runs" / run_id
+    (run_dir / "outputs").mkdir(parents=True)
+    (run_dir / "outputs" / "acquire.json").write_text(
+        json.dumps({"rows": [{"posting": posting.to_json(), "outcome": "new"}]})
+    )
+    selected = (SelectedPosting(posting.normalized_url, posting.url, posting.content_sha256, True),)
+    context = NodeContext(
+        run_id=run_id,
+        project_id=fixture["resolved"].project_id,
+        gig_id=fixture["gig_id"],
+        graph_id="graph_find_jobs_test",
+        graph_version=1,
+        goal_slug="assess",
+        manifest_digest="sha256:" + "0" * 64,
+        operation_key="assess-test",
+        target_observation_digest="sha256:" + "0" * 64,
+        workpad_path=str(fixture["resolved"].path),
+        redeemed_consent_ref="none",
+        model_target=ModelTarget.OLLAMA_LOCAL,
+    )
+    assess_input = AssessInput(
+        acquire_batch_ref=str(run_dir / "outputs" / "acquire.json"),
+        acquire_output_digest="sha256:" + "0" * 64,
+        selected_postings=selected,
+        selection_cap=10,
+        selection_reasons=(SelectionReason(posting.normalized_url, SelectionReasonCode.NEW),),
+        pinned_resume=fixture["pinned"],
+        target=str(target),
+        model_target=ModelTarget.OLLAMA_LOCAL,
+        answer_association_version="scout-answer-association:1",
+    )
+    seen_targets: list[str] = []
+
+    def _fake_resolve(config, adapter_target):
+        seen_targets.append(adapter_target)
+        return _ScriptedBinding([good])
+
+    monkeypatch.setattr("gigai.scout.proposal_execution.resolve_model_adapter", _fake_resolve)
+    output = assess_node(context, assess_input, home_root=fixture["home"], target=target, config=fixture["config"])
+    assert seen_targets == ["ollama-default"]
+    assert len(output.assessments) == 1
