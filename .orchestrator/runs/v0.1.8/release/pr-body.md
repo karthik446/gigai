@@ -132,7 +132,7 @@ files scanned as text; deleted files can't be scanned but can't leak either).
 Checked for: `dcap_` Orca dispatch-capability tokens, `sk-`/`ghp_`/`gho_`
 API-key shapes, `-----BEGIN ... PRIVATE KEY-----` blocks, `Bearer <token>`
 patterns, generic `api_key`/`API_KEY` assignments to real-looking values, and
-the operator's email (`skarthikc...`) — zero hits on any of the above. Any
+the operator's email (`[operator-email]`) — zero hits on any of the above. Any
 API-key-shaped or `Bearer`-shaped strings that do appear in the tree are test
 fixtures with synthetic values (e.g. `"super-secret-value"`) or references to
 environment-variable *names*, not values. `.orchestrator/**` needed no
