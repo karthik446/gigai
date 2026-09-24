@@ -244,6 +244,129 @@ def test_scout_resume_add_is_idempotent_for_the_same_file_bytes(tmp_path: Path) 
     assert second_payload["record_created"] is False
 
 
+@pytest.mark.parametrize("git", [True, False], ids=["git-target", "non-git-target"])
+def test_scout_resume_add_installs_scout_when_not_yet_installed(tmp_path: Path, git: bool) -> None:
+    """``resume add`` alone (no prior ``scout install``) is a true one-step command."""
+
+    home, target = _setup_and_init(tmp_path, git=git)
+    runner = CliRunner()
+
+    resume_source = tmp_path / "resume.md"
+    resume_source.write_text("Software engineer with Python service experience.\n", encoding="utf-8")
+
+    result = runner.invoke(
+        cli,
+        ["scout", "resume", "add", str(resume_source), "--home", str(home), "--target", str(target), "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["scout_installed"] is True
+    assert payload["reference_created"] is True
+    assert payload["record_created"] is True
+    gig_id = payload["gig_id"]
+
+    # Scout is now installed/approved/active, same as `scout install` would leave it.
+    gigs_result = runner.invoke(cli, ["gigs", "--home", str(home), "--target", str(target), "--json"])
+    assert gigs_result.exit_code == 0, gigs_result.output
+    gigs_payload = json.loads(gigs_result.output)
+    scout_entry = next(item for item in gigs_payload["entries"] if item["gig_id"] == gig_id)
+    assert scout_entry["status"] == "Approved"
+
+    config_path = target / "find-jobs.json"
+    assert config_path.is_file()
+
+    # Rerunning is idempotent: Scout is already installed, nothing changes.
+    second = runner.invoke(
+        cli,
+        ["scout", "resume", "add", str(resume_source), "--home", str(home), "--target", str(target), "--json"],
+    )
+    assert second.exit_code == 0, second.output
+    second_payload = json.loads(second.output)
+    assert second_payload["scout_installed"] is False
+    assert second_payload["reference_created"] is False
+    assert second_payload["record_created"] is False
+
+
+def test_scout_commands_resolve_a_bound_non_git_target_from_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``install``/``resume add``/``run``/``status``/``stop`` all work with no
+    ``--target`` when cwd is (or is under) an already-bound non-Git target.
+
+    Reproduces the exact one-command flow the brief requires: setup -> init
+    --target . -> resume add -> run --no-browser -> status -> stop, entirely
+    from inside the target directory (and, for `status`, a subfolder of it).
+    """
+
+    home, target = _setup_and_init(tmp_path, git=False)
+    runner = CliRunner()
+
+    resume_source = tmp_path / "resume.md"
+    resume_source.write_text("Software engineer with Python service experience.\n", encoding="utf-8")
+
+    monkeypatch.chdir(target)
+
+    install_result = runner.invoke(cli, ["scout", "install", "--home", str(home), "--json"])
+    assert install_result.exit_code == 0, install_result.output
+    install_payload = json.loads(install_result.output)
+    assert install_payload["bound"] is True
+
+    resume_result = runner.invoke(
+        cli, ["scout", "resume", "add", str(resume_source), "--home", str(home), "--json"]
+    )
+    assert resume_result.exit_code == 0, resume_result.output
+    resume_payload = json.loads(resume_result.output)
+    # Scout was already installed by the step above: rerunning install via
+    # resume add is a no-op here.
+    assert resume_payload["scout_installed"] is False
+    assert resume_payload["reference_created"] is True
+
+    # Disable every live source so `run` never makes a network call.
+    config_path = target / "find-jobs.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["sources"] = {"exa": False, "ats": False, "hiringcafe": False}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    run_result = runner.invoke(cli, ["scout", "run", "--no-browser", "--home", str(home), "--json"])
+    assert run_result.exit_code == 0, run_result.output
+    run_payload = json.loads(run_result.output)
+    assert run_payload["ok"] is True
+
+    try:
+        # `status` from a subfolder of the target must resolve the same binding.
+        subfolder = target / "nested"
+        subfolder.mkdir()
+        monkeypatch.chdir(subfolder)
+        status_result = runner.invoke(cli, ["scout", "status", "--home", str(home), "--json"])
+        assert status_result.exit_code == 0, status_result.output
+        status_payload = json.loads(status_result.output)
+        assert status_payload["state"] == "running"
+    finally:
+        monkeypatch.chdir(target)
+        stop_result = runner.invoke(cli, ["scout", "stop", "--home", str(home), "--json"])
+        assert stop_result.exit_code == 0, stop_result.output
+        assert json.loads(stop_result.output)["stopped"] is True
+
+
+def test_scout_install_still_requires_target_from_an_unbound_non_git_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-Git cwd that was never `gigai init --target`-ed keeps requiring
+    --target; implicit cwd resolution never invents a binding.
+    """
+
+    home, _target = _setup_and_init(tmp_path, git=False)
+    unbound = tmp_path / "unbound"
+    unbound.mkdir()
+    monkeypatch.chdir(unbound)
+
+    result = CliRunner().invoke(cli, ["scout", "install", "--home", str(home), "--json"])
+    assert result.exit_code != 0
+    payload = json.loads(result.output)
+    message = payload["error"]["message"]
+    assert "Git repository" in message or "target" in message
+
+
 def test_starter_find_jobs_config_validates_against_the_contract(tmp_path: Path) -> None:
     from gigai.scout.scout_cli import STARTER_FIND_JOBS_CONFIG, write_starter_find_jobs_config
 

@@ -18,9 +18,35 @@ import click
 from ..canonical import canonical_json_bytes
 from ..private_records import PrivateRecordError, create_record, import_reference
 from ..setup import default_home_root
-from ..workpad import WorkpadError
+from ..workpad import WorkpadError, resolve_bound_project
 from .find_jobs.contracts import FindJobsConfig, SourceToggles
 from .template import ScoutInstallError, install_scout
+
+
+def _resolved_target(target_value: Path | None, home_root: Path) -> Path | None:
+    """Turn an implicit ``--target`` into the cwd's already-bound target path.
+
+    Several downstream helpers (``install_scout`` -> ``initialize_defaults``,
+    in particular) re-resolve the target themselves via the raw, registry-
+    unaware ``resolve_target``, which rejects an implicit (no ``--target``)
+    non-Git cwd even when that exact directory is already a registered
+    non-Git target (``resolve_bound_project`` -- used by ``gigai scout
+    status``/``stop``/``run`` reuse -- already handles this case). Passing an
+    *explicit* resolved path down sidesteps that gap without touching those
+    helpers: an explicit path never falls into the "no --target given"
+    branch. When ``target_value`` was already given, or when no binding can
+    be found for the cwd, this returns ``target_value`` unchanged so the
+    normal (git-discovery or not-bound) error paths are unchanged.
+    """
+
+    if target_value is not None:
+        return target_value
+    try:
+        bound = resolve_bound_project(home_root=home_root, requested_target=None)
+    except WorkpadError:
+        return None
+    return bound.target_root
+
 
 STARTER_FIND_JOBS_CONFIG = FindJobsConfig(
     roles=("REPLACE_WITH_YOUR_ROLE (e.g. software engineer)",),
@@ -84,15 +110,16 @@ def install_command(target_value: Path | None, home_value: Path | None, as_json:
     """Bind, approve, and activate Scout for the bound project; safe to rerun."""
 
     home_root = home_value or default_home_root()
+    resolved_target = _resolved_target(target_value, home_root)
     try:
-        result = install_scout(home_root=home_root, requested_target=target_value)
+        result = install_scout(home_root=home_root, requested_target=resolved_target)
     except (ScoutInstallError, WorkpadError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_install_failed")
         return
 
     wrote_config = False
     try:
-        target_root = (target_value or Path.cwd()).expanduser().resolve(strict=True)
+        target_root = (resolved_target or Path.cwd()).expanduser().resolve(strict=True)
         wrote_config = write_starter_find_jobs_config(target_root)
     except OSError as exc:
         _fail(exc, as_json=as_json, fallback="scout_install_failed")
@@ -140,18 +167,29 @@ def resume_add_command(
 ) -> None:
     """Import FILE as the resume reference and create the record find-jobs reads.
 
-    One step: this both imports the reference (kind ``resume``) and creates
-    the ``g45_reference`` record wrapper (family) find-jobs' resume resolution
-    requires. Rerunning with the same file bytes is a no-op: the reference
-    import dedupes by content digest and the record uses a digest-derived
-    operation key.
+    Installs/approves/activates Scout first if it isn't yet (same idempotent
+    step ``gigai scout install`` and ``gigai scout run`` perform), so this is
+    a true one-step command on a freshly bound target. Rerunning is a no-op
+    once Scout is installed: this both imports the reference (kind
+    ``resume``) and creates the ``g45_reference`` record wrapper (family)
+    find-jobs' resume resolution requires, in one call. Rerunning with the
+    same file bytes is a no-op: the reference import dedupes by content
+    digest and the record uses a digest-derived operation key.
     """
 
     home_root = home_value or default_home_root()
+    resolved_target = _resolved_target(target_value, home_root)
     try:
+        install_result = install_scout(home_root=home_root, requested_target=resolved_target)
+        installed_scout = install_result.bound or install_result.approved or install_result.activated
+        # Matches ensure_scout_ready()'s install_scout -> write starter config
+        # sequence in run_supervisor.py, so `resume add` alone (before `scout
+        # run`) leaves the target in the same state `scout run` would.
+        target_root = (resolved_target or Path.cwd()).expanduser().resolve(strict=True)
+        write_starter_find_jobs_config(target_root)
         imported = import_reference(
             home_root=home_root,
-            requested_target=target_value,
+            requested_target=resolved_target,
             gig_id=gig_id,
             kind="resume",
             source=file,
@@ -159,7 +197,7 @@ def resume_add_command(
         )
         record = create_record(
             home_root=home_root,
-            requested_target=target_value,
+            requested_target=resolved_target,
             gig_id=gig_id,
             kind="imported_reference",
             content_family="g45_reference",
@@ -168,12 +206,14 @@ def resume_add_command(
             origin="imported",
             operation_key=f"scout-resume-record:{imported.item_id}",
         )
-    except (PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
+    except (ScoutInstallError, PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_resume_add_failed")
         return
 
     payload = {
         "ok": True,
+        "scout_installed": installed_scout,
+        "gig_id": install_result.gig_id,
         "reference_id": imported.item_id,
         "reference_created": imported.created,
         "record_id": record.record_id,
@@ -183,6 +223,8 @@ def resume_add_command(
     if as_json:
         _emit(payload, True, "")
         return
+    if installed_scout:
+        click.echo(f"Scout ({install_result.gig_id}) was installed, approved, and activated.")
     click.echo(
         f"Resume reference {imported.item_id} and record {record.record_id} are ready. "
         "Next: `gigai scout run`."
@@ -219,10 +261,11 @@ def run_command(
     from . import run_supervisor
 
     home_root = home_value or default_home_root()
+    resolved_target = _resolved_target(target_value, home_root)
     try:
         result = run_supervisor.start(
             home_root=home_root,
-            requested_target=target_value,
+            requested_target=resolved_target,
             port=port,
             foreground=foreground,
             open_browser=not no_browser,

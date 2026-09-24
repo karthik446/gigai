@@ -652,10 +652,11 @@ def _resolve_bound_project(
             target = resolve_target(requested_target, cwd=cwd)
         except GitTargetError:
             # An explicitly initialized non-Git target is still a valid implicit
-            # target for commands run from that directory.  resolve_target
-            # deliberately rejects implicit non-Git paths because it has no
-            # registry context; use the registry only for this exact, already
-            # bound directory and never infer a parent or neighboring target.
+            # target for commands run from that directory, or from a subfolder
+            # of it.  resolve_target deliberately rejects implicit non-Git
+            # paths because it has no registry context; use the registry only
+            # to recognize an already-bound directory (walking up from cwd to
+            # find it) and never to infer a sibling or unrelated target.
             if requested_target is not None:
                 raise
             current = (cwd or Path.cwd()).resolve(strict=True)
@@ -664,14 +665,19 @@ def _resolve_bound_project(
                 create=False,
                 tolerate_invalid_rows=tolerate_invalid_registry_rows,
             )
+            found_root: Path | None = None
             with registry.transaction() as transaction:
-                record = transaction.find_target(current)
-            if record is None or record.target_kind != "non-git":
+                for candidate in (current, *current.parents):
+                    record = transaction.find_target(candidate)
+                    if record is not None and record.target_kind == "non-git":
+                        found_root = candidate
+                        break
+            if found_root is None:
                 raise
             target = ResolvedTarget(
                 requested_path=current,
                 requested_identity=current,
-                root=current,
+                root=found_root,
                 kind="non-git",
             )
         registry, _ = open_project_registry(
