@@ -235,8 +235,8 @@ uv run --locked pytest tests/behaviors/scout_find_jobs -q   # a focused slice
   lifecycle, catalog, package boundary. Never imports a Gig.
 - `src/gigai/scout/` — the Scout Gig: `find_jobs/` (acquire/assess/present),
   bundled goal-graph data, and `ui/` (the separate Vite/React checkout above).
-- `.orchestrator/` — this project's coordination record: worker reports,
-  decisions, and status. Committed, not a scratch directory.
+- `.orchestrator/` — the coordinator's local workpad (worker reports,
+  decisions, status). Local only and gitignored; never committed.
 
 ## Status
 

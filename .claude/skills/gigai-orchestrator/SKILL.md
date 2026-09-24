@@ -1,11 +1,13 @@
 ---
 name: gigai-orchestrator
-description: Coordinate GigAI v0.1.8 work on Orca. Dispatch workers to the cheapest capable model, verify claims against repo evidence, keep the operator's status workpad current. Use when told to orchestrate or coordinate, or asked where v0.1.8 work stands. Works for Claude Code and Codex.
+description: Coordinate GigAI work on Orca from the orchestrator home (/Users/kar/orca/workspaces/gigai). Dispatch workers to the cheapest capable model, verify claims against repo evidence, keep the operator's status workpad current. Use when told to orchestrate or coordinate, or asked where the current GigAI version's work stands. Works for Claude Code and Codex.
 ---
 
-# GigAI orchestrator (v0.1.8 · Orca 1.4.207 · Claude or Codex)
+# GigAI orchestrator (Orca · Claude or Codex)
 
-**Job:** pick the work, dispatch it on Orca to the cheapest model that can do it, verify what comes back, and keep `.orchestrator/status.md` true. **Don't edit source or docs yourself.** Workers do that. You run read-only commands, visible test runs, local-model checks and Orca verbs, and you write only to `.orchestrator/` (committed as the project's coordination record). Never deploy: give the operator `make deploy`.
+**Job:** pick the work, dispatch it on Orca to the cheapest model that can do it, verify what comes back, and keep `.orchestrator/status.md` true. **Don't edit source or docs yourself.** Workers do that. You run read-only commands, visible test runs, local-model checks and Orca verbs, and you write only to `.orchestrator/`. Never deploy: give the operator `make deploy`.
+
+**Where you run (since 2026-09-24).** The coordinator runs from the orchestrator home `/Users/kar/orca/workspaces/gigai`, not from a version worktree. That directory is not a git repo: `.orchestrator/` (the coordination record) is local only and never committed or pushed anywhere. Version worktrees (`gigai-vX.Y.Z/`) sit beside it. The active worktree's absolute path is in `.orchestrator/active-worktree`: read it first, and use `git -C <worktree>` and `--worktree path:<worktree>` for everything that touches the product repo. Each version worktree has a gitignored symlink `.orchestrator -> ../.orchestrator`, so workers' relative `.orchestrator/workers/<title>.md` paths land here. The gigai repo never commits `.orchestrator/` (this skill stays in the gigai repo). When a new version worktree is cut, create that symlink (`ln -s ../.orchestrator <worktree>/.orchestrator`) and update `active-worktree`.
 
 **One coordinator per Run.** Start with `orca orchestration run-current --json`. Another terminal's Run is fenced (`consumer_fenced`); never `run-use` a Run another coordinator still owns unless the operator says so. For new work, `run-create --objective '…'` rebinds you.
 
@@ -51,7 +53,7 @@ Codex quota is shared with implementation: don't spend it on checks a local mode
 ## 4. Visible by default: never run hidden long jobs
 
 Anything over about 30s runs in a named Orca tab the operator can watch:
-`.claude/skills/gigai-orchestrator/run_visible.sh "TEST make test" make test` prints a log path under `.orchestrator/logs/` (local only: `*.log` is gitignored; never commit test logs, and cite results in status/decisions, not log paths).
+`.claude/skills/gigai-orchestrator/run_visible.sh "TEST make test" make test` runs the command in the active worktree (`$GIGAI_WORKTREE` overrides) and prints a log path under `.orchestrator/logs/` (local only: logs are gitignored; never commit test logs, and cite results in status/decisions, not log paths).
 - Tab title prefixes: `TEST`, `EVAL`, `LOCAL`, `BUILD`, `LINT`. Read only the log tail. The run is done when the log has `=== EXIT <code> ===`.
 - To wait: a background `until grep -q '^=== EXIT' <log>; do sleep 10; done` if your harness resumes on background exit (Claude: `run_in_background`). Otherwise end your turn and check once when prompted.
 - **Test budget (the operator's rule; the full suite makes the Mac spin).** A worker's acceptance is **only the tests covering the files it changed**, plus directly dependent test files: exact `path::test` or `tests/behaviors/<area>/test_x.py` selectors, never whole directories, never `tests/behaviors`, never `-n` parallel sweeps, never `make test`/`test-wheel`/`test-installed`. A one-test fix gets that one test. Workers may also run **`make unit-tests`** (the conftest `fast_unit` lane, ~730 tests, ~7s, no subprocess/network/git) as a cheap regression check. The **full `make test` runs only through the coordinator**, once per release (or once after a cross-cutting change like a package move), in one `TEST` tab, and never while workers are editing. `make test-live` needs `GIGAI_G30_UAT=1` and operator consent. When writing a spec's ACCEPTANCE, list the exact test selectors; if you catch yourself writing a directory or `-n 8`, narrow it.
@@ -59,7 +61,7 @@ Anything over about 30s runs in a named Orca tab the operator can watch:
 
 ## 5. The loop
 
-1. Launch the whole wave of independent packets in one turn (`worker-start --run <run> --worktree current … --task-title … --spec …`). Use `task-create --deps` only when B reads A's output.
+1. Launch the whole wave of independent packets in one turn (`worker-start --run <run> --worktree path:<active worktree> … --task-title … --spec …`). Use `task-create --deps` only when B reads A's output.
 2. One waiter per wave: `ORCH_RUN=<run> .claude/skills/gigai-orchestrator/wait.sh` in the background. It returns on worker_done, question or escalation, acks heartbeats, sweeps idle workers every 5 min, and gives up after 1 h (`MAX_WAITS`). Write the checkpoint to `status.md`, tell the operator, and yield. Don't poll.
 3. **Messaging is flaky** (ORCA-01, missed wakes). Every spec tells the worker to also write `.orchestrator/workers/<task-title>.md` (state, evidence paths, open question). If the inbox is silent, read those files, then `worker-show` or `worker-read --limit 40` before restarting anything.
 4. On a delivery: read *every* message, `reply --id` to questions, verify each `worker_done` (§7), and only then `check --ack <delivery_id>`.
@@ -88,7 +90,7 @@ Anything over about 30s runs in a named Orca tab the operator can watch:
 
 `.orchestrator/status.md` sections: **Coordinator · In progress · Next up · Done · Open tabs · Blocked on operator · Flagged**. Rewrite it at every checkpoint so the operator can read it without asking. Chat checkpoints are at most 10 lines: one row per packet (`packet | model | running/done/verified/blocked | evidence path | next`), then "Blocked on you" and "Flagged". Give paths, not transcripts.
 
-Also record every decision (operator's or yours) with its reason as one line in `.orchestrator/decisions.log`. Layout and reading order are in `.orchestrator/README.md`. The workpad is committed, so before each commit scan it for secrets and personal data (dispatch capabilities `dcap_…`, API keys, emails) and redact them.
+Also record every decision (operator's or yours) with its reason as one line in `.orchestrator/decisions.log`. Layout and reading order are in `.orchestrator/README.md`. The workpad is local only (not in git), but still never paste secrets into it (dispatch capabilities `dcap_…`, API keys).
 
 **Waiting and the inbox:** `ORCH_RUN=<run> .claude/skills/gigai-orchestrator/wait.sh` (run it in the background) blocks until a non-heartbeat event arrives and acks heartbeat-only deliveries itself. `ORCH_RUN=<run> .claude/skills/gigai-orchestrator/inbox.sh` prints pending messages without acking.
 
@@ -97,7 +99,8 @@ Also record every decision (operator's or yours) with its reason as one line in 
 ## 9. Git workflow (adopted 2026-09-23, from v0.1.9)
 
 - **One worktree + branch per version** (`karthik446/gigai-vX.Y.Z`), cut from `main` after the previous release. Open a **draft PR** at once and keep its body current (packets done, what each one proved).
-- **Workers never commit.** The coordinator commits right after verifying a packet: that packet's files only, by explicit path (never `git add -A` or `.`), one logical commit ending with the Co-Authored-By line. Secret-scan `.orchestrator/` changes first (§8). Never let verified work sit uncommitted.
+- **Workers never commit.** The coordinator commits right after verifying a packet: that packet's files only, by explicit path (never `git add -A` or `.`), one logical commit ending with the Co-Authored-By line, via `git -C <worktree>`. Never let verified work sit uncommitted.
+- **`.orchestrator/` is never committed.** It is local only and gitignored in the gigai repo. Version-branch commits are product changes only, and the PR body never lists orchestrator work as commits.
 - **Push at wave ends.** A push cancels and restarts PR CI. Never force-push a pushed branch without the operator.
 - **Ship:** the operator squash-merges; the tag is annotated: `git tag -a vX.Y.Z -m "GigAI vX.Y.Z" && git push origin vX.Y.Z` (`release.yml` requires it). Give the operator the command; push it only when they explicitly ask.
 - **Release notes are part of the release.** The CHANGELOG `### X.Y.Z` section becomes the GitHub Release notes. Before tagging, write it and review every claim against the code like any other doc (§7).

@@ -27,10 +27,9 @@ dist/
 .idea/
 .vscode/
 
-# Orchestrator run/test logs are local only (decisions.log is the committed record)
-.orchestrator/**/*.log
-.orchestrator/**/logs/
-!.orchestrator/decisions.log
+# Orchestrator coordination state is local only, never committed: in a version
+# worktree .orchestrator is a symlink to the orchestrator home's ../.orchestrator.
+.orchestrator
 
 # S24 discovery bake-off: raw DOL H-1B LCA disclosure file (~250MB) is scratch
 # input, never committed -- only a small derived sample under

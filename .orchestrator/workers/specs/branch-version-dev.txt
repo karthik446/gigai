@@ -1,9 +1,0 @@
-TARGET (branch-version-dev): make a branch install distinguishable from the PyPI 0.1.8.1 release (reviewer finding on PR #37, operator-approved). Set the package version to the PEP 440 pre-release 0.1.9.dev0.
-CHANGE:
-1. pyproject.toml [project] version = "0.1.9.dev0" (line 7).
-2. Refresh uv.lock's own gigai entry to match: run `uv lock` (it must change ONLY the gigai version line; if it tries to upgrade any other package, stop and report). Then `uv run --locked gigai --version` must print `gigai 0.1.9.dev0`.
-3. Do NOT change src/gigai/catalog.py CATALOG_REVISION ("v0.1.8.1"): it's a release-time value that ends up in installed catalog entries' source_revision; it's bumped at release (coordinator decision).
-4. Check nothing else pins the package version to 0.1.8.1: grep tools/ tests/ and .github/ for "0.1.8.1" and for tests that compare the package version to CATALOG_REVISION or to a tag; run tests/behaviors/installed_release/test_release_check.py.
-OWNED FILES (nothing else): pyproject.toml (version line only), uv.lock (the gigai version only), .orchestrator/workers/branch-version-dev.md.
-ACCEPTANCE: `uv run --locked gigai --version` → gigai 0.1.9.dev0; `uv run --locked --extra test pytest tests/behaviors/installed_release/test_release_check.py -q` passes; `make unit-tests` passes; `git diff --stat` shows only pyproject.toml and uv.lock (1 line each, or explain).
-EXCLUSIONS: no other edits; no git add/commit/stash/reset/clean/push. Ask questions only via `orca orchestration ask`. Say READ vs EXECUTED. Write .orchestrator/workers/branch-version-dev.md, then worker_done.

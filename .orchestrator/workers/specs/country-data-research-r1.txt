@@ -1,9 +1,0 @@
-TARGET (country-data-research-r1): coordinator review of .orchestrator/research/country-data.md. §3-§5 (pycountry required, geonamescache optional, country_converter/us as weaker alternatives) are accepted. §2 is circular: it proves only what OUR clients read (location name / categories.location / top-level location), then concludes "no structured country field is being thrown away". The question was what the APIs RETURN.
-CHANGE: check the public API documentation (READ via web fetch; no live API calls, no requests with tokens) for each source Scout uses:
-- Lever public postings API (e.g. github.com/lever/postings-api README): is there a `country` field (ISO code?), `workplaceType`, `categories.allLocations`?
-- Ashby public job board / posting API (developers.ashbyhq.com, "job postings" / posting-api): `address.postalAddress.addressCountry`, `isRemote`, `secondaryLocations`, `workplaceType`?
-- Greenhouse Job Board API (developers.greenhouse.io/job-board.html): `location.name` only, or `offices[]` / `?content=true` fields with structured location?
-- Exa: any location field in search results (expected none).
-For each: quote the field and URL, say which endpoint/params return it, and whether Scout's clients (ats_board_clients.py; cite the request URLs they build) already call that endpoint. Then rewrite §2's conclusion and, if structured fields exist, update §5: "use the structured field first; fall back to pycountry string matching only where a source gives free text". Keep §3-§5's library findings. Add a Change log entry.
-OWNED FILES: .orchestrator/research/country-data.md, .orchestrator/workers/country-data-research.md (append r1).
-EXCLUSIONS: no code/test/lock edits; no live ATS/Exa calls (docs pages only); no installs; no git add/commit/stash/reset/clean. Say READ vs EXECUTED; if a doc page can't be fetched, say so rather than inferring. Then worker_done.

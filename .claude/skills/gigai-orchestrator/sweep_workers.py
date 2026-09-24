@@ -56,7 +56,10 @@ def close(handle: str, why: str) -> None:
         orca("terminal", "close", "--terminal", handle, "--tab")
 
 
-live = {t["handle"]: t for t in (orca("terminal", "list").get("result") or {}).get("terminals", [])}
+# Workers and TEST/LOCAL tabs live in the active version worktree, not the orchestrator home.
+HOME = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+WORKTREE = os.environ.get("GIGAI_WORKTREE") or open(os.path.join(HOME, ".orchestrator", "active-worktree")).read().strip()
+live = {t["handle"]: t for t in (orca("terminal", "list", "--worktree", f"path:{WORKTREE}").get("result") or {}).get("terminals", [])}
 workers = (orca("orchestration", "worker-list", "--run", RUN).get("result") or {}).get("workers", [])
 
 
