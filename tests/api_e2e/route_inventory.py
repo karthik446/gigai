@@ -1,29 +1,33 @@
-"""test-gap-001: statically discover every route ``present_api.py`` serves.
+"""test-gap-001: statically discover every route the Scout find-jobs API serves.
 
 Mirrors ``tests/behaviors/scout_find_jobs/test_run_dir_writer_inventory.py``'s
 own shape: an AST scan of the real source (never a hand-maintained list that
 can silently drift from the code), cross-referenced against a registry this
 suite owns (``JOURNEYS`` in ``test_route_inventory.py``) so a route added to
-``present_api.py`` without an e2e journey added here fails loudly.
+the API without an e2e journey added here fails loudly.
+
+R0: the ``do_GET``/``do_POST``/``do_PUT`` dispatch this scanner reads moved
+from ``present_api.py`` into ``present_api/api/server.py`` (a pure move; see
+that package's docstrings) -- this scanner now points at ``api/server.py``,
+the dispatch's new home, instead.
 
 ## What this recognizes
 
-``present_api.py``'s ``do_GET``/``do_POST``/``do_PUT`` dispatch (there is no
-``do_PATCH``/``do_DELETE`` today -- confirmed by the same grep
-``test_present_csrf.py``'s docstring already used to justify its own route
-list) each contain a flat chain of ``if path == "<literal>":`` /
-``if path.startswith("<literal>"):`` comparisons, plus one parametric-path
-helper: ``_match_run_id(path, suffix="<literal>")`` for the three
-``/api/runs/{run_id}...`` routes. This scanner recognizes exactly those two
-shapes inside each ``do_*`` method body:
+The dispatch (there is no ``do_PATCH``/``do_DELETE`` today -- confirmed by
+the same grep ``test_present_csrf.py``'s docstring already used to justify
+its own route list) each contain a flat chain of ``if path ==
+"<literal>":`` / ``if path.startswith("<literal>"):`` comparisons, plus one
+parametric-path helper: ``_match_run_id(path, suffix="<literal>")`` for the
+three ``/api/runs/{run_id}...`` routes. This scanner recognizes exactly
+those two shapes inside each ``do_*`` method body:
 
 1. ``if path == "<literal>":`` -> a fixed route on that method.
 2. ``_match_run_id(path, suffix="<literal>")`` -> the parametric route
    ``/api/runs/{run_id}<literal>`` on that method (GET only today).
 
 It deliberately does not try to recognize an arbitrary new dispatch shape a
-future route might use (e.g. a regex route table) -- if ``present_api.py``'s
-dispatch shape changes, this scanner's own self-test
+future route might use (e.g. a regex route table) -- if the dispatch's shape
+changes, this scanner's own self-test
 (``test_scanner_finds_the_known_routes``) catches that by failing to find a
 route this packet already knows must exist.
 
@@ -37,7 +41,7 @@ route this packet already knows must exist.
 - A route registered dynamically (built from a variable, not a string
   literal) would be invisible here, same honest limit
   ``test_run_dir_writer_inventory.py`` documents for its own scan. No route
-  in ``present_api.py`` does this today (confirmed by this file's own
+  in the dispatch does this today (confirmed by this file's own
   ``test_scanner_finds_the_known_routes``).
 """
 
@@ -53,7 +57,8 @@ _PRESENT_API_PATH = (
     / "gigai"
     / "scout"
     / "find_jobs"
-    / "present_api.py"
+    / "api"
+    / "server.py"
 )
 
 
