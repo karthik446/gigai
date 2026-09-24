@@ -13,7 +13,12 @@ from gigai.scout.find_jobs.contracts import (
     SourceToggles,
     SponsorshipStatus,
 )
-from gigai.scout.find_jobs.filters import country_match, exclusion_reason, sponsorship_from_text
+from gigai.scout.find_jobs.filters import (
+    country_match,
+    exclusion_reason,
+    location_mismatch_detail,
+    sponsorship_from_text,
+)
 
 
 def _config(**overrides: object) -> FindJobsConfig:
@@ -188,6 +193,90 @@ def test_country_match_genuinely_ambiguous_locations_stay_none() -> None:
     assert country_match(None, ("US",)) is None
 
 
+# --- B1 (0.1.8.1, r1 coordinator review): region tokens must never count
+# as a single-country MATCH, and a location that resolves to ONLY region
+# tokens (no country/state/city anywhere in it) is a definite NON-match
+# (False), not ambiguous -- the operator's own UAT complaint: "AMER" rows
+# passed a US-only filter because it fell into the ambiguous bucket and
+# exclusion_reason never excludes ambiguous locations. r0 of this test
+# asserted the pre-fix (None/ambiguous) behavior; r1 corrects it to the
+# operator's actual rule. -----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "location",
+    ["AMER", "EMEA", "APAC", "LATAM", "Remote - Americas", "Remote, AMER"],
+)
+def test_country_match_region_only_locations_are_a_definite_non_match(location: str) -> None:
+    assert country_match(location, ("US",)) is False
+
+
+def test_country_match_region_token_with_matching_country_still_matches() -> None:
+    # A region token alongside a real country match still matches on the
+    # country -- the region token doesn't poison an otherwise-good match.
+    assert country_match("AMER; Denver, CO", ("US",)) is True
+    assert country_match("Remote - US", ("US",)) is True
+
+
+def test_country_match_region_token_with_non_matching_country_is_false() -> None:
+    assert country_match("AMER; Bengaluru, India", ("US",)) is False
+
+
+def test_country_match_multiple_region_tokens_still_non_match() -> None:
+    assert country_match("EMEA; APAC", ("US",)) is False
+
+
+def test_country_match_region_token_is_whole_segment_only_not_substring() -> None:
+    # "AMER" must not fire as a substring of an unrelated word/company name.
+    assert country_match("AMERica Story Inc", ("US",)) is None
+
+
+def test_country_match_region_token_alongside_unrecognized_token_still_non_match() -> None:
+    # A region token plus a genuinely unrecognized token (no country
+    # signal at all from either) is still a definite region-only non-match.
+    assert country_match("AMER; Remote", ("US",)) is False
+
+
+def test_country_match_unrecognized_token_without_region_signal_stays_ambiguous() -> None:
+    # No region token at all: an unrelated unrecognized token keeps its
+    # pre-existing ambiguous (None) behavior, unaffected by this fix.
+    assert country_match("Remote", ("US",)) is None
+    assert country_match("Some Unknown Place", ("US",)) is None
+
+
+# --- 0.1.8.1: pycountry-backed table still resolves the same real UAT
+# strings (drop-in replacement for the hand-typed alias tables). ----------
+
+
+def test_country_match_great_britain_demonym_still_folds_to_gb() -> None:
+    assert country_match("Great Britain", ("GB",)) is True
+    assert country_match("Great Britain", ("US",)) is False
+
+
+def test_country_match_czechia_and_czech_republic_both_resolve() -> None:
+    assert country_match("Czechia", ("CZ",)) is True
+    assert country_match("Czech Republic", ("CZ",)) is True
+
+
+# --- structured_countries: trusted field wins outright, no text fallback --
+
+
+def test_country_match_structured_field_wins_over_conflicting_text() -> None:
+    # Structured says US; free text (deliberately wrong/garbage here) is
+    # never even consulted once structured data is supplied.
+    assert country_match("Seoul, South Korea", ("US",), structured_countries=("US",)) is True
+
+
+def test_country_match_structured_field_empty_tuple_is_trusted_not_ambiguous() -> None:
+    # An empty structured result (field present, resolved to no recognized
+    # country) is a real "no match" -- not "fall back to parsing text".
+    assert country_match("", ("US",), structured_countries=()) is False
+
+
+def test_country_match_structured_none_falls_back_to_text_parsing() -> None:
+    assert country_match("Denver, CO", ("US",), structured_countries=None) is True
+
+
 # --- sponsorship_from_text ------------------------------------------------
 
 
@@ -258,6 +347,46 @@ def test_sponsorship_p1b_negative_wins_over_new_positive_phrases() -> None:
     assert sponsorship_from_text(text) is SponsorshipStatus.NOT_OFFERED
 
 
+# --- 0.1.8.1 B3: the ticket's required phrase coverage. "will not sponsor"
+# was missing outright; the rest were already covered but are asserted here
+# together as the ticket's explicit checklist, against real evidence-run
+# posting shapes once html_to_text's entity-decoding bug (B3's other half,
+# see test_ats_board_clients.py) stopped mangling the text these run
+# through in production. --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "We will not sponsor employment visas for this role.",
+        "Unable to sponsor work visas at this time.",
+        "You must be authorized to work in the US without sponsorship.",
+        "Must be authorized to work in the United States without visa sponsorship.",
+        "Sponsorship is not available for this position.",
+    ],
+)
+def test_sponsorship_b3_required_not_offered_phrases(text: str) -> None:
+    assert sponsorship_from_text(text) is SponsorshipStatus.NOT_OFFERED
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Sponsorship is available for the right candidate.",
+        "Visa sponsorship available for qualified candidates.",
+        "We sponsor international candidates.",
+    ],
+)
+def test_sponsorship_b3_required_offered_phrases(text: str) -> None:
+    assert sponsorship_from_text(text) is SponsorshipStatus.OFFERED
+
+
+def test_sponsorship_b3_visa_required_excludes_not_offered() -> None:
+    row = _row(sponsorship=sponsorship_from_text("We will not sponsor employment visas for this role."))
+    config = _config(visa_sponsorship_required=True)
+    assert exclusion_reason(row, config) is NotAssessedReason.SPONSORSHIP_EXCLUDED
+
+
 # --- exclusion_reason ------------------------------------------------------
 
 
@@ -306,3 +435,52 @@ def test_exclusion_reason_location_checked_before_sponsorship() -> None:
     row = _row(location="Bengaluru, India", sponsorship=SponsorshipStatus.NOT_OFFERED)
     config = _config(countries=("US",), visa_sponsorship_required=True)
     assert exclusion_reason(row, config) is NotAssessedReason.LOCATION_MISMATCH
+
+
+# --- 0.1.8.1 r1: exclusion_reason on a region-only location -- the
+# operator's UAT complaint ("AMER" rows passed a US-only filter). Keeps
+# exclusion_reason's stable, coarse LOCATION_MISMATCH contract (unchanged
+# for proposal_execution.py); location_mismatch_detail is the finer-grained
+# helper acquire's drop-count accounting uses. -----------------------------
+
+
+def test_exclusion_reason_region_only_location_is_excluded() -> None:
+    row = _row(location="AMER")
+    config = _config(countries=("US",))
+    assert exclusion_reason(row, config) is NotAssessedReason.LOCATION_MISMATCH
+
+
+def test_exclusion_reason_region_with_matching_country_is_not_excluded() -> None:
+    row = _row(location="AMER; Denver, CO")
+    config = _config(countries=("US",))
+    assert exclusion_reason(row, config) is None
+
+
+def test_location_mismatch_detail_region_only_returns_region_only() -> None:
+    row = _row(location="AMER")
+    config = _config(countries=("US",))
+    assert location_mismatch_detail(row, config) is NotAssessedReason.REGION_ONLY
+
+
+def test_location_mismatch_detail_recognized_wrong_country_returns_location_mismatch() -> None:
+    row = _row(location="Bengaluru, India")
+    config = _config(countries=("US",))
+    assert location_mismatch_detail(row, config) is NotAssessedReason.LOCATION_MISMATCH
+
+
+def test_location_mismatch_detail_none_when_not_excluded() -> None:
+    row = _row(location="Denver, CO")
+    config = _config(countries=("US",))
+    assert location_mismatch_detail(row, config) is None
+    ambiguous_row = _row(location="Remote")
+    assert location_mismatch_detail(ambiguous_row, config) is None
+
+
+def test_location_mismatch_detail_structured_countries_never_region_only() -> None:
+    # A structured countries=() result (present but unmatched) is always a
+    # LOCATION_MISMATCH, never REGION_ONLY -- REGION_ONLY only applies to
+    # the free-text fallback path, since a structured field names real
+    # countries or nothing, never a region label.
+    row = _row(location="AMER", countries=())
+    config = _config(countries=("US",))
+    assert location_mismatch_detail(row, config) is NotAssessedReason.LOCATION_MISMATCH

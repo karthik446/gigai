@@ -23,9 +23,12 @@ change its response shape without notice, so failures are treated as
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import html as _html_entities
 from html.parser import HTMLParser
 import re
 from typing import TYPE_CHECKING
+
+import pycountry
 
 from .contracts import (
     ATSProvider,
@@ -108,15 +111,34 @@ def html_to_text(html: str | None) -> str:
     imperfect line breaks, never an exception. Falls through unchanged when
     ``html`` doesn't look like markup at all (Lever/Ashby's ``descriptionPlain``
     is already plain text).
+
+    0.1.8.1 B3 fix: Greenhouse's ``content`` field is *HTML-escaped HTML* --
+    real tags encoded as text, e.g. ``"&lt;p&gt;...&lt;/p&gt;"`` rather than
+    ``"<p>...</p>"`` (confirmed against a live evidence run's raw payload:
+    ``ats_board_clients.py``'s own module docstring already said this, but
+    the code never actually decoded that outer layer of escaping). The old
+    ``"<" not in html`` check saw no literal ``<`` in that escaped string,
+    took the "already plain text" branch, and returned the raw
+    entity-escaped soup completely unprocessed -- which broke
+    ``sponsorship_from_text``'s phrase matching for every Greenhouse
+    posting (0.1.8.1 B3: acquire.json showed 69/69 "sponsorship unknown";
+    the Greenhouse share of those rows all had this exact symptom, still
+    carrying literal ``"&amp;nbsp;"``/``"&lt;li&gt;"`` in their stored
+    ``text``). Decoding entities *before* checking for ``<`` reveals the
+    real tags underneath (or, for genuinely plain text -- Lever/Ashby's
+    ``descriptionPlain`` -- is a safe no-op/idempotent pass that only
+    resolves any literal ``&amp;``-style entities that plain text might
+    itself contain, which is the correct display form either way).
     """
 
     if not html:
         return ""
-    if "<" not in html:
+    decoded = _html_entities.unescape(html)
+    if "<" not in decoded:
         # Already plain text (e.g. descriptionPlain) -- nothing to strip.
-        return html.strip()
+        return decoded.strip()
     parser = _HTMLTextExtractor()
-    parser.feed(html)
+    parser.feed(decoded)
     parser.close()
     return parser.text()
 
@@ -198,6 +220,38 @@ def _published_at_from_iso(value: object) -> str | None:
     return value
 
 
+def _normalize_country(value: object) -> str | None:
+    """Normalize a provider's own country string/code to ISO alpha-2.
+
+    Only exact matches against :mod:`pycountry`'s alpha-2/alpha-3/name/
+    official_name/common_name index (``pycountry.countries.lookup``) are
+    accepted -- never ``search_fuzzy``, which fuzzy-matches short/garbage
+    tokens like "AMER" to an unrelated country (confirmed against
+    ``pycountry`` directly: ``search_fuzzy("AMER")`` returns American Samoa/
+    Cameroon/the US) and would silently turn a region code into a false
+    country match, exactly the 0.1.8.1 B1 bug. A leading "The " (Ashby's
+    ``secondaryLocations`` sometimes sends "The Netherlands") is stripped
+    once and retried, since pycountry's own name for that country is just
+    "Netherlands". Anything else -- a region token, "Remote", an internal
+    label like "z-Test & Templates Only", or an already-ISO alpha-2 code --
+    either resolves deterministically or returns ``None`` (never a guess).
+    """
+
+    if type(value) is not str or not value.strip():
+        return None
+    candidate = value.strip()
+    try:
+        return pycountry.countries.lookup(candidate).alpha_2
+    except LookupError:
+        pass
+    if candidate.lower().startswith("the "):
+        try:
+            return pycountry.countries.lookup(candidate[4:].strip()).alpha_2
+        except LookupError:
+            pass
+    return None
+
+
 def _published_at_from_epoch_ms(value: object) -> str | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -276,6 +330,43 @@ def _lever_lists_text(lists: object) -> str:
     return "\n\n".join(sections)
 
 
+def _lever_countries(job: dict[str, object]) -> tuple[str, ...] | None:
+    """Lever's structured country signal: ``country`` + ``categories.allLocations``.
+
+    Lever's own docs (``.orchestrator/research/country-data.md`` §2): a plain
+    JSON object field ``"country"`` -- an ISO alpha-2 code, or ``null`` for
+    "unknown country" -- present on every posting in the exact ``?mode=json``
+    list response Scout already requests. When present and non-null, this
+    *is* the trusted answer (normalized/validated through
+    :func:`_normalize_country` since Lever's value is already ISO-2, so this
+    is a validation pass, not a guess). ``categories.allLocations`` is a
+    structured array covering multi-location postings the same way
+    ``categories.location``'s free text does today; each entry is itself
+    free text (no per-location country code), so it's normalized the same
+    way as the primary ``location_name`` string would be, via
+    :func:`_normalize_country` on each entry, adding to the primary
+    ``country`` signal rather than replacing it. Returns ``None`` (no
+    structured signal at all) only when neither ``country`` nor any
+    ``allLocations`` entry resolves -- callers then fall back to parsing the
+    free-text ``location`` string, same as before this packet.
+    """
+
+    found: set[str] = set()
+    primary = _normalize_country(job.get("country"))
+    if primary is not None:
+        found.add(primary)
+    categories = job.get("categories")
+    all_locations = categories.get("allLocations") if type(categories) is dict else None
+    if type(all_locations) is list:
+        for entry in all_locations:
+            code = _normalize_country(entry)
+            if code is not None:
+                found.add(code)
+    if not found:
+        return None
+    return tuple(sorted(found))
+
+
 def list_lever_board(client: "httpx.Client", board_token: str, config: FindJobsConfig) -> tuple[PostingRow, ...]:
     url = _LEVER_URL.format(token=board_token)
     payload = _request(client, url, "lever", board_token)
@@ -296,6 +387,7 @@ def list_lever_board(client: "httpx.Client", board_token: str, config: FindJobsC
         location_name = ""
         if type(categories) is dict and type(categories.get("location")) is str:
             location_name = categories["location"]
+        countries = _lever_countries(job)
         description = job.get("descriptionPlain")
         # Lever's descriptionPlain is already plain text (occasionally with
         # simple list markup); html_to_text is a no-op on text with no tags
@@ -321,9 +413,62 @@ def list_lever_board(client: "httpx.Client", board_token: str, config: FindJobsC
                 query_key=f"ats:lever:{board_token}",
                 text=text or None,
                 sponsorship=sponsorship_from_text(text),
+                countries=countries,
             )
         )
     return tuple(rows)
+
+
+def _ashby_address_country(address: object) -> str | None:
+    """Normalize one Ashby ``address`` object's ``postalAddress.addressCountry``.
+
+    Ashby's own doc shape (`.orchestrator/research/country-data.md` §2):
+    ``address`` -> ``postalAddress`` -> ``addressCountry``, all optionally
+    ``null``/missing (confirmed against the evidence run's raw payload: a
+    fully remote/region-labelled posting has ``"address": null``; a
+    located one sends a country *name* like ``"United States"``, not an
+    ISO code -- so this always goes through :func:`_normalize_country`,
+    never trusted as already-ISO the way Lever's ``country`` is).
+    """
+
+    if type(address) is not dict:
+        return None
+    postal = address.get("postalAddress")
+    if type(postal) is not dict:
+        return None
+    return _normalize_country(postal.get("addressCountry"))
+
+
+def _ashby_countries(job: dict[str, object]) -> tuple[str, ...] | None:
+    """Ashby's structured country signal: ``address`` + ``secondaryLocations``.
+
+    The primary ``address.postalAddress.addressCountry`` covers the job's
+    main location; ``secondaryLocations`` (each with its own optional
+    ``address`` of the identical shape, confirmed in the evidence run) covers
+    additional locations the same way Lever's ``categories.allLocations``
+    does -- structured where present, but each entry can itself have a
+    ``null`` address (evidence run: several ``secondaryLocations`` entries
+    carry only a free-text ``location`` name with no ``address`` at all), in
+    which case that one entry contributes nothing and the row falls back to
+    whatever the primary signal (or free-text ``location`` parsing) found.
+    Returns ``None`` when nothing structured resolves at all.
+    """
+
+    found: set[str] = set()
+    primary = _ashby_address_country(job.get("address"))
+    if primary is not None:
+        found.add(primary)
+    secondary = job.get("secondaryLocations")
+    if type(secondary) is list:
+        for entry in secondary:
+            if type(entry) is not dict:
+                continue
+            code = _ashby_address_country(entry.get("address"))
+            if code is not None:
+                found.add(code)
+    if not found:
+        return None
+    return tuple(sorted(found))
 
 
 def list_ashby_board(client: "httpx.Client", board_token: str, config: FindJobsConfig) -> tuple[PostingRow, ...]:
@@ -344,6 +489,7 @@ def list_ashby_board(client: "httpx.Client", board_token: str, config: FindJobsC
             continue
         location = job.get("location")
         location_name = location if type(location) is str else ""
+        countries = _ashby_countries(job)
         description = job.get("descriptionPlain")
         text = html_to_text(description if type(description) is str else None)
         content_bytes = _text_bytes(title, text or None)
@@ -360,6 +506,7 @@ def list_ashby_board(client: "httpx.Client", board_token: str, config: FindJobsC
                 content_sha256=content_hash(content_bytes),
                 source_kind=SourceKind.ATS,
                 query_key=f"ats:ashby:{board_token}",
+                countries=countries,
                 text=text or None,
                 sponsorship=sponsorship_from_text(text),
             )

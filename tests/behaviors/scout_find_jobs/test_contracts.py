@@ -20,6 +20,7 @@ from gigai.scout.find_jobs.contracts import (
     ConfigRequest,
     ConfigResponse,
     ConsentActor,
+    DropCount,
     EditedURL,
     FailureRow,
     FindJobsConfig,
@@ -233,6 +234,81 @@ def test_posting_row_sponsorship_rejects_bad_enum() -> None:
     with pytest.raises(FindJobsContractError) as raised:
         PostingRow.from_json(posting)
     assert raised.value.code == "bad_enum"
+
+
+# --- 0.1.8.1 B1: PostingRow.countries (structured, ISO alpha-2, additive) --
+
+
+def test_old_shape_posting_row_without_countries_parses() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    old_posting = acquire["rows"][0]["posting"]  # type: ignore[index]
+    assert "countries" not in old_posting
+    row = PostingRow.from_json(old_posting)
+    assert row.countries is None
+    assert row.to_json() == old_posting
+
+
+def test_posting_row_countries_round_trip() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    old_posting = deepcopy(acquire["rows"][0]["posting"])  # type: ignore[index]
+    old_posting["countries"] = ["US"]
+    row = PostingRow.from_json(old_posting)
+    assert row.countries == ("US",)
+    assert row.to_json() == old_posting
+
+
+def test_posting_row_countries_empty_tuple_round_trips_as_trusted_zero_result() -> None:
+    # An empty list is a real, structured "no recognized country" answer
+    # (not "field absent") -- it must round-trip distinctly from the field
+    # being missing entirely (see test_old_shape_posting_row_without_countries_parses).
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    old_posting = deepcopy(acquire["rows"][0]["posting"])  # type: ignore[index]
+    old_posting["countries"] = []
+    row = PostingRow.from_json(old_posting)
+    assert row.countries == ()
+    assert row.to_json() == old_posting
+
+
+def test_posting_row_countries_rejects_non_alpha2() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    posting = deepcopy(acquire["rows"][0]["posting"])  # type: ignore[index]
+    posting["countries"] = ["USA"]
+    with pytest.raises(FindJobsContractError) as raised:
+        PostingRow.from_json(posting)
+    assert raised.value.code == "invalid_value"
+
+
+# --- 0.1.8.1 B1: AcquireOutput.dropped_counts (additive) -------------------
+
+
+def test_old_shape_acquire_output_without_dropped_counts_parses() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    assert "dropped_counts" not in acquire
+    output = AcquireOutput.from_json(acquire)
+    assert output.dropped_counts == ()
+    assert output.to_json() == acquire
+
+
+def test_acquire_output_dropped_counts_round_trip() -> None:
+    acquire = deepcopy(load_fixture("fixture-acquire-batch-v1.json"))
+    acquire["dropped_counts"] = [{"reason": "location_mismatch", "count": 3}, {"reason": "role_mismatch", "count": 1}]
+    output = AcquireOutput.from_json(acquire)
+    assert output.dropped_counts == (
+        DropCount(NotAssessedReason.LOCATION_MISMATCH, 3),
+        DropCount(NotAssessedReason.ROLE_MISMATCH, 1),
+    )
+    assert output.to_json() == acquire
+
+
+def test_acquire_output_dropped_counts_region_only_round_trip() -> None:
+    # 0.1.8.1 r1 (B1 coordinator review): REGION_ONLY is a new
+    # NotAssessedReason value, additive to the enum -- must serialize/parse
+    # like any other existing reason.
+    acquire = deepcopy(load_fixture("fixture-acquire-batch-v1.json"))
+    acquire["dropped_counts"] = [{"reason": "region_only", "count": 3}]
+    output = AcquireOutput.from_json(acquire)
+    assert output.dropped_counts == (DropCount(NotAssessedReason.REGION_ONLY, 3),)
+    assert output.to_json() == acquire
 
 
 def test_old_shape_assessment_result_without_sponsorship_parses() -> None:

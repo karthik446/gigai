@@ -72,6 +72,25 @@ def test_html_to_text_tolerates_malformed_markup() -> None:
     assert "bold text" in html_to_text(html)
 
 
+# --- 0.1.8.1 B3: Greenhouse's `content` is *HTML-escaped HTML* -- real tags
+# encoded as text ("&lt;p&gt;" not "<p>"), confirmed against a live evidence
+# run's raw payload. The old "<" not in html check saw no literal "<" in
+# that escaped string and returned it completely unprocessed, which broke
+# sponsorship_from_text's phrase matching for every Greenhouse posting. -----
+
+
+def test_html_to_text_decodes_double_escaped_greenhouse_style_markup() -> None:
+    escaped = "&lt;p&gt;&lt;strong&gt;Team&lt;/strong&gt; intro. No visa sponsorship available.&lt;/p&gt;"
+    assert html_to_text(escaped) == "Team intro. No visa sponsorship available."
+
+
+def test_html_to_text_double_escaped_entities_still_decode_within_real_tags() -> None:
+    # A field that's genuinely single-escaped HTML (the common case, already
+    # covered by test_html_to_text_decodes_entities) must keep working
+    # unchanged after adding the outer-unescape pass.
+    assert html_to_text("<p>Q&amp;A and R&amp;D</p>") == "Q&A and R&D"
+
+
 # --- matches_roles -----------------------------------------------------
 
 
@@ -229,6 +248,35 @@ def test_greenhouse_sponsorship_derived_from_text() -> None:
     assert rows[0].sponsorship is SponsorshipStatus.NOT_OFFERED
 
 
+def test_greenhouse_sponsorship_derived_from_double_escaped_content() -> None:
+    # 0.1.8.1 B3: Greenhouse's real `content` field is HTML-escaped HTML
+    # ("&lt;p&gt;" not "<p>", confirmed against a live evidence run's raw
+    # payload) -- this is the shape that actually broke sponsorship
+    # detection for every Greenhouse row before the html_to_text fix.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "jobs": [
+                    {
+                        "id": 202,
+                        "title": "Software Engineer",
+                        "absolute_url": "https://boards.greenhouse.io/acme/jobs/202",
+                        "location": {"name": "Singapore"},
+                        "updated_at": "2026-09-20T00:00:00Z",
+                        "content": "&lt;p&gt;Candidates do not require company sponsorship. We will not sponsor visas for this role.&lt;/p&gt;",
+                    }
+                ]
+            },
+        )
+
+    with _client(handler) as client:
+        rows = list_greenhouse_board(client, "acme", _config())
+
+    assert "&lt;" not in (rows[0].text or "")
+    assert rows[0].sponsorship is SponsorshipStatus.NOT_OFFERED
+
+
 # --- Lever -----------------------------------------------------------------
 
 
@@ -328,6 +376,106 @@ def test_lever_missing_lists_is_fine() -> None:
         rows = list_lever_board(client, "bright", _config(("data engineer",)))
 
     assert rows[0].text == "Own the pipeline."
+
+
+# --- 0.1.8.1 B1: Lever's structured `country` + `categories.allLocations`
+# (`.orchestrator/research/country-data.md` §2: Lever's own postings-api
+# README documents `country` as "An ISO 3166-1 alpha-2 code ... or null"). --
+
+
+def test_lever_structured_country_read_from_country_field() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "abc",
+                    "text": "Data Engineer",
+                    "hostedUrl": "https://jobs.lever.co/bright/202",
+                    "categories": {"location": "Denver, CO"},
+                    "country": "US",
+                    "createdAt": 1758326400000,
+                    "descriptionPlain": "Own the pipeline.",
+                }
+            ],
+        )
+
+    with _client(handler) as client:
+        rows = list_lever_board(client, "bright", _config(("data engineer",)))
+
+    assert rows[0].countries == ("US",)
+
+
+def test_lever_structured_country_null_falls_back_to_none() -> None:
+    # Lever's own doc: `country` may be null "to indicate an unknown
+    # country" -- the row must carry `countries=None` (no structured signal)
+    # so callers fall back to parsing the free-text `location`, not a
+    # trusted-but-empty result.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "abc",
+                    "text": "Data Engineer",
+                    "hostedUrl": "https://jobs.lever.co/bright/202",
+                    "categories": {"location": "Denver, CO"},
+                    "country": None,
+                    "createdAt": 1758326400000,
+                    "descriptionPlain": "Own the pipeline.",
+                }
+            ],
+        )
+
+    with _client(handler) as client:
+        rows = list_lever_board(client, "bright", _config(("data engineer",)))
+
+    assert rows[0].countries is None
+
+
+def test_lever_structured_country_missing_field_falls_back_to_none() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "abc",
+                    "text": "Data Engineer",
+                    "hostedUrl": "https://jobs.lever.co/bright/202",
+                    "categories": {"location": "Denver, CO"},
+                    "createdAt": 1758326400000,
+                    "descriptionPlain": "Own the pipeline.",
+                }
+            ],
+        )
+
+    with _client(handler) as client:
+        rows = list_lever_board(client, "bright", _config(("data engineer",)))
+
+    assert rows[0].countries is None
+
+
+def test_lever_structured_all_locations_adds_to_country_field() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "abc",
+                    "text": "Data Engineer",
+                    "hostedUrl": "https://jobs.lever.co/bright/202",
+                    "categories": {"location": "Denver, CO", "allLocations": ["United States", "Canada"]},
+                    "country": "US",
+                    "createdAt": 1758326400000,
+                    "descriptionPlain": "Own the pipeline.",
+                }
+            ],
+        )
+
+    with _client(handler) as client:
+        rows = list_lever_board(client, "bright", _config(("data engineer",)))
+
+    assert rows[0].countries == ("CA", "US")
 
 
 def test_lever_url_parses_via_contracts() -> None:
@@ -439,6 +587,103 @@ def test_ashby_sponsorship_derived_from_text() -> None:
         rows = list_ashby_board(client, "orbit", _config(("platform engineer",)))
 
     assert rows[0].sponsorship is SponsorshipStatus.NOT_OFFERED
+
+
+# --- 0.1.8.1 B1: Ashby's structured `address.postalAddress.addressCountry`
+# + `secondaryLocations` (shapes confirmed against the evidence run's real
+# raw payload -- `.orchestrator/research/country-data.md` §2, and this
+# packet's own worker read of `raw/ashby/*.json.gz` in that run: a fully
+# region-labelled posting sends `"address": null`; a located one sends
+# `addressCountry` as a full country *name* like "United States", never an
+# already-ISO code, so this always normalizes through pycountry). ----------
+
+
+def test_ashby_structured_country_read_from_address() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "title": "Platform Engineer",
+                        "location": "San Francisco",
+                        "jobUrl": "https://jobs.ashbyhq.com/orbit/303",
+                        "publishedAt": "2026-09-18T12:00:00Z",
+                        "descriptionPlain": "Build the platform.",
+                        "address": {"postalAddress": {"addressCountry": "United States", "addressLocality": "San Francisco"}},
+                    }
+                ]
+            },
+        )
+
+    with _client(handler) as client:
+        rows = list_ashby_board(client, "orbit", _config(("platform engineer",)))
+
+    assert rows[0].countries == ("US",)
+
+
+def test_ashby_structured_country_null_address_falls_back_to_none() -> None:
+    # Evidence run: a region-labelled posting ("AMER") sends `"address":
+    # null` -- must not be misread as a trusted-empty structured result;
+    # `countries` stays None so callers fall back to parsing the free-text
+    # `location` string ("AMER"), which itself correctly stays ambiguous.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "title": "Platform Engineer",
+                        "location": "AMER",
+                        "jobUrl": "https://jobs.ashbyhq.com/orbit/303",
+                        "publishedAt": "2026-09-18T12:00:00Z",
+                        "descriptionPlain": "Build the platform.",
+                        "address": None,
+                        "secondaryLocations": [],
+                    }
+                ]
+            },
+        )
+
+    with _client(handler) as client:
+        rows = list_ashby_board(client, "orbit", _config(("platform engineer",)))
+
+    assert rows[0].countries is None
+    assert rows[0].location == "AMER"
+
+
+def test_ashby_structured_secondary_locations_add_to_country_field() -> None:
+    # Evidence run's own secondaryLocations shape: entries can mix a
+    # populated address with a null one in the same list (only the country
+    # name string is sent, not an ISO code either).
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "title": "Platform Engineer",
+                        "location": "United States",
+                        "jobUrl": "https://jobs.ashbyhq.com/orbit/303",
+                        "publishedAt": "2026-09-18T12:00:00Z",
+                        "descriptionPlain": "Build the platform.",
+                        "address": {"postalAddress": {"addressCountry": "United States"}},
+                        "secondaryLocations": [
+                            {"location": "Germany", "address": None},
+                            {"location": "The Netherlands", "address": {"postalAddress": {"addressCountry": "The Netherlands"}}},
+                        ],
+                    }
+                ]
+            },
+        )
+
+    with _client(handler) as client:
+        rows = list_ashby_board(client, "orbit", _config(("platform engineer",)))
+
+    assert rows[0].countries == ("NL", "US")
 
 
 def test_ashby_url_parses_via_contracts() -> None:

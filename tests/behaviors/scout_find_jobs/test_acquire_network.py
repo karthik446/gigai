@@ -13,8 +13,10 @@ from gigai.scout.find_jobs.ats_board_clients import ATSBoardClients
 from gigai.scout.find_jobs.contracts import (
     AcquireInput,
     ATSProvider,
+    DropCount,
     FindJobsConfig,
     NodeContext,
+    NotAssessedReason,
     PostingRow,
     SelectionRule,
     SourceKind,
@@ -149,6 +151,35 @@ def test_all_exa_fail_with_only_exa_enabled_raises(monkeypatch, tmp_path):
     assert "exa transport exploded" not in str(exc_info.value)
 
 
+def test_b5_exa_fails_and_ats_watchlist_is_empty_still_raises(monkeypatch, tmp_path):
+    # B5 (0.1.8.1 live UAT): the real bug wasn't the `not rows` gate itself
+    # -- it was that ATS's "no boards in the watchlist yet" case sets
+    # `ats_ok = True` vacuously (:431-432, a legitimate "nothing to do" on
+    # its own). On a first run, Exa is the *only* source that would ever
+    # populate that watchlist; if Exa fails outright, the watchlist stays
+    # empty, ATS's vacuous "ok" papered over Exa's real failure, and the old
+    # `source_outcomes`-based check reported the run as succeeded with 0
+    # postings. Both sources enabled, watchlist genuinely empty, Exa fails:
+    # this must still raise, not silently succeed.
+    monkeypatch.setattr(
+        "gigai.scout.find_jobs.market_acquisition.import_public_rows",
+        lambda **_: (_ for _ in ()).throw(AssertionError("must not write a batch when every source failed")),
+    )
+    config = _config(exa=True, ats=True)
+    with pytest.raises(AcquireAllSourcesFailedError) as exc_info:
+        acquire_node(
+            _context(tmp_path, "acquire-b5-1"),
+            _input(config=config),
+            http_client=None,
+            exa=_FailingExa(RuntimeError("exa transport exploded")),
+            ats=_ATS(),  # returns () for any board -- but the watchlist is
+            watchlist=_Watchlist(),  # empty, so list_board is never even called.
+        )
+    assert exc_info.value.code == "acquire_all_sources_failed"
+    assert "exa transport exploded" not in str(exc_info.value)
+    assert "exa:runtimeerror" in str(exc_info.value)
+
+
 def test_exa_fails_ats_succeeds_returns_rows_and_failure(monkeypatch, tmp_path):
     payload = json.loads((FIXTURES / "fixture-acquire-input-v1.json").read_text())
     row = PostingRow.from_json(payload["rows"][0])
@@ -262,13 +293,18 @@ def test_ats_row_wins_over_exa_row_same_job_id_different_domain(monkeypatch, tmp
 
 
 def test_exa_only_row_kept_when_no_matching_ats_row(monkeypatch, tmp_path):
+    # Title must match _config()'s default role ("software engineer"): B1
+    # now drops a role-mismatched row right after fetch (not just at
+    # selection), so a fixture title has to actually satisfy the configured
+    # role for this Exa-vs-ATS-dedupe test to still exercise dedupe rather
+    # than the (correct, separate) role-drop path.
     exa_row = PostingRow(
         url="https://job-boards.greenhouse.io/acme/jobs/999",
         normalized_url="https://job-boards.greenhouse.io/acme/jobs/999",
         provider=ATSProvider.GREENHOUSE, board_token="acme", company="acme",
-        title="Job Application for Engineer at Acme", location="",
+        title="Job Application for Software Engineer at Acme", location="",
         published_at=None, content_sha256=None, source_kind=SourceKind.EXA,
-        query_key="engineer",
+        query_key="software engineer",
     )
     status = SimpleNamespace(complete=True, input_ref={"path": "input.json"})
     monkeypatch.setattr("gigai.scout.find_jobs.market_acquisition.import_public_rows", lambda **_: status)
@@ -292,6 +328,9 @@ def _row_at(location: str, *, source_kind: SourceKind = SourceKind.ATS, url: str
 
 
 def test_country_filter_excludes_non_matching_row_from_selection(monkeypatch, tmp_path):
+    # B1 (0.1.8.1, operator: "why are we doing filtering on fucking ui?"):
+    # a country-non-matching row is now dropped from `results` entirely at
+    # acquire, not just left unselected for the UI to filter.
     row = _row_at("Bengaluru, India")
     status = SimpleNamespace(complete=True, input_ref={"path": "input.json"})
     monkeypatch.setattr("gigai.scout.find_jobs.market_acquisition.import_public_rows", lambda **_: status)
@@ -301,11 +340,9 @@ def test_country_filter_excludes_non_matching_row_from_selection(monkeypatch, tm
         _context(tmp_path, "acquire-country-1"), _input([row], config=config),
         http_client=None, exa=_Exa(()), ats=_ATS(), watchlist=_Watchlist(),
     )
-    # Filtered out: visible in rows with its real (new) outcome, never selected.
-    assert len(out.rows) == 1
-    assert out.rows[0].outcome.value == "new"
-    assert out.rows[0].posting.location == "Bengaluru, India"
+    assert out.rows == ()
     assert out.selected_postings == ()
+    assert out.dropped_counts == (DropCount(NotAssessedReason.LOCATION_MISMATCH, 1),)
 
 
 def test_country_filter_keeps_matching_row_selected(monkeypatch, tmp_path):
@@ -383,6 +420,8 @@ def _sponsorship_row(sponsorship: SponsorshipStatus | None) -> PostingRow:
 
 
 def test_visa_required_excludes_not_offered_row(monkeypatch, tmp_path):
+    # B1 (0.1.8.1): dropped from `results` at acquire, same as a
+    # country-mismatch row -- not just left unselected.
     row = _sponsorship_row(SponsorshipStatus.NOT_OFFERED)
     status = SimpleNamespace(complete=True, input_ref={"path": "input.json"})
     monkeypatch.setattr("gigai.scout.find_jobs.market_acquisition.import_public_rows", lambda **_: status)
@@ -391,8 +430,9 @@ def test_visa_required_excludes_not_offered_row(monkeypatch, tmp_path):
         _context(tmp_path, "acquire-visa-1"), _input([row], config=config),
         http_client=None, exa=_Exa(()), ats=_ATS(), watchlist=_Watchlist(),
     )
-    assert len(out.rows) == 1  # still visible
-    assert out.selected_postings == ()  # never selected
+    assert out.rows == ()
+    assert out.selected_postings == ()
+    assert out.dropped_counts == (DropCount(NotAssessedReason.SPONSORSHIP_EXCLUDED, 1),)
 
 
 def test_visa_required_keeps_unknown_sponsorship_row(monkeypatch, tmp_path):
@@ -537,3 +577,105 @@ def test_missing_exa_api_key_with_only_exa_enabled_raises(monkeypatch, tmp_path)
     # only the exception's type name (via FailureRow.code) is surfaced.
     assert "is not set in the environment" not in str(exc_info.value)
     assert "exaclienterror" in str(exc_info.value)
+
+
+# --- B1 replay: the operator's real evidence run (run_d73cb030-...), small
+# shape-only fixtures derived from its raw Ashby/Greenhouse payloads (see
+# fixtures/fixture-uat-0181-replay-postings.json's _provenance note). Feeds
+# them through acquire_node with countries=["US"] and asserts the exact
+# before/after drop the ticket describes: no Bengaluru/Hyderabad/Seoul/
+# Singapore/Australia/Canada/AMER-only rows survive; US rows do. -----------
+
+
+def test_replay_uat_0181_evidence_run_country_filter(monkeypatch, tmp_path):
+    payload = json.loads((FIXTURES / "fixture-uat-0181-replay-postings.json").read_text())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "ashbyhq.com" in url:
+            return httpx.Response(200, json=payload["ashby"])
+        return httpx.Response(200, json=payload["greenhouse"])
+
+    status = SimpleNamespace(complete=True, input_ref={"path": "input.json"})
+    monkeypatch.setattr("gigai.scout.find_jobs.market_acquisition.import_public_rows", lambda **_: status)
+    watchlist = _Watchlist()
+    watchlist.added.append(
+        WatchlistEntry(
+            watchlist_id="scout_watchlist:ashby:acme", provider=ATSProvider.ASHBY,
+            board_token="acme", company="acme", state="active",
+            first_seen=WatchlistFirstSeen(SourceKind.ATS, "https://jobs.ashbyhq.com/acme", "software engineer", "acquire-replay-1", "2026-09-22T00:00:00Z"),
+        )
+    )
+    watchlist.added.append(
+        WatchlistEntry(
+            watchlist_id="scout_watchlist:greenhouse:acme", provider=ATSProvider.GREENHOUSE,
+            board_token="acme", company="acme", state="active",
+            first_seen=WatchlistFirstSeen(SourceKind.ATS, "https://boards.greenhouse.io/acme", "software engineer", "acquire-replay-1", "2026-09-22T00:00:00Z"),
+        )
+    )
+    config = replace(_config(exa=False, ats=True), countries=("US",))
+
+    # Before: what the same 11 fixture postings look like with country
+    # filtering off entirely (the pre-B1 "everything survives to results"
+    # baseline this replay is measuring against).
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        before = acquire_node(
+            _context(tmp_path, "acquire-replay-before"), _input(config=replace(_config(exa=False, ats=True))),
+            http_client=client, exa=_Exa(()), ats=ATSBoardClients(), watchlist=watchlist,
+        )
+    assert len(before.rows) == 11
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        after = acquire_node(
+            _context(tmp_path, "acquire-replay-after"), _input(config=config),
+            http_client=client, exa=_Exa(()), ats=ATSBoardClients(), watchlist=watchlist,
+        )
+
+    kept_locations = {row.posting.location for row in after.rows}
+    survivors = sorted(
+        (row.posting.company, row.posting.location, row.posting.countries) for row in after.rows
+    )
+    print(f"B1 replay: before={len(before.rows)} rows, after={len(after.rows)} rows, dropped={len(before.rows) - len(after.rows)}")
+    print("B1 replay survivors (company | location | countries):")
+    for company, location, countries in survivors:
+        print(f"  {company} | {location} | {countries}")
+
+    # The exact non-US *countries* named in the ticket: none of their rows
+    # survive a definite country mismatch.
+    assert "India" not in kept_locations  # Bengaluru-sourced (structured)
+    assert "Australia" not in kept_locations
+    assert "Canada" not in kept_locations
+    assert "Singapore" not in kept_locations
+    assert "Seoul, South Korea" not in kept_locations
+
+    # 0.1.8.1 r1 (coordinator review): AMER/EMEA/APAC are *region* tokens,
+    # not countries. A region-ONLY location is now a definite non-match
+    # (dropped), not ambiguous -- the operator's own UAT complaint ("AMER"
+    # rows passed a US-only filter). None of them survive.
+    assert "AMER" not in kept_locations
+    assert "EMEA" not in kept_locations
+    assert "APAC" not in kept_locations
+
+    # The internal "z-Test & Templates Only" label carries no region token
+    # and no country signal at all -- it has no signal whatsoever, so it
+    # stays genuinely ambiguous (kept), unaffected by this fix, same as
+    # "Remote" alone always has been.
+    assert "z-Test & Templates Only" in kept_locations
+
+    # The US-located rows (structured Ashby address + free-text Greenhouse
+    # "Mountain View, USA") also survive.
+    assert "United States" in kept_locations
+    assert "Mountain View, USA" in kept_locations
+    assert len(after.rows) == 3  # US(2, structured+text) + z-Test (ambiguous, kept)
+
+    # Every dropped row is accounted for by a per-reason count: the 5
+    # definite non-US-country rows (India/Australia/Canada/Singapore/Seoul)
+    # under LOCATION_MISMATCH, and the 3 region-only rows (AMER/EMEA/APAC)
+    # under their own REGION_ONLY key (0.1.8.1 r1), distinct and auditable.
+    total_dropped = sum(item.count for item in after.dropped_counts)
+    assert total_dropped == len(before.rows) - len(after.rows) == 8
+    by_reason = {item.reason: item.count for item in after.dropped_counts}
+    assert by_reason == {
+        NotAssessedReason.LOCATION_MISMATCH: 5,
+        NotAssessedReason.REGION_ONLY: 3,
+    }

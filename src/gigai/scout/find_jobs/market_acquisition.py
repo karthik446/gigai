@@ -8,6 +8,7 @@ acquisition journal.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from datetime import datetime, timezone
 import gzip
 import json
@@ -23,9 +24,11 @@ from .contracts import (
     ATSProvider,
     AcquireInput,
     AcquireOutput,
+    DropCount,
     FailureRow,
     FindJobsContractError,
     NodeContext,
+    NotAssessedReason,
     PostingRow,
     PostingRowResult,
     ProgressStatus,
@@ -42,7 +45,7 @@ from .contracts import (
     normalize_url,
     parse_board_url,
 )
-from .filters import exclusion_reason
+from .filters import exclusion_reason, location_mismatch_detail
 from ...workpad import ResolvedWorkpad, resolve_workpad
 
 # U26: cap on the total size of raw provider responses stored per run, so a
@@ -139,7 +142,11 @@ def _merge_exa_and_ats_rows(rows: Sequence[PostingRow]) -> list[PostingRow]:
     for row in ordered:
         normalized = normalize_url(row.normalized_url or row.url)
         if normalized != row.normalized_url:
-            row = PostingRow(row.url, normalized, row.provider, row.board_token, row.company, row.title, row.location, row.published_at, row.content_sha256, row.source_kind, row.query_key, row.text, row.sponsorship)
+            # dataclasses.replace (not a positional PostingRow(...) rebuild)
+            # so a future additive field (like B1's `countries`) carries
+            # through automatically instead of silently reverting to its
+            # default on every URL-normalization pass.
+            row = replace(row, normalized_url=normalized)
         if normalized in by_url:
             continue  # ATS-first ordering already means the first seen wins.
         by_url[normalized] = row
@@ -433,7 +440,24 @@ def acquire_node(
                 failures.append(FailureRow(SourceKind.ATS, "ats", None, type(exc).__name__.lower(), "ATS watchlist fetch failed"))
             source_outcomes["ats"] = ats_ok
 
-        if source_outcomes and not any(source_outcomes.values()):
+        # B5 (0.1.8.1, live UAT: a run where every source failed still
+        # reported "succeeded" with 0 postings). The original check here
+        # was `source_outcomes and not any(source_outcomes.values())`, which
+        # has a vacuous-success hole: ATS sets `ats_ok = True` whenever its
+        # watchlist has *no boards to fetch* (`boards` empty, :431) -- a
+        # legitimate "nothing to do" case on its own, but on a *first* run
+        # (or any run where Exa is the only source that would have populated
+        # the watchlist and Exa itself failed), that same "no boards yet"
+        # state is indistinguishable from "ATS succeeded". `exa: False,
+        # ats: True (vacuous)` then made `any(source_outcomes.values())`
+        # true, and the node returned COMPLETE with an empty batch instead
+        # of raising. The correct invariant (per the B5 ticket: "0 postings
+        # and >=1 source failure") doesn't depend on ATS's vacuous-ok
+        # bookkeeping at all -- it only needs to know whether *any* row was
+        # actually produced and whether *any* source recorded a real
+        # failure. `source_outcomes` is kept only for the error message's
+        # per-source failure codes below, not as the raise condition itself.
+        if not rows and failures:
             codes = ", ".join(f"{failure.source_kind.value}:{failure.code}" for failure in failures)
             detail = f" ({codes})" if codes else ""
             raise AcquireAllSourcesFailedError(
@@ -442,6 +466,40 @@ def acquire_node(
             )
 
     rows = _merge_exa_and_ats_rows(rows)
+
+    # B1 (0.1.8.1, operator: "why are we doing filtering on fucking ui?"):
+    # apply the country/location (`exclusion_reason`) and role filters right
+    # after fetch, on the full merged set -- not left for UI chips to apply
+    # against every row the ATS APIs returned worldwide. A non-matching row
+    # is dropped from `results`/`outputs/acquire.json` entirely (never
+    # reaches the NEW/EDITED/selection accounting below); `raw/` (written
+    # separately, `_write_raw_payloads`) still keeps every response
+    # unfiltered for audit/replay. Per-reason counts are recorded additively
+    # on the output (`dropped_counts`) so the drop is visible on the run
+    # without re-deriving it from raw/ vs acquire.json.
+    #
+    # 0.1.8.1 r1 (coordinator review, B1's region-token rule): the
+    # drop-count key uses `location_mismatch_detail` rather than
+    # `exclusion_reason`'s own (coarse, stable) return value, so a
+    # region-only location ("AMER", "EMEA", ...) is auditable as its own
+    # REGION_ONLY bucket instead of being folded into LOCATION_MISMATCH --
+    # `exclusion_reason` itself is still what actually decides whether the
+    # row is dropped at all (identical result either way; this only changes
+    # which key the drop gets counted under).
+    kept_rows: list[PostingRow] = []
+    drop_counts: dict[NotAssessedReason, int] = {}
+    for row in rows:
+        reason = exclusion_reason(row, input.config)
+        if reason is NotAssessedReason.LOCATION_MISMATCH:
+            reason = location_mismatch_detail(row, input.config) or reason
+        if reason is None and not _role_match(row, input.config.roles):
+            reason = NotAssessedReason.ROLE_MISMATCH
+        if reason is not None:
+            drop_counts[reason] = drop_counts.get(reason, 0) + 1
+            continue
+        kept_rows.append(row)
+    rows = kept_rows
+
     current = {row.normalized_url: _digest(row) for row in rows}
     resolved = _resolved(context, home_root, target)
     previous = _prior_observations(resolved.path, batch_id)
@@ -458,18 +516,17 @@ def acquire_node(
         else:
             outcome = RowOutcome.UNCHANGED
         results.append(PostingRowResult(row, outcome))
-        # Selection = new/edited + role match + country ok + not visa-excluded,
-        # capped (U19/U12). A row that's new/edited and role-matched but fails
-        # country/visa stays fully visible in `results` above -- it's simply
-        # never added to `selected`, so it can't reach assess. The exact
-        # reason (location_mismatch/sponsorship_excluded) is re-derived by
-        # assess via the same pure `exclusion_reason` helper, not carried on
-        # this contract.
+        # Selection = new/edited + capped (U19/U12's country/visa and role
+        # checks now already happened above, as a drop -- every row reaching
+        # this loop already passed them). A row that's new/edited but over
+        # the cap stays fully visible in `results` above -- it's simply
+        # never added to `selected`, so it can't reach assess.
+        # `exclusion_reason` is still re-derived by assess (via the same
+        # pure helper) for its own not-assessed labeling, and remains
+        # correct for an older run's acquire.json that predates this drop.
         if (
             input.selection_rule is SelectionRule.NEW_OR_EDITED_ROLE_MATCH
             and outcome in {RowOutcome.NEW, RowOutcome.EDITED}
-            and _role_match(row, input.config.roles)
-            and exclusion_reason(row, input.config) is None
             and len(selected) < input.selection_cap
         ):
             selected.append(SelectedPosting(row.normalized_url, row.url, _digest(row), True))
@@ -491,6 +548,7 @@ def acquire_node(
         url_set_diff=url_diff,
         watchlist_refs=tuple(dict.fromkeys(watchlist_refs)),
         selected_postings=tuple(selected),
+        dropped_counts=tuple(DropCount(reason, count) for reason, count in sorted(drop_counts.items(), key=lambda item: item[0].value)),
     )
 
 

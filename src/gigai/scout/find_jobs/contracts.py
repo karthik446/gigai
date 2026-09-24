@@ -166,6 +166,18 @@ class NotAssessedReason(StrEnum):
     LOCATION_MISMATCH = "location_mismatch"
     SPONSORSHIP_EXCLUDED = "sponsorship_excluded"
     MODEL_OUTPUT_INVALID = "model_output_invalid"
+    # 0.1.8.1 r1 (B1 coordinator review): a finer-grained sub-case of
+    # LOCATION_MISMATCH, used only for AcquireOutput.dropped_counts'
+    # per-reason auditability -- a location that resolves to *only* region
+    # tokens ("AMER"/"EMEA"/"APAC"/"LATAM"/"Remote - Americas") rather than
+    # a recognized-but-wrong country. `exclusion_reason` itself keeps
+    # returning LOCATION_MISMATCH for this case (its existing, stable
+    # contract that proposal_execution.py's not-assessed labeling relies
+    # on); only market_acquisition.py's drop-count bucketing distinguishes
+    # the two, so a coordinator/operator reading dropped_counts can tell
+    # "wrong country" apart from "region label, no country at all" without
+    # changing exclusion_reason's public return value.
+    REGION_ONLY = "region_only"
 
 
 class _Contract:
@@ -460,6 +472,16 @@ class PostingRow(_Contract):
     query_key: str
     text: str | None = None
     sponsorship: SponsorshipStatus | None = None
+    # C0 (v0.1.8.1 B1): ISO-3166 alpha-2 codes read from a provider's own
+    # structured location field (Lever's `country`, Ashby's
+    # `address.postalAddress.addressCountry` + `secondaryLocations`, both
+    # normalized to alpha-2), when the provider returns one. `None` means no
+    # structured signal was available (Greenhouse/Exa rows, or a Lever/Ashby
+    # row whose structured field itself came back null) -- callers fall back
+    # to parsing `location`'s free text. An empty tuple is a *trusted* zero
+    # result (the field was present but named no recognized country), not
+    # "unknown" -- see `filters.country_match`.
+    countries: tuple[str, ...] | None = None
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {
@@ -482,6 +504,10 @@ class PostingRow(_Contract):
             value["text"] = self.text
         if self.sponsorship is not None:
             value["sponsorship"] = _json_enum(self.sponsorship)
+        # C0 (v0.1.8.1 B1): countries is additive/optional the same way;
+        # omitted at its None default so a pre-B1 row's digest is unaffected.
+        if self.countries is not None:
+            value["countries"] = _json_strings(self.countries)
         return value
 
     @classmethod
@@ -489,10 +515,11 @@ class PostingRow(_Contract):
         value = _object_with_optional(
             obj,
             ("url", "normalized_url", "provider", "board_token", "company", "title", "location", "published_at", "content_sha256", "source_kind", "query_key"),
-            ("text", "sponsorship"),
+            ("text", "sponsorship", "countries"),
             "posting_row",
         )
         sponsorship = None if "sponsorship" not in value else _enum(value["sponsorship"], SponsorshipStatus, "posting_row.sponsorship")
+        countries = None if "countries" not in value else _country_codes(value["countries"], "posting_row.countries")
         return cls(
             _string(value["url"], "url"),
             _string(value["normalized_url"], "normalized_url"),
@@ -507,6 +534,7 @@ class PostingRow(_Contract):
             _string(value["query_key"], "query_key"),
             _optional_string(value.get("text"), "posting_row.text") if "text" in value else None,
             sponsorship,
+            countries,
         )
 
 
@@ -903,6 +931,30 @@ class URLSetDiff(_Contract):
 
 
 @dataclass(frozen=True)
+class DropCount(_Contract):
+    """How many acquired rows were dropped for one reason (0.1.8.1 B1).
+
+    B1: acquire now drops country/location/remote/role-non-matching rows
+    right after fetch instead of leaving them for the UI to filter (raw/
+    keeps everything for audit/replay -- see ``_write_raw_payloads``). This
+    is the per-reason accounting of that drop, additive on
+    :class:`AcquireOutput` so it's visible on the run without re-deriving it
+    from ``raw/`` vs ``outputs/acquire.json``.
+    """
+
+    reason: NotAssessedReason
+    count: int
+
+    def to_json(self) -> dict[str, object]:
+        return {"reason": _json_enum(self.reason), "count": self.count}
+
+    @classmethod
+    def from_json(cls, obj: object) -> "DropCount":
+        value = _object(obj, ("reason", "count"), "drop_count")
+        return cls(_enum(value["reason"], NotAssessedReason, "drop_count.reason"), _integer(value["count"], "drop_count.count", minimum=0))
+
+
+@dataclass(frozen=True)
 class AcquireOutput(_Contract):
     schema_version: ClassVar[str] = "scout-find-jobs-acquire-output:1"
     batch_id: str
@@ -914,9 +966,14 @@ class AcquireOutput(_Contract):
     url_set_diff: URLSetDiff
     watchlist_refs: tuple[str, ...]
     selected_postings: tuple[SelectedPosting, ...]
+    # C0 (v0.1.8.1 B1): additive/optional -- per-reason counts of rows
+    # dropped right after fetch (before ``rows``/``url_set_diff`` are even
+    # computed), so old serialized acquire outputs (pre-B1, no drop stage)
+    # still parse with this at its `()` default.
+    dropped_counts: tuple[DropCount, ...] = ()
 
     def to_json(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "schema_version": self.schema_version,
             "batch_id": self.batch_id,
             "batch_ref": self.batch_ref,
@@ -928,14 +985,27 @@ class AcquireOutput(_Contract):
             "watchlist_refs": _json_strings(self.watchlist_refs),
             "selected_postings": [posting.to_json() for posting in self.selected_postings],
         }
+        if self.dropped_counts:
+            value["dropped_counts"] = [item.to_json() for item in self.dropped_counts]
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "AcquireOutput":
-        value = _object(obj, ("schema_version", "batch_id", "batch_ref", "progress_ref", "progress_status", "rows", "failures", "url_set_diff", "watchlist_refs", "selected_postings"), "acquire_output")
+        value = _object_with_optional(
+            obj,
+            ("schema_version", "batch_id", "batch_ref", "progress_ref", "progress_status", "rows", "failures", "url_set_diff", "watchlist_refs", "selected_postings"),
+            ("dropped_counts",),
+            "acquire_output",
+        )
         if value["schema_version"] != cls.schema_version:
             _fail("bad_enum", "acquire_output.schema_version is unsupported")
         if type(value["rows"]) is not list or type(value["failures"]) is not list or type(value["selected_postings"]) is not list:
             _fail("wrong_type", "acquire_output arrays are malformed")
+        dropped_counts: tuple[DropCount, ...] = ()
+        if "dropped_counts" in value:
+            if type(value["dropped_counts"]) is not list:
+                _fail("wrong_type", "acquire_output.dropped_counts must be an array")
+            dropped_counts = tuple(DropCount.from_json(item) for item in value["dropped_counts"])
         return cls(
             _string(value["batch_id"], "batch_id"),
             _string(value["batch_ref"], "batch_ref"),
@@ -946,6 +1016,7 @@ class AcquireOutput(_Contract):
             URLSetDiff.from_json(value["url_set_diff"]),
             _strings(value["watchlist_refs"], "watchlist_refs", allow_empty=True),
             tuple(SelectedPosting.from_json(item) for item in value["selected_postings"]),
+            dropped_counts,
         )
 
 
@@ -1874,6 +1945,7 @@ __all__ = [
     "ASSESS_CAPABILITY", "ASSESS_CAPABILITY_ID", "ASSESS_DECLARED_EFFECTS", "ASSESS_EFFECTS", "ASSESS_LOCAL_EFFECTS",
     "API_BIND", "ATSBoardClient", "ATSProvider", "AcquireInput", "AcquireNodeCallable", "AcquireOutput", "ExaSearchClient",
     "AggregateStatus", "ArtifactRef", "AssessmentResult", "AssessInput", "AssessNodeCallable", "AssessOutput", "ConsentActor", "ConfigRequest", "ConfigResponse",
+    "DropCount",
     "EditedURL", "FindJobsConfig", "FindJobsContractError", "FailureRow", "FindJobsRunInput", "FindJobsConfig", "GoalError", "GoalStatus", "MatrixStatus", "ModelTarget", "NodeContext",
     "NodeFailure", "NodeReceipt", "NodeReceiptFixture", "NodeReceiptStatus", "NodeStatus", "NodeCallable", "NormalizedPostingRow", "NormalizedPublicPostingRow", "NotAssessedReason",
     "NotAssessedRow", "PRESENT_CAPABILITY", "PRESENT_CAPABILITY_ID", "PRESENT_DECLARED_EFFECTS", "PRESENT_EFFECTS", "PresentInput",
