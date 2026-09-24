@@ -189,4 +189,117 @@ def resume_add_command(
     )
 
 
+@scout_group.command("run")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--port", "port", type=int, default=None, help="Loopback port (default 8765).")
+@click.option("--no-browser", "no_browser", is_flag=True, help="Don't open a browser tab.")
+@click.option(
+    "--foreground",
+    "foreground",
+    is_flag=True,
+    help="Run the server in this process (Ctrl-C stops it) instead of detaching it.",
+)
+@click.option("--json", "as_json", is_flag=True)
+def run_command(
+    target_value: Path | None,
+    home_value: Path | None,
+    port: int | None,
+    no_browser: bool,
+    foreground: bool,
+    as_json: bool,
+) -> None:
+    """Install/activate Scout if needed, then start (or reuse) its API + UI.
+
+    Backgrounded by default: prints the URL and log path and returns. Use
+    `gigai scout status` / `gigai scout stop` to check on or stop it, or pass
+    --foreground to run it in this process instead (Ctrl-C stops it).
+    """
+
+    from . import run_supervisor
+
+    home_root = home_value or default_home_root()
+    try:
+        result = run_supervisor.start(
+            home_root=home_root,
+            requested_target=target_value,
+            port=port,
+            foreground=foreground,
+            open_browser=not no_browser,
+        )
+    except (run_supervisor.ScoutRunError, WorkpadError, ScoutInstallError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_run_failed")
+        return
+
+    payload = {
+        "ok": True,
+        "reused": result.reused,
+        "cleaned_stale": result.cleaned_stale,
+        **result.state.to_json(),
+    }
+    if as_json:
+        _emit(payload, True, "")
+        return
+    if result.cleaned_stale:
+        click.echo("Cleaned up a stale Scout run state (its process was no longer running).")
+    if result.reused:
+        click.echo(f"Scout is already running at {result.state.url} (log: {result.state.log_path}).")
+    else:
+        click.echo(f"Scout is running at {result.state.url} (log: {result.state.log_path}).")
+
+
+@scout_group.command("stop")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def stop_command(target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Stop this project's running Scout instance, if any. Safe to rerun."""
+
+    from . import run_supervisor
+
+    home_root = home_value or default_home_root()
+    try:
+        stopped = run_supervisor.stop(home_root=home_root, requested_target=target_value)
+    except (WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_stop_failed")
+        return
+
+    payload = {"ok": True, "stopped": stopped}
+    if as_json:
+        _emit(payload, True, "")
+        return
+    click.echo("Stopped Scout." if stopped else "Scout was not running.")
+
+
+@scout_group.command("status")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def status_command(target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Show whether this project's Scout instance is running, stopped, or crashed."""
+
+    from . import run_supervisor
+
+    home_root = home_value or default_home_root()
+    try:
+        current = run_supervisor.status(home_root=home_root, requested_target=target_value)
+    except (WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_status_failed")
+        return
+
+    payload = {"ok": True, **current.to_json()}
+    if as_json:
+        _emit(payload, True, "")
+        return
+    if current.state == "running":
+        click.echo(f"running: {current.url} (pid {current.pid}, log: {current.log_path})")
+    elif current.state == "crashed":
+        click.echo(
+            f"crashed: last known pid {current.pid} is no longer running "
+            f"(log: {current.log_path}). Run `gigai scout run` to restart it."
+        )
+    else:
+        click.echo("stopped")
+
+
 __all__ = ["scout_group", "write_starter_find_jobs_config", "STARTER_FIND_JOBS_CONFIG"]

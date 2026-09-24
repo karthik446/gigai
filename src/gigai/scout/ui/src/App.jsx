@@ -137,13 +137,17 @@ export default function App() {
 
       {configResponse && (
         <>
-          <ConfigPanel config={configResponse.config} resumePreview={configResponse.resume_preview} />
+          <ConfigPanel
+            config={configResponse.config}
+            resumePreview={configResponse.resume_preview}
+            resumeMissingHint={configResponse.resume_missing_hint}
+          />
 
           <div className="panel">
             <button className="button" onClick={openDialog} disabled={!canRun}>
               Run workflow
             </button>
-            {!hasResume && <p className="muted">Add a resume record to enable a run.</p>}
+            {!hasResume && <p className="muted">Add a resume (see above) to enable a run.</p>}
           </div>
         </>
       )}

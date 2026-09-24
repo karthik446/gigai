@@ -5,6 +5,7 @@ import json
 import threading
 import time
 from email.message import Message
+from pathlib import Path
 from typing import Any, Callable
 
 import httpx
@@ -18,7 +19,14 @@ from gigai.scout.find_jobs.contracts import (
     RunResultsResponse,
     RunStatusResponse,
 )
-from gigai.scout.find_jobs.present_api import Backend, NotWiredBackend, _make_handler, main, serve
+from gigai.scout.find_jobs.present_api import (
+    Backend,
+    ConfigMissingError,
+    NotWiredBackend,
+    _make_handler,
+    main,
+    serve,
+)
 
 from .conftest import load_fixture
 
@@ -136,6 +144,68 @@ def test_get_config_happy_path(running_server) -> None:
     assert body["config"] == backend.config.to_json()
     assert body["resume_preview"] == backend.resume.to_json()
     assert body["config_digest"] == backend.config.digest()
+
+
+class _ConfigMissingBackend(FakeBackend):
+    """Models an unwritten ``find-jobs.json`` (0.1.8.1 UAT addendum)."""
+
+    def read_config(self) -> tuple[FindJobsConfig, bytes]:
+        raise ConfigMissingError(Path("/tmp/fixture-target/find-jobs.json"))
+
+
+class _NoResumeBackend(FakeBackend):
+    """Models a project with a config but no saved resume yet (U15)."""
+
+    def resume_preview(self) -> PinnedResume | None:
+        return None
+
+
+def test_get_health_ok(running_server) -> None:
+    client, _backend = running_server
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+@pytest.mark.parametrize("running_server", [_ConfigMissingBackend()], indirect=True)
+def test_get_config_missing_names_the_file_and_the_fix(running_server) -> None:
+    client, _backend = running_server
+    response = client.get("/api/config")
+    assert response.status_code == 404
+    body = response.json()
+    assert body["error"]["code"] == "config_missing"
+    message = body["error"]["message"]
+    # The old blanket 404 text ("That run could not be found.") is a UI-side
+    # fallback keyed off status code; the backend message here must be
+    # specific enough that the UI no longer needs that fallback for this case.
+    assert "find-jobs.json" in message
+    assert "gigai scout install" in message or "gigai scout run" in message
+
+
+@pytest.mark.parametrize("running_server", [_ConfigMissingBackend()], indirect=True)
+def test_post_run_with_missing_config_is_also_config_missing(running_server) -> None:
+    client, _backend = running_server
+    request_payload = load_fixture("fixture-api-run-request-v1.json")
+    response = client.post("/api/run", json=request_payload)
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "config_missing"
+
+
+@pytest.mark.parametrize("running_server", [_NoResumeBackend()], indirect=True)
+def test_get_config_with_no_resume_carries_an_explicit_hint(running_server) -> None:
+    client, _backend = running_server
+    response = client.get("/api/config")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["resume_preview"] is None
+    assert body["resume_missing_hint"] == "gigai scout resume add <file>"
+
+
+def test_get_config_with_a_resume_has_no_hint(running_server) -> None:
+    client, _backend = running_server
+    response = client.get("/api/config")
+    assert response.status_code == 200
+    assert response.json()["resume_missing_hint"] is None
 
 
 def test_post_run_happy_path_returns_202(running_server) -> None:

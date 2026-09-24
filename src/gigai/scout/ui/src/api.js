@@ -12,16 +12,26 @@ const STATUS_MESSAGES = {
   504: "The server timed out handling this request. It may still be running; try checking status again shortly.",
 };
 
+// Error codes whose backend message is specific enough to show as-is,
+// instead of the generic per-status text above. config_missing in
+// particular used to fall through to the 404 default ("That run could not
+// be found."), which is wrong: no run is missing, the config file is.
+const CODES_WITH_OWN_MESSAGE = new Set(["config_missing"]);
+
 class ApiError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
-function messageForStatus(status, fallback) {
-  return STATUS_MESSAGES[status] || fallback || `Request failed with status ${status}.`;
+function messageForStatus(status, code, detail) {
+  if (code && CODES_WITH_OWN_MESSAGE.has(code) && detail) {
+    return detail;
+  }
+  return STATUS_MESSAGES[status] || detail || `Request failed with status ${status}.`;
 }
 
 async function request(method, path, body) {
@@ -47,8 +57,10 @@ async function request(method, path, body) {
   }
 
   if (!response.ok) {
-    const detail = payload && typeof payload.message === "string" ? payload.message : undefined;
-    throw new ApiError(response.status, messageForStatus(response.status, detail));
+    const errorBody = payload && typeof payload.error === "object" ? payload.error : null;
+    const code = errorBody && typeof errorBody.code === "string" ? errorBody.code : undefined;
+    const detail = errorBody && typeof errorBody.message === "string" ? errorBody.message : undefined;
+    throw new ApiError(response.status, messageForStatus(response.status, code, detail), code);
   }
 
   return payload;

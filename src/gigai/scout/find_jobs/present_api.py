@@ -105,6 +105,21 @@ class _RunBoundaryError(FindJobsContractError):
         self.status = status
 
 
+class ConfigMissingError(LookupError):
+    """``find-jobs.json`` doesn't exist for the target yet.
+
+    Distinct from a generic ``LookupError`` (used elsewhere for "not found"
+    routes like an unknown run id) so ``/api/config`` can return a message
+    that names the actual missing file and the commands that create it,
+    instead of the generic "not found" text the UI used to show for every
+    404 (see api.js's old blanket "That run could not be found.").
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        super().__init__(str(path))
+
+
 class ScoutFindJobsBackend:
     """The production localhost backend for the Scout find-jobs API."""
 
@@ -141,7 +156,7 @@ class ScoutFindJobsBackend:
     def read_config(self) -> tuple[FindJobsConfig, bytes]:
         path = self._target_root() / "find-jobs.json"
         if path.is_symlink() or not path.is_file():
-            raise LookupError(path)
+            raise ConfigMissingError(path)
         try:
             from ...canonical import parse_json_bytes
 
@@ -381,6 +396,9 @@ def _make_handler(
             path = urlsplit(self.path).path
             try:
                 if path.startswith("/api/"):
+                    if path == "/api/health":
+                        self._write_json(HTTPStatus.OK, {"status": "ok"})
+                        return
                     if path == "/api/config":
                         self._handle_get_config()
                         return
@@ -429,6 +447,14 @@ def _make_handler(
         def _handle_get_config(self) -> None:
             try:
                 config, _config_bytes = backend.read_config()
+            except ConfigMissingError as exc:
+                self._error(
+                    HTTPStatus.NOT_FOUND,
+                    "config_missing",
+                    f"{exc.path} does not exist yet. Run `gigai scout install` or "
+                    "`gigai scout run` to write a starter find-jobs.json, then edit it.",
+                )
+                return
             except FindJobsContractError as exc:
                 self._error(HTTPStatus.UNPROCESSABLE_ENTITY, exc.code, str(exc))
                 return
@@ -441,6 +467,9 @@ def _make_handler(
                 "schema_version": "scout-find-jobs-config-response:1",
                 "config": config.to_json(),
                 "resume_preview": resume_preview.to_json() if resume_preview is not None else None,
+                "resume_missing_hint": (
+                    None if resume_preview is not None else "gigai scout resume add <file>"
+                ),
                 "config_digest": config_digest,
             }
             self._write_json(HTTPStatus.OK, payload)
@@ -456,6 +485,14 @@ def _make_handler(
                 return
             try:
                 config, config_bytes = backend.read_config()
+            except ConfigMissingError as exc:
+                self._error(
+                    HTTPStatus.NOT_FOUND,
+                    "config_missing",
+                    f"{exc.path} does not exist yet. Run `gigai scout install` or "
+                    "`gigai scout run` to write a starter find-jobs.json, then edit it.",
+                )
+                return
             except FindJobsContractError as exc:
                 self._error(HTTPStatus.UNPROCESSABLE_ENTITY, exc.code, str(exc))
                 return
@@ -591,6 +628,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--target", dest="target", default=None, help="target root path")
     parser.add_argument("--home", dest="home", default=None, help="GigAI home root path")
     parser.add_argument(
+        "--port",
+        dest="port",
+        type=int,
+        default=None,
+        help=f"loopback port to bind (default: {API_BIND[1]})",
+    )
+    parser.add_argument(
         "--allow-test-seams",
         dest="allow_test_seams",
         action="store_true",
@@ -614,8 +658,9 @@ def main(argv: list[str] | None = None) -> None:
 
     target = Path(args.target).expanduser().resolve(strict=False) if args.target else None
     home_root = Path(args.home).expanduser().resolve(strict=False) if args.home else default_home_root()
+    bind = (API_BIND[0], args.port) if args.port is not None else API_BIND
     backend = ScoutFindJobsBackend(home_root=home_root, target=target)
-    _run_forever(API_BIND, backend=backend)
+    _run_forever(bind, backend=backend)
 
 
 if __name__ == "__main__":

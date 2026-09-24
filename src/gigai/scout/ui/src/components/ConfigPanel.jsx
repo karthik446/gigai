@@ -18,7 +18,7 @@ function SourceList({ sources }) {
   );
 }
 
-export default function ConfigPanel({ config, resumePreview }) {
+export default function ConfigPanel({ config, resumePreview, resumeMissingHint }) {
   return (
     <section className="panel">
       <h2>Configuration</h2>
@@ -79,7 +79,8 @@ export default function ConfigPanel({ config, resumePreview }) {
             <div className="value">{resumeDisplayLabel(resumePreview)}</div>
           ) : (
             <div className="callout warn" style={{ marginBottom: 0 }}>
-              No resume saved: run <code>gigai reference add --kind resume ...</code> before running.
+              No resume saved: run <code>{resumeMissingHint || "gigai scout resume add <file>"}</code>{" "}
+              before running.
             </div>
           )}
         </div>
