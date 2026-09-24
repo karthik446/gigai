@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-23 21:11 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-23 21:18 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -16,7 +16,11 @@ _Updated 2026-09-23 21:11 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - Post-release full matrix (run 35909539154) **finished with 2 failures**: Debian 12 offline container, and Source suite Python 3.12 on macos-latest. The other 9 passed (incl. macOS 3.11/3.13). PyPI and the Release are unaffected. Audit proposed, waiting on the operator.
 
 ## In progress
-- PR CI on the merge push (`b2a4f2d`) and the v0.1.8.1 release run 35948069799: background watcher.
+| Packet | Model | State | Task / dispatch | Next |
+| --- | --- | --- | --- | --- |
+| secrets-core: Workstream 0 P0-P2, pulled into 0.1.9 (secrets store on python-dotenv, service map, `gigai secrets add/list/rm`, env-then-.env resolver, roadmap placement) | Sonnet 5 | running | `task_56b12b13b1b9` / `ctx_119a0a1693fd` | verify → commit → dispatch secrets-exa (P3) |
+| country-data-research: replace the hand-made country/city tables in `scout/find_jobs/filters.py` with libraries/data or structured ATS fields? research only | Sonnet 5 | running | `task_9b8d138e10f0` / `ctx_1cc00426c3f0` | coordinator review → operator decides the fix |
+| PR CI (`ad88708`) + v0.1.8.1 release run 35948069799 | — | background watcher | | report |
 
 ## Next up
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
@@ -42,7 +46,7 @@ _Updated 2026-09-23 21:11 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - After the roadmap draft: pull Workstream 0 (connect secrets: `gigai secrets add`, .env fallback, Exa through the resolver) into 0.1.9?
 - Go-ahead for a read-only audit of the 2 v0.1.8 post-release failures (Debian offline; macOS 3.12)?
 - Release checklist change: GitHub Release notes = the CHANGELOG `### X.Y.Z` section verbatim. Write 0.1.9's section for users before tagging.
-- Apply the v0.1.8 release notes? (`gh release edit v0.1.8 --repo karthik446/gigai --notes-file /Users/kar/orca/workspaces/gigai/v0.1.8-release-notes.md`)
+- v0.1.8 release notes: operator will apply later (deferred).
 
 ## Flagged
 - S16 counts disagree: 45 strict rows in its inventory and in S20, but open question 2 says "the existing 34". Fix before S16 is used for sizing.
