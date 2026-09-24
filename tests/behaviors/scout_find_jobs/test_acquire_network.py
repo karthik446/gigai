@@ -78,7 +78,7 @@ class _Exa:
     def __init__(self, rows):
         self.rows = rows
 
-    def search(self, client, config):
+    def search(self, client, config, *, home_root=None):
         return tuple(self.rows)
 
 
@@ -91,7 +91,7 @@ class _FailingExa:
     def __init__(self, exc: Exception):
         self.exc = exc
 
-    def search(self, client, config):
+    def search(self, client, config, *, home_root=None):
         raise self.exc
 
 

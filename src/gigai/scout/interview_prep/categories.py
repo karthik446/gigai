@@ -22,6 +22,7 @@ only to the configured assess-equivalent model, never to web search.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import re
 from typing import Mapping
 
@@ -112,19 +113,24 @@ def predict_categories(
     posting_text: str,
     resume_text: str,
     company_claims: tuple[str, ...],
+    home_root: Path | None = None,
 ) -> tuple[tuple[QuestionCategoryPrediction, ...], str]:
     """Predict question categories; returns (predictions, resolved_target_name).
 
     Raises :class:`CategoryPredictionError` for a missing/ambiguous/disabled
     target, a denied/unavailable model, or output that doesn't parse -- never
     silently falls back to another provider or returns an empty prediction.
+
+    ``home_root`` (P1-8 follow-up) selects which operator home's secrets
+    store a remote adapter's credential resolver falls back to; omitting it
+    keeps today's default resolver (env, then the default home).
     """
 
     if model_target not in {"ollama_local", "codex_cli", "openrouter_api"}:
         raise CategoryPredictionError("category_model_target_invalid", f"unsupported model target {model_target!r}")
     try:
         adapter_target = _resolve_configured_target_name_for_adapter(config, model_target)
-        binding = resolve_model_adapter(config, adapter_target)
+        binding = resolve_model_adapter(config, adapter_target, home_root=home_root)
     except (AdapterFactoryError, ModelTargetResolutionError, ScoutProposalExecutionError) as exc:
         raise CategoryPredictionError("category_model_unavailable", str(exc)) from exc
     try:

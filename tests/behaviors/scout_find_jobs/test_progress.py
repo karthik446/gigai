@@ -342,7 +342,7 @@ class _Watchlist:
 
 
 class _Exa:
-    def search(self, client, config):
+    def search(self, client, config, *, home_root=None):
         return ()
 
 
@@ -390,7 +390,7 @@ def test_acquire_node_marks_the_step_failed_when_every_source_fails(
     from gigai.scout.find_jobs.market_acquisition import AcquireAllSourcesFailedError
 
     class _FailingExa:
-        def search(self, client, config):
+        def search(self, client, config, *, home_root=None):
             raise RuntimeError("boom")
 
     monkeypatch.setattr(
@@ -473,7 +473,7 @@ def test_a_real_exception_propagates_even_when_finish_step_also_fails(
     monkeypatch.setattr("gigai.scout.find_jobs.progress._replace_json", _boom)
 
     class _FailingExa:
-        def search(self, client, config):
+        def search(self, client, config, *, home_root=None):
             raise RuntimeError("boom")
 
     monkeypatch.setattr(

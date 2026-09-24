@@ -147,6 +147,28 @@ def test_secrets_store_used_when_env_unset(monkeypatch: pytest.MonkeyPatch, tmp_
     assert captured[0].headers["authorization"] == "Bearer dotenv-openai-key"
 
 
+def test_explicit_home_root_key_used_when_env_and_default_home_unset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # P1-8: `run()` must look up the key under the caller's explicit
+    # home_root, not the default GIGAI_HOME/~/.gigai fallback -- GIGAI_HOME
+    # here points at a decoy home that never has the key.
+    monkeypatch.delenv(OPENAI_API_KEY_ENV_VAR, raising=False)
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path / "decoy-home"))
+    chosen_home = tmp_path / "chosen-home"
+    secrets_store.set(OPENAI_API_KEY_ENV_VAR, "chosen-home-key", home_root=chosen_home)
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json=_responses_payload(companies=[]))
+
+    run(client=_client(handler), prefs=_prefs(), exclusions=(), runs=1, home_root=chosen_home)
+
+    assert captured[0].headers["authorization"] == "Bearer chosen-home-key"
+
+
 def test_429_retried_then_succeeds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("GIGAI_HOME", str(tmp_path))
     monkeypatch.setenv(OPENAI_API_KEY_ENV_VAR, "sk-test-key")

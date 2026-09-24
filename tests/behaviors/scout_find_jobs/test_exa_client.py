@@ -420,6 +420,49 @@ def test_missing_results_key_raises_redacted_error(monkeypatch: pytest.MonkeyPat
     assert "super-secret-value" not in str(excinfo.value)
 
 
+def test_search_uses_key_from_explicit_home_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # P1-8: `search()` must look up the key under the caller's explicit
+    # home_root, not the default GIGAI_HOME/~/.gigai fallback -- proved by
+    # pointing GIGAI_HOME at a decoy home that never has the key.
+    monkeypatch.delenv(EXA_API_KEY_ENV_VAR, raising=False)
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path / "decoy-home"))
+    chosen_home = tmp_path / "chosen-home"
+    secrets_store.set(EXA_API_KEY_ENV_VAR, "chosen-home-key", home_root=chosen_home)
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config(), home_root=chosen_home)
+
+    assert len(captured) == 1
+    assert captured[0].headers["x-api-key"] == "chosen-home-key"
+
+
+def test_search_without_home_root_ignores_other_homes_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Backward compatibility: omitting home_root keeps today's behavior
+    # (env, then the default GIGAI_HOME) -- a key stashed under some other
+    # explicit home is not found.
+    monkeypatch.delenv(EXA_API_KEY_ENV_VAR, raising=False)
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path / "default-home"))
+    other_home = tmp_path / "other-home"
+    secrets_store.set(EXA_API_KEY_ENV_VAR, "other-home-key", home_root=other_home)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("no HTTP request should be made without an API key")
+
+    with pytest.raises(ExaClientError) as excinfo:
+        ExaSearchClient().search(_client(handler), _config())
+
+    assert excinfo.value.code == "exa_missing_key"
+
+
 def test_transport_failure_raises_redacted_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "super-secret-value")
 

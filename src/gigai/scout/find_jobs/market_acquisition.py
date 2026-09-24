@@ -478,7 +478,7 @@ def _acquire_node_body(
         if input.config.sources.exa:
             exa_ok = False
             try:
-                discovered = tuple(exa.search(active_client, input.config))
+                discovered = tuple(exa.search(active_client, input.config, home_root=home_root))
                 rows.extend(discovered)
                 for row in discovered:
                     ref = _watchlist_add(watchlist, row, query_key=row.query_key, batch_id=batch_id)

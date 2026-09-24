@@ -345,7 +345,8 @@ def _run_assess(
     )
     binding = _ScriptedBinding(outputs)
     monkeypatch.setattr(
-        "gigai.scout.proposal_execution.resolve_model_adapter", lambda config, adapter_target: binding
+        "gigai.scout.proposal_execution.resolve_model_adapter",
+        lambda config, adapter_target, **_kwargs: binding,
     )
     output = assess_node(context, assess_input, home_root=fixture["home"], target=target, config=fixture["config"])
     return output, binding
@@ -795,7 +796,7 @@ def test_assess_node_resolves_the_real_adapter_without_a_literal_enum_named_targ
     )
     seen_targets: list[str] = []
 
-    def _fake_resolve(config, adapter_target):
+    def _fake_resolve(config, adapter_target, **_kwargs):
         seen_targets.append(adapter_target)
         return _ScriptedBinding([good])
 

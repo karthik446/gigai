@@ -198,6 +198,7 @@ def run_discovery(
             exclusions=tuple(sorted(openai_exclusions)),
             runs=runs,
             on_progress=_progress,
+            home_root=home_root,
         )
     source_outcomes.append(openai_outcome)
     all_candidates.extend(openai_outcome.candidates)

@@ -61,6 +61,7 @@ prefers it over this Exa row (fuller title/location/text; U20).
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from gigai import secrets_store
@@ -131,8 +132,10 @@ class ExaClientError(FindJobsContractError):
     """
 
 
-def _require_api_key() -> str:
-    api_key = os.environ.get(EXA_API_KEY_ENV_VAR) or secrets_store.get(EXA_API_KEY_ENV_VAR)
+def _require_api_key(*, home_root: Path | None = None) -> str:
+    api_key = os.environ.get(EXA_API_KEY_ENV_VAR) or secrets_store.get(
+        EXA_API_KEY_ENV_VAR, home_root=home_root
+    )
     if not api_key:
         raise ExaClientError(
             "exa_missing_key",
@@ -192,8 +195,14 @@ def _row_from_result(result: object, query: str) -> PostingRow | None:
 class ExaSearchClient:
     """Concrete ``ExaSearchClient`` protocol implementation backed by Exa."""
 
-    def search(self, client: "httpx.Client", config: FindJobsConfig) -> tuple[PostingRow, ...]:
-        api_key = _require_api_key()
+    def search(
+        self,
+        client: "httpx.Client",
+        config: FindJobsConfig,
+        *,
+        home_root: Path | None = None,
+    ) -> tuple[PostingRow, ...]:
+        api_key = _require_api_key(home_root=home_root)
         rows: list[PostingRow] = []
         for query in config.merged_queries:
             body: dict[str, object] = {

@@ -118,6 +118,37 @@ def test_unverifiable_source_urls_are_dropped(monkeypatch: pytest.MonkeyPatch, t
     assert result.skipped == "no_claims_had_a_verifiable_source"
 
 
+def test_explicit_home_root_key_used_when_env_and_default_home_unset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # P1-8: research_company's key lookup must use the caller's explicit
+    # home_root, not the default GIGAI_HOME/~/.gigai fallback -- GIGAI_HOME
+    # here points at a decoy home that never has the key.
+    monkeypatch.delenv(OPENAI_API_KEY_ENV_VAR, raising=False)
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path / "decoy-home"))
+    chosen_home = tmp_path / "chosen-home"
+    secrets_store.set(OPENAI_API_KEY_ENV_VAR, "chosen-home-key", home_root=chosen_home)
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.method == "POST":
+            return httpx.Response(200, json=_responses_payload(claims=[]))
+        return httpx.Response(200)
+
+    client = _client(handler)
+    result = research_company(
+        company="Acme Corp", title="Staff Backend Engineer", budget_usd=0.50,
+        search_client=client, verify_client=client, home_root=chosen_home,
+    )
+
+    assert result.skipped != f"{OPENAI_API_KEY_ENV_VAR} is not set; run `gigai secrets add openai`"
+    post_requests = [r for r in captured if r.method == "POST"]
+    assert len(post_requests) == 1
+    assert post_requests[0].headers["authorization"] == "Bearer chosen-home-key"
+
+
 def test_verify_source_url_head_then_get_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 

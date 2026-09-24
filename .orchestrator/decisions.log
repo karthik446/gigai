@@ -121,3 +121,6 @@
 - 2026-09-24 10:39 p1-secrets-home Q: allowed a one-line change to the ExaSearchClient Protocol in contracts.py (keyword-only optional home_root); fakes must accept it.
 - 2026-09-24 10:40 p1-stale-pid verified (8 tests re-run; _pid_is_our_server checks the command line via /proc or ps, fail-closed). Committed.
 - 2026-09-24 10:41 p1-csrf verified (47 tests re-run: JSON content type + Origin/Host guard on POST/PUT; no ACAO; the UI already sends JSON). Committed.
+- 2026-09-24 10:46 p1-secrets-home r0 accepted except one gap: model adapters (http/openrouter/openai) resolve keys without the home → r1 threads a home-aware credential_resolver at the adapter factory.
+- 2026-09-24 10:54 p1-secrets-home-r1 Q: approved home_root on HttpModelAdapter (the partial is built inside http.py) + passthrough on the openai/openrouter adapters + factory, to respect the boundary test that only http.py imports resolve_reference_value.
+- 2026-09-24 11:16 p1-secrets-home r1: the worker looped on no-op waits for ~20 min behind a directory-wide pytest (scout_proposals_tools/, test-budget violation). The coordinator killed the stray pytest, stopped the worker (ctx_98ef7399228f), and verified the finished change itself: 173 exact tests incl. test_model_invocation_foundation (resolve_reference_value only in http.py) + make unit-tests 1023. Committed. All pre-UAT P1s done → UAT.

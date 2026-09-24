@@ -33,6 +33,8 @@ from ...canonical import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
+    from pathlib import Path
+
     import httpx
 
 
@@ -1579,7 +1581,13 @@ PRESENT_DECLARED_EFFECTS = PRESENT_EFFECTS
 
 
 class ExaSearchClient(Protocol):
-    def search(self, client: "httpx.Client", config: FindJobsConfig) -> tuple[PostingRow, ...]: ...
+    def search(
+        self,
+        client: "httpx.Client",
+        config: FindJobsConfig,
+        *,
+        home_root: Path | None = None,
+    ) -> tuple[PostingRow, ...]: ...
 
 
 class ATSBoardClient(Protocol):

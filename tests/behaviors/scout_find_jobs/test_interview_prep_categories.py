@@ -72,7 +72,7 @@ def test_grounded_categories_cite_posting_resume_and_company(tmp_path: Path, mon
         {"category": "coding_in_their_stack", "why": "The role requires Go and the resume shows Go experience.", "grounded_in": ["proficiency in Kubernetes and Go", "9 years building distributed payments systems in Go"]},
     ])
     binding = _ScriptedBinding([good])
-    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, target: binding)
+    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, target, **_kwargs: binding)
 
     categories, resolved_target = predict_categories(
         config=config, model_target="ollama_local", title="Staff Backend Engineer", company="Acme Corp",
@@ -112,7 +112,7 @@ def test_model_denied_raises_not_returns_empty(tmp_path: Path, monkeypatch: pyte
     denied = ModelInvocationError("model denial")
     denied.code = "model_denied"
     binding = _ScriptedBinding([denied])
-    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, target: binding)
+    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, target, **_kwargs: binding)
     with pytest.raises(CategoryPredictionError) as excinfo:
         predict_categories(
             config=config, model_target="ollama_local", title="t", company="c",
@@ -130,7 +130,7 @@ def test_invalid_category_in_output_is_dropped_not_fabricated(tmp_path: Path, mo
         {"category": "domain", "why": "The posting is about payments domain knowledge.", "grounded_in": ["payments platform"]},
     ])
     binding = _ScriptedBinding([good])
-    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, target: binding)
+    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, target, **_kwargs: binding)
     categories, _ = predict_categories(
         config=config, model_target="ollama_local", title="t", company="c",
         posting_text="payments platform", resume_text="resume", company_claims=(),
@@ -145,7 +145,7 @@ def test_all_invalid_categories_raises(tmp_path: Path, monkeypatch: pytest.Monke
     config = _config_with_ollama_target(home, tmp_path)
     good = _good_output([{"category": "nonsense", "why": "x", "grounded_in": []}])
     binding = _ScriptedBinding([good])
-    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, target: binding)
+    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, target, **_kwargs: binding)
     with pytest.raises(CategoryPredictionError) as excinfo:
         predict_categories(
             config=config, model_target="ollama_local", title="t", company="c",

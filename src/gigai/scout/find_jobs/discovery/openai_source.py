@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -108,8 +109,10 @@ class OpenAISourceError(RuntimeError):
     """Raised only for a caller-side programming error; provider failures never raise."""
 
 
-def _api_key() -> str | None:
-    return os.environ.get(OPENAI_API_KEY_ENV_VAR) or secrets_store.get(OPENAI_API_KEY_ENV_VAR)
+def _api_key(*, home_root: Path | None = None) -> str | None:
+    return os.environ.get(OPENAI_API_KEY_ENV_VAR) or secrets_store.get(
+        OPENAI_API_KEY_ENV_VAR, home_root=home_root
+    )
 
 
 def resolve_model(model_override: str | None = None) -> str:
@@ -312,15 +315,20 @@ def run(
     runs: int,
     model_override: str | None = None,
     on_progress: Callable[[dict], None] | None = None,
+    home_root: Path | None = None,
 ) -> SourceRunOutcome:
     """Run ``runs`` OpenAI ``web_search`` calls; never raises for provider errors.
 
     Each call's exclusion list grows with companies the *previous* call in
     this same session already found (S24's "week 2 simulation" pattern),
     so N runs in one session don't just repeat the same result.
+
+    ``home_root`` (P1-8) selects which operator home's secrets store the key
+    lookup falls back to when the environment variable isn't set; omitting
+    it keeps today's behavior (env, then the default home).
     """
 
-    api_key = _api_key()
+    api_key = _api_key(home_root=home_root)
     if not api_key:
         return SourceRunOutcome(
             name="openai_web_search",

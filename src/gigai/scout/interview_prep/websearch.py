@@ -24,6 +24,7 @@ not done here to stay inside this packet's owned files.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -59,10 +60,10 @@ class WebSearchResult:
     error: str | None = None
 
 
-def api_key_present() -> bool:
+def api_key_present(*, home_root: Path | None = None) -> bool:
     """Cheap pre-check so a caller can skip the section without a client/budget dance."""
 
-    return bool(openai_source._api_key())
+    return bool(openai_source._api_key(home_root=home_root))
 
 
 def worst_case_cost_usd(model_override: str | None = None) -> float:
@@ -87,6 +88,7 @@ def web_search_structured(
     model_override: str | None = None,
     client: httpx.Client | None = None,
     on_progress: Callable[[dict], None] | None = None,
+    home_root: Path | None = None,
 ) -> WebSearchResult:
     """One OpenAI ``web_search`` call with a caller-supplied strict JSON schema.
 
@@ -95,9 +97,13 @@ def web_search_structured(
     ``skip_reason``/``error`` so a caller can build a partial prep. Raises
     :class:`WebSearchError` only for a caller programming error (a schema
     the price table can't be resolved for).
+
+    ``home_root`` (P1-8) selects which operator home's secrets store the key
+    lookup falls back to when the environment variable isn't set; omitting
+    it keeps today's behavior (env, then the default home).
     """
 
-    if not api_key_present():
+    if not api_key_present(home_root=home_root):
         return WebSearchResult(
             ok=False, parsed=None, cost_usd=0.0,
             skip_reason=f"{OPENAI_API_KEY_ENV_VAR} is not set; run `gigai secrets add openai`",
@@ -113,7 +119,7 @@ def web_search_structured(
             skip_reason=f"worst-case cost ${worst_case:.4f} exceeds budget ${budget_usd:.4f}",
         )
 
-    api_key = openai_source._api_key()
+    api_key = openai_source._api_key(home_root=home_root)
     assert api_key is not None
     body = {
         "model": model,

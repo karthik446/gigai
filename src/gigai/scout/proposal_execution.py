@@ -186,7 +186,7 @@ def _assess_node_body(
     # unmatched adapter kind fails loudly, naming the fix.
     adapter_target = _resolve_configured_target_name_for_adapter(config, model_target)
     try:
-        binding = resolve_model_adapter(config, adapter_target)
+        binding = resolve_model_adapter(config, adapter_target, home_root=home_root)
     except (AdapterFactoryError, ModelTargetResolutionError, KeyError) as exc:
         # Missing credentials and unknown targets are setup errors, not a row
         # level model outage: callers must see them loudly.

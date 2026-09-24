@@ -115,7 +115,7 @@ def build_prep(
     with httpx.Client(timeout=30.0) as verify_client:
         company = company_research.research_company(
             company=posting.company, title=posting.title, budget_usd=budget_usd,
-            verify_client=verify_client, on_progress=_progress,
+            verify_client=verify_client, on_progress=_progress, home_root=home_root,
         )
 
     _progress({"stage": "role_research"})
@@ -130,6 +130,7 @@ def build_prep(
             title=posting.title, company=posting.company,
             posting_text=posting.text or "", resume_text=resume_text,
             company_claims=tuple(claim.claim for claim in company.claims),
+            home_root=home_root,
         )
     except CategoryPredictionError as exc:
         raise InterviewPrepError(exc.code, str(exc)) from exc

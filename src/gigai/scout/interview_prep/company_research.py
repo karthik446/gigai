@@ -18,6 +18,7 @@ named, and the rest of the prep still builds (packet CHANGE 2a).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 
 import httpx
@@ -69,6 +70,7 @@ def research_company(
     search_client: httpx.Client | None = None,
     verify_client: httpx.Client | None = None,
     on_progress: Callable[[dict], None] | None = None,
+    home_root: Path | None = None,
 ) -> CompanyResearch:
     """Research one company; never raises for a missing key or provider error.
 
@@ -80,14 +82,19 @@ def research_company(
     30s-timeout client for the HEAD/GET source-URL checks below) -- sharing
     one short-timeout client between both calls previously made every
     ``web_search`` call time out at 30s even when the provider was healthy.
+
+    ``home_root`` (P1-8) selects which operator home's secrets store the key
+    lookup falls back to when the environment variable isn't set; omitting
+    it keeps today's behavior (env, then the default home).
     """
 
-    if not websearch.api_key_present():
+    if not websearch.api_key_present(home_root=home_root):
         return CompanyResearch(skipped=f"{websearch.OPENAI_API_KEY_ENV_VAR} is not set; run `gigai secrets add openai`")
 
     query = build_query(company=company, title=title)
     result = websearch.web_search_structured(
         query, _SCHEMA, budget_usd=budget_usd, client=search_client, on_progress=on_progress,
+        home_root=home_root,
     )
     if not result.ok:
         return CompanyResearch(cost_usd=result.cost_usd, skipped=result.skip_reason or result.error or "company_research_unavailable")

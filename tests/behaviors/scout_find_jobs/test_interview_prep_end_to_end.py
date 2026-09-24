@@ -121,7 +121,7 @@ def test_build_prep_end_to_end_no_resume_in_search_request(tmp_path: Path, monke
         return httpx.Response(200)  # source verification HEAD/GET
 
     binding = _ScriptedBinding([_good_categories()])
-    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, tgt: binding)
+    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, tgt, **_kwargs: binding)
     monkeypatch.setattr("gigai.scout.interview_prep.prep.httpx.Client", lambda *a, **k: _RealClient(*a, transport=httpx.MockTransport(handler), **{k2: v for k2, v in k.items() if k2 != "transport"}))
 
     prep = build_prep(home_root=home, target=target, posting_url=POSTING_URL, gig_id=gig_id)
@@ -154,7 +154,7 @@ def test_idempotent_same_resume_revision_returns_cached_without_new_calls(tmp_pa
         return httpx.Response(200)
 
     binding = _ScriptedBinding([_good_categories()])
-    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, tgt: binding)
+    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, tgt, **_kwargs: binding)
     monkeypatch.setattr("gigai.scout.interview_prep.prep.httpx.Client", lambda *a, **k: _RealClient(*a, transport=httpx.MockTransport(handler), **{k2: v for k2, v in k.items() if k2 != "transport"}))
 
     first = build_prep(home_root=home, target=target, posting_url=POSTING_URL, gig_id=gig_id)
@@ -177,7 +177,7 @@ def test_refresh_forces_a_new_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         return httpx.Response(200)
 
     binding = _ScriptedBinding([_good_categories(), _good_categories()])
-    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, tgt: binding)
+    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, tgt, **_kwargs: binding)
     monkeypatch.setattr("gigai.scout.interview_prep.prep.httpx.Client", lambda *a, **k: _RealClient(*a, transport=httpx.MockTransport(handler), **{k2: v for k2, v in k.items() if k2 != "transport"}))
 
     first = build_prep(home_root=home, target=target, posting_url=POSTING_URL, gig_id=gig_id)
@@ -195,7 +195,7 @@ def test_missing_key_still_builds_partial_prep_with_categories(tmp_path: Path, m
         raise AssertionError("no HTTP call should be made without an OpenAI key")
 
     binding = _ScriptedBinding([_good_categories()])
-    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, tgt: binding)
+    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, tgt, **_kwargs: binding)
     monkeypatch.setattr("gigai.scout.interview_prep.prep.httpx.Client", lambda *a, **k: _RealClient(*a, transport=httpx.MockTransport(handler), **{k2: v for k2, v in k.items() if k2 != "transport"}))
 
     prep = build_prep(home_root=home, target=target, posting_url=POSTING_URL, gig_id=gig_id)
@@ -210,7 +210,7 @@ def test_prep_notes_reuse_assess_matrix_when_it_exists(tmp_path: Path, monkeypat
     monkeypatch.delenv(OPENAI_API_KEY_ENV_VAR, raising=False)
 
     binding = _ScriptedBinding([_good_categories()])
-    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, tgt: binding)
+    monkeypatch.setattr("gigai.scout.interview_prep.categories.resolve_model_adapter", lambda cfg, tgt, **_kwargs: binding)
 
     prep = build_prep(home_root=home, target=target, posting_url=POSTING_URL, gig_id=gig_id)
 
