@@ -26,7 +26,7 @@ KINDS = ["claim", "logic", "count", "bulk-read", "hallucination", "lint-triage"]
 def log_path():
     # Orchestrator home (workspaces/gigai): this file is .claude/skills/gigai-orchestrator/local_check.py
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    return os.environ.get("GIGAI_LOCAL_LOG", os.path.join(root, ".orchestrator/local-models.jsonl"))
+    return os.environ.get("GIGAI_LOCAL_LOG", os.path.join(root, "orchestrator/local-models.jsonl"))
 
 
 def append(row):

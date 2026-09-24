@@ -27,9 +27,10 @@ dist/
 .idea/
 .vscode/
 
-# Orchestrator coordination state is local only, never committed: in a version
-# worktree .orchestrator is a symlink to the orchestrator home's ../.orchestrator.
+# Orchestrator coordination state lives outside the repo (workspaces/gigai/orchestrator);
+# never commit a stray copy here.
 .orchestrator
+/orchestrator/
 
 # S24 discovery bake-off: raw DOL H-1B LCA disclosure file (~250MB) is scratch
 # input, never committed -- only a small derived sample under
