@@ -218,6 +218,27 @@ def test_country_match_region_only_locations_are_a_definite_non_match(location: 
     assert country_match(location, ("US",)) is False
 
 
+# uat-bug-009: "APJ" (ClickHouse's own region label) was missing from
+# _REGION_TOKENS and fell into the ambiguous bucket B1 fixed for the other
+# region labels above -- confirmed against a real operator run where
+# "ClickHouse · APJ" passed a countries=[US] filter. ANZ/Asia-Pacific/
+# Worldwide are added alongside it as the same kind of known, named
+# multi-country label (not present in the real evidence corpus, so not
+# added to location-corpus.json, but covered here directly).
+@pytest.mark.parametrize(
+    "location",
+    ["APJ", "ANZ", "Asia-Pacific", "Asia Pacific", "Worldwide", "APJ; Bengaluru"],
+)
+def test_country_match_additional_region_tokens_are_a_definite_non_match(location: str) -> None:
+    assert country_match(location, ("US",)) is False
+
+
+def test_country_match_apj_region_token_with_matching_country_still_matches() -> None:
+    # A region token alongside a real country match still matches on the
+    # country, the same as the existing AMER/EMEA/APAC/LATAM tokens.
+    assert country_match("APJ; Denver, CO", ("US",)) is True
+
+
 def test_country_match_region_token_with_matching_country_still_matches() -> None:
     # A region token alongside a real country match still matches on the
     # country -- the region token doesn't poison an otherwise-good match.

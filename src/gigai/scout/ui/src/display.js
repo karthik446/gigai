@@ -65,7 +65,33 @@ function formatShortDate(isoDate) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(parsed);
 }
 
+// uat-bug-009: plain-word labels for the not-assessed reason each card shows
+// -- the operator's own words ("Over cap", "Filtered: location",
+// "Duplicate") in place of the longer sentences below, which stay as the
+// tooltip/detail text (see notAssessedReasonDetail). "Unchanged since
+// <date>" is built separately, from the carried-forward entry's
+// from_run_date, by unchangedSinceLabel -- a bare "unchanged" reason with no
+// carried-forward date (shouldn't normally happen after this fix, but an
+// older run dir or a resume-revision-unknown case can still produce one)
+// falls back to this table's plain "Unchanged".
 const NOT_ASSESSED_REASON_LABELS = {
+  unchanged: "Unchanged",
+  duplicate: "Duplicate",
+  failed: "Acquisition failed",
+  over_cap: "Over cap",
+  role_mismatch: "Filtered: role",
+  no_resume: "No resume pinned",
+  model_unavailable: "Model unavailable",
+  model_denied: "Model denied",
+  location_mismatch: "Filtered: location",
+  region_only: "Filtered: location",
+  sponsorship_excluded: "Filtered: sponsorship",
+  model_output_invalid: "Model output invalid",
+};
+
+// The longer, original sentence form -- kept for a detail/tooltip line
+// under the short plain-word badge above.
+const NOT_ASSESSED_REASON_DETAILS = {
   unchanged: "Already seen with no content change.",
   duplicate: "Duplicate of another posting in this batch.",
   failed: "Acquisition failed for this posting.",
@@ -75,12 +101,26 @@ const NOT_ASSESSED_REASON_LABELS = {
   model_unavailable: "The model target was unavailable.",
   model_denied: "The model target was denied (missing credentials or consent).",
   location_mismatch: "Location did not match the configured country/location filter.",
+  region_only: "Location is a region label (e.g. AMER/EMEA/APAC/APJ), not a specific country.",
   sponsorship_excluded: "Posting does not offer visa sponsorship, which this config requires.",
   model_output_invalid: "The model's answer for this posting could not be parsed.",
 };
 
 export function notAssessedReasonLabel(reason) {
   return NOT_ASSESSED_REASON_LABELS[reason] || reason;
+}
+
+export function notAssessedReasonDetail(reason) {
+  return NOT_ASSESSED_REASON_DETAILS[reason] || reason;
+}
+
+// uat-bug-009: "Unchanged since <date>" for a posting carried forward from
+// an earlier run's successful assessment -- falls back to the plain
+// "Unchanged" badge when no date is available (e.g. the earlier run's
+// outputs/assess.json mtime couldn't be read).
+export function unchangedSinceLabel(fromRunDate) {
+  const dateText = formatShortDate(fromRunDate);
+  return dateText ? `Unchanged since ${dateText}` : "Unchanged";
 }
 
 const SPONSORSHIP_LABELS = {

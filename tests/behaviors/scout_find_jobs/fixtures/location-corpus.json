@@ -14,7 +14,7 @@
     {
       "location": "APJ",
       "expected_countries": [],
-      "expected_us_match": null
+      "expected_us_match": false
     },
     {
       "location": "ASSIGN LOCATION",

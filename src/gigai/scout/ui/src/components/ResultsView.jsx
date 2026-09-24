@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import PostingsBoard from "./PostingsBoard.jsx";
 import { rowsFromResults } from "../boardRows.js";
-import { resumeDisplayLabel } from "../display.js";
+import { resumeDisplayLabel, resumeIdsTooltip } from "../display.js";
 
 // B4: the final sealed-results view. Postings/assessments render through the
 // same PostingsBoard the live /progress view uses (see boardRows.js), so a
@@ -18,7 +18,12 @@ export default function ResultsView({ payload }) {
           <div className="field-row">
             <div className="field">
               <div className="label">Resume</div>
-              <div className="value">{resumeDisplayLabel(payload.pinned_resume)}</div>
+              <div
+                className="value"
+                title={resumeIdsTooltip(payload.pinned_resume)}
+              >
+                {resumeDisplayLabel(payload.pinned_resume, payload.resume_label, payload.resume_created_at)}
+              </div>
             </div>
           </div>
         </div>

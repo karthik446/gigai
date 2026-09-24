@@ -589,16 +589,26 @@ def test_candidate_partition_mixes_assessed_over_cap_and_exclusions(
     assert by_url[over_cap_posting.normalized_url].reason is NotAssessedReason.OVER_CAP
     assert by_url[location_mismatch_posting.normalized_url].reason is NotAssessedReason.LOCATION_MISMATCH
     assert by_url[sponsorship_excluded_posting.normalized_url].reason is NotAssessedReason.SPONSORSHIP_EXCLUDED
-    assert unchanged_posting.normalized_url not in by_url
+    # uat-bug-009: an UNCHANGED row is no longer excluded from candidates
+    # outright -- this fixture has no `outputs/assess.json` anywhere on disk
+    # (no earlier run ever produced a successful assessment for it), so it's
+    # still eligible for selection under the cap, same as any other
+    # candidate. It shares its default company/title ("Acme"/"Software
+    # Engineer") with `assessed_posting`, which is already selected/in-cap,
+    # so `select_for_assessment` correctly dedupes it as DUPLICATE rather
+    # than assessing it a second time or counting it as a fresh OVER_CAP.
+    assert by_url[unchanged_posting.normalized_url].reason is NotAssessedReason.DUPLICATE
 
-    # candidate_rows: complete, non-overlapping partition (T4), and the
-    # unchanged row is not a candidate at all.
+    # candidate_rows: complete, non-overlapping partition (T4). uat-bug-009:
+    # the unchanged row IS a candidate now (no prior successful assessment
+    # exists for it anywhere), unlike before this fix.
     candidate_urls = {row.posting.normalized_url for row in output.candidate_rows}
     assert candidate_urls == {
         assessed_posting.normalized_url,
         over_cap_posting.normalized_url,
         location_mismatch_posting.normalized_url,
         sponsorship_excluded_posting.normalized_url,
+        unchanged_posting.normalized_url,
     }
     assessed_urls = {a.posting.normalized_url for a in output.assessments}
     not_assessed_urls = set(by_url)

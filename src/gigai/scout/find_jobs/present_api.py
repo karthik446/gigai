@@ -135,6 +135,16 @@ class Backend(Protocol):
 
     def run_results(self, run_id: str) -> RunResultsResponse: ...
 
+    def carried_forward_assessments(self, run_id: str) -> tuple:
+        """uat-bug-009: this run's postings skipped as unchanged, plus their earlier result.
+
+        Additive to ``run_results``: read from acquire's own sealed output
+        (``AcquireOutput.carried_forward_assessments``), never through the
+        assessed/not-assessed partition ``PresentPayload`` enforces. Returns
+        ``()`` for a run with no carried-forward postings.
+        """
+        ...
+
     def run_progress(self, run_id: str) -> dict[str, object]: ...
 
     # S2-B: the setup interview + "Discover companies" panel. These four
@@ -201,6 +211,10 @@ class NotWiredBackend:
         raise AssertionError("unreachable")
 
     def run_results(self, run_id: str) -> RunResultsResponse:
+        self._not_wired()
+        raise AssertionError("unreachable")
+
+    def carried_forward_assessments(self, run_id: str) -> tuple:
         self._not_wired()
         raise AssertionError("unreachable")
 
@@ -602,6 +616,38 @@ class ScoutFindJobsBackend:
             target=self._target_root(),
             run_id=run_id,
         )
+
+    def carried_forward_assessments(self, run_id: str) -> tuple:
+        """uat-bug-009: postings this run skipped as unchanged, plus their earlier result.
+
+        Read straight from the run's own sealed ``outputs/acquire.json``
+        (``AcquireOutput.carried_forward_assessments``, additive) rather than
+        through ``build_present_payload``/``projection.py`` -- that module's
+        ``PresentPayload`` enforces the assessed/not-assessed partition
+        invariant (T4: a posting cannot be both), so a carried-forward result
+        must stay outside it. Degrades to ``()`` for a run whose acquire
+        output hasn't landed yet, or predates this field.
+        """
+        from ...journal import JournalArtifactMissingError, read_committed_artifact
+        from .contracts import AcquireOutput
+
+        resolved = self._resolved_run(run_id)
+        try:
+            raw, _commit = read_committed_artifact(
+                workpad=resolved.path,
+                project_id=resolved.project_id,
+                gig_id=resolved.gig_id,
+                path=f"runs/{run_id}/outputs/acquire.json",
+            )
+        except JournalArtifactMissingError:
+            return ()
+        try:
+            from ...canonical import parse_json_bytes
+
+            output = AcquireOutput.from_json(parse_json_bytes(raw))
+        except (ValueError, FindJobsContractError):
+            return ()
+        return output.carried_forward_assessments
 
     def run_status(self, run_id: str) -> RunStatusResponse:
         from ... import run
@@ -1662,7 +1708,52 @@ def _make_handler(
             except LookupError:
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "run not found")
                 return
-            self._write_json(HTTPStatus.OK, results_response.to_json())
+            body = results_response.to_json()
+            # uat-bug-009: the run view's "Resume used" card showed the raw
+            # `record_… (revision_…)` ids -- the same bug uat-bug-004 already
+            # fixed for the Configuration card, just never carried over here.
+            # Reuse the exact same additive fields (resume_label/
+            # resume_created_at, resolved via backend.resume_metadata() ->
+            # run.resolve_newest_resume_details), added next to
+            # RunResultsResponse's own sealed to_json() rather than on the
+            # PresentPayload contract itself, so the sealed payload shape
+            # stays untouched (same reasoning as /api/config's resume_label).
+            #
+            # resume_metadata() resolves the *newest* committed resume, which
+            # is not necessarily the resume this specific (possibly older)
+            # run was pinned to -- so the label/date are only attached when
+            # they identify the same record+revision as this run's actual
+            # payload.pinned_resume; otherwise the UI falls back to the raw
+            # ids it already carries, never a mislabeled resume.
+            pinned = results_response.payload.pinned_resume
+            resume_label: str | None = None
+            resume_created_at: str | None = None
+            if pinned is not None:
+                try:
+                    preview = backend.resume_preview()
+                except Exception:  # noqa: BLE001 - display-only enrichment must never break /results
+                    preview = None
+                if preview is not None and preview.record_id == pinned.record_id and preview.revision_id == pinned.revision_id:
+                    try:
+                        metadata = backend.resume_metadata()
+                    except Exception:  # noqa: BLE001 - display-only enrichment must never break /results
+                        metadata = None
+                    if metadata is not None:
+                        resume_label, resume_created_at = metadata
+            body["resume_label"] = resume_label
+            body["resume_created_at"] = resume_created_at
+            # uat-bug-009: a posting skipped this run as unchanged (because a
+            # successful assessment of it already exists for the current
+            # resume revision) carries that earlier result into this run's
+            # present output -- additively, alongside (never inside) the
+            # sealed assessed/not-assessed partition, so the card can show
+            # the carried fit/reasons instead of a bare "Not assessed".
+            try:
+                carried_forward = backend.carried_forward_assessments(run_id)
+            except Exception:  # noqa: BLE001 - display-only enrichment must never break /results
+                carried_forward = ()
+            body["carried_forward_assessments"] = [item.to_json() for item in carried_forward]
+            self._write_json(HTTPStatus.OK, body)
 
         def _handle_get_run_progress(self, run_id: str) -> None:
             try:

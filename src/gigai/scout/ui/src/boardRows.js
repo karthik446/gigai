@@ -28,15 +28,30 @@ export function rowsFromResults(payload) {
   const notAssessedByUrl = new Map(
     payload.not_assessed.map((entry) => [entry.posting.normalized_url, entry.reason]),
   );
+  // uat-bug-009: a posting skipped as unchanged, with a successful earlier
+  // assessment carried forward (additive, outside the assessed/
+  // not-assessed partition -- see present_api.py's carried_forward_assessments).
+  const carriedForwardByUrl = new Map(
+    (payload.carried_forward_assessments || []).map((entry) => [entry.normalized_url, entry]),
+  );
   return payload.rows.map((row) => {
     const url = row.posting.normalized_url;
     const assessment = assessedByUrl.get(url) || null;
     const notAssessedReason = notAssessedByUrl.get(url) || null;
+    const carriedForward = carriedForwardByUrl.get(url) || null;
+    const status = assessment
+      ? "assessed"
+      : carriedForward
+        ? "carried_forward"
+        : notAssessedReason
+          ? "not_assessed"
+          : "acquired";
     return {
       posting: row.posting,
-      status: assessment ? "assessed" : notAssessedReason ? "not_assessed" : "acquired",
-      assessment,
+      status,
+      assessment: assessment || carriedForward?.result || null,
       notAssessedReason,
+      fromRunDate: carriedForward?.from_run_date || null,
     };
   });
 }

@@ -213,23 +213,52 @@ def _assess_node_body(
     # role-matched row. Every candidate that isn't selected gets a reason
     # -- exclusion_reason() first (location_mismatch/sponsorship_excluded),
     # then B2's selection helper (duplicate/over_cap) for an otherwise-
-    # eligible row acquire's diversity selection left behind. Unchanged/
-    # duplicate/failed and role-mismatched rows are not candidates at all
-    # and never appear in candidate_rows.
+    # eligible row acquire's diversity selection left behind. Duplicate/
+    # failed and role-mismatched rows are not candidates at all and never
+    # appear in candidate_rows.
+    #
+    # uat-bug-009: UNCHANGED is no longer an automatic exclusion here either
+    # -- acquire itself only ever selects an UNCHANGED row into
+    # `input.selected_postings` (assess never widens the *selected* set on
+    # its own) when it found no successful prior assessment for the current
+    # resume revision (see `market_acquisition._prior_assessments`). So a
+    # selected UNCHANGED row is already-sealed selection authority the same
+    # as a selected NEW/EDITED row; an UNCHANGED row that ISN'T selected is
+    # independently re-checked here with the identical pure helpers acquire
+    # used, so the two call sites can never disagree about which UNCHANGED
+    # rows are genuinely skippable (has a valid prior assessment) versus
+    # eligible (recorded provisionally as OVER_CAP below, same as any other
+    # otherwise-eligible row acquire's diversity selection didn't pick).
+    from .find_jobs.contracts import PinnedResume
     from .find_jobs.filters import exclusion_reason
-    from .find_jobs.market_acquisition import _role_match
+    from .find_jobs.market_acquisition import _prior_assessments, _role_match
     from .find_jobs.selection import select_for_assessment
 
     selected_by_url = {item.normalized_url: item for item in input.selected_postings}
     roles = tuple(getattr(sealed_config, "roles", ())) if sealed_config is not None else ()
+    resume_revision_id = input.pinned_resume.revision_id if isinstance(input.pinned_resume, PinnedResume) else None
+    prior_assessments = _prior_assessments(root, context.run_id)
     rows: list[object] = []
     not_assessed: list[object] = []
     to_assess: list[tuple[object, bytes | None]] = []
     eligible_postings: list[object] = []
     for posting, outcome in acquire_rows:
-        if outcome not in (RowOutcome.NEW, RowOutcome.EDITED):
-            continue
         selected = selected_by_url.get(posting.normalized_url)
+        if outcome is RowOutcome.UNCHANGED and selected is None:
+            prior = prior_assessments.get(posting.normalized_url)
+            if (
+                prior is not None
+                and prior.result.posting.content_sha256 == posting.content_sha256
+                and resume_revision_id is not None
+                and prior.resume_revision_id == resume_revision_id
+            ):
+                # A genuinely skippable UNCHANGED row: not a candidate at
+                # all, same as before this fix. Its carried-forward result
+                # is surfaced by present_api.py from acquire's own
+                # AcquireOutput.carried_forward_assessments, not here.
+                continue
+        elif outcome not in (RowOutcome.NEW, RowOutcome.EDITED):
+            continue
         if selected is not None:
             # Already-sealed selection authority (AssessInput validates
             # every selected posting's role_match=True at construction) --

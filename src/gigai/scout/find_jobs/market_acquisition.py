@@ -8,7 +8,7 @@ acquisition journal.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import gzip
 import json
@@ -24,6 +24,8 @@ from .contracts import (
     ATSProvider,
     AcquireInput,
     AcquireOutput,
+    AssessmentResult,
+    CarriedForwardAssessment,
     DropCount,
     FailureRow,
     FindJobsContractError,
@@ -266,6 +268,96 @@ def _prior_observations(root: Path, current_batch: str) -> dict[str, str | None]
                     result[normalize_url(str(url))] = row.get("source_snapshot", {}).get("content_sha256") or row.get("content_sha256")
         except (OSError, ValueError, TypeError):
             continue
+    return result
+
+
+def _resume_revision_for_run(root: Path, run_id: str) -> str | None:
+    """The pinned resume's ``revision_id`` sealed for this run, if resolvable.
+
+    uat-bug-009: reads ``runs/<run_id>/sealed/find-jobs-run-input.json`` --
+    the same sealed file ``proposal_execution.py``'s own ``_read_sealed_config``
+    reads for its config -- rather than growing ``AcquireInput``'s sealed
+    contract with a resume field (a schema change). Written by
+    ``run.launch_find_jobs_run`` before the graph is even scheduled, so it is
+    on disk before this node's body runs on a real run; degrades to ``None``
+    for the many direct-call unit tests that construct ``AcquireInput``
+    without a real on-disk run (older run dirs too) -- callers treat ``None``
+    the same as "no config": never a match, so an unchanged row's prior
+    assessment is never trusted without a known, current resume revision to
+    compare it against.
+    """
+
+    path = root / "runs" / run_id / "sealed" / "find-jobs-run-input.json"
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        from .contracts import FindJobsRunInput
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return FindJobsRunInput.from_json(payload).pinned_resume.revision_id
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
+@dataclass(frozen=True)
+class _PriorAssessment:
+    """One posting's most recent *successful* assessment from an earlier run."""
+
+    result: "AssessmentResult"
+    resume_revision_id: str
+    run_date: str | None
+
+
+def _prior_assessments(root: Path, current_run_id: str) -> dict[str, _PriorAssessment]:
+    """Every URL's latest successful assessment from an earlier run's sealed output.
+
+    uat-bug-009 root cause: acquire's candidate loop excluded every
+    ``UNCHANGED`` row outright (this function is what lets it stop doing
+    that for a row that was never actually, successfully assessed --
+    ``NEW_never_assessed``/never-run-2-2-2 the operator's evidence run.md:
+    a failed run leaves postings acquired but with no ``outputs/assess.json``
+    at all, so those postings are already excluded here -- see the
+    ``AssessOutput.assessments`` scan below only ever iterating *sealed*
+    outputs that exist).
+    ``runs/*/outputs/assess.json`` (sealed per run, never cleaned up) is the
+    only durable, resume-revision-tagged record of "which postings were
+    actually, successfully assessed" -- ``records/scout-proposals/...`` (the
+    R1 immutable revision layer) is keyed by opaque record/revision uuids
+    with no content-digest index, so it cannot answer "was this digest ever
+    assessed" without an unbounded scan of every proposal record ever
+    written; ``AssessOutput`` is already the exact bounded, per-run answer.
+    Later runs win ties (sorted by directory name, which is the run's UUID --
+    not a true time order, but the exact "from run <date>" wall-clock label
+    is resolved separately, from ``outputs/assess.json``'s own mtime, by the
+    caller that needs to display it -- ordering here only decides which
+    *result* to prefer when a posting was assessed successfully more than
+    once, and the newest successful one is always the more useful carry-
+    forward, so last-write-wins over ``sorted()`` order is adequate).
+    """
+
+    from .contracts import AssessOutput
+
+    result: dict[str, _PriorAssessment] = {}
+    runs_dir = root / "runs"
+    if not runs_dir.is_dir():
+        return result
+    for output_file in sorted(runs_dir.glob("*/outputs/assess.json")):
+        run_id = output_file.parent.parent.name
+        if run_id == current_run_id:
+            continue
+        try:
+            payload = json.loads(output_file.read_text(encoding="utf-8"))
+            output = AssessOutput.from_json(payload)
+        except (OSError, ValueError, TypeError):
+            continue
+        resume_revision_id = output.pinned_resume.revision_id
+        run_date = None
+        try:
+            run_date = datetime.fromtimestamp(output_file.stat().st_mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        except OSError:
+            pass
+        for assessment in output.assessments:
+            result[assessment.posting.normalized_url] = _PriorAssessment(assessment, resume_revision_id, run_date)
     return result
 
 
@@ -570,8 +662,25 @@ def _acquire_node_body(
     url_diff = diff_url_sets(previous, current)
     added = {item.url for item in url_diff.added}
     edited = {item.url for item in url_diff.edited}
+    # uat-bug-009 root cause: an UNCHANGED row (same content digest as an
+    # earlier acquire) used to be excluded from `candidates` outright --
+    # even when that earlier run never actually produced a successful
+    # assessment for it (a failed run, an over-cap drop, a since-changed
+    # resume revision). A run 1 that fails at assess then made every posting
+    # in run 2 "unchanged" and permanently unassessable. Fixed: an UNCHANGED
+    # row only stays excluded when a *successful* assessment of the exact
+    # same content digest exists for the *current* resume revision -- config
+    # inputs that affect assess (resume content, via its revision id; the
+    # digest already captures the posting content itself) -- otherwise it's
+    # still eligible for selection under the cap, same as NEW/EDITED. A
+    # changed/unresolvable resume revision makes an earlier assessment not
+    # count (never a match), so it never wrongly skips a posting the
+    # operator's new resume hasn't actually been assessed against.
+    current_resume_revision_id = _resume_revision_for_run(resolved.path, context.run_id)
+    prior_assessments = _prior_assessments(resolved.path, context.run_id)
     results: list[PostingRowResult] = []
     candidates: list[PostingRow] = []
+    carried_forward: dict[str, _PriorAssessment] = {}
     for row in rows:
         if row.normalized_url in added:
             outcome = RowOutcome.NEW
@@ -580,12 +689,24 @@ def _acquire_node_body(
         else:
             outcome = RowOutcome.UNCHANGED
         results.append(PostingRowResult(row, outcome))
+        is_candidate = outcome in {RowOutcome.NEW, RowOutcome.EDITED}
+        if outcome is RowOutcome.UNCHANGED:
+            prior = prior_assessments.get(row.normalized_url)
+            if (
+                prior is not None
+                and prior.result.posting.content_sha256 == row.content_sha256
+                and current_resume_revision_id is not None
+                and prior.resume_revision_id == current_resume_revision_id
+            ):
+                carried_forward[row.normalized_url] = prior
+            else:
+                is_candidate = True
         if progress is not None:
             # B4: one line per posting kept after the B1 filter, appended as
             # acquire produces it -- this is what lets a card render before
             # the whole run (or even the whole acquire step) finishes.
             progress.posting_acquired(row.to_json(), outcome=outcome.value)
-        if input.selection_rule is SelectionRule.NEW_OR_EDITED_ROLE_MATCH and outcome in {RowOutcome.NEW, RowOutcome.EDITED}:
+        if input.selection_rule is SelectionRule.NEW_OR_EDITED_ROLE_MATCH and is_candidate:
             candidates.append(row)
 
     # B2 (0.1.8.1 live UAT): the naive first-N-in-batch-order walk let one
@@ -639,6 +760,10 @@ def _acquire_node_body(
         watchlist_refs=tuple(dict.fromkeys(watchlist_refs)),
         selected_postings=tuple(selected),
         dropped_counts=tuple(DropCount(reason, count) for reason, count in sorted(drop_counts.items(), key=lambda item: item[0].value)),
+        carried_forward_assessments=tuple(
+            CarriedForwardAssessment(url, prior.result, prior.run_date)
+            for url, prior in sorted(carried_forward.items())
+        ),
     )
 
 

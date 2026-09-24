@@ -957,6 +957,38 @@ class DropCount(_Contract):
 
 
 @dataclass(frozen=True)
+class CarriedForwardAssessment(_Contract):
+    """uat-bug-009: a posting skipped as UNCHANGED, plus its earlier result.
+
+    Produced only when acquire finds a *successful* assessment of the exact
+    same content digest, for the current resume revision, from an earlier
+    run -- the only case where skipping a posting as "unchanged" is still
+    correct (see ``market_acquisition._prior_assessments``). Additive on
+    :class:`AcquireOutput`, never on the assessed/not-assessed partition
+    :class:`PresentPayload` enforces (a posting cannot be both): the UI
+    layer (``present_api.py``, ``ResultsView.jsx``/``boardRows.js``) merges
+    this alongside the NotAssessedRow(UNCHANGED) entry so the card shows the
+    carried fit/reasons instead of a bare "Not assessed", labelled with the
+    run it came from.
+    """
+
+    normalized_url: str
+    result: "AssessmentResult"
+    from_run_date: str | None
+
+    def to_json(self) -> dict[str, object]:
+        return {"normalized_url": self.normalized_url, "result": self.result.to_json(), "from_run_date": self.from_run_date}
+
+    @classmethod
+    def from_json(cls, obj: object) -> "CarriedForwardAssessment":
+        value = _object(obj, ("normalized_url", "result", "from_run_date"), "carried_forward_assessment")
+        from_run_date = value["from_run_date"]
+        if from_run_date is not None and not isinstance(from_run_date, str):
+            _fail("wrong_type", "carried_forward_assessment.from_run_date must be a string or null")
+        return cls(_string(value["normalized_url"], "normalized_url"), AssessmentResult.from_json(value["result"]), from_run_date)
+
+
+@dataclass(frozen=True)
 class AcquireOutput(_Contract):
     schema_version: ClassVar[str] = "scout-find-jobs-acquire-output:1"
     batch_id: str
@@ -973,6 +1005,11 @@ class AcquireOutput(_Contract):
     # computed), so old serialized acquire outputs (pre-B1, no drop stage)
     # still parse with this at its `()` default.
     dropped_counts: tuple[DropCount, ...] = ()
+    # uat-bug-009: additive/optional -- every UNCHANGED row skipped this run
+    # because a successful prior assessment for the current resume revision
+    # was found, plus that earlier result. `()` default keeps an old
+    # serialized acquire output (pre-uat-bug-009) parsing unchanged.
+    carried_forward_assessments: tuple[CarriedForwardAssessment, ...] = ()
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {
@@ -989,6 +1026,8 @@ class AcquireOutput(_Contract):
         }
         if self.dropped_counts:
             value["dropped_counts"] = [item.to_json() for item in self.dropped_counts]
+        if self.carried_forward_assessments:
+            value["carried_forward_assessments"] = [item.to_json() for item in self.carried_forward_assessments]
         return value
 
     @classmethod
@@ -996,7 +1035,7 @@ class AcquireOutput(_Contract):
         value = _object_with_optional(
             obj,
             ("schema_version", "batch_id", "batch_ref", "progress_ref", "progress_status", "rows", "failures", "url_set_diff", "watchlist_refs", "selected_postings"),
-            ("dropped_counts",),
+            ("dropped_counts", "carried_forward_assessments"),
             "acquire_output",
         )
         if value["schema_version"] != cls.schema_version:
@@ -1008,6 +1047,11 @@ class AcquireOutput(_Contract):
             if type(value["dropped_counts"]) is not list:
                 _fail("wrong_type", "acquire_output.dropped_counts must be an array")
             dropped_counts = tuple(DropCount.from_json(item) for item in value["dropped_counts"])
+        carried_forward_assessments: tuple[CarriedForwardAssessment, ...] = ()
+        if "carried_forward_assessments" in value:
+            if type(value["carried_forward_assessments"]) is not list:
+                _fail("wrong_type", "acquire_output.carried_forward_assessments must be an array")
+            carried_forward_assessments = tuple(CarriedForwardAssessment.from_json(item) for item in value["carried_forward_assessments"])
         return cls(
             _string(value["batch_id"], "batch_id"),
             _string(value["batch_ref"], "batch_ref"),
@@ -1019,6 +1063,7 @@ class AcquireOutput(_Contract):
             _strings(value["watchlist_refs"], "watchlist_refs", allow_empty=True),
             tuple(SelectedPosting.from_json(item) for item in value["selected_postings"]),
             dropped_counts,
+            carried_forward_assessments,
         )
 
 

@@ -134,6 +134,11 @@ class FakeBackend:
             raise LookupError(run_id)
         return _run_results_response(run_id)
 
+    def carried_forward_assessments(self, run_id: str) -> tuple:
+        if run_id != self.known_run_id:
+            raise LookupError(run_id)
+        return ()
+
 
 @pytest.fixture
 def running_server(request: pytest.FixtureRequest):
@@ -268,7 +273,94 @@ def test_get_run_results_happy_path(running_server) -> None:
     client, backend = running_server
     response = client.get(f"/api/runs/{backend.known_run_id}/results")
     assert response.status_code == 200
-    assert response.json() == _run_results_response(backend.known_run_id).to_json()
+    # uat-bug-009: resume_label/resume_created_at are additive fields next to
+    # RunResultsResponse's own sealed to_json() (this fixture's pinned_resume
+    # is null, so both stay None -- see the carry-through test below for the
+    # case where they're populated).
+    expected = dict(_run_results_response(backend.known_run_id).to_json())
+    expected["resume_label"] = None
+    expected["resume_created_at"] = None
+    expected["carried_forward_assessments"] = []
+    assert response.json() == expected
+
+
+def test_get_run_results_carries_the_resume_label_and_created_date(running_server) -> None:
+    # uat-bug-009: the run view's "Resume used" card showed the raw
+    # `record_… (revision_…)` ids, the same bug uat-bug-004 already fixed for
+    # the Configuration card. resume_label/resume_created_at are attached
+    # whenever the run's own pinned_resume matches backend.resume_preview()
+    # (the same record_id/revision_id resume_metadata() describes).
+    client, backend = running_server
+    fixture = json.loads(json.dumps(load_fixture("fixture-api-run-results-response-v1.json")))
+    fixture["run_id"] = backend.known_run_id
+    fixture["payload"]["run_id"] = backend.known_run_id
+    fixture["payload"]["pinned_resume"] = backend.resume.to_json()
+    backend_response = RunResultsResponse.from_json(fixture)
+
+    class _WithPinnedResumeBackend(FakeBackend):
+        def run_results(self, run_id: str) -> RunResultsResponse:
+            if run_id != self.known_run_id:
+                raise LookupError(run_id)
+            return backend_response
+
+    pinned_backend = _WithPinnedResumeBackend()
+    server = serve(backend=pinned_backend, bind=("127.0.0.1", 0))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address[0], server.server_address[1]
+        with httpx.Client(base_url=f"http://{host}:{port}") as inner_client:
+            response = inner_client.get(f"/api/runs/{pinned_backend.known_run_id}/results")
+        assert response.status_code == 200
+        body = response.json()
+        expected_label, expected_created_at = pinned_backend.resume_metadata_value
+        assert body["resume_label"] == expected_label == "kar-omada-staff-resume.md"
+        assert body["resume_created_at"] == expected_created_at == "2026-09-23T12:00:00+00:00"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_get_run_results_does_not_label_an_older_runs_different_pinned_resume(running_server) -> None:
+    # A run pinned to a resume that is NOT the newest one must never show the
+    # newest resume's label/date -- resume_metadata() always resolves the
+    # newest, so the handler must verify the ids agree before attaching them.
+    client, backend = running_server
+    fixture = json.loads(json.dumps(load_fixture("fixture-api-run-results-response-v1.json")))
+    fixture["run_id"] = backend.known_run_id
+    fixture["payload"]["run_id"] = backend.known_run_id
+    fixture["payload"]["pinned_resume"] = {
+        "record_id": "record_00000000-0000-4000-8000-000000000099",
+        "revision_id": "revision_00000000-0000-4000-8000-000000000099",
+        "content_sha256": "sha256:" + "0" * 64,
+    }
+    backend_response = RunResultsResponse.from_json(fixture)
+
+    class _OlderPinnedResumeBackend(FakeBackend):
+        def run_results(self, run_id: str) -> RunResultsResponse:
+            if run_id != self.known_run_id:
+                raise LookupError(run_id)
+            return backend_response
+
+    older_backend = _OlderPinnedResumeBackend()
+    response = client.get(f"/api/runs/{backend.known_run_id}/results")
+    assert response.status_code == 200  # sanity: default fixture still serves
+    server = serve(backend=older_backend, bind=("127.0.0.1", 0))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address[0], server.server_address[1]
+        with httpx.Client(base_url=f"http://{host}:{port}") as inner_client:
+            response = inner_client.get(f"/api/runs/{older_backend.known_run_id}/results")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["resume_label"] is None
+        assert body["resume_created_at"] is None
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_get_run_status_404_for_unknown_run(running_server) -> None:

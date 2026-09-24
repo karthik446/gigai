@@ -346,36 +346,47 @@ def _assess_bound(
             for row in output.candidate_rows
         )
         output = replace(output, candidate_rows=normalized_rows)
-        # A-6 intentionally sends only new/edited role matches to B-2.  On a
-        # repeat run that leaves the real assess node with an empty candidate
-        # partition, even though C-1 must still expose the visible unchanged
-        # rows and their stable not-assessed reason.  Carry that deterministic
-        # classification across this integration seam without asking B-2 to
-        # reread acquisition state or changing its standalone contract.
-        if (
-            not output.candidate_rows
-            and not output.assessments
-            and not output.not_assessed
-            and not selected_postings
-            and workpad_path
-            and run_id
-        ):
+        # A-6 intentionally sends only new/edited (and, since uat-bug-009,
+        # UNCHANGED-but-never-successfully-assessed) role matches to B-2. A
+        # genuinely skippable UNCHANGED row (a successful prior assessment
+        # already exists for it -- see market_acquisition._prior_assessments)
+        # never reaches B-2's own candidate_rows/assessments/not_assessed at
+        # all, yet C-1's PresentPayload partition (present_node/projection.py)
+        # requires EVERY row in AcquireOutput.rows to appear in either
+        # payload.assessments or payload.not_assessed. Reconcile here rather
+        # than asking B-2 to reread acquisition state or changing its
+        # standalone contract: any UNCHANGED acquire row missing from B-2's
+        # own candidate_rows/assessments/not_assessed (a mixed run can have
+        # some newly-assessed candidates alongside some genuinely-skipped
+        # UNCHANGED rows, not just the all-skipped case) gets the same
+        # deterministic NotAssessedReason.UNCHANGED label C-1 already used
+        # before this reconciliation existed. uat-bug-009's carried-forward
+        # result itself is surfaced separately, from acquire's own
+        # AcquireOutput.carried_forward_assessments (present_api.py), not
+        # through this reconciliation.
+        if workpad_path and run_id:
             acquire_path = Path(workpad_path) / "runs" / run_id / "outputs" / "acquire.json"
             try:
                 acquire = AcquireOutput.from_json(json.loads(acquire_path.read_text(encoding="utf-8")))
             except (OSError, ValueError, TypeError):
                 acquire = None
-            if acquire is not None and acquire.rows and all(
-                row.outcome.value == "unchanged" for row in acquire.rows
-            ):
-                output = replace(
-                    output,
-                    candidate_rows=acquire.rows,
-                    not_assessed=tuple(
-                        NotAssessedRow(row.posting, NotAssessedReason.UNCHANGED)
-                        for row in acquire.rows
-                    ),
+            if acquire is not None:
+                accounted = {row.posting.normalized_url for row in output.candidate_rows} | {
+                    row.posting.normalized_url for row in output.not_assessed
+                } | {item.posting.normalized_url for item in output.assessments}
+                missing_unchanged = tuple(
+                    row for row in acquire.rows
+                    if row.outcome.value == "unchanged" and row.posting.normalized_url not in accounted
                 )
+                if missing_unchanged:
+                    output = replace(
+                        output,
+                        candidate_rows=(*output.candidate_rows, *missing_unchanged),
+                        not_assessed=(
+                            *output.not_assessed,
+                            *(NotAssessedRow(row.posting, NotAssessedReason.UNCHANGED) for row in missing_unchanged),
+                        ),
+                    )
         return output
     finally:
         scout_proposals.parse_assessment_proposal = parser  # type: ignore[assignment]

@@ -201,7 +201,26 @@ _TIMEZONE_TOKENS: frozenset[str] = frozenset(
 # deliberately tracked separately from "no signal at all" so a
 # region-token-*only* location can be treated as a definite non-match
 # (see `_LocationSignal`/`location_countries` below) rather than ambiguous.
-_REGION_TOKENS: frozenset[str] = frozenset({"amer", "americas", "emea", "apac", "latam"})
+#
+# uat-bug-009: "APJ" (Asia-Pacific-Japan, e.g. ClickHouse's own posting)
+# passed a countries=[US] filter with `expected_us_match: null` in the
+# location corpus -- it fell into the same ambiguous bucket B1 fixed for
+# AMER/EMEA/APAC/LATAM, because it was never added to this table. Fixed by
+# adding it alongside three more multi-country sales/eng region labels
+# common in the same postings (none present in the real evidence corpus
+# today, so none are added to location-corpus.json, but each is a known,
+# named region label a country filter must not treat as ambiguous):
+# "anz" (Australia/New Zealand), "asia-pacific"/"asia pacific" (APAC's
+# spelled-out form -- checked as a whole segment/substring like "americas"
+# is, since "-" splits it into two tokens, "asia" and "pacific", neither of
+# which is a country alias on its own), and "worldwide" (a "hire anywhere"
+# label, the same shape as "global"/"remote" scope claims but explicitly a
+# multi-country signal rather than a single-location one). Checked against
+# `location_countries` for accidental collisions (none of the six existing
+# aliases, nor these four, resolve to a real country/state/city token).
+_REGION_TOKENS: frozenset[str] = frozenset(
+    {"amer", "americas", "emea", "apac", "latam", "apj", "anz", "asia-pacific", "asia pacific", "worldwide"}
+)
 
 
 # Bare tech-hub city names with no country/state suffix at all (P1b:
