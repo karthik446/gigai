@@ -15,6 +15,7 @@ just started.
 
 from __future__ import annotations
 
+import importlib.metadata
 import os
 import signal
 import socket
@@ -27,10 +28,25 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
+import gigai
+
 from ..canonical import canonical_json_bytes, parse_json_bytes
 from ..workpad import resolve_bound_project
 from .find_jobs.contracts import API_BIND
 from .template import install_scout
+
+
+def _installed_gigai_version() -> str:
+    """The version ``gigai --version`` prints (``importlib.metadata``, same
+    source ``click.version_option(package_name="gigai")`` uses)."""
+
+    return importlib.metadata.version("gigai")
+
+
+def _installed_package_path() -> str:
+    """The directory the running ``gigai`` package was imported from."""
+
+    return str(Path(gigai.__file__).resolve().parent)
 
 # Deferred import: scout_cli imports this module (to build the `run`/`stop`/
 # `status` commands), so importing scout_cli at module load time here would
@@ -62,6 +78,11 @@ class ScoutRunState:
     url: str
     log_path: str
     started_at: str
+    # ``None`` means "written by a build before uat-bug-006" -- treated as a
+    # version mismatch (an upgrade must never be masked by an old state file
+    # that predates recording a version at all).
+    gigai_version: str | None = None
+    package_path: str | None = None
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -72,10 +93,14 @@ class ScoutRunState:
             "url": self.url,
             "log_path": self.log_path,
             "started_at": self.started_at,
+            "gigai_version": self.gigai_version,
+            "package_path": self.package_path,
         }
 
     @classmethod
     def from_json(cls, data: dict[str, object]) -> "ScoutRunState":
+        gigai_version = data.get("gigai_version")
+        package_path = data.get("package_path")
         return cls(
             project_id=str(data["project_id"]),
             pid=int(data["pid"]),  # type: ignore[arg-type]
@@ -83,6 +108,17 @@ class ScoutRunState:
             url=str(data["url"]),
             log_path=str(data["log_path"]),
             started_at=str(data["started_at"]),
+            gigai_version=str(gigai_version) if gigai_version is not None else None,
+            package_path=str(package_path) if package_path is not None else None,
+        )
+
+    def is_outdated(self) -> bool:
+        """True if this state predates the installed gigai, or lacks a
+        recorded version entirely (older builds never wrote one)."""
+
+        return (
+            self.gigai_version != _installed_gigai_version()
+            or self.package_path != _installed_package_path()
         )
 
 
@@ -247,6 +283,10 @@ class ScoutRunResult:
     state: ScoutRunState
     reused: bool
     cleaned_stale: bool
+    # Set to the old build's recorded version (or "unknown" if it had none)
+    # when a live server was stopped and replaced because it predated the
+    # installed gigai (uat-bug-006). ``None`` otherwise.
+    restarted_from_version: str | None = None
 
 
 def ensure_scout_ready(*, home_root: Path, requested_target: Path | None) -> None:
@@ -261,7 +301,14 @@ def ensure_scout_ready(*, home_root: Path, requested_target: Path | None) -> Non
 
 
 def _existing_live_state(home_root: Path, project_id: str) -> tuple[ScoutRunState | None, bool]:
-    """Return (state, cleaned_stale). ``state`` is ``None`` unless it is live."""
+    """Return (state, cleaned_stale). ``state`` is ``None`` unless it is live.
+
+    A live server recorded with an outdated (or missing) version is *not*
+    returned here -- callers that need to reuse-if-current must check
+    ``ScoutRunState.is_outdated()`` themselves, since an outdated-but-live
+    server is neither "reusable" nor "stale" in the cleanup sense; it needs
+    an explicit stop-and-restart (uat-bug-006), not silent removal.
+    """
 
     state = _read_state(home_root, project_id)
     if state is None:
@@ -293,8 +340,18 @@ def start(
     project_id = bound_project.project_id
 
     live_state, cleaned_stale = _existing_live_state(home_root, project_id)
+    restarted_from_version: str | None = None
     if live_state is not None:
-        return ScoutRunResult(state=live_state, reused=True, cleaned_stale=cleaned_stale)
+        if not live_state.is_outdated():
+            return ScoutRunResult(state=live_state, reused=True, cleaned_stale=cleaned_stale)
+        # uat-bug-006: a live server that is genuinely ours but predates the
+        # installed gigai (or has no recorded version at all -- older
+        # builds). Reusing it would silently keep serving pre-upgrade code,
+        # so stop it (identity-checked; `_stop_pid` only signals a pid we
+        # already confirmed is our server) and fall through to start fresh.
+        restarted_from_version = live_state.gigai_version or "an earlier build"
+        _stop_pid(live_state.pid)
+        _remove_state(home_root, project_id)
 
     requested_port = port if port is not None else DEFAULT_PORT
     if not _port_is_free(requested_port):
@@ -331,13 +388,20 @@ def start(
             url=f"http://127.0.0.1:{requested_port}",
             log_path=str(log_path),
             started_at=_now_iso(),
+            gigai_version=_installed_gigai_version(),
+            package_path=_installed_package_path(),
         )
         _write_state(home_root, state)
         try:
             _run_foreground(bound_project.target_root, home_root, requested_port, open_browser)
         finally:
             _remove_state(home_root, project_id)
-        return ScoutRunResult(state=state, reused=False, cleaned_stale=cleaned_stale)
+        return ScoutRunResult(
+            state=state,
+            reused=False,
+            cleaned_stale=cleaned_stale,
+            restarted_from_version=restarted_from_version,
+        )
 
     with log_path.open("ab") as log_file:
         process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell, loopback-only server
@@ -355,6 +419,8 @@ def start(
         url=f"http://127.0.0.1:{requested_port}",
         log_path=str(log_path),
         started_at=_now_iso(),
+        gigai_version=_installed_gigai_version(),
+        package_path=_installed_package_path(),
     )
 
     deadline = time.monotonic() + HEALTH_TIMEOUT_SECONDS
@@ -379,7 +445,12 @@ def start(
     _write_state(home_root, state)
     if open_browser:
         webbrowser.open(state.url)
-    return ScoutRunResult(state=state, reused=False, cleaned_stale=cleaned_stale)
+    return ScoutRunResult(
+        state=state,
+        reused=False,
+        cleaned_stale=cleaned_stale,
+        restarted_from_version=restarted_from_version,
+    )
 
 
 def _run_foreground(target: Path, home_root: Path, port: int, open_browser: bool) -> None:
@@ -448,6 +519,10 @@ class ScoutStatus:
     pid: int | None = None
     log_path: str | None = None
     started_at: str | None = None
+    # True only when state == "running" and the live server predates the
+    # installed gigai (or has no recorded version -- older builds).
+    outdated: bool = False
+    outdated_version: str | None = None
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -457,6 +532,7 @@ class ScoutStatus:
             "pid": self.pid,
             "log_path": self.log_path,
             "started_at": self.started_at,
+            "outdated": self.outdated,
         }
 
 
@@ -489,6 +565,8 @@ def status(*, home_root: Path, requested_target: Path | None) -> ScoutStatus:
         pid=saved.pid,
         log_path=saved.log_path,
         started_at=saved.started_at,
+        outdated=saved.is_outdated(),
+        outdated_version=saved.gigai_version,
     )
 
 

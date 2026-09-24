@@ -311,6 +311,7 @@ def run_command(
         "ok": True,
         "reused": result.reused,
         "cleaned_stale": result.cleaned_stale,
+        "restarted_from_version": result.restarted_from_version,
         **result.state.to_json(),
     }
     if as_json:
@@ -318,6 +319,8 @@ def run_command(
         return
     if result.cleaned_stale:
         click.echo("Cleaned up a stale Scout run state (its process was no longer running).")
+    if result.restarted_from_version is not None:
+        click.echo(f"Restarted Scout: it was running {result.restarted_from_version} from before your upgrade.")
     if result.reused:
         click.echo(f"Scout is already running at {result.state.url} (log: {result.state.log_path}).")
     else:
@@ -371,6 +374,9 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
         return
     if current.state == "running":
         click.echo(f"running: {current.url} (pid {current.pid}, log: {current.log_path})")
+        if current.outdated:
+            old = current.outdated_version or "an earlier build"
+            click.echo(f"running an old version ({old}); run `gigai scout run` to restart")
     elif current.state == "crashed":
         click.echo(
             f"crashed: last known pid {current.pid} is no longer running "

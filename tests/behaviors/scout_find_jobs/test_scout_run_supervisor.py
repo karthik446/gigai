@@ -354,6 +354,100 @@ def test_stop_and_status_do_not_trust_a_pid_reused_by_an_unrelated_process(bound
             unrelated.wait(timeout=5.0)
 
 
+def test_run_restarts_a_live_server_recorded_with_an_older_gigai_version(stop_after) -> None:
+    """uat-bug-006: a live server that is genuinely ours, but whose state file
+    records an older (or missing) gigai version than what's installed now,
+    must be stopped and replaced -- never silently reused -- so an upgrade
+    actually takes effect.
+    """
+
+    home, target = stop_after
+    first_port = _free_port()
+    # A distinct free port for the restart: after a SIGTERM the OS can hold
+    # the old listening port in TIME_WAIT for a while (a plain kernel/BSD
+    # socket fact, unrelated to this fix), so the replacement server must
+    # not be made to fight over the exact same port number to prove it
+    # restarted -- only that it's a genuinely new, live process.
+    second_port = _free_port()
+
+    # Start a real server the normal way, so its pid legitimately passes the
+    # command-line identity check (`_pid_is_our_server`) -- this must be a
+    # real "our server", never a stranger, per the identity-check discipline
+    # the stale-pid/reused-pid tests already establish.
+    first = _run_cli(home, target, "run", "--port", str(first_port), "--no-browser")
+    pid = int(first["pid"])  # type: ignore[arg-type]
+    assert _process_is_alive(pid)
+
+    # Rewrite the state file as if it were written by an older build: no
+    # version/package_path fields at all (older builds never wrote them).
+    from gigai.workpad import resolve_bound_project
+
+    bound = resolve_bound_project(home_root=home, requested_target=target)
+    state_path = run_supervisor._state_path(home, bound.project_id)
+    raw = json.loads(state_path.read_text(encoding="utf-8"))
+    raw.pop("gigai_version", None)
+    raw.pop("package_path", None)
+    state_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    second = _run_cli(home, target, "run", "--port", str(second_port), "--no-browser")
+    assert second["reused"] is False, (
+        "a server recorded with no/older gigai version must be restarted, "
+        "not reused, on the next `scout run`"
+    )
+    assert second["restarted_from_version"] is not None
+    new_pid = int(second["pid"])  # type: ignore[arg-type]
+    assert new_pid != pid
+    assert _wait_until_gone(pid), "the old-version server must have been stopped"
+    assert _process_is_alive(new_pid)
+
+
+def test_run_reuses_a_live_server_with_the_same_version_and_package_path(stop_after) -> None:
+    home, target = stop_after
+    port = _free_port()
+
+    first = _run_cli(home, target, "run", "--port", str(port), "--no-browser")
+    assert first["reused"] is False
+    pid = int(first["pid"])  # type: ignore[arg-type]
+
+    assert "gigai_version" in first
+    assert "package_path" in first
+
+    second = _run_cli(home, target, "run", "--port", str(port), "--no-browser")
+    assert second["reused"] is True
+    assert second["pid"] == pid
+    assert _process_is_alive(pid)
+
+
+def test_status_reports_an_old_version_running(stop_after) -> None:
+    home, target = stop_after
+    port = _free_port()
+
+    first = _run_cli(home, target, "run", "--port", str(port), "--no-browser")
+    pid = int(first["pid"])  # type: ignore[arg-type]
+
+    from gigai.workpad import resolve_bound_project
+
+    bound = resolve_bound_project(home_root=home, requested_target=target)
+    state_path = run_supervisor._state_path(home, bound.project_id)
+    raw = json.loads(state_path.read_text(encoding="utf-8"))
+    raw["gigai_version"] = "0.0.1-older-than-installed"
+    state_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    status_payload = _run_cli(home, target, "status")
+    assert status_payload["state"] == "running"
+    assert status_payload.get("outdated") is True
+
+    result = CliRunner().invoke(
+        cli,
+        ["scout", "status", "--home", str(home), "--target", str(target)],
+    )
+    assert result.exit_code == 0, result.output
+    assert "old version" in result.output
+    assert "gigai scout run" in result.output
+
+    assert _process_is_alive(pid)  # status never touches the running process
+
+
 def test_health_check_failure_reports_log_and_exits_nonzero(bound_project, monkeypatch) -> None:
     home, target = bound_project
     port = _free_port()
