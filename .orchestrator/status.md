@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-23 15:27 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` rebased onto `main` at `c36f182`, the #36 hotfix; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-23 20:36 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` rebased onto `main` at `c36f182`, the #36 hotfix; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -13,10 +13,12 @@ _Updated 2026-09-23 15:27 MDT by Claude (coordinator of `run_7cba834cb817`, work
 ## v0.1.8 release check (15:05 MDT)
 - PyPI 0.1.8 published (20:13Z). The rerun of the failed jobs passed PyPI clean install (ubuntu + macOS) and created the GitHub Release at 21:02Z: https://github.com/karthik446/gigai/releases/tag/v0.1.8
 - The Release still has the **auto notes** (2 PR lines). The real notes (`/Users/kar/orca/workspaces/gigai/v0.1.8-release-notes.md`) are not applied. Waiting on the operator (it's outward-facing).
-- Post-release full matrix (run 35909539154): wheel resources + G28 eval passed; 7 source-suite jobs and Debian **still running** at 21:05Z.
+- Post-release full matrix (run 35909539154) **finished with 2 failures**: Debian 12 offline container, and Source suite Python 3.12 on macos-latest. The other 9 passed (incl. macOS 3.11/3.13). PyPI and the Release are unaffected. Audit proposed, waiting on the operator.
 
 ## In progress
-- PR CI run 35922536061 on `26b3e8a` **green**. This status update is pushed alone (docs-only) and check that the new run's `changes` job skips (`reason:` line) and the heavy jobs are skipped.
+| Packet | Model | State | Task / dispatch | Next |
+| --- | --- | --- | --- | --- |
+| v020-s21-gig-repos: v0.2.0 spike S21 (gigs in own repos, gig-owned data, gigai as library + CLI); operator request relayed by the v0.1.8 coordinator; spec `workers/specs/v020-s21-gig-repos.txt` | Sonnet 5 | running | `task_e91ef640f8ae` / `ctx_5d52c541ac60` | coordinator content review → commit |
 
 ## Next up
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
@@ -25,6 +27,7 @@ _Updated 2026-09-23 15:27 MDT by Claude (coordinator of `run_7cba834cb817`, work
 ## Done
 - Run `run_7cba834cb817` created.
 - Handoff + README "Handoffs" section committed as the first v0.1.9 commit.
+- **Docs-only CI skip proven live** (run 35924315765 on `aa9d06a`: only `changes` ran; the `before` run succeeded).
 - **release-pipeline verified + committed** (`c4cc1b3`, r1): Release right after publish; install retried ~10 min; notes from CHANGELOG. Fully proven only by the next tag.
 - **ci-docs-skip verified + committed** (`384234e`, r1): docs-only skip when `before` passed; callers grant `actions: read`; job renames.
 - Wave 1 pushed; PR #37 body updated; workers released and tabs closed (sweep).
@@ -35,6 +38,7 @@ _Updated 2026-09-23 15:27 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - None started by this Run.
 
 ## Blocked on operator
+- Go-ahead for a read-only audit of the 2 v0.1.8 post-release failures (Debian offline; macOS 3.12)?
 - Release checklist change: GitHub Release notes = the CHANGELOG `### X.Y.Z` section verbatim. Write 0.1.9's section for users before tagging.
 - Apply the v0.1.8 release notes? (`gh release edit v0.1.8 --repo karthik446/gigai --notes-file /Users/kar/orca/workspaces/gigai/v0.1.8-release-notes.md`)
 
