@@ -244,6 +244,57 @@ def test_scout_resume_add_is_idempotent_for_the_same_file_bytes(tmp_path: Path) 
     assert second_payload["record_created"] is False
 
 
+def test_scout_resume_add_creates_a_new_revision_when_the_same_file_name_is_edited(
+    tmp_path: Path,
+) -> None:
+    """P0-4 repro: `resume add` keyed the reference import's operation_key
+    off `file.name` alone (scout_cli.py's `scout-resume-add:{file.name}`).
+    Re-adding an EDITED resume under the SAME file name reused that key with
+    a different content digest, so `_existing_receipt` in private_records.py
+    raised `private_operation_conflict` ("operation key was already used
+    with different payload") instead of creating a new resume revision.
+    The operation key must be content-derived (name + sha256 of the bytes)
+    so identical bytes stay idempotent while edited bytes create a new
+    resume revision, and `resolve_newest_resume` must resolve to that
+    newest revision.
+    """
+
+    home, target = _setup_and_init(tmp_path)
+    runner = CliRunner()
+    _invoke(runner, home, target, "scout", "install")
+
+    resume_source = tmp_path / "resume.md"
+    resume_source.write_text("Software engineer with Python service experience.\n", encoding="utf-8")
+
+    first = runner.invoke(
+        cli,
+        ["scout", "resume", "add", str(resume_source), "--home", str(home), "--target", str(target), "--json"],
+    )
+    assert first.exit_code == 0, first.output
+    first_payload = json.loads(first.output)
+
+    # Edit the file's bytes but keep the same file name.
+    resume_source.write_text("Senior software engineer with distributed systems experience.\n", encoding="utf-8")
+
+    second = runner.invoke(
+        cli,
+        ["scout", "resume", "add", str(resume_source), "--home", str(home), "--target", str(target), "--json"],
+    )
+    assert second.exit_code == 0, second.output
+    second_payload = json.loads(second.output)
+
+    # Edited bytes must produce a new reference and record, not a conflict.
+    assert second_payload["reference_created"] is True
+    assert second_payload["record_created"] is True
+    assert second_payload["reference_id"] != first_payload["reference_id"]
+    assert second_payload["record_id"] != first_payload["record_id"]
+
+    # find-jobs must resolve to the newest (edited) resume's record.
+    resolved = resolve_newest_resume(home, target)
+    assert resolved is not None
+    assert resolved.record_id == second_payload["record_id"]
+
+
 @pytest.mark.parametrize("git", [True, False], ids=["git-target", "non-git-target"])
 def test_scout_resume_add_installs_scout_when_not_yet_installed(tmp_path: Path, git: bool) -> None:
     """``resume add`` alone (no prior ``scout install``) is a true one-step command."""

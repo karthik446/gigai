@@ -547,6 +547,52 @@ def test_assess_node_wrapper_completes_and_propagates_correctly_when_progress_wr
         assess_node(context, object(), home_root=tmp_path, target=tmp_path, config=object())
 
 
+def test_assess_node_writes_progress_under_the_workpad_not_the_target_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P0-3 repro: in the real graph-worker path, ``target`` (bound from
+    ``present_api._target_root()``, the operator's repo/target root) and
+    ``context.workpad_path`` (the resolved per-Gig workpad, from
+    ``run._build_node_context``'s ``resolved.path``) are different paths
+    whenever the active Gig's workpad isn't the target root itself. Every
+    other progress writer/reader (acquire's ``_progress_writer`` in
+    ``market_acquisition.py``, and ``present_api.run_progress`` /
+    ``/progress``) always resolves and uses the real workpad path, never the
+    bare target. ``_assess_progress_writer`` must match that: progress must
+    land under ``workpad_path/runs/<run_id>/progress``, never under
+    ``target/runs/<run_id>/progress``.
+    """
+
+    from gigai.scout.proposal_execution import assess_node
+
+    target_root = tmp_path / "operator-repo"
+    workpad_root = tmp_path / "home" / "workpads" / "gig_01"
+    target_root.mkdir(parents=True)
+    workpad_root.mkdir(parents=True)
+
+    context = NodeContext(
+        run_id="run_01", project_id="project_01", gig_id="gig_01",
+        graph_id="find-jobs:functional", graph_version=1, goal_slug="assess",
+        manifest_digest="sha256:" + "a" * 64, operation_key="assess-001",
+        target_observation_digest="sha256:" + "b" * 64,
+        workpad_path=str(workpad_root), redeemed_consent_ref="consent",
+        model_target="ollama_local",
+    )
+    sentinel_output = SimpleNamespace(assessments=(), not_assessed=())
+    monkeypatch.setattr(
+        "gigai.scout.proposal_execution._assess_node_body",
+        lambda *_args, **_kwargs: sentinel_output,
+    )
+
+    result = assess_node(context, object(), home_root=tmp_path, target=target_root, config=object())
+    assert result is sentinel_output
+
+    # Progress must be under the workpad, matching acquire's writer and
+    # present_api's /progress reader -- never under the bare target root.
+    assert (workpad_root / "runs" / "run_01" / "progress").exists()
+    assert not (target_root / "runs" / "run_01" / "progress").exists()
+
+
 # ---------------------------------------------------------------------------
 # 3. GET /api/runs/{id}/progress route contract
 # ---------------------------------------------------------------------------

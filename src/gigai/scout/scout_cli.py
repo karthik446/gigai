@@ -15,7 +15,7 @@ from pathlib import Path
 
 import click
 
-from ..canonical import canonical_json_bytes
+from ..canonical import canonical_json_bytes, digest_imported_bytes
 from ..private_records import PrivateRecordError, create_record, import_reference
 from ..setup import default_home_root
 from ..workpad import WorkpadError, resolve_bound_project
@@ -195,13 +195,19 @@ def resume_add_command(
         # run`) leaves the target in the same state `scout run` would.
         target_root = (resolved_target or Path.cwd()).expanduser().resolve(strict=True)
         write_starter_find_jobs_config(target_root)
+        # Key by name + content digest (not name alone) so re-adding the
+        # SAME bytes under the same file name stays idempotent (identical
+        # key -> the existing receipt is reused) while re-adding EDITED
+        # bytes under the same file name creates a new resume revision
+        # instead of conflicting on a stale operation key (P0-4).
+        content_digest = digest_imported_bytes(file.read_bytes())
         imported = import_reference(
             home_root=home_root,
             requested_target=resolved_target,
             gig_id=gig_id,
             kind="resume",
             source=file,
-            operation_key=f"scout-resume-add:{file.name}",
+            operation_key=f"scout-resume-add:{file.name}:{content_digest}",
         )
         record = create_record(
             home_root=home_root,

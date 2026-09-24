@@ -91,14 +91,22 @@ def _assess_progress_writer(context: "NodeContext", target: Path | None) -> Prog
     which may resolve through ``home_root``/``target``), so this reads that
     directly rather than re-resolving the workpad -- one less way for a
     progress-only failure to diverge from the sealed node's own resolution.
+
+    ``target`` (the operator's bound repo/target root, as ``present_api``
+    binds it) is NOT used here even when present: it can differ from the
+    workpad root whenever the active Gig's workpad isn't the target root
+    itself, and every other progress writer/reader -- acquire's own
+    ``_progress_writer`` in ``market_acquisition.py``, and
+    ``present_api.run_progress`` (``/progress``) -- always resolves and uses
+    the real workpad path. Writing under ``target`` instead leaves a stray
+    ``runs/`` dir in the operator's repo and the UI stuck on "waiting"
+    because ``/progress`` never looks there.
     """
 
     try:
         run_id = getattr(context, "run_id", None)
         workpad_path = getattr(context, "workpad_path", None)
-        root = Path(target) if isinstance(target, Path) else (
-            Path(workpad_path) if isinstance(workpad_path, str) else None
-        )
+        root = Path(workpad_path) if isinstance(workpad_path, str) else None
         if root is None or not isinstance(run_id, str) or not run_id:
             return None
         return ProgressWriter(root / "runs" / run_id)
