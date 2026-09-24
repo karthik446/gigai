@@ -1,6 +1,6 @@
 # Orchestrator status
 
-_Updated 2026-09-23 23:46 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
+_Updated 2026-09-24 08:43 MDT by Claude (coordinator of `run_7cba834cb817`, worktree `gigai-v0.1.9`, branch `karthik446/gigai-v0.1.9` main (0.1.8.1, `7adf3bb`) merged in at `8380102`; pushed). **Wave 1 verified, committed and pushed** (workflow + tests first, operator 15:20). PR CI running on `26b3e8a`; next, a docs-only push proves the skip. Draft PR #37: https://github.com/karthik446/gigai/pull/37 The v0.1.8 end state is in git history (`27b6532:.orchestrator/status.md`) and in `handoffs/0.1.8-09-23-26-release-handoff.md`._
 
 ## Coordinator
 - **Claude**: `run_7cba834cb817` (v0.1.9). Created 21:05Z.
@@ -18,8 +18,8 @@ _Updated 2026-09-23 23:46 MDT by Claude (coordinator of `run_7cba834cb817`, work
 ## In progress
 | Packet | Model | State | Task / dispatch | Next |
 | --- | --- | --- | --- | --- |
-| discovery-bakeoff (S24): OpenAI web_search, Tavily, H-1B LCA baseline vs S23 Exa Agent low; ≤ $10 total, ≤ $2/call; Websets blocked (Exa plan: 401 'Upgrade to a Pro plan', $0) | Sonnet 5 | running | `task_9fa9042ca55a` / `ctx_1c85dd2548dd` | coordinator review → operator picks the discovery approach |
-| S23 stage 2: UI setup interview (11 questions) + weekly Discover (approach per S24) | — | queued (operator approved) | | after D part 2 + S24 |
+| S2-A discovery engine: OpenAI web_search ×3 + H-1B → merge, board-check, evidence verify → watchlist; `gigai scout discover`; budget guard; one live smoke ≤ $0.50 | Sonnet 5 | running | `task_f082af89d99d` / `ctx_3a56797ab9a4` | verify → commit |
+| S2-B setup interview (11 Qs) in the Scout UI + Discover panel; /api/setup, /api/discover | Sonnet 5 | running | `task_f951e3e00855` / `ctx_1f13631aa84c` | verify → commit → end-to-end check with A |
 
 ## Next up
 - UAT fix requests from the v0.1.8 coordinator (they jump the queue).
@@ -31,6 +31,7 @@ _Updated 2026-09-23 23:46 MDT by Claude (coordinator of `run_7cba834cb817`, work
 - **secrets-core committed** `a915c24`: `gigai secrets add/list/rm`, env → ~/.gigai/.env resolver (python-dotenv, interpolation off, 0600 under umask 077). Coordinator reproduced + re-verified the 2 r0 bugs.
 - **README uv-only** `f1fb6c6` (+ API command via `uv tool run --from gigai`, verified on 0.1.8.1).
 - **Country-data research** accepted (`.orchestrator/research/country-data.md`): Lever/Ashby structured country fields unread; pycountry fallback. Implementation waits on the operator.
+- **S24 bake-off** `74512c3` ($0.30): OpenAI web_search most repeatable ($0.025/board, never empty); H-1B free (1.5% slug hits); Tavily none; Websets needs Exa Pro. Operator chose OpenAI + H-1B.
 - **`gigai scout run` feature complete** (brief acceptance met from an installed wheel, `d82b9a0` report; flow gaps fixed in scout-ux-gaps): setup → init → secrets add exa → resume add → scout run/status/stop, from inside the target, no --target, no Python/TOML/record create.
 - **B4 progressive cards** `546b346`: progress/ files + /api/runs/{id}/progress + card UI + live step status; writes best-effort (r1).
 - **wire-selection** `8856b1d`: B2 end to end (≤2 per company, dedupe, round-robin; DUPLICATE/OVER_CAP labels).
