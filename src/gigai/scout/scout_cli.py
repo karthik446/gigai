@@ -18,7 +18,7 @@ import click
 from ..canonical import canonical_json_bytes, digest_imported_bytes
 from ..private_records import PrivateRecordError, create_record, import_reference
 from ..setup import default_home_root
-from ..workpad import WorkpadError, resolve_bound_project
+from ..workpad import WorkpadError
 from .find_jobs.contracts import FindJobsConfig, SourceToggles
 from .find_jobs.discovery import (
     DiscoveryBudgetExceeded,
@@ -28,32 +28,40 @@ from .find_jobs.discovery import (
     run_discovery,
 )
 from .interview_prep import InterviewPrepError, build_prep
+from .target_resolution import ScoutTargetError, resolve_scout_target
 from .template import ScoutInstallError, install_scout
 
 
-def _resolved_target(target_value: Path | None, home_root: Path) -> Path | None:
-    """Turn an implicit ``--target`` into the cwd's already-bound target path.
+def _resolved_target(
+    target_value: Path | None,
+    home_root: Path,
+    *,
+    username: str | None = None,
+    as_json: bool = False,
+) -> Path:
+    """Resolve the folder a Scout command should act on.
 
-    Several downstream helpers (``install_scout`` -> ``initialize_defaults``,
-    in particular) re-resolve the target themselves via the raw, registry-
-    unaware ``resolve_target``, which rejects an implicit (no ``--target``)
-    non-Git cwd even when that exact directory is already a registered
-    non-Git target (``resolve_bound_project`` -- used by ``gigai scout
-    status``/``stop``/``run`` reuse -- already handles this case). Passing an
-    *explicit* resolved path down sidesteps that gap without touching those
-    helpers: an explicit path never falls into the "no --target given"
-    branch. When ``target_value`` was already given, or when no binding can
-    be found for the cwd, this returns ``target_value`` unchanged so the
-    normal (git-discovery or not-bound) error paths are unchanged.
+    Delegates to the shared resolver (``--target`` -> a registered cwd
+    binding -> the one existing Scout project -> create ``<home>/scout``) so
+    every ``gigai scout ...`` command shares one resolution order instead of
+    each re-deriving it. Unlike the old per-command helper this always
+    returns a usable path; a genuinely unresolvable case raises
+    ``ScoutTargetError``, which callers catch alongside their other target
+    errors. When resolution creates ``<home>/scout``, prints which username
+    was used (plain text only -- ``--json`` output stays parseable).
     """
 
-    if target_value is not None:
-        return target_value
-    try:
-        bound = resolve_bound_project(home_root=home_root, requested_target=None)
-    except WorkpadError:
-        return None
-    return bound.target_root
+    def _announce(created: Path, resolved_username: str) -> None:
+        if as_json:
+            return
+        click.echo(f"No Scout target found; created {created} (owner: {resolved_username}).")
+
+    return resolve_scout_target(
+        home_root=home_root,
+        requested_target=target_value,
+        requested_username=username,
+        on_created=_announce,
+    )
 
 
 STARTER_FIND_JOBS_CONFIG = FindJobsConfig(
@@ -113,21 +121,32 @@ def scout_group() -> None:
 @scout_group.command("install")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option(
+    "--username",
+    "username",
+    help=(
+        "Workspace-owner display name to use if this creates a new default "
+        "Scout target (<home>/scout). Ignored otherwise; see `gigai init "
+        "--username`."
+    ),
+)
 @click.option("--json", "as_json", is_flag=True)
-def install_command(target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+def install_command(
+    target_value: Path | None, home_value: Path | None, username: str | None, as_json: bool
+) -> None:
     """Bind, approve, and activate Scout for the bound project; safe to rerun."""
 
     home_root = home_value or default_home_root()
-    resolved_target = _resolved_target(target_value, home_root)
     try:
+        resolved_target = _resolved_target(target_value, home_root, username=username, as_json=as_json)
         result = install_scout(home_root=home_root, requested_target=resolved_target)
-    except (ScoutInstallError, WorkpadError, OSError, ValueError) as exc:
+    except (ScoutTargetError, ScoutInstallError, WorkpadError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_install_failed")
         return
 
     wrote_config = False
     try:
-        target_root = (resolved_target or Path.cwd()).expanduser().resolve(strict=True)
+        target_root = resolved_target.expanduser().resolve(strict=True)
         wrote_config = write_starter_find_jobs_config(target_root)
     except OSError as exc:
         _fail(exc, as_json=as_json, fallback="scout_install_failed")
@@ -186,14 +205,14 @@ def resume_add_command(
     """
 
     home_root = home_value or default_home_root()
-    resolved_target = _resolved_target(target_value, home_root)
     try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
         install_result = install_scout(home_root=home_root, requested_target=resolved_target)
         installed_scout = install_result.bound or install_result.approved or install_result.activated
         # Matches ensure_scout_ready()'s install_scout -> write starter config
         # sequence in run_supervisor.py, so `resume add` alone (before `scout
         # run`) leaves the target in the same state `scout run` would.
-        target_root = (resolved_target or Path.cwd()).expanduser().resolve(strict=True)
+        target_root = resolved_target.expanduser().resolve(strict=True)
         write_starter_find_jobs_config(target_root)
         # Key by name + content digest (not name alone) so re-adding the
         # SAME bytes under the same file name stays idempotent (identical
@@ -220,7 +239,7 @@ def resume_add_command(
             origin="imported",
             operation_key=f"scout-resume-record:{imported.item_id}",
         )
-    except (ScoutInstallError, PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
+    except (ScoutTargetError, ScoutInstallError, PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_resume_add_failed")
         return
 
@@ -275,8 +294,8 @@ def run_command(
     from . import run_supervisor
 
     home_root = home_value or default_home_root()
-    resolved_target = _resolved_target(target_value, home_root)
     try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
         result = run_supervisor.start(
             home_root=home_root,
             requested_target=resolved_target,
@@ -284,7 +303,7 @@ def run_command(
             foreground=foreground,
             open_browser=not no_browser,
         )
-    except (run_supervisor.ScoutRunError, WorkpadError, ScoutInstallError, OSError, ValueError) as exc:
+    except (ScoutTargetError, run_supervisor.ScoutRunError, WorkpadError, ScoutInstallError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_run_failed")
         return
 
@@ -316,8 +335,9 @@ def stop_command(target_value: Path | None, home_value: Path | None, as_json: bo
 
     home_root = home_value or default_home_root()
     try:
-        stopped = run_supervisor.stop(home_root=home_root, requested_target=target_value)
-    except (WorkpadError, OSError, ValueError) as exc:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        stopped = run_supervisor.stop(home_root=home_root, requested_target=resolved_target)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_stop_failed")
         return
 
@@ -339,8 +359,9 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
 
     home_root = home_value or default_home_root()
     try:
-        current = run_supervisor.status(home_root=home_root, requested_target=target_value)
-    except (WorkpadError, OSError, ValueError) as exc:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        current = run_supervisor.status(home_root=home_root, requested_target=resolved_target)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_status_failed")
         return
 
@@ -398,8 +419,12 @@ def discover_command(
     """
 
     home_root = home_value or default_home_root()
-    resolved_target = _resolved_target(target_value, home_root)
-    target = (resolved_target or Path.cwd()).expanduser().resolve(strict=True)
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_discover_failed")
+        return
+    target = resolved_target.expanduser().resolve(strict=True)
 
     if show_status:
         try:
@@ -509,8 +534,12 @@ def prep_command(
     """
 
     home_root = home_value or default_home_root()
-    resolved_target = _resolved_target(target_value, home_root)
-    target = (resolved_target or Path.cwd()).expanduser().resolve(strict=True)
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_prep_failed")
+        return
+    target = resolved_target.expanduser().resolve(strict=True)
 
     def _on_progress(event: dict) -> None:
         if as_json:

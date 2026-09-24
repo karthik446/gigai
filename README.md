@@ -106,13 +106,22 @@ idempotent for an already-bound project.
 ### Scout: install and run
 
 Everything below runs from an installed package (`uv tool install gigai`) —
-no source checkout needed.
+no source checkout needed, and Scout runs from anywhere: no `cd` into a
+target repo and no `gigai init` step first.
 
 ```bash
-gigai scout install --json                    # bind, approve, and activate Scout for this project
+gigai scout install --json                    # bind, approve, and activate Scout
 gigai secrets add exa                         # store EXA_API_KEY locally — see "Exa search" below
 gigai scout resume add ./resume.txt --json    # import + wrap your resume for find-jobs
 ```
+
+Every `gigai scout ...` command resolves its target in this order: an
+explicit `--target`; the current folder, if it's already a registered
+project; your one existing Scout project, reused from anywhere; otherwise a
+default target is created and bound at `<home>/scout` (`~/.gigai/scout` by
+default) the first time you run a Scout command. If more than one Scout
+project is ever registered, Scout commands ask you to pick one with
+`--target` instead of guessing.
 
 `gigai scout install` writes a starter `<target_root>/find-jobs.json` the
 first time it runs (never overwrites an existing one). Edit it before

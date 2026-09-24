@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import socket
 import subprocess
 
 from click.testing import CliRunner
@@ -19,6 +20,15 @@ import pytest
 from gigai.cli import cli
 from gigai.run import resolve_newest_resume
 from gigai.scout.find_jobs.contracts import FindJobsConfig
+
+
+def _free_port() -> int:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+    finally:
+        sock.close()
 
 
 def _git_target(target: Path) -> None:
@@ -378,7 +388,10 @@ def test_scout_commands_resolve_a_bound_non_git_target_from_cwd(
     config["sources"] = {"exa": False, "ats": False, "hiringcafe": False}
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
-    run_result = runner.invoke(cli, ["scout", "run", "--no-browser", "--home", str(home), "--json"])
+    port = _free_port()
+    run_result = runner.invoke(
+        cli, ["scout", "run", "--no-browser", "--port", str(port), "--home", str(home), "--json"]
+    )
     assert run_result.exit_code == 0, run_result.output
     run_payload = json.loads(run_result.output)
     assert run_payload["ok"] is True
@@ -399,11 +412,14 @@ def test_scout_commands_resolve_a_bound_non_git_target_from_cwd(
         assert json.loads(stop_result.output)["stopped"] is True
 
 
-def test_scout_install_still_requires_target_from_an_unbound_non_git_cwd(
+def test_scout_install_from_an_unbound_non_git_cwd_creates_home_scout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A non-Git cwd that was never `gigai init --target`-ed keeps requiring
-    --target; implicit cwd resolution never invents a binding.
+    """uat-bug-002: a non-Git cwd that was never `gigai init --target`-ed no
+    longer demands --target -- it falls through to creating and binding
+    `<home>/scout` (there's no *Scout* project registered yet: `_target` was
+    only `gigai init`-ed, never `scout install`-ed, so it doesn't count as an
+    existing Scout project either -- see the "exactly one" test below).
     """
 
     home, _target = _setup_and_init(tmp_path, git=False)
@@ -412,10 +428,10 @@ def test_scout_install_still_requires_target_from_an_unbound_non_git_cwd(
     monkeypatch.chdir(unbound)
 
     result = CliRunner().invoke(cli, ["scout", "install", "--home", str(home), "--json"])
-    assert result.exit_code != 0
+    assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    message = payload["error"]["message"]
-    assert "Git repository" in message or "target" in message
+    assert payload["bound"] is True
+    assert (home / "scout").is_dir()
 
 
 def test_starter_find_jobs_config_validates_against_the_contract(tmp_path: Path) -> None:

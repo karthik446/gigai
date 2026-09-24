@@ -185,6 +185,90 @@ def test_status_is_stopped_from_a_clean_project(bound_project) -> None:
     assert payload["pid"] is None
 
 
+def _setup_only(tmp_path: Path) -> Path:
+    """Non-interactive ``gigai setup`` with NO ``gigai init`` and no bound target."""
+
+    home = tmp_path / "home"
+    runner = CliRunner()
+    setup_result = runner.invoke(
+        cli,
+        [
+            "setup",
+            "--non-interactive",
+            "--home",
+            str(home),
+            "--workpad-root",
+            str(tmp_path / "workpads"),
+            "--editor",
+            "/usr/bin/true",
+            "--credential-ref",
+            "provider=environment:GIGAI_PROVIDER_TOKEN",
+            "--endpoint",
+            "remote=openai_api:provider:https://api.example.test",
+            "--model-target",
+            "remote=remote:smoke-test",
+            "--create-model-target",
+            "remote",
+            "--json",
+        ],
+    )
+    assert setup_result.exit_code == 0, setup_result.output
+    return home
+
+
+def test_scout_run_from_an_unregistered_folder_with_no_target_creates_home_scout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """uat-bug-002: no ``--target``, cwd an empty unregistered folder, no prior
+    ``gigai init`` -- ``scout install`` -> ``resume add`` -> ``run --no-browser``
+    must succeed by creating and binding ``<home>/scout``, not by demanding
+    ``--target`` for an implicit non-Git cwd (958306c's behavior).
+    """
+
+    home = _setup_only(tmp_path)
+    cwd = tmp_path / "empty-cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+
+    resume_source = tmp_path / "resume.md"
+    resume_source.write_text("Software engineer with Python service experience.\n", encoding="utf-8")
+
+    runner = CliRunner()
+
+    install_result = runner.invoke(cli, ["scout", "install", "--home", str(home), "--json"])
+    assert install_result.exit_code == 0, install_result.output
+    install_payload = json.loads(install_result.output)
+    assert install_payload["bound"] is True
+
+    scout_home_target = home / "scout"
+    assert scout_home_target.is_dir()
+
+    resume_result = runner.invoke(
+        cli, ["scout", "resume", "add", str(resume_source), "--home", str(home), "--json"]
+    )
+    assert resume_result.exit_code == 0, resume_result.output
+
+    # Disable every live source so `run` never makes a network call.
+    config_path = scout_home_target / "find-jobs.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["sources"] = {"exa": False, "ats": False, "hiringcafe": False}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    port = _free_port()
+    try:
+        run_result = runner.invoke(
+            cli, ["scout", "run", "--no-browser", "--port", str(port), "--home", str(home), "--json"]
+        )
+        assert run_result.exit_code == 0, run_result.output
+        run_payload = json.loads(run_result.output)
+        assert run_payload["ok"] is True
+        pid = int(run_payload["pid"])  # type: ignore[arg-type]
+        assert _process_is_alive(pid)
+    finally:
+        stop_result = runner.invoke(cli, ["scout", "stop", "--home", str(home), "--json"])
+        assert stop_result.exit_code == 0, stop_result.output
+
+
 def test_stale_state_file_is_cleaned_and_a_fresh_instance_starts(stop_after) -> None:
     home, target = stop_after
     port = _free_port()
