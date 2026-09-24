@@ -119,6 +119,8 @@ TRANSITIONS = frozenset(
         "template_instance_bound",
         "scout_source_materialized",
         "scout_public_acquisition_progress",
+        "scout_profile_revised",
+        "scout_profile_selected",
         "capability_review_decided",
         "capability_successor_prepared",
         "private_reference_imported",

@@ -112,6 +112,8 @@ _VERSIONED_SCHEMA_NAMES = (
     "runtime-comparison-attempt.schema.json",
     "runtime-comparison-intent.schema.json",
     "scout-interview-preparation.schema.json",
+    "scout-profile.schema.json",
+    "scout-profile-selection.schema.json",
     "scout-private-transfer-manifest.schema.json",
     "scout-definition-export-manifest.schema.json",
 )

@@ -81,6 +81,12 @@ class ScoutProjection:
     evidence: tuple[dict[str, object], ...] = ()
     applications: tuple[dict[str, object], ...] = ()
     runs: tuple[dict[str, object], ...] = ()
+    # S25 F1-a: a read-only profiles view, built from the same pinned
+    # snapshot as every other row above -- never a second authority. No
+    # reader wiring here (F1-b's job): nothing else in this projection joins
+    # against these rows yet.
+    profiles: tuple[dict[str, object], ...] = ()
+    selected_profile_id: str | None = None
     cursor: dict[str, object] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
@@ -97,6 +103,8 @@ class ScoutProjection:
             "evidence": [dict(item) for item in self.evidence],
             "applications": [dict(item) for item in self.applications],
             "runs": [dict(item) for item in self.runs],
+            "profiles": [dict(item) for item in self.profiles],
+            "selected_profile_id": self.selected_profile_id,
         }
 
 
@@ -259,6 +267,34 @@ def _application_rows(snapshot: JournalSnapshot, project: str, gig: str, opportu
     return values
 
 
+def _profile_rows(snapshot: JournalSnapshot, project: str, gig: str) -> tuple[list[dict[str, object]], str | None]:
+    """Read profiles (S25 F1-a) directly off the pinned snapshot.
+
+    Profiles are append-only write-file chains (each edit is a NEW file at
+    the next seq under ``records/scout-profiles/<profile_id>/writes/``,
+    never an overwrite -- see ``profile_records``'s module docstring,
+    "Storage layout amendment"); the CURRENT profile is the write at the
+    highest seq. This never runs the migration
+    (``profile_records.ensure_default_profile``/``selected_profile``): the
+    projection is a read-only cache of whatever is already committed, and
+    the migration is invoked only from Scout's own read paths per the
+    architecture rule (never from core, never from this reader).
+    """
+
+    from .profile_records import ProfileRecordError, _current_profiles, _current_selection
+
+    try:
+        current = _current_profiles(snapshot.artifacts)
+        selection = _current_selection(snapshot.artifacts)
+    except ProfileRecordError as exc:
+        raise ScoutProjectionError("projection_profile_invalid", "committed profile or selection is invalid") from exc
+
+    profiles = [record.to_json() for record in current.values()]
+    profiles.sort(key=lambda item: (str(item.get("created_at", "")), str(item.get("profile_id", ""))))
+    selected_profile_id = selection.selected_profile_id if selection is not None else None
+    return profiles, selected_profile_id
+
+
 def _verify_opportunities(applications: list[dict[str, object]], opportunities: list[dict[str, object]]) -> None:
     identities = {
         (str(item.get("opportunity_id")), str(item.get("snapshot_id")))
@@ -299,6 +335,7 @@ def projection_from_snapshot(*, snapshot: JournalSnapshot, project_id: str, gig_
     documents = _rows(readers.documents, snapshot, project_id, gig_id)
     evidence = _rows(readers.evidence, snapshot, project_id, gig_id)
     runs = _rows(readers.runs, snapshot, project_id, gig_id)
+    profiles, selected_profile_id = _profile_rows(snapshot, project_id, gig_id)
     _verify_opportunities(applications, opportunities)
     _verify_proposals(proposals, opportunities)
     if require_opportunity_links and any(not item["opportunity_verified"] for item in applications):
@@ -316,6 +353,8 @@ def projection_from_snapshot(*, snapshot: JournalSnapshot, project_id: str, gig_
         evidence=tuple(evidence),
         applications=tuple(applications),
         runs=tuple(runs),
+        profiles=tuple(profiles),
+        selected_profile_id=selected_profile_id,
         cursor=cursor,
     )
 
@@ -337,6 +376,8 @@ def query_projection(projection: ScoutProjection) -> sqlite3.Connection:
         CREATE TABLE evidence (evidence_id TEXT, payload BLOB NOT NULL);
         CREATE TABLE applications (event_id TEXT PRIMARY KEY, opportunity_ref TEXT, event_kind TEXT, current INTEGER, payload BLOB NOT NULL);
         CREATE TABLE runs (run_id TEXT, status TEXT, payload BLOB NOT NULL);
+        CREATE TABLE profiles (profile_id TEXT, state TEXT, origin TEXT, payload BLOB NOT NULL);
+        CREATE TABLE profile_selection (selected_profile_id TEXT);
         CREATE TABLE scout_cursor (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     """)
     connection.executemany("INSERT INTO opportunities VALUES (?, ?, ?)", [(item.get("opportunity_id"), item.get("snapshot_id"), canonical_json_bytes(item)) for item in projection.opportunities])
@@ -346,6 +387,8 @@ def query_projection(projection: ScoutProjection) -> sqlite3.Connection:
     connection.executemany("INSERT INTO evidence VALUES (?, ?)", [(item.get("evidence_id") or item.get("claim_id"), canonical_json_bytes(item)) for item in projection.evidence])
     connection.executemany("INSERT INTO applications VALUES (?, ?, ?, ?, ?)", [(item.get("event_id"), item.get("opportunity_ref"), item.get("event_kind"), int(bool(item.get("current"))), canonical_json_bytes(item)) for item in projection.applications])
     connection.executemany("INSERT INTO runs VALUES (?, ?, ?)", [(item.get("run_id"), item.get("status"), canonical_json_bytes(item)) for item in projection.runs])
+    connection.executemany("INSERT INTO profiles VALUES (?, ?, ?, ?)", [(item.get("profile_id"), item.get("state"), item.get("origin"), canonical_json_bytes(item)) for item in projection.profiles])
+    connection.execute("INSERT INTO profile_selection VALUES (?)", (projection.selected_profile_id,))
     connection.executemany("INSERT INTO scout_cursor VALUES (?, ?)", [("journal_head", projection.journal_head), ("schema_version", projection.schema_version)])
     connection.commit()
     return connection
@@ -369,7 +412,7 @@ def read_cached_projection(*, workpad: Path) -> ScoutProjection:
         payload = json.loads(bytes(row[0]))
         if not isinstance(payload, dict):
             raise ValueError("projection payload is not an object")
-        fields = {"schema_version", "project_id", "gig_id", "journal_head", "cursor", "opportunities", "proposals", "questions", "documents", "evidence", "applications", "runs"}
+        fields = {"schema_version", "project_id", "gig_id", "journal_head", "cursor", "opportunities", "proposals", "questions", "documents", "evidence", "applications", "runs", "profiles", "selected_profile_id"}
         if set(payload) != fields:
             raise ValueError("projection payload has unexpected fields")
         return ScoutProjection(**payload)
