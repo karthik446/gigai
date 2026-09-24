@@ -1,0 +1,20 @@
+BRIEF (operator-approved 2026-09-24, from the v0.1.8-worktree session). The v0.1.9 coordinator turns this into a worker spec.
+
+ASK: one packet that makes Scout startable from the PUBLISHED package with one command, fixing UAT blockers U6, U13, U14, U15 (UAT log: ~/orca/workspaces/gigai/v0.1.8-uat.md). Still open in 0.1.8.1: its CHANGELOG covers only the assess/filters/UI-search fixes. For 0.1.8.1 the operator will UAT with workarounds.
+
+COMMAND NAME: `gigai scout run`. This matches the proposed v0.2.0 roadmap decision D-C ("gigai <gig> run opens everything for that gig"), brief at .orchestrator/workers/specs/v020-roadmap-workbench.brief.txt. The spec should make this a thin first slice of roadmap workstream 3, not a Scout-only dead end.
+
+WHAT IT MUST DO (each maps to a UAT row):
+- U6: install Scout into the bound project when it isn't there yet (what the internal helper initialize_defaults(inventory=scout_candidate_inventory()) does today; installed gigai/default_init.py:100-102 says "Scout remains authoring-only") and approve it. No Python helper for the user.
+- U14 (+U9/U11): after install/approve, Scout becomes the ACTIVE gig for the project (today active_gig_id in <target>/.gigai/project.toml is set by no CLI command; approve leaves it empty; run.py:165-186, workpad.py:262-276). Errors that need a gig id must name the fix.
+- U15: saving a resume works in one step: `reference add --kind resume` (or a `gigai scout resume add <file>`) also creates the records/record_*/revisions wrapper (family g45_reference) that find-jobs needs (run.py:196-232). Today it takes an undocumented `gigai record create …`.
+- U13 (+U23): the UI ships in the package and is served by the API process; `gigai scout run` starts the API (+ static UI) supervised, prints the URL, opens the browser, and writes logs to a known path. No source checkout, no yarn dev, no `python -m gigai.scout.find_jobs.present_api`.
+
+DECISIONS FOR THE SPEC (coordinator proposes, operator confirms):
+- How the Vite build gets into the wheel: build during `uv build` in release CI (needs Node in the build job) vs commit ui/dist. Keep the wheel's resource checks (release_check.py verify-artifacts) green.
+- Foreground vs background: operator's U23 ask was "starts the API + UI in the background, supervised, with logs". Also needs a stop command (e.g. `gigai scout stop`) if backgrounded.
+- What `gigai scout run` does when no resume or no find-jobs.json exists: guide the user in the UI, not fail.
+
+CONSTRAINTS: uv only in all docs and output (never pip; operator rule). Core-never-imports-a-gig is the target direction: don't add new core→scout imports if a registration seam works; if not, record the debt. Focused tests only for changed files. Update README "Scout: install and approve" (U7 said it was wrong) to the one-command flow.
+
+ACCEPTANCE (to refine in the spec): from a clean ~/.gigai + `gigai setup` + `gigai init --target <dir>`, `gigai scout run` reaches a UI that loads config and resume and can start a run, with no Python helper, no manual TOML edit, no record create, no source checkout. Proven on an installed wheel (uv tool install from the built wheel or the git branch), not just source.
