@@ -128,13 +128,21 @@ starting Scout:
   "published_after": "2026-09-15T00:00:00Z",
   "sources": { "exa": true, "ats": true, "hiringcafe": false },
   "default_assess_cap": 10,
-  "default_model_target": "ollama_local"
+  "default_model_target": "ollama_local",
+  "countries": ["US"],
+  "visa_sponsorship_required": false
 }
 ```
 
 `default_model_target` accepts `ollama_local`, `codex_cli`, or
 `openrouter_api`. `hiringcafe` is defined in the schema but not a live source
-in this release; leave it `false`.
+in this release; leave it `false`. `countries` is a list of ISO-3166 alpha-2
+codes to filter postings by; a posting whose location resolves to a
+region-only label (e.g. `AMER`, `EMEA`) with no specific country never
+matches. `visa_sponsorship_required` excludes postings whose sponsorship
+read comes back "not offered" when `true`. Acquire also caps results to at
+most 2 postings per company for diversity, and results appear as cards on
+the UI as the run progresses.
 
 Then start it:
 
