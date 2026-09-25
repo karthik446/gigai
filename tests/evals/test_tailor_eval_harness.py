@@ -132,7 +132,7 @@ def test_fake_model_run_goes_end_to_end_through_the_shipped_path(tmp_path: Path)
 
     metrics = report["metrics"]
     assert metrics["calls"] == {"max_calls": 6, "made": 6, "tailor_calls": 3, "judge_calls": 3, "stopped_at_cap": True, "rows_planned": len(planned), "rows_done": 3, "rows_not_done": run["rows_not_done"]}
-    assert metrics["lines"] == {"total": 9, "copy": 6, "rewritten": 3, "answer_refs": 0}
+    assert metrics["lines"] == {"total": 9, "copy": 6, "rewritten": 3, "answer_refs": 0, "expanded_refs": 0}
     fab = metrics["fabrication"]
     assert fab["fabricated_claims"] == 0 and fab["fabrication_rate"] == 0.0 and fab["lines"] == []
     assert fab["judge_calls"] == 3 and fab["judge_attempts"] == 3 and fab["judge_retries"] == 0
@@ -421,6 +421,44 @@ def test_an_answer_ref_is_offered_and_accepted_under_its_canonical_id() -> None:
     assert "A language:cpp_go_java: language cpp go java Go: yes, daily. Java and C++: no." in binding.prompts[1]
     metrics = harness.summarize([row], planned=1, max_calls=25, judge=True, calls=budget.calls)
     assert metrics["lines"]["answer_refs"] == 1 and metrics["fabrication"]["fabricated_claims"] == 0
+
+
+_WRAPPED_RESUME_FIXTURE = assess_harness.Resume(
+    "r", "Software engineer with Python service experience and\nGo services in production for 12 years.\n", ("US",), (), False, "synthetic", None, "test"
+)
+_GO_POSTING = assess_harness.Posting(
+    "p", "Software Engineer", "Acme", "Denver, CO", "https://example.test/p", "Acme is hiring a Software Engineer to build services. Requirements: Python; Go."
+)
+
+
+def test_a_cited_wrapped_resume_line_reaches_the_guards_the_row_and_the_judge_as_its_whole_span() -> None:
+    # tailor-r2: R1 ends mid-sentence and R2 finishes it; the model cites R1 only
+    # (the r5 x cloudflare miss of the r1 live run). The harness builds the
+    # product's context, so the number and the term that live on R2 pass the
+    # guards, the row lists the joined span with its continuation, and the
+    # judge's SOURCES carry the joined span, not the cited line alone.
+    binding = _ScriptedBinding(
+        [
+            _tailor_reply("Python and Go services for 12 years."),
+            {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None}]},
+        ]
+    )
+    budget = harness.CallBudget(max_calls=25)
+    row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _GO_POSTING, _WRAPPED_RESUME_FIXTURE, (), budget=budget)
+    joined = "Software engineer with Python service experience and Go services in production for 12 years."
+    # The prompt's numbering is unchanged: two lines, R1 and R2.
+    assert "R1: Software engineer with Python service experience and\nR2: Go services in production for 12 years." in binding.prompts[0]
+    assert row["ok"] is True and row["attempts"] == 1 and "go" in row["guard_terms"]
+    header, summary = row["lines"]
+    assert header["sources"] == [{"label": "R1", "text": "Software engineer with Python service experience and"}]  # a copy line never expands
+    assert header["verbatim"] is True
+    assert summary["sources"] == [{"label": "R1", "text": joined, "continued_lines": [2]}]
+    assert summary["guard_hit"] is False and summary["numeric_hits"] == [] and summary["term_hits"] == []
+    assert "CLAIM 1:\nPython and Go services for 12 years.\nSOURCES FOR CLAIM 1:\nR1: " + joined + "\n" in binding.prompts[1] + "\n"
+    metrics = harness.summarize([row], planned=1, max_calls=25, judge=True, calls=budget.calls)
+    assert metrics["lines"]["expanded_refs"] == 1 and metrics["fabrication"]["fabricated_claims"] == 0
+    assert "  > R1+R2: " + joined in metrics["samples"]["pending"]["markdown_with_sources"]
+    assert "# Software engineer with Python service experience and <!-- R1 -->" in row["markdown"]
 
 
 def test_a_verdict_count_mismatch_is_a_judge_failure_after_one_retry() -> None:

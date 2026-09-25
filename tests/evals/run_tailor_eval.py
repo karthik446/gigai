@@ -480,19 +480,39 @@ def _context(resume: Resume, answers: Sequence[FixedAnswer]):
     """
 
     from gigai.scout.question_ids import normalize_question_id
-    from gigai.scout.tailored_resume import AnswerSource, TailorContext, resume_lines
+    from gigai.scout.tailored_resume import AnswerSource, TailorContext, resume_continuations, resume_lines
 
     keyed: dict[str, AnswerSource] = {}
     for item in answers:
         canonical = normalize_question_id(item.question_id)
         keyed[canonical] = AnswerSource(canonical, item.answer, "eval")
-    return TailorContext(resume_lines=resume_lines(resume.text), answers=keyed)
+    # tailor-r2: exactly the product's context, so a cited wrapped line reaches
+    # the guards, the row's sources and the judge as its whole span.
+    return TailorContext(resume_lines=resume_lines(resume.text), answers=keyed, continuations=resume_continuations(resume.text))
 
 
 def _job(posting: Posting):
     from gigai.scout.tailored_resume import TailorJob
 
     return TailorJob(title=posting.title, company=posting.company, location=posting.location, posting_text=posting.full_text)
+
+
+def _source_entry(ref: Any) -> dict[str, Any]:
+    """One cited source as the row lists it: the label as cited, the text the
+    validator saw (a wrapped resume line's whole span, tailor-r2) and, only
+    when the ref was expanded, the continuation line numbers."""
+
+    entry: dict[str, Any] = {"label": ref.label(), "text": ref.text}
+    continued = list(getattr(ref, "continued_lines", ()) or ())
+    if continued:
+        entry["continued_lines"] = continued
+    return entry
+
+
+def _source_label(source: Mapping[str, Any]) -> str:
+    """``R4+R5`` for an expanded ref in the human-readable markdown; the JSON label stays ``R4``."""
+
+    return str(source["label"]) + "".join(f"+R{number}" for number in source.get("continued_lines") or ())
 
 
 def _where_lines(result: Any) -> list[tuple[str, Any]]:
@@ -578,7 +598,7 @@ def tailor_row(
     claims: list[JudgeClaim] = []
     for where, line in _where_lines(result):
         cited = tuple((ref.label(), ref.text) for ref in line.refs)
-        entry: dict[str, Any] = {"where": where, "kind": line.kind, "text": line.text, "sources": [{"label": label_, "text": text} for label_, text in cited]}
+        entry: dict[str, Any] = {"where": where, "kind": line.kind, "text": line.text, "sources": [_source_entry(ref) for ref in line.refs]}
         if line.kind == "copy":
             row["copy_lines"] += 1
             entry["verbatim"] = line.refs[0].text == line.text  # checked in code, never by the judge
@@ -641,7 +661,7 @@ def render_sample_markdown(row: Mapping[str, Any]) -> str:
         indent = "  " if line.startswith("- ") else ""
         out.append(line)
         for source in entry["sources"]:
-            out.append(f"{indent}  > {source['label']}: {source['text']}")
+            out.append(f"{indent}  > {_source_label(source)}: {source['text']}")
         if entry["kind"] == "copy":
             out.append(f"{indent}  > check: copy line, verbatim={entry['verbatim']}")
         else:
@@ -739,6 +759,7 @@ def summarize(
     judge_stopped = sum(1 for row in valid if row["judge_stopped_at_cap"])
     unjudged = sum(int(row["unjudged_lines"]) for row in valid)
     answer_refs = sum(1 for row in valid for entry in row["lines"] for source in entry["sources"] if source["label"].startswith("A "))
+    expanded_refs = sum(1 for row in valid for entry in row["lines"] for source in entry["sources"] if source.get("continued_lines"))
     invalid_rate = _rate(len(invalid_after_retry), len(rows))
     guard_rejections: dict[str, dict[str, int]] = {guard: {"retried": 0, "invalid_after_retry": 0} for guard in GUARDS}
     for row in rows:
@@ -764,7 +785,7 @@ def summarize(
             "rows_done": len(rows),
             "rows_not_done": list(rows_not_done),
         },
-        "lines": {"total": lines, "copy": copied, "rewritten": rewritten, "answer_refs": answer_refs},
+        "lines": {"total": lines, "copy": copied, "rewritten": rewritten, "answer_refs": answer_refs, "expanded_refs": expanded_refs},
         "fabrication": {
             "fabricated_claims": len(fabricated),
             "fabrication_rate": _rate(len(fabricated), rewritten + copied),
@@ -879,7 +900,7 @@ def _print_summary(metrics: Mapping[str, Any], report_path: Path, *, out=sys.std
         + (f"; STOPPED AT CAP, not done: {calls['rows_not_done']}" if calls["stopped_at_cap"] else ""),
         file=out,
     )
-    print(f"lines: {lines['total']} ({lines['copy']} copied, {lines['rewritten']} rewritten, {lines['answer_refs']} answer refs)", file=out)
+    print(f"lines: {lines['total']} ({lines['copy']} copied, {lines['rewritten']} rewritten, {lines['answer_refs']} answer refs, {lines.get('expanded_refs', 0)} expanded resume refs)", file=out)
     print(
         f"fabricated claims: {fab['fabricated_claims']} (rate {fab['fabrication_rate']}; bar 0 met: {metrics['bars']['fabricated_claims_bar_met']}) -- numeric {fab['numeric_guard_hits']}, posting-term {fab['posting_term_guard_hits']}, copy-not-verbatim {fab['copy_lines_not_verbatim']}, judge-unsupported {fab['judge_unsupported']}; judge failures {fab['judge_failures']} (retries {fab['judge_retries']}), unjudged rewritten lines {fab['unjudged_rewritten_lines']}",
         file=out,

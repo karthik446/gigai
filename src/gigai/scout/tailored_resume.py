@@ -24,7 +24,12 @@ from the model:
   the summary (and, optionally, skills lines) are rewritten.
 - PROVENANCE: every rewritten line cites 1-4 sources; a resume ref must be
   in ``1..len(resume_lines)``; an answer ref's id, after
-  ``normalize_question_id``, must be a ``read_answers`` key.
+  ``normalize_question_id``, must be a ``read_answers`` key.  A resume ref
+  whose line ends mid-sentence is EXPANDED to its continuation lines
+  (``resume_continuations``, tailor-r2): the ref's ``text`` is the joined
+  span and ``continued_lines`` names the extra lines; the guards, the
+  stored refs and every consumer of ``SourceRef.text`` see the span.  Copy
+  lines never expand (they are one resume line verbatim).
 - NUMERIC guard: every number in a rewritten line (digits or number words,
   ranges, ``5+``, ``$1.2M`` vs ``1.2 million``) appears in a cited source.
 - POSTING-TERM guard: a rewritten line may not carry a skill/tool/technology
@@ -171,6 +176,72 @@ def resume_lines(resume_text: str) -> tuple[str, ...]:
     return tuple(line.strip() for line in resume_text.splitlines() if line.strip())
 
 
+#: A line that ends a sentence: terminal punctuation, optionally followed by
+#: closing quotes/brackets/emphasis markers (``experience."``, ``(SOC2).``,
+#: ``years.**``).
+_TERMINATED = re.compile(r"[.!?;:][\"'”’)\]}*_]*\Z")
+#: A line that starts a bullet (``-`` ``*`` ``•`` ``–`` ``—`` ``·`` ``>`` or
+#: ``1.``/``1)`` then whitespace) -- the markers ``_BULLET_PREFIX`` and
+#: ``_LEADING_MARKERS`` already know -- or a heading (see ``_HEADING_LINE``).
+_BULLET_LINE = re.compile(r"(?:[-*•–—·>]|\d+[.)])(?:\s|\Z)")
+#: A markdown heading (``#``) or a line opening with paired strong emphasis
+#: (``**Senior Platform Engineer — Hexa Cloud** (2021–present)``), the shape
+#: ``_display`` already treats as a copied entry heading.
+_HEADING_LINE = re.compile(r"#|\*\*|__")
+
+
+def _is_terminated(line: str) -> bool:
+    return _TERMINATED.search(line) is not None
+
+
+def _is_heading_line(line: str) -> bool:
+    return _HEADING_LINE.match(line) is not None
+
+
+def _is_marked_line(line: str) -> bool:
+    return _is_heading_line(line) or _BULLET_LINE.match(line) is not None
+
+
+def resume_continuations(resume_text: str) -> dict[int, tuple[int, ...]]:
+    """Which numbered resume lines continue which (tailor-r2): ``{n: (n+1, ...)}``.
+
+    A resume sentence hard-wrapped across lines is one fact split over
+    several ``R<n>``; a citation of ``R<n>`` is expanded to the lines it
+    runs on into.  ``R<n+1>`` continues ``R<n>`` when ``R<n>`` does not end
+    a sentence (``_TERMINATED``: ``. ! ? ; :`` plus closing quotes/brackets),
+    ``R<n>`` is not itself a heading, no blank RAW line separates the two
+    (``resume_lines`` drops blank lines, so this is decided here on the
+    text before numbering) and ``R<n+1>`` is not a bullet or a heading
+    (``_is_marked_line``); the chain repeats for ``R<n+2>`` and so on.
+    Numbering is exactly ``resume_lines``'s; only lines with at least one
+    continuation are keyed.
+    """
+
+    numbered: list[str] = []
+    blank_after: set[int] = set()  # numbered line n with a blank raw line before n+1
+    for raw in resume_text.splitlines():
+        line = raw.strip()
+        if line:
+            numbered.append(line)
+        elif numbered:
+            blank_after.add(len(numbered))
+    continuations: dict[int, tuple[int, ...]] = {}
+    for start in range(1, len(numbered) + 1):
+        if _is_heading_line(numbered[start - 1]):
+            continue
+        span: list[int] = []
+        tail = start
+        while tail < len(numbered) and tail not in blank_after and not _is_terminated(numbered[tail - 1]):
+            following = numbered[tail]  # R<tail+1>
+            if _is_marked_line(following):
+                break
+            tail += 1
+            span.append(tail)
+        if span:
+            continuations[start] = tuple(span)
+    return continuations
+
+
 @dataclass(frozen=True)
 class AnswerSource:
     """One answered ``experience_qa`` question as a citable source."""
@@ -213,23 +284,38 @@ class TailorContext:
     resume_lines: tuple[str, ...]
     answers: Mapping[str, AnswerSource] = field(default_factory=dict)
     matrix: tuple[MatrixRow, ...] = ()
+    #: ``resume_continuations(resume_text)``: which lines a cited line runs on
+    #: into.  Empty (the default) means no ref is ever expanded.
+    continuations: Mapping[int, tuple[int, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class SourceRef:
-    """A validated citation: the source kind, its key, and the source text as the validator saw it."""
+    """A validated citation: the source kind, its key, and the source text as the validator saw it.
+
+    A resume ref cited from a rewritten line may be EXPANDED (tailor-r2):
+    ``continued_lines`` are the numbered lines that continue ``line``
+    (``resume_continuations``) and ``text`` is then the joined span, one
+    space between lines.  ``label()`` stays the cited line (``R4``); the
+    stored JSON carries ``continued_lines`` only when it is non-empty, so an
+    unexpanded ref serializes exactly as before.
+    """
 
     kind: str  # "resume" | "answer"
     line: int | None
     question_id: str | None
     text: str
+    continued_lines: tuple[int, ...] = ()
 
     def label(self) -> str:
         return f"R{self.line}" if self.kind == "resume" else f"A {self.question_id}"
 
     def to_json(self) -> dict[str, object]:
         if self.kind == "resume":
-            return {"kind": "resume", "line": self.line, "text": self.text}
+            out: dict[str, object] = {"kind": "resume", "line": self.line, "text": self.text}
+            if self.continued_lines:
+                out["continued_lines"] = list(self.continued_lines)
+            return out
         return {"kind": "answer", "question_id": self.question_id, "text": self.text}
 
     @classmethod
@@ -238,11 +324,14 @@ class SourceRef:
             _fail("wrong_type", "ref must be an object")
         kind = obj.get("kind")
         if kind == "resume":
-            value = _object_with_optional(obj, ("kind", "line", "text"), (), "ref")
+            value = _object_with_optional(obj, ("kind", "line", "text"), ("continued_lines",), "ref")
             line = value["line"]
             if type(line) is not int or line < 1:
                 _fail("invalid_value", "ref.line must be a positive integer")
-            return cls("resume", line, None, _string(value["text"], "ref.text", nonempty=False))
+            raw_continued = value.get("continued_lines", [])
+            if type(raw_continued) is not list or any(type(item) is not int or item <= line for item in raw_continued):
+                _fail("invalid_value", "ref.continued_lines must be a list of line numbers after ref.line")
+            return cls("resume", line, None, _string(value["text"], "ref.text", nonempty=False), tuple(raw_continued))
         if kind == "answer":
             value = _object_with_optional(obj, ("kind", "question_id", "text"), (), "ref")
             return cls("answer", None, _string(value["question_id"], "ref.question_id"), _string(value["text"], "ref.text", nonempty=False))
@@ -767,6 +856,20 @@ def _copy_line(raw: object, where: str, ctx: TailorContext) -> TailoredLine:
     return TailoredLine("copy", text, (SourceRef("resume", number, None, text),))
 
 
+def _resume_ref(number: int, ctx: TailorContext) -> SourceRef:
+    """The cited resume line, expanded to its continuation lines (tailor-r2).
+
+    Runs inside validation, before the numeric and posting-term guards, so
+    the guards judge the joined span; a copy line never comes through here.
+    """
+
+    continued = tuple(
+        item for item in ctx.continuations.get(number, ()) if number < item <= len(ctx.resume_lines)
+    )
+    text = " ".join(ctx.resume_lines[item - 1] for item in (number, *continued))
+    return SourceRef("resume", number, None, text, continued)
+
+
 def _refs(raw: object, where: str, ctx: TailorContext) -> tuple[SourceRef, ...]:
     if type(raw) is not list or not raw:
         _reject(f"{where} has no refs; every rewritten line cites 1 to {MAX_REFS_PER_LINE} sources")
@@ -785,7 +888,7 @@ def _refs(raw: object, where: str, ctx: TailorContext) -> tuple[SourceRef, ...]:
                 _reject(f"{where} has a resume ref without a line number")
             if not 1 <= number <= len(ctx.resume_lines):
                 _reject(f"{where} cites resume line {number}; the resume has {len(ctx.resume_lines)} lines")
-            refs.append(SourceRef("resume", number, None, ctx.resume_lines[number - 1]))
+            refs.append(_resume_ref(number, ctx))
         elif kind == "answer":
             raw_id = item.get("question_id")
             if not isinstance(raw_id, str) or not raw_id.strip():
@@ -1346,7 +1449,7 @@ def run_tailored_resume(
     active = config if config is not None else load_config(home_root)
     binding = _resolve_binding(active, model_target, home_root=home_root)
     tailor_job = TailorJob(title=job.title, company=job.company, location=job.location, posting_text=job.text)
-    ctx = TailorContext(resume_lines=lines, answers=answers, matrix=matrix)
+    ctx = TailorContext(resume_lines=lines, answers=answers, matrix=matrix, continuations=resume_continuations(resume.text))
     try:
         attempt = tailor_once(binding, tailor_job, ctx)
     finally:
@@ -1436,6 +1539,7 @@ __all__ = [
     "posting_terms",
     "render_markdown",
     "render_tailor_prompt",
+    "resume_continuations",
     "resume_lines",
     "run_tailored_resume",
     "tailor_once",
