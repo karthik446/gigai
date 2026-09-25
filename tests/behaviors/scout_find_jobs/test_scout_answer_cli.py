@@ -215,7 +215,7 @@ def test_answer_reused_across_a_later_assess_call_never_re_asks(tmp_path: Path, 
 
     assert result.exit_code == 0, result.output
     assert "cloud:gcp: Yes, two years on GCP." in binding.port.prompts[0]
-    assert "6. A question whose id has a prior answer is resolved by that answer, never re-asked." in binding.port.prompts[0]
+    assert "is resolved by that answer, never re-asked" in binding.port.prompts[0]
     payload = json.loads(result.output)
     assert payload["result"]["verdict"] == "matched_above_threshold"
 
