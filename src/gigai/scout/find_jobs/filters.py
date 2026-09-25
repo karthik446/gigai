@@ -48,7 +48,10 @@ Britain"/"England"/"Scotland"/"Wales" -> GB -- a product choice about how to
 bucket UK-constituent-country mentions, not something ISO-3166 encodes), the
 bare "ca"/"in"/"de" country-vs-US-state disambiguation policy (still
 computed, now generically, from whichever pycountry alpha-2 codes actually
-collide with a US state's postal abbreviation), and ``_CITY_COUNTRIES`` (the
+collide with a US state's postal abbreviation; held-review-003 adds the one
+tie-break on top of it -- a known non-US city in the same location wins over
+the state reading of its own country's colliding code, so "Berlin, DE" is
+Germany, not Delaware, while a bare "DE" stays the state), and ``_CITY_COUNTRIES`` (the
 45-city list -- kept for now, not replaced by a city gazetteer package; see
 the research doc §5 "Optional").
 """
@@ -162,6 +165,23 @@ _UK_FOLD_ALIASES: tuple[str, ...] = ("uk", "u.k.", "great britain", "england", "
 _COUNTRY_ALIASES["GB"] = tuple(sorted(set(_COUNTRY_ALIASES["GB"]) | set(_UK_FOLD_ALIASES)))
 
 _CODE_ALIASES: dict[str, tuple[str, ...]] = _build_code_aliases()
+
+# held-review-003: the folded two-letter tokens that are *both* a US state
+# postal abbreviation and a country's alpha-2 code ("de" Delaware/Germany,
+# "ca" California/Canada, "in" Indiana/India, ...), mapped to that country.
+# Computed from the same pycountry data ``_build_code_aliases`` drops them
+# from, so the two policies can't drift. A bare such token still reads as
+# the US state (policy unchanged); the only thing this table enables is the
+# tie-break in ``location_countries``: when a *known non-US city* in the
+# same location resolves to exactly the country the token collides with
+# ("Berlin, DE", "Toronto, CA", "Bangalore, IN"), the token is that country,
+# not the state -- "Berlin, DE" used to resolve to {DE, US} and pass a
+# US-only filter (a false keep).
+_AMBIGUOUS_STATE_CODES: dict[str, str] = {
+    country.alpha_2.lower(): country.alpha_2
+    for country in pycountry.countries
+    if country.alpha_2.upper() in _US_STATE_ABBREVIATIONS_UPPER
+}
 
 # US additionally carries "US"/"USA" as bare uppercase codes (PR #37 P0:
 # these used to be case-insensitive aliases; moved here so lowercase "us"/
@@ -434,15 +454,38 @@ def location_countries(location: str) -> set[str]:
 
     if not location:
         return set()
-    found: set[str] = _code_countries_in_original(location)
+    code_found = _code_countries_in_original(location)
+    found: set[str] = set(code_found)
+    # held-review-003 bookkeeping: which colliding state/country tokens
+    # appeared as a whole (sub)segment, which known non-US cities did, and
+    # whether anything *other* than a colliding token said US.
+    ambiguous_tokens: set[str] = set()
+    city_codes: set[str] = set()
+    us_from_elsewhere = "US" in code_found
     for segment in _segments(location):
-        found |= _segment_countries(segment)
         # Also check whole-segment "usa - tempe" style joins where a country
         # alias and a city share one comma-free segment separated by " - ".
-        for sub in segment.split(" - "):
-            sub = sub.strip()
-            if sub:
-                found |= _segment_countries(sub)
+        subsegments = [segment] + [sub.strip() for sub in segment.split(" - ") if sub.strip()]
+        for sub in subsegments:
+            codes = _segment_countries(sub)
+            found |= codes
+            if sub in _AMBIGUOUS_STATE_CODES:
+                ambiguous_tokens.add(_AMBIGUOUS_STATE_CODES[sub])
+            else:
+                us_from_elsewhere = us_from_elsewhere or "US" in codes
+            city_code = _CITY_COUNTRIES.get(sub)
+            if city_code:
+                city_codes.add(city_code)
+    # held-review-003: a known non-US city beats the US-state reading of a
+    # colliding token *for that city's own country* ("Berlin, DE" -> DE,
+    # never Delaware). The US reading is only dropped when nothing else in
+    # the string signalled US and *every* colliding token is backed by such
+    # a city ("Toronto, CA; Denver, CO" keeps both: "co" collides with
+    # Colombia but no known city backs it, so it stays Colorado). A bare
+    # colliding token, a real US city ("Wilmington, DE"), and a city whose
+    # country is not the colliding one ("London, CA") are untouched.
+    if "US" in found and not us_from_elsewhere and ambiguous_tokens and ambiguous_tokens <= city_codes:
+        found.discard("US")
     return found
 
 

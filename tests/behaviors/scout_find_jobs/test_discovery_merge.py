@@ -214,3 +214,93 @@ def test_watchlist_entries_excluded_from_future_discovery(tmp_path: Path) -> Non
 
     active = list_active(home, target, gig_id)
     assert {normalize_company(e.company) for e in active} == {normalize_company("Docker")}
+
+
+# --- held-review-002: an empty/missing evidence source_url is kept, unverified,
+# with no HTTP call -- never dropped as "evidence_unverifiable" (that skip is for
+# a *cited* URL that turned out dead, S23's live-404 case) and never a crash.
+# openai_source's documented operator rule (2026-09-24): when sponsorship isn't
+# required the model may answer with no evidence/source at all, and merge only
+# verifies a source URL when one is present. ----------------------------------
+
+
+class _CountingHandler:
+    """MockTransport handler that serves the board API and records every other request."""
+
+    def __init__(self, evidence_status: int = 200) -> None:
+        self.evidence_requests: list[tuple[str, str]] = []
+        self.evidence_status = evidence_status
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if "boards-api.greenhouse.io" in request.url.host:
+            return httpx.Response(200, json=_GREENHOUSE_JOBS)
+        self.evidence_requests.append((request.method, str(request.url)))
+        return httpx.Response(self.evidence_status)
+
+
+def test_empty_evidence_source_url_is_kept_unverified_without_http_call() -> None:
+    handler = _CountingHandler()
+    candidates = [_candidate(source_url="", sponsorship="unknown", sponsorship_evidence="")]
+
+    with _client(handler) as client:
+        boards, skipped = merge_and_verify(client=client, all_candidates=candidates, prefs=_prefs(), exclusions=set())
+
+    assert skipped == {}, skipped
+    assert len(boards) == 1
+    assert boards[0].company == "Docker"
+    assert boards[0].evidence_verified is False
+    assert boards[0].evidence_source_url == ""
+    assert boards[0].matching_us_postings == 1
+    assert handler.evidence_requests == []  # nothing to verify -> no HEAD/GET at all
+
+
+def test_empty_primary_source_url_falls_back_to_a_cited_and_live_alternative() -> None:
+    handler = _CountingHandler()
+    candidates = [
+        _candidate(source_url="", found_by="openai_web_search"),
+        _candidate(source_url="https://example.test/docker-h1b", found_by="h1b", sponsorship_evidence="3 LCA filings"),
+    ]
+
+    with _client(handler) as client:
+        boards, skipped = merge_and_verify(client=client, all_candidates=candidates, prefs=_prefs(), exclusions=set())
+
+    assert skipped == {}
+    assert len(boards) == 1
+    assert boards[0].evidence_verified is True
+    assert boards[0].evidence_source_url == "https://example.test/docker-h1b"
+    assert boards[0].sponsorship_evidence == "3 LCA filings"
+    assert set(boards[0].found_by) == {"h1b", "openai_web_search"}
+    assert [method for method, _ in handler.evidence_requests] == ["HEAD"]
+
+
+def test_empty_source_url_alongside_a_dead_citation_is_still_kept_unverified() -> None:
+    # The uncited member is exactly as good as a solo uncited candidate; the
+    # other source's dead citation doesn't make the company disappear.
+    handler = _CountingHandler(evidence_status=404)
+    candidates = [
+        _candidate(source_url="", found_by="openai_web_search"),
+        _candidate(source_url="https://example.test/dead", found_by="h1b"),
+    ]
+
+    with _client(handler) as client:
+        boards, skipped = merge_and_verify(client=client, all_candidates=candidates, prefs=_prefs(), exclusions=set())
+
+    assert skipped == {}
+    assert len(boards) == 1
+    assert boards[0].evidence_verified is False
+    assert boards[0].evidence_source_url == ""
+    assert set(boards[0].found_by) == {"h1b", "openai_web_search"}
+
+
+def test_unverified_empty_source_board_still_reaches_watchlist_and_sidecar(tmp_path: Path) -> None:
+    home, target, gig_id = _fixture(tmp_path)
+    with _client(_CountingHandler()) as client:
+        boards, _ = merge_and_verify(client=client, all_candidates=[_candidate(source_url="")], prefs=_prefs(), exclusions=set())
+
+    added = add_usable_boards_to_watchlist(home_root=home, target=target, discovery_id="discovery_test1", boards=boards, gig_id=gig_id)
+
+    assert len(added) == 1
+    assert len(list_active(home, target, gig_id)) == 1
+    evidence = evidence_for(home_root=home, target=target)[("greenhouse", "docker")]
+    assert evidence["evidence_source_url"] == ""
+    assert evidence["evidence_verified"] is False

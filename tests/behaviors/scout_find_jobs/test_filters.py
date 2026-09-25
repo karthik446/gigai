@@ -134,6 +134,49 @@ def test_country_match_bare_ca_does_not_force_canada_or_california_exclusion() -
     assert country_match("Some City, CA", ("US",)) is True
 
 
+# held-review-003: a *known non-US city* beats the US-state reading of an
+# ambiguous two-letter token that collides with a country's alpha-2 code
+# ("DE" Delaware/Germany, "CA" California/Canada, "IN" Indiana/India).
+# "Berlin, DE" was resolving to {DE, US} and passing a US-only filter (a
+# false keep). Both directions are pinned: the city-backed reading flips to
+# the country only when the city's own country *is* the one the token
+# collides with; a real US city, a bare token, and every other shape keep
+# resolving exactly as before (bare-token policy unchanged, see
+# test_country_match_bare_ca_does_not_force_canada_or_california_exclusion).
+@pytest.mark.parametrize(
+    "location,expected_countries,expected_us_match",
+    [
+        # known non-US city + colliding token -> the country, not the state
+        ("Berlin, DE", {"DE"}, False),
+        ("Munich, DE", {"DE"}, False),
+        ("Hamburg, DE", {"DE"}, False),
+        ("Toronto, CA", {"CA"}, False),
+        ("Bangalore, IN", {"IN"}, False),
+        ("Berlin, de", {"DE"}, False),  # folded the same way the state check is
+        ("Remote - Berlin, DE", {"DE"}, False),
+        # real US cases keep working
+        ("Wilmington, DE", {"US"}, True),
+        ("Dover, DE", {"US"}, True),
+        ("San Francisco, CA", {"US"}, True),
+        ("Indianapolis, IN", {"US"}, True),
+        ("DE", {"US"}, True),
+        ("CA", {"US"}, True),
+        ("Remote - US", {"US"}, True),
+        ("Some City, CA", {"US"}, True),
+        # a real US signal elsewhere in the string still keeps the US reading
+        ("Toronto, CA; Denver, CO", {"CA", "US"}, True),
+        ("Berlin, DE - US", {"DE", "US"}, True),
+        # a city whose country is NOT the colliding one leaves the token alone
+        ("London, CA", {"GB", "US"}, True),
+    ],
+)
+def test_country_match_known_non_us_city_beats_ambiguous_state_abbreviation(
+    location: str, expected_countries: set[str], expected_us_match: bool
+) -> None:
+    assert location_countries(location) == expected_countries
+    assert country_match(location, ("US",)) is expected_us_match
+
+
 # --- P1b: the operator's real run-2 numbers (174 postings; US filter gave
 # True 101 / False 41 / None 32) showed bare non-US tech-hub city names
 # (Bengaluru x18+, Hyderabad, ...) landing in the ambiguous/None bucket

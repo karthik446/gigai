@@ -9,10 +9,12 @@ Steps (task contract, step 4):
 4. Board-check each survivor with the real ATS APIs (>=1 posting matching
    ``prefs.roles`` in ``prefs.countries``) -- S23 Investigate §5's
    ``check_boards.py`` logic, reused.
-5. Verify every sponsorship-evidence ``source_url`` actually resolves
-   (HTTP HEAD, falling back to GET on a HEAD failure -- some sites block
-   HEAD but allow GET) -- S23 Recommendation point 5 (a live 404 was cited
-   as evidence in S23's own sample).
+5. Verify every *cited* sponsorship-evidence ``source_url`` actually
+   resolves (HTTP HEAD, falling back to GET on a HEAD failure -- some sites
+   block HEAD but allow GET) -- S23 Recommendation point 5 (a live 404 was
+   cited as evidence in S23's own sample). An empty ``source_url`` is not a
+   dead citation: the board is kept, marked ``evidence_verified=False``,
+   with no HTTP call (held-review-002).
 6. Add each usable, board-checked board to the Scout watchlist.
    ``WatchlistEntry``/``WatchlistFirstSeen`` are the versioned
    ``scout-watchlist:1`` journal contract (Amendment 02) and this task must
@@ -222,15 +224,20 @@ def merge_and_verify(
             _skip("no_matching_us_postings")
             continue
 
-        primary = group[0]
-        evidence_verified = _verify_source_url(client, primary.source_url)
-        if not evidence_verified:
-            for alt in group[1:]:
-                if _verify_source_url(client, alt.source_url):
-                    primary = alt
-                    evidence_verified = True
-                    break
-        if not evidence_verified:
+        # held-review-002: verification is only for a *cited* source URL. A
+        # member with an empty source_url (openai_source's documented rule:
+        # when sponsorship isn't required the model may answer with no
+        # evidence/source at all, and merge only verifies a URL when one is
+        # present) is kept with ``evidence_verified=False`` and costs no HTTP
+        # call. Only a group whose every citation is dead is dropped as
+        # ``evidence_unverifiable`` (S23's live-404 case).
+        cited = [c for c in group if c.source_url]
+        uncited = [c for c in group if not c.source_url]
+        primary = next((c for c in cited if _verify_source_url(client, c.source_url)), None)
+        evidence_verified = primary is not None
+        if primary is None and uncited:
+            primary = uncited[0]
+        if primary is None:
             _skip("evidence_unverifiable")
             continue
 
