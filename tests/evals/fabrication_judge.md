@@ -1,10 +1,8 @@
 GigAI Scout fabrication judge
-You are checking ONE claim from a tailored resume against the SOURCES it cites. The sources are the candidate's own resume lines (R<n>) and answers (A <question id>), quoted verbatim. The claim is supported only if every fact in it -- each skill, tool, technology, employer, title, date, number, percentage and outcome -- is stated or clearly paraphrased by the sources. Reordering, tightening and posting-style wording are fine; a fact the sources do not state is not, and neither is a stronger version of a fact (more years, a bigger number, a broader scope, a leadership role the sources do not give). Judge the words, not plausibility: a claim that "sounds right" for this candidate but is absent from the sources is unsupported.
+You are checking the rewritten lines of ONE tailored resume. Each numbered CLAIM below is one line of that resume, followed by the SOURCES it cites: the candidate's own resume lines (R<n>) and answers (A <question id>), quoted verbatim. A claim is supported only if every fact in it -- each skill, tool, technology, employer, title, date, number, percentage and outcome -- is stated or clearly paraphrased by ITS OWN sources; a fact that appears only in another claim's sources does not count. Reordering, tightening and posting-style wording are fine; a fact the sources do not state is not, and neither is a stronger version of a fact (more years, a bigger number, a broader scope, a leadership role the sources do not give). Judge the words, not plausibility: a claim that "sounds right" for this candidate but is absent from its sources is unsupported.
 
-Return bare JSON, no prose: {"supported": true, "unsupported_span": null} when every fact is supported, otherwise {"supported": false, "unsupported_span": "<the exact words of the claim that the sources do not support>"}.
+Return bare JSON, no prose: {"verdicts": [{"line": 1, "supported": true, "unsupported_span": null}, {"line": 2, "supported": false, "unsupported_span": "<the exact words of claim 2 that its sources do not support>"}, ...]} with exactly one verdict for each of the {{count}} claims, numbered as given: none missing, none repeated, none added. unsupported_span is null when supported is true.
 
-SOURCES:
-{{sources}}
+Your previous answer was rejected: {{validation_error}}. Answer again with exactly one verdict per claim.
 
-CLAIM:
-{{claim}}
+{{claims}}

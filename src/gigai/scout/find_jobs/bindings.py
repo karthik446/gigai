@@ -17,6 +17,7 @@ from dataclasses import replace
 from functools import partial
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -342,9 +343,11 @@ TEST_MODEL_TAILOR_MARKER = "GigAI Scout tailored resume"
 #: and the eval's detector self-test can prove it catches each one.
 TEST_MODEL_FABRICATE_MARKER = "GIGAI-TEST-MODEL: fabricate"
 #: Q3 eval: the first line of ``tests/evals/fabrication_judge.md``; the
-#: fixture judge finds every claim supported (the offline harness proves the
-#: judge is wired and parsed, never that a fake model can judge).
+#: fixture judge finds every claim supported -- one verdict per numbered
+#: ``CLAIM <n>:`` block the batched judge prompt carries (the offline harness
+#: proves the judge is wired and parsed, never that a fake model can judge).
 TEST_MODEL_JUDGE_MARKER = "GigAI Scout fabrication judge"
+_TEST_MODEL_JUDGE_CLAIM = re.compile(r"^CLAIM (\d+):$", re.MULTILINE)
 TEST_MODEL_FABRICATED_NUMBER_LINE = "Led a team of 8 engineers for 12 years."
 TEST_MODEL_FABRICATED_TERM_LINE = "Deep Kubernetes and Terraform experience in production."
 
@@ -386,6 +389,13 @@ def _test_model_tailor_reply(prompt: str) -> dict[str, object]:
             {"heading": "other", "lines": [{"text": gcp_answer, "refs": [{"kind": "answer", "question_id": "cloud:gcp"}]}]}
         )
     return {"header": [{"copy": 1}], "sections": sections}
+
+
+def _test_model_judge_reply(prompt: str) -> dict[str, object]:
+    """The fixture's batched judge answer: every ``CLAIM <n>:`` block in ``prompt`` supported."""
+
+    numbers = [int(match.group(1)) for match in _TEST_MODEL_JUDGE_CLAIM.finditer(prompt)]
+    return {"verdicts": [{"line": number, "supported": True, "unsupported_span": None} for number in numbers]}
 
 
 def _test_model_handler(request: httpx.Request) -> httpx.Response:
@@ -458,7 +468,7 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
             reply: dict[str, object] = (
                 _test_model_tailor_reply(prompt)
                 if TEST_MODEL_TAILOR_MARKER in prompt
-                else {"supported": True, "unsupported_span": None}
+                else _test_model_judge_reply(prompt)
             )
             return httpx.Response(
                 200,
