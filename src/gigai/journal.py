@@ -1536,6 +1536,18 @@ def _fsync_directory(directory: Path) -> None:
         os.close(descriptor)
 
 
+# `git commit` otherwise forks `git maintenance run --auto --detach`, whose
+# default tasks keep rewriting `.git/objects` after the commit returned:
+# `repack -d` prunes the packed loose objects and removes their now-empty
+# fan-out directories, and the commit-graph task writes `objects/info`.  A
+# journal `git add` racing that prune fails with "unable to create temporary
+# file", and a workpad removed under the repack sees `objects/pack` re-created
+# (".git: Directory not empty").  The journal is the only writer of its
+# workpad; it never wants background maintenance.  `gc.auto=0` covers gits
+# older than `maintenance.auto` (2.29), which run `gc --auto` directly.
+_GIT_NO_AUTO_MAINTENANCE = ("-c", "maintenance.auto=false", "-c", "gc.auto=0")
+
+
 def _git(
     root: Path, *args: str, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
@@ -1543,7 +1555,7 @@ def _git(
     if executable is None:
         raise JournalConflictError("Git executable is unavailable")
     result = subprocess.run(
-        [executable, "-C", os.fspath(root), *args],
+        [executable, "-C", os.fspath(root), *_GIT_NO_AUTO_MAINTENANCE, *args],
         env={
             **os.environ,
             "GIT_CONFIG_GLOBAL": "/dev/null",
