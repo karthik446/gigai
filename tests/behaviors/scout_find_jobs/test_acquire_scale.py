@@ -209,18 +209,37 @@ def test_concurrency_is_bounded_per_provider(monkeypatch: pytest.MonkeyPatch, tm
 
 
 def test_requests_are_paced_per_provider(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Six requests through one provider's pacer cost at least five intervals.
+
+    ``_RateLimiter`` reserves each start under its lock at least ``interval``
+    after the previous one, and a worker only issues its request after that
+    reserved start (``time.sleep`` never returns early). So the k-th request
+    start, in start order, cannot precede ``k`` intervals after the run began
+    -- true however late the OS schedules any one worker. Adjacent gaps
+    between the STARTS the client records are not what the limiter
+    guarantees: the gap measures when two threads woke up, and an earlier
+    thread scheduled late lands closer than the interval to the next one
+    (seen as a 0.0438 s gap under a 0.05 s interval on a loaded 4-worker
+    xdist run; test-flakes-r1).
+    """
+
     _patch_import(monkeypatch)
     boards = [_board(ATSProvider.ASHBY, f"a{i}") for i in range(6)]
     client = _TimestampClient()
     ats = _FakeATS(request_client=True)
+    interval = 0.05
+    began = time.monotonic()
     acquire_node(
         _context(tmp_path), _input(), http_client=client, exa=_Exa(), ats=ats, watchlist=_Watchlist(boards),
-        limits=_limits(concurrency=4, interval=0.05),
+        limits=_limits(concurrency=4, interval=interval),
     )
     starts = sorted(client.starts)
     assert len(starts) == 6
-    gaps = [later - earlier for earlier, later in zip(starts, starts[1:])]
-    assert all(gap >= 0.045 for gap in gaps), gaps
+    # A burst (all six at once) or a leaky pacer (two grants inside one
+    # interval) both fail this; a late-woken thread does not. The 1 ms slack
+    # covers the platform sleep's clock granularity only.
+    elapsed = [start - began for start in starts]
+    assert all(elapsed[k] >= k * interval - 0.001 for k in range(6)), elapsed
 
 
 # --- cache hits + title prefilter (real ATSBoardClients over a fake transport) --
