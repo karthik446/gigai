@@ -22,9 +22,41 @@ from .test_interview_prep_fixtures import (
 
 
 def test_missing_find_jobs_config_refuses_before_any_web_call(tmp_path: Path) -> None:
+    """No ``find-jobs.json`` at all -> refused with the RIGHT error: setup is
+
+    missing, not the resume. F1-b2-r1 fix: resume resolution now goes
+    through the gig's SELECTED profile (``current_resume``), and a profile
+    only comes to exist via migration off a real ``find-jobs.json`` -- but a
+    project with a resume and NO ``find-jobs.json`` at all must still say
+    ``find_jobs_config_missing`` (the user HAS a resume; what's missing is
+    Scout setup), never the misleading ``resume_missing``. This restores
+    this test's original (pre-F1-b2) assertion, unchanged.
+    """
+
     home, target, gig_id = bound_project(tmp_path)
     add_resume(home, target, gig_id, tmp_path)
     write_acquire_output(home, target, "run_1")
+    with pytest.raises(InterviewPrepError) as excinfo:
+        build_prep(home_root=home, target=target, posting_url=POSTING_URL)
+    assert excinfo.value.code == "find_jobs_config_missing"
+
+
+def test_starter_placeholder_find_jobs_config_refuses_with_config_missing(tmp_path: Path) -> None:
+    """``find-jobs.json`` exists but is still the UNCHANGED starter placeholder
+
+    (``gigai scout install`` writes it, before the setup interview is ever
+    run) -- no profile can migrate off it (``profile_records.
+    ensure_default_profile``'s own guard), so this must be treated exactly
+    like "no find-jobs.json at all": ``find_jobs_config_missing``, never
+    ``resume_missing``.
+    """
+
+    from gigai.scout.scout_cli import write_starter_find_jobs_config
+
+    home, target, gig_id = bound_project(tmp_path)
+    add_resume(home, target, gig_id, tmp_path)
+    write_acquire_output(home, target, "run_1")
+    write_starter_find_jobs_config(target)
     with pytest.raises(InterviewPrepError) as excinfo:
         build_prep(home_root=home, target=target, posting_url=POSTING_URL)
     assert excinfo.value.code == "find_jobs_config_missing"
@@ -63,10 +95,21 @@ def test_posting_resolution_reuses_assess_matrix_when_it_exists(tmp_path: Path) 
 
 
 def test_no_resume_refuses_before_any_web_call(tmp_path: Path) -> None:
+    """A REAL (non-starter, schema-valid) ``find-jobs.json`` but NO resume
+
+    at all -- Scout IS set up, so this is genuinely ``resume_missing``, not
+    ``find_jobs_config_missing`` (F1-b2-r1's own distinction). ``merged_
+    queries`` is fixed to match ``roles`` here (a pre-existing fixture typo:
+    an empty list fails ``FindJobsConfig.from_json`` outright, which used to
+    go unnoticed only because the OLD resume resolver never parsed
+    ``find-jobs.json`` at all -- the new profile-aware one does, so an
+    unparseable config now degrades the same as a missing one).
+    """
+
     home, target, gig_id = bound_project(tmp_path)
     write_acquire_output(home, target, "run_1")
     (target / "find-jobs.json").write_text(
-        '{"schema_version":"find-jobs-config:1","roles":["staff backend"],"merged_queries":[],'
+        '{"schema_version":"find-jobs-config:1","roles":["staff backend"],"merged_queries":["staff backend"],'
         '"location":null,"remote":true,"published_after":null,'
         '"sources":{"exa":false,"ats":true,"hiringcafe":false},'
         '"default_assess_cap":10,"default_model_target":"ollama_local"}',
@@ -77,9 +120,25 @@ def test_no_resume_refuses_before_any_web_call(tmp_path: Path) -> None:
     assert excinfo.value.code == "resume_missing"
 
 
-def test_current_resume_reads_the_newest_imported_reference(tmp_path: Path) -> None:
+def test_current_resume_reads_the_selected_profiles_resume(tmp_path: Path) -> None:
+    """S25 F1-b2: ``current_resume`` resolves the SELECTED PROFILE's resume,
+
+    not "the newest imported reference" -- this replaces this file's
+    pre-F1-b2 version of this test (that behaviour, and its name, are
+    exactly what F1-b2 retires: a profile now exists to have a
+    ``resume_ref``, and a profile only exists once a real
+    ``find-jobs.json`` lets one migrate).
+    """
+
     home, target, gig_id = bound_project(tmp_path)
     add_resume(home, target, gig_id, tmp_path, text=b"Old resume text.\n")
+    (target / "find-jobs.json").write_text(
+        '{"schema_version":"find-jobs-config:1","roles":["staff backend"],"merged_queries":["staff backend"],'
+        '"location":null,"remote":true,"published_after":null,'
+        '"sources":{"exa":false,"ats":true,"hiringcafe":false},'
+        '"default_assess_cap":10,"default_model_target":"ollama_local"}',
+        encoding="utf-8",
+    )
     identity, data = current_resume(home_root=home, requested_target=target, gig_id=gig_id)
     assert data == b"Old resume text.\n"
     assert identity.content_sha256

@@ -184,12 +184,14 @@ def resume_group() -> None:
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--gig", "gig_id", help="Explicit Gig ID; defaults to the project's active Gig.")
+@click.option("--profile", "profile_id", help="Scout profile ID to attach this resume to; defaults to the SELECTED profile.")
 @click.option("--json", "as_json", is_flag=True)
 def resume_add_command(
     file: Path,
     target_value: Path | None,
     home_value: Path | None,
     gig_id: str | None,
+    profile_id: str | None,
     as_json: bool,
 ) -> None:
     """Import FILE as the resume reference and create the record find-jobs reads.
@@ -202,6 +204,17 @@ def resume_add_command(
     find-jobs' resume resolution requires, in one call. Rerunning with the
     same file bytes is a no-op: the reference import dedupes by content
     digest and the record uses a digest-derived operation key.
+
+    S25 F1-b2 (operator decision): without ``--profile``, the imported
+    resume is ATTACHED to the gig's SELECTED profile -- its ``resume_ref``
+    moves to the newly imported resume (``profile_records.write_profile``,
+    a revision bump) -- and this command PRINTS which profile it attached
+    to (label + profile_id; ``profile_id`` alone in ``--json`` output). A
+    given ``--profile`` attaches to that profile instead of the selected
+    one. When no profile can be resolved yet (no ``find-jobs.json``/no prior
+    resume to migrate from), the import still succeeds exactly as before
+    F1-b2 -- there is simply nothing to attach to yet; a later migration or
+    profile creation will pin this resume as its own initial ``resume_ref``.
     """
 
     home_root = home_value or default_home_root()
@@ -239,6 +252,16 @@ def resume_add_command(
             origin="imported",
             operation_key=f"scout-resume-record:{imported.item_id}",
         )
+
+        attached_profile = _attach_resume_to_profile(
+            home_root=home_root,
+            target_root=target_root,
+            gig_id=gig_id,
+            profile_id=profile_id,
+            record_id=record.record_id,
+            revision_id=record.revision_id,
+            content_sha256=str(imported.record["content_sha256"]),
+        )
     except (ScoutTargetError, ScoutInstallError, PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_resume_add_failed")
         return
@@ -252,6 +275,7 @@ def resume_add_command(
         "record_id": record.record_id,
         "revision_id": record.revision_id,
         "record_created": record.created,
+        "profile_id": attached_profile.profile_id if attached_profile is not None else None,
     }
     if as_json:
         _emit(payload, True, "")
@@ -262,6 +286,50 @@ def resume_add_command(
         f"Resume reference {imported.item_id} and record {record.record_id} are ready. "
         "Next: `gigai scout run`."
     )
+    if attached_profile is not None:
+        click.echo(f"Attached to profile {attached_profile.label} ({attached_profile.profile_id})")
+
+
+def _attach_resume_to_profile(
+    *,
+    home_root: Path,
+    target_root: Path,
+    gig_id: str | None,
+    profile_id: str | None,
+    record_id: str,
+    revision_id: str,
+    content_sha256: str,
+):
+    """Move a profile's ``resume_ref`` to the just-imported resume; ``None`` if there's no profile yet.
+
+    ``profile_id=None`` (the default) attaches to the gig's SELECTED
+    profile (migrating a default profile on first read, like every other
+    F1-b2 profile-aware path); a given ``profile_id`` attaches to that
+    committed profile instead, refusing one that isn't committed in this
+    gig. Returns ``None`` (no attach) only when no profile exists yet at
+    all and none was explicitly named -- the import above still succeeded.
+    """
+
+    from ..workpad import resolve_workpad
+    from .find_jobs.contracts import PinnedResume
+    from . import profile_records
+
+    resolved = resolve_workpad(
+        home_root=home_root, requested_target=target_root, gig_id=gig_id, allow_semantic_state=True
+    )
+    resume_ref = PinnedResume(record_id=record_id, revision_id=revision_id, content_sha256=content_sha256)
+
+    if profile_id is None:
+        target_profile = profile_records.selected_profile(resolved, home_root=home_root, target=target_root)
+        if target_profile is None:
+            return None
+    else:
+        profiles = {item.profile_id: item for item in profile_records.list_profiles(resolved)}
+        target_profile = profiles.get(profile_id)
+        if target_profile is None:
+            raise ScoutTargetError(f"profile {profile_id!r} is not committed in this gig")
+
+    return profile_records.write_profile(resolved, profile_id=target_profile.profile_id, resume_ref=resume_ref)
 
 
 @scout_group.command("run")
@@ -518,6 +586,7 @@ def discover_command(
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--run", "run_id", help="Find-jobs run ID to resolve the posting from (default: newest run that has it).")
+@click.option("--profile", "profile_id", help="Scout profile ID to prepare against (default: the selected profile).")
 @click.option("--refresh", is_flag=True, help="Re-run prep even if one is already stored for this posting and resume revision.")
 @click.option("--budget", "budget_usd", type=float, default=0.50, show_default=True, help="Max USD to spend on company-research web search.")
 @click.option("--json", "as_json", is_flag=True)
@@ -526,6 +595,7 @@ def prep_command(
     target_value: Path | None,
     home_value: Path | None,
     run_id: str | None,
+    profile_id: str | None,
     refresh: bool,
     budget_usd: float,
     as_json: bool,
@@ -533,10 +603,11 @@ def prep_command(
     """Prepare for an interview at POSTING_URL (a find-jobs-acquired posting).
 
     Foreground -- company research (OpenAI web_search, ~seconds) plus one
-    model call for likely question categories. Idempotent per (posting,
-    resume revision); pass --refresh to re-run. The resume is sent only to
-    the question-category model call, never to the company-research web
-    search. Prints a summary and where the prep is stored.
+    model call for likely question categories. Idempotent per (profile,
+    posting, resume revision); pass --refresh to re-run. The resume is sent
+    only to the question-category model call, never to the company-research
+    web search. Prints a summary and where the prep is stored. Without
+    --profile, prepares against the SELECTED profile (S25 F1-b2).
     """
 
     home_root = home_value or default_home_root()
@@ -566,7 +637,7 @@ def prep_command(
         prep = build_prep(
             home_root=home_root, target=target, posting_url=posting_url,
             run_id=run_id, refresh=refresh, budget_usd=budget_usd,
-            on_progress=_on_progress,
+            profile_id=profile_id, on_progress=_on_progress,
         )
     except InterviewPrepError as exc:
         _fail(exc, as_json=as_json, fallback="scout_prep_failed")
@@ -590,7 +661,7 @@ def prep_command(
         click.echo(f"  Prep notes: {len(prep.prep_notes.resume_points)} resume point(s) to lead with, {len(prep.prep_notes.gaps)} gap(s) to prepare for.")
     else:
         click.echo("  Prep notes: no assess matrix found for this posting yet; run `gigai scout run` to assess it for richer notes.")
-    click.echo(f"  Total cost: ${prep.cost_usd:.4f}. Stored under scout/interview_prep/{prep.posting_id}.json (GigAI home).")
+    click.echo(f"  Total cost: ${prep.cost_usd:.4f}. Stored under scout/interview_prep/ (GigAI home).")
 
 
 __all__ = ["scout_group", "write_starter_find_jobs_config", "STARTER_FIND_JOBS_CONFIG"]

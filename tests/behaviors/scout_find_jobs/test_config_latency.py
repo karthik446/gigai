@@ -242,6 +242,7 @@ def _clear_process_caches() -> None:
 
     run_module._resume_details_cache.clear()
     server_module._selected_profile_cache.clear()
+    server_module._profile_resume_details_cache.clear()
 
 
 def test_get_config_resolves_the_resume_in_well_under_a_second(
@@ -348,16 +349,21 @@ def test_second_config_call_on_the_same_head_does_not_replay_the_journal(
     )
 
 
-def test_resume_add_invalidates_the_cache_never_serves_a_stale_resume(
+def test_resume_add_alone_does_not_change_the_selected_profiles_shown_resume(
     operator_shaped_workpad: tuple[Path, Path, str],
 ) -> None:
-    """No cache that can serve a stale resume after ``gigai scout resume add``.
+    """S25 F1-b2: ``resume_details()`` shows the SELECTED PROFILE's pinned resume,
 
-    Warms the per-journal-head cache with the fixture's existing resume,
-    then commits a new resume the same way ``gigai scout resume add``
-    would (``import_reference`` + ``create_record``, a real journal commit)
-    and asserts the very next ``/api/config``-equivalent call sees the new
-    resume, not the cached one.
+    never workpad-wide "newest" -- so importing a new resume WITHOUT
+    attaching it to the selected profile (``gigai scout resume add`` has no
+    ``--profile`` in this test; F1-b2's own CLI change is asserted
+    separately in ``test_scout_cli.py``) must NOT change what
+    ``resume_details()`` shows: the selected profile's own ``resume_ref``
+    still points at the old resume. This replaces this file's pre-F1-b2
+    version of this test, which asserted the opposite ("newest always
+    wins") -- that was exactly the behaviour F1-b2 intentionally retires
+    once a selected-profile authority exists (see the S25 spike's
+    Q2/ReaderChangeList row for ``resume_preview``/``resume_metadata``).
     """
 
     home, target, gig_id = operator_shaped_workpad
@@ -394,9 +400,76 @@ def test_resume_add_invalidates_the_cache_never_serves_a_stale_resume(
 
     after = backend.resume_details()
     assert after is not None
-    assert after.pinned.record_id != before.pinned.record_id, (
-        "cache served a stale resume after `gigai scout resume add`"
+    assert after.pinned.record_id == before.pinned.record_id, (
+        "resume_details() changed the shown resume after an UNATTACHED "
+        "`gigai scout resume add` -- it must keep showing the selected "
+        "profile's own pinned resume_ref, never workpad-wide newest"
     )
+
+
+def test_resume_details_shows_the_selected_profiles_resume_after_a_switch(
+    operator_shaped_workpad: tuple[Path, Path, str],
+) -> None:
+    """S25 F1-b2 acceptance: switching the selected profile changes what
+    ``resume_details()`` shows to that profile's own pinned resume.
+    """
+
+    from gigai.private_records import create_record as _create_record
+    from gigai.private_records import import_reference as _import_reference
+    from gigai.scout.profile_records import create_profile, switch_selected_profile
+    from gigai.scout.find_jobs.contracts import PinnedResume
+
+    home, target, gig_id = operator_shaped_workpad
+    backend = ScoutFindJobsBackend(home_root=home, target=target)
+
+    before = backend.resume_details()
+    assert before is not None
+
+    resolved = resolve_workpad(
+        home_root=home, requested_target=target, gig_id=None, allow_semantic_state=True
+    )
+    resume_source = target.parent / "resume_second_profile.md"
+    resume_source.write_text("Resume for the SECOND profile.\n", encoding="utf-8")
+    imported = _import_reference(
+        home_root=home,
+        requested_target=target,
+        gig_id=resolved.gig_id,
+        kind="resume",
+        source=resume_source,
+        operation_key="resume-import-second-profile",
+    )
+    record = _create_record(
+        home_root=home,
+        requested_target=target,
+        gig_id=resolved.gig_id,
+        kind="imported_reference",
+        content_family="g45_reference",
+        content_id=imported.item_id,
+        actor={"kind": "operator", "id": "local-user"},
+        origin="imported",
+        operation_key="resume-record-second-profile",
+    )
+    second_resume_ref = PinnedResume(
+        record_id=record.record_id,
+        revision_id=record.revision_id,
+        content_sha256=str(imported.record["content_sha256"]),
+    )
+    second_profile = create_profile(
+        resolved,
+        label="second",
+        titles=("staff backend engineer",),
+        titles_to_avoid=(),
+        queries=("staff backend engineer",),
+        resume_ref=second_resume_ref,
+    )
+    switch_selected_profile(resolved, profile_id=second_profile.profile_id)
+
+    after = backend.resume_details()
+    assert after is not None
+    assert after.pinned.record_id == record.record_id, (
+        "resume_details() did not follow the switched selected profile's own resume_ref"
+    )
+    assert after.pinned.record_id != before.pinned.record_id
 
 
 def test_profile_edit_invalidates_the_selected_profile_cache(

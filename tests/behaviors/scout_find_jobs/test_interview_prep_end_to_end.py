@@ -221,4 +221,6 @@ def test_prep_notes_reuse_assess_matrix_when_it_exists(tmp_path: Path, monkeypat
 
 def test_load_prep_returns_none_when_never_built(tmp_path: Path) -> None:
     home, target, gig_id = bound_project(tmp_path)
-    assert load_prep(home_root=home, target=target, posting_url=POSTING_URL) is None
+    assert load_prep(
+        home_root=home, target=target, profile_id="profile_00000000-0000-4000-8000-000000000000", posting_url=POSTING_URL
+    ) is None

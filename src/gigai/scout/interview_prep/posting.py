@@ -22,6 +22,16 @@ matches -- the same store ``proposal_records.save_assessment_revision``
 writes to. Best-effort: a posting acquired but not yet assessed still
 builds a prep from posting text alone (per packet CHANGE 2d, "reusing
 assess's requirement x resume matrix for that posting when it exists").
+
+S25 F1-b2: candidate runs are scoped to ONE profile's own run history
+(``profile_id``), per the spike's Legacy-run policy -- a run sealed before
+F1-a shipped (no ``profile_ref`` in its own ``sealed/find-jobs-run-input.
+json``) is visible ONLY to the gig's migrated ``origin == "migrated_
+default"`` profile, never to any other (operator-created) profile, since it
+was never produced under that profile. This mirrors ``market_acquisition.
+py``'s own ``_run_profile_identity``/``_default_profile_id`` (A2's cache
+scoping) but is reimplemented locally here rather than importing those
+(private, `_`-prefixed) helpers across module ownership boundaries.
 """
 
 from __future__ import annotations
@@ -33,13 +43,66 @@ from typing import Any
 from ...canonical import parse_json_bytes
 from ...journal import run_with_journal_writer
 from ...workpad import ResolvedWorkpad
-from ..find_jobs.contracts import AcquireOutput, AssessmentResult, FindJobsContractError, PostingRow, RowOutcome
+from ..find_jobs.contracts import (
+    AcquireOutput,
+    AssessmentResult,
+    FindJobsContractError,
+    FindJobsRunInput,
+    PostingRow,
+    RowOutcome,
+)
 
 
 class PostingUnavailableError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+def _sealed_run_profile_id(root: Path, run_id: str) -> str | None:
+    """The profile id a run's OWN sealed input pins, or ``None`` if unsealed/legacy.
+
+    Reads ``runs/<run_id>/sealed/find-jobs-run-input.json`` directly (the
+    same file ``market_acquisition._run_profile_identity`` reads) -- never
+    raises: a missing/unparseable sealed input or an absent ``profile_ref``
+    (a legacy pre-F1-a run) both degrade to ``None``, which callers here
+    treat as "attribute to the gig's default profile only," per the
+    Legacy-run policy.
+    """
+
+    path = root / "runs" / run_id / "sealed" / "find-jobs-run-input.json"
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        sealed = FindJobsRunInput.from_json(payload)
+    except (OSError, ValueError, TypeError, KeyError, FindJobsContractError):
+        return None
+    return sealed.profile_ref.profile_id if sealed.profile_ref is not None else None
+
+
+def _default_profile_id(resolved: ResolvedWorkpad | None) -> str | None:
+    """The gig's migrated-default profile id, or ``None`` if unresolvable.
+
+    ``resolved`` is ``None`` for callers that never had a real journaled
+    workpad to resolve (mirrors ``market_acquisition._default_profile_id``'s
+    own "cannot attribute, never raise" precedent).
+    """
+
+    if resolved is None:
+        return None
+    try:
+        from .. import profile_records
+    except ImportError:
+        return None
+    try:
+        profiles = profile_records.list_profiles(resolved)
+    except Exception:
+        return None
+    for profile in profiles:
+        if profile.origin == "migrated_default":
+            return profile.profile_id
+    return None
 
 
 class PostingInfo:
@@ -101,16 +164,41 @@ def find_assess_matrix(*, resolved: ResolvedWorkpad, normalized_url: str) -> Ass
     )
 
 
-def resolve_posting(*, resolved: ResolvedWorkpad, normalized_url: str, run_id: str | None) -> PostingInfo:
+def resolve_posting(
+    *, resolved: ResolvedWorkpad, normalized_url: str, run_id: str | None, profile_id: str | None = None
+) -> PostingInfo:
     """Resolve one posting by its acquire-normalized URL from a find-jobs Run's acquire output.
 
     ``run_id=None`` selects the newest Run (by acquire-output mtime) that
-    contains this posting. Raises :class:`PostingUnavailableError` when no
-    matching posting is found -- this module never guesses posting content.
+    contains this posting AND belongs to ``profile_id``'s own run history.
+    Raises :class:`PostingUnavailableError` when no matching posting is
+    found -- this module never guesses posting content.
+
+    S25 F1-b2: ``profile_id=None`` (the default) means "no profile scoping"
+    -- every candidate run is considered, matching this function's pre-
+    F1-b2 behaviour (used by direct callers that haven't resolved a profile,
+    e.g. a bare ``run_id`` request, which is already an exact, unambiguous
+    pick and needs no scoping). A given ``profile_id`` scopes the candidate
+    scan to runs whose OWN sealed ``profile_ref.profile_id`` matches it; a
+    legacy run (sealed before F1-a, no ``profile_ref`` at all) is included
+    ONLY when ``profile_id`` is the gig's migrated ``origin ==
+    "migrated_default"`` profile (the Legacy-run policy) -- never for any
+    other profile. An explicit ``run_id`` is never filtered by profile (the
+    caller named an exact run on purpose).
     """
 
     root = resolved.path
-    run_ids = [run_id] if run_id is not None else _candidate_run_ids(root)
+    if run_id is not None:
+        run_ids = [run_id]
+    else:
+        run_ids = _candidate_run_ids(root)
+        if profile_id is not None:
+            default_profile_id = _default_profile_id(resolved)
+            run_ids = [
+                candidate
+                for candidate in run_ids
+                if (_sealed_run_profile_id(root, candidate) or default_profile_id) == profile_id
+            ]
     if not run_ids:
         raise PostingUnavailableError("posting_no_runs", "no find-jobs run with acquire output was found")
     for candidate_run_id in run_ids:

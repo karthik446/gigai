@@ -31,7 +31,7 @@ import httpx
 import pytest
 
 from gigai.canonical import canonical_json_bytes, parse_json_bytes
-from gigai.scout.find_jobs.contracts import FindJobsConfig, ModelTarget, SourceToggles
+from gigai.scout.find_jobs.contracts import FindJobsConfig, ModelTarget, PinnedResume, SourceToggles
 from gigai.scout.find_jobs.present_api import (
     Backend,
     ConfigMissingError,
@@ -43,6 +43,9 @@ from gigai.scout.find_jobs.present_api import (
     _validate_setup_body,
     serve,
 )
+from gigai.scout.profile_records import create_profile, selected_profile, write_profile
+
+from tests.support.scout_profile_fixtures import build_gig_with_resume
 
 
 # ---------------------------------------------------------------------------
@@ -711,6 +714,88 @@ def test_write_setup_keeps_other_find_jobs_json_fields_unchanged(
     assert written.sources == SourceToggles(exa=False, ats=True, hiringcafe=True)
     assert written.default_assess_cap == 25
     assert written.default_model_target.value == "codex_cli"
+
+
+def test_prefs_roles_is_union_of_active_profile_titles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """S25 F1-b2 (operator decision, spike Q5): discovery prefs stay ONE
+
+    shared file, but ``roles``/``titles_to_avoid`` are the order-stable,
+    de-duplicated UNION of every ACTIVE (non-archived) profile's own
+    ``titles``/``titles_to_avoid`` -- never just the profile this save
+    touched, and never an archived profile's.
+    """
+
+    fixture = build_gig_with_resume(tmp_path, name="setup-union-proof")
+
+    # Trigger the (real, un-mocked) migration BEFORE the fake discovery
+    # module is installed below -- `ensure_default_profile` lazily imports
+    # `scout_cli`, which imports the REAL `find_jobs.discovery` package at
+    # module level; importing it once here caches it in ``sys.modules`` so
+    # the later `_install_fake_discovery_module` swap (needed for
+    # `write_setup` itself) doesn't shadow a name `scout_cli`'s own
+    # top-level import needs (`DiscoveryBudgetExceeded`), which the fake
+    # module doesn't define.
+    selected_profile(fixture.resolved, home_root=fixture.home_root, target=fixture.target)
+
+    prefs_store: dict[str, _FakeDiscoveryPrefs] = {}
+    _install_fake_discovery_module(monkeypatch, prefs_store=prefs_store, results_store={})
+    backend = ScoutFindJobsBackend(home_root=fixture.home_root, target=fixture.target)
+
+    # A second, ACTIVE profile with its own distinct titles.
+    second_ref = PinnedResume(
+        record_id=fixture.resume_record_id, revision_id=fixture.resume_revision_id, content_sha256="sha256:" + "1" * 64
+    )
+    create_profile(
+        fixture.resolved, label="second", titles=("staff platform engineer", "shared title"),
+        titles_to_avoid=("recruiter",), queries=("staff platform engineer",), resume_ref=second_ref,
+    )
+    # A third, ARCHIVED profile -- its titles must be EXCLUDED from the union.
+    third_ref = PinnedResume(
+        record_id=fixture.resume_record_id, revision_id=fixture.resume_revision_id, content_sha256="sha256:" + "2" * 64
+    )
+    third = create_profile(
+        fixture.resolved, label="third", titles=("excluded archived title",),
+        titles_to_avoid=(), queries=("excluded archived title",), resume_ref=third_ref,
+    )
+    write_profile(fixture.resolved, profile_id=third.profile_id, state="archived")
+
+    # The setup-interview save touches the SELECTED (default/migrated)
+    # profile's own titles, which also contain "shared title" -- proving
+    # de-duplication, not just concatenation.
+    default_profile = selected_profile(fixture.resolved, home_root=fixture.home_root, target=fixture.target)
+    assert default_profile is not None
+
+    fields = {
+        "roles": ["shared title", "default profile new role"],
+        "titles_to_avoid": ["avoid this"],
+        "countries": ["US"],
+        "work_mode": "remote",
+        "city": "Denver, CO",
+        "visa_sponsorship_required": False,
+        "exclude_companies": [],
+        "watch_companies": [],
+        "company_stage_size": None,
+        "industries_include": [],
+        "industries_exclude": [],
+        "must_have_stack": [],
+        "dealbreaker_stack": [],
+        "cadence_days": 7,
+        "budget_usd_per_session": 0.50,
+    }
+    result = backend.write_setup(fields)
+
+    # END outcome: the returned AND saved prefs carry the union, not the
+    # raw submitted roles.
+    assert set(result["roles"]) == {"shared title", "default profile new role", "staff platform engineer"}
+    assert "excluded archived title" not in result["roles"]
+    # De-duplicated: "shared title" appears in both the default profile
+    # (just saved) and the second profile -- only once in the union.
+    assert result["roles"].count("shared title") == 1
+    assert set(result["titles_to_avoid"]) == {"avoid this", "recruiter"}
+
+    saved = prefs_store[str(fixture.target)]
+    assert set(saved.roles) == set(result["roles"])
+    assert set(saved.titles_to_avoid) == set(result["titles_to_avoid"])
 
 
 def test_start_discovery_runs_synchronously_on_a_background_thread(

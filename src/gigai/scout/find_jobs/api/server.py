@@ -135,8 +135,10 @@ class Backend(Protocol):
     def resume_details(self) -> "ResumeDetails | None":
         """One resolution for both ``resume_preview()`` and ``resume_metadata()``.
 
-        uat-bug-008: a caller that needs both no longer resolves the newest
-        resume twice per request; see ``ScoutFindJobsBackend.resume_details``.
+        uat-bug-008: a caller that needs both no longer resolves the resume
+        twice per request. S25 F1-b2: resolves the gig's SELECTED profile's
+        resume, not "newest workpad-wide" -- see
+        ``ScoutFindJobsBackend.resume_details``.
         """
         ...
 
@@ -189,7 +191,10 @@ class Backend(Protocol):
         """Validate, then ``save_prefs`` + update ``find-jobs.json`` atomically.
 
         Returns the saved prefs' JSON. ``prefs_fields`` is already validated
-        (see ``_validate_setup_body``) by the time this is called.
+        (see ``_validate_setup_body``) by the time this is called. S25
+        F1-b2: the returned/saved ``roles``/``titles_to_avoid`` are the
+        union of every ACTIVE profile's own titles, not just the submitted
+        fields -- see ``ScoutFindJobsBackend.write_setup``.
         """
         ...
 
@@ -360,6 +365,21 @@ _SELECTED_PROFILE_CACHE_LOCK = threading.Lock()
 _UNSET = object()  # distinguishes "not cached" from a cached "no profile" (None)
 _selected_profile_cache: dict[tuple[str, str], object] = {}
 
+_PROFILE_RESUME_DETAILS_CACHE_LOCK = threading.Lock()
+# S25 F1-b2: ``resume_details()`` now resolves the SELECTED PROFILE's
+# resume (``run.resolve_profile_resume`` + this module's own display-
+# metadata lookup) instead of "newest" -- neither of those two calls is
+# covered by ``run.py``'s existing ``_resume_details_cache`` (that cache is
+# keyed to ``resolve_newest_resume_details`` alone). Without a cache of its
+# own here, a repeat ``resume_details()`` call against an UNCHANGED workpad
+# would replay ``private_records.read_record`` + a ``list_imports``/
+# ``list_revisions`` scan every time -- exactly the uat-bug-008 class of
+# regression ``test_config_latency.py``'s "same HEAD, no replay" bound
+# exists to catch. Same mechanism as ``_selected_profile_cache`` above:
+# keyed by the workpad's exact git HEAD, so any new commit (a profile edit,
+# a resume add, a migration) always misses.
+_profile_resume_details_cache: dict[tuple[str, str], object] = {}
+
 
 class ScoutFindJobsBackend:
     """The production localhost backend for the Scout find-jobs API."""
@@ -515,43 +535,139 @@ class ScoutFindJobsBackend:
         return config, canonical_json_bytes(config.to_json())
 
     def resume_preview(self) -> PinnedResume | None:
-        from .... import run
-
-        try:
-            return run.resolve_newest_resume(self.home_root, self._target_root())
-        except RunError as exc:
-            if str(exc).startswith("find_jobs_resume_required:"):
-                return None
-            raise
+        details = self.resume_details()
+        return details.pinned if details is not None else None
 
     def resume_metadata(self) -> tuple[str | None, str | None] | None:
-        from .... import run
-
-        try:
-            details = run.resolve_newest_resume_details(self.home_root, self._target_root())
-        except RunError as exc:
-            if str(exc).startswith("find_jobs_resume_required:"):
-                return None
-            raise
-        return (details.label, details.created_at)
+        details = self.resume_details()
+        return None if details is None else (details.label, details.created_at)
 
     def resume_details(self) -> ResumeDetails | None:
-        """One resolution for both the pinned preview and its display fields.
+        """The SELECTED profile's resume (S25 F1-b2), not "newest".
 
-        uat-bug-008: ``resume_preview()`` and ``resume_metadata()`` both
-        call ``run.resolve_newest_resume_details`` -- calling it twice per
-        request is wasteful even with that resolver's own per-journal-head
-        cache (present_api.py:1371 GET /api/config). Callers that need both
-        ``pinned`` and the label/date use this instead of calling both.
+        Before F1-b2, ``resume_preview``/``resume_metadata``/``resume_details``
+        each independently called ``run.resolve_newest_resume_details`` --
+        "the newest committed resume workpad-wide," ignoring which profile
+        is selected entirely. Once more than one profile exists, "newest"
+        and "the selected profile's own pin" can disagree (a second
+        profile's resume is imported, making it workpad-wide "newest," while
+        the FIRST profile stays selected and pinned to its own, older
+        resume) -- this must show the SELECTED profile's resume, never
+        whichever one was imported most recently.
+
+        Reuses the two existing per-journal-head caches rather than adding
+        a third: ``self._selected_profile()`` (this module's own cache) for
+        the profile resolution, and ``run.resolve_profile_resume`` for the
+        pinned-content digest -- no new cache, no new latency bound (see
+        ``test_config_latency.py``'s three bounds, unchanged by this
+        method).
+
+        Falls back to ``run.resolve_newest_resume_details`` (pre-F1-b2's
+        "newest" behaviour) only when no profile can be resolved at all --
+        no ``find-jobs.json`` yet, no committed resume for this gig, or the
+        gig itself is unresolvable (e.g. ``write_setup``'s own
+        target-with-no-workpad-yet case) -- so a target that has never seen
+        a profile migrate still shows *something* exactly as before.
         """
+
         from .... import run
 
         try:
-            return run.resolve_newest_resume_details(self.home_root, self._target_root())
-        except RunError as exc:
-            if str(exc).startswith("find_jobs_resume_required:"):
-                return None
-            raise
+            resolved = self._resolved_gig()
+        except Exception:
+            resolved = None
+
+        profile = self._selected_profile() if resolved is not None else None
+
+        if resolved is None or profile is None:
+            try:
+                return run.resolve_newest_resume_details(self.home_root, self._target_root())
+            except RunError as exc:
+                if str(exc).startswith("find_jobs_resume_required:"):
+                    return None
+                raise
+
+        # S25 F1-b2: cache this resolution per workpad HEAD (see
+        # ``_profile_resume_details_cache``'s own docstring) -- ``_selected_
+        # profile()`` above already replayed the journal once (cached on its
+        # own HEAD-keyed entry), but ``run.resolve_profile_resume`` +
+        # ``_resume_display_metadata`` below are each a further
+        # ``private_records`` read that must not repeat on every call.
+        head = run._cheap_workpad_head(resolved.path)
+        cache_key = (str(resolved.path), head) if head is not None else None
+        if cache_key is not None:
+            with _PROFILE_RESUME_DETAILS_CACHE_LOCK:
+                cached = _profile_resume_details_cache.get(cache_key, _UNSET)
+            if cached is not _UNSET:
+                return cached  # type: ignore[return-value]
+
+        try:
+            pinned = run.resolve_profile_resume(
+                resolved,
+                profile.resume_ref.record_id,
+                profile.resume_ref.revision_id,
+                home_root=self.home_root,
+                target=self._target_root(),
+            )
+        except RunError:
+            result = None
+        else:
+            label, created_at = self._resume_display_metadata(resolved, profile.resume_ref.record_id)
+            result = ResumeDetails(pinned=pinned, label=label, created_at=created_at)
+
+        if cache_key is not None:
+            with _PROFILE_RESUME_DETAILS_CACHE_LOCK:
+                _profile_resume_details_cache[cache_key] = result
+        return result
+
+    def _resume_display_metadata(self, resolved, record_id: str) -> tuple[str | None, str | None]:
+        """The imported reference's ``label``/``created_at`` for a pinned ``record_id``.
+
+        Mirrors ``profile_records._resolve_newest_resume_for_gig``'s own
+        import<->record linking (a resume reference is display metadata,
+        the ``g45_reference`` record is the pinned identity) but looks up
+        ONE already-known ``record_id`` instead of picking "the newest" --
+        display-only, never affects which resume is pinned.
+        """
+
+        from .... import private_records
+
+        try:
+            imports = private_records.list_imports(
+                home_root=self.home_root,
+                requested_target=self._target_root(),
+                family="reference",
+                gig_id=resolved.gig_id,
+            )
+        except Exception:
+            return (None, None)
+        snapshot = private_records._private_snapshot(resolved)
+        for imported in imports:
+            if imported.get("kind") != "resume":
+                continue
+            reference_id = imported.get("reference_id")
+            if not isinstance(reference_id, str):
+                continue
+            try:
+                revisions = private_records.list_revisions(
+                    resolved=resolved, record_id=record_id, snapshot=snapshot
+                )
+            except Exception:
+                continue
+            if not revisions:
+                continue
+            content = revisions[-1].get("content")
+            if not isinstance(content, dict):
+                continue
+            if content.get("family") != "g45_reference" or content.get("reference_id") != reference_id:
+                continue
+            label = imported.get("label")
+            created_at = imported.get("created_at")
+            return (
+                label if isinstance(label, str) else None,
+                created_at if isinstance(created_at, str) else None,
+            )
+        return (None, None)
 
     def start_run(
         self,
@@ -890,11 +1006,82 @@ class ScoutFindJobsBackend:
         return prefs.to_json() if prefs is not None else None
 
     def write_setup(self, prefs_fields: dict[str, object]) -> dict[str, object]:
+        """Save discovery prefs, then reconcile ``roles``/``titles_to_avoid`` to the union.
+
+        S25 F1-b2 (operator decision, spike Q5): discovery prefs stay ONE
+        shared ``discovery/prefs.json`` -- never keyed per profile -- but
+        ``roles``/``titles_to_avoid`` are the UNION of every ACTIVE (non-
+        archived) profile's ``titles``/``titles_to_avoid``, not just the
+        profile this setup-interview save just touched. ``_update_find_jobs_
+        config`` (called below) writes THIS save's answers onto the
+        SELECTED profile first (F1-b1); the union is assembled after that
+        write lands, so it always reflects the just-saved titles alongside
+        every other active profile's.
+
+        Order: `roles`/`titles_to_avoid` from `prefs_fields` are written
+        verbatim into `discovery/prefs.json` first (matching every other
+        prefs field, which stays exactly what the operator submitted), then
+        immediately overwritten in the same saved file with the assembled
+        union -- so a caller reading the return value or the file back
+        never observes the pre-union value.
+        """
+
         discovery = self._discovery_module()
         prefs = discovery.DiscoveryPrefs(**prefs_fields)
         discovery.save_prefs(home_root=self.home_root, target=self._target_root(), prefs=prefs)
         self._update_find_jobs_config(prefs_fields)
+
+        union_titles, union_titles_to_avoid = self._active_profile_titles_union()
+        if union_titles is not None:
+            from dataclasses import replace
+
+            prefs = replace(prefs, roles=union_titles, titles_to_avoid=union_titles_to_avoid)
+            discovery.save_prefs(home_root=self.home_root, target=self._target_root(), prefs=prefs)
         return prefs.to_json()
+
+    def _active_profile_titles_union(self) -> tuple[tuple[str, ...], tuple[str, ...]] | tuple[None, None]:
+        """The order-stable, de-duplicated union of every ACTIVE profile's titles.
+
+        Returns ``(None, None)`` when the gig/profiles cannot be resolved at
+        all (no workpad yet, no ``find-jobs.json``, no committed resume) --
+        the caller then leaves ``prefs.roles``/``titles_to_avoid`` at
+        whatever the setup interview itself submitted (today's pre-F1-b2
+        behaviour), since there is no profile to union over yet. Archived
+        profiles are excluded. Order: profiles in ``list_profiles``'s own
+        order (creation order), each profile's own titles in their stored
+        order; a title seen again (same profile or a later one) is not
+        repeated.
+        """
+
+        from ... import profile_records
+
+        try:
+            resolved = self._resolved_gig()
+        except Exception:
+            return (None, None)
+        try:
+            profiles = profile_records.list_profiles(resolved)
+        except Exception:
+            return (None, None)
+        if not profiles:
+            return (None, None)
+
+        titles: list[str] = []
+        titles_to_avoid: list[str] = []
+        seen_titles: set[str] = set()
+        seen_avoid: set[str] = set()
+        for profile in profiles:
+            if profile.state == "archived":
+                continue
+            for title in profile.titles:
+                if title not in seen_titles:
+                    seen_titles.add(title)
+                    titles.append(title)
+            for title in profile.titles_to_avoid:
+                if title not in seen_avoid:
+                    seen_avoid.add(title)
+                    titles_to_avoid.append(title)
+        return (tuple(titles), tuple(titles_to_avoid))
 
     def _update_find_jobs_config(self, prefs_fields: dict[str, object]) -> None:
         """Apply the setup answers onto the SELECTED profile + ``find-jobs.json``.

@@ -17,7 +17,7 @@ import subprocess
 from gigai.canonical import digest_imported_bytes
 from gigai.default_init import initialize_defaults
 from gigai.lifecycle import approve_offline
-from gigai.private_records import import_reference
+from gigai.private_records import create_record, import_reference
 from gigai.scout.find_jobs.contracts import (
     AcquireOutput,
     ATSProvider,
@@ -67,11 +67,35 @@ def bound_project(tmp_path: Path) -> tuple[Path, Path, str]:
 
 
 def add_resume(home: Path, target: Path, gig_id: str, tmp_path: Path, *, text: bytes = RESUME_TEXT) -> str:
+    """Import a resume reference AND its ``g45_reference`` record wrapper.
+
+    S25 F1-b2: a profile's ``resume_ref`` pins ``{record_id, revision_id}``
+    (the record wrapper), not the bare imported reference id -- the same
+    pair ``gigai scout resume add`` creates in one call
+    (``scout_cli.resume_add_command``). Without the record, no profile can
+    ever be migrated onto this resume at all (``profile_records.
+    ensure_default_profile`` requires a committed record revision, not just
+    an imported reference) -- this fixture predates F1-a/F1-b and is
+    updated here to match, so every test built on it exercises the SAME
+    profile-migration path the real CLI does.
+    """
+
     resume_file = tmp_path / "resume.txt"
     resume_file.write_bytes(text)
     imported = import_reference(
         home_root=home, requested_target=target, gig_id=gig_id, kind="resume", source=resume_file,
         operation_key=f"test-resume:{digest_imported_bytes(text)}",
+    )
+    create_record(
+        home_root=home,
+        requested_target=target,
+        gig_id=gig_id,
+        kind="imported_reference",
+        content_family="g45_reference",
+        content_id=imported.item_id,
+        actor={"kind": "operator", "id": "local-user"},
+        origin="imported",
+        operation_key=f"test-resume-record:{imported.item_id}",
     )
     return imported.item_id
 
