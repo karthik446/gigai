@@ -468,12 +468,25 @@ def attempt_errors(outputs: Sequence[str | None], job: Any, ctx: Any) -> list[st
 
 
 def _context(resume: Resume, answers: Sequence[FixedAnswer]):
+    """The product's ``TailorContext``: answers keyed by their CANONICAL question id.
+
+    The validator looks a cited id up as ``normalize_question_id(raw_id)``
+    and the product's ``read_answers`` stores canonical ids, so the prompt
+    shows and the model cites canonical ids.  The first live run (2026-09-25)
+    keyed them raw: every citation of an id whose canonical form differs
+    (``language:java_cpp_go`` -> ``language:cpp_go_java``) was rejected as
+    "not an answered question" although the prompt had offered exactly that
+    id -- a harness defect, not a model one.
+    """
+
+    from gigai.scout.question_ids import normalize_question_id
     from gigai.scout.tailored_resume import AnswerSource, TailorContext, resume_lines
 
-    return TailorContext(
-        resume_lines=resume_lines(resume.text),
-        answers={item.question_id: AnswerSource(item.question_id, item.answer, "eval") for item in answers},
-    )
+    keyed: dict[str, AnswerSource] = {}
+    for item in answers:
+        canonical = normalize_question_id(item.question_id)
+        keyed[canonical] = AnswerSource(canonical, item.answer, "eval")
+    return TailorContext(resume_lines=resume_lines(resume.text), answers=keyed)
 
 
 def _job(posting: Posting):
@@ -530,7 +543,7 @@ def tailor_row(
         "clean_fit": label.clean_fit,
         "expected_verdict": label.expected_verdict,
         "excluded": label.excluded,  # informational here: an explicitly selected row is scored whatever the flag says
-        "answers": [item.question_id for item in answers],
+        "answers": sorted(ctx.answers),  # canonical ids, as the prompt shows them
         "ok": attempt.ok,
         "attempts": attempt.attempts,
         "retried": attempt.attempts >= 2,

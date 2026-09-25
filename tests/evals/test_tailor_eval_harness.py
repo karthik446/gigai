@@ -170,7 +170,9 @@ def test_no_judge_run_and_answers_reach_the_row(tmp_path: Path) -> None:
     assert report["run"]["judge"] is False and report["run"]["stopped_at_cap"] is False
     row = report["rows"][0]
     assert row["resume_id"] == label.resume_id
-    assert row["answers"] == [item.question_id for item in answers[label.resume_id]]
+    from gigai.scout.question_ids import normalize_question_id
+
+    assert row["answers"] == sorted({normalize_question_id(item.question_id) for item in answers[label.resume_id]})
     assert row["judge_calls"] == 0 and row["lines"][1]["judge"] is None and row["unjudged_lines"] == 1
     assert report["metrics"]["fabrication"]["judge_enabled"] is False
     assert report["metrics"]["calls"]["made"] == 1 and report["metrics"]["bars"]["fabricated_claims_bar_met"] is True
@@ -396,6 +398,29 @@ def test_a_planted_unsupported_line_is_flagged_through_the_batch() -> None:
     assert fab["lines"][0]["where"] == "summary line 2" and fab["lines"][0]["sources"] == [{"label": "R1", "text": "Software engineer with Python service experience."}]
     assert metrics["bars"]["fabricated_claims_bar_met"] is False
     assert "> judge: UNSUPPORTED span: 'large platform team'" in metrics["samples"]["pending"]["markdown_with_sources"]
+
+
+def test_an_answer_ref_is_offered_and_accepted_under_its_canonical_id() -> None:
+    # The live run of 2026-09-25 rejected every citation of ``language:java_cpp_go``
+    # because the harness keyed the answers raw while the validator looks the id up
+    # canonically (``language:cpp_go_java``); the prompt must show the canonical id
+    # and a citation of it must be accepted, exactly as in the product.
+    answers = (harness.FixedAnswer("language:java_cpp_go", "Go: yes, daily. Java and C++: no."),)
+    binding = _ScriptedBinding(
+        [
+            {"header": [{"copy": 1}], "sections": [{"heading": "summary", "lines": [{"text": "Go daily; no Java or C++.", "refs": [{"kind": "answer", "question_id": "language:cpp_go_java"}]}]}]},
+            {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None}]},
+        ]
+    )
+    budget = harness.CallBudget(max_calls=25)
+    row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _POSTING, _RESUME_FIXTURE, answers, budget=budget)
+    assert "A language:cpp_go_java: Go: yes, daily. Java and C++: no." in binding.prompts[0]
+    assert "java_cpp_go" not in binding.prompts[0]
+    assert row["ok"] is True and row["attempts"] == 1 and row["answers"] == ["language:cpp_go_java"]
+    assert row["lines"][1]["sources"] == [{"label": "A language:cpp_go_java", "text": "language cpp go java Go: yes, daily. Java and C++: no."}]
+    assert "A language:cpp_go_java: language cpp go java Go: yes, daily. Java and C++: no." in binding.prompts[1]
+    metrics = harness.summarize([row], planned=1, max_calls=25, judge=True, calls=budget.calls)
+    assert metrics["lines"]["answer_refs"] == 1 and metrics["fabrication"]["fabricated_claims"] == 0
 
 
 def test_a_verdict_count_mismatch_is_a_judge_failure_after_one_retry() -> None:
