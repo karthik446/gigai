@@ -34,6 +34,13 @@ resume's top-N), cross-profile discrimination (same posting, two resumes) and
 reliability (valid-output rate, invalid-after-retry rate with its < 5% release
 bar, retries, latency, tokens; model cost is ``unavailable`` because the
 adapters report no cost, Jev cost is real).
+
+Excluded rows (``excluded=true`` in ``labels.csv``; the operator's label
+policy of 2026-09-25, rule E: Canadian/province rows are dropped from 0.1.9
+scoring, US-only): ``load_labels`` validates them but leaves them out unless
+``include_excluded=True``, ``plan_rows`` never plans one, and ``summarize``
+ignores any stored row flagged ``excluded`` -- so they enter no metric.  The
+report lists them under ``run.excluded_rows``.
 """
 
 from __future__ import annotations
@@ -82,6 +89,7 @@ LABEL_COLUMNS = (
     "expected_question_ids",
     "clean_fit",
     "uncertain",
+    "excluded",
     "source",
     "notes",
 )
@@ -127,6 +135,7 @@ class Label:
     expected_question_ids: tuple[str, ...]
     clean_fit: bool
     uncertain: bool
+    excluded: bool  # rule E: never planned, never scored (see the module docstring)
     source: str
     notes: str
 
@@ -181,7 +190,9 @@ def _flag(value: str, column: str) -> bool:
     return value == "true"
 
 
-def load_labels(path: Path = LABELS_PATH) -> tuple[Label, ...]:
+def load_labels(path: Path = LABELS_PATH, *, include_excluded: bool = False) -> tuple[Label, ...]:
+    """The labelled rows the harness scores; ``include_excluded=True`` also returns rule-E rows."""
+
     with path.open(encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         if tuple(reader.fieldnames or ()) != LABEL_COLUMNS:
@@ -197,11 +208,14 @@ def load_labels(path: Path = LABELS_PATH) -> tuple[Label, ...]:
                     expected_question_ids=ids,
                     clean_fit=_flag(row["clean_fit"].strip(), "clean_fit"),
                     uncertain=_flag(row["uncertain"].strip(), "uncertain"),
+                    excluded=_flag(row["excluded"].strip(), "excluded"),
                     source=row["source"].strip(),
                     notes=row["notes"].strip(),
                 )
             )
-    return tuple(labels)
+    if include_excluded:
+        return tuple(labels)
+    return tuple(label for label in labels if not label.excluded)
 
 
 def plan_rows(
@@ -215,6 +229,7 @@ def plan_rows(
 ) -> tuple[Label, ...]:
     """The rows a run will call, in priority order: clean fits, then confident, then uncertain.
 
+    An ``excluded`` row is never planned, whatever the other filters say.
     ``--max-calls`` cuts this list from the end, so the rows whose outcome is
     unambiguous (a clean fit that does not match is a failure) are always
     called first.  ``sample`` draws ``sample`` rows with ``random.Random(seed)``
@@ -226,7 +241,8 @@ def plan_rows(
     rows = [
         label
         for label in labels
-        if (not clean_fit_only or label.clean_fit)
+        if not label.excluded
+        and (not clean_fit_only or label.clean_fit)
         and (not wanted_resumes or label.resume_id in wanted_resumes)
         and (not wanted_postings or label.posting_id in wanted_postings)
     ]
@@ -331,6 +347,7 @@ def assess_row(binding: object, label: Label, posting: Posting, resume: Resume) 
         "expected_question_ids": list(label.expected_question_ids),
         "clean_fit": label.clean_fit,
         "uncertain": label.uncertain,
+        "excluded": label.excluded,
         "ok": attempt.ok,
         "attempts": attempt.attempts,
         "retried": attempt.attempts >= 2,
@@ -409,6 +426,7 @@ def _latency(values: Sequence[float]) -> dict[str, float | None]:
 def summarize(rows: Sequence[Mapping[str, Any]], *, planned: int, max_calls: int, jev: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Every metric the plan lists, from the stored rows alone (re-runnable on a report)."""
 
+    rows = [row for row in rows if not row.get("excluded")]  # rule E: an excluded row enters no metric
     valid = [row for row in rows if row["ok"]]
     invalid_after_retry = [row for row in rows if not row["ok"] and row["not_assessed_reason"] == "model_output_invalid"]
     transport_failures = [row for row in rows if not row["ok"] and row["not_assessed_reason"] in {"model_unavailable", "model_denied"}]
@@ -833,12 +851,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     postings = load_postings()
     resumes = load_resumes()
     labels = load_labels()
+    excluded = [label for label in load_labels(include_excluded=True) if label.excluded]
     rows_to_call = plan_rows(labels, sample=args.sample, seed=args.seed, clean_fit_only=args.clean_fit_only, resume_ids=args.resume, posting_ids=args.posting)
     if args.dry_run:
         for index, label in enumerate(rows_to_call, 1):
             marker = "clean" if label.clean_fit else "uncertain" if label.uncertain else "confident"
             called = "call" if index <= args.max_calls else "skip (cap)"
             print(f"{index:3} {called:10} {marker:9} {label.resume_id} x {label.posting_id} expects {label.expected_verdict} {';'.join(label.expected_question_ids)}")
+        for label in excluded:
+            print(f"    excluded  {label.resume_id} x {label.posting_id} (rule E: not planned, not scored)", file=sys.stderr)
         return 0
 
     report_path = args.report or default_report_path(fake=args.fake_model, now=now)
@@ -919,6 +940,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "labels": os.fspath(LABELS_PATH.relative_to(REPO_ROOT)),
             "postings": os.fspath(POSTINGS_PATH.relative_to(REPO_ROOT)),
             "skipped_rows": skipped,
+            "excluded_rows": [{"resume_id": label.resume_id, "posting_id": label.posting_id} for label in excluded],
         },
         "rows": results,
         "metrics": metrics,

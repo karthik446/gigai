@@ -3,7 +3,9 @@
 Nothing here calls a model, Jev or the network: the fixtures parse, every
 label references an existing pair, ids match the shipped ``question_id``
 shape, every row renders through the shipped prompt without truncation, and
-``summarize`` produces each planned metric from synthetic rows.  Runs in
+``summarize`` produces each planned metric from synthetic rows.  The label
+policy of 2026-09-25 is checked too: no ``sponsorship:*``/``visa:*`` expected
+id (rule F) and ``excluded`` rows (rule E) enter no plan and no metric.  Runs in
 ``make unit-tests`` (the fast_unit classifier sees no filesystem, process or
 network seam in this file).
 """
@@ -57,7 +59,7 @@ def test_resume_index_settings_are_config_shaped() -> None:
 def test_labels_reference_fixture_pairs_and_use_shipped_id_shapes() -> None:
     resumes = harness.load_resumes()
     postings = harness.load_postings()
-    labels = harness.load_labels()
+    labels = harness.load_labels(include_excluded=True)
     assert len(labels) >= 20
     assert len({label.key for label in labels}) == len(labels)
     clean_rows_by_resume: dict[str, int] = {}
@@ -69,6 +71,8 @@ def test_labels_reference_fixture_pairs_and_use_shipped_id_shapes() -> None:
         for question_id in label.expected_question_ids:
             assert harness.QUESTION_ID_RE.fullmatch(question_id), question_id
             assert harness.SCHEMA_QUESTION_ID_RE.fullmatch(question_id), question_id
+            # Rule F: sponsorship is never an ask -- the posting decides it or it stays unknown.
+            assert harness.question_category(question_id) not in {"sponsorship", "visa"}, (label.key, question_id)
         if label.expected_verdict == "matched_above_threshold":
             assert label.expected_question_ids == ()
         if label.expected_verdict == "pending_user_answers":
@@ -83,8 +87,22 @@ def test_labels_reference_fixture_pairs_and_use_shipped_id_shapes() -> None:
     assert clean_rows_by_resume == {resume_id: 1 for resume_id in clean_fit_resumes}
 
 
+def test_excluded_rows_are_well_formed_but_never_scored() -> None:
+    every = harness.load_labels(include_excluded=True)
+    scored = harness.load_labels()
+    excluded = [label for label in every if label.excluded]
+    # Rule E (US-only): the Canadian rows are the excluded ones, and only they are.
+    postings = harness.load_postings()
+    assert excluded and all(postings[label.posting_id].location == "Remote Canada" for label in excluded)
+    assert {label.key for label in every if postings[label.posting_id].location == "Remote Canada"} == {label.key for label in excluded}
+    assert [label.key for label in scored] == [label.key for label in every if not label.excluded]
+    assert not any(label.excluded for label in harness.plan_rows(every))
+    assert harness.plan_rows(every) == harness.plan_rows(scored)
+    assert not harness.plan_rows(every, resume_ids=(excluded[0].resume_id,), posting_ids=(excluded[0].posting_id,))
+
+
 def test_every_posting_has_a_cross_profile_or_clean_fit_twin_where_labelled() -> None:
-    labels = harness.load_labels()
+    labels = harness.load_labels()  # over the scored rows only
     by_posting: dict[str, set[str]] = {}
     for label in labels:
         by_posting.setdefault(label.posting_id, set()).add(label.expected_verdict)
@@ -95,7 +113,7 @@ def test_every_posting_has_a_cross_profile_or_clean_fit_twin_where_labelled() ->
 def test_every_row_renders_through_the_shipped_prompt_untruncated() -> None:
     resumes = harness.load_resumes()
     postings = harness.load_postings()
-    for label in harness.load_labels():
+    for label in harness.load_labels(include_excluded=True):
         posting = postings[label.posting_id]
         resume = resumes[label.resume_id]
         prompt = render_assess_prompt(
@@ -153,6 +171,7 @@ def _row(
     expected_ids: tuple[str, ...] = (),
     clean_fit: bool = False,
     uncertain: bool = False,
+    excluded: bool = False,
     ok: bool = True,
     attempts: int = 1,
     reason: str | None = None,
@@ -167,6 +186,7 @@ def _row(
         "expected_question_ids": list(expected_ids),
         "clean_fit": clean_fit,
         "uncertain": uncertain,
+        "excluded": excluded,
         "ok": ok,
         "attempts": attempts,
         "retried": attempts >= 2,
@@ -227,6 +247,27 @@ def test_summarize_computes_every_planned_metric() -> None:
     assert reliability["latency_seconds"]["max"] == 30.0 and reliability["tokens"] == {"input": 500, "output": 250, "total": 750}
     assert reliability["model_cost_usd"] == "unavailable" and reliability["jev_cost_usd"] is None
     assert metrics["jev"] is None
+
+
+def test_summarize_skips_excluded_rows_in_every_metric() -> None:
+    rows = [
+        _row("cf-a", "p1", "matched_above_threshold", verdict="matched_above_threshold", clean_fit=True),
+        _row("r1", "p1", "not_a_match", verdict="pending_user_answers", questions=(("cloud:aws", "AWS?"),), expected_ids=("years:ml",)),
+        _row("r2", "p2", "pending_user_answers", ok=False, attempts=2, reason="model_output_invalid", expected_ids=("cloud:aws",)),
+    ]
+    # One excluded row of every kind that could move a metric: a failing clean fit, a
+    # disagreeing confident row with a false ask and a cross-profile twin, and an invalid row.
+    noise = [
+        _row("cf-x", "p1", "matched_above_threshold", verdict="not_a_match", clean_fit=True, excluded=True, unmet=2),
+        _row("r9", "p2", "not_a_match", verdict="pending_user_answers", questions=(("cloud:aws", "AWS?"),), expected_ids=("cloud:aws",), excluded=True, elapsed=900.0),
+        _row("r8", "p1", "pending_user_answers", ok=False, attempts=2, reason="model_output_invalid", expected_ids=("cloud:gcp",), excluded=True),
+    ]
+    assert harness.summarize(rows + noise, planned=3, max_calls=20) == harness.summarize(rows, planned=3, max_calls=20)
+    metrics = harness.summarize(rows + noise, planned=3, max_calls=20)
+    assert metrics["calls"]["made"] == 3
+    assert metrics["clean_fit"] == {"rows": 1, "valid": 1, "matched": 1, "rate": 1.0, "failures": []}
+    assert metrics["cross_profile"]["pairs"] == 1
+    assert metrics["reliability"]["latency_seconds"]["max"] == 30.0
 
 
 def test_summarize_on_no_rows_reports_nulls_not_errors() -> None:
