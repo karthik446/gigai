@@ -55,6 +55,18 @@ _VALIDATION_ERROR = "matrix[0].status must be one of met|partial|gap"
 # them). The old pre-P1 goldens they replace lived at these same sha256/len
 # values with the met|partial|gap prompt; that prompt is gone from the live
 # path (P2 rules 3-5 vocabulary is met|unmet|unclear plus a verdict).
+#
+# P2-r2 (v0.1.9) INTENTIONAL CHANGE #2: the "fair test" live acceptance (5
+# real codex calls, original round-1 resumes that never state a location,
+# with countries/titles set the way a real find-jobs.json + profile would)
+# found 0/5 known-match pairs reached matched_above_threshold -- the bare
+# "countries = {{countries}}" fact list did not tell the model those
+# countries are where the CANDIDATE is eligible to work, so a posting's own
+# remote-region location kept getting reclassified ASKABLE under rule 1
+# ("resume is simply silent"). The CANDIDATE CONSTRAINTS line was reworded
+# (assess.md only; no verdict-consistency code rule touched) to say
+# explicitly that a posting location matching one of these countries is MET,
+# not askable. Goldens below were re-captured again for the reworded line.
 GOLDEN_PROMPT = (
     "You are assessing one real job posting against one candidate's resume for GigAI Scout. "
     "Return a workflow-state verdict, not a grader score: the verdict decides what GigAI does "
@@ -122,8 +134,12 @@ GOLDEN_PROMPT = (
     "We need 5+ years of Python. Remote OK.\nNo visa sponsorship available for this role.\n\n\n"
     "RESUME:\n"
     "Karthik built Python services for 6 years.\nOperated Kubernetes clusters in production.\n\n\n"
-    "CANDIDATE CONSTRAINTS: visa sponsorship required = no; countries = any; target titles = "
-    "unspecified."
+    "CANDIDATE CONSTRAINTS: visa sponsorship required = no; the candidate is eligible to work "
+    "from these countries (this is a fact about the candidate, exactly like a resume statement "
+    "-- treat a posting's location/remote-region requirement as MET whenever the posting's own "
+    "location matches one of these countries, and only ask a location question when the "
+    "posting's location does not match any of them and the resume itself gives no other "
+    "answer): any; target titles the candidate is looking for = unspecified."
 )
 
 # Same fixed inputs, visa required = yes, retry with the validation error fed back.
@@ -134,18 +150,20 @@ GOLDEN_RETRY_PROMPT = (
     + ". Return corrected JSON only, matching the schema exactly."
 )
 
-# sha256 of the P2 prompts, recorded by the capture script above (the strings
-# above are the source of truth; the digests guard the transcription).
-GOLDEN_SHA256 = "1b845c0245b32debca7692b1d7521607fe89a95c9725f55b3e116ac0033e706c"
-GOLDEN_RETRY_SHA256 = "7d64ac8748fb713432b317febda6c633f0e8a6577e3f35a176b0b6112d465671"
-# 13,000-byte posting text and resume plus a 400-char validation error, P2:
+# sha256 of the P2-r2 prompts, recorded by the capture script above (the
+# strings above are the source of truth; the digests guard the
+# transcription).
+GOLDEN_SHA256 = "54b09bea14d79ee3f6a28a19021f51f3ba9340978960c44673afe4eb9e1f841b"
+GOLDEN_RETRY_SHA256 = "4213ef94c51bf51d8adcc397b76895fcd0ccd8ebba593873482138b87d54435d"
+# 13,000-byte posting text and resume plus a 400-char validation error, P2-r2:
 # the three ``_MAX_PROMPT_*`` bounds (12_000 / 12_000 / 300) produce this exact prompt.
-GOLDEN_BOUNDED_SHA256 = "9145fdffbfa5d0565b585aa19b2a7b52b8da7bf6f203312b6dfe095155b304ad"
-GOLDEN_BOUNDED_LEN = 28_899
+GOLDEN_BOUNDED_SHA256 = "cdb58b6790c383453cd06647743a61af715cf2ced6519851c209ee3058283b63"
+GOLDEN_BOUNDED_LEN = 29_305
 
 # Digest of the shipped ``assess.md`` bytes; bump ONLY when the template changes on purpose.
-# P2 (v0.1.9) INTENTIONAL CHANGE: bumped for the S29 r1 template replacement.
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:85c6e1d95d2e3b5bef94149b7eeedbf4482f5fc9fef509cf800e247a6ef3d346"
+# P2-r2 (v0.1.9) INTENTIONAL CHANGE: bumped again for the eligible-countries
+# wording fix (see the comment above GOLDEN_PROMPT).
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:f3e28113aa3e4ed2de62df000367a7d715ee5b682cf9027c9ffe3539ac789707"
 
 
 def _sha256(text: str) -> str:

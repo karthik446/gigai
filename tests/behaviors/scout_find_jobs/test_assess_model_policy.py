@@ -256,6 +256,7 @@ def _run_assess(
     monkeypatch: pytest.MonkeyPatch,
     visa_sponsorship_required: bool | None = None,
     countries: list[str] | None = None,
+    roles: list[str] | None = None,
     outcomes: dict[str, str] | None = None,
     selected_postings: list[PostingRow] | None = None,
     selection_cap: int = 10,
@@ -289,7 +290,7 @@ def _run_assess(
                     "schema_version": "scout-find-jobs-run-input:1",
                     "config": {
                         "schema_version": "find-jobs-config:1",
-                        "roles": ["Software Engineer"],
+                        "roles": roles if roles is not None else ["Software Engineer"],
                         "merged_queries": ["software engineer"],
                         "location": None,
                         "remote": True,
@@ -409,6 +410,68 @@ def test_visa_sponsorship_required_reaches_the_prompt(tmp_path: Path, monkeypatc
         postings=[posting], outputs=[good], monkeypatch=monkeypatch, visa_sponsorship_required=True,
     )
     assert "visa sponsorship required = yes" in binding.port.prompts[0]
+
+
+def test_sealed_countries_and_profile_titles_reach_the_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """P2-r2 (v0.1.9): {{countries}}/{{titles}} come from the SEALED effective
+    config -- find-jobs.json's own countries, and roles (the profile's titles
+    after overlay_selected_profile replaces roles with them, C11-adjacent) --
+    never from the resume text. This is the hermetic counterpart to the P2
+    live acceptance's "fair test": prove the plumbing puts the real-user
+    context on the prompt, without a live model call."""
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/909",
+        text="We need Kubernetes experience.",
+    )
+    good = json.dumps({
+        "matrix": [{"requirement": "Kubernetes", "resume_evidence": ["Ran production Kubernetes clusters"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+    _output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000110",
+        postings=[posting], outputs=[good], monkeypatch=monkeypatch,
+        visa_sponsorship_required=False, countries=["PL", "CA"], roles=["Senior Analytics Engineer"],
+    )
+    prompt = binding.port.prompts[0]
+    # P2-r2: the eligible-countries clause states the meaning explicitly (a
+    # matching posting location is MET, not askable) after the fair-test live
+    # acceptance found a bare fact list wasn't enough for the model to use.
+    assert "eligible to work from these countries" in prompt
+    assert "): PL, CA;" in prompt
+    assert "target titles the candidate is looking for = Senior Analytics Engineer" in prompt
+
+
+def test_sealed_empty_countries_renders_a_sane_default_not_a_dangling_placeholder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty countries (no find-jobs.json filter) must render as a plain word
+    the model can read, never a bare "{{countries}}" or an empty string that
+    looks like truncated output. ``FindJobsConfig.roles`` itself must not be
+    empty (a real DTO bound, not exercised here); the no-profile-selected
+    case still carries the shared config's own roles, unaffected by
+    countries being empty."""
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/910",
+        text="We need Kubernetes experience.",
+    )
+    good = json.dumps({
+        "matrix": [{"requirement": "Kubernetes", "resume_evidence": ["Ran production Kubernetes clusters"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+    _output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000111",
+        postings=[posting], outputs=[good], monkeypatch=monkeypatch,
+        visa_sponsorship_required=False, countries=[],
+    )
+    prompt = binding.port.prompts[0]
+    assert "{{countries}}" not in prompt
+    assert "{{titles}}" not in prompt
+    assert "): any;" in prompt
+    assert "target titles the candidate is looking for = Software Engineer" in prompt  # _run_assess's default roles
 
 
 def test_string_resume_evidence_is_normalized_and_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

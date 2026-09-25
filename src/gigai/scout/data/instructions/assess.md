@@ -36,6 +36,6 @@ POSTING TEXT:
 RESUME:
 {{resume_text}}
 
-CANDIDATE CONSTRAINTS: visa sponsorship required = {{visa_required}}; countries = {{countries}}; target titles = {{titles}}.
+CANDIDATE CONSTRAINTS: visa sponsorship required = {{visa_required}}; the candidate is eligible to work from these countries (this is a fact about the candidate, exactly like a resume statement -- treat a posting's location/remote-region requirement as MET whenever the posting's own location matches one of these countries, and only ask a location question when the posting's location does not match any of them and the resume itself gives no other answer): {{countries}}; target titles the candidate is looking for = {{titles}}.
 
 Your previous answer did not match the required JSON shape: {{validation_error}}. Return corrected JSON only, matching the schema exactly.

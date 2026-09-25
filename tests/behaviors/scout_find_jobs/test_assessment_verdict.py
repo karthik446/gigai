@@ -271,17 +271,23 @@ def _job() -> AssessJob:
 
 
 def test_render_prompt_includes_countries_and_titles() -> None:
+    # P2-r2 (v0.1.9): the fair-test live acceptance found the model would not
+    # infer a candidate's residency from a bare "countries = ..." fact list,
+    # so the eligible-countries clause now says explicitly that a matching
+    # posting location is MET, not askable (see assess.md's CANDIDATE
+    # CONSTRAINTS line and the eval below).
     ctx = AssessContext(resume_text="resume", visa_sponsorship_required=False, countries=("US", "CA"), titles=("Backend Engineer",))
     prompt = assessment_core.render_assess_prompt(_job(), ctx)
-    assert "countries = US, CA" in prompt
-    assert "target titles = Backend Engineer" in prompt
+    assert "eligible to work from these countries" in prompt
+    assert "): US, CA;" in prompt
+    assert "target titles the candidate is looking for = Backend Engineer" in prompt
 
 
 def test_render_prompt_defaults_countries_and_titles_when_empty() -> None:
     ctx = AssessContext(resume_text="resume", visa_sponsorship_required=False)
     prompt = assessment_core.render_assess_prompt(_job(), ctx)
-    assert "countries = any" in prompt
-    assert "target titles = unspecified" in prompt
+    assert "): any;" in prompt
+    assert "target titles the candidate is looking for = unspecified" in prompt
 
 
 def test_no_excluded_domains_placeholder_in_the_shipped_instructions() -> None:
