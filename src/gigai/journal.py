@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from typing import Callable, Iterator, TypeVar
 
@@ -590,7 +591,52 @@ def _lock_owner(path: Path) -> str:
     return value or "unknown"
 
 
+_MOUNT_PROBE_CACHE_LOCK = threading.Lock()
+# probe-cache: every journal writer acquisition used to spawn
+# `python -m gigai.diagnostics --contend-lock` (~0.35s) to prove the
+# workpad's interprocess advisory lock actually excludes, on every single
+# records/profile/run operation -- a fixed structural cost paid over and
+# over for a fact that does not change while the mount stays the same.
+# Cache only a PASS, per process, keyed by the resolved root plus its
+# (st_dev, st_ino): a remount or a replaced directory changes one of those
+# and re-probes. A FAIL is never cached -- a failing probe must keep
+# raising on every acquisition, since "the mount broke mid-session" is
+# exactly the case this exists to catch. `gigai doctor` never consults this
+# cache; it always calls `run_mount_probes` directly so an operator's
+# diagnostic reflects the mount right now.
+_mount_probe_cache: dict[tuple[str, int, int], bool] = {}
+
+
+def _mount_probe_cache_key(root: Path) -> tuple[str, int, int] | None:
+    """Identity of the mount to cache a PASS against, or ``None`` if it
+
+    cannot be established (the probe then always runs, uncached).
+    """
+
+    try:
+        stat = root.stat()
+    except OSError:
+        return None
+    return (os.fspath(root), stat.st_dev, stat.st_ino)
+
+
 def _require_mount_probes(root: Path) -> None:
+    cache_key = _mount_probe_cache_key(root)
+    if cache_key is None:
+        _run_and_raise_on_failure(root)
+        return
+    with _MOUNT_PROBE_CACHE_LOCK:
+        if _mount_probe_cache.get(cache_key):
+            return
+        # Hold the lock across the probe itself (it is a subprocess-bound
+        # call, not a hot path once warm) so two threads racing on the same
+        # mount's first acquisition probe at most once for a PASS, never
+        # concurrently.
+        _run_and_raise_on_failure(root)
+        _mount_probe_cache[cache_key] = True
+
+
+def _run_and_raise_on_failure(root: Path) -> None:
     failed = [check.id for check in run_mount_probes(root) if check.status != "PASS"]
     if failed:
         raise InterprocessLockUnavailable(
