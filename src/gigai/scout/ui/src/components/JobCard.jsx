@@ -2,6 +2,7 @@ import JevBadge from "./JevBadge.jsx";
 import VerdictChip from "./VerdictChip.jsx";
 import SponsorshipBadge from "./SponsorshipBadge.jsx";
 import ProviderBadge from "./ProviderBadge.jsx";
+import QuickAssessChip from "./QuickAssessChip.jsx";
 import { displayCompanyName, unchangedSinceLabel } from "../display.js";
 import { ageLabel, jevReasonsLine, notAssessedLine, payLabel, requirementSummary, workModeLabel } from "../jobModel.js";
 import { jobHash } from "../routing.js";
@@ -16,6 +17,9 @@ import { jobHash } from "../routing.js";
 // assessment's read falling back to the posting's (shown only when
 // find-jobs.json visa_sponsorship_required is true, operator amendment),
 // "Unchanged since" from carried_forward_assessments (uat-bug-009).
+// Q4a-nav-r1: an on-demand job (quick-assess store, status "on_demand")
+// shows the "Quick assess" source chip where a run posting shows its
+// provider badge; nothing else on the card differs.
 //
 // Operator answer 2: the requirement summary only after assess; an
 // unassessed card shows Jev's reasons instead (or the not-assessed reason
@@ -81,7 +85,7 @@ export default function JobCard({ job, visaRequired }) {
                 <span>{posting.location}</span>
               </>
             )}
-            <ProviderBadge posting={posting} />
+            {job.status === "on_demand" ? <QuickAssessChip fetchKind={job.quick && job.quick.job && job.quick.job.fetch_kind} /> : <ProviderBadge posting={posting} />}
           </div>
         </div>
         <JevBadge rank={job.rank} />

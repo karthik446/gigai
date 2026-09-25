@@ -925,6 +925,8 @@ table.data-table th {
 .ats-badge.ats-lever { background: #eaf0ff; color: #1a3aa3; }
 .ats-badge.ats-ashby { background: #fff4dc; color: #8a5a00; }
 .ats-badge .ats-via { font-weight: 400; opacity: 0.8; }
+/* Q4a-nav-r1: the "Quick assess" source chip on on-demand jobs (QuickAssessChip.jsx) */
+.ats-badge.ats-quick { background: #efe9ff; color: #4b2ea8; }
 
 .jev-badge {
   display: inline-flex;

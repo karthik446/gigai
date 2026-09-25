@@ -5,6 +5,7 @@ import JevBadge from "../components/JevBadge.jsx";
 import VerdictChip from "../components/VerdictChip.jsx";
 import SponsorshipBadge from "../components/SponsorshipBadge.jsx";
 import ProviderBadge from "../components/ProviderBadge.jsx";
+import QuickAssessChip from "../components/QuickAssessChip.jsx";
 import PrepPanel from "../components/PrepPanel.jsx";
 import { displayCompanyName, notAssessedReasonDetail, unchangedSinceLabel } from "../display.js";
 import {
@@ -256,7 +257,7 @@ export default function JobPage({ job, jobId, profileId, visaRequired, loading, 
             <div className="job-sub">
               <strong style={{ color: "var(--text)" }}>{displayCompanyName(posting.company)}</strong>
               {posting.location && <span>{posting.location}</span>}
-              <ProviderBadge posting={posting} />
+              {job.status === "on_demand" ? <QuickAssessChip fetchKind={job.quick && job.quick.job && job.quick.job.fetch_kind} /> : <ProviderBadge posting={posting} />}
               {job.status === "on_demand" ? (
                 <span title={job.quick && job.quick.created_at ? job.quick.created_at : undefined}>
                   assessed on demand{job.quick && job.quick.created_at ? ` ${dateLabel(job.quick.created_at)}` : ""}
