@@ -59,12 +59,16 @@ def test_fake_model_run_goes_end_to_end_through_the_shipped_path(tmp_path: Path)
         assert [item["status"] for item in row["matrix"]] == ["met", "unclear"]
         assert row["usage"] == {"input_tokens": 10, "output_tokens": 20, "total_tokens": 30}
         assert row["agreement"] is False
+        # assess-prompt-v3-r1: a pending answer has nothing stripped; the count is recorded as 0, not "unknown".
+        assert row["dropped_questions"] == 0 and row["dropped_question_ids"] == []
 
     metrics = report["metrics"]
     assert metrics["calls"] == {"planned": len(harness.load_labels()), "made": 3, "max_calls": 3, "stopped_at_cap": True}
     assert metrics["clean_fit"]["matched"] == 0 and len(metrics["clean_fit"]["failures"]) == 3
     assert metrics["clean_fit"]["failures"][0]["questions"][0]["question_id"] == "cloud:gcp"
     assert metrics["false_asks"]["clean_fit_questions"] == 3 and metrics["false_asks"]["bar_zero_met"] is False
+    assert metrics["false_asks"]["dropped_questions"] == 0 and metrics["false_asks"]["dropped_rows"] == []
+    assert metrics["false_asks"]["dropped_unrecorded_rows"] == 0
     assert metrics["reliability"]["valid_output_rate"] == 1.0
     assert metrics["reliability"]["invalid_after_retry"] == 0 and metrics["reliability"]["invalid_after_retry_bar_met"] is True
     assert metrics["reliability"]["model_cost_usd"] == "unavailable"
@@ -125,10 +129,58 @@ def test_rescore_reannotates_a_stored_report_without_any_call(tmp_path: Path) ->
     assert rescored["run"]["rescored_at"] and "rescored_head" in rescored["run"]
     assert rescored["rows"][:2] == first["rows"]  # unchanged rows re-annotate to themselves
     assert rescored["rows"][2]["expected_hits_normalized"] == ["tool:x"] and rescored["rows"][2]["expected_hits_exact"] == []
+    # A row stored before assess-prompt-v3-r1 has no dropped count: reported as not recorded, never as 0.
+    assert rescored["rows"][2]["dropped_questions"] is None and rescored["rows"][2]["dropped_question_ids"] == []
+    assert rescored["metrics"]["false_asks"]["dropped_unrecorded_rows"] == 1
+    assert rescored["metrics"]["false_asks"]["dropped_questions"] == 0
     recall = rescored["metrics"]["question_recall"]
     assert (recall["rows"], recall["hit_exact"], recall["hit_normalized"]) == (1, 0, 1)
     assert rescored["metrics"]["calls"] == first["metrics"]["calls"] | {"made": 3}
     assert not (tmp_path / "stored-rescored.json").exists()
+
+
+def test_a_not_a_match_answer_reaches_the_report_with_its_questions_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """assess-prompt-v3-r1: the harness goes through ``assess_once``, so a not_a_match answer that
+    still carries questions lands in the row with ``questions`` empty (what the product kept) and
+    ``dropped_questions`` counting what the product stripped; no false-ask figure sees them."""
+
+    from types import SimpleNamespace
+
+    from gigai.adapters.port import InvocationResult, NormalizedUsage
+
+    answer = json.dumps({
+        "verdict": "not_a_match",
+        "matrix": [
+            {"requirement": "10+ years", "class": "hard", "status": "unmet", "resume_evidence": ["9 years"]},
+            {"requirement": "AWS", "class": "askable", "status": "unclear", "resume_evidence": []},
+        ],
+        "suggestions": [], "not_a_match_reason": "9 years against 10+.",
+        "questions": [{"question_id": "cloud:aws", "question": "AWS?", "requirement": "AWS"}, {"question_id": "years:ml", "question": "ML years?", "requirement": "10+ years"}],
+    })
+
+    class _Port:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def invoke(self, request):
+            self.prompts.append(request.prompt)
+            return InvocationResult(status="success", output_text=answer, resolved_model="f", raw_usage={}, normalized_usage=NormalizedUsage(1, 1, 2), cost_status="unavailable")
+
+    binding = SimpleNamespace(port=_Port(), request=lambda *, role, prompt, required_capabilities=frozenset({"text"}): SimpleNamespace(prompt=prompt, role=role))
+    labels = {label.key: label for label in harness.load_labels()}
+    label = labels[("r1-ml-staff", "gh:airbnb:7955579")]  # a not_a_match row whose resume says AWS
+    row = harness.assess_row(binding, label, harness.load_postings()[label.posting_id], harness.load_resumes()[label.resume_id])
+    assert row["ok"] and row["attempts"] == 1 and row["verdict"] == "not_a_match"
+    assert row["questions"] == [] and row["question_ids"] == [] and row["possible_false_asks"] == []
+    assert row["dropped_questions"] == 2 and row["dropped_question_ids"] == ["cloud:aws", "years:ml"]
+    metrics = harness.summarize([row], planned=1, max_calls=1)
+    assert metrics["verdict_agreement"]["agree"] == 1
+    assert metrics["false_asks"]["possible"] == [] and metrics["false_asks"]["dropped_questions"] == 2
+    assert metrics["false_asks"]["dropped_rows"] == [{
+        "resume_id": "r1-ml-staff", "posting_id": "gh:airbnb:7955579", "verdict": "not_a_match",
+        "dropped_questions": 2, "dropped_question_ids": ["cloud:aws", "years:ml"],
+    }]
+    assert metrics["false_asks"]["counted_on"].startswith("kept questions only")
 
 
 def test_fake_jev_prefilter_ranks_every_fixture_posting_per_resume(tmp_path: Path) -> None:

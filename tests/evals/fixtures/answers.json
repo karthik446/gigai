@@ -76,8 +76,8 @@
     "answer": "Yes, every change I ship goes through Git pull requests with review."
    },
    {
-    "question_id": "education:enrolled",
-    "answer": "No. I completed my B.S. and have worked full time since; I am not currently enrolled in a degree program."
+    "question_id": "location:francisco_san",
+    "answer": "No. I work fully remote and cannot be in the San Francisco office for a hybrid schedule."
    }
   ],
   "r5-platform-sre-senior": [

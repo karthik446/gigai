@@ -33,7 +33,7 @@ pins the golden strings).
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import resources
 import json
 import re
@@ -147,6 +147,16 @@ class AssessAttempt:
     usage: NormalizedUsage | None
     attempts: int
     validation_error: str | None
+    # assess-prompt-v3-r1 (v0.1.9): bookkeeping for the eval, no contract
+    # change. ``dropped_questions`` counts the questions the model attached
+    # to a ``not_a_match`` verdict that ``_strip_not_a_match_questions``
+    # removed before validation (the product never shows a question on a
+    # failed verdict); ``dropped_question_ids`` names the structured ones.
+    # Both describe the SUCCESSFUL attempt only and default to none, so every
+    # earlier constructor (and ``invoke_json_once``, which knows nothing of
+    # assessments) keeps building attempts the same way.
+    dropped_questions: int = 0
+    dropped_question_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.ok and (self.parsed is None or self.not_assessed_reason is not None):
@@ -284,13 +294,30 @@ def assess_once(
     A thin wrapper over ``invoke_json_once`` (Q3): the prompt is
     ``render_assess_prompt`` and the parse step is the assessment-specific
     ``_normalize_assessment_payload`` followed by the caller's ``parse``.
+
+    assess-prompt-v3-r1: the questions a ``not_a_match`` answer carried are
+    stripped inside that normalization (``_strip_not_a_match_questions``);
+    the returned attempt records how many, for the successful attempt only
+    (a rejected first attempt's count is overwritten by the retry's).
     """
 
-    return invoke_json_once(
+    dropped: tuple[str, ...] = ()
+    dropped_count = 0
+
+    def parse_normalized(decoded: Mapping[str, object]) -> object:
+        nonlocal dropped, dropped_count
+        dropped, dropped_count = (), 0
+        normalized, dropped, dropped_count = _normalize_and_strip(decoded)
+        return parse(normalized)
+
+    attempt = invoke_json_once(
         binding,
         lambda validation_error: render_assess_prompt(job, ctx, validation_error),
-        lambda decoded: parse(_normalize_assessment_payload(decoded)),
+        parse_normalized,
     )
+    if attempt.ok and dropped_count:
+        attempt = replace(attempt, dropped_questions=dropped_count, dropped_question_ids=dropped)
+    return attempt
 
 
 def _extract_json_object(raw: object) -> Mapping[str, object]:
@@ -469,9 +496,62 @@ def _normalize_assessment_payload(decoded: Mapping[str, object]) -> dict[str, ob
       (``proposals.parse_assessment_proposal``), not here.
     - unknown top-level keys are dropped so the frozen contract's closed-object check still applies cleanly
     - ``sponsorship`` synonyms map to offered/not_offered/unknown; absent stays absent
+    - assess-prompt-v3-r1: a ``not_a_match`` verdict keeps NO questions
+      (``_strip_not_a_match_questions``): both the plain ``questions`` list and
+      ``structured_questions`` are emptied before validation, so the answer is
+      accepted as it is (no retry is spent on it) and a question is never
+      stored or shown against a failed verdict. ``_normalize_and_strip``
+      reports what was dropped; this wrapper discards that count.
 
     This never loosens the frozen contract itself: ``parse_assessment_proposal``
     still runs strict validation immediately after this step.
+    """
+    return _normalize_and_strip(decoded)[0]
+
+
+def _strip_not_a_match_questions(result: dict[str, object]) -> tuple[tuple[str, ...], int]:
+    """Empty the question lists of a ``not_a_match`` payload; report what was dropped.
+
+    assess-prompt-v3-r1 (operator decision 2026-09-25, eval evidence in
+    ``orchestrator/research/evals/2026-09-25-prompt-v3.md``): every remaining
+    hard false ask in the v3 live run sat on a row whose verdict was already
+    ``not_a_match``. A question on a failed verdict has no next action for the
+    product (the Questions view lists ``pending_user_answers`` results only,
+    and an answer could never flip a HARD-unmet row), so the product keeps
+    none: the plain ``questions`` list (the shipped UI's C9 shape) and
+    ``structured_questions`` are both emptied here, BEFORE strict validation,
+    so ``proposals._validate_verdict_consistency`` sees a clean
+    ``not_a_match`` with 0 questions and the answer is never refused for
+    them. Returns ``(structured question ids dropped, questions dropped)``
+    where the count covers the plain list (a bare-string question carries no
+    id). Any other verdict, or none, is left exactly as it came.
+    """
+
+    if result.get("verdict") != "not_a_match":
+        return (), 0
+    plain = result.get("questions")
+    structured = result.get("structured_questions")
+    count = len(plain) if isinstance(plain, list) else 0
+    ids = tuple(
+        str(item["question_id"])
+        for item in (structured if isinstance(structured, list) else ())
+        if isinstance(item, Mapping) and isinstance(item.get("question_id"), str)
+    )
+    if not count and not ids:
+        return (), 0
+    result["questions"] = []
+    result.pop("structured_questions", None)
+    return ids, count
+
+
+def _normalize_and_strip(decoded: Mapping[str, object]) -> tuple[dict[str, object], tuple[str, ...], int]:
+    """``_normalize_assessment_payload`` plus what the not_a_match strip removed.
+
+    Returns ``(normalized payload, dropped structured question ids, dropped
+    question count)``; ``assess_once`` records the last two on the
+    ``AssessAttempt`` for the eval harness. The strip runs LAST, on the
+    fully normalized shape, so it sees the canonical verdict word and every
+    structured question that ``_normalize_question_item`` accepted.
     """
     matrix = decoded.get("matrix")
     normalized_matrix: list[object] = []
@@ -532,7 +612,8 @@ def _normalize_assessment_payload(decoded: Mapping[str, object]) -> dict[str, ob
     # Drop any other unknown keys (e.g. a model echoing "posting" back, or
     # inventing extra fields): the frozen contract is a closed object, and
     # normalization's job is to fix shape, not to smuggle new keys through.
-    return result
+    dropped_ids, dropped_count = _strip_not_a_match_questions(result)
+    return result, dropped_ids, dropped_count
 
 
 __all__ = [

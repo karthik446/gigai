@@ -29,7 +29,10 @@ clean-fit match rate (every failure listed with the model's questions),
 question recall (normalized exact -- both sides through the product's
 ``normalize_question_id`` -- plus category and raw exact) on rows with expected ids, false
 asks (clean-fit rows: every question is one by construction; other rows: a
-token heuristic lists *possible* false asks for review), Jev as a pre-filter
+token heuristic lists *possible* false asks for review; every false-ask figure
+counts the questions the product KEEPS -- ``dropped_questions`` per row and in
+the summary is what ``assessment_core`` stripped off a ``not_a_match`` answer,
+assess-prompt-v3-r1), Jev as a pre-filter
 (``--with-jev``: does every matched/pending-labelled posting land in the
 resume's top-N), cross-profile discrimination (same posting, two resumes) and
 reliability (valid-output rate, invalid-after-retry rate with its < 5% release
@@ -374,6 +377,10 @@ def assess_row(binding: object, label: Label, posting: Posting, resume: Resume) 
         "questions": [],
         "matrix": [],
         "not_a_match_reason": None,
+        # assess-prompt-v3-r1: what the product stripped off a not_a_match answer
+        # (``AssessAttempt.dropped_questions``); ``questions`` above is what it KEPT.
+        "dropped_questions": attempt.dropped_questions if attempt.ok else 0,
+        "dropped_question_ids": list(attempt.dropped_question_ids) if attempt.ok else [],
     }
     if attempt.usage is not None:
         row["usage"] = {
@@ -410,6 +417,10 @@ def annotate_row(row: dict[str, Any], resume_text: str) -> dict[str, Any]:
     observed = [item["question_id"] for item in row.get("questions", [])]  # type: ignore[index]
     expected = list(row.get("expected_question_ids", []))  # type: ignore[arg-type]
     exact, normalized, by_category = question_hits(expected, observed)
+    # A stored row from before assess-prompt-v3-r1 has no dropped count: keep it
+    # ``None`` ("not recorded"), never 0, so a re-scored old report says so.
+    row.setdefault("dropped_questions", None)
+    row.setdefault("dropped_question_ids", [])
     row["agreement"] = (row["verdict"] == row["expected_verdict"]) if row.get("ok") else None
     row["question_ids"] = observed
     row["question_ids_normalized"] = [normalize_question_id(item) for item in observed]
@@ -484,6 +495,23 @@ def summarize(rows: Sequence[Mapping[str, Any]], *, planned: int, max_calls: int
     asked_when_expected = [row for row in recall_rows if row["question_ids"]]
 
     clean_fit_questions = sum(len(row["question_ids"]) for row in clean_valid)  # type: ignore[arg-type]
+    # assess-prompt-v3-r1: the questions the product stripped off not_a_match answers.
+    # Every other figure in this block (clean-fit questions, possible false asks) is
+    # computed on ``questions`` = what the product KEPT, so a dropped question is
+    # never a false ask. ``None`` = a stored row that predates the count.
+    dropped_rows = [
+        {
+            "resume_id": row["resume_id"],
+            "posting_id": row["posting_id"],
+            "verdict": row["verdict"],
+            "dropped_questions": int(row["dropped_questions"]),  # type: ignore[arg-type]
+            "dropped_question_ids": list(row.get("dropped_question_ids") or []),  # type: ignore[arg-type]
+        }
+        for row in valid
+        if row.get("dropped_questions")
+    ]
+    dropped_total = sum(item["dropped_questions"] for item in dropped_rows)
+    dropped_unrecorded = sum(1 for row in valid if row.get("dropped_questions") is None)
     possible = [
         {"resume_id": row["resume_id"], "posting_id": row["posting_id"], "question_id": item["question_id"], "question": item["question"]}
         for row in valid
@@ -564,6 +592,7 @@ def summarize(rows: Sequence[Mapping[str, Any]], *, planned: int, max_calls: int
                     "hit_exact": list(row["expected_hits_exact"]),  # type: ignore[arg-type]
                     "hit_normalized": list(row["expected_hits_normalized"]),  # type: ignore[arg-type]
                     "hit_category": list(row["expected_hits_category"]),  # type: ignore[arg-type]
+                    "dropped_questions": row.get("dropped_questions"),
                 }
                 for row in recall_rows
             ],
@@ -573,6 +602,10 @@ def summarize(rows: Sequence[Mapping[str, Any]], *, planned: int, max_calls: int
             "clean_fit_rows_asked": sum(1 for row in clean_valid if row["question_ids"]),
             "bar_zero_met": clean_fit_questions == 0,
             "possible": possible,
+            "counted_on": "kept questions only (a question stripped off a not_a_match answer is never a false ask)",
+            "dropped_questions": dropped_total,
+            "dropped_rows": dropped_rows,
+            "dropped_unrecorded_rows": dropped_unrecorded,
         },
         "cross_profile": {"pairs": pairs, "discriminated": discriminated, "rate": _rate(discriminated, pairs), "postings": cross},
         "reliability": {
@@ -855,7 +888,11 @@ def _print_summary(metrics: Mapping[str, Any], report_path: Path, *, out=sys.std
         asked = "; ".join(f"{item['question_id']}: {item['question']}" for item in failure["questions"]) or "-"
         print(f"  FAIL {failure['resume_id']} x {failure['posting_id']}: {failure['verdict']} | questions: {asked} | reason: {failure['not_a_match_reason']}", file=out)
     print(f"question recall: normalized exact {recall['hit_normalized']}/{recall['expected_ids']} ({recall['recall_normalized']}), category {recall['hit_category']}/{recall['expected_ids']} ({recall['recall_category']}), raw exact {recall['hit_exact']}/{recall['expected_ids']} ({recall['recall_exact']}) over {recall['rows']} rows", file=out)
-    print(f"false asks on clean fits: {false_asks['clean_fit_questions']} (bar 0 met: {false_asks['bar_zero_met']}); possible false asks to review: {len(false_asks['possible'])}", file=out)
+    print(f"false asks on clean fits: {false_asks['clean_fit_questions']} (bar 0 met: {false_asks['bar_zero_met']}); possible false asks to review: {len(false_asks['possible'])} (both on kept questions)", file=out)
+    unrecorded = f"; {false_asks['dropped_unrecorded_rows']} rows predate the count" if false_asks["dropped_unrecorded_rows"] else ""
+    print(f"dropped questions (stripped by the product off not_a_match answers): {false_asks['dropped_questions']} over {len(false_asks['dropped_rows'])} rows{unrecorded}", file=out)
+    for item in false_asks["dropped_rows"]:  # type: ignore[union-attr]
+        print(f"  DROPPED {item['resume_id']} x {item['posting_id']}: {item['dropped_questions']} ({'; '.join(item['dropped_question_ids']) or '-'})", file=out)
     print(f"cross-profile: {cross['discriminated']}/{cross['pairs']} differently-labelled pairs discriminated ({cross['rate']})", file=out)
     print(
         f"reliability: valid {reliability['valid']}/{calls['made']} ({reliability['valid_output_rate']}); invalid after retry {reliability['invalid_after_retry']} ({reliability['invalid_after_retry_rate']}, bar < {reliability['invalid_after_retry_bar']} met: {reliability['invalid_after_retry_bar_met']}); retries {reliability['retries']} (recovered {reliability['recovered_on_retry']}); transport failures {reliability['transport_failures']}",
@@ -948,7 +985,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 results.append(row)
                 if not args.quiet:
                     outcome = row["verdict"] if row["ok"] else f"INVALID {row['not_assessed_reason']}: {row['validation_error']}"
-                    print(f"    -> {outcome} in {row['elapsed_seconds']}s, attempts {row['attempts']}, questions {row['question_ids']}", file=sys.stderr)
+                    print(f"    -> {outcome} in {row['elapsed_seconds']}s, attempts {row['attempts']}, questions {row['question_ids']}, dropped {row['dropped_questions']} {row['dropped_question_ids']}", file=sys.stderr)
         finally:
             close = getattr(binding, "close", None)
             if callable(close):

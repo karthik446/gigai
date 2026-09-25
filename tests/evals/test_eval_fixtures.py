@@ -234,6 +234,7 @@ def _row(
     elapsed: float = 30.0,
     unmet: int = 0,
     resume_text: str = "AWS Kubernetes Python",
+    dropped: tuple[str, ...] | None = (),
 ) -> dict[str, Any]:
     row: dict[str, Any] = {
         "resume_id": resume_id,
@@ -255,6 +256,9 @@ def _row(
         "matrix": [{"requirement": f"req{i}", "class": "hard", "status": "unmet", "resume_evidence": []} for i in range(unmet)] if ok else [],
         "not_a_match_reason": "stated gap" if verdict == "not_a_match" else None,
     }
+    if dropped is not None:  # None = a stored row from before the count existed
+        row["dropped_questions"] = len(dropped)
+        row["dropped_question_ids"] = list(dropped)
     return harness.annotate_row(row, resume_text)
 
 
@@ -262,7 +266,9 @@ def test_summarize_computes_every_planned_metric() -> None:
     rows = [
         _row("cf-a", "p1", "matched_above_threshold", verdict="matched_above_threshold", clean_fit=True),
         _row("cf-b", "p2", "matched_above_threshold", verdict="pending_user_answers", questions=(("location:poland", "Where do you live?"),), clean_fit=True),
-        _row("r1", "p1", "not_a_match", verdict="not_a_match", unmet=1),
+        # assess-prompt-v3-r1: the product stripped two questions off this not_a_match answer; one of them
+        # (cloud:aws against an "AWS" resume) would have been a possible false ask had it been kept.
+        _row("r1", "p1", "not_a_match", verdict="not_a_match", unmet=1, dropped=("cloud:aws", "years:ml")),
         _row("r2", "p2", "pending_user_answers", verdict="pending_user_answers", questions=(("cloud:aws", "AWS?"), ("database:mysql_flavour", "MySQL?")), expected_ids=("cloud:aws", "database:mysql", "pattern:bff")),
         _row("r3", "p3", "not_a_match", verdict="pending_user_answers", questions=(("cloud:aws", "AWS?"),), uncertain=True, attempts=2),
         _row("r4", "p3", "pending_user_answers", ok=False, attempts=2, reason="model_output_invalid", expected_ids=("years:ml",)),
@@ -292,6 +298,12 @@ def test_summarize_computes_every_planned_metric() -> None:
     false_asks = metrics["false_asks"]
     assert false_asks["clean_fit_questions"] == 1 and false_asks["bar_zero_met"] is False
     assert [(item["resume_id"], item["question_id"]) for item in false_asks["possible"]] == [("r2", "cloud:aws"), ("r3", "cloud:aws")]
+    # r1's dropped cloud:aws is not among the possible false asks: the figures count kept questions only.
+    assert false_asks["dropped_questions"] == 2 and false_asks["dropped_unrecorded_rows"] == 0
+    assert false_asks["dropped_rows"] == [
+        {"resume_id": "r1", "posting_id": "p1", "verdict": "not_a_match", "dropped_questions": 2, "dropped_question_ids": ["cloud:aws", "years:ml"]}
+    ]
+    assert recall["per_row"][0]["dropped_questions"] == 0
 
     cross = metrics["cross_profile"]
     assert (cross["pairs"], cross["discriminated"], cross["rate"]) == (2, 1, 0.5)
@@ -318,6 +330,8 @@ def test_summarize_skips_excluded_rows_in_every_metric() -> None:
     noise = [
         _row("cf-x", "p1", "matched_above_threshold", verdict="not_a_match", clean_fit=True, excluded=True, unmet=2),
         _row("r9", "p2", "not_a_match", verdict="pending_user_answers", questions=(("cloud:aws", "AWS?"),), expected_ids=("cloud:aws",), excluded=True, elapsed=900.0),
+        _row("r7", "p3", "not_a_match", verdict="not_a_match", unmet=1, excluded=True, dropped=("cloud:aws",)),
+        _row("r6", "p3", "not_a_match", verdict="not_a_match", unmet=1, excluded=True, dropped=None),
         _row("r8", "p1", "pending_user_answers", ok=False, attempts=2, reason="model_output_invalid", expected_ids=("cloud:gcp",), excluded=True),
     ]
     assert harness.summarize(rows + noise, planned=3, max_calls=20) == harness.summarize(rows, planned=3, max_calls=20)
@@ -328,8 +342,20 @@ def test_summarize_skips_excluded_rows_in_every_metric() -> None:
     assert metrics["reliability"]["latency_seconds"]["max"] == 30.0
 
 
+def test_summarize_reports_a_stored_row_without_the_dropped_count_as_unrecorded() -> None:
+    rows = [
+        _row("r1", "p1", "not_a_match", verdict="not_a_match", unmet=1, dropped=None),
+        _row("r2", "p1", "pending_user_answers", verdict="pending_user_answers", questions=(("cloud:gcp", "GCP?"),), dropped=("skill:x",)),
+    ]
+    assert rows[0]["dropped_questions"] is None and rows[0]["dropped_question_ids"] == []
+    false_asks = harness.summarize(rows, planned=2, max_calls=2)["false_asks"]
+    assert false_asks["dropped_unrecorded_rows"] == 1
+    assert false_asks["dropped_questions"] == 1 and [item["resume_id"] for item in false_asks["dropped_rows"]] == ["r2"]
+
+
 def test_summarize_on_no_rows_reports_nulls_not_errors() -> None:
     metrics = harness.summarize([], planned=0, max_calls=20)
     assert metrics["verdict_agreement"]["rate"] is None
+    assert metrics["false_asks"]["dropped_questions"] == 0 and metrics["false_asks"]["dropped_unrecorded_rows"] == 0
     assert metrics["reliability"]["invalid_after_retry_bar_met"] is False
     assert metrics["reliability"]["latency_seconds"]["mean"] is None
