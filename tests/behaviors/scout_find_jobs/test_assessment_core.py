@@ -111,6 +111,18 @@ _VALIDATION_ERROR = "matrix[0].status must be one of met|partial|gap"
 # ``assessment_core._strip_not_a_match_questions``). Goldens and the shipped
 # digest below were RE-CAPTURED (EXECUTED) from ``render_assess_prompt`` on the
 # same fixed inputs; the retry tail and every placeholder are unchanged.
+#
+# assess-prompt-v3-r2 (v0.1.9) INTENTIONAL CHANGE (operator-approved 2026-09-25,
+# msg_886eeb875f8a; evidence in orchestrator/research/evals/2026-09-25-prompt-v3-r1.md):
+# two class sentences. HARD: a required area of work the candidate's own facts
+# explicitly disclaim is an excluded domain, so the row is HARD and unmet forces
+# not_a_match (the v3-r1 live run classed such a row ASKABLE on a posting whose
+# only skills list is headed "Desirable", which can never fail a verdict).
+# NICE_TO_HAVE exception: a main skills list headed "Desirable"/"Preferred" with a
+# separate "Bonus"/"Nice to have" list is the posting's requirements, never
+# NICE_TO_HAVE. Goldens and the shipped digest below were RE-CAPTURED (EXECUTED)
+# from ``render_assess_prompt`` on the same fixed inputs; the retry tail and every
+# placeholder are unchanged.
 GOLDEN_PROMPT = (
     "You are assessing one real job posting against one candidate's resume for GigAI Scout. Return a "
     'workflow-state verdict, not a grader score: the verdict decides what GigAI does next, so pick the '
@@ -151,18 +163,24 @@ GOLDEN_PROMPT = (
     'REQUIREMENT CLASSES (assign exactly one to each row; the class says how important the row is, the '
     'status says what the evidence shows):\n'
     '- HARD: required years of experience; a level the posting states as a requirement (see rule 3); an '
-    'explicit clearance; an explicitly excluded domain; and a location/residency, in-office or '
-    'sponsorship statement the posting itself makes (see rules 4 and 5).\n'
+    'explicit clearance; an explicitly excluded domain, including a required area of work that the '
+    'candidate\'s own facts explicitly disclaim ("has not worked on X", rule 1): the disclaimer makes it '
+    'an excluded domain, so that row is HARD and its "unmet" status forces "not_a_match"; and a '
+    'location/residency, in-office or sponsorship statement the posting itself makes (see rules 4 and 5).'
+    '\n'
     '- ASKABLE: a named tool, cloud platform, language, framework, database, domain or specific '
     'technology the posting requires, and any degree, enrolment or student-status requirement (see rule '
     '1). Lacking it is never disqualifying by itself (tools are learnable, and the candidate may have '
     'unlisted experience), so an ASKABLE row is "met", "unclear" (ask about it) or "unmet" (the '
     "candidate's facts rule it out; this does NOT force not_a_match).\n"
     '- NICE_TO_HAVE: anything the posting phrases as "bonus", "plus", "preferred", "nice to have", or '
-    'lists under such a heading. A "preferred" option inside a required bullet ("Spark preferred; '
-    'Ray/Dask or similar", "GitHub preferred") does not make the bullet nice_to_have: the bullet stays '
-    'required and the preferred tool is just one way to meet it. NICE_TO_HAVE rows never change the '
-    'verdict and never produce a question.\n'
+    'lists under such a heading. Exception: when the posting\'s MAIN skills list is headed "Desirable", '
+    '"Preferred" or the like AND a separate "Bonus", "Nice to have" or "Plus" list exists, the main list '
+    "is the posting's requirements (its rows are HARD or ASKABLE by the classes above, never "
+    'NICE_TO_HAVE); only the separate list is NICE_TO_HAVE. A "preferred" option inside a required bullet'
+    ' ("Spark preferred; Ray/Dask or similar", "GitHub preferred") does not make the bullet nice_to_have:'
+    ' the bullet stays required and the preferred tool is just one way to meet it. NICE_TO_HAVE rows '
+    'never change the verdict and never produce a question.\n'
     '\n'
     'RULES:\n'
     "1. Status is decided from the candidate's facts (resume text plus CANDIDATE CONSTRAINTS plus PRIOR "
@@ -295,18 +313,19 @@ GOLDEN_RETRY_PROMPT = (
 # sha256 of the assess-prompt-v2 prompts, recorded by the capture script
 # above (the strings above are the source of truth; the digests guard the
 # transcription).
-GOLDEN_SHA256 = "e6842a9ca942773b56fe6aa4493372de4856194e0af7c54c216765da91a6d849"
-GOLDEN_RETRY_SHA256 = "fe4504699c7c91a70ac49c38f075a5ec9a7d9684ad45de85af3188a656adbfc8"
+GOLDEN_SHA256 = "f8c08c65b4664b212663e78c5aa9248c3951fbc650263288cab6f428f4ab2f4f"
+GOLDEN_RETRY_SHA256 = "6a2c8a17ad68d52d7d81d6248e9a542f1fe06d3b18bb0931c439c0d6fafd662b"
 # 13,000-byte posting text and resume plus a 400-char validation error:
 # the three ``_MAX_PROMPT_*`` bounds (12_000 / 12_000 / 300) produce this exact prompt.
-GOLDEN_BOUNDED_SHA256 = "f5d4b16436d818f59fe11f00160f3beb3fcee0eec73dafbd8b32af624d5cbdc5"
-GOLDEN_BOUNDED_LEN = 37_389
+GOLDEN_BOUNDED_SHA256 = "6e9b09d545f9dafa8be5c1327a29f83db2288fba3b27b9c3b9a1c48cd7af4f12"
+GOLDEN_BOUNDED_LEN = 37_929
 
 # Digest of the shipped ``assess.md`` bytes; bump ONLY when the template changes on purpose.
 # assess-prompt-v2 (v0.1.9) INTENTIONAL CHANGE: bumped for the rewritten body (see above).
 # assess-prompt-v3 (v0.1.9) INTENTIONAL CHANGE: bumped again for the three rules (see above).
 # assess-prompt-v3-r1 (v0.1.9) INTENTIONAL CHANGE: bumped for the two sentences (see above).
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:ec8deb8d9e09c8795a3af275bb0ceeddfabade8a0afa283b7945bfe950f81d6c"
+# assess-prompt-v3-r2 (v0.1.9) INTENTIONAL CHANGE: bumped for the two HARD-class sentences (see above).
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:59679af634cba34afefddc272f61d0b1f269bd9df48d564f76cfbfe109f327e0"
 
 
 def _sha256(text: str) -> str:
@@ -516,6 +535,28 @@ def test_prompt_carries_the_v3_r1_sentences() -> None:
     rule_2 = rest.split("\n3. Seniority", 1)[0]
     assert disclaimer in rule_1 and no_questions in rule_2  # each sentence sits in its own rule
     assert prompt.count(disclaimer) == 1 and prompt.count(no_questions) == 1
+
+
+def test_prompt_carries_the_v3_r2_class_sentences() -> None:
+    """assess-prompt-v3-r2: a disclaimed required area is HARD; a "Desirable" main list is the requirements."""
+
+    prompt = render_assess_prompt(_job(), _ctx())
+    hard = (
+        'an explicitly excluded domain, including a required area of work that the candidate\'s own facts '
+        'explicitly disclaim ("has not worked on X", rule 1): the disclaimer makes it an excluded domain, so '
+        'that row is HARD and its "unmet" status forces "not_a_match";'
+    )
+    desirable = (
+        'Exception: when the posting\'s MAIN skills list is headed "Desirable", "Preferred" or the like AND a '
+        'separate "Bonus", "Nice to have" or "Plus" list exists, the main list is the posting\'s requirements '
+        "(its rows are HARD or ASKABLE by the classes above, never NICE_TO_HAVE); only the separate list is NICE_TO_HAVE."
+    )
+    assert prompt.count(hard) == 1 and prompt.count(desirable) == 1
+    classes = prompt.split("REQUIREMENT CLASSES", 1)[1].split("\n\nRULES:", 1)[0]
+    hard_line, askable_line, nice_line = [line for line in classes.splitlines() if line.startswith("- ")]
+    assert hard_line.startswith("- HARD:") and hard in hard_line
+    assert nice_line.startswith("- NICE_TO_HAVE:") and desirable in nice_line
+    assert "disclaim" not in askable_line  # the disclaimer rule reclassifies, it does not soften ASKABLE
 
 
 def _not_a_match_with_questions(rows: int = 3) -> str:
