@@ -76,12 +76,18 @@ def test_fake_jev_prefilter_ranks_every_fixture_posting_per_resume(tmp_path: Pat
     report = _run(tmp_path, "--clean-fit-only", "--max-calls", "2", "--with-jev", "--fake-jev")
     jev = report["metrics"]["jev"]
     assert jev["top_n"] == harness.DEFAULT_TOP_N and jev["postings_ranked"] == 15
-    assert set(jev["per_resume"]) == {"cf-analytics-engineer-pl", "cf-senior-analytics-engineer-us"}
+    # The first two planned clean fits are the US ones: the Poland clean fit is excluded (US-only, 2026-09-25).
+    assert set(jev["per_resume"]) == {"cf-senior-analytics-engineer-us", "cf-analytics-intern-sf"}
     for entry in jev["per_resume"].values():
         assert len(entry["ranking"]) == 15
         assert all(item["fit"] == "strong" and item["score"] == 89 for item in entry["ranking"])
         assert entry["cost_usd"] == pytest.approx(0.0075)
-    assert jev["must_keep"] == 2 and jev["kept"] == 2 and jev["prefilter_rate"] == 1.0
+    # Every fake score ties at 89, so the top-N follows fixture order and the intern posting
+    # (12th) sits outside it: check the pre-filter bookkeeping, not the tie order.
+    checks = [check for entry in jev["per_resume"].values() for check in entry["labels"] if check["must_keep"]]
+    assert jev["must_keep"] == len(checks) == 2
+    assert all(check["in_top_n"] == (check["rank"] <= harness.DEFAULT_TOP_N) for check in checks)
+    assert jev["kept"] == sum(check["in_top_n"] for check in checks) == 1 and jev["prefilter_rate"] == 0.5
     assert report["metrics"]["reliability"]["jev_cost_usd"] == pytest.approx(0.015)
     assert report["run"]["fake_jev"] is True
 

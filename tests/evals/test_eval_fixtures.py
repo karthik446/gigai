@@ -12,6 +12,7 @@ network seam in this file).
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from gigai.scout.assessment_core import _MAX_PROMPT_POSTING_TEXT, _MAX_PROMPT_RESUME_TEXT, AssessContext, AssessJob, render_assess_prompt
@@ -87,14 +88,43 @@ def test_labels_reference_fixture_pairs_and_use_shipped_id_shapes() -> None:
     assert clean_rows_by_resume == {resume_id: 1 for resume_id in clean_fit_resumes}
 
 
+_LOCATION_COUNTRY_CODES = {"Canada": "CA", "Poland": "PL", "Spain": "ES", "United Kingdom": "GB", "United States": "US", "USA": "US"}
+
+
+def _remote_country_codes(location: str) -> set[str]:
+    """The countries a remote posting's location line names (empty for in-office/hybrid lines)."""
+
+    if not location.startswith("Remote"):
+        return set()
+    codes = {code for word, code in _LOCATION_COUNTRY_CODES.items() if word in location}
+    if re.search(r"\bUS\b", location):
+        codes.add("US")
+    return codes
+
+
 def test_excluded_rows_are_well_formed_but_never_scored() -> None:
+    """The 0.1.9 US-only exclusion (orchestrator, 2026-09-25): every Remote Canada row is
+    excluded per posting (rule E as the labels worker chose it), and a Remote Poland row is
+    excluded per row, only where PL is in the resume's ``countries`` (the cases where US-only
+    contradicts the fixture's own settings).  Every other remote-outside-US row stays scored as
+    a rule-D ``not_a_match`` (Spain; Poland for US-only resumes), and a posting that names the
+    US among its remote countries (GitLab) stays scored."""
+
     every = harness.load_labels(include_excluded=True)
     scored = harness.load_labels()
     excluded = [label for label in every if label.excluded]
-    # Rule E (US-only): the Canadian rows are the excluded ones, and only they are.
     postings = harness.load_postings()
-    assert excluded and all(postings[label.posting_id].location == "Remote Canada" for label in excluded)
-    assert {label.key for label in every if postings[label.posting_id].location == "Remote Canada"} == {label.key for label in excluded}
+    resumes = harness.load_resumes()
+
+    def us_only_excluded(label: harness.Label) -> bool:
+        codes = _remote_country_codes(postings[label.posting_id].location)
+        if not codes or "US" in codes:
+            return False
+        return "CA" in codes or ("PL" in codes and "PL" in resumes[label.resume_id].countries)
+
+    assert excluded
+    assert {label.key for label in excluded} == {label.key for label in every if us_only_excluded(label)}
+    assert {postings[label.posting_id].location for label in excluded} == {"Remote Canada", "Remote Poland"}
     assert [label.key for label in scored] == [label.key for label in every if not label.excluded]
     assert not any(label.excluded for label in harness.plan_rows(every))
     assert harness.plan_rows(every) == harness.plan_rows(scored)
@@ -107,7 +137,8 @@ def test_every_posting_has_a_cross_profile_or_clean_fit_twin_where_labelled() ->
     for label in labels:
         by_posting.setdefault(label.posting_id, set()).add(label.expected_verdict)
     twins = [posting_id for posting_id, verdicts in by_posting.items() if len(verdicts) >= 2]
-    assert len(twins) >= 6
+    # Four twins remain once the Remote Canada and Remote Poland rows are excluded (US-only, 2026-09-25).
+    assert len(twins) >= 4
 
 
 def test_every_row_renders_through_the_shipped_prompt_untruncated() -> None:
