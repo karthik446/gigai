@@ -6,7 +6,7 @@ TEST_XDIST_WORKERS ?= auto
 TEST_XDIST_MAX_WORKERS ?= 14
 TEST_XDIST_DIST ?= worksteal
 
-.PHONY: test test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e
+.PHONY: test test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live
 
 # Complete portable offline coverage: one source discovery pass, the existing
 # deterministic behavior evaluation, and a fresh wheel plus every installed
@@ -83,6 +83,21 @@ test-live:
 		exit 2; \
 	fi
 	$(UV) run --locked --extra test pytest -m g30_live
+
+# P7 (v0.1.9): the assess eval against the operator's REAL configured model
+# target (tests/evals/run_assess_eval.py), reading ~/.gigai (or $GIGAI_HOME)
+# read-only and writing one report under ../orchestrator/research/evals/.
+# Same consent gate shape as test-live: it never runs from `make test`, and
+# the offline checks (tests/evals/test_eval_fixtures.py in unit-tests,
+# tests/evals/test_eval_harness.py with the fake model in the source lane)
+# never call a model.  Pass flags through EVAL_ARGS, e.g.
+#   GIGAI_ASSESS_EVAL_LIVE=1 make eval-live EVAL_ARGS="--max-calls 30 --with-jev"
+eval-live:
+	@if [ "$${GIGAI_ASSESS_EVAL_LIVE:-}" != "1" ]; then \
+		echo "refusing the live assess eval: set GIGAI_ASSESS_EVAL_LIVE=1 explicitly" >&2; \
+		exit 2; \
+	fi
+	$(UV) run --locked --extra test python tests/evals/run_assess_eval.py $(EVAL_ARGS)
 
 # Debian's direct-mount/read-only container contract is a platform-specific
 # CI gate.  It remains explicit because it cannot be truthfully run on every
