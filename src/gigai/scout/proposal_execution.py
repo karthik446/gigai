@@ -14,7 +14,6 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import re
 import uuid
 
 from .. import model_execution
@@ -26,7 +25,22 @@ from ..canonical import (
     parse_json_bytes,
     validate_entity_id,
 )
-from .find_jobs.contracts import FindJobsContractError
+from .assessment_core import (  # noqa: F401 - moved in P1; re-exported by the old names
+    _MAX_PROMPT_POSTING_TEXT,
+    _MAX_PROMPT_RESUME_TEXT,
+    _MAX_PROMPT_VALIDATION_ERROR,
+    _SPONSORSHIP_SYNONYMS,
+    _STATUS_SYNONYMS,
+    _extract_json_object,
+    _normalize_assessment_payload,
+    _normalize_sponsorship,
+    _normalize_status,
+    _normalize_string_list,
+    AssessContext,
+    AssessJob,
+    assess_once,
+    render_assess_prompt,
+)
 from .find_jobs.progress import ProgressWriter
 from ..journal import (
     JournalArtifact,
@@ -63,7 +77,6 @@ from ..model_execution import (
     SelectedReference,
 )
 from ..adapters.factory import AdapterFactoryError, resolve_model_adapter
-from ..adapters.port import ModelInvocationError
 from ..validators import validate_goal_graph, validate_serialized_contract
 from ..validators import validate_model_invocation
 
@@ -380,6 +393,14 @@ def _assess_node_body(
     from .proposals import parse_assessment_proposal
     from .proposal_records import save_assessment_revision
 
+    # P1: the prompt -> invoke -> extract -> normalize -> validate -> retry
+    # loop is `assessment_core.assess_once`; this node keeps selection,
+    # reuse/skip, sealing, journaling and progress around it.
+    assess_context = AssessContext(
+        resume_text=resume.decode("utf-8", errors="replace"),
+        visa_sponsorship_required=visa_sponsorship_required,
+    )
+
     for posting, posting_text in to_assess[: input.selection_cap]:
         if not posting_text:
             # U25: an older acquire batch (or a row the acquirer genuinely
@@ -397,83 +418,47 @@ def _assess_node_body(
             # model, so its card can show "assessing…" instead of sitting on
             # "waiting" for however long the model call + retry takes.
             progress.assessment_started(posting.normalized_url)
-        validation_error: str | None = None
-        outcome_recorded = False
-        for attempt in range(2):
-            prompt = _assess_prompt(posting, resume, posting_text, visa_sponsorship_required, validation_error)
-            try:
-                request = binding.request(role="reviewer", prompt=prompt)
-                result = binding.port.invoke(request)
-                model_attempts += 1
-            except (ModelInvocationError, OSError, TimeoutError) as exc:
-                reason = NotAssessedReason.MODEL_DENIED if getattr(exc, "code", "") in {"network_denied", "model_denied", "credential_denied"} else NotAssessedReason.MODEL_UNAVAILABLE
-                not_assessed.append(NotAssessedRow(posting, reason))
-                if progress is not None:
-                    progress.assessment_finished(posting.normalized_url, ok=False, reason=reason.value)
-                outcome_recorded = True
-                break
-            except Exception as exc:
-                if getattr(exc, "code", "") in {"model_denied", "network_denied", "model_unavailable"}:
-                    reason = NotAssessedReason.MODEL_DENIED if getattr(exc, "code", "") == "model_denied" else NotAssessedReason.MODEL_UNAVAILABLE
-                    not_assessed.append(NotAssessedRow(posting, reason))
-                    if progress is not None:
-                        progress.assessment_finished(posting.normalized_url, ok=False, reason=reason.value)
-                    outcome_recorded = True
-                    break
-                raise
-            raw = result.output_text
-            try:
-                decoded = _extract_json_object(raw)
-                normalized = _normalize_assessment_payload(decoded)
-                # The frozen assessment_result.posting field is the narrower
-                # SelectedPosting DTO, not the full PostingRow the model was
-                # shown; use the sealed selected-posting identity so parsing
-                # never fails on PostingRow's extra keys (provider,
-                # board_token, text, ...).
-                selected_posting = selected_by_url[posting.normalized_url]
-                normalized = {**normalized, "posting": selected_posting.to_json(), "proposal_revision_ref": None}
-                parsed = parse_assessment_proposal(normalized)
-            except (FindJobsContractError, ValueError, TypeError) as exc:
-                if attempt == 0:
-                    # U22: one retry, with the validation error fed back so
-                    # the model can correct its own shape, before giving up
-                    # on this single posting.
-                    validation_error = str(exc)
-                    continue
-                not_assessed.append(NotAssessedRow(posting, NotAssessedReason.MODEL_OUTPUT_INVALID))
-                if progress is not None:
-                    progress.assessment_finished(
-                        posting.normalized_url, ok=False, reason=NotAssessedReason.MODEL_OUTPUT_INVALID.value
-                    )
-                outcome_recorded = True
-                break
-            saved = save_assessment_revision(
-                home_root=home_root,
-                target=resolved,
-                posting=selected_posting,
-                result=parsed,
-                producer=producer,
-                pinned_resume=input.pinned_resume,
+        # The frozen assessment_result.posting field is the narrower
+        # SelectedPosting DTO, not the full PostingRow the model was
+        # shown; use the sealed selected-posting identity so parsing
+        # never fails on PostingRow's extra keys (provider,
+        # board_token, text, ...).
+        selected_posting = selected_by_url[posting.normalized_url]
+        selected_posting_json = selected_posting.to_json()
+
+        def parse_selected(normalized: dict[str, object], _posting_json: dict = selected_posting_json) -> object:
+            return parse_assessment_proposal(
+                {**normalized, "posting": _posting_json, "proposal_revision_ref": None}
             )
-            revision_ref = _revision_ref(saved)
-            assessments.append(replace(parsed, proposal_revision_ref=revision_ref))
-            if revision_ref:
-                revisions.append(revision_ref)
-            usage_values.append(result.normalized_usage)
+
+        outcome = assess_once(binding, _assess_job(posting, posting_text), assess_context, parse=parse_selected)
+        model_attempts += outcome.attempts
+        if not outcome.ok:
+            # MODEL_DENIED / MODEL_UNAVAILABLE / MODEL_OUTPUT_INVALID, mapped
+            # inside assess_once exactly as this loop mapped them before P1;
+            # every other exception has already propagated (U22 per-posting
+            # isolation applies only to failures the boundary can name).
+            reason = outcome.not_assessed_reason
+            not_assessed.append(NotAssessedRow(posting, reason))
             if progress is not None:
-                progress.assessment_finished(posting.normalized_url, ok=True, assessment_json=parsed.to_json())
-            outcome_recorded = True
-            break
-        if not outcome_recorded:
-            # Defensive: every branch above either records an outcome or
-            # raises. Reached only if the loop body changes; fail closed
-            # per posting rather than silently dropping it from the
-            # candidate/assessed partition invariant.
-            not_assessed.append(NotAssessedRow(posting, NotAssessedReason.MODEL_OUTPUT_INVALID))
-            if progress is not None:
-                progress.assessment_finished(
-                    posting.normalized_url, ok=False, reason=NotAssessedReason.MODEL_OUTPUT_INVALID.value
-                )
+                progress.assessment_finished(posting.normalized_url, ok=False, reason=reason.value)
+            continue
+        parsed = outcome.parsed
+        saved = save_assessment_revision(
+            home_root=home_root,
+            target=resolved,
+            posting=selected_posting,
+            result=parsed,
+            producer=producer,
+            pinned_resume=input.pinned_resume,
+        )
+        revision_ref = _revision_ref(saved)
+        assessments.append(replace(parsed, proposal_revision_ref=revision_ref))
+        if revision_ref:
+            revisions.append(revision_ref)
+        usage_values.append(outcome.usage)
+        if progress is not None:
+            progress.assessment_finished(posting.normalized_url, ok=True, assessment_json=parsed.to_json())
 
     if attempted and model_attempts and not assessments:
         # Every posting that had text and reached the model failed there.
@@ -552,9 +537,16 @@ def _resolve_configured_target_name_for_adapter(config: GigAIConfig, adapter_kin
     return matches[0]
 
 
-_MAX_PROMPT_POSTING_TEXT = 12_000
-_MAX_PROMPT_RESUME_TEXT = 12_000
-_MAX_PROMPT_VALIDATION_ERROR = 300
+def _assess_job(posting: object, posting_text: bytes) -> AssessJob:
+    """The prompt-facing view of one posting row (title/company/location + bounded text)."""
+
+    posting_json = posting.to_json()
+    return AssessJob(
+        title=str(posting_json.get("title", "")),
+        company=str(posting_json.get("company", "")),
+        location=str(posting_json.get("location", "") or ""),
+        posting_text=posting_text.decode("utf-8", errors="replace"),
+    )
 
 
 def _assess_prompt(
@@ -566,191 +558,16 @@ def _assess_prompt(
 ) -> str:
     """Build the real find-jobs assessment prompt (U25).
 
-    Includes the role/title/company/location, the bounded posting text, the
-    resume text, the candidate's sponsorship constraint, and a precise JSON
-    schema with a short worked example so the model returns a shape that
-    parses on the first try.  On a retry (U22), the prior validation error is
-    fed back so the model can correct its own output.
+    P1: a thin wrapper over ``assessment_core.render_assess_prompt`` (the
+    template lives in ``scout/data/instructions/assess.md``); kept under this
+    name because the assess-node tests assert prompt contents through it.
     """
-    posting_json = posting.to_json()
-    title = posting_json.get("title", "")
-    company = posting_json.get("company", "")
-    location = posting_json.get("location", "") or "unspecified"
-    bounded_posting_text = posting_text.decode("utf-8", errors="replace")[:_MAX_PROMPT_POSTING_TEXT]
-    bounded_resume_text = resume.decode("utf-8", errors="replace")[:_MAX_PROMPT_RESUME_TEXT]
-    visa_line = "yes" if visa_sponsorship_required else "no"
-    schema = (
-        "Return JSON only (no prose, no markdown fences) matching exactly this shape:\n"
-        '{"matrix": [{"requirement": "<one concrete requirement drawn from the posting>", '
-        '"resume_evidence": ["<short quote or paraphrase from the resume>"], '
-        '"status": "met|partial|gap"}], '
-        '"suggestions": ["<short actionable suggestion>"], '
-        '"questions": ["<short clarifying question, if any>"], '
-        '"sponsorship": "offered|not_offered|unknown"}\n'
-        "Example:\n"
-        '{"matrix": [{"requirement": "5+ years backend Python", "resume_evidence": '
-        '["Built and operated Python services for 6 years"], "status": "met"}, '
-        '{"requirement": "Kubernetes production experience", "resume_evidence": [], "status": "gap"}], '
-        '"suggestions": ["Call out the on-call rotation experience explicitly."], '
-        '"questions": ["Is the Kubernetes requirement negotiable?"], "sponsorship": "unknown"}\n'
-        "Derive 5 to 12 concrete requirements FROM THE POSTING TEXT below (skills, years of "
-        "experience, clearance, location/remote terms, tooling) — do not invent generic "
-        "requirements not stated or clearly implied by the posting."
+
+    context = AssessContext(
+        resume_text=resume.decode("utf-8", errors="replace"),
+        visa_sponsorship_required=visa_sponsorship_required,
     )
-    parts = [
-        "You are assessing one real job posting against one candidate's resume for GigAI Scout.",
-        schema,
-        f"ROLE: {title}\nCOMPANY: {company}\nLOCATION: {location}",
-        f"CANDIDATE CONSTRAINT: visa sponsorship required = {visa_line}. "
-        "Read the posting text for its own sponsorship stance and report it "
-        'as "sponsorship": "offered", "not_offered", or "unknown".',
-        "POSTING TEXT (may be truncated):\n" + bounded_posting_text,
-        "RESUME (may be truncated):\n" + bounded_resume_text,
-    ]
-    if validation_error:
-        bounded_error = validation_error[:_MAX_PROMPT_VALIDATION_ERROR]
-        parts.append(
-            "Your previous answer did not match the required JSON shape: "
-            + bounded_error
-            + ". Return corrected JSON only, matching the schema exactly."
-        )
-    return "\n\n".join(parts)
-
-
-def _extract_json_object(raw: object) -> Mapping[str, object]:
-    """Extract one JSON object from model output that may be fenced/prose-wrapped.
-
-    Tolerant boundary parsing (U22), applied before normalization and before
-    strict contract validation: models sometimes wrap JSON in ``` fences or
-    prepend/append prose. This never relaxes the frozen contract itself —
-    ``parse_assessment_proposal`` still validates strictly after normalization.
-    """
-    if isinstance(raw, Mapping):
-        return raw
-    if not isinstance(raw, str):
-        raise ValueError("assessment output is not text or an object")
-    text = raw.strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
-    if fence:
-        text = fence.group(1).strip()
-    try:
-        decoded = json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            raise ValueError("assessment output contains no JSON object") from None
-        decoded = json.loads(text[start : end + 1])
-    if not isinstance(decoded, Mapping):
-        raise ValueError("assessment output is not a JSON object")
-    return decoded
-
-
-_STATUS_SYNONYMS = {
-    "met": "met",
-    "meets": "met",
-    "meet": "met",
-    "yes": "met",
-    "full": "met",
-    "partial": "partial",
-    "partially": "partial",
-    "partly": "partial",
-    "some": "partial",
-    "gap": "gap",
-    "missing": "gap",
-    "no": "gap",
-    "none": "gap",
-    "not_met": "gap",
-    "not met": "gap",
-}
-
-_SPONSORSHIP_SYNONYMS = {
-    "offered": "offered",
-    "offer": "offered",
-    "yes": "offered",
-    "available": "offered",
-    "not_offered": "not_offered",
-    "not offered": "not_offered",
-    "no": "not_offered",
-    "unavailable": "not_offered",
-    "unknown": "unknown",
-    "unclear": "unknown",
-    "n/a": "unknown",
-    "na": "unknown",
-}
-
-
-def _normalize_string_list(value: object) -> list[object]:
-    """A single string coerces to a one-item list; ``null``/missing to ``[]``."""
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list):
-        return list(value)
-    return [value]
-
-
-def _normalize_status(value: object) -> object:
-    if not isinstance(value, str):
-        return value
-    key = value.strip().lower()
-    return _STATUS_SYNONYMS.get(key, value)
-
-
-def _normalize_sponsorship(value: object) -> object:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        return value
-    key = value.strip().lower()
-    return _SPONSORSHIP_SYNONYMS.get(key, value)
-
-
-def _normalize_assessment_payload(decoded: Mapping[str, object]) -> dict[str, object]:
-    """Tolerant normalization at the model boundary, BEFORE strict validation (U22).
-
-    - extracts already happened in ``_extract_json_object``
-    - ``resume_evidence`` as a bare string becomes ``[string]``; ``null``/missing becomes ``[]``
-    - matrix ``status`` synonyms (yes/partially/no, meets/partial/missing, any case) map to met/partial/gap
-    - ``suggestions``/``questions`` as a bare string become ``[string]``; ``null``/missing become ``[]``
-    - unknown top-level keys are dropped so the frozen contract's closed-object check still applies cleanly
-    - ``sponsorship`` synonyms map to offered/not_offered/unknown; absent stays absent
-
-    This never loosens the frozen contract itself: ``parse_assessment_proposal``
-    still runs strict validation immediately after this step.
-    """
-    matrix = decoded.get("matrix")
-    normalized_matrix: list[object] = []
-    if isinstance(matrix, list):
-        for row in matrix:
-            if not isinstance(row, Mapping):
-                normalized_matrix.append(row)
-                continue
-            normalized_row: dict[str, object] = {
-                "requirement": row.get("requirement"),
-                "resume_evidence": [
-                    item for item in _normalize_string_list(row.get("resume_evidence")) if isinstance(item, str)
-                ],
-                "status": _normalize_status(row.get("status")),
-            }
-            normalized_matrix.append(normalized_row)
-    else:
-        normalized_matrix = matrix
-
-    result: dict[str, object] = {
-        "matrix": normalized_matrix,
-        "suggestions": [item for item in _normalize_string_list(decoded.get("suggestions")) if isinstance(item, str)],
-        "questions": [item for item in _normalize_string_list(decoded.get("questions")) if isinstance(item, str)],
-    }
-    if "sponsorship" in decoded:
-        sponsorship = _normalize_sponsorship(decoded.get("sponsorship"))
-        if sponsorship is not None:
-            result["sponsorship"] = sponsorship
-    # Drop any other unknown keys (e.g. a model echoing "posting" back, or
-    # inventing extra fields): the frozen contract is a closed object, and
-    # normalization's job is to fix shape, not to smuggle new keys through.
-    return result
+    return render_assess_prompt(_assess_job(posting, posting_text), context, validation_error)
 
 
 def assess_invocation_policy(model_target: str, input: object) -> InvocationPolicy:

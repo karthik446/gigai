@@ -46,7 +46,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "gigai.schemas" = ["*.schema.json", "README.md", "SHA256SUMS"]
 "gigai.data" = ["*.json", "runtime-comparison-pack-v1.json"]
-"gigai.scout" = ["data/*.md", "data/goalgraphs/*.md", "data/ui/*.html", "data/ui/*.css", "data/tools/*/*.json", "ui/dist/*", "ui/dist/assets/*"]
+"gigai.scout" = ["data/*.md", "data/goalgraphs/*.md", "data/instructions/*.md", "data/ui/*.html", "data/ui/*.css", "data/tools/*/*.json", "ui/dist/*", "ui/dist/assets/*"]
 "gigai" = ["static/*.css"]
 
 [tool.pytest.ini_options]
