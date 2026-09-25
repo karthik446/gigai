@@ -181,6 +181,27 @@ def test_answer_requires_exactly_one_of_answer_text_or_answer_file(tmp_path: Pat
     assert json.loads(both.output)["error"]["code"] == "answer_invalid"
 
 
+# --- question_id contract validation, BEFORE any write (Terra review P2) --------------
+
+
+def test_answer_rejects_question_id_with_invalid_characters(tmp_path: Path) -> None:
+    home, target, runner = _setup(tmp_path)
+
+    result = runner.invoke(cli, [*_answer_base(home, target), "cloud:gcp/invalid", "--answer-text", "Yes.", "--json"])
+
+    assert result.exit_code == 1, result.output
+    assert json.loads(result.output)["error"]["code"] == "answer_invalid"
+
+
+def test_answer_rejects_question_id_over_128_chars_after_normalization(tmp_path: Path) -> None:
+    home, target, runner = _setup(tmp_path)
+
+    result = runner.invoke(cli, [*_answer_base(home, target), f"cloud:{'a' * 200}", "--answer-text", "Yes.", "--json"])
+
+    assert result.exit_code == 1, result.output
+    assert json.loads(result.output)["error"]["code"] == "answer_invalid"
+
+
 def test_answer_reused_across_a_later_assess_call_never_re_asks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home, target, runner = _setup(tmp_path)
     answered = runner.invoke(cli, [*_answer_base(home, target), "cloud:gcp", "--answer-text", "Yes, two years on GCP.", "--json"])

@@ -120,6 +120,22 @@ def test_answers_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
         preanswer = client.post("/api/answers", json={"question_id": "clearance:secret", "answer": "No.", "reassess": None})
         assert preanswer.status_code == 201, preanswer.text
 
+        # Terra review P2: an id that fails the experience_question contract
+        # after normalization (a "/" is not stripped by normalize_question_id)
+        # is rejected as a typed 422/answer_invalid BEFORE any write -- not a
+        # generic conflict from native-record schema validation.
+        _assert_error(
+            client.post("/api/answers", json={"question_id": "cloud:gcp/invalid", "answer": "Yes.", "reassess": None}),
+            status=422, code="answer_invalid",
+        )
+        _assert_error(
+            client.post("/api/answers", json={"question_id": f"cloud:{'a' * 200}", "answer": "Yes.", "reassess": None}),
+            status=422, code="answer_invalid",
+        )
+        no_new_write = client.get("/api/answers")
+        assert no_new_write.status_code == 200, no_new_write.text
+        assert len(no_new_write.json()["answers"]) == 3  # unchanged: cloud:gcp, years:python, clearance:secret
+
         # CSRF: wrong Origin -> 403, wrong Content-Type -> 415.
         _assert_error(
             httpx.post(

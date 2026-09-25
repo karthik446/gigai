@@ -53,6 +53,54 @@ def test_genuinely_different_technology_facts_stay_distinct() -> None:
     assert normalize_question_id("technology:graph_ml") != normalize_question_id("technology:tabular_classification")
 
 
+# --- P0 (Terra review): the category/value BOUNDARY is preserved by default -----------
+#
+# The old pool-and-pick-one-category design dissolved category and value into
+# one bag, so a token could cross the boundary for ANY pair, not just the
+# evidence-backed ML-lifecycle one -- silently merging two distinct facts
+# whenever they happened to share tokens on opposite sides. The fix
+# canonicalizes each side separately; only the explicit, evidence-backed
+# ``_CROSS_BOUNDARY_ALIASES`` table may still cross the boundary.
+
+
+def test_location_remote_vs_remote_location_stay_distinct() -> None:
+    # Two different real-world facts that happen to share the same two
+    # tokens on opposite sides of the colon: "location:remote" (does the
+    # POSTING's location make the candidate eligible) is not the same
+    # question as "remote:location" (is remote work itself permitted). A
+    # pool-everything normalizer would merge these; per-side canonicalization
+    # must not.
+    assert normalize_question_id("location:remote") != normalize_question_id("remote:location")
+
+
+def test_cloud_platform_vs_platform_cloud_stay_distinct() -> None:
+    # "cloud:platform" (which cloud platform) vs "platform:cloud" (is the
+    # role itself a cloud-platform role) -- same two tokens, swapped sides,
+    # not an evidence-backed alias.
+    assert normalize_question_id("cloud:platform") != normalize_question_id("platform:cloud")
+
+
+def test_years_seniority_vs_seniority_years_stay_distinct() -> None:
+    # "years:seniority" vs "seniority:years" -- not the r1 ML-lifecycle pair,
+    # so no alias-table entry backs merging these; they must stay distinct.
+    assert normalize_question_id("years:seniority") != normalize_question_id("seniority:years")
+
+
+def test_tool_ai_vs_ai_tool_stay_distinct() -> None:
+    # "tool:ai" (a named AI tool/platform) vs "ai:tool" (is AI tooling
+    # experience itself required) -- distinct facts sharing tokens across
+    # the boundary; not in the alias table.
+    assert normalize_question_id("tool:ai") != normalize_question_id("ai:tool")
+
+
+def test_explicit_cross_boundary_alias_still_unifies_the_evidence_backed_pair() -> None:
+    # The one cross-boundary merge P0 keeps: r1's own rerun of the SAME
+    # question against the SAME (resume, posting) pair moved "ml"/"tooling"
+    # from the category side to the value side between calls. This is named
+    # explicitly in ``_CROSS_BOUNDARY_ALIASES``, not inferred by pooling.
+    assert normalize_question_id("ml_tooling:lifecycle") == normalize_question_id("tooling:ml-lifecycle")
+
+
 # --- shape / determinism -------------------------------------------------------------
 
 

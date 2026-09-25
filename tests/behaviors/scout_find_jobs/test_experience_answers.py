@@ -12,6 +12,7 @@ re-answer updating in place rather than duplicating, and answer-text bounds
 
 from __future__ import annotations
 
+import multiprocessing
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,14 @@ def fx(tmp_path: Path) -> ProfileFixtureGig:
 
 def _opts(fx: ProfileFixtureGig) -> dict[str, object]:
     return {"home_root": fx.home_root, "requested_target": fx.target, "gig_id": fx.resolved.gig_id}
+
+
+def _concurrent_answer(opts: dict[str, object], question_id: str, prompt: str, answer: str, queue: object) -> None:
+    try:
+        result = record_answer(**opts, question_id=question_id, prompt=prompt, answer=answer)  # type: ignore[arg-type]
+        queue.put(("ok", result.record_id, result.revision_id))  # type: ignore[attr-defined]
+    except PrivateRecordError as exc:
+        queue.put((exc.code, "", ""))  # type: ignore[attr-defined]
 
 
 # --- create-on-first-answer / append / read-back -------------------------------------
@@ -162,3 +171,91 @@ def test_answer_text_over_16000_chars_is_rejected(fx: ProfileFixtureGig) -> None
 def test_answer_text_at_exactly_16000_chars_is_accepted(fx: ProfileFixtureGig) -> None:
     result = record_answer(**_opts(fx), question_id="cloud:gcp", prompt="GCP?", answer="x" * 16_000)
     assert result.created
+
+
+# --- question_id contract validation, BEFORE any write (Terra review P2) --------------
+
+
+def test_question_id_with_invalid_characters_is_rejected_before_any_write(fx: ProfileFixtureGig) -> None:
+    # "/" survives normalization's own tokenizing (it's not one of the
+    # `-`/`_`/whitespace separators normalize_question_id splits on) but
+    # fails the experience_question contract's character class -- the
+    # review's own concrete example.
+    with pytest.raises(PrivateRecordError) as excinfo:
+        record_answer(**_opts(fx), question_id="cloud:gcp/invalid", prompt="GCP?", answer="Yes.")
+    assert excinfo.value.code == "answer_invalid"
+    assert list_native_records(**_opts(fx)) == []  # rejected before any write
+
+
+def test_question_id_over_128_chars_after_normalization_is_rejected_before_any_write(fx: ProfileFixtureGig) -> None:
+    with pytest.raises(PrivateRecordError) as excinfo:
+        record_answer(**_opts(fx), question_id=f"cloud:{'a' * 200}", prompt="?", answer="Yes.")
+    assert excinfo.value.code == "answer_invalid"
+    assert list_native_records(**_opts(fx)) == []
+
+
+def test_question_id_at_exactly_128_chars_after_normalization_is_accepted(fx: ProfileFixtureGig) -> None:
+    # 128 total: "cloud:" (6) + 122 'a's.
+    question_id = f"cloud:{'a' * 122}"
+    result = record_answer(**_opts(fx), question_id=question_id, prompt="?", answer="Yes.")
+    assert result.created
+
+
+# --- retry-safety under the journal writer (Terra review P1) --------------------------
+
+
+def test_two_concurrent_answers_appending_at_31_both_land_no_duplicate_no_error(fx: ProfileFixtureGig) -> None:
+    # Pre-fill one record to 31 answered questions (one below the 32-cap),
+    # then race two DIFFERENT new answers for the 32nd slot. Exactly one
+    # process's update wins the parent revision at 31; the other hits
+    # `stale_parent`, re-reads (record now at 32, full), and rolls over into
+    # a fresh record -- both retries must land without error, without a
+    # duplicate fact, and without silently dropping either answer.
+    for i in range(31):
+        record_answer(**_opts(fx), question_id=f"years:skill{i}", prompt=f"skill {i}?", answer=f"answer {i}")
+    assert len(read_answers(**_opts(fx))) == 31
+
+    opts = _opts(fx)
+    context = multiprocessing.get_context("spawn")
+    queue = context.Queue()
+    workers = [
+        context.Process(target=_concurrent_answer, args=(opts, "cloud:gcp", "GCP?", "Yes, two years.", queue)),
+        context.Process(target=_concurrent_answer, args=(opts, "years:python", "Years of Python?", "Six.", queue)),
+    ]
+    for worker in workers:
+        worker.start()
+    outcomes = [queue.get(timeout=60) for _ in workers]
+    for worker in workers:
+        worker.join(timeout=60)
+        assert worker.exitcode == 0
+
+    # No error surfaced to either caller: the retry absorbed the race.
+    assert [outcome[0] for outcome in outcomes] == ["ok", "ok"]
+
+    answers = read_answers(**opts)
+    assert len(answers) == 33  # 31 pre-filled + both new answers, no duplicate
+    assert "cloud:gcp" in answers and "years:python" in answers
+
+    # One of the two landed in the original (now-full, 32-question) record;
+    # the other rolled over into a second record (operator answer 4).
+    experience_records = [row for row in list_native_records(**opts) if row["kind"] == "experience_qa"]
+    assert len(experience_records) == 2
+    record_ids = {answers["cloud:gcp"].record_id, answers["years:python"].record_id}
+    assert len(record_ids) == 2  # the two new answers did NOT land in the same record
+
+
+def test_identical_retried_answer_after_ambiguous_response_is_not_duplicated(fx: ProfileFixtureGig) -> None:
+    # Simulate a client that retried after an ambiguous response (e.g. its
+    # first call's HTTP response was lost, but the write actually committed):
+    # calling record_answer again with the SAME question_id/answer must not
+    # error and must not create a second fact or a spurious extra revision.
+    first = record_answer(**_opts(fx), question_id="cloud:gcp", prompt="GCP?", answer="Yes, two years.")
+
+    retried = record_answer(**_opts(fx), question_id="cloud:gcp", prompt="GCP?", answer="Yes, two years.")
+
+    assert retried.record_id == first.record_id
+    assert retried.revision_id == first.revision_id  # identical retry -> same committed revision, not a new one
+
+    answers = read_answers(**_opts(fx))
+    assert len(answers) == 1
+    assert answers["cloud:gcp"].answer == "Yes, two years."

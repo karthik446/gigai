@@ -125,10 +125,16 @@ def test_not_a_match_round_trips_with_reason() -> None:
     assert result.not_a_match_reason == "Resume states 9 years against a 10+ year requirement."
 
 
-# --- consistency rules (plan "P2", r1 rules 3-5) ------------------------------
+# --- consistency rules (plan "P2", r1 rules 3-5), CLASS-AWARE (Terra review P1) -----
+#
+# The full state table: matched requires zero HARD-unmet rows AND zero
+# structured questions; pending requires zero HARD-unmet rows AND >=1
+# structured question; not_a_match requires >=1 HARD-unmet row. Only
+# HARD-class (or unclassed, i.e. old) unmet rows count -- an unmet
+# NICE_TO_HAVE or ASKABLE row must never force not_a_match or block a match.
 
 
-def test_not_a_match_requires_at_least_one_unmet_row() -> None:
+def test_not_a_match_requires_at_least_one_hard_unmet_row() -> None:
     new = _new_shape_assessment(
         verdict="not_a_match",
         matrix=[{"requirement": "Python", "class": "hard", "resume_evidence": ["Built Python services"], "status": "met"}],
@@ -136,22 +142,106 @@ def test_not_a_match_requires_at_least_one_unmet_row() -> None:
         structured_questions=[],
         not_a_match_reason="claimed but nothing is unmet",
     )
-    with pytest.raises(FindJobsContractError):
+    with pytest.raises(FindJobsContractError, match="rule 4"):
+        parse_assessment_proposal(new)
+
+
+def test_not_a_match_with_only_an_unmet_nice_to_have_row_is_rejected() -> None:
+    # An unmet NICE_TO_HAVE must not satisfy the not_a_match gate -- only a
+    # HARD-unmet row can (assess.md's REQUIREMENT CLASSES + rule 1).
+    new = _new_shape_assessment(
+        verdict="not_a_match",
+        matrix=[{"requirement": "Conference talks", "class": "nice_to_have", "resume_evidence": [], "status": "unmet"}],
+        questions=[],
+        structured_questions=[],
+        not_a_match_reason="claimed but only a nice-to-have is unmet",
+    )
+    with pytest.raises(FindJobsContractError, match="rule 4"):
+        parse_assessment_proposal(new)
+
+
+def test_not_a_match_with_only_an_unmet_askable_row_is_rejected() -> None:
+    # An unmet ASKABLE row (rule 1: silence is a question, never a gap) must
+    # not satisfy the not_a_match gate either.
+    new = _new_shape_assessment(
+        verdict="not_a_match",
+        matrix=[{"requirement": "GCP", "class": "askable", "resume_evidence": [], "status": "unmet"}],
+        questions=[],
+        structured_questions=[],
+        not_a_match_reason="claimed but only an askable is unmet",
+    )
+    with pytest.raises(FindJobsContractError, match="rule 4"):
         parse_assessment_proposal(new)
 
 
 def test_pending_user_answers_requires_at_least_one_structured_question() -> None:
     new = _new_shape_assessment(questions=[], structured_questions=[])
-    with pytest.raises(FindJobsContractError):
+    with pytest.raises(FindJobsContractError, match="rule 5"):
         parse_assessment_proposal(new)
 
 
-def test_matched_above_threshold_is_not_checked_against_matrix_or_questions() -> None:
-    # Rule 3 is enforced by the model/prompt, not re-derived here (the plan's
-    # consistency rules only forbid not_a_match-without-unmet and
-    # pending_user_answers-without-a-question); a matched_above_threshold
-    # verdict with zero rows in it (an edge a test might construct) is not
-    # additionally second-guessed.
+def test_pending_user_answers_with_a_hard_unmet_row_is_rejected() -> None:
+    new = _new_shape_assessment(
+        verdict="pending_user_answers",
+        matrix=[
+            {"requirement": "10+ years", "class": "hard", "resume_evidence": ["9 years"], "status": "unmet"},
+            {"requirement": "GCP", "class": "askable", "resume_evidence": [], "status": "unclear"},
+        ],
+    )
+    with pytest.raises(FindJobsContractError, match="rule 5"):
+        parse_assessment_proposal(new)
+
+
+def test_pending_user_answers_with_an_unmet_nice_to_have_is_accepted() -> None:
+    # Acceptance case (coordinator correction): an unmet NICE_TO_HAVE row
+    # alongside a structured question must NOT block pending_user_answers.
+    new = _new_shape_assessment(
+        matrix=[
+            {"requirement": "GCP", "class": "askable", "resume_evidence": [], "status": "unclear"},
+            {"requirement": "Conference talks", "class": "nice_to_have", "resume_evidence": [], "status": "unmet"},
+        ],
+    )
+    result = parse_assessment_proposal(new)
+    assert result.verdict is Verdict.PENDING_USER_ANSWERS
+
+
+def test_matched_above_threshold_with_a_hard_unmet_row_is_rejected() -> None:
+    new = _new_shape_assessment(
+        verdict="matched_above_threshold",
+        matrix=[{"requirement": "10+ years", "class": "hard", "resume_evidence": ["9 years"], "status": "unmet"}],
+        questions=[],
+        structured_questions=[],
+    )
+    with pytest.raises(FindJobsContractError, match="rule 3"):
+        parse_assessment_proposal(new)
+
+
+def test_matched_above_threshold_with_an_unresolved_structured_question_is_rejected() -> None:
+    new = _new_shape_assessment(
+        verdict="matched_above_threshold",
+        matrix=[{"requirement": "Python", "class": "hard", "resume_evidence": ["Built Python services"], "status": "met"}],
+    )
+    with pytest.raises(FindJobsContractError, match="rule 3"):
+        parse_assessment_proposal(new)
+
+
+def test_matched_above_threshold_with_an_unmet_nice_to_have_is_accepted() -> None:
+    # Acceptance case (coordinator correction): an unmet NICE_TO_HAVE row
+    # must NOT block matched_above_threshold either.
+    new = _new_shape_assessment(
+        verdict="matched_above_threshold",
+        matrix=[
+            {"requirement": "Python", "class": "hard", "resume_evidence": ["Built Python services"], "status": "met"},
+            {"requirement": "Conference talks", "class": "nice_to_have", "resume_evidence": [], "status": "unmet"},
+        ],
+        questions=[],
+        structured_questions=[],
+    )
+    result = parse_assessment_proposal(new)
+    assert result.verdict is Verdict.MATCHED_ABOVE_THRESHOLD
+
+
+def test_matched_above_threshold_with_zero_rows_is_not_additionally_second_guessed() -> None:
     new = _new_shape_assessment(
         verdict="matched_above_threshold",
         matrix=[{"requirement": "Python", "class": "hard", "resume_evidence": ["Built Python services"], "status": "met"}],
@@ -159,6 +249,30 @@ def test_matched_above_threshold_is_not_checked_against_matrix_or_questions() ->
         structured_questions=[],
     )
     parse_assessment_proposal(new)  # does not raise
+
+
+def test_unclassed_row_old_result_is_treated_as_hard_for_the_gate() -> None:
+    # A matrix row with no "class" key at all predates P2's per-row
+    # classification -- treated as HARD (the conservative default), so an
+    # unmet unclassed row still satisfies not_a_match and still blocks a match.
+    unclassed_unmet = _new_shape_assessment(
+        verdict="not_a_match",
+        matrix=[{"requirement": "10+ years", "resume_evidence": ["9 years"], "status": "unmet"}],
+        questions=[],
+        structured_questions=[],
+        not_a_match_reason="9 years against a 10+ year requirement",
+    )
+    result = parse_assessment_proposal(unclassed_unmet)
+    assert result.verdict is Verdict.NOT_A_MATCH
+
+    unclassed_unmet_matched = _new_shape_assessment(
+        verdict="matched_above_threshold",
+        matrix=[{"requirement": "10+ years", "resume_evidence": ["9 years"], "status": "unmet"}],
+        questions=[],
+        structured_questions=[],
+    )
+    with pytest.raises(FindJobsContractError, match="rule 3"):
+        parse_assessment_proposal(unclassed_unmet_matched)
 
 
 def test_absent_verdict_is_not_checked() -> None:

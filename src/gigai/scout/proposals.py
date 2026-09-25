@@ -557,24 +557,91 @@ def _validate_structured_questions(items: object) -> None:
             raise FindJobsContractError("invalid_value", "assessment_result.structured_questions requirement is invalid")
 
 
+def _is_hard_unmet_row(row: object) -> bool:
+    """A matrix row counts toward the verdict's HARD-unmet gate (Terra
+    review P1) only when it is BOTH ``status == "unmet"`` AND HARD-class --
+    per assess.md's REQUIREMENT CLASSES paragraph and rule 1, only a HARD
+    requirement's explicit contradiction can drive ``not_a_match``; an
+    unmet NICE_TO_HAVE (rule: posting-phrased "bonus"/"plus"/"preferred")
+    or an ASKABLE row (rule 1: silence is reclassified ASKABLE, never
+    "unmet") must never force ``not_a_match`` or block a match. A row with
+    NO ``class`` at all is an OLD serialized result predating P2's
+    per-row classification -- treated as HARD (the conservative default:
+    unmet always meant hard before P2 added classes), so an old assessment's
+    verdict is checked exactly as strictly as it always was.
+    """
+
+    if not isinstance(row, Mapping) or row.get("status") != "unmet":
+        return False
+    row_class = row.get("class")
+    return row_class is None or row_class == "hard"
+
+
 def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
     """P2 (v0.1.9): verdict must agree with the matrix/questions it came with
-    (plan section "P2"; rules 3-5 of the S29 r1 instructions). Absent verdict
-    (an old-shape or non-verdict answer) is not checked -- this rule only
-    binds a payload that actually claims a verdict."""
+    (plan section "P2"; rules 3-5 of the S29 r1 instructions), CLASS-AWARE
+    per Terra's review: only HARD-class unmet rows (or an unclassed old row,
+    treated as HARD) decide ``not_a_match`` or block a match -- an unmet
+    NICE_TO_HAVE or an ASKABLE row must never force ``not_a_match`` or block
+    ``matched_above_threshold``. Absent verdict (an old-shape or non-verdict
+    answer) is not checked -- this rule only binds a payload that actually
+    claims a verdict.
+
+    The full state table (assess.md rules 3-5):
+    - ``matched_above_threshold``: zero HARD-unmet rows AND zero structured
+      questions (rule 3: "zero not_a_match findings AND zero unresolved
+      askable questions").
+    - ``pending_user_answers``: zero HARD-unmet rows AND at least one
+      structured question (rule 5: "no not_a_match finding but at least one
+      askable question remains").
+    - ``not_a_match``: at least one HARD-unmet row (rule 4).
+
+    Each violation message NAMES the violated rule so the one retry
+    (``assessment_core.assess_once``, U22) feeds the model something it can
+    act on, not just "invalid_value".
+    """
 
     verdict = raw.get("verdict")
     if verdict is None:
         return
     matrix = raw.get("matrix")
     rows = matrix if isinstance(matrix, list) else []
-    unmet_rows = sum(1 for row in rows if isinstance(row, Mapping) and row.get("status") == "unmet")
+    hard_unmet_rows = sum(1 for row in rows if _is_hard_unmet_row(row))
     structured = raw.get("structured_questions")
     question_count = len(structured) if isinstance(structured, list) else 0
-    if verdict == "not_a_match" and unmet_rows < 1:
-        raise FindJobsContractError("invalid_value", "not_a_match verdict requires at least one unmet matrix row")
-    if verdict == "pending_user_answers" and question_count < 1:
-        raise FindJobsContractError("invalid_value", "pending_user_answers verdict requires at least one structured question")
+
+    if verdict == "matched_above_threshold":
+        if hard_unmet_rows > 0:
+            raise FindJobsContractError(
+                "invalid_value",
+                "rule 3 violated: matched_above_threshold requires zero not_a_match findings, "
+                f"but the matrix has {hard_unmet_rows} hard-unmet row(s)",
+            )
+        if question_count > 0:
+            raise FindJobsContractError(
+                "invalid_value",
+                "rule 3 violated: matched_above_threshold requires zero unresolved askable questions, "
+                f"but structured_questions has {question_count} item(s)",
+            )
+    elif verdict == "pending_user_answers":
+        if hard_unmet_rows > 0:
+            raise FindJobsContractError(
+                "invalid_value",
+                "rule 5 violated: pending_user_answers requires no not_a_match finding, "
+                f"but the matrix has {hard_unmet_rows} hard-unmet row(s)",
+            )
+        if question_count < 1:
+            raise FindJobsContractError(
+                "invalid_value",
+                "rule 5 violated: pending_user_answers requires at least one askable question, "
+                "but structured_questions is empty",
+            )
+    elif verdict == "not_a_match":
+        if hard_unmet_rows < 1:
+            raise FindJobsContractError(
+                "invalid_value",
+                "rule 4 violated: not_a_match requires at least one hard-unmet matrix row",
+            )
 
 
 def validate_assessment_bounds(raw: Mapping[str, object]) -> None:
