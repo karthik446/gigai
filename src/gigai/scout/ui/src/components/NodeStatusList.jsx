@@ -25,7 +25,23 @@ function stepLabel(receipt, progressStep) {
   return "waiting";
 }
 
-export default function NodeStatusList({ status, nodeReceipts, progressSteps }) {
+// acquire-rotation: one line under the step pills while/after acquire pages
+// through the watchlist -- "boards N-M of T this run; full rotation every
+// ~K runs" (from GET /progress's `rotation` block; `last`/K are the previous
+// run's estimate until this run's page is measured, `?` on the first run).
+export function rotationLine(rotation, boards) {
+  if (!rotation || rotation.total == null) {
+    return null;
+  }
+  const span = `${rotation.first ?? 1}–${rotation.last ?? "?"}`;
+  const runs = rotation.runs_per_rotation;
+  const cadence = runs === 1 ? "every run" : runs > 1 ? `every ~${runs} runs` : "cadence unknown";
+  const done = boards && boards.done != null && boards.status === "running" ? ` (${boards.done} done so far)` : "";
+  return `Boards ${span} of ${rotation.total} this run${done}; full rotation ${cadence}.`;
+}
+
+export default function NodeStatusList({ status, nodeReceipts, progressSteps, rotation, boards }) {
+  const line = rotationLine(rotation, boards);
   return (
     <section className="panel">
       <h2>Run status: {status}</h2>
@@ -44,6 +60,11 @@ export default function NodeStatusList({ status, nodeReceipts, progressSteps }) 
           );
         })}
       </div>
+      {line && (
+        <p className="muted" data-role="rotation-line" style={{ margin: "0.5rem 0 0" }}>
+          {line}
+        </p>
+      )}
     </section>
   );
 }

@@ -449,7 +449,7 @@ export default function FindJobsView({
           {resultsLoading && <p className="muted">Loading run…</p>}
         </section>
         {runId === routeRunId && runStatus && (
-          <NodeStatusList status={runStatus.status} nodeReceipts={runStatus.node_receipts} progressSteps={progress?.steps} />
+          <NodeStatusList status={runStatus.status} nodeReceipts={runStatus.node_receipts} progressSteps={progress?.steps} rotation={progress?.rotation} boards={progress?.boards} />
         )}
         {runId === routeRunId && grid}
       </div>
@@ -498,7 +498,7 @@ export default function FindJobsView({
       )}
 
       {runId && runStatus && (runActive || runStatus.status !== "succeeded") && (
-        <NodeStatusList status={runStatus.status} nodeReceipts={runStatus.node_receipts} progressSteps={progress?.steps} />
+        <NodeStatusList status={runStatus.status} nodeReceipts={runStatus.node_receipts} progressSteps={progress?.steps} rotation={progress?.rotation} boards={progress?.boards} />
       )}
 
       {grid}

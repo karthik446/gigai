@@ -28,7 +28,14 @@ Layout, all under ``runs/<run_id>/progress/``:
 - ``boards.json`` (Q2): ``{"total": <int>, "budget_seconds": <float>|null,
   "status": "running"|"done", ...totals}``; written once acquire has planned
   its ATS board fetches, replaced with the totals (requests, cache hits,
-  skipped, elapsed) when the fetch pass ends.
+  skipped, elapsed) when the fetch pass ends. acquire-rotation adds
+  ``"rotation": {"cycle", "cycle_started_at", "total", "first", "last",
+  "page_size", "runs_per_rotation", "estimated", "providers": {<provider>:
+  {"total", "page_size", "runs_per_rotation"}}}`` -- "boards first-last of
+  total this run; full rotation every ~K runs". While the pass runs
+  ``last``/``page_size``/K come from the previous run's page
+  (``estimated: true``, ``null`` on the first run ever); the final write
+  carries this run's measured page.
 - ``boards.jsonl`` (Q2): one JSON line per watchlist board as its fetch
   finishes: ``{"provider", "board_token", "status": "fetched"|"cached"|
   "failed"|"skipped", "requests", "cache", "postings", "matched",
@@ -293,15 +300,17 @@ class ProgressWriter:
 
         self._guard(lambda: _replace_json(self._dir / _WATCHLIST_SEED_FILENAME, dict(payload)))
 
-    def boards_planned(self, *, total: int, budget_seconds: float | None) -> None:
-        """Written once acquire knows how many boards it will fetch this run."""
+    def boards_planned(self, *, total: int, budget_seconds: float | None, rotation: Mapping[str, object] | None = None) -> None:
+        """Written once acquire knows how many boards it will fetch this run.
 
-        self._guard(
-            lambda: _replace_json(
-                self._dir / _BOARDS_SUMMARY_FILENAME,
-                {"total": total, "budget_seconds": budget_seconds, "status": "running"},
-            )
-        )
+        ``rotation`` (acquire-rotation, optional) is the cursor block: where
+        in the watchlist this run's page starts and the estimated cadence.
+        """
+
+        payload: dict[str, object] = {"total": total, "budget_seconds": budget_seconds, "status": "running"}
+        if rotation is not None:
+            payload["rotation"] = dict(rotation)
+        self._guard(lambda: _replace_json(self._dir / _BOARDS_SUMMARY_FILENAME, payload))
 
     def board_finished(
         self,
@@ -460,7 +469,8 @@ def _read_boards(directory: Path) -> dict[str, object]:
     ``cache_hits`` summed, and ``skipped_boards`` (the ``provider:token``
     of every board a run-time budget left unfetched) so a UI can name them.
     The final totals ``boards_finished`` writes win over the derived counts
-    where both exist.
+    where both exist. The ``rotation`` block (acquire-rotation) passes
+    through from whichever ``boards.json`` write is current.
     """
 
     summary_raw = _read_json(directory / _BOARDS_SUMMARY_FILENAME)

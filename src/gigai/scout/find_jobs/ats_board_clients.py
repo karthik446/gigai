@@ -806,6 +806,76 @@ class CachedResponse:
     body: bytes
 
 
+# acquire-rotation: the per-board "last fetch attempt" index + rotation cursor.
+LAST_FETCHED_SCHEMA = "scout-ats-last-fetched:1"
+_LAST_FETCHED_FILENAME = "last-fetched.json"
+
+
+@dataclass(frozen=True)
+class BoardFetchIndex:
+    """When each watchlist board was last *attempted*, plus the rotation cursor.
+
+    ``boards`` maps ``"<provider>:<board token>"`` to the UTC ISO-8601 stamp
+    of the run that last attempted it (fetched, served from the cache by a
+    ``304``, or failed -- a dead board must rotate like a live one, or it
+    would lead every run forever). ``cycle``/``cycle_started_at`` is the
+    rotation cursor: a board stamped at or after ``cycle_started_at`` has
+    been covered in the current rotation; when every planned board has,
+    the next run starts a new cycle. ``page_sizes`` is how many boards per
+    provider the previous run attempted, so the next run can say "full
+    rotation every ~K runs" before its own page is measured.
+
+    This is a CACHE, not a record: it lives next to the response cache
+    under the GigAI home, never in a workpad or the journal, and losing it
+    merely restarts the rotation from "nothing fetched yet".
+    """
+
+    boards: dict[str, str] = field(default_factory=dict)
+    cycle: int = 1
+    cycle_started_at: str | None = None
+    page_sizes: dict[str, int] = field(default_factory=dict)
+
+    @staticmethod
+    def key(provider: str, board_token: str) -> str:
+        return f"{provider}:{board_token}"
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "schema_version": LAST_FETCHED_SCHEMA,
+            "cycle": self.cycle,
+            "cycle_started_at": self.cycle_started_at,
+            "page_sizes": dict(self.page_sizes),
+            "boards": dict(self.boards),
+        }
+
+    @classmethod
+    def from_json(cls, payload: object) -> "BoardFetchIndex":
+        """A missing, corrupt or foreign-schema payload reads as the empty index."""
+
+        if not isinstance(payload, dict) or payload.get("schema_version") != LAST_FETCHED_SCHEMA:
+            return cls()
+        raw_boards = payload.get("boards")
+        boards = (
+            {key: value for key, value in raw_boards.items() if isinstance(key, str) and isinstance(value, str)}
+            if isinstance(raw_boards, dict)
+            else {}
+        )
+        raw_cycle = payload.get("cycle")
+        cycle = raw_cycle if isinstance(raw_cycle, int) and not isinstance(raw_cycle, bool) and raw_cycle >= 1 else 1
+        started = payload.get("cycle_started_at")
+        raw_pages = payload.get("page_sizes")
+        page_sizes = (
+            {
+                key: value
+                for key, value in raw_pages.items()
+                if isinstance(key, str) and isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            }
+            if isinstance(raw_pages, dict)
+            else {}
+        )
+        return cls(boards=boards, cycle=cycle, cycle_started_at=started if isinstance(started, str) else None, page_sizes=page_sizes)
+
+
 class BoardCache:
     """A per-URL response cache for the public board endpoints.
 
@@ -877,6 +947,30 @@ class BoardCache:
         tmp_meta = meta_path.with_name(meta_path.name + f".tmp{pid}")
         tmp_meta.write_text(json.dumps(meta, separators=(",", ":")), encoding="utf-8")
         os.replace(tmp_meta, meta_path)
+
+    # -- acquire-rotation: the last-fetched index ---------------------------
+
+    @property
+    def fetch_index_path(self) -> Path:
+        return self.root / _LAST_FETCHED_FILENAME
+
+    def load_fetch_index(self) -> BoardFetchIndex:
+        """Read ``<root>/last-fetched.json``; missing or corrupt reads as empty (a fresh rotation)."""
+
+        try:
+            payload = json.loads(self.fetch_index_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return BoardFetchIndex()
+        return BoardFetchIndex.from_json(payload)
+
+    def store_fetch_index(self, index: BoardFetchIndex) -> None:
+        """Replace the index atomically (temp file + ``os.replace``); one write per call, never per board."""
+
+        path = self.fetch_index_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + f".tmp{os.getpid()}")
+        tmp.write_text(json.dumps(index.to_json(), separators=(",", ":"), sort_keys=True), encoding="utf-8")
+        os.replace(tmp, path)
 
     @staticmethod
     def conditional_headers(entry: CachedResponse | None) -> dict[str, str]:
@@ -1087,9 +1181,11 @@ __all__ = [
     "ATSBoardClientError",
     "ATSBoardClients",
     "BoardCache",
+    "BoardFetchIndex",
     "BoardFetchResult",
     "BoardFetchStats",
     "CachedResponse",
+    "LAST_FETCHED_SCHEMA",
     "ashby_pay",
     "ashby_work_mode",
     "fetch_ashby_board",

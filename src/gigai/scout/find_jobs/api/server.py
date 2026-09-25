@@ -955,6 +955,11 @@ class ScoutFindJobsBackend:
                 not_assessed_counts[reason_value] = not_assessed_counts.get(reason_value, 0) + 1
 
         cap = snapshot.cap if snapshot.cap is not None else self._sealed_selection_cap(run_id)
+        # acquire-rotation: the cursor block of ``boards.json`` ("boards N-M
+        # of T this run; full rotation every ~K runs"), lifted to a top-level
+        # key so the UI's progress line has a stable path; ``null`` until
+        # acquire has planned a board pass.
+        rotation = snapshot.boards.get("rotation")
 
         return {
             "schema_version": "scout-find-jobs-progress:1",
@@ -970,6 +975,7 @@ class ScoutFindJobsBackend:
             # passed through as-is (``{}`` / ``null`` before acquire writes them).
             "boards": dict(snapshot.boards),
             "watchlist_seed": None if snapshot.watchlist_seed is None else dict(snapshot.watchlist_seed),
+            "rotation": dict(rotation) if isinstance(rotation, dict) else None,
         }
 
     def _sealed_selection_cap(self, run_id: str) -> int | None:

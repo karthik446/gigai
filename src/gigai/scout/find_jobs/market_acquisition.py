@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import gzip
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -26,7 +27,7 @@ import httpx
 
 from ...canonical import canonical_json_bytes, digest_imported_bytes
 from ..acquisition_records import import_public_rows
-from .ats_board_clients import BoardCache, BoardFetchStats
+from .ats_board_clients import BoardCache, BoardFetchIndex, BoardFetchStats
 from .contracts import (
     ATSBoardClient,
     ATSProvider,
@@ -77,6 +78,10 @@ DEFAULT_ATS_CONCURRENCY_PER_PROVIDER = 4
 DEFAULT_ATS_MIN_INTERVAL_SECONDS = 0.125  # 8 requests/s per provider, across all its workers
 DEFAULT_ACQUIRE_BUDGET_SECONDS = 1200.0  # 20 minutes for the whole ATS pass
 BUDGET_EXCEEDED_CODE = "time_budget_exceeded"
+# acquire-rotation: how often the last-fetched index is flushed mid-pass, so
+# a run killed before its end still advances the rotation for the boards it
+# reached (the final flush at the end of the pass is unconditional).
+ROTATION_FLUSH_INTERVAL_SECONDS = 30.0
 
 # Query parameter names ATS boards use to carry a job id when the posting is
 # served from a custom career-site domain rather than the board's own
@@ -196,16 +201,125 @@ class _BoardOutcome:
     code: str | None
 
 
-def _board_order_key(board: WatchlistEntry) -> tuple[int, str, str]:
-    """User/discovery-added boards first, then the catalog's, each by (provider, token).
+def _board_index_key(board: WatchlistEntry) -> str:
+    return BoardFetchIndex.key(board.provider.value, board.board_token)
 
-    A run-time budget therefore always spends itself on the boards the
-    operator chose by hand (or Discover found for them) before the bulk
-    catalog seed -- and the order is deterministic run to run.
+
+def _rotation_stamp() -> str:
+    """Fixed-width UTC stamp (milliseconds) so index stamps compare as strings."""
+
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+@dataclass(frozen=True)
+class _RotationPlan:
+    """The ordered page for this run plus the cursor it starts from (acquire-rotation)."""
+
+    ordered: tuple[WatchlistEntry, ...]
+    index: BoardFetchIndex  # with the cycle already advanced when this run opens a new one
+    stamp: str  # what every board attempted this run is stamped with
+    covered_before: int  # boards already covered in this cycle before this run
+    covered_keys: frozenset[str]
+
+    @property
+    def total(self) -> int:
+        return len(self.ordered)
+
+    def rotation_json(self, *, page_sizes: Mapping[str, int] | None, newly_covered: int | None) -> dict[str, object]:
+        """The ``rotation`` block of ``boards.json``.
+
+        Before the pass ends ``page_sizes`` is the previous run's (an
+        estimate, ``estimated: true``) and ``newly_covered`` is unknown;
+        at the end both are this run's measurements. ``runs_per_rotation``
+        (K) is the worst provider's ``ceil(boards / page)``: the pools run
+        side by side, so the rotation is only as fast as its slowest
+        provider (Greenhouse, in practice).
+        """
+
+        totals: dict[str, int] = {}
+        for board in self.ordered:
+            totals[board.provider.value] = totals.get(board.provider.value, 0) + 1
+        providers: dict[str, dict[str, object]] = {}
+        worst: int | None = None
+        for provider, count in sorted(totals.items()):
+            page = page_sizes.get(provider) if page_sizes else None
+            runs = math.ceil(count / page) if page else None
+            providers[provider] = {"total": count, "page_size": page, "runs_per_rotation": runs}
+            if runs is not None:
+                worst = runs if worst is None else max(worst, runs)
+        page_total = sum(page_sizes.values()) if page_sizes else None
+        first = self.covered_before + 1
+        last = self.covered_before + newly_covered if newly_covered else None
+        return {
+            "cycle": self.index.cycle,
+            "cycle_started_at": self.index.cycle_started_at,
+            "total": self.total,
+            "first": first,
+            "last": last,
+            "page_size": page_total,
+            "runs_per_rotation": worst,
+            "estimated": newly_covered is None,
+            "providers": providers,
+        }
+
+
+def _plan_rotation(
+    boards: Sequence[WatchlistEntry],
+    *,
+    index: BoardFetchIndex,
+    catalog_counts: Mapping[tuple[str, str], int] | None,
+    stamp: str,
+) -> _RotationPlan:
+    """Order this run's boards: the next page of the watchlist by last fetch (acquire-rotation).
+
+    Operator direction 2026-09-25: every board stays on the watchlist and the
+    rotation bounds the cost. The order is
+
+    1. user/discovery-added boards (not ``catalog:`` seeded) before catalog
+       boards -- they are few, so they are re-checked every run and a budget
+       can never starve them (Q2's rule, kept);
+    2. never-fetched boards first, then by last-attempted stamp ascending
+       (least recently attempted first: what the previous run's budget left
+       behind leads, so consecutive runs page through the whole watchlist);
+    3. ties (every board attempted in one run carries that run's stamp) by
+       the catalog record's ``us_posting_count`` descending, then (provider,
+       token) -- so the order is deterministic run to run, independent of
+       thread timing.
+
+    The cursor: boards stamped at/after ``cycle_started_at`` are covered in
+    the current cycle; once every planned board is, this run opens the next
+    cycle. The returned plan's ``index`` already reflects that.
     """
 
-    from_catalog = board.first_seen.query_key.startswith("catalog:")
-    return (1 if from_catalog else 0, board.provider.value, board.board_token)
+    covered_keys: set[str] = set()
+    keys = [_board_index_key(board) for board in boards]
+    if index.cycle_started_at is not None:
+        started = index.cycle_started_at
+        covered_keys = {key for key in keys if (at := index.boards.get(key)) is not None and at >= started}
+    if boards and (index.cycle_started_at is None or len(covered_keys) == len(keys)):
+        index = replace(index, cycle=index.cycle + (1 if index.cycle_started_at is not None else 0), cycle_started_at=stamp)
+        covered_keys = set()
+
+    def order_key(board: WatchlistEntry) -> tuple[int, int, str, int, str, str]:
+        from_catalog = board.first_seen.query_key.startswith("catalog:")
+        last = index.boards.get(_board_index_key(board))
+        us = catalog_counts.get((board.provider.value, board.board_token)) if catalog_counts else None
+        return (
+            1 if from_catalog else 0,
+            0 if last is None else 1,
+            last or "",
+            -(us if us is not None else -1),
+            board.provider.value,
+            board.board_token,
+        )
+
+    return _RotationPlan(
+        ordered=tuple(sorted(boards, key=order_key)),
+        index=index,
+        stamp=stamp,
+        covered_before=len(covered_keys),
+        covered_keys=frozenset(covered_keys),
+    )
 
 
 def _fetch_one_board(
@@ -247,8 +361,18 @@ def _fetch_boards(
     cache: BoardCache | None,
     progress: ProgressWriter | None,
     started_at: float,
+    catalog_counts: Mapping[tuple[str, str], int] | None = None,
 ) -> tuple[list[PostingRow], list[FailureRow], dict[str, object]]:
-    """Fetch every watchlist board with per-provider pools, pacing and a budget.
+    """Fetch the next page of watchlist boards with per-provider pools, pacing and a budget.
+
+    acquire-rotation: the boards are ordered by ``_plan_rotation`` (least
+    recently attempted first, from the ``BoardCache``'s last-fetched index),
+    every board attempted this run -- fetched, cached (a ``304`` counts) or
+    failed, never a budget-skipped one -- is stamped with this run's stamp,
+    and the index is flushed every :data:`ROTATION_FLUSH_INTERVAL_SECONDS`
+    and at the end. The page is whatever the budget fits; the boards it
+    skips keep their old stamp and lead the next run. Without a cache (no
+    home) nothing persists and every run orders the same way.
 
     Rows come back in the planned board order (never completion order), so
     the sealed batch is deterministic regardless of thread timing; a
@@ -256,12 +380,33 @@ def _fetch_boards(
     future settles. Returns ``(rows, failures, summary)``.
     """
 
-    ordered = sorted(boards, key=_board_order_key)
+    fetch_index = cache.load_fetch_index() if cache is not None else BoardFetchIndex()
+    plan = _plan_rotation(boards, index=fetch_index, catalog_counts=catalog_counts, stamp=_rotation_stamp())
+    ordered = plan.ordered
+    fetch_index = plan.index
     budget = limits.time_budget_seconds if limits.time_budget_seconds and limits.time_budget_seconds > 0 else None
     deadline = started_at + budget if budget is not None else None
     if progress is not None:
-        progress.boards_planned(total=len(ordered), budget_seconds=budget)
+        progress.boards_planned(
+            total=len(ordered),
+            budget_seconds=budget,
+            rotation=plan.rotation_json(page_sizes=fetch_index.page_sizes, newly_covered=None),
+        )
     workers = max(1, int(limits.concurrency_per_provider))
+    stamped: dict[str, str] = {}
+    last_flush = time.monotonic()
+
+    def flush_index() -> None:
+        nonlocal fetch_index, last_flush
+        if cache is None:
+            return
+        fetch_index = replace(fetch_index, boards={**fetch_index.boards, **stamped})
+        try:
+            cache.store_fetch_index(fetch_index)
+        except OSError as exc:
+            print(f"scout acquire: could not write the board rotation index ({type(exc).__name__})", file=sys.stderr)
+        last_flush = time.monotonic()
+
     limiters: dict[str, _RateLimiter] = {}
     throttled: dict[str, Any] = {}
     executors: dict[str, ThreadPoolExecutor] = {}
@@ -287,6 +432,10 @@ def _fetch_boards(
         for future in as_completed(futures):
             outcome = future.result()
             outcomes[futures[future]] = outcome
+            if outcome.status != "skipped":
+                stamped[_board_index_key(outcome.board)] = plan.stamp
+                if cache is not None and time.monotonic() - last_flush >= ROTATION_FLUSH_INTERVAL_SECONDS:
+                    flush_index()
             if progress is not None:
                 stats = outcome.stats
                 progress.board_finished(
@@ -303,6 +452,17 @@ def _fetch_boards(
     finally:
         for executor in executors.values():
             executor.shutdown(wait=True)
+
+    page_sizes: dict[str, int] = {}
+    newly_covered = 0
+    for key in stamped:
+        provider = key.split(":", 1)[0]
+        page_sizes[provider] = page_sizes.get(provider, 0) + 1
+        if key not in plan.covered_keys:
+            newly_covered += 1
+    fetch_index = replace(fetch_index, page_sizes={**fetch_index.page_sizes, **page_sizes})
+    flush_index()
+    rotation = plan.rotation_json(page_sizes=page_sizes, newly_covered=newly_covered)
 
     rows: list[PostingRow] = []
     failures: list[FailureRow] = []
@@ -350,8 +510,31 @@ def _fetch_boards(
         "elapsed_seconds": round(time.monotonic() - started_at, 3),
         "budget_seconds": budget,
         "limits": limits.to_json(),
+        "rotation": rotation,
     }
     return rows, failures, summary
+
+
+def _catalog_us_counts() -> dict[tuple[str, str], int]:
+    """``(provider, token) -> us_posting_count`` from the shipped catalog, or ``{}`` if it cannot load.
+
+    Only a tie-breaker for the rotation order (``_plan_rotation``); a
+    catalog that fails its digest pin must not fail acquire here -- seeding
+    already reported that.
+    """
+
+    try:
+        from .company_catalog import load_company_catalog
+
+        catalog = load_company_catalog()
+    except Exception as exc:  # noqa: BLE001 - ordering hint only
+        print(f"scout acquire: company catalog unavailable for the rotation order ({type(exc).__name__})", file=sys.stderr)
+        return {}
+    return {
+        (record.provider.value, record.board_token): record.us_posting_count
+        for record in catalog.records
+        if record.us_posting_count is not None
+    }
 
 
 def _board_cache(home_root: Path | None) -> BoardCache | None:
@@ -414,6 +597,22 @@ def _seed_watchlist(
         file=sys.stderr,
     )
     return None
+
+
+def _rotation_line(rotation: object) -> str:
+    """One human line: ``boards N-M of T this run; full rotation every ~K runs``."""
+
+    if not isinstance(rotation, dict):
+        return "scout acquire: rotation: n/a"
+    first, last, total, runs = rotation.get("first"), rotation.get("last"), rotation.get("total"), rotation.get("runs_per_rotation")
+    span = f"{first}-{last}" if last is not None else f"{first}-?"
+    if runs == 1:
+        cadence = "every run"
+    elif isinstance(runs, int) and runs > 1:
+        cadence = f"every ~{runs} runs"
+    else:
+        cadence = "cadence unknown"
+    return f"scout acquire: boards {span} of {total} this run (cycle {rotation.get('cycle')}); full rotation {cadence}"
 
 
 def _now() -> str:
@@ -1153,6 +1352,7 @@ def _acquire_node_body(
                         cache=_board_cache(home_root),
                         progress=progress,
                         started_at=started_at,
+                        catalog_counts=_catalog_us_counts() if home_root is not None else None,
                     )
                     rows.extend(board_rows)
                     failures.extend(board_failures)
@@ -1166,6 +1366,7 @@ def _acquire_node_body(
                         "{elapsed_seconds}s".format(**board_summary),
                         file=sys.stderr,
                     )
+                    print(_rotation_line(board_summary.get("rotation")), file=sys.stderr)
             except Exception as exc:
                 failures.append(FailureRow(SourceKind.ATS, "ats", None, type(exc).__name__.lower(), "ATS watchlist fetch failed"))
             source_outcomes["ats"] = ats_ok

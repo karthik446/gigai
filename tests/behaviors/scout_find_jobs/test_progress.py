@@ -846,3 +846,19 @@ def test_backend_run_progress_passes_boards_and_watchlist_seed_through(tmp_path:
     assert body["boards"] == snapshot.boards
     assert body["boards"]["status"] == "done" and body["boards"]["fetched"] == 2
     assert body["schema_version"] == "scout-find-jobs-progress:1"
+    # acquire-rotation: no cursor block written (an older run, or acquire
+    # without a board pass) reads as ``null`` at the top level.
+    assert before["rotation"] is None and body["rotation"] is None
+
+    # acquire-rotation: the cursor block of ``boards.json`` is lifted to a
+    # top-level ``rotation`` key (the UI's "boards N-M of T this run; full
+    # rotation every ~K runs" line), on the planned AND the finished write.
+    writer = ProgressWriter(tmp_path / "runs" / "run_02")
+    planned = {"cycle": 2, "cycle_started_at": "2026-09-25T00:00:00.000Z", "total": 3, "first": 2, "last": None,
+               "page_size": 1, "runs_per_rotation": 3, "estimated": True, "providers": {"greenhouse": {"total": 3, "page_size": 1, "runs_per_rotation": 3}}}
+    writer.boards_planned(total=3, budget_seconds=None, rotation=planned)
+    live = backend.run_progress("run_02")
+    assert live["rotation"] == planned and live["boards"]["rotation"] == planned
+    final = {**planned, "last": 3, "page_size": 2, "runs_per_rotation": 2, "estimated": False}
+    writer.boards_finished({"total": 3, "fetched": 2, "rotation": final})
+    assert backend.run_progress("run_02")["rotation"] == final
