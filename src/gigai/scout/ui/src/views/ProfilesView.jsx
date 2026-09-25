@@ -1,22 +1,28 @@
 import { useState } from "react";
 import TagListInput from "../components/TagListInput.jsx";
 import { archiveProfile, createProfile, updateProfile } from "../api.js";
+import { useRuns } from "../hooks.js";
+import { relativeTimeLabel } from "../display.js";
 
-// P9/F3: Profiles.
+// P9/P9c (F3): Profiles.
 //
-// DROPPED from the mockup (no backing API):
+// DROPPED from the mockup (no backing API, still, as of P9c):
 //  - Extracted stack / seniority chips: F2's wizard resume-extraction step
 //    (S27) is not part of this packet's scope and ProfileRecord carries no
 //    stack/seniority fields (profiles.py's `_profile_to_json`: profile_id,
 //    revision, label, state, origin, resume_ref, titles, titles_to_avoid,
 //    queries, content_digest, created_at, updated_at -- nothing else).
-//  - Run history table: no route lists a profile's past runs (see
-//    DashboardView.jsx's note); "cost"/"duration" per run have no source.
+//    Operator decision (0.1.9): dropped for this version.
 //  - Rename: PUT /api/profiles/{id} can change label, but the task's own
 //    Profiles view spec lists rename as a distinct action with no defined
 //    request shape agreed anywhere in this packet's APIs beyond "edit
 //    label via PUT" -- implemented here as exactly that (label-only PUT),
 //    not dropped, since the API genuinely supports it.
+//
+// P9c: Run history table now wired to GET /api/runs?profile_id=<this
+// profile>, newest first -- "cost"/"duration" still have no source field
+// (mockups/README.md's open question #6) and stay out; date/found/
+// assessed/matched are real.
 //
 // KEPT, on real data: profile list + resume_ref/titles/queries (GET
 // /api/profiles), create (POST), edit titles/label (PUT), archive (POST
@@ -24,6 +30,45 @@ import { archiveProfile, createProfile, updateProfile } from "../api.js";
 // "Shared across all profiles" reuses GET /api/config, since visa/
 // countries/work-mode/cadence/budget/model all live in find-jobs.json, not
 // per profile (S25).
+function RunHistoryTable({ profileId }) {
+  const { loading, runs, error } = useRuns(profileId);
+  if (loading) {
+    return <p className="muted">Loading run history…</p>;
+  }
+  if (error) {
+    return <div className="callout danger">Could not load run history: {error}</div>;
+  }
+  if (runs.length === 0) {
+    return <p className="muted">No runs yet for this profile.</p>;
+  }
+  return (
+    <table className="data-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Found</th>
+          <th>New</th>
+          <th>Assessed</th>
+          <th>Matched</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {runs.map((run) => (
+          <tr key={run.run_id}>
+            <td>{relativeTimeLabel(run.created_at)}</td>
+            <td>{run.counts.found}</td>
+            <td>{run.counts.new}</td>
+            <td>{run.counts.assessed}</td>
+            <td>{run.counts.matched}</td>
+            <td>{run.status}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 export default function ProfilesView({ profiles, selectedProfileId, onSelectProfile, config, reloadProfiles }) {
   const selected = profiles.find((profile) => profile.profile_id === selectedProfileId) || null;
 
@@ -214,6 +259,9 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
               </div>
             </>
           )}
+
+          <h3>Run history</h3>
+          <RunHistoryTable profileId={selected.profile_id} />
 
           <div className="card-actions" style={{ marginTop: 14 }}>
             <button className="button small danger-outline" onClick={handleArchive} disabled={archiving}>

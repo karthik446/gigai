@@ -1302,6 +1302,7 @@ def _make_handler(
     run_start_timeout_seconds: float = RUN_START_TIMEOUT_SECONDS,
 ) -> type[BaseHTTPRequestHandler]:
     from .answers import AnswersRoutesMixin
+    from .applications import ApplicationsRoutesMixin
     from .assess import AssessRoutesMixin
     from .config import ConfigRoutesMixin
     from .discover import DiscoverRoutesMixin
@@ -1309,6 +1310,7 @@ def _make_handler(
     from .profiles import ProfilesRoutesMixin
     from .rank import RankRoutesMixin
     from .runs import RunRoutesMixin
+    from .runs_list import RunsListRoutesMixin
     from .setup import SetupRoutesMixin
     from .static import StaticRoutesMixin
 
@@ -1317,10 +1319,12 @@ def _make_handler(
         SetupRoutesMixin,
         DiscoverRoutesMixin,
         RunRoutesMixin,
+        RunsListRoutesMixin,
         ProfilesRoutesMixin,
         RankRoutesMixin,
         AssessRoutesMixin,
         AnswersRoutesMixin,
+        ApplicationsRoutesMixin,
         ResumeExtractRoutesMixin,
         StaticRoutesMixin,
         BaseHTTPRequestHandler,
@@ -1501,6 +1505,12 @@ def _make_handler(
                     if path == "/api/answers":
                         self._handle_get_answers()
                         return
+                    if path == "/api/runs":
+                        self._handle_get_runs_list()
+                        return
+                    if path == "/api/applications":
+                        self._handle_get_applications()
+                        return
                     run_id = _match_run_id(path, suffix="/results")
                     if run_id is not None:
                         self._handle_get_run_results(run_id)
@@ -1547,6 +1557,9 @@ def _make_handler(
                     return
                 if path == "/api/resume/extract":
                     self._handle_post_resume_extract()
+                    return
+                if path == "/api/applications":
+                    self._handle_post_applications()
                     return
                 profile_id = _match_profile_id(path, suffix="/archive")
                 if profile_id is not None:

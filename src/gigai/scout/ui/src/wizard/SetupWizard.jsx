@@ -31,7 +31,16 @@ const TOTAL_STEPS = 4;
 //
 // `onDone(result)` fires when the operator presses Done after a successful
 // save; `result` is `{profile}` (the saved profile's public shape).
-export default function SetupWizard({ onDone }) {
+//
+// P9c: `onCancel` (optional) fires when the operator backs out before
+// saving -- nothing is submitted, and the caller decides where "back to
+// where the user came from" means (App.jsx's edit-preferences path closes
+// the wizard and returns to whichever tab was showing). Only rendered once
+// a save hasn't already succeeded (`!saved`), matching Back/Next's own
+// `Boolean(saved)` gating -- once Finish has saved, Cancel would be
+// confusing ("cancel" a save that already happened), so FinishScreen's own
+// Done button is the only way forward from there.
+export default function SetupWizard({ onDone, onCancel }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [existingPrefs, setExistingPrefs] = useState(null);
@@ -250,9 +259,16 @@ export default function SetupWizard({ onDone }) {
       )}
 
       <div className="wz-actions">
-        <button type="button" className="button secondary" onClick={goBack} disabled={step === 1 || saving || Boolean(saved)}>
-          Back
-        </button>
+        <div>
+          <button type="button" className="button secondary" onClick={goBack} disabled={step === 1 || saving || Boolean(saved)}>
+            Back
+          </button>
+          {onCancel && !saved && (
+            <button type="button" className="button secondary" onClick={onCancel} disabled={saving} style={{ marginLeft: 8 }}>
+              Cancel
+            </button>
+          )}
+        </div>
         <div className="wz-right">
           {!isLast && (
             <button type="button" className="button" onClick={goNext} disabled={!complete || extracting}>

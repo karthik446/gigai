@@ -151,4 +151,32 @@ export function verdictLabel(verdict) {
   return VERDICT_LABELS[verdict] || verdict;
 }
 
+// P9c: "2 hours ago"/"3 days ago"-style copy for a run's created_at, for the
+// dashboard's "last run" line and the Profiles run-history table (mockup's
+// lastRun.when). Falls back to the raw ISO string for an unparseable date
+// rather than hiding the field.
+export function relativeTimeLabel(isoDate) {
+  if (!isoDate) {
+    return "unknown time";
+  }
+  const parsed = new Date(isoDate);
+  if (Number.isNaN(parsed.getTime())) {
+    return isoDate;
+  }
+  const diffMs = Date.now() - parsed.getTime();
+  const diffMinutes = Math.round(diffMs / 60000);
+  if (diffMinutes < 1) {
+    return "just now";
+  }
+  if (diffMinutes < 60) {
+    return `${diffMinutes} minute${diffMinutes === 1 ? "" : "s"} ago`;
+  }
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
+  }
+  const diffDays = Math.round(diffHours / 24);
+  return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
+}
+
 export { NOT_ASSESSED_REASON_LABELS };

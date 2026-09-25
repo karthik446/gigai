@@ -123,6 +123,7 @@ export default function App() {
             reloadConfig();
             setTab("dashboard");
           }}
+          onCancel={() => setEditingSetup(false)}
         />
       )}
 

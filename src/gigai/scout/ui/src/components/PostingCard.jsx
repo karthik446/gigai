@@ -1,7 +1,9 @@
+import { useState } from "react";
 import AssessmentBody from "./AssessmentBody.jsx";
 import SponsorshipBadge from "./SponsorshipBadge.jsx";
 import PrepPanel from "./PrepPanel.jsx";
 import { displayCompanyName, notAssessedReasonDetail, notAssessedReasonLabel, unchangedSinceLabel } from "../display.js";
+import { postApplication } from "../api.js";
 
 // One card per posting (B4: operator "load ui sooner, one search -> assess
 // load, as a card"). `row` is the normalized shape `buildBoardRows` produces
@@ -45,6 +47,52 @@ function RankBadge({ rankScore }) {
   );
 }
 
+// P9c: "Mark applied" records a POST /api/applications event
+// (external_ref = this posting's normalized_url) -- own local state so one
+// card's in-flight request never blocks another; once recorded the button
+// becomes a plain confirmation (no un-mark; a correction is a fresh event
+// through the same posting, matching application_events.py's own
+// append-only/supersedes model, out of scope for a card action).
+function MarkAppliedButton({ normalizedUrl }) {
+  const [state, setState] = useState("idle"); // idle | saving | done | error
+  const [error, setError] = useState(null);
+
+  if (!normalizedUrl) {
+    return null;
+  }
+  if (state === "done") {
+    return <span className="status-badge met">Marked applied</span>;
+  }
+  return (
+    <span>
+      <button
+        type="button"
+        className="button small secondary"
+        disabled={state === "saving"}
+        onClick={(event) => {
+          event.stopPropagation();
+          event.preventDefault();
+          setState("saving");
+          setError(null);
+          postApplication({ normalized_url: normalizedUrl, event_kind: "applied" })
+            .then(() => setState("done"))
+            .catch((err) => {
+              setState("idle");
+              setError(err.message || String(err));
+            });
+        }}
+      >
+        {state === "saving" ? "Marking…" : "Mark applied"}
+      </button>
+      {error && (
+        <span className="muted" style={{ marginLeft: 6, fontSize: "0.8rem" }}>
+          {error}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export default function PostingCard({ row, rankScore, profileId, showPrep }) {
   const { posting, status, assessment, notAssessedReason, fromRunDate } = row;
   const statusLabel = status === "carried_forward" ? unchangedSinceLabel(fromRunDate) : STATUS_LABELS[status] || status;
@@ -72,6 +120,10 @@ export default function PostingCard({ row, rankScore, profileId, showPrep }) {
           <RankBadge rankScore={rankScore} />
         </div>
       </summary>
+
+      <div className="card-actions" style={{ marginTop: 8 }}>
+        <MarkAppliedButton normalizedUrl={posting.normalized_url} />
+      </div>
 
       {status === "assessing" && <p className="muted">The model is assessing this posting…</p>}
 

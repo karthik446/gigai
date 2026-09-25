@@ -213,4 +213,29 @@ export function postRank(runId, fields) {
   return request("POST", `/api/runs/${encodeURIComponent(runId)}/rank`, fields || {});
 }
 
+// P9c: every find-jobs run for this target (newest first), with per-run
+// counts (found/new/assessed/matched) -- the dashboard's "last run"/"new
+// since last run", the Profiles run-history table, and the Find-jobs
+// past-run picker. Optionally scoped to one profile.
+export function getRuns(params) {
+  const query = new URLSearchParams();
+  if (params && params.profileId) {
+    query.set("profile_id", params.profileId);
+  }
+  const qs = query.toString();
+  return request("GET", `/api/runs${qs ? `?${qs}` : ""}`);
+}
+
+// P9c: the application pipeline + needs-action panels, and the posting
+// card's "Mark applied" action. GET lists every recorded application event
+// (incl. `linked_posting`, A1's find-jobs join, `null` when unmatched);
+// POST records one via external_ref = the posting's normalized_url.
+export function getApplications() {
+  return request("GET", "/api/applications");
+}
+
+export function postApplication(fields) {
+  return request("POST", "/api/applications", fields);
+}
+
 export { ApiError };

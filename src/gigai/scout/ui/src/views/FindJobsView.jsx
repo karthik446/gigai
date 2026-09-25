@@ -13,17 +13,22 @@ import ConfigPanel from "../components/ConfigPanel.jsx";
 import RunConfirmDialog from "../components/RunConfirmDialog.jsx";
 import NodeStatusList from "../components/NodeStatusList.jsx";
 import FindJobsPostingsBoard from "../components/FindJobsPostingsBoard.jsx";
+import { useRuns } from "../hooks.js";
+import { relativeTimeLabel } from "../display.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "blocked", "cancelled", "interrupted"]);
 const POLL_INTERVAL_MS = 2000;
 const PROGRESS_POLL_INTERVAL_MS = 1500;
 
-// P9/F3: Find jobs, for the selected profile.
+// P9/P9c (F3): Find jobs, for the selected profile.
 //
-// DROPPED from the mockup (no backing API):
-//  - Past-run picker: no route lists a profile's (or any) past run_ids;
-//    GET /api/runs/{run_id} needs one you already hold. This view only
-//    ever shows the run it just started, in this session.
+// P9c: past-run picker now wired to GET /api/runs?profile_id=<this
+// profile> -- selecting an entry loads that run's real, sealed
+// GET /api/runs/{id}/results (never a stub; the mockup's own
+// selectPastRun() was a documented no-op, see mockups/README.md's open
+// question #7 -- this replaces it with the real read).
+//
+// Still DROPPED from the mockup (no backing API):
 //  - "New since last run" filter: no field computes it anywhere.
 //  - "Stack overlap with profile" on cards: no field computes it; Jev's
 //    `reasons`/`mismatch_flags` (category ids, never prose) are shown
@@ -33,7 +38,43 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 // existing polling logic), posting cards with verdict + rank score/flags +
 // sponsorship + not-assessed reason (PostingCard.jsx, extended), the Jev
 // "no + strong mismatch" hidden-by-default filter (RankScore.hidden_by_default),
-// and a "Prep for interview" command panel (gigai scout prep, S27).
+// a "Prep for interview" command panel (gigai scout prep, S27), and a
+// "Mark applied" action per card (POST /api/applications).
+function PastRunPicker({ profileId, onSelect, disabled }) {
+  const { loading, runs, error } = useRuns(profileId);
+  if (loading || error || runs.length === 0) {
+    return null;
+  }
+  return (
+    <div className="form-group" style={{ maxWidth: 360 }}>
+      <label className="form-label" htmlFor="past-run-picker">
+        View a past run
+      </label>
+      <select
+        id="past-run-picker"
+        onChange={(event) => {
+          if (event.target.value) {
+            onSelect(event.target.value);
+          }
+          event.target.value = "";
+        }}
+        disabled={disabled}
+        defaultValue=""
+      >
+        <option value="" disabled>
+          Select a past run…
+        </option>
+        {runs.map((run) => (
+          <option key={run.run_id} value={run.run_id}>
+            {relativeTimeLabel(run.created_at)} · {run.counts.found} found / {run.counts.assessed} assessed (
+            {run.status})
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export default function FindJobsView({ profile, config, reloadConfig }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [runSubmitting, setRunSubmitting] = useState(false);
@@ -142,6 +183,31 @@ export default function FindJobsView({ profile, config, reloadConfig }) {
     setRunError(null);
   }
 
+  // P9c: load a PAST run's real, sealed results -- never starts a new run.
+  // Stops any live poll first, so an in-progress run's cards can't keep
+  // arriving and overwrite what the operator just chose to view.
+  function viewPastRun(pastRunId) {
+    stopPolling();
+    stopProgressPolling();
+    setRunError(null);
+    setResultsError(null);
+    setRunId(pastRunId);
+    boardRowsRef.current = [];
+    setBoardRows([]);
+    setProgress(null);
+    setRankScores([]);
+    getRunStatus(pastRunId)
+      .then((status) => {
+        setRunStatus(status);
+        return getRunResults(pastRunId);
+      })
+      .then((response) => {
+        setResults(response.payload);
+        loadRankScores(pastRunId);
+      })
+      .catch((error) => setResultsError(error.message || String(error)));
+  }
+
   async function handleConfirm({ selectionCap, modelTarget }) {
     if (!config) {
       return;
@@ -222,6 +288,10 @@ export default function FindJobsView({ profile, config, reloadConfig }) {
           </button>
         </div>
         {!hasResume && <p className="muted">Add a resume (see above) to enable a run.</p>}
+
+        <div style={{ marginTop: 12 }}>
+          <PastRunPicker profileId={profile.profile_id} onSelect={viewPastRun} disabled={runActive} />
+        </div>
       </section>
 
       {dialogOpen && config && (
