@@ -1,0 +1,276 @@
+/* P9b: setup-wizard-only styles, scoped under .setup-wizard so nothing here
+   collides with styles.css (P9a's) or the existing components. Tokens the
+   app stylesheet already defines (--panel, --border, --muted, --accent,
+   --accent-contrast, --ok, --ok-bg, --warn, --warn-bg, --danger,
+   --danger-bg) are reused; the two the mockup adds are defined here. */
+
+.setup-wizard {
+  --wz-chip-bg: #eef0f4;
+  --wz-step-inactive: #d9dbe0;
+}
+
+/* Step indicator (mockup: 4 dots, labels hidden under 480px). */
+.setup-wizard .wz-steps {
+  display: flex;
+  align-items: center;
+  margin-bottom: 18px;
+}
+.setup-wizard .wz-step {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+.setup-wizard .wz-step-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--wz-step-inactive);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.setup-wizard .wz-step.active .wz-step-dot {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+.setup-wizard .wz-step.done .wz-step-dot {
+  background: var(--ok);
+  color: var(--accent-contrast);
+}
+.setup-wizard .wz-step-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-left: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.setup-wizard .wz-step.active .wz-step-label {
+  color: var(--text);
+  font-weight: 600;
+}
+.setup-wizard .wz-step-line {
+  flex: 1;
+  height: 2px;
+  background: var(--wz-step-inactive);
+  margin: 0 6px;
+}
+.setup-wizard .wz-step-line.done {
+  background: var(--ok);
+}
+@media (max-width: 480px) {
+  .setup-wizard .wz-step-label {
+    display: none;
+  }
+}
+
+.setup-wizard h3 {
+  font-size: 0.95rem;
+  margin: 16px 0 8px;
+}
+.setup-wizard small.wz-hint {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-top: 4px;
+}
+.setup-wizard .wz-hint-inline {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-style: italic;
+  font-weight: normal;
+}
+.setup-wizard textarea.text-input {
+  resize: vertical;
+  min-height: 160px;
+  font-family: inherit;
+}
+.setup-wizard input[type="file"] {
+  display: block;
+  font-size: 0.9rem;
+}
+
+/* Resume source tabs */
+.setup-wizard .wz-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.setup-wizard .wz-tab {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 12px;
+  font-size: 0.88rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.setup-wizard .wz-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+/* Existing-resume picker */
+.setup-wizard .wz-file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: 0.88rem;
+  cursor: pointer;
+  background: var(--panel);
+  color: var(--text);
+  font-family: inherit;
+}
+.setup-wizard .wz-file-item.active {
+  border-color: var(--accent);
+  background: var(--wz-chip-bg);
+}
+.setup-wizard .wz-file-item .wz-fname {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.setup-wizard .wz-file-item .wz-fdate {
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+/* Profile mode + model target choices as radio rows */
+.setup-wizard .wz-radio-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.setup-wizard .wz-radio-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.setup-wizard .wz-radio-card.active {
+  border-color: var(--accent);
+  background: var(--wz-chip-bg);
+}
+.setup-wizard .wz-radio-card input {
+  margin-top: 3px;
+  width: auto;
+}
+.setup-wizard .wz-radio-body strong {
+  display: block;
+  font-size: 0.92rem;
+}
+.setup-wizard .wz-radio-body span {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* Extraction status + results */
+.setup-wizard .wz-progress {
+  margin: 10px 0 14px;
+}
+.setup-wizard .wz-progress-track {
+  background: var(--wz-chip-bg);
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.setup-wizard .wz-progress-fill {
+  background: var(--accent);
+  height: 100%;
+  width: 40%;
+  animation: wz-indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes wz-indeterminate {
+  0% {
+    margin-left: -40%;
+  }
+  100% {
+    margin-left: 100%;
+  }
+}
+.setup-wizard .callout.ok {
+  background: var(--ok-bg);
+  color: var(--ok);
+  border: 1px solid var(--ok);
+}
+
+/* Screen 4 */
+.setup-wizard .wz-summary {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+.setup-wizard .wz-summary td {
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.setup-wizard .wz-summary td.k {
+  color: var(--muted);
+  width: 40%;
+}
+.setup-wizard .wz-copy-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.setup-wizard .wz-commands {
+  background: var(--wz-chip-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.setup-wizard .wz-command {
+  margin-bottom: 6px;
+}
+.setup-wizard .wz-command:last-child {
+  margin-bottom: 0;
+}
+.setup-wizard .wz-command .wz-comment {
+  color: var(--muted);
+}
+.setup-wizard code {
+  background: var(--wz-chip-bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+/* Back / Next bar */
+.setup-wizard .wz-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 18px;
+  gap: 8px;
+}
+.setup-wizard .wz-actions .wz-right {
+  display: flex;
+  gap: 8px;
+}

@@ -136,4 +136,19 @@ export function sponsorshipLabel(sponsorship) {
   return SPONSORSHIP_LABELS[sponsorship] || sponsorship;
 }
 
+// P2/P9: the verdict enum (contracts.py's Verdict) in plain words, for the
+// card-level badge PostingCard/AssessmentBody show alongside the matrix.
+const VERDICT_LABELS = {
+  matched_above_threshold: "Matched",
+  pending_user_answers: "Needs your answer",
+  not_a_match: "Not a match",
+};
+
+export function verdictLabel(verdict) {
+  if (!verdict) {
+    return null;
+  }
+  return VERDICT_LABELS[verdict] || verdict;
+}
+
 export { NOT_ASSESSED_REASON_LABELS };

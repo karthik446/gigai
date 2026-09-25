@@ -302,6 +302,27 @@ def _test_model_prompt(request: httpx.Request) -> str:
 #: for this file).
 _TEST_MODEL_ANSWERED_GCP_MARKER = "cloud:gcp:"
 
+#: P9b (v0.1.9): the first line of every ``api/extract.py`` prompt
+#: (``extract.EXTRACT_PROMPT_HEADER`` -- the literal is repeated here so the
+#: fixture never imports the route module; ``test_resume_extract_api.py``
+#: asserts the two stay identical). Its presence means "this is a resume
+#: extraction, not an assessment", and the fixture answers with a fixed
+#: stack/seniority/titles JSON instead of the assess verdict below. The
+#: garbage/sleep markers above still apply first (they sit in the resume
+#: text, which the extraction prompt carries), so the extract journeys get
+#: the 502/504 paths through the same existing branches.
+TEST_MODEL_EXTRACT_MARKER = "GigAI Scout resume extraction"
+#: Inside an extraction prompt only: the fixture answers HTTP 503 (the
+#: local adapter raises, the route maps it to 503 ``model_unavailable``) --
+#: the journey's "model unavailable" case without a live provider. Checked
+#: only under the extraction branch, so no assess journey ever sees it.
+TEST_MODEL_UNAVAILABLE_MARKER = "GIGAI-TEST-MODEL: unavailable"
+TEST_MODEL_EXTRACT_REPLY: dict[str, object] = {
+    "stack": ["Python", "PostgreSQL", "Kubernetes"],
+    "seniority": "staff",
+    "titles": ["Staff Software Engineer", "Staff Backend Engineer"],
+}
+
 
 def _test_model_handler(request: httpx.Request) -> httpx.Response:
     """Answer the three Ollama identity/chat calls without a model process.
@@ -347,6 +368,25 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
                     "done_reason": "stop",
                     "prompt_eval_count": 10,
                     "eval_count": 12,
+                },
+                request=request,
+            )
+        if TEST_MODEL_EXTRACT_MARKER in prompt:
+            if TEST_MODEL_UNAVAILABLE_MARKER in prompt:
+                return httpx.Response(503, json={"error": "test fixture: model unavailable"}, request=request)
+            return httpx.Response(
+                200,
+                json={
+                    "model": TEST_MODEL_NAME,
+                    "created_at": "2026-09-25T00:00:00Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps(TEST_MODEL_EXTRACT_REPLY, separators=(",", ":")),
+                    },
+                    "done": True,
+                    "done_reason": "stop",
+                    "prompt_eval_count": 10,
+                    "eval_count": 16,
                 },
                 request=request,
             )

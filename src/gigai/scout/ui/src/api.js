@@ -150,4 +150,67 @@ export function getDiscoverLatest() {
   return request("GET", "/api/discover/latest");
 }
 
+// F1: profiles (S25). GET lists every profile + which one is selected;
+// POST creates one; PUT edits one; archive/selection are their own routes
+// (see find_jobs/api/profiles.py -- this module mirrors that contract).
+export function getProfiles() {
+  return request("GET", "/api/profiles");
+}
+
+export function createProfile(fields) {
+  return request("POST", "/api/profiles", fields);
+}
+
+export function updateProfile(profileId, fields) {
+  return request("PUT", `/api/profiles/${encodeURIComponent(profileId)}`, fields);
+}
+
+export function archiveProfile(profileId, replacementProfileId) {
+  return request("POST", `/api/profiles/${encodeURIComponent(profileId)}/archive`, {
+    ...(replacementProfileId ? { replacement_profile_id: replacementProfileId } : {}),
+  });
+}
+
+export function selectProfile(profileId) {
+  return request("POST", "/api/profiles/selection", { profile_id: profileId });
+}
+
+// P5: one standalone ("quick") assessment -- URL or pasted text, a profile
+// or a pasted resume. Synchronous: the handler blocks for the model call
+// (present_api's docstring); a 504 assess_timeout surfaces through ApiError
+// like any other error code.
+export function postAssess(request_) {
+  return request("POST", "/api/assess", request_);
+}
+
+export function getAssessments(params) {
+  const query = new URLSearchParams();
+  if (params && params.profileId) {
+    query.set("profile_id", params.profileId);
+  }
+  if (params && params.verdict) {
+    query.set("verdict", params.verdict);
+  }
+  const qs = query.toString();
+  return request("GET", `/api/assessments${qs ? `?${qs}` : ""}`);
+}
+
+// P3: the Q&A loop. POST upserts one answered question and optionally
+// re-assesses the named job (by job_identity) with every answered question
+// applied; GET lists every answered question recorded so far.
+export function postAnswer(fields) {
+  return request("POST", "/api/answers", fields);
+}
+
+export function getAnswers() {
+  return request("GET", "/api/answers");
+}
+
+// P6: Jev pre-rank for one run's postings, against a profile (default: the
+// selected one). No key configured -> scores come back empty (fail open),
+// never an error.
+export function postRank(runId, fields) {
+  return request("POST", `/api/runs/${encodeURIComponent(runId)}/rank`, fields || {});
+}
+
 export { ApiError };

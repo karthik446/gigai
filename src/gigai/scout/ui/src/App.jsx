@@ -1,34 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ApiError,
-  buildRunRequest,
-  getConfig,
-  getDiscoverLatest,
-  getRunProgress,
-  getRunResults,
-  getRunStatus,
-  getSetup,
-  putSetup,
-  startDiscovery,
-  startRun,
-} from "./api.js";
-import { mergeRows, rowsFromProgress } from "./boardRows.js";
-import ConfigPanel from "./components/ConfigPanel.jsx";
-import RunConfirmDialog from "./components/RunConfirmDialog.jsx";
-import NodeStatusList from "./components/NodeStatusList.jsx";
-import ProgressBoard from "./components/ProgressBoard.jsx";
-import ResultsView from "./components/ResultsView.jsx";
-import SetupInterviewForm from "./components/SetupInterviewForm.jsx";
-import DiscoverPanel from "./components/DiscoverPanel.jsx";
+import { useCallback, useEffect, useState } from "react";
+import { ApiError, getConfig, getSetup } from "./api.js";
+import { useProfiles } from "./hooks.js";
+import SetupWizard from "./wizard/index.js";
+import ProfileSwitcher from "./components/ProfileSwitcher.jsx";
+import DashboardView from "./views/DashboardView.jsx";
+import ProfilesView from "./views/ProfilesView.jsx";
+import FindJobsView from "./views/FindJobsView.jsx";
+import QuickAssessPanel from "./views/QuickAssessPanel.jsx";
+import PendingAnswersView from "./views/PendingAnswersView.jsx";
 
-const TERMINAL_STATUSES = new Set(["succeeded", "failed", "blocked", "cancelled", "interrupted"]);
-const POLL_INTERVAL_MS = 2000;
-// B4: the progress poll is a separate, faster cadence than the run-status
-// poll -- "load ui sooner… we load as we get" means cards should update at
-// roughly the rate work actually happens, not at the coarser status cadence.
-const PROGRESS_POLL_INTERVAL_MS = 1500;
-// S2-B: the Discover panel's own poll, while a discovery session is running.
-const DISCOVER_POLL_INTERVAL_MS = 4000;
+const TABS = [
+  { value: "dashboard", label: "Dashboard" },
+  { value: "profiles", label: "Profiles" },
+  { value: "findjobs", label: "Find jobs" },
+  { value: "quickassess", label: "Quick assess" },
+  { value: "answers", label: "Pending answers" },
+];
 
 function useConfig() {
   const [state, setState] = useState({ loading: true, config: null, error: null });
@@ -71,252 +58,32 @@ function useSetup() {
   return { ...state, reload };
 }
 
+// P9 (v0.1.9): App.jsx is now a router across F3's app views (dashboard /
+// profiles / find jobs / quick assess / pending answers / setup) instead of
+// the single-screen run flow it used to be. The run flow itself moved to
+// views/FindJobsView.jsx (same polling logic, per-profile). The setup route
+// renders P9b's <SetupWizard/> (ui/src/wizard/) in place of the old
+// single-page SetupInterviewForm.
 export default function App() {
   const { loading: configLoading, config: configResponse, error: configError, reload: reloadConfig } = useConfig();
   const setupState = useSetup();
+  const profilesState = useProfiles();
 
+  const [tab, setTab] = useState("dashboard");
   const [editingSetup, setEditingSetup] = useState(false);
-  const [setupSaving, setSetupSaving] = useState(false);
-  const [setupError, setSetupError] = useState(null);
-  const [setupFieldErrors, setSetupFieldErrors] = useState(null);
-
-  const [discoverLatest, setDiscoverLatest] = useState(null);
-  const [discoverLoading, setDiscoverLoading] = useState(false);
-  const [discoverStarting, setDiscoverStarting] = useState(false);
-  const [discoverError, setDiscoverError] = useState(null);
-  const discoverPollTimer = useRef(null);
-
-  const stopDiscoverPolling = useCallback(() => {
-    if (discoverPollTimer.current) {
-      clearTimeout(discoverPollTimer.current);
-      discoverPollTimer.current = null;
-    }
-  }, []);
-
-  const pollDiscoverLatest = useCallback(
-    (delayMs) => {
-      discoverPollTimer.current = setTimeout(() => {
-        getDiscoverLatest()
-          .then((latest) => {
-            setDiscoverLatest(latest);
-            if (latest.running) {
-              pollDiscoverLatest(DISCOVER_POLL_INTERVAL_MS);
-            }
-          })
-          .catch(() => {
-            // Best-effort, same reasoning as the run-progress poll: a
-            // transient failure here should back off and retry, not stop
-            // reflecting a session that may still be running.
-            pollDiscoverLatest(DISCOVER_POLL_INTERVAL_MS);
-          });
-      }, delayMs);
-    },
-    [],
-  );
-
-  // Once prefs exist (setup is done), load the Discover panel's last-run
-  // state and keep polling if a session is already running (e.g. the UI
-  // was reloaded mid-session).
-  useEffect(() => {
-    if (setupState.prefsMissing || setupState.loading || !setupState.prefs) {
-      return undefined;
-    }
-    setDiscoverLoading(true);
-    getDiscoverLatest()
-      .then((latest) => {
-        setDiscoverLatest(latest);
-        setDiscoverLoading(false);
-        if (latest.running) {
-          pollDiscoverLatest(DISCOVER_POLL_INTERVAL_MS);
-        }
-      })
-      .catch((error) => {
-        setDiscoverLoading(false);
-        setDiscoverError(error.message || String(error));
-      });
-    return stopDiscoverPolling;
-  }, [setupState.prefsMissing, setupState.loading, setupState.prefs, pollDiscoverLatest, stopDiscoverPolling]);
-
-  async function handleSaveSetup(fields) {
-    setSetupSaving(true);
-    setSetupError(null);
-    setSetupFieldErrors(null);
-    try {
-      await putSetup(fields);
-      setEditingSetup(false);
-      setupState.reload();
-      // P0-2: PUT /api/setup also rewrites find-jobs.json (present_api.py's
-      // _handle_put_setup), so the config -- and its config_digest that
-      // handleConfirm sends on the next Run -- goes stale the moment the
-      // setup save succeeds. Without this, the next Run POST 409s
-      // (config_digest_mismatch) even though nothing about the run itself
-      // was wrong; reloading here keeps configResponse.config_digest current.
-      reloadConfig();
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 400) {
-        setSetupFieldErrors(error.field_errors || null);
-        setSetupError(error.field_errors ? null : error.message || String(error));
-      } else {
-        setSetupError(error.message || String(error));
-      }
-    } finally {
-      setSetupSaving(false);
-    }
-  }
-
-  async function handleStartDiscovery() {
-    setDiscoverStarting(true);
-    setDiscoverError(null);
-    try {
-      await startDiscovery();
-      stopDiscoverPolling();
-      pollDiscoverLatest(0);
-    } catch (error) {
-      setDiscoverError(error.message || String(error));
-    } finally {
-      setDiscoverStarting(false);
-    }
-  }
-
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [runSubmitting, setRunSubmitting] = useState(false);
-  const [runError, setRunError] = useState(null);
-  const [runId, setRunId] = useState(null);
-  const [runStatus, setRunStatus] = useState(null);
-  const [progress, setProgress] = useState(null);
-  const [boardRows, setBoardRows] = useState([]);
-  const [results, setResults] = useState(null);
-  const [resultsError, setResultsError] = useState(null);
-  const pollTimer = useRef(null);
-  const progressPollTimer = useRef(null);
-  const boardRowsRef = useRef([]);
-
-  const stopPolling = useCallback(() => {
-    if (pollTimer.current) {
-      clearTimeout(pollTimer.current);
-      pollTimer.current = null;
-    }
-  }, []);
-
-  const stopProgressPolling = useCallback(() => {
-    if (progressPollTimer.current) {
-      clearTimeout(progressPollTimer.current);
-      progressPollTimer.current = null;
-    }
-  }, []);
-
-  useEffect(() => () => {
-    stopPolling();
-    stopProgressPolling();
-  }, [stopPolling, stopProgressPolling]);
-
-  // B4: progressive cards -- poll /progress independently of /runs/{id}
-  // status, so a card appears the moment its posting is acquired and fills
-  // in as its assessment finishes, instead of waiting for the whole run
-  // (operator: "we load as we get"). Stops once the run reaches a terminal
-  // status (the caller of startProgressPolling controls that via `active`).
-  const pollProgress = useCallback((id) => {
-    getRunProgress(id)
-      .then((snapshot) => {
-        setProgress(snapshot);
-        const nextRows = mergeRows(boardRowsRef.current, rowsFromProgress(snapshot));
-        boardRowsRef.current = nextRows;
-        setBoardRows(nextRows);
-        progressPollTimer.current = setTimeout(() => pollProgress(id), PROGRESS_POLL_INTERVAL_MS);
-      })
-      .catch(() => {
-        // A failed progress poll is never fatal to the run itself (it's a
-        // best-effort, non-authoritative view) -- back off and retry rather
-        // than surfacing an error the way a failed status/results poll does.
-        progressPollTimer.current = setTimeout(() => pollProgress(id), PROGRESS_POLL_INTERVAL_MS);
-      });
-  }, []);
-
-  const pollStatus = useCallback(
-    (id) => {
-      getRunStatus(id)
-        .then((status) => {
-          setRunStatus(status);
-          if (TERMINAL_STATUSES.has(status.status)) {
-            stopProgressPolling();
-            getRunResults(id)
-              .then((response) => setResults(response.payload))
-              .catch((error) => setResultsError(error.message || String(error)));
-          } else {
-            pollTimer.current = setTimeout(() => pollStatus(id), POLL_INTERVAL_MS);
-          }
-        })
-        .catch((error) => {
-          // A failed status poll must not spin forever pretending to still be running:
-          // surface it and stop, rather than silently retrying on a broken connection.
-          stopPolling();
-          stopProgressPolling();
-          setResultsError(error.message || String(error));
-        });
-    },
-    [stopPolling, stopProgressPolling],
-  );
-
-  function openDialog() {
-    setRunError(null);
-    setDialogOpen(true);
-  }
-
-  function closeDialog() {
-    setDialogOpen(false);
-    setRunError(null);
-  }
-
-  async function handleConfirm({ selectionCap, modelTarget }) {
-    if (!configResponse) {
-      return;
-    }
-    setRunSubmitting(true);
-    setRunError(null);
-    try {
-      const body = buildRunRequest({
-        configDigest: configResponse.config_digest,
-        selectionCap,
-        modelTarget,
-      });
-      const response = await startRun(body);
-      setDialogOpen(false);
-      setRunId(response.run_id);
-      setRunStatus({ run_id: response.run_id, status: response.status, node_receipts: response.node_receipts });
-      setResults(null);
-      setResultsError(null);
-      setProgress(null);
-      boardRowsRef.current = [];
-      setBoardRows([]);
-      stopPolling();
-      stopProgressPolling();
-      if (!TERMINAL_STATUSES.has(response.status)) {
-        pollTimer.current = setTimeout(() => pollStatus(response.run_id), POLL_INTERVAL_MS);
-        progressPollTimer.current = setTimeout(() => pollProgress(response.run_id), 0);
-      } else {
-        getRunResults(response.run_id)
-          .then((resultsResponse) => setResults(resultsResponse.payload))
-          .catch((error) => setResultsError(error.message || String(error)));
-      }
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) {
-        setRunError(`${error.message} Reloading configuration…`);
-        reloadConfig();
-      } else {
-        setRunError(error.message || String(error));
-      }
-    } finally {
-      setRunSubmitting(false);
-    }
-  }
-
-  const hasResume = Boolean(configResponse && configResponse.resume_preview);
-  const canRun = Boolean(configResponse) && hasResume;
-  const runActive = Boolean(runId && runStatus && !TERMINAL_STATUSES.has(runStatus.status));
 
   // S2-B: `gigai scout run` opens this UI; if no discovery prefs exist yet,
-  // the interview shows first, ahead of the rest of the app (CHANGE #2).
+  // the interview shows first, ahead of every other view (CHANGE #2).
   const showFirstRunInterview = !setupState.loading && setupState.prefsMissing && !setupState.error;
+
+  const selectedProfile = profilesState.profiles.find((profile) => profile.profile_id === profilesState.selectedProfileId) || null;
+
+  function handleSelectProfile(profileId) {
+    profilesState.switchTo(profileId).catch(() => {
+      /* surfaced via profilesState.error on the next reload; the switcher
+         itself stays on the previous selection rather than guessing. */
+    });
+  }
 
   return (
     <div>
@@ -336,40 +103,59 @@ export default function App() {
       )}
 
       {showFirstRunInterview && (
-        <SetupInterviewForm
-          initialPrefs={setupState.prefill || {}}
-          onSave={handleSaveSetup}
-          onCancel={null}
-          saving={setupSaving}
-          error={setupError}
-          fieldErrors={setupFieldErrors}
-          isFirstRun
+        <SetupWizard
+          onDone={() => {
+            setupState.reload();
+            // P0-2: PUT /api/setup also rewrites find-jobs.json, so the
+            // config -- and its config_digest that a run POST sends --
+            // goes stale the moment the wizard's Finish save succeeds.
+            reloadConfig();
+            setTab("dashboard");
+          }}
         />
       )}
 
       {editingSetup && setupState.prefs && (
-        <SetupInterviewForm
-          initialPrefs={setupState.prefs}
-          onSave={handleSaveSetup}
-          onCancel={() => {
+        <SetupWizard
+          onDone={() => {
             setEditingSetup(false);
-            setSetupError(null);
-            setSetupFieldErrors(null);
+            setupState.reload();
+            reloadConfig();
+            setTab("dashboard");
           }}
-          saving={setupSaving}
-          error={setupError}
-          fieldErrors={setupFieldErrors}
-          isFirstRun={false}
         />
       )}
 
-      {/* The rest of the app (config, run, discover) is gated behind the
-          first-run interview -- CHANGE #2's "asked ONCE... shows the
-          interview first". Once prefs exist it's never blocking again;
-          editing happens in-place above via the Preferences link. */}
+      {/* The rest of the app is gated behind the first-run interview --
+          CHANGE #2's "asked ONCE... shows the interview first". Once prefs
+          exist it's never blocking again; editing happens via the
+          Preferences link inside the Profiles view. */}
       {!showFirstRunInterview && !editingSetup && (
         <>
-          {configLoading && <p>Loading configuration…</p>}
+          <nav className="top-nav" aria-label="Main views">
+            {TABS.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                className={tab === item.value ? "active" : ""}
+                onClick={() => setTab(item.value)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
+
+          <div className="panel" style={{ padding: "10px 16px" }}>
+            {profilesState.loading && <p className="muted">Loading profiles…</p>}
+            {profilesState.error && <div className="callout danger">Could not load profiles: {profilesState.error}</div>}
+            {!profilesState.loading && !profilesState.error && (
+              <ProfileSwitcher
+                profiles={profilesState.profiles}
+                selectedProfileId={profilesState.selectedProfileId}
+                onSelect={handleSelectProfile}
+              />
+            )}
+          </div>
 
           {configError && (
             <div className="callout danger">
@@ -380,69 +166,41 @@ export default function App() {
             </div>
           )}
 
-          {configResponse && (
-            <>
-              <ConfigPanel
-                config={configResponse.config}
-                resumePreview={configResponse.resume_preview}
-                resumeLabel={configResponse.resume_label}
-                resumeCreatedAt={configResponse.resume_created_at}
-                resumeMissingHint={configResponse.resume_missing_hint}
-              />
-
-              <div className="panel">
-                <button className="button" onClick={openDialog} disabled={!canRun}>
-                  Run workflow
-                </button>
-                {!hasResume && <p className="muted">Add a resume (see above) to enable a run.</p>}
-                {setupState.prefs && (
-                  <p className="muted">
-                    <button className="button small secondary" onClick={() => setEditingSetup(true)}>
-                      Preferences
-                    </button>
-                  </p>
-                )}
-              </div>
-            </>
-          )}
-
-          {dialogOpen && configResponse && (
-            <RunConfirmDialog
-              config={configResponse.config}
-              onConfirm={handleConfirm}
-              onCancel={closeDialog}
-              submitting={runSubmitting}
-              error={runError}
+          {tab === "dashboard" && (
+            <DashboardView
+              profiles={profilesState.profiles}
+              selectedProfileId={profilesState.selectedProfileId}
+              onSelectProfile={handleSelectProfile}
+              cadenceDays={setupState.prefs?.cadence_days}
             />
           )}
 
-          {runId && runStatus && (
-            <NodeStatusList
-              status={runStatus.status}
-              nodeReceipts={runStatus.node_receipts}
-              progressSteps={progress?.steps}
+          {tab === "profiles" && (
+            <ProfilesView
+              profiles={profilesState.profiles}
+              selectedProfileId={profilesState.selectedProfileId}
+              onSelectProfile={handleSelectProfile}
+              config={configResponse?.config}
+              reloadProfiles={profilesState.reload}
             />
           )}
 
-          {resultsError && <div className="callout danger">Could not load results: {resultsError}</div>}
+          {tab === "findjobs" && !configLoading && (
+            <FindJobsView profile={selectedProfile} config={configResponse} reloadConfig={reloadConfig} />
+          )}
 
-          {/* B4: while the run is active, cards render straight from the
-              progressive /progress poll; once results land, ResultsView takes
-              over (same PostingsBoard underneath, so this is not a layout
-              swap -- see ResultsView.jsx). */}
-          {!results && runActive && <ProgressBoard rows={boardRows} progress={progress} />}
+          {tab === "quickassess" && (
+            <QuickAssessPanel profiles={profilesState.profiles} selectedProfileId={profilesState.selectedProfileId} />
+          )}
 
-          {results && <ResultsView payload={results} />}
+          {tab === "answers" && <PendingAnswersView />}
 
-          {setupState.prefs && !discoverLoading && (
-            <DiscoverPanel
-              latest={discoverLatest}
-              running={Boolean(discoverLatest && discoverLatest.running)}
-              cadenceDays={setupState.prefs.cadence_days || 7}
-              onStart={handleStartDiscovery}
-              starting={discoverStarting}
-              error={discoverError}
-            />
+          {setupState.prefs && (
+            <div className="panel">
+              <button className="button small secondary" onClick={() => setEditingSetup(true)}>
+                Preferences
+              </button>
+            </div>
           )}
         </>
       )}

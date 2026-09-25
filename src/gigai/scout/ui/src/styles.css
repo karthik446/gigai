@@ -563,4 +563,288 @@ table.matrix-table td {
     flex-direction: column;
     gap: 10px;
   }
+
+  .pipeline-row {
+    flex-direction: column;
+  }
+
+  .pipeline-stage {
+    text-align: left;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+}
+
+/* P9 (v0.1.9): F3 app views (dashboard/profiles/find-jobs) + the Q&A loop's
+   inline answer box. Tokens/class names match
+   orchestrator/docs/v0.1.9/mockups/scout-app-views.html so the shipped UI
+   reads as the same product as the approved mockup. */
+
+.top-nav {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.top-nav button {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.top-nav button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.profile-switcher {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.profile-pill {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  min-width: 150px;
+  text-align: left;
+}
+
+.profile-pill.active {
+  border-color: var(--accent);
+  background: #eef0f4;
+}
+
+.profile-pill .pname {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.profile-pill .presume {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.stat-tile {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #eef0f4;
+}
+
+.stat-tile .stat-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.stat-tile .stat-value {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.pipeline-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+
+.pipeline-stage {
+  flex: 1;
+  min-width: 100px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.pipeline-stage .stage-count {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.pipeline-stage .stage-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.action-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+
+.action-item:last-child {
+  border-bottom: none;
+}
+
+.fit-verdict {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 0.88rem;
+}
+
+.reasons-list {
+  margin: 4px 0 0 0;
+  padding-left: 18px;
+  font-size: 0.85rem;
+}
+
+.reasons-list li {
+  margin-bottom: 2px;
+}
+
+.prep-panel {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  font-size: 0.85rem;
+}
+
+.prep-panel h4 {
+  margin: 8px 0 4px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.prep-panel ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.prep-panel pre {
+  background: #eef0f4;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  overflow-x: auto;
+}
+
+.not-assessed-summary {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+
+.not-assessed-summary summary {
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.progress-bar-track {
+  background: #eef0f4;
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+  margin: 10px 0;
+}
+
+.progress-bar-fill {
+  background: var(--accent);
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.node-status-pill.running {
+  border-color: var(--accent);
+}
+
+.node-status-pill.done {
+  border-color: var(--ok);
+}
+
+.run-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+table.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+table.data-table th,
+table.data-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+table.data-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.structured-question-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.structured-question {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
+.question-id {
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: #eef0f4;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.answer-form {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.answer-form .text-input {
+  flex: 1;
+}
+
+.privacy-note {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-style: italic;
+  margin-top: 6px;
 }

@@ -1305,6 +1305,7 @@ def _make_handler(
     from .assess import AssessRoutesMixin
     from .config import ConfigRoutesMixin
     from .discover import DiscoverRoutesMixin
+    from .extract import ResumeExtractRoutesMixin
     from .profiles import ProfilesRoutesMixin
     from .rank import RankRoutesMixin
     from .runs import RunRoutesMixin
@@ -1320,6 +1321,7 @@ def _make_handler(
         RankRoutesMixin,
         AssessRoutesMixin,
         AnswersRoutesMixin,
+        ResumeExtractRoutesMixin,
         StaticRoutesMixin,
         BaseHTTPRequestHandler,
     ):
@@ -1542,6 +1544,9 @@ def _make_handler(
                     return
                 if path == "/api/answers":
                     self._handle_post_answers()
+                    return
+                if path == "/api/resume/extract":
+                    self._handle_post_resume_extract()
                     return
                 profile_id = _match_profile_id(path, suffix="/archive")
                 if profile_id is not None:

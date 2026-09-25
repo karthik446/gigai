@@ -1,5 +1,6 @@
 import AssessmentBody from "./AssessmentBody.jsx";
 import SponsorshipBadge from "./SponsorshipBadge.jsx";
+import PrepPanel from "./PrepPanel.jsx";
 import { displayCompanyName, notAssessedReasonDetail, notAssessedReasonLabel, unchangedSinceLabel } from "../display.js";
 
 // One card per posting (B4: operator "load ui sooner, one search -> assess
@@ -15,6 +16,13 @@ import { displayCompanyName, notAssessedReasonDetail, notAssessedReasonLabel, un
 // result and `row.fromRunDate` names which run it came from, so the card
 // shows the carried fit/reasons instead of a bare "Not assessed" (see
 // boardRows.js's rowsFromResults).
+//
+// P6/P9 (v0.1.9, additive/optional): `rankScore` is this posting's Jev
+// pre-rank (RankScore, jev_contracts.py) when the caller has one (only
+// FindJobsView does, via POST /api/runs/{id}/rank) -- shows fit/score plus
+// its category-id reasons/mismatch flags (Jev has no free-text output).
+// `profileId` + `showPrep` gate the "Prep for interview" panel, shown only
+// on an assessed card with a real posting URL.
 const STATUS_LABELS = {
   acquired: "Waiting to be assessed…",
   assessing: "Assessing…",
@@ -24,9 +32,23 @@ const STATUS_LABELS = {
   carried_forward: "Unchanged",
 };
 
-export default function PostingCard({ row }) {
+function RankBadge({ rankScore }) {
+  if (!rankScore || rankScore.fit === null || rankScore.fit === undefined) {
+    return null;
+  }
+  const cls = rankScore.fit === "strong" ? "met" : rankScore.fit === "no" ? "unmet" : "unclear";
+  return (
+    <span className={`status-badge ${cls}`} title={rankScore.reasons.join(", ")}>
+      Jev: {rankScore.fit}
+      {typeof rankScore.score === "number" ? ` (${rankScore.score})` : ""}
+    </span>
+  );
+}
+
+export default function PostingCard({ row, rankScore, profileId, showPrep }) {
   const { posting, status, assessment, notAssessedReason, fromRunDate } = row;
   const statusLabel = status === "carried_forward" ? unchangedSinceLabel(fromRunDate) : STATUS_LABELS[status] || status;
+  const jobIdentity = posting.normalized_url || null;
 
   return (
     <details className="posting-card" open={status === "assessed" || status === "carried_forward"}>
@@ -47,6 +69,7 @@ export default function PostingCard({ row }) {
           {posting.location && <span>{posting.location}</span>}
           {posting.source_kind && <span className="muted">{posting.source_kind}</span>}
           <SponsorshipBadge sponsorship={assessment?.sponsorship || posting.sponsorship} />
+          <RankBadge rankScore={rankScore} />
         </div>
       </summary>
 
@@ -62,7 +85,13 @@ export default function PostingCard({ row }) {
         <p className="muted">{notAssessedReason ? notAssessedReasonLabel(notAssessedReason) : "The model call for this posting failed."}</p>
       )}
 
-      {assessment && <AssessmentBody assessment={assessment} />}
+      {rankScore && rankScore.mismatch_flags && rankScore.mismatch_flags.length > 0 && (
+        <p className="muted">Jev mismatch flags: {rankScore.mismatch_flags.join(", ")}</p>
+      )}
+
+      {assessment && <AssessmentBody assessment={assessment} jobIdentity={jobIdentity} />}
+
+      {showPrep && status === "assessed" && posting.url && <PrepPanel postingUrl={posting.url} profileId={profileId} />}
     </details>
   );
 }
