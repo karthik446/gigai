@@ -141,10 +141,15 @@ def test_changed_st_dev_reprobes(
     assert calls == 1
 
     real_stat = Path.stat
+    # Resolve once, before patching: resolving inside _fake_stat would call
+    # Path.stat again (already patched to _fake_stat by then) and recurse.
+    # On 3.11's pure-Python Path.resolve() that recursion blows the stack
+    # instead of raising cleanly, so it must never happen.
+    resolved_workpad = workpad.resolve()
 
     def _fake_stat(self, *args, **kwargs):
         result = real_stat(self, *args, **kwargs)
-        if self == workpad.resolve():
+        if self == resolved_workpad:
             return os.stat_result(
                 (
                     result.st_mode,
@@ -185,10 +190,15 @@ def test_changed_st_ino_reprobes(
     assert calls == 1
 
     real_stat = Path.stat
+    # Resolve once, before patching: resolving inside _fake_stat would call
+    # Path.stat again (already patched to _fake_stat by then) and recurse.
+    # On 3.11's pure-Python Path.resolve() that recursion blows the stack
+    # instead of raising cleanly, so it must never happen.
+    resolved_workpad = workpad.resolve()
 
     def _fake_stat(self, *args, **kwargs):
         result = real_stat(self, *args, **kwargs)
-        if self == workpad.resolve():
+        if self == resolved_workpad:
             return os.stat_result(
                 (
                     result.st_mode,
