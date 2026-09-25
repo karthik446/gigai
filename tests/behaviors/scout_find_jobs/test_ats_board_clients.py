@@ -6,18 +6,28 @@ import pytest
 from gigai.scout.find_jobs.ats_board_clients import (
     ATSBoardClientError,
     ATSBoardClients,
+    ashby_pay,
+    ashby_work_mode,
+    fetch_greenhouse_board,
+    greenhouse_pay,
     html_to_text,
+    lever_pay,
+    lever_work_mode,
     list_ashby_board,
     list_greenhouse_board,
     list_lever_board,
     matches_roles,
+    work_mode_from_label,
 )
 from gigai.scout.find_jobs.contracts import (
     ATSProvider,
     FindJobsConfig,
+    PayPeriod,
+    PostingPay,
     SourceKind,
     SourceToggles,
     SponsorshipStatus,
+    WorkMode,
     content_hash,
     normalize_url,
     parse_board_url,
@@ -551,7 +561,8 @@ def test_ashby_url_and_mapping() -> None:
     with _client(handler) as client:
         rows = list_ashby_board(client, "orbit", _config(("platform engineer",)))
 
-    assert seen_urls == ["https://api.ashbyhq.com/posting-api/job-board/orbit"]
+    # Q4b-data: compensation is served only when asked for; same single request.
+    assert seen_urls == ["https://api.ashbyhq.com/posting-api/job-board/orbit?includeCompensation=true"]
     assert len(rows) == 1
     row = rows[0]
     assert row.provider is ATSProvider.ASHBY
@@ -757,3 +768,197 @@ def test_network_error_is_redacted() -> None:
     assert exc_info.value.code == "network_error"
     assert "secret token" not in str(exc_info.value)
     assert "10.0.0.5" not in str(exc_info.value)
+
+
+# --- Q4b-data: work_mode + pay from the providers' structured fields only ---
+
+
+def _ashby_job(**extra: object) -> dict[str, object]:
+    return {
+        "id": "j1",
+        "title": "Platform Engineer",
+        "location": "Remote",
+        "jobUrl": "https://jobs.ashbyhq.com/orbit/303",
+        "publishedAt": "2026-09-18T12:00:00Z",
+        "descriptionPlain": "Build the platform. Remote within the US. $200k.",
+        **extra,
+    }
+
+
+def _lever_job(**extra: object) -> dict[str, object]:
+    return {
+        "id": "abc",
+        "text": "Software Engineer",
+        "hostedUrl": "https://jobs.lever.co/acme/abc",
+        "categories": {"location": "Remote - US"},
+        "createdAt": 1758326400000,
+        "descriptionPlain": "Build things. Fully remote. Pays $150,000.",
+        **extra,
+    }
+
+
+def _greenhouse_job(**extra: object) -> dict[str, object]:
+    return {
+        "id": 101,
+        "title": "Software Engineer",
+        "absolute_url": "https://boards.greenhouse.io/acme/jobs/101",
+        "location": {"name": "Remote"},
+        "updated_at": "2026-09-20T00:00:00Z",
+        "content": "<p>Remote role paying $180,000 a year.</p>",
+        **extra,
+    }
+
+
+def test_work_mode_from_label_accepts_both_providers_spellings_only() -> None:
+    assert work_mode_from_label("Remote") is WorkMode.REMOTE
+    assert work_mode_from_label("remote") is WorkMode.REMOTE
+    assert work_mode_from_label("Hybrid") is WorkMode.HYBRID
+    assert work_mode_from_label("OnSite") is WorkMode.ONSITE
+    assert work_mode_from_label("onsite") is WorkMode.ONSITE
+    assert work_mode_from_label("on-site") is WorkMode.ONSITE
+    assert work_mode_from_label("unspecified") is None
+    assert work_mode_from_label("Remote (US only)") is None  # free text is not a stated mode
+    assert work_mode_from_label(None) is None
+    assert work_mode_from_label(True) is None
+
+
+def test_ashby_work_mode_and_pay_present() -> None:
+    job = _ashby_job(
+        workplaceType="Hybrid",
+        isRemote=False,
+        compensation={
+            "compensationTierSummary": "$150K – $190K • Offers Equity",
+            "summaryComponents": [
+                {"compensationType": "EquityPercentage", "interval": "NONE", "currencyCode": None, "minValue": 0.01, "maxValue": 0.05},
+                {"compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "USD", "minValue": 150000, "maxValue": 190000},
+            ],
+        },
+    )
+    assert ashby_work_mode(job) is WorkMode.HYBRID
+    assert ashby_pay(job) == PostingPay(150000, 190000, "USD", PayPeriod.YEAR)
+
+    with _client(lambda request: httpx.Response(200, json={"jobs": [job]})) as client:
+        rows = list_ashby_board(client, "orbit", _config(("platform engineer",)))
+    assert rows[0].work_mode is WorkMode.HYBRID
+    assert rows[0].pay == PostingPay(150000, 190000, "USD", PayPeriod.YEAR)
+    assert rows[0].to_json()["work_mode"] == "hybrid"
+    assert rows[0].to_json()["pay"] == {"min": 150000, "max": 190000, "currency": "USD", "period": "year"}
+
+
+def test_ashby_is_remote_true_alone_means_remote_false_alone_means_nothing() -> None:
+    assert ashby_work_mode(_ashby_job(isRemote=True)) is WorkMode.REMOTE
+    assert ashby_work_mode(_ashby_job(isRemote=False)) is None
+    assert ashby_work_mode(_ashby_job(workplaceType="OnSite", isRemote=True)) is WorkMode.ONSITE  # the label wins
+
+
+def test_ashby_pay_falls_back_to_the_first_tier_and_reads_hourly_and_monthly_intervals() -> None:
+    tiers = {"compensationTiers": [{"title": "US", "components": [{"compensationType": "Salary", "interval": "1 HOUR", "currencyCode": "usd", "minValue": 60, "maxValue": None}]}]}
+    assert ashby_pay(_ashby_job(compensation=tiers)) == PostingPay(60, None, "USD", PayPeriod.HOUR)
+    monthly = {"summaryComponents": [{"compensationType": "Salary", "interval": "1 MONTH", "currencyCode": "EUR", "minValue": None, "maxValue": 9000}]}
+    assert ashby_pay(_ashby_job(compensation=monthly)) == PostingPay(None, 9000, "EUR", PayPeriod.MONTH)
+    no_interval = {"summaryComponents": [{"compensationType": "Salary", "currencyCode": "USD", "minValue": 1, "maxValue": 2}]}
+    assert ashby_pay(_ashby_job(compensation=no_interval)) == PostingPay(1, 2, "USD", None)
+
+
+def test_ashby_work_mode_and_pay_absent_stay_absent_never_inferred_from_text() -> None:
+    # The description says "Remote" and "$200k"; the structured fields do not.
+    job = _ashby_job()
+    assert ashby_work_mode(job) is None
+    assert ashby_pay(job) is None
+    with _client(lambda request: httpx.Response(200, json={"jobs": [job]})) as client:
+        rows = list_ashby_board(client, "orbit", _config(("platform engineer",)))
+    assert rows[0].work_mode is None and rows[0].pay is None
+    assert "work_mode" not in rows[0].to_json() and "pay" not in rows[0].to_json()
+    # Stated-but-unusable shapes are skipped, never guessed at.
+    assert ashby_pay(_ashby_job(compensation={"summaryComponents": [{"compensationType": "Bonus", "interval": "1 YEAR", "currencyCode": "USD", "minValue": 1, "maxValue": 2}]})) is None
+    assert ashby_pay(_ashby_job(compensation={"summaryComponents": [{"compensationType": "Salary", "interval": "NONE", "currencyCode": "USD", "minValue": 1, "maxValue": 2}]})) is None
+    assert ashby_pay(_ashby_job(compensation={"summaryComponents": [{"compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "USD", "minValue": None, "maxValue": None}]})) is None
+    assert ashby_pay(_ashby_job(compensation={"summaryComponents": [{"compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "", "minValue": 1, "maxValue": 2}]})) is None
+    assert ashby_pay(_ashby_job(compensation={"summaryComponents": [{"compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "USD", "minValue": 5, "maxValue": 2}]})) is None
+    assert ashby_pay(_ashby_job(compensation={"summaryComponents": [{"compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "USD", "minValue": True, "maxValue": "2"}]})) is None
+    assert ashby_pay(_ashby_job(compensation="$1-$2")) is None
+    assert ashby_pay(_ashby_job(compensation={"compensationTiers": []})) is None
+
+
+def test_lever_work_mode_and_pay_present() -> None:
+    job = _lever_job(workplaceType="remote", salaryRange={"min": 140000, "max": 180000, "currency": "USD", "interval": "per-year-salary"})
+    assert lever_work_mode(job) is WorkMode.REMOTE
+    assert lever_pay(job) == PostingPay(140000, 180000, "USD", PayPeriod.YEAR)
+    with _client(lambda request: httpx.Response(200, json=[job])) as client:
+        rows = list_lever_board(client, "acme", _config())
+    assert rows[0].work_mode is WorkMode.REMOTE
+    assert rows[0].pay == PostingPay(140000, 180000, "USD", PayPeriod.YEAR)
+    assert rows[0].to_json()["pay"] == {"min": 140000, "max": 180000, "currency": "USD", "period": "year"}
+
+
+def test_lever_intervals_map_or_skip() -> None:
+    assert lever_pay(_lever_job(salaryRange={"min": 40, "max": 55, "currency": "USD", "interval": "per-hour-wage"})) == PostingPay(40, 55, "USD", PayPeriod.HOUR)
+    assert lever_pay(_lever_job(salaryRange={"min": 8000, "max": 9000, "currency": "GBP", "interval": "per-month-salary"})) == PostingPay(8000, 9000, "GBP", PayPeriod.MONTH)
+    # An interval the contract cannot express (stated, but not year/hour/month) is skipped, not mislabeled.
+    assert lever_pay(_lever_job(salaryRange={"min": 2000, "max": 2500, "currency": "USD", "interval": "per-week-salary"})) is None
+    assert lever_pay(_lever_job(salaryRange={"min": 2000, "max": 2500, "currency": "USD", "interval": "one-time"})) is None
+    # No interval at all: the range is stated, the period is not.
+    assert lever_pay(_lever_job(salaryRange={"min": 2000, "max": 2500, "currency": "USD"})) == PostingPay(2000, 2500, "USD", None)
+    assert lever_work_mode(_lever_job(workplaceType="on-site")) is WorkMode.ONSITE
+    assert lever_work_mode(_lever_job(workplaceType="hybrid")) is WorkMode.HYBRID
+
+
+def test_lever_work_mode_and_pay_absent_stay_absent_never_inferred_from_text() -> None:
+    job = _lever_job(workplaceType="unspecified")
+    assert lever_work_mode(job) is None
+    assert lever_pay(job) is None
+    assert lever_pay(_lever_job(salaryRange=None)) is None
+    assert lever_pay(_lever_job(salaryRange={"currency": "USD", "interval": "per-year-salary"})) is None
+    with _client(lambda request: httpx.Response(200, json=[job])) as client:
+        rows = list_lever_board(client, "acme", _config())
+    assert rows[0].work_mode is None and rows[0].pay is None
+    assert "work_mode" not in rows[0].to_json() and "pay" not in rows[0].to_json()
+
+
+def test_greenhouse_pay_from_pay_input_ranges_cents_to_units_no_period() -> None:
+    job = _greenhouse_job(pay_input_ranges=[{"min_cents": 15000000, "max_cents": 18000050, "currency_type": "USD", "title": "Salary Range"}])
+    assert greenhouse_pay(job) == PostingPay(150000, 180000.5, "USD", None)
+    with _client(lambda request: httpx.Response(200, json={"jobs": [job]})) as client:
+        rows = list_greenhouse_board(client, "acme", _config())
+    assert rows[0].pay == PostingPay(150000, 180000.5, "USD", None)
+    assert rows[0].work_mode is None  # Greenhouse has no workplace-type field
+    assert rows[0].to_json()["pay"] == {"min": 150000, "max": 180000.5, "currency": "USD", "period": None}
+    assert "work_mode" not in rows[0].to_json()
+    # A one-sided range is still a stated range; an empty/absent list is not.
+    assert greenhouse_pay(_greenhouse_job(pay_input_ranges=[{"min_cents": None, "max_cents": 100, "currency_type": "USD"}])) == PostingPay(None, 1, "USD", None)
+    assert greenhouse_pay(_greenhouse_job(pay_input_ranges=[])) is None
+    assert greenhouse_pay(_greenhouse_job(pay_input_ranges=[{"title": "n/a"}])) is None
+    assert greenhouse_pay(_greenhouse_job()) is None
+
+
+def test_greenhouse_pay_absent_stays_absent_and_the_digest_ignores_pay() -> None:
+    plain = _greenhouse_job()
+    with_pay = _greenhouse_job(pay_input_ranges=[{"min_cents": 100, "max_cents": 200, "currency_type": "USD"}])
+    with _client(lambda request: httpx.Response(200, json={"jobs": [plain]})) as client:
+        (row,) = list_greenhouse_board(client, "acme", _config())
+    with _client(lambda request: httpx.Response(200, json={"jobs": [with_pay]})) as client:
+        (paid,) = list_greenhouse_board(client, "acme", _config())
+    assert row.pay is None and "pay" not in row.to_json()
+    assert paid.pay is not None
+    # The change-detection identity (title + text) is untouched by the new field.
+    assert row.content_sha256 == paid.content_sha256
+
+
+def test_two_phase_greenhouse_reads_pay_from_the_detail_payload_already_fetched() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path.endswith("/jobs/101"):
+            return httpx.Response(
+                200,
+                json={**_greenhouse_job(), "content": "<p>Detail text.</p>", "pay_input_ranges": [{"min_cents": 12000000, "max_cents": 16000000, "currency_type": "USD"}]},
+            )
+        return httpx.Response(200, json={"jobs": [{k: v for k, v in _greenhouse_job().items() if k != "content"}]})
+
+    with _client(handler) as client:
+        result = fetch_greenhouse_board(client, "acme", _config())
+    assert seen == ["/v1/boards/acme/jobs", "/v1/boards/acme/jobs/101"]  # no extra request for pay
+    (row,) = result.rows
+    assert row.text == "Detail text."
+    assert row.pay == PostingPay(120000, 160000, "USD", None)

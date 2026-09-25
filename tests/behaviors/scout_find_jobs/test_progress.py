@@ -800,3 +800,49 @@ def test_progress_route_does_not_shadow_the_results_route(running_server) -> Non
     response = running_server.get("/api/runs/run_known/progress")
     assert response.status_code == 200
     assert response.json()["schema_version"] == "scout-find-jobs-progress:1"
+
+
+# ---------------------------------------------------------------------------
+# 4. Q4b-data (Q2 flag 1): run_progress passes boards + watchlist_seed through
+# ---------------------------------------------------------------------------
+
+
+def test_backend_run_progress_passes_boards_and_watchlist_seed_through(tmp_path: Path) -> None:
+    """``ScoutFindJobsBackend.run_progress`` builds its dict by hand; the two
+    Q2 keys ``read_progress`` already returns must reach ``/progress``
+    unchanged (fail-before: ``KeyError``), and read as ``{}``/``None``
+    before acquire writes them."""
+
+    from types import SimpleNamespace
+
+    from gigai.scout.find_jobs.present_api import ScoutFindJobsBackend
+
+    class _Backend(ScoutFindJobsBackend):
+        # Only the progress-file read is under test: the run lookup, the
+        # sealed-payload fold-in and the cap fallback are stubbed to their
+        # "nothing sealed yet" shapes.
+        def _require_run(self, run_id: str):
+            return SimpleNamespace(path=tmp_path)
+
+        def _payload(self, run_id: str):
+            return SimpleNamespace(rows=(), assessments=(), not_assessed=())
+
+        def _sealed_selection_cap(self, run_id: str) -> int | None:
+            return None
+
+    backend = _Backend(home_root=tmp_path / "home", target=tmp_path)
+    before = backend.run_progress("run_01")
+    assert before["boards"] == {} and before["watchlist_seed"] is None
+
+    writer = ProgressWriter(tmp_path / "runs" / "run_01")
+    seed = {"status": "seeded", "catalog_revision": "s26-test", "eligible": 3, "added": 3, "already_present": 0}
+    writer.watchlist_seeded(seed)
+    writer.boards_planned(total=3, budget_seconds=None)
+    writer.boards_finished({"total": 3, "fetched": 2, "failed": 1, "skipped": 0, "requests": 4, "cache_hits": 0})
+
+    body = backend.run_progress("run_01")
+    snapshot = read_progress(tmp_path / "runs" / "run_01")
+    assert body["watchlist_seed"] == seed == snapshot.watchlist_seed
+    assert body["boards"] == snapshot.boards
+    assert body["boards"]["status"] == "done" and body["boards"]["fetched"] == 2
+    assert body["schema_version"] == "scout-find-jobs-progress:1"

@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from gigai.scout.find_jobs.company_catalog import load_company_catalog
+from gigai.scout.find_jobs.contracts import ATSProvider
 from gigai.scout.find_jobs.market_acquisition import ATS_CONCURRENCY_ENV, ATS_MIN_INTERVAL_ENV
 from gigai.scout.find_jobs.progress import read_progress
 from gigai.scout.find_jobs.watchlist import list_active
@@ -91,6 +92,23 @@ def test_run_over_a_seeded_watchlist_passes_the_existing_journeys(tmp_path: Path
         first_progress = read_progress(workpad / "runs" / first_run_id)
         seed = first_progress.watchlist_seed
         assert seed is not None and seed["status"] == "seeded", seed
+        # Q4b-data (Q2 flag 1): the route serves the same two Q2 keys the
+        # progress files hold, not just the hand-built subset.
+        progress_body = progress_response.json()
+        assert progress_body["watchlist_seed"] == seed
+        assert progress_body["boards"] == first_progress.boards
+        # Q4b-data: the H-1B join. Every served row agrees with the shipped
+        # catalog: ``h1b`` present iff its board is a catalog record whose
+        # h1b is an object, and then exactly that aggregate; never ``null``.
+        h1b_index = catalog.h1b_by_board()
+        for row in first_payload["rows"]:
+            posting = row["posting"]
+            key = (ATSProvider(posting["provider"]), (posting["board_token"] or "").lower())
+            expected = h1b_index.get(key)
+            if expected is None:
+                assert "h1b" not in row, row
+            else:
+                assert row["h1b"] == expected.to_json(), row
         assert seed["catalog_revision"] == catalog.revision
         assert seed["catalog_digest"] == catalog.digest
         assert seed["added"] == seed["eligible"] > 0

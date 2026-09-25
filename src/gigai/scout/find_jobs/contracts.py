@@ -184,6 +184,29 @@ class SponsorshipStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+class WorkMode(StrEnum):
+    """Q4b-data (v0.1.9): the posting's work mode as the ATS payload STATES it.
+
+    ``PostingRow.work_mode`` is set only from a provider's own structured
+    field (Lever ``workplaceType``, Ashby ``workplaceType``/``isRemote``),
+    never inferred from the location or description text. Greenhouse has no
+    such field, so its rows never carry one. ``None`` (the default, omitted
+    from JSON) means "the payload did not say" -- not "onsite".
+    """
+
+    REMOTE = "remote"
+    HYBRID = "hybrid"
+    ONSITE = "onsite"
+
+
+class PayPeriod(StrEnum):
+    """The interval a :class:`PostingPay` range is quoted per (Q4b-data)."""
+
+    YEAR = "year"
+    HOUR = "hour"
+    MONTH = "month"
+
+
 class NotAssessedReason(StrEnum):
     UNCHANGED = "unchanged"
     DUPLICATE = "duplicate"
@@ -333,6 +356,18 @@ def _optional_digest(value: object, name: str) -> str | None:
     if value is None:
         return None
     return _digest_value(value, name)
+
+
+def _optional_amount(value: object, name: str) -> int | float | None:
+    """A non-negative JSON number (int or float, never a bool), or ``None``."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        _fail("wrong_type", f"{name} must be a number or null")
+    if value != value or value < 0:  # NaN or negative
+        _fail("invalid_value", f"{name} must be a non-negative number")
+    return value
 
 
 def _datetime_string(value: object, name: str, *, optional: bool = False) -> str | None:
@@ -528,6 +563,50 @@ class FindJobsConfig(_Contract):
 
 
 @dataclass(frozen=True)
+class PostingPay(_Contract):
+    """A pay range the ATS payload STATES for one posting (Q4b-data, v0.1.9).
+
+    Read only from a provider's structured compensation field (Lever
+    ``salaryRange``, Ashby ``compensation`` components, Greenhouse
+    ``pay_input_ranges``), never parsed out of the description text. At
+    least one bound is present; ``currency`` is the payload's own code
+    (``"USD"`` etc.) and ``period`` the interval it is quoted per -- ``None``
+    when the payload names no interval (Greenhouse's ranges carry none, and
+    a period is never inferred; coordinator answer 2026-09-25).
+    """
+
+    schema_version: ClassVar[str] = "scout-posting-pay:1"
+    min: int | float | None
+    max: int | float | None
+    currency: str
+    period: PayPeriod | None
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "min": self.min,
+            "max": self.max,
+            "currency": self.currency,
+            "period": None if self.period is None else _json_enum(self.period),
+        }
+
+    @classmethod
+    def from_json(cls, obj: object) -> "PostingPay":
+        value = _object(obj, ("min", "max", "currency", "period"), "posting_pay")
+        minimum = _optional_amount(value["min"], "posting_pay.min")
+        maximum = _optional_amount(value["max"], "posting_pay.max")
+        if minimum is None and maximum is None:
+            _fail("invalid_value", "posting_pay needs at least one of min/max")
+        if minimum is not None and maximum is not None and minimum > maximum:
+            _fail("invalid_value", "posting_pay.min must not exceed posting_pay.max")
+        return cls(
+            minimum,
+            maximum,
+            _string(value["currency"], "posting_pay.currency"),
+            None if value["period"] is None else _enum(value["period"], PayPeriod, "posting_pay.period"),  # type: ignore[arg-type]
+        )
+
+
+@dataclass(frozen=True)
 class PostingRow(_Contract):
     """One normalized public posting, with no private or provider secrets."""
 
@@ -555,6 +634,15 @@ class PostingRow(_Contract):
     # result (the field was present but named no recognized country), not
     # "unknown" -- see `filters.country_match`.
     countries: tuple[str, ...] | None = None
+    # Q4b-data (v0.1.9): the work mode and pay range the ATS payload states
+    # (see `WorkMode`/`PostingPay`). Both additive and optional, omitted from
+    # JSON at their None default, so every earlier row's to_json() -- and
+    # therefore its digest -- is byte-identical to before. Neither takes part
+    # in a row's change-detection identity (`content_sha256` hashes title +
+    # text only), so an existing posting is never re-selected as "edited"
+    # just because these fields appeared.
+    work_mode: WorkMode | None = None
+    pay: PostingPay | None = None
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {
@@ -581,6 +669,10 @@ class PostingRow(_Contract):
         # omitted at its None default so a pre-B1 row's digest is unaffected.
         if self.countries is not None:
             value["countries"] = _json_strings(self.countries)
+        if self.work_mode is not None:
+            value["work_mode"] = _json_enum(self.work_mode)
+        if self.pay is not None:
+            value["pay"] = self.pay.to_json()
         return value
 
     @classmethod
@@ -588,11 +680,13 @@ class PostingRow(_Contract):
         value = _object_with_optional(
             obj,
             ("url", "normalized_url", "provider", "board_token", "company", "title", "location", "published_at", "content_sha256", "source_kind", "query_key"),
-            ("text", "sponsorship", "countries"),
+            ("text", "sponsorship", "countries", "work_mode", "pay"),
             "posting_row",
         )
         sponsorship = None if "sponsorship" not in value else _enum(value["sponsorship"], SponsorshipStatus, "posting_row.sponsorship")
         countries = None if "countries" not in value else _country_codes(value["countries"], "posting_row.countries")
+        work_mode = None if "work_mode" not in value else _enum(value["work_mode"], WorkMode, "posting_row.work_mode")
+        pay = None if "pay" not in value else PostingPay.from_json(value["pay"])
         return cls(
             _string(value["url"], "url"),
             _string(value["normalized_url"], "normalized_url"),
@@ -608,6 +702,8 @@ class PostingRow(_Contract):
             _optional_string(value.get("text"), "posting_row.text") if "text" in value else None,
             sponsorship,
             countries,
+            work_mode=work_mode,  # type: ignore[arg-type]
+            pay=pay,
         )
 
 
@@ -2208,9 +2304,9 @@ __all__ = [
     "EditedURL", "FindJobsConfig", "FindJobsContractError", "FailureRow", "FindJobsRunInput", "FindJobsConfig", "GoalError", "GoalStatus", "MatrixStatus", "ModelTarget", "NodeContext",
     "NodeFailure", "NodeReceipt", "NodeReceiptFixture", "NodeReceiptStatus", "NodeStatus", "NodeCallable", "NormalizedPostingRow", "NormalizedPublicPostingRow", "NotAssessedReason",
     "NotAssessedRow", "PRESENT_CAPABILITY", "PRESENT_CAPABILITY_ID", "PRESENT_DECLARED_EFFECTS", "PRESENT_EFFECTS", "PresentInput",
-    "PresentNodeCallable", "PresentOutput", "PresentPayload", "PinnedResume", "PostingRow", "PostingRowResult", "Producer", "ProfileRef", "ROUTES",
+    "PayPeriod", "PresentNodeCallable", "PresentOutput", "PresentPayload", "PinnedResume", "PostingPay", "PostingRow", "PostingRowResult", "Producer", "ProfileRef", "ROUTES",
     "ProgressStatus", "RequirementClass", "RequirementMatrixRow", "RowOutcome", "RouteSpec", "RunLookupRequest", "RunRequest", "RunResponse", "RunResultsResponse", "RunStatusResponse",
     "SelectedPosting", "SelectionReason", "SelectionReasonCode", "SelectionRule", "SourceKind", "SourceToggles", "SponsorshipStatus", "UIConsentEnvelope", "URLChangeDetectionClient", "URLObservation", "URLSetDiff", "Verdict",
-    "UsageBlock", "WatchlistClient", "WatchlistEntry", "WatchlistFixture", "WatchlistFirstSeen", "aggregate_status", "content_hash",
+    "UsageBlock", "WatchlistClient", "WatchlistEntry", "WatchlistFixture", "WatchlistFirstSeen", "WorkMode", "aggregate_status", "content_hash",
     "diff_url_sets", "normalize_url", "parse_board_url",
 ]

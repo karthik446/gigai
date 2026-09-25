@@ -24,6 +24,16 @@ a fetched job (``source_url`` set) is re-fetched by URL; pasted text has no
 so re-assessing a pasted-text job is not possible from the identity alone --
 ``reassess_unavailable`` (422) names that rather than silently reusing stale
 text.
+
+Q4b-data: a posting assessed only by a find-jobs run has no quick-assess
+store entry (C5: run results live in ``runs/*/outputs``, never the store).
+Its job page identity is the posting's ``normalized_url``, so when the store
+has nothing for ``job_identity`` the route falls back to the newest run whose
+sealed ``outputs/acquire.json`` acquired that posting: its URL/title/company
+(and the run's own profile) become the quick-assess request, which re-fetches
+the posting and lands the result in the store with the ``answer:<id>``
+trigger -- so the page's history reads "Re-assessed after you answered ...".
+``reassess_not_found`` (404) stays for an identity no run or store knows.
 """
 
 from __future__ import annotations
@@ -34,6 +44,7 @@ from ....native_records import NativeRecordResult
 from ....private_records import PrivateRecordError
 from ...experience_answers import PriorAnswer, read_answers, record_answer
 from ...question_ids import normalize_question_id
+from ..contracts import AcquireOutput, FindJobsContractError, PostingRow, normalize_url
 from ...quick_assess import (
     TRIGGER_ANSWER_PREFIX,
     QuickAssessError,
@@ -68,6 +79,51 @@ def _answer_to_json(item: PriorAnswer) -> dict[str, object]:
         "record_id": item.record_id,
         "revision_id": item.revision_id,
     }
+
+
+def find_run_posting(home_root, target, job_identity: str) -> tuple[PostingRow, str | None] | None:
+    """The newest find-jobs run's acquired posting for ``job_identity``, plus that run's profile id.
+
+    Q4b-data: ``job_identity`` is the posting's ``normalized_url`` (the job
+    page's card <-> assessment join key). Runs are enumerated newest first
+    exactly as ``GET /api/runs`` does (``runs_list._run_ids_newest_first``)
+    and each one's sealed ``outputs/acquire.json`` is read through the
+    journal (never a full replay); a run without a sealed acquire output,
+    or whose output no longer parses, is skipped. Returns ``None`` when no
+    run acquired the posting. The profile id is the run's own
+    (``runs_list._run_profile_id``; ``None`` -> the gig's selected profile),
+    so the re-assessment is scored against the resume the run used.
+    """
+
+    from ....canonical import parse_json_bytes
+    from ....journal import JournalArtifactMissingError, read_committed_artifact
+    from ....workpad import resolve_workpad
+    from .runs_list import _run_ids_newest_first, _run_profile_id
+
+    try:
+        resolved = resolve_workpad(home_root=home_root, requested_target=target, gig_id=None, allow_semantic_state=True)
+    except Exception:  # noqa: BLE001 - an unbound folder simply has no runs to fall back to
+        return None
+    try:
+        wanted = normalize_url(job_identity)
+    except Exception:  # noqa: BLE001 - a non-URL identity (text:sha256:...) can never be a run posting
+        wanted = job_identity
+    for run_id in _run_ids_newest_first(resolved):
+        try:
+            raw, _commit = read_committed_artifact(
+                workpad=resolved.path,
+                project_id=resolved.project_id,
+                gig_id=resolved.gig_id,
+                path=f"runs/{run_id}/outputs/acquire.json",
+            )
+            output = AcquireOutput.from_json(parse_json_bytes(raw))
+        except (JournalArtifactMissingError, ValueError, FindJobsContractError):
+            continue
+        for row in output.rows:
+            posting = row.posting
+            if job_identity in (posting.normalized_url, posting.url) or wanted == posting.normalized_url:
+                return posting, _run_profile_id(resolved=resolved, run_id=run_id, default_profile_id=None)
+    return None
 
 
 class AnswersRoutesMixin:
@@ -153,16 +209,24 @@ class AnswersRoutesMixin:
 
         previous = find_quick_assessment_by_job_identity(self._backend.home_root, target, job_identity)
         if previous is None:
-            raise QuickAssessError("reassess_not_found", f"no stored assessment for job_identity {job_identity!r}")
-        if previous.job.source_url is None:
-            raise QuickAssessError(
-                "reassess_unavailable",
-                "this job was assessed from pasted text, which is never stored; re-assess with --job-text again",
+            run_posting = find_run_posting(self._backend.home_root, target, job_identity)
+            if run_posting is None:
+                raise QuickAssessError("reassess_not_found", f"no stored assessment for job_identity {job_identity!r}")
+            posting, profile_id = run_posting
+            request = AssessRequest(
+                job=AssessJobInput(job_url=posting.url, title=posting.title or None, company=posting.company or None),
+                resume=AssessResumeInput(profile_id=profile_id),
             )
-        request = AssessRequest(
-            job=AssessJobInput(job_url=previous.job.source_url, title=previous.job.title or None, company=previous.job.company or None),
-            resume=AssessResumeInput(profile_id=previous.resume.profile_id),
-        )
+        else:
+            if previous.job.source_url is None:
+                raise QuickAssessError(
+                    "reassess_unavailable",
+                    "this job was assessed from pasted text, which is never stored; re-assess with --job-text again",
+                )
+            request = AssessRequest(
+                job=AssessJobInput(job_url=previous.job.source_url, title=previous.job.title or None, company=previous.job.company or None),
+                resume=AssessResumeInput(profile_id=previous.resume.profile_id),
+            )
         response = run_quick_assessment(request, home_root=self._backend.home_root, target=target, trigger=trigger)
         return response.to_json()
 
@@ -179,4 +243,4 @@ class AnswersRoutesMixin:
         self._write_json(HTTPStatus.OK, {"answers": [_answer_to_json(item) for item in items]})
 
 
-__all__ = ["AnswersRoutesMixin"]
+__all__ = ["AnswersRoutesMixin", "find_run_posting"]

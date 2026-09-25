@@ -34,7 +34,9 @@ from gigai.scout.find_jobs.contracts import (
     NodeReceiptFixture,
     NotAssessedReason,
     NotAssessedRow,
+    PayPeriod,
     PinnedResume,
+    PostingPay,
     PostingRow,
     PostingRowResult,
     PresentInput,
@@ -60,6 +62,7 @@ from gigai.scout.find_jobs.contracts import (
     WatchlistEntry,
     WatchlistFirstSeen,
     WatchlistFixture,
+    WorkMode,
     aggregate_status,
     diff_url_sets,
     normalize_url,
@@ -686,3 +689,57 @@ def test_effect_sets_and_model_target_are_frozen() -> None:
     assert PRESENT_EFFECTS == {"write_workpad"}
     assert set(ModelTarget) == {ModelTarget.OLLAMA_LOCAL, ModelTarget.CODEX_CLI, ModelTarget.OPENROUTER_API}
     assert not hasattr(RowOutcome, "PENDING")
+
+
+# --- Q4b-data (v0.1.9): PostingRow.work_mode / PostingRow.pay (additive) --
+
+
+def test_old_shape_posting_row_without_work_mode_or_pay_parses_and_round_trips_byte_identically() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    old_posting = acquire["rows"][0]["posting"]  # type: ignore[index]
+    assert "work_mode" not in old_posting and "pay" not in old_posting
+    row = PostingRow.from_json(old_posting)
+    assert row.work_mode is None and row.pay is None
+    assert row.to_json() == old_posting
+    assert canonical_json_bytes(row.to_json()) == canonical_json_bytes(old_posting)
+
+
+def test_posting_row_work_mode_and_pay_round_trip() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    posting = deepcopy(acquire["rows"][0]["posting"])  # type: ignore[index]
+    posting["work_mode"] = "hybrid"
+    posting["pay"] = {"min": 120000, "max": 150000.5, "currency": "USD", "period": "year"}
+    row = PostingRow.from_json(posting)
+    assert row.work_mode is WorkMode.HYBRID
+    assert row.pay == PostingPay(120000, 150000.5, "USD", PayPeriod.YEAR)
+    assert row.to_json() == posting
+    # period null (Greenhouse) and a one-sided range both round-trip.
+    posting["pay"] = {"min": None, "max": 90, "currency": "USD", "period": None}
+    del posting["work_mode"]
+    row = PostingRow.from_json(posting)
+    assert row.pay == PostingPay(None, 90, "USD", None) and row.work_mode is None
+    assert row.to_json() == posting
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "code"),
+    [
+        ("work_mode", "office", "bad_enum"),
+        ("work_mode", 1, "wrong_type"),
+        ("pay", {"min": 1, "max": 2, "currency": "USD", "period": "week"}, "bad_enum"),
+        ("pay", {"min": None, "max": None, "currency": "USD", "period": "year"}, "invalid_value"),
+        ("pay", {"min": 5, "max": 2, "currency": "USD", "period": "year"}, "invalid_value"),
+        ("pay", {"min": -1, "max": 2, "currency": "USD", "period": "year"}, "invalid_value"),
+        ("pay", {"min": True, "max": 2, "currency": "USD", "period": "year"}, "wrong_type"),
+        ("pay", {"min": 1, "max": 2, "currency": "USD"}, "missing_key"),
+        ("pay", {"min": 1, "max": 2, "currency": "USD", "period": "year", "title": "x"}, "unknown_key"),
+        ("pay", "100k-150k", "wrong_type"),
+    ],
+)
+def test_posting_row_work_mode_and_pay_fail_closed(field: str, value: object, code: str) -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    posting = deepcopy(acquire["rows"][0]["posting"])  # type: ignore[index]
+    posting[field] = value
+    with pytest.raises(FindJobsContractError) as raised:
+        PostingRow.from_json(posting)
+    assert raised.value.code == code

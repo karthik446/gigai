@@ -5,11 +5,65 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 import threading
 from http import HTTPStatus
+from typing import TYPE_CHECKING
 
-from ..contracts import FindJobsContractError, RunRequest
+from ..contracts import ATSProvider, FindJobsContractError, RunRequest
 from .server import ConfigMissingError, _RunBoundaryError, _logger
+
+if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
+    from ..company_catalog import CompanyH1B
+
+
+@lru_cache(maxsize=1)
+def _catalog_h1b_index() -> dict[tuple[ATSProvider, str], CompanyH1B]:
+    """``(provider, board token lower-cased)`` -> the shipped catalog's H-1B aggregate.
+
+    Q4b-data: read-only use of the bundled company catalog
+    (``company_catalog.load_company_catalog``, itself cached per process),
+    built once. A catalog that fails to load (missing resource, digest
+    mismatch) degrades to an empty index: the join is display-only
+    enrichment and must never break ``/results``.
+    """
+
+    from ..company_catalog import CompanyCatalogError, load_company_catalog
+
+    try:
+        return load_company_catalog().h1b_by_board()
+    except CompanyCatalogError:
+        return {}
+
+
+def attach_h1b(rows: list[object], index: dict[tuple[ATSProvider, str], CompanyH1B]) -> None:
+    """Add ``h1b`` to each results row whose posting's board is in ``index``.
+
+    ``rows`` is the served ``payload.rows`` JSON (``[{"posting": {...},
+    "outcome": ...}, ...]``), mutated in place: a row gains
+    ``"h1b": {"approvals": int, "fiscal_years": [...]}`` when its
+    ``posting.provider``/``posting.board_token`` name a catalog record whose
+    ``h1b`` is an object; every other row is left exactly as it was (no
+    key, never ``null``). Exa rows have no board token and never match.
+    """
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        posting = row.get("posting")
+        if not isinstance(posting, dict):
+            continue
+        provider_raw = posting.get("provider")
+        token = posting.get("board_token")
+        if not isinstance(provider_raw, str) or not isinstance(token, str) or not token:
+            continue
+        try:
+            provider = ATSProvider(provider_raw)
+        except ValueError:
+            continue
+        aggregate = index.get((provider, token.lower()))
+        if aggregate is not None:
+            row["h1b"] = aggregate.to_json()
 
 
 class RunRoutesMixin:
@@ -185,6 +239,16 @@ class RunRoutesMixin:
         except Exception:  # noqa: BLE001 - display-only enrichment must never break /results
             rank_scores = ()
         body["rank_scores"] = [item.to_json() for item in rank_scores]
+        # Q4b-data: the H-1B join. ``rows[].h1b`` (field contract shared with
+        # Q4b-ui) is added to the served JSON only, next to the sealed
+        # ``posting``/``outcome`` pair -- the sealed present payload and its
+        # contracts are untouched, same reasoning as the enrichments above.
+        try:
+            payload_json = body.get("payload")
+            if isinstance(payload_json, dict) and isinstance(payload_json.get("rows"), list):
+                attach_h1b(payload_json["rows"], _catalog_h1b_index())
+        except Exception:  # noqa: BLE001 - display-only enrichment must never break /results
+            _logger.exception("H-1B join skipped for run %s", run_id)
         self._write_json(HTTPStatus.OK, body)
 
     def _handle_get_run_progress(self, run_id: str) -> None:

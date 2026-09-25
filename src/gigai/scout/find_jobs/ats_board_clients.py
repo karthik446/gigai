@@ -54,8 +54,11 @@ from ...canonical import digest_imported_bytes
 from .contracts import (
     ATSProvider,
     FindJobsConfig,
+    PayPeriod,
+    PostingPay,
     PostingRow,
     SourceKind,
+    WorkMode,
     content_hash,
     normalize_url,
     parse_board_url,
@@ -181,7 +184,11 @@ _GREENHOUSE_URL = "https://boards-api.greenhouse.io/v1/boards/{token}/jobs?conte
 _GREENHOUSE_LIST_URL = "https://boards-api.greenhouse.io/v1/boards/{token}/jobs"
 _GREENHOUSE_JOB_URL = "https://boards-api.greenhouse.io/v1/boards/{token}/jobs/{job_id}"
 _LEVER_URL = "https://api.lever.co/v0/postings/{token}?mode=json"
-_ASHBY_URL = "https://api.ashbyhq.com/posting-api/job-board/{token}"
+# Q4b-data: Ashby's public board API omits ``compensation`` unless asked
+# (``includeCompensation=true``); it is the same single request, so the pay
+# range costs no extra call. The param is part of the cached URL, so every
+# Ashby board misses its per-board cache exactly once after this change.
+_ASHBY_URL = "https://api.ashbyhq.com/posting-api/job-board/{token}?includeCompensation=true"
 
 
 def matches_roles(title: str, roles: tuple[str, ...]) -> bool:
@@ -286,6 +293,174 @@ def _published_at_from_epoch_ms(value: object) -> str | None:
     return parsed.isoformat().replace("+00:00", "Z")
 
 
+# ---------------------------------------------------------------------------
+# Q4b-data: work mode + pay, read ONLY from each provider's structured fields
+# (never from the location or description text). Every helper returns None
+# when the payload does not state the value, so the row omits the field.
+# ---------------------------------------------------------------------------
+
+_WORK_MODE_LABELS = {
+    "remote": WorkMode.REMOTE,
+    "hybrid": WorkMode.HYBRID,
+    "onsite": WorkMode.ONSITE,
+}
+# Lever ``salaryRange.interval`` -> PayPeriod. Lever also quotes
+# ``per-week-salary``/``semi-month-salary``/``bi-week-salary``/``per-day-wage``/
+# ``one-time``: an interval the contract cannot express is a STATED interval
+# we would misreport as "no period", so such a range is skipped entirely.
+_LEVER_INTERVALS = {
+    "per-year-salary": PayPeriod.YEAR,
+    "per-month-salary": PayPeriod.MONTH,
+    "per-hour-wage": PayPeriod.HOUR,
+}
+# Ashby compensation component ``interval`` -> PayPeriod (same skip rule for
+# an interval outside this table, e.g. ``NONE`` on a one-time component).
+_ASHBY_INTERVALS = {
+    "1 YEAR": PayPeriod.YEAR,
+    "1 MONTH": PayPeriod.MONTH,
+    "1 HOUR": PayPeriod.HOUR,
+}
+
+
+def work_mode_from_label(value: object) -> WorkMode | None:
+    """A provider's workplace-type label -> :class:`WorkMode`, or ``None``.
+
+    Accepts Ashby's ``Remote``/``Hybrid``/``OnSite`` and Lever's
+    ``remote``/``hybrid``/``onsite``/``on-site`` spellings (case and
+    punctuation ignored). ``unspecified``, ``null``, a free-text label or a
+    non-string all mean "not stated" -> ``None``.
+    """
+
+    if type(value) is not str:
+        return None
+    return _WORK_MODE_LABELS.get(re.sub(r"[^a-z]", "", value.lower()))
+
+
+def _amount(value: object) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value != value or value < 0:  # NaN / negative
+        return None
+    return value
+
+
+def _cents_to_units(value: object) -> int | float | None:
+    amount = _amount(value)
+    if amount is None:
+        return None
+    units = amount / 100
+    return int(units) if float(units).is_integer() else units
+
+
+def _pay(minimum: object, maximum: object, currency: object, period: PayPeriod | None) -> PostingPay | None:
+    """A :class:`PostingPay` when at least one bound and a currency are stated."""
+
+    low, high = _amount(minimum), _amount(maximum)
+    if low is None and high is None:
+        return None
+    if type(currency) is not str or not currency.strip():
+        return None
+    if low is not None and high is not None and low > high:
+        return None
+    return PostingPay(low, high, currency.strip().upper(), period)
+
+
+def lever_work_mode(job: dict[str, object]) -> WorkMode | None:
+    """Lever ``workplaceType`` (``remote``/``hybrid``/``onsite``/``unspecified``)."""
+
+    return work_mode_from_label(job.get("workplaceType"))
+
+
+def lever_pay(job: dict[str, object]) -> PostingPay | None:
+    """Lever ``salaryRange: {min, max, currency, interval}`` -> pay, when stated."""
+
+    salary_range = job.get("salaryRange")
+    if type(salary_range) is not dict:
+        return None
+    interval = salary_range.get("interval")
+    period: PayPeriod | None = None
+    if type(interval) is str and interval.strip():
+        period = _LEVER_INTERVALS.get(interval.strip().lower())
+        if period is None:
+            return None
+    return _pay(salary_range.get("min"), salary_range.get("max"), salary_range.get("currency"), period)
+
+
+def ashby_work_mode(job: dict[str, object]) -> WorkMode | None:
+    """Ashby ``workplaceType`` (``Remote``/``Hybrid``/``OnSite``), else ``isRemote: true``.
+
+    ``isRemote: false`` alone says nothing about hybrid vs. on-site, so it
+    never sets a mode.
+    """
+
+    mode = work_mode_from_label(job.get("workplaceType"))
+    if mode is not None:
+        return mode
+    return WorkMode.REMOTE if job.get("isRemote") is True else None
+
+
+def ashby_pay(job: dict[str, object]) -> PostingPay | None:
+    """Ashby ``compensation`` -> the first stated ``Salary`` component's range.
+
+    Reads ``compensation.summaryComponents`` (the board API's flattened
+    view), falling back to the first tier's ``components``. Only the
+    ``Salary`` component is a pay range (``Bonus``/``Commission``/equity
+    components are not); its ``interval`` (``1 YEAR``/``1 MONTH``/``1 HOUR``)
+    is the period. The compensation object arrives only when the board was
+    fetched with ``includeCompensation=true`` (see ``_ASHBY_URL``).
+    """
+
+    compensation = job.get("compensation")
+    if type(compensation) is not dict:
+        return None
+    components: object = compensation.get("summaryComponents")
+    if type(components) is not list or not components:
+        tiers = compensation.get("compensationTiers")
+        components = None
+        if type(tiers) is list and tiers and type(tiers[0]) is dict:
+            components = tiers[0].get("components")
+    if type(components) is not list:
+        return None
+    for component in components:
+        if type(component) is not dict:
+            continue
+        kind = component.get("compensationType")
+        if type(kind) is not str or kind.strip().lower() != "salary":
+            continue
+        interval = component.get("interval")
+        period: PayPeriod | None = None
+        if type(interval) is str and interval.strip():
+            period = _ASHBY_INTERVALS.get(" ".join(interval.upper().split()))
+            if period is None:
+                continue
+        pay = _pay(component.get("minValue"), component.get("maxValue"), component.get("currencyCode"), period)
+        if pay is not None:
+            return pay
+    return None
+
+
+def greenhouse_pay(job: dict[str, object]) -> PostingPay | None:
+    """Greenhouse ``pay_input_ranges[] {min_cents, max_cents, currency_type}`` -> pay.
+
+    Only what the already-fetched list/detail payload carries (no extra
+    request): the first usable range, cents converted to units. Greenhouse
+    states no interval, so ``period`` is ``None`` -- never inferred
+    (coordinator answer, 2026-09-25). Greenhouse has no workplace-type
+    field either, so its rows never carry ``work_mode``.
+    """
+
+    ranges = job.get("pay_input_ranges")
+    if type(ranges) is not list:
+        return None
+    for item in ranges:
+        if type(item) is not dict:
+            continue
+        pay = _pay(_cents_to_units(item.get("min_cents")), _cents_to_units(item.get("max_cents")), item.get("currency_type"), None)
+        if pay is not None:
+            return pay
+    return None
+
+
 def list_greenhouse_board(client: "httpx.Client", board_token: str, config: FindJobsConfig) -> tuple[PostingRow, ...]:
     url = _GREENHOUSE_URL.format(token=board_token)
     payload = _request(client, url, "greenhouse", board_token)
@@ -306,9 +481,23 @@ def list_greenhouse_board(client: "httpx.Client", board_token: str, config: Find
     return tuple(rows)
 
 
-def _greenhouse_row(job: dict[str, object], title: str, absolute_url: str, content: str | None, board_token: str) -> PostingRow:
-    """One Greenhouse job (+ its HTML ``content``, from the list or a detail call) -> ``PostingRow``."""
+def _greenhouse_row(
+    job: dict[str, object],
+    title: str,
+    absolute_url: str,
+    content: str | None,
+    board_token: str,
+    detail: dict[str, object] | None = None,
+) -> PostingRow:
+    """One Greenhouse job (+ its HTML ``content``, from the list or a detail call) -> ``PostingRow``.
 
+    ``detail`` is the already-fetched detail payload when the two-phase
+    fetch made one; its ``pay_input_ranges`` win over the list item's.
+    """
+
+    pay = greenhouse_pay(detail) if detail is not None else None
+    if pay is None:
+        pay = greenhouse_pay(job)
     location = job.get("location")
     location_name = ""
     if type(location) is dict and type(location.get("name")) is str:
@@ -332,6 +521,7 @@ def _greenhouse_row(job: dict[str, object], title: str, absolute_url: str, conte
         query_key=f"ats:greenhouse:{board_token}",
         text=text or None,
         sponsorship=sponsorship_from_text(text),
+        pay=pay,
     )
 
 
@@ -449,6 +639,8 @@ def _lever_rows(payload: list, board_token: str, config: FindJobsConfig, stats: 
                 text=text or None,
                 sponsorship=sponsorship_from_text(text),
                 countries=countries,
+                work_mode=lever_work_mode(job),
+                pay=lever_pay(job),
             )
         )
     return tuple(rows)
@@ -552,6 +744,8 @@ def _ashby_rows(jobs: list, board_token: str, config: FindJobsConfig, stats: "Bo
                 countries=countries,
                 text=text or None,
                 sponsorship=sponsorship_from_text(text),
+                work_mode=ashby_work_mode(job),
+                pay=ashby_pay(job),
             )
         )
     return tuple(rows)
@@ -796,6 +990,7 @@ def fetch_greenhouse_board(
             continue
         inline = job.get("content")
         content: str | None = inline if type(inline) is str else None
+        detail: dict[str, object] | None = None
         job_id = job.get("id")
         if isinstance(job_id, (int, str)) and not isinstance(job_id, bool) and str(job_id):
             detail_url = _GREENHOUSE_JOB_URL.format(token=board_token, job_id=job_id)
@@ -808,6 +1003,7 @@ def fetch_greenhouse_board(
                 )
                 detail = json.loads(detail_body.decode("utf-8"))
                 if type(detail) is not dict or type(detail.get("content")) is not str:
+                    detail = None
                     raise ValueError("greenhouse detail has no content")
                 content = detail["content"]
                 if stats.requests == before:
@@ -816,7 +1012,7 @@ def fetch_greenhouse_board(
                     stats.detail_fetched += 1
             except (ATSBoardClientError, ValueError, UnicodeDecodeError):
                 stats.detail_failed += 1
-        rows.append(_greenhouse_row(job, title, absolute_url, content, board_token))
+        rows.append(_greenhouse_row(job, title, absolute_url, content, board_token, detail))
     return BoardFetchResult(tuple(rows), stats)
 
 
@@ -894,13 +1090,19 @@ __all__ = [
     "BoardFetchResult",
     "BoardFetchStats",
     "CachedResponse",
+    "ashby_pay",
+    "ashby_work_mode",
     "fetch_ashby_board",
     "fetch_greenhouse_board",
     "fetch_lever_board",
+    "greenhouse_pay",
     "html_to_text",
+    "lever_pay",
+    "lever_work_mode",
     "list_ashby_board",
     "list_greenhouse_board",
     "list_lever_board",
     "matches_roles",
     "parse_board_url",
+    "work_mode_from_label",
 ]

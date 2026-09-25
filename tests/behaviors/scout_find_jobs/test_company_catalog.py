@@ -25,10 +25,12 @@ from gigai.scout.find_jobs.company_catalog import (
     COMPANY_CATALOG_SHA256,
     COMPANY_CATALOG_SIZE_BUDGET_BYTES,
     CompanyCatalogError,
+    CompanyH1B,
     build_catalog_resource,
     decode_catalog_bytes,
     load_company_catalog,
     parse_catalog_payload,
+    parse_company_h1b,
     parse_company_record,
     read_catalog_resource_bytes,
 )
@@ -184,3 +186,72 @@ def test_installed_interpreter_ships_the_pinned_company_catalog(installed_gigai:
 @pytest.fixture
 def installed_gigai() -> InstalledGigAI:
     return InstalledGigAI.current()
+
+
+# --- Q4b-data: the H-1B aggregate next to the bool -------------------------
+
+_FULL_H1B = {
+    "fiscal_years": ["2025", "2026"],
+    "approvals": 12,
+    "denials": 1,
+    "naics": "54 - Professional, Scientific, and Technical Services",
+    "matched_name": "KONG INC",
+    "match_confidence": "normalized",
+}
+
+
+def test_parse_company_h1b_handles_the_full_schema_shape_a_thin_shape_and_no_match() -> None:
+    assert parse_company_h1b(_FULL_H1B) == CompanyH1B(approvals=12, fiscal_years=("2025", "2026"), denials=1)
+    assert parse_company_h1b(_FULL_H1B).to_json() == {"approvals": 12, "fiscal_years": ["2025", "2026"], "denials": 1}
+    # A thinner record (a key missing, or an older sample) still yields an
+    # aggregate; a missing ``denials`` stays out of the JSON (never null).
+    assert parse_company_h1b({"fiscal_years": ["2026"]}) == CompanyH1B(approvals=0, fiscal_years=("2026",), denials=None)
+    assert parse_company_h1b({"fiscal_years": ["2026"]}).to_json() == {"approvals": 0, "fiscal_years": ["2026"]}
+    assert parse_company_h1b({"approvals": 3}) == CompanyH1B(approvals=3, fiscal_years=())
+    assert parse_company_h1b({"approvals": 3, "denials": 0}).to_json() == {"approvals": 3, "fiscal_years": [], "denials": 0}
+    assert parse_company_h1b({"approvals": "3", "fiscal_years": [2026, " 2025 ", ""], "denials": "1"}) == CompanyH1B(approvals=0, fiscal_years=("2025",))
+    assert parse_company_h1b({"approvals": -4, "fiscal_years": "2026", "denials": -2}) == CompanyH1B(approvals=0, fiscal_years=(), denials=0)
+    # No match recorded: null / absent / the bare bool some rows may carry.
+    assert parse_company_h1b(None) is None
+    assert parse_company_h1b(False) is None
+    assert parse_company_h1b(True) is None
+    assert parse_company_h1b("yes") is None
+
+
+def test_parse_company_record_keeps_the_h1b_bool_and_adds_the_aggregate() -> None:
+    full = parse_company_record({"name": "Kong", "ats": "ashby", "board_slug": "kong", "h1b": _FULL_H1B})
+    assert full is not None and full.h1b is True
+    assert full.h1b_summary == CompanyH1B(approvals=12, fiscal_years=("2025", "2026"), denials=1)
+    thin = parse_company_record({"name": "Thin", "ats": "lever", "board_slug": "thin", "h1b": {"fiscal_years": ["2026"], "approvals": 1}})
+    assert thin is not None and thin.h1b is True and thin.h1b_summary == CompanyH1B(approvals=1, fiscal_years=("2026",))
+    none = parse_company_record({"name": "None", "ats": "greenhouse", "board_slug": "none", "h1b": None})
+    assert none is not None and none.h1b is False and none.h1b_summary is None
+    flag = parse_company_record({"name": "Flag", "ats": "greenhouse", "board_slug": "flag", "h1b": True})
+    assert flag is not None and flag.h1b is True and flag.h1b_summary is None
+    absent = parse_company_record({"name": "Absent", "ats": "greenhouse", "board_slug": "absent"})
+    assert absent is not None and absent.h1b is False and absent.h1b_summary is None
+    # The existing JSON view of a record is unchanged (the aggregate is not added to it).
+    assert full.to_json()["h1b"] is True and "h1b_summary" not in full.to_json()
+
+
+def test_catalog_h1b_by_board_indexes_only_records_with_an_aggregate_case_insensitively() -> None:
+    rows = [
+        {"name": "Kong", "ats": "ashby", "board_slug": "Kong", "h1b": _FULL_H1B},
+        {"name": "None", "ats": "greenhouse", "board_slug": "none", "h1b": None},
+        {"name": "Flag", "ats": "lever", "board_slug": "flag", "h1b": True},
+    ]
+    decoded = decode_catalog_bytes(gzip.compress(json.dumps(rows).encode("utf-8")), revision="t")
+    assert [record.h1b for record in decoded.records] == [True, False, True]
+    assert decoded.h1b_by_board() == {(ATSProvider.ASHBY, "kong"): CompanyH1B(approvals=12, fiscal_years=("2025", "2026"), denials=1)}
+
+
+def test_shipped_catalog_carries_h1b_aggregates_for_every_true_flag_with_an_object() -> None:
+    catalog = load_company_catalog()
+    with_summary = [record for record in catalog.records if record.h1b_summary is not None]
+    assert with_summary, "the shipped sample records at least one USCIS match"
+    for record in with_summary:
+        assert record.h1b is True
+        assert record.h1b_summary.approvals >= 0
+        assert record.h1b_summary.denials is not None and record.h1b_summary.denials >= 0  # the sample carries denials
+        assert all(isinstance(year, str) and year for year in record.h1b_summary.fiscal_years)
+    assert len(catalog.h1b_by_board()) == len(with_summary)

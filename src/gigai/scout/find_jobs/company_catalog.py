@@ -100,6 +100,54 @@ class CompanyCatalogError(ValueError):
 
 
 @dataclass(frozen=True)
+class CompanyH1B:
+    """The catalog's per-company H-1B aggregate (Q4b-data, v0.1.9).
+
+    Read from a record's ``h1b`` object (S26 ``schema.json``: ``fiscal_years``,
+    ``approvals``, ``denials``, ``naics``, ``matched_name``,
+    ``match_confidence``). The fields the job card shows are kept -- the
+    sum of approvals, the fiscal years they span and (orchestrator-approved
+    contract addition, 2026-09-25) the sum of denials when the record has
+    it -- and all tolerate a thinner shape (the shipped sample, or a future
+    revision that drops a key): a missing ``approvals`` reads as 0, missing
+    ``fiscal_years`` as ``()``, missing ``denials`` as ``None`` (then left
+    out of the JSON). ``to_json()`` is exactly the ``rows[].h1b`` shape
+    ``GET /api/runs/{id}/results`` serves.
+    """
+
+    approvals: int
+    fiscal_years: tuple[str, ...]
+    denials: int | None = None
+
+    def to_json(self) -> dict[str, object]:
+        value: dict[str, object] = {"approvals": self.approvals, "fiscal_years": list(self.fiscal_years)}
+        if self.denials is not None:
+            value["denials"] = self.denials
+        return value
+
+
+def parse_company_h1b(raw: object) -> CompanyH1B | None:
+    """A record's ``h1b`` value -> :class:`CompanyH1B`, or ``None`` when no match was recorded.
+
+    ``None``/``false``/a non-object (the pre-aggregate ``true`` some rows
+    may carry) yields ``None``: the aggregate exists only when the seed
+    recorded the USCIS join itself.
+    """
+
+    if not isinstance(raw, dict):
+        return None
+    approvals = _optional_int(raw.get("approvals"))
+    denials = _optional_int(raw.get("denials"))
+    years_raw = raw.get("fiscal_years")
+    years = tuple(item.strip() for item in years_raw if isinstance(item, str) and item.strip()) if isinstance(years_raw, list) else ()
+    return CompanyH1B(
+        approvals=max(approvals, 0) if approvals is not None else 0,
+        fiscal_years=years,
+        denials=max(denials, 0) if denials is not None else None,
+    )
+
+
+@dataclass(frozen=True)
 class CompanyRecord:
     """One catalog company with a public ATS board.
 
@@ -119,6 +167,10 @@ class CompanyRecord:
     us_posting_count: int | None = None
     h1b: bool = False
     last_verified: str | None = None
+    # Q4b-data: the aggregate behind the ``h1b`` flag, when the record
+    # carries the USCIS join object (see :class:`CompanyH1B`); ``None`` for
+    # a null/absent/boolean ``h1b``. ``h1b`` (the bool) keeps its meaning.
+    h1b_summary: CompanyH1B | None = None
 
     @property
     def watchlist_id(self) -> str:
@@ -172,6 +224,20 @@ class CompanyCatalog:
     def by_board(self) -> dict[tuple[ATSProvider, str], CompanyRecord]:
         return {(record.provider, record.board_token): record for record in self.records}
 
+    def h1b_by_board(self) -> dict[tuple[ATSProvider, str], CompanyH1B]:
+        """``(provider, board token lower-cased)`` -> aggregate, for records whose ``h1b`` is an object.
+
+        The token is lower-cased because a posting's ``board_token`` is
+        whatever the watchlist/board URL carried, and the catalog itself
+        dedupes case-insensitively (``parse_catalog_payload``).
+        """
+
+        return {
+            (record.provider, record.board_token.lower()): record.h1b_summary
+            for record in self.records
+            if record.h1b_summary is not None
+        }
+
     def summary(self) -> dict[str, object]:
         by_provider: dict[str, int] = {}
         for record in self.records:
@@ -219,6 +285,7 @@ def parse_company_record(raw: object) -> CompanyRecord | None:
     board_url = _optional_str(raw.get("board_url")) or _BOARD_URL_TEMPLATES[provider].format(token=token)
     h1b_raw = raw.get("h1b")
     h1b = bool(h1b_raw) if not isinstance(h1b_raw, str) else h1b_raw.strip().lower() in {"1", "true", "yes"}
+    h1b_summary = parse_company_h1b(h1b_raw)
     return CompanyRecord(
         name=name.strip(),
         provider=provider,
@@ -231,6 +298,7 @@ def parse_company_record(raw: object) -> CompanyRecord | None:
         us_posting_count=_optional_int(raw.get("us_posting_count")),
         h1b=h1b,
         last_verified=_optional_str(raw.get("last_verified")),
+        h1b_summary=h1b_summary,
     )
 
 
@@ -371,12 +439,14 @@ __all__ = [
     "COMPANY_CATALOG_SIZE_BUDGET_BYTES",
     "CompanyCatalog",
     "CompanyCatalogError",
+    "CompanyH1B",
     "CompanyRecord",
     "build_catalog_resource",
     "catalog_info",
     "decode_catalog_bytes",
     "load_company_catalog",
     "parse_catalog_payload",
+    "parse_company_h1b",
     "parse_company_record",
     "read_catalog_resource_bytes",
 ]

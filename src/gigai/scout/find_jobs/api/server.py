@@ -965,6 +965,11 @@ class ScoutFindJobsBackend:
             "cap": cap,
             "candidate_count": snapshot.candidate_count,
             "not_assessed_counts": not_assessed_counts,
+            # Q4b-data (Q2 flag 1): the per-board fetch summary and the
+            # watchlist seeding receipt ``read_progress`` already returns,
+            # passed through as-is (``{}`` / ``null`` before acquire writes them).
+            "boards": dict(snapshot.boards),
+            "watchlist_seed": None if snapshot.watchlist_seed is None else dict(snapshot.watchlist_seed),
         }
 
     def _sealed_selection_cap(self, run_id: str) -> int | None:
