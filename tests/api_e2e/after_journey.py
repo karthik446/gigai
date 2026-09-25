@@ -9,8 +9,9 @@ function instead of repeating the same tail every time:
    must never leave the workpad dirty (regression-001/-r2).
 2. doctor's ``journal.index`` check, via ``gigai.diagnostics.run_doctor`` --
    the same call ``gigai doctor`` makes; must report PASS.
-3. A generous per-route latency budget (default budgets below), checked by
-   the journey itself via ``LatencyBudget``/``timed_request``.
+3. A generous per-route latency budget (default budgets below, scaled per
+   ``tests/support/latency.py`` for CI), checked by the journey itself via
+   ``LatencyBudget``/``timed_request``.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from pathlib import Path
 
 from gigai.diagnostics import run_doctor
 
+from tests.support.latency import latency_bound
 from tests.support.workpad_assertions import assert_managed_workpad_clean
 
 
@@ -38,8 +40,12 @@ from tests.support.workpad_assertions import assert_managed_workpad_clean
 # something it shouldn't, e.g. a live network call slipping past a seam,
 # which would take far longer than 15s against a closed port). /api/config
 # keeps its own explicit tighter budget (CONFIG_ROUTE_LATENCY_BUDGET_SECONDS)
-# because the ticket names that exact number -- currently failing for the
-# known, tracked uat-bug-008 reason.
+# because the ticket names that exact number; uat-bug-008 (78fcbf2) landed
+# this, so it is a hard assertion again -- both budgets are scaled by
+# ``tests.support.latency.latency_bound`` (ci-fix-pr37-r2), so a noisy
+# shared CI runner (observed 1.3s here for a 1.0s laptop bound in unrelated
+# runs) gets more room via ``GIGAI_TEST_LATENCY_SCALE`` without loosening
+# the bound that actually catches a regression on a dev machine.
 DEFAULT_LATENCY_BUDGET_SECONDS = 15.0
 CONFIG_ROUTE_LATENCY_BUDGET_SECONDS = 1.0
 
@@ -53,9 +59,11 @@ class LatencyBudget:
     budget_seconds: float = DEFAULT_LATENCY_BUDGET_SECONDS
 
     def assert_within_budget(self) -> None:
-        assert self.elapsed_seconds < self.budget_seconds, (
+        bound = latency_bound(self.budget_seconds)
+        assert self.elapsed_seconds < bound, (
             f"{self.route} took {self.elapsed_seconds:.3f}s, over its "
-            f"{self.budget_seconds:.1f}s budget"
+            f"{bound:.1f}s budget ({self.budget_seconds:.1f}s x "
+            f"{bound / self.budget_seconds:.1f} CI scale)"
         )
 
 
@@ -69,26 +77,6 @@ def timed_request(route: str, call, *, budget_seconds: float = DEFAULT_LATENCY_B
     response = call()
     elapsed = time.monotonic() - started
     return response, LatencyBudget(route, elapsed, budget_seconds)
-
-
-def assert_latency_xfail_strict_false(budget: LatencyBudget, *, reason: str) -> None:
-    """Soft-check a latency budget: a failure here warns instead of failing.
-
-    Used for the one known-broken budget the ticket calls out
-    (``/api/config`` < 1s, blocked on uat-bug-008 landing in a parallel
-    packet) so this suite still proves everything else in a journey without
-    a whole-test ``@pytest.mark.xfail`` hiding unrelated regressions, and
-    without a bare ``pytest.xfail()`` aborting the rest of the journey.
-    Becomes a hard assertion again the moment the underlying fix lands and
-    the route is actually fast -- there is nothing to "un-xfail" by hand.
-    """
-
-    import warnings
-
-    try:
-        budget.assert_within_budget()
-    except AssertionError as exc:
-        warnings.warn(f"{exc} (known, xfail(strict=False), reason={reason!r})", stacklevel=2)
 
 
 def assert_doctor_journal_index_passes(home: Path) -> None:
@@ -116,6 +104,5 @@ __all__ = [
     "LatencyBudget",
     "assert_clean_and_healthy",
     "assert_doctor_journal_index_passes",
-    "assert_latency_xfail_strict_false",
     "timed_request",
 ]

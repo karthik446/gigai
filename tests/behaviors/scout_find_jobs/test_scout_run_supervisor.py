@@ -475,9 +475,22 @@ def test_port_is_free_after_time_wait_from_our_own_closed_connection() -> None:
     one connection, the server side closes first (leaving the local
     ephemeral<->port pair in TIME_WAIT on the *server* port), then we ask
     ``_port_is_free`` about that port while the OS still has it quarantined.
+
+    The listener sets ``SO_REUSEADDR`` before binding, just like the real
+    server (``ThreadingHTTPServer``/``TCPServer.allow_reuse_address``) does.
+    This matters on Linux: the kernel caches a per-port "fast reuse" bit on
+    the bind bucket, and that bit is only kept set if every socket that has
+    ever bound to the port set ``SO_REUSEADDR`` -- including the one that
+    goes on to sit in TIME_WAIT. A listener that omits it (as a naive test
+    double might) poisons the bucket and makes a later ``SO_REUSEADDR`` bind
+    fall through to the slow conflict-check path that still sees the
+    TIME_WAIT entry and refuses, even though the real server would have
+    bound fine. macOS/BSD has no such bucket-poisoning: a plain listener
+    would pass here regardless, so it wouldn't have caught this mismatch.
     """
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
     port = listener.getsockname()[1]

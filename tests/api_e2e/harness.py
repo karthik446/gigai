@@ -110,16 +110,39 @@ def setup_and_init(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def setup_and_init_without_a_model_target(tmp_path: Path) -> tuple[Path, Path]:
-    """Same as ``setup_and_init``, but configures NO model target at all.
+    """Same as ``setup_and_init``, but with no target named exactly
+    ``ollama_local``.
 
     For journeys (e.g. the failed-run-then-next-run-assesses repro) that
     need to add their OWN, deliberately ambiguous pair of
     ``ollama_local``-adapter targets afterward, with nothing already named
     exactly ``ollama_local`` to short-circuit the ambiguity via the
     exact-name-match rule (``_resolve_configured_target_name_for_adapter``).
+
+    Configures a differently-named ``ollama_local``-adapter target
+    (``seed-default``) and creates it explicitly via ``--create-model-target``.
+    ``gigai setup`` requires *some* create-target: passing no endpoint/
+    target/create-target at all falls back to auto-detecting a Codex/Claude
+    executable already installed on the *host* running the test (see
+    ``cli.py``'s "no usable model runtime is configured" error), which is
+    true on a developer's machine but never true on a bare CI runner. Naming
+    it something other than ``ollama_local`` keeps this hermetic while still
+    leaving nothing named exactly ``ollama_local`` for the ambiguity check.
     """
 
-    return _setup_and_init(tmp_path, extra_setup_args=())
+    from gigai.scout.find_jobs.bindings import TEST_MODEL_DIGEST, TEST_MODEL_NAME
+
+    return _setup_and_init(
+        tmp_path,
+        extra_setup_args=(
+            "--endpoint",
+            "seed=ollama_local:http://127.0.0.1:11434",
+            "--model-target",
+            f"seed-default=seed:{TEST_MODEL_NAME}@{TEST_MODEL_DIGEST}",
+            "--create-model-target",
+            "seed-default",
+        ),
+    )
 
 
 def _setup_and_init(tmp_path: Path, *, extra_setup_args: tuple[str, ...]) -> tuple[Path, Path]:

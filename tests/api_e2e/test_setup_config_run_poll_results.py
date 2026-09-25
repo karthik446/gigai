@@ -18,7 +18,6 @@ import pytest
 from tests.api_e2e.after_journey import (
     CONFIG_ROUTE_LATENCY_BUDGET_SECONDS,
     assert_clean_and_healthy,
-    assert_latency_xfail_strict_false,
     timed_request,
 )
 from tests.api_e2e.harness import (
@@ -77,16 +76,12 @@ def test_setup_config_run_poll_results_journey(tmp_path: Path, monkeypatch: pyte
         assert config_body["resume_preview"] is not None
         assert config_body["resume_missing_hint"] is None
         config_digest = config_body["config_digest"]
-        # uat-bug-008 ("13s /api/config", per the ticket's own survey) has
-        # not landed in this parallel packet yet, so /api/config's <1s
-        # budget is known-broken today. A whole-test `@pytest.mark.xfail`
-        # would hide every OTHER assertion in this journey (run/poll/
-        # results) behind the same xfail, and a bare `pytest.xfail()` call
-        # aborts the rest of the test outright -- neither is "xfail(strict=
-        # False) this one assertion" as asked. This soft-checks it instead:
-        # a real regression elsewhere still fails the test; only this one
-        # known latency budget is downgraded to a warning until 008 lands.
-        assert_latency_xfail_strict_false(config_latency, reason="uat-bug-008")
+        # uat-bug-008 ("13s /api/config", per the ticket's own survey)
+        # landed (78fcbf2): this is a real assertion again. The budget
+        # itself is scaled for CI noise, not loosened outright -- see
+        # ``after_journey.py``'s ``CONFIG_ROUTE_LATENCY_BUDGET_SECONDS``
+        # comment and ``tests/support/latency.py`` (ci-fix-pr37-r2).
+        config_latency.assert_within_budget()
 
         # -- run -------------------------------------------------------------
         run_response, run_latency = timed_request(
