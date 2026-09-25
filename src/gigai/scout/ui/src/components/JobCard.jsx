@@ -91,7 +91,7 @@ export default function JobCard({ job, visaRequired }) {
         {mode && <span className="mode-chip">{mode}</span>}
         {pay && <span className="pay">{pay}</span>}
         <span className="card-age" title={posting.published_at || undefined}>
-          {ageLabel(posting.published_at)}
+          {job.status === "on_demand" ? "assessed on demand" : ageLabel(posting.published_at)}
         </span>
       </div>
 

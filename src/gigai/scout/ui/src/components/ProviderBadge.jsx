@@ -8,7 +8,7 @@ export default function ProviderBadge({ posting }) {
   if (!label) {
     return null;
   }
-  const via = posting.source_kind && posting.source_kind !== "ats" ? ` via ${posting.source_kind}` : "";
+  const via = provider && posting.source_kind && posting.source_kind !== "ats" ? ` via ${posting.source_kind}` : "";
   return (
     <span className={`ats-badge ats-${provider || "other"}`} title={`${label}${via}`}>
       {label}

@@ -1,24 +1,44 @@
-// F1/P9: the profile-switcher pill row every app view shows (mockup's
-// `.profile-switcher`/`.profile-pill`). `profiles` is GET /api/profiles's
-// own list (profiles.py's `_profile_to_json`: label, resume_ref, titles,
-// ...) -- no resume text, no proposed fields.
+import { SETTINGS_HASH, navigate } from "../routing.js";
+
+// Q4a-nav: the profile switcher is a dropdown in the top bar (it replaced
+// the profile card every view used to show). Options are GET /api/profiles'
+// own list (profiles.py's `_profile_to_json`: label, resume_ref, titles);
+// choosing one calls POST /api/profiles/selection through `onSelect`
+// (hooks.useProfiles.switchTo, which only updates once the server
+// confirms). The last option opens Settings, where profiles are managed.
+const MANAGE = "__manage__";
+
 export default function ProfileSwitcher({ profiles, selectedProfileId, onSelect }) {
   if (!profiles || profiles.length === 0) {
-    return <p className="muted">No profiles yet.</p>;
+    return (
+      <a href={SETTINGS_HASH} className="top-profile-note">
+        No profiles yet
+      </a>
+    );
   }
   return (
-    <div className="profile-switcher">
-      {profiles.map((profile) => (
-        <button
-          key={profile.profile_id}
-          type="button"
-          className={`profile-pill${profile.profile_id === selectedProfileId ? " active" : ""}`}
-          onClick={() => onSelect(profile.profile_id)}
-        >
-          <div className="pname">{profile.label}</div>
-          <div className="presume">{profile.resume_ref.record_id ? profile.titles[0] || "" : ""}</div>
-        </button>
-      ))}
-    </div>
+    <label className="profile-select">
+      <span className="visually-hidden">Profile</span>
+      <select
+        aria-label="Profile"
+        value={selectedProfileId || ""}
+        onChange={(event) => {
+          if (event.target.value === MANAGE) {
+            event.target.value = selectedProfileId || "";
+            navigate(SETTINGS_HASH);
+            return;
+          }
+          onSelect(event.target.value);
+        }}
+      >
+        {profiles.map((profile) => (
+          <option key={profile.profile_id} value={profile.profile_id}>
+            {profile.label}
+            {profile.resume_ref.record_id && profile.titles[0] ? ` · ${profile.titles[0]}` : ""}
+          </option>
+        ))}
+        <option value={MANAGE}>Manage profiles…</option>
+      </select>
+    </label>
   );
 }

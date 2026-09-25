@@ -167,9 +167,11 @@ export function buildJobs({ rows, rankScores, quickItems, runCreatedAt }) {
     });
   });
 
-  return (rows || []).map((row) => {
+  const seen = new Set();
+  const jobs = (rows || []).map((row) => {
     const { posting } = row;
     const url = posting.normalized_url;
+    seen.add(url);
     const quick = quickByUrl.get(url) || null;
     const runAt = row.status === "carried_forward" ? row.fromRunDate || runCreatedAt : runCreatedAt;
     const quickIsLatest = Boolean(quick) && (!row.assessment || !runAt || assessmentTime(quick) >= runAt);
@@ -191,6 +193,57 @@ export function buildJobs({ rows, rankScores, quickItems, runCreatedAt }) {
       sponsorship: (assessment && assessment.sponsorship) || posting.sponsorship || "unknown",
     };
   });
+
+  // Q4a-nav: a posting assessed on demand ("+ Assess a job", the CLI, a
+  // pasted text) that no row of the loaded run carries is still a job: its
+  // job page (#/jobs/<job_identity>) is the same JobPage, so the store's
+  // ResolvedJob (title / company / location / source_url, text never
+  // serialized) stands in for the posting row. `row` is null for these.
+  const onDemand = [];
+  const seenQuick = new Set();
+  (quickItems || []).forEach((item) => {
+    const identity = item.job && item.job.job_identity;
+    if (!identity || seen.has(identity) || seen.has(item.job.normalized_url) || seenQuick.has(identity)) {
+      return;
+    }
+    if (quickByUrl.get(identity) !== item) {
+      return; // an older entry for the same job
+    }
+    seenQuick.add(identity);
+    onDemand.push(quickOnlyJob(item, rankByUrl.get(identity) || null));
+  });
+  return jobs.concat(onDemand);
+}
+
+export function quickOnlyJob(item, rank = null) {
+  const job = item.job || {};
+  const posting = {
+    title: job.title || "",
+    company: job.company || "",
+    location: job.location || "",
+    url: job.source_url || null,
+    normalized_url: job.normalized_url || job.job_identity,
+    text: null,
+    published_at: null,
+    provider: null,
+    source_kind: job.fetch_kind === "pasted" ? "pasted text" : "on demand",
+  };
+  const assessment = item.result || null;
+  return {
+    id: job.job_identity,
+    posting,
+    row: null,
+    status: "on_demand",
+    notAssessedReason: null,
+    fromRunDate: null,
+    runCreatedAt: null,
+    rank,
+    quick: item,
+    assessment,
+    assessmentSource: assessment ? "quick" : null,
+    verdict: effectiveVerdict(assessment),
+    sponsorship: (assessment && assessment.sponsorship) || "unknown",
+  };
 }
 
 export function effectiveVerdict(assessment) {

@@ -2,7 +2,7 @@
 // so each view module (views/*.jsx) can import just what it needs without
 // growing App.jsx into the single file that owns every fetch.
 import { useCallback, useEffect, useState } from "react";
-import { getApplications, getProfiles, getRuns, selectProfile } from "./api.js";
+import { getAnswers, getApplications, getAssessments, getProfiles, getRuns, selectProfile } from "./api.js";
 
 // F1: the profile list + which one is selected, shared by every view
 // (dashboard/profiles/find-jobs all read the same GET /api/profiles).
@@ -68,4 +68,42 @@ export function useApplications() {
   useEffect(reload, [reload]);
 
   return { ...state, reload };
+}
+
+// Q4a-nav: every open question across postings -- the Questions view's
+// list AND the top bar's badge count read this one state. The list is
+// DERIVED exactly as PendingAnswersView always did (P3, operator decision
+// 3): every stored quick assessment with verdict pending_user_answers
+// (GET /api/assessments?verdict=pending_user_answers) minus any question_id
+// already answered (GET /api/answers). `count` is the number of such
+// questions still open; `reload` is called after anything that can change
+// it (an answer, a re-assess, an on-demand assess).
+export function usePendingQuestions() {
+  const [state, setState] = useState({ loading: true, items: [], answeredIds: new Set(), error: null });
+
+  const reload = useCallback(() => {
+    setState((prev) => ({ ...prev, loading: true, error: null }));
+    Promise.all([getAssessments({ verdict: "pending_user_answers" }), getAnswers()])
+      .then(([assessments, answers]) => {
+        setState({
+          loading: false,
+          items: assessments.items || [],
+          answeredIds: new Set((answers.answers || []).map((answer) => answer.question_id)),
+          error: null,
+        });
+      })
+      .catch((error) => setState({ loading: false, items: [], answeredIds: new Set(), error: error.message || String(error) }));
+  }, []);
+
+  useEffect(reload, [reload]);
+
+  const cards = state.items.map((item) => ({
+    item,
+    result: item.result,
+    pendingQuestions: (item.result.structured_questions || []).filter((question) => !state.answeredIds.has(question.question_id)),
+  }));
+  const stillPending = cards.filter((card) => card.result.verdict === "pending_user_answers" || card.pendingQuestions.length > 0);
+  const count = stillPending.reduce((total, card) => total + card.pendingQuestions.length, 0);
+
+  return { ...state, cards: stillPending, count, reload };
 }

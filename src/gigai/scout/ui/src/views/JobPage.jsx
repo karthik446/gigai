@@ -19,7 +19,8 @@ import {
   verdictHistoryFor,
   workModeLabel,
 } from "../jobModel.js";
-import { GRID_HASH } from "../routing.js";
+import Breadcrumb from "../components/Breadcrumb.jsx";
+import { JOBS_HASH } from "../routing.js";
 
 // Q4a: one posting's job page (#/jobs/<normalized_url>), per
 // mockups/cards-and-job-page.html with the operator amendment: the
@@ -193,7 +194,7 @@ function AssessNow({ posting, onAssessed }) {
   );
 }
 
-export default function JobPage({ job, jobId, profileId, visaRequired, loading, onQuickUpdated }) {
+export default function JobPage({ job, jobId, profileId, visaRequired, loading, onQuickUpdated, onApplicationsChanged }) {
   const [answers, setAnswers] = useState([]);
   const [applications, setApplications] = useState([]);
 
@@ -202,6 +203,12 @@ export default function JobPage({ job, jobId, profileId, visaRequired, loading, 
       .then((response) => setApplications(response.applications || []))
       .catch(() => setApplications([]));
   }, []);
+  const handleApplicationRecorded = useCallback(() => {
+    reloadApplications();
+    if (onApplicationsChanged) {
+      onApplicationsChanged();
+    }
+  }, [reloadApplications, onApplicationsChanged]);
 
   useEffect(() => {
     getAnswers()
@@ -217,9 +224,7 @@ export default function JobPage({ job, jobId, profileId, visaRequired, loading, 
   if (!job) {
     return (
       <div>
-        <a className="back-link" href={GRID_HASH}>
-          ← All postings
-        </a>
+        <Breadcrumb crumbs={[{ label: "Jobs", href: JOBS_HASH }, { label: loading ? "Loading…" : "Job not found" }]} />
         <section className="panel">
           <h2>{loading ? "Loading run…" : "Job not found"}</h2>
           {!loading && (
@@ -238,11 +243,11 @@ export default function JobPage({ job, jobId, profileId, visaRequired, loading, 
   const pay = payLabel(posting.pay);
   const priorAnswers = new Map(answers.map((answer) => [answer.question_id, answer]));
 
+  const crumbTitle = [displayCompanyName(posting.company), posting.title].filter(Boolean).join(" · ") || "(untitled posting)";
+
   return (
     <div>
-      <a className="back-link" href={GRID_HASH}>
-        ← All postings
-      </a>
+      <Breadcrumb crumbs={[{ label: "Jobs", href: JOBS_HASH }, { label: crumbTitle }]} />
 
       <section className="panel">
         <div className="job-header">
@@ -252,10 +257,16 @@ export default function JobPage({ job, jobId, profileId, visaRequired, loading, 
               <strong style={{ color: "var(--text)" }}>{displayCompanyName(posting.company)}</strong>
               {posting.location && <span>{posting.location}</span>}
               <ProviderBadge posting={posting} />
-              <span title={posting.published_at || undefined}>
-                posted {ageLabel(posting.published_at)}
-                {posting.published_at ? ` (${dateLabel(posting.published_at)})` : ""}
-              </span>
+              {job.status === "on_demand" ? (
+                <span title={job.quick && job.quick.created_at ? job.quick.created_at : undefined}>
+                  assessed on demand{job.quick && job.quick.created_at ? ` ${dateLabel(job.quick.created_at)}` : ""}
+                </span>
+              ) : (
+                <span title={posting.published_at || undefined}>
+                  posted {ageLabel(posting.published_at)}
+                  {posting.published_at ? ` (${dateLabel(posting.published_at)})` : ""}
+                </span>
+              )}
             </div>
             <div className="job-facts">
               {mode && <span className="mode-chip">{mode}</span>}
@@ -287,7 +298,7 @@ export default function JobPage({ job, jobId, profileId, visaRequired, loading, 
               Open posting ↗
             </a>
           )}
-          <MarkApplied normalizedUrl={posting.normalized_url} applications={applications} onRecorded={reloadApplications} />
+          {posting.url && <MarkApplied normalizedUrl={posting.normalized_url} applications={applications} onRecorded={handleApplicationRecorded} />}
         </div>
       </section>
 

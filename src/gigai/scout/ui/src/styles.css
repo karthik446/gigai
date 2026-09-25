@@ -1044,4 +1044,419 @@ table.data-table th {
 @media (max-width: 480px) {
   .card-grid { grid-template-columns: 1fr; }
   .filter-row { flex-direction: column; align-items: stretch; }
+  /* Q4a-nav: in a column the 220px flex-basis became the search box's HEIGHT. */
+  .filter-search { flex: 0 0 auto; }
+  .filter-company select { width: 100%; }
+}
+
+/* Q4a-nav (v0.1.9): one persistent top bar, breadcrumbs, the Jobs summary
+   strip, and the 390px collapse. The old .top-nav / .profile-switcher /
+   .profile-pill rules above are unused now (kept for the wizard's shared
+   tokens only). */
+
+.app-main {
+  padding-top: 4px;
+}
+
+.app-loading {
+  padding: 24px 0;
+  color: var(--muted);
+}
+
+.top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 16px;
+}
+
+.top-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  min-height: 48px;
+}
+
+.top-bar .brand {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--text);
+  text-decoration: none;
+  letter-spacing: 0.01em;
+  padding: 6px 8px 6px 4px;
+  white-space: nowrap;
+}
+
+.top-links {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.top-link,
+.menu-links .top-gear {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.top-link:hover,
+.top-gear:hover {
+  background: #eef0f4;
+}
+
+.top-link.active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.top-link.active .nav-badge {
+  background: var(--accent-contrast);
+  color: var(--accent);
+}
+
+.top-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.profile-select select {
+  padding: 6px 28px 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-family: inherit;
+  max-width: 220px;
+  text-overflow: ellipsis;
+}
+
+.top-profile-note {
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+.top-gear {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  padding: 7px;
+  border-radius: 999px;
+  text-decoration: none;
+}
+
+.top-gear.active {
+  color: var(--accent);
+  background: #eef0f4;
+}
+
+.top-gear .gear-label {
+  display: none;
+  font-size: 0.9rem;
+}
+
+.menu-toggle {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.menu-sheet {
+  border-top: 1px solid var(--border);
+  padding: 8px 10px 12px;
+}
+
+.menu-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menu-links .top-link,
+.menu-links .top-gear {
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 1rem;
+}
+
+.menu-links .top-gear .gear-label {
+  display: inline;
+}
+
+.menu-profile {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.menu-profile .profile-select,
+.menu-profile .profile-select select {
+  width: 100%;
+  max-width: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Breadcrumb: Jobs › Company · Title */
+.breadcrumb {
+  margin-bottom: 10px;
+  font-size: 0.88rem;
+}
+
+.breadcrumb ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.breadcrumb li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.breadcrumb a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.breadcrumb [aria-current="page"] {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70vw;
+}
+
+.crumb-sep {
+  color: var(--muted);
+}
+
+/* Summary strip (the Dashboard's, now on top of Jobs) */
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.summary-strip.compact {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 10px 0 0;
+}
+
+.summary-strip .stat-tile {
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.summary-strip .stat-value {
+  font-size: 1.05rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.stat-link:hover {
+  border-color: var(--accent);
+}
+
+.jobs-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.jobs-header-row h2 {
+  margin: 0;
+}
+
+.jobs-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.jobs-header-actions .button {
+  text-decoration: none;
+}
+
+.jobs-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px 18px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 0.85rem;
+}
+
+.past-run-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.past-run-picker .chip-group-label {
+  margin: 0;
+}
+
+.past-run-picker select {
+  width: auto;
+  max-width: 100%;
+  padding: 6px 8px;
+  font-size: 0.85rem;
+}
+
+.small {
+  font-size: 0.78rem;
+}
+
+.run-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  background: #eef0f4;
+}
+
+.run-status.succeeded {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.run-status.failed,
+.run-status.blocked {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.applications-table td,
+.runs-table td {
+  vertical-align: top;
+}
+
+.applications-table tr.superseded {
+  opacity: 0.6;
+}
+
+/* The bar collapses to a menu below 640px (the operator's 390px phone
+   width included): links and the profile switcher move into the sheet. */
+@media (max-width: 640px) {
+  .top-links,
+  .top-right {
+    display: none;
+  }
+
+  .menu-toggle {
+    display: inline-flex;
+  }
+
+  .top-bar {
+    border-radius: 8px;
+    margin-bottom: 12px;
+  }
+
+  .summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .summary-strip.compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .jobs-header-actions {
+    width: 100%;
+  }
+
+  .jobs-header-actions .button {
+    flex: 1;
+    text-align: center;
+  }
+
+  .breadcrumb [aria-current="page"] {
+    max-width: 60vw;
+  }
+
+  .past-run-picker {
+    width: 100%;
+  }
+
+  .past-run-picker select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .applications-table,
+  .runs-table {
+    font-size: 0.8rem;
+  }
 }
