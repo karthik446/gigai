@@ -47,6 +47,18 @@ class ApplicationEventError(RuntimeError):
         super().__init__(message)
 
 
+def _event_ref(event):
+    """Return a committed/validated event's one posting identity.
+
+    ``event`` carries exactly one of ``opportunity_ref``/``external_ref``
+    (schema-enforced); this mirrors :func:`_ref_field` for readers holding
+    an already-assembled event dict rather than raw input.
+    """
+    if "opportunity_ref" in event:
+        return "opportunity_ref", event.get("opportunity_ref")
+    return "external_ref", event.get("external_ref")
+
+
 def _now():
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -59,11 +71,25 @@ def _digest(value):
     return digest_imported_bytes(canonical_json_bytes(value))
 
 
+def _ref_field(data):
+    """Return the event's one posting identity as ``(field_name, value)``.
+
+    An event carries exactly one of ``opportunity_ref`` (a committed Scout
+    Discover opportunity) or ``external_ref`` (a bounded opaque string --
+    A1: no format that implies a URL or posting; readers outside core join
+    it to whatever they own, e.g. Scout's find-jobs posting identity).
+    """
+    if "opportunity_ref" in data:
+        return "opportunity_ref", data["opportunity_ref"]
+    return "external_ref", data.get("external_ref")
+
+
 def _scope(data):
+    field, value = _ref_field(data)
     return {
         "project_id": data["project_id"],
         "gig_id": data["gig_id"],
-        "opportunity_ref": data["opportunity_ref"],
+        field: value,
         "event_kind": data["event_kind"],
         "occurred_at": data["occurred_at"],
         "timezone": data["timezone"],
@@ -323,13 +349,14 @@ def validate_application_links(
     # never mutate the event object that the writer will serialize as its
     # immutable schema-closed artifact.
     checked = dict(checked)
+    _, ref_value = _event_ref(checked)
     for ref in checked.get("document_refs", []):
         if not isinstance(ref, dict):
             raise ApplicationEventError("application_document_ref_invalid", "document reference must be an object")
         if ref.get("kind") == "scout_document":
             _scout_document_ref(
                 ref, snapshot=snapshot, project_id=project_id, gig_id=gig_id,
-                opportunity_ref=str(checked.get("opportunity_ref")),
+                opportunity_ref=str(ref_value),
             )
             continue
         record_id, revision_id, digest = ref.get("record_id"), ref.get("revision_id"), ref.get("content_sha256")
@@ -358,7 +385,11 @@ def validate_application_links(
             or digest != snapshot_ref.get("content_sha256")
         ):
             raise ApplicationEventError("application_document_digest_mismatch", "document reference digest differs from committed bytes")
-    if opportunity_reader is None:
+    # Discover opportunity verification only applies to opportunity_ref
+    # events; an external_ref event names no Discover opportunity at all, so
+    # it is left explicitly unresolved here (Scout's own reader joins it to
+    # a find-jobs posting separately -- see scout/projection.py).
+    if opportunity_reader is None or "opportunity_ref" not in checked:
         checked["opportunity_verified"] = False
         return checked
     try:
@@ -384,6 +415,7 @@ def validate_application_links(
 
 
 def _redeem_documents(source, snapshot, project_id, gig_id, workpad):
+    _, source_ref_value = _event_ref(source)
     for ref in source.get("document_refs", []):
         if not isinstance(ref, dict):
             raise ApplicationEventError(
@@ -393,7 +425,7 @@ def _redeem_documents(source, snapshot, project_id, gig_id, workpad):
         if ref.get("kind") == "scout_document":
             _scout_document_ref(
                 ref, snapshot=snapshot, project_id=project_id, gig_id=gig_id,
-                opportunity_ref=str(source.get("opportunity_ref")),
+                opportunity_ref=str(source_ref_value),
             )
             continue
         rid, vid, digest = (
@@ -460,7 +492,7 @@ def _redeem_documents(source, snapshot, project_id, gig_id, workpad):
                 "application_document_digest_mismatch",
                 "document reference digest differs from committed document bytes",
             )
-        if ref.get("opportunity_ref") not in (None, source["opportunity_ref"]):
+        if ref.get("opportunity_ref") not in (None, source_ref_value):
             raise ApplicationEventError(
                 "application_document_scope_refused",
                 "document reference opportunity differs",
@@ -472,10 +504,21 @@ def _validate_input(data):
         raise ApplicationEventError(
             "application_event_invalid", "input must be a JSON object"
         )
-    required = {"opportunity_ref", "event_kind", "occurred_at", "timezone"}
+    required = {"event_kind", "occurred_at", "timezone"}
     if not required <= data.keys():
         raise ApplicationEventError(
             "application_event_invalid", "input lacks required application scope"
+        )
+    has_opportunity, has_external = "opportunity_ref" in data, "external_ref" in data
+    if has_opportunity and has_external:
+        raise ApplicationEventError(
+            "application_ref_conflict",
+            "an application event accepts exactly one of opportunity_ref or external_ref",
+        )
+    if not has_opportunity and not has_external:
+        raise ApplicationEventError(
+            "application_ref_missing",
+            "an application event requires exactly one of opportunity_ref or external_ref",
         )
     if "request_evidence" in data:
         raise ApplicationEventError(
@@ -491,13 +534,20 @@ def _validate_input(data):
         raise ApplicationEventError("application_document_ref_invalid", "document_refs must be a bounded object list")
     if any(item.get("kind") not in (None, "scout_document") for item in refs):
         raise ApplicationEventError("application_document_ref_invalid", "document reference kind is unsupported")
-    if not isinstance(data["opportunity_ref"], str) or not re.fullmatch(
-        r"opportunity_[0-9a-f]{32}", data["opportunity_ref"]
-    ):
-        raise ApplicationEventError(
-            "application_opportunity_ref_invalid",
-            "opportunity_ref must be a committed Scout opportunity identity",
-        )
+    if has_opportunity:
+        if not isinstance(data["opportunity_ref"], str) or not re.fullmatch(
+            r"opportunity_[0-9a-f]{32}", data["opportunity_ref"]
+        ):
+            raise ApplicationEventError(
+                "application_opportunity_ref_invalid",
+                "opportunity_ref must be a committed Scout opportunity identity",
+            )
+    else:
+        if not isinstance(data["external_ref"], str) or not 1 <= len(data["external_ref"]) <= 2048:
+            raise ApplicationEventError(
+                "application_external_ref_invalid",
+                "external_ref must be a non-empty string of at most 2048 characters",
+            )
     try:
         dt = datetime.fromisoformat(str(data["occurred_at"]).replace("Z", "+00:00"))
     except ValueError as exc:
@@ -558,12 +608,13 @@ def record_application(
         "recorded_at": recorded,
         "command": "gigai application record",
     }
+    ref_field, ref_value = _ref_field(source)
     event = {
         "schema_version": "1.0",
         "event_id": event_id,
         "project_id": project_id,
         "gig_id": gig_id,
-        "opportunity_ref": source["opportunity_ref"],
+        ref_field: ref_value,
         "event_kind": source["event_kind"],
         "occurred_at": source["occurred_at"],
         "timezone": source["timezone"],
@@ -674,10 +725,7 @@ def record_application(
             target = next(
                 (e for e in prior if e.get("event_id") == source["supersedes"]), None
             )
-            if (
-                target is None
-                or target.get("opportunity_ref") != source["opportunity_ref"]
-            ):
+            if target is None or _event_ref(target) != _event_ref(source):
                 raise ApplicationEventError(
                     "application_correction_invalid",
                     "correction must supersede an earlier same-opportunity event",
@@ -769,9 +817,9 @@ def read_application(
         )
         groups = {
             str(key): [
-                event for event, _seq in ordered if event.get("opportunity_ref") == key
+                event for event, _seq in ordered if _event_ref(event)[1] == key
             ]
-            for key in {event.get("opportunity_ref") for event, _seq in ordered}
+            for key in {_event_ref(event)[1] for event, _seq in ordered}
         }
         if opportunity_ref is not None:
             selected = groups.get(opportunity_ref, [])

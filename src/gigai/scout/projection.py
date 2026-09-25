@@ -220,6 +220,20 @@ def _record_rows(snapshot: JournalSnapshot, project: str, gig: str) -> tuple[lis
     return records, questions
 
 
+def _event_ref_value(event: Mapping[str, object]) -> object:
+    """Return an application event's one posting identity.
+
+    A1: core's committed event carries exactly one of ``opportunity_ref``
+    (a Discover opportunity) or ``external_ref`` (a bounded opaque string --
+    here, a find-jobs posting's ``normalized_url``, joined below). Grouping
+    and the report both need this generic identity regardless of which
+    field is present.
+    """
+    if "opportunity_ref" in event:
+        return event.get("opportunity_ref")
+    return event.get("external_ref")
+
+
 def _application_rows(snapshot: JournalSnapshot, project: str, gig: str, opportunity_reader: ProjectionReader | None = None) -> list[dict[str, object]]:
     sequences: dict[str, int] = {}
     for handoff_path, raw in snapshot.artifacts.items():
@@ -258,7 +272,7 @@ def _application_rows(snapshot: JournalSnapshot, project: str, gig: str, opportu
     values.sort(key=lambda item: (str(item.get("occurred_at", "")), int(item.get("journal_sequence", 0)), str(item.get("event_id", ""))))
     by_opportunity: dict[str, list[dict[str, object]]] = {}
     for event in values:
-        by_opportunity.setdefault(str(event["opportunity_ref"]), []).append(event)
+        by_opportunity.setdefault(str(_event_ref_value(event)), []).append(event)
     for group in by_opportunity.values():
         superseded = {item.get("supersedes") for item in group}
         for item in group:
@@ -302,7 +316,11 @@ def _verify_opportunities(applications: list[dict[str, object]], opportunities: 
         if _OPPORTUNITY.fullmatch(str(item.get("opportunity_id"))) and isinstance(item.get("snapshot_id"), str)
     }
     for event in applications:
-        event["opportunity_verified"] = any(
+        # external_ref events name no Discover opportunity at all (A1); only
+        # opportunity_ref events can verify against this Discover identity
+        # set. external_ref's own join is a separate, find-jobs-side lookup
+        # (see _posting_rows / A1's join below), not "verified" in this sense.
+        event["opportunity_verified"] = "opportunity_ref" in event and any(
             item[0] == event.get("opportunity_ref") for item in identities
         )
 
@@ -318,6 +336,48 @@ def _verify_proposals(proposals: list[dict[str, object]], opportunities: list[di
         proposal["opportunity_verified"] = (
             str(proposal.get("opportunity_id")), str(proposal.get("snapshot_id"))
         ) in identities
+
+
+def _posting_by_normalized_url(snapshot: JournalSnapshot) -> dict[str, dict[str, object]]:
+    """Read every committed find-jobs posting off this snapshot, by normalized_url.
+
+    A1: the Scout-side join for ``external_ref`` events. ``runs/<run_id>/
+    outputs/acquire.json`` is the same committed ``AcquireOutput`` shape
+    ``interview_prep.posting`` reads for prep (``PostingRow.normalized_url``
+    is find-jobs' own posting identity, a separate system from Discover's
+    ``opportunity_id`` -- see that module's docstring). Malformed acquire
+    output at a path this snapshot happened to include is skipped rather
+    than failing the whole projection: this join is best-effort, not
+    authority over whether the event itself is valid.
+    """
+    postings: dict[str, dict[str, object]] = {}
+    for path in sorted(snapshot.artifacts):
+        if not (path.startswith("runs/") and path.endswith("/outputs/acquire.json")):
+            continue
+        try:
+            value = parse_json_bytes(snapshot.artifacts[path])
+            acquire = AcquireOutput.from_json(value)
+        except (ValueError, FindJobsContractError):
+            continue
+        for row in acquire.rows:
+            postings.setdefault(row.posting.normalized_url, row.posting.to_json())
+    return postings
+
+
+def _link_external_refs(applications: list[dict[str, object]], snapshot: JournalSnapshot) -> None:
+    """Annotate each external_ref application with its find-jobs posting, if any.
+
+    A1 (5): an external_ref matching no posting still shows -- unlinked, not
+    dropped, not an error; ``linked_posting`` is ``None`` in that case. An
+    opportunity_ref event is untouched (``linked_posting`` stays absent).
+    """
+    postings: dict[str, dict[str, object]] | None = None
+    for event in applications:
+        if "external_ref" not in event:
+            continue
+        if postings is None:
+            postings = _posting_by_normalized_url(snapshot)
+        event["linked_posting"] = postings.get(str(event.get("external_ref")))
 
 
 def projection_from_snapshot(*, snapshot: JournalSnapshot, project_id: str, gig_id: str, readers: ScoutReaderSet | None = None, require_opportunity_links: bool = False) -> ScoutProjection:
@@ -338,6 +398,7 @@ def projection_from_snapshot(*, snapshot: JournalSnapshot, project_id: str, gig_
     profiles, selected_profile_id = _profile_rows(snapshot, project_id, gig_id)
     _verify_opportunities(applications, opportunities)
     _verify_proposals(proposals, opportunities)
+    _link_external_refs(applications, snapshot)
     if require_opportunity_links and any(not item["opportunity_verified"] for item in applications):
         raise ScoutProjectionError("projection_opportunity_missing", "application event does not name a committed opportunity")
     cursor = {"schema_version": "scout-projection:1", "journal_head": snapshot.head}

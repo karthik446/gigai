@@ -111,11 +111,23 @@ def _proposal_content(item: Mapping[str, object]) -> str:
     return f'<details class="proposal-content"><summary>Proposal content</summary><dl>{"".join(parts) or "<dd>Proposal content unavailable.</dd>"}</dl></details>'
 
 
+def _application_ref(item: Mapping[str, object]) -> str:
+    """An application event's one posting identity, whichever field it carries.
+
+    A1: core events carry exactly one of ``opportunity_ref``/``external_ref``;
+    the report never assumes ``opportunity_ref`` is present.
+    """
+    value = item.get("opportunity_ref") if "opportunity_ref" in item else item.get("external_ref")
+    return str(value)
+
+
 def _section(projection: ScoutProjection, *, workpad: Path, from_dir: Path) -> str:
     opportunities = {str(item.get("opportunity_id")): item for item in projection.opportunities}
     apps_by_opportunity: dict[str, list[Mapping[str, object]]] = {}
     for app in projection.applications:
-        apps_by_opportunity.setdefault(str(app.get("opportunity_ref")), []).append(app)
+        if "opportunity_ref" not in app:
+            continue
+        apps_by_opportunity.setdefault(_application_ref(app), []).append(app)
     proposal_by_opportunity: dict[str, list[Mapping[str, object]]] = {}
     for item in projection.proposals:
         proposal_by_opportunity.setdefault(str(item.get("opportunity_id")), []).append(item)
@@ -142,11 +154,19 @@ def _section(projection: ScoutProjection, *, workpad: Path, from_dir: Path) -> s
     if not jobs and projection.applications:
         jobs.append('<article class="job warning"><h3>Unlinked application events</h3><p>Application history exists, but no committed opportunity reader has linked it yet; no job identity was invented.</p></article>')
 
-    application_items = [
-        f"{_text(item.get('event_kind'))} · {_text(item.get('occurred_at'))} · {_text(item.get('opportunity_ref'))}"
-        + (" · opportunity verified" if item.get("opportunity_verified") else " · opportunity unresolved")
-        for item in projection.applications
-    ]
+    application_items = []
+    for item in projection.applications:
+        if "opportunity_ref" in item:
+            identity = f"{_text(item.get('opportunity_ref'))}" + (
+                " · opportunity verified" if item.get("opportunity_verified") else " · opportunity unresolved"
+            )
+        else:
+            linked = item.get("linked_posting")
+            posting_label = _text(linked.get("title")) if isinstance(linked, Mapping) else None
+            identity = f"{_text(item.get('external_ref'))}" + (
+                f" · linked to {posting_label}" if posting_label else " · posting unresolved"
+            )
+        application_items.append(f"{_text(item.get('event_kind'))} · {_text(item.get('occurred_at'))} · {identity}")
     proposal_items = []
     for item in projection.proposals:
         identity = (
