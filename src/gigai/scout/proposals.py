@@ -577,8 +577,16 @@ def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
         raise FindJobsContractError("invalid_value", "pending_user_answers verdict requires at least one structured question")
 
 
-def parse_assessment_proposal(raw: Mapping[str, object]) -> AssessmentResult:
-    """Parse the frozen find-jobs assessment DTO without coercion."""
+def validate_assessment_bounds(raw: Mapping[str, object]) -> None:
+    """The strict pre-parse bounds every assessment answer must meet (P5: shared).
+
+    Matrix non-empty and capped, ``suggestions``/``questions`` capped and
+    clean strings, P2's structured-question bounds and verdict consistency.
+    Extracted from ``parse_assessment_proposal`` so the standalone quick
+    assessment (``quick_assess.py``, parsing an ``AssessmentBody``) and the
+    run path (parsing an ``AssessmentResult``) validate identically; raises
+    ``FindJobsContractError`` on the first violation.
+    """
     if not isinstance(raw, Mapping):
         raise FindJobsContractError("wrong_type", "assessment proposal must be an object")
     matrix = raw.get("matrix")
@@ -594,6 +602,11 @@ def parse_assessment_proposal(raw: Mapping[str, object]) -> AssessmentResult:
             raise FindJobsContractError("invalid_value", f"assessment_result.{field} is out of bounds")
     _validate_structured_questions(raw.get("structured_questions"))
     _validate_verdict_consistency(raw)
+
+
+def parse_assessment_proposal(raw: Mapping[str, object]) -> AssessmentResult:
+    """Parse the frozen find-jobs assessment DTO without coercion."""
+    validate_assessment_bounds(raw)
     try:
         return AssessmentResult.from_json(dict(raw))
     except FindJobsContractError:
@@ -1195,4 +1208,5 @@ __all__ = [
     "validate_and_bind_proposal",
     "validate_proposal_output",
     "parse_assessment_proposal",
+    "validate_assessment_bounds",
 ]

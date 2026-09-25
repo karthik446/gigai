@@ -17,6 +17,7 @@ from dataclasses import replace
 from functools import partial
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,14 @@ _TEST_MODEL_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_MODEL"
 # P6: the seam name harness.py's own docstring already reserved for the
 # fake Jev client (mirrors _TEST_HTTP_ENV/_TEST_MODEL_ENV's shape exactly).
 _TEST_JEV_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_JEV"
+# P5: the quick-assess deadline for the fake model; read ONLY when
+# _TEST_MODEL_ENV is on (see _test_assess_timeout_seconds).
+_TEST_ASSESS_TIMEOUT_ENV = "GIGAI_SCOUT_ASSESS_TIMEOUT_SECONDS"
+# P5: prompt-content markers the fake model handler reacts to (a journey puts
+# one into the pasted posting text; the real prompt carries it through).
+TEST_MODEL_GARBAGE_MARKER = "GIGAI-TEST-MODEL: return garbage"
+TEST_MODEL_SLEEP_MARKER = "GIGAI-TEST-MODEL: sleep"
+TEST_MODEL_SLEEP_SECONDS = 2.5
 _TIMEOUT = httpx.Timeout(20.0, connect=5.0)
 _LIVE_BINDINGS: dict[tuple[Path, Path], tuple[RegisteredNode, ...]] = {}
 
@@ -199,6 +208,32 @@ def _test_provider_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text=_TEST_GENERIC_PAGE_HTML, headers={"content-type": "text/html; charset=utf-8"}, request=request)
     if request.method == "GET" and request.url.host == "boards.greenhouse.io" and request.url.path == "/acme/jobs/101":
         return httpx.Response(200, text=_TEST_JS_SHELL_HTML, headers={"content-type": "text/html; charset=utf-8"}, request=request)
+    # P5 (api-e2e journey (d)): a SECOND Greenhouse board, ``shell``, whose
+    # single-job endpoint is unknown (404), whose posting page is a JavaScript
+    # shell, and whose board listing carries the row -- so ``resolve_job``
+    # has to take the board-listing fallback.  A separate token keeps the
+    # acquire journeys (which list only the ``acme`` board) untouched.
+    if request.method == "GET" and request.url.host == "boards-api.greenhouse.io" and request.url.path == "/v1/boards/shell/jobs/303":
+        return httpx.Response(404, json={"error": "job not found"}, request=request)
+    if request.method == "GET" and request.url.host == "boards.greenhouse.io" and request.url.path == "/shell/jobs/303":
+        return httpx.Response(200, text=_TEST_JS_SHELL_HTML, headers={"content-type": "text/html; charset=utf-8"}, request=request)
+    if request.method == "GET" and request.url.host == "boards-api.greenhouse.io" and request.url.path == "/v1/boards/shell/jobs":
+        return httpx.Response(
+            200,
+            json={
+                "jobs": [
+                    {
+                        "id": "303",
+                        "title": "Platform Engineer",
+                        "absolute_url": "https://boards.greenhouse.io/shell/jobs/303",
+                        "location": {"name": "Remote, US"},
+                        "updated_at": "2026-09-22T00:00:00Z",
+                        "content": "&lt;p&gt;Operate Python platform services on GCP.&lt;/p&gt;",
+                    }
+                ]
+            },
+            request=request,
+        )
     if request.method == "GET" and request.url.host == "boards-api.greenhouse.io":
         return httpx.Response(
             200,
@@ -219,8 +254,54 @@ def _test_provider_handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(404, json={"error": "test fixture route not found"}, request=request)
 
 
+def _test_model_enabled() -> bool:
+    return os.environ.get(_TEST_MODEL_ENV) == "1"
+
+
+def _test_assess_timeout_seconds() -> float | None:
+    """P5's quick-assess deadline for the FAKE model, or ``None`` when unset.
+
+    Read by ``quick_assess`` only while ``GIGAI_SCOUT_FIND_JOBS_TEST_MODEL=1``
+    (the fixture ``MockTransport`` has no socket for an adapter timeout to
+    fire on, so the api-e2e timeout journey needs a deadline of its own).
+    Production never reads it: the real adapters' own timeouts apply.
+    """
+
+    raw = os.environ.get(_TEST_ASSESS_TIMEOUT_ENV)
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def _test_model_prompt(request: httpx.Request) -> str:
+    """The prompt text inside a fixture Ollama ``/api/chat`` body (``""`` if none)."""
+
+    try:
+        payload = json.loads(request.content.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return ""
+    messages = payload.get("messages") if isinstance(payload, dict) else None
+    if not isinstance(messages, list):
+        return ""
+    return "\n".join(
+        item["content"] for item in messages if isinstance(item, dict) and isinstance(item.get("content"), str)
+    )
+
+
 def _test_model_handler(request: httpx.Request) -> httpx.Response:
-    """Answer the three Ollama identity/chat calls without a model process."""
+    """Answer the three Ollama identity/chat calls without a model process.
+
+    P5: two prompt-content markers let the api-e2e assess journeys exercise
+    the failure paths through the same fixture -- a posting text carrying
+    ``TEST_MODEL_GARBAGE_MARKER`` gets a non-JSON answer on every call (the
+    core's one retry then fails ``model_output_invalid``); one carrying
+    ``TEST_MODEL_SLEEP_MARKER`` sleeps ``TEST_MODEL_SLEEP_SECONDS`` first
+    (past the journey's 1 s ``GIGAI_SCOUT_ASSESS_TIMEOUT_SECONDS``).
+    """
 
     if request.method == "GET" and request.url.path == "/api/version":
         return httpx.Response(200, json={"version": "scout-test"}, request=request)
@@ -231,6 +312,23 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
             request=request,
         )
     if request.method == "POST" and request.url.path == "/api/chat":
+        prompt = _test_model_prompt(request)
+        if TEST_MODEL_SLEEP_MARKER in prompt:
+            time.sleep(TEST_MODEL_SLEEP_SECONDS)
+        if TEST_MODEL_GARBAGE_MARKER in prompt:
+            return httpx.Response(
+                200,
+                json={
+                    "model": TEST_MODEL_NAME,
+                    "created_at": "2026-09-23T00:00:00Z",
+                    "message": {"role": "assistant", "content": "I cannot produce JSON for this posting, sorry."},
+                    "done": True,
+                    "done_reason": "stop",
+                    "prompt_eval_count": 10,
+                    "eval_count": 12,
+                },
+                request=request,
+            )
         return httpx.Response(
             200,
             json={
@@ -702,6 +800,9 @@ __all__ = [
     "GRAPH_ID",
     "GRAPH_VERSION",
     "TEST_MODEL_DIGEST",
+    "TEST_MODEL_GARBAGE_MARKER",
     "TEST_MODEL_NAME",
+    "TEST_MODEL_SLEEP_MARKER",
+    "TEST_MODEL_SLEEP_SECONDS",
     "register_find_jobs_nodes",
 ]

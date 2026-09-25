@@ -1301,6 +1301,7 @@ def _make_handler(
     *,
     run_start_timeout_seconds: float = RUN_START_TIMEOUT_SECONDS,
 ) -> type[BaseHTTPRequestHandler]:
+    from .assess import AssessRoutesMixin
     from .config import ConfigRoutesMixin
     from .discover import DiscoverRoutesMixin
     from .profiles import ProfilesRoutesMixin
@@ -1316,6 +1317,7 @@ def _make_handler(
         RunRoutesMixin,
         ProfilesRoutesMixin,
         RankRoutesMixin,
+        AssessRoutesMixin,
         StaticRoutesMixin,
         BaseHTTPRequestHandler,
     ):
@@ -1489,6 +1491,9 @@ def _make_handler(
                     if path == "/api/profiles":
                         self._handle_get_profiles()
                         return
+                    if path == "/api/assessments":
+                        self._handle_get_assessments()
+                        return
                     run_id = _match_run_id(path, suffix="/results")
                     if run_id is not None:
                         self._handle_get_run_results(run_id)
@@ -1526,6 +1531,9 @@ def _make_handler(
                     return
                 if path == "/api/profiles/selection":
                     self._handle_post_profiles_selection()
+                    return
+                if path == "/api/assess":
+                    self._handle_post_assess()
                     return
                 profile_id = _match_profile_id(path, suffix="/archive")
                 if profile_id is not None:

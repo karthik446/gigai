@@ -19,7 +19,7 @@ from ..canonical import canonical_json_bytes, digest_imported_bytes
 from ..private_records import PrivateRecordError, create_record, import_reference
 from ..setup import default_home_root
 from ..workpad import WorkpadError
-from .find_jobs.contracts import FindJobsConfig, SourceToggles
+from .find_jobs.contracts import FindJobsConfig, ModelTarget, SourceToggles
 from .find_jobs.discovery import (
     DiscoveryBudgetExceeded,
     DiscoveryPrefsError,
@@ -662,6 +662,143 @@ def prep_command(
     else:
         click.echo("  Prep notes: no assess matrix found for this posting yet; run `gigai scout run` to assess it for richer notes.")
     click.echo(f"  Total cost: ${prep.cost_usd:.4f}. Stored under scout/interview_prep/ (GigAI home).")
+
+
+
+def _read_text_option(value: str, *, flag: str) -> str:
+    """Read ``FILE`` (or ``-`` for stdin) for a ``--job-text``/``--resume`` flag."""
+
+    if value == "-":
+        return click.get_text_stream("stdin").read()
+    path = Path(value).expanduser()
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise OSError(f"{flag}: cannot read {path}: {exc.strerror or exc}") from exc
+
+
+@scout_group.command("assess")
+@click.option("--job-url", "job_url", help="Public job posting URL to fetch and assess.")
+@click.option("--job-text", "job_text_file", help="File with the posting text (or - for stdin).")
+@click.option("--profile", "profile_id", help="Scout profile ID whose pinned resume to assess against (default: the selected profile).")
+@click.option("--resume", "resume_file", help="Resume text FILE (or - for stdin), used for this call only; never stored.")
+@click.option("--resume-text", "resume_text", help="Resume text inline, used for this call only; never stored.")
+@click.option("--visa/--no-visa", "visa", default=None, help="Override find-jobs.json's visa-sponsorship-required flag.")
+@click.option("--title", "title", help="Job title override (pasted text has none).")
+@click.option("--company", "company", help="Company override (pasted text has none).")
+@click.option("--model-target", "model_target", type=click.Choice([item.value for item in ModelTarget]), help="Adapter kind to assess with (default: find-jobs.json's default_model_target).")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def assess_command(
+    job_url: str | None,
+    job_text_file: str | None,
+    profile_id: str | None,
+    resume_file: str | None,
+    resume_text: str | None,
+    visa: bool | None,
+    title: str | None,
+    company: str | None,
+    model_target: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Assess ONE job against a resume right now -- no find-jobs run.
+
+    Pass exactly one of --job-url / --job-text, and at most one of --profile /
+    --resume / --resume-text (none means the selected profile's resume). A
+    pasted resume is used for this call only and never imported or stored.
+    Synchronous: the configured model is called once (plus one retry on a
+    malformed answer). Prints the verdict, the requirement matrix, the
+    questions with their ids, and where the result is stored.
+    """
+
+    from .find_jobs.assess_contracts import AssessJobInput, AssessPreferences, AssessRequest, AssessResumeInput
+    from .find_jobs.contracts import FindJobsContractError
+    from .quick_assess import QuickAssessError, run_quick_assessment
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        target = resolved_target.expanduser().resolve(strict=True)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_assess_failed")
+        return
+
+    if job_url and job_text_file:
+        _fail(ValueError("pass exactly one of --job-url or --job-text"), as_json=as_json, fallback="job_input_invalid")
+        return
+    if sum(1 for item in (profile_id, resume_file, resume_text) if item) > 1:
+        _fail(ValueError("pass at most one of --profile, --resume or --resume-text"), as_json=as_json, fallback="resume_input_invalid")
+        return
+    try:
+        job_text = _read_text_option(job_text_file, flag="--job-text") if job_text_file else None
+        if resume_file:
+            resume_text = _read_text_option(resume_file, flag="--resume")
+    except OSError as exc:
+        _fail(exc, as_json=as_json, fallback="input_file_unreadable")
+        return
+
+    try:
+        request = AssessRequest(
+            job=AssessJobInput(job_url=job_url or None, job_text=job_text or None, title=title, company=company),
+            resume=AssessResumeInput(profile_id=profile_id or None, resume_text=resume_text or None),
+            preferences=None if visa is None else AssessPreferences(visa_sponsorship_required=visa),
+            model_target=None if model_target is None else ModelTarget(model_target),
+        )
+    except FindJobsContractError as exc:
+        _fail(exc, as_json=as_json, fallback="invalid_value")
+        return
+
+    if not as_json:
+        click.echo("Assessing (one model call; this can take up to a minute)...")
+    try:
+        response = run_quick_assessment(request, home_root=home_root, target=target)
+    except QuickAssessError as exc:
+        _fail(exc, as_json=as_json, fallback="scout_assess_failed")
+        return
+
+    if as_json:
+        _emit({"ok": True, **response.to_json()}, True, "")
+        return
+    result = response.result
+    job = response.job
+    heading = job.title or "(untitled posting)"
+    if job.company:
+        heading += f" at {job.company}"
+    click.echo(f"Assessment for {heading}:")
+    click.echo(f"  Verdict: {result.verdict.value if result.verdict is not None else 'none returned'}")
+    if result.not_a_match_reason:
+        click.echo(f"  Reason: {result.not_a_match_reason}")
+    if result.sponsorship is not None:
+        click.echo(f"  Sponsorship: {result.sponsorship.value}")
+    resume_label = response.resume.profile_id or "pasted resume (not stored)"
+    click.echo(f"  Resume: {resume_label}")
+    prefs = response.preferences
+    click.echo(
+        f"  Preferences: visa required = {'yes' if prefs.visa_sponsorship_required else 'no'}; "
+        f"countries = {', '.join(prefs.countries or ()) or 'any'}; titles = {', '.join(prefs.titles or ()) or 'unspecified'}"
+    )
+    click.echo("  Requirements:")
+    for row in result.matrix:
+        klass = f" [{row.requirement_class.value}]" if row.requirement_class is not None else ""
+        evidence = f" -- {'; '.join(row.resume_evidence)}" if row.resume_evidence else ""
+        click.echo(f"    {row.status.value:8} {row.requirement}{klass}{evidence}")
+    if result.structured_questions:
+        click.echo("  Questions:")
+        for question in result.structured_questions:
+            click.echo(f"    {question.question_id}: {question.question}")
+    elif result.questions:
+        click.echo("  Questions:")
+        for text in result.questions:
+            click.echo(f"    - {text}")
+    if result.suggestions:
+        click.echo("  Suggestions:")
+        for suggestion in result.suggestions:
+            click.echo(f"    - {suggestion}")
+    click.echo(f"  Model: {response.producer.model_target.value} ({response.producer.adapter})")
+    click.echo(f"  Stored at {response.stored_path}")
 
 
 __all__ = ["scout_group", "write_starter_find_jobs_config", "STARTER_FIND_JOBS_CONFIG"]

@@ -37,6 +37,8 @@ JOURNEYS: dict[Route, str] = {
     Route("POST", "/api/profiles/{profile_id}/archive"): "test_profiles_journey.py",
     Route("POST", "/api/profiles/selection"): "test_profiles_journey.py",
     Route("POST", "/api/runs/{run_id}/rank"): "test_rank_journey.py",
+    Route("POST", "/api/assess"): "test_assess_journey.py",
+    Route("GET", "/api/assessments"): "test_assess_journey.py",
 }
 
 

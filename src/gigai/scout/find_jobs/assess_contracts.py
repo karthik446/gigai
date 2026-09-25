@@ -16,12 +16,22 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from .contracts import (
+    AssessmentQuestion,
+    ModelTarget,
     PinnedResume,
+    Producer,
+    RequirementMatrixRow,
+    SponsorshipStatus,
+    UsageBlock,
+    Verdict,
     _Contract,
     _bool,
     _country_codes,
     _digest_value,
+    _enum,
     _fail,
+    _json_enum,
+    _json_strings,
     _object_with_optional,
     _optional_string,
     _string,
@@ -48,11 +58,19 @@ def _optional_bool(value: object, name: str) -> bool | None:
 
 @dataclass(frozen=True)
 class AssessJobInput(_Contract):
-    """The job to assess: exactly one of a public URL or pasted text."""
+    """The job to assess: exactly one of a public URL or pasted text.
+
+    ``title``/``company`` (P5, additive) override what the source carried --
+    the plan's ``--title/--company`` flags for pasted text, which otherwise
+    has neither.  Both are omitted from JSON when ``None`` so a P4-era
+    payload round-trips byte-identically.
+    """
 
     schema_version: ClassVar[str] = "scout-assess-job-input:1"
     job_url: str | None = None
     job_text: str | None = None
+    title: str | None = None
+    company: str | None = None
 
     def __post_init__(self) -> None:
         has_url = bool(self.job_url)
@@ -61,14 +79,21 @@ class AssessJobInput(_Contract):
             _fail("job_input_invalid", "pass exactly one of job_url or job_text")
 
     def to_json(self) -> dict[str, object]:
-        return {"job_url": self.job_url, "job_text": self.job_text}
+        value: dict[str, object] = {"job_url": self.job_url, "job_text": self.job_text}
+        if self.title is not None:
+            value["title"] = self.title
+        if self.company is not None:
+            value["company"] = self.company
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "AssessJobInput":
-        value = _object_with_optional(obj, (), ("job_url", "job_text"), "assess_job_input")
+        value = _object_with_optional(obj, (), ("job_url", "job_text", "title", "company"), "assess_job_input")
         return cls(
             job_url=_optional_string(value.get("job_url"), "job_url"),
             job_text=_optional_string(value.get("job_text"), "job_text"),
+            title=_optional_string(value.get("title"), "title"),
+            company=_optional_string(value.get("company"), "company"),
         )
 
 
@@ -262,11 +287,220 @@ def text_identity(text_sha256: str) -> str:
     return _TEXT_IDENTITY_PREFIX + _digest_value(text_sha256, "text_sha256")
 
 
+# --- P5: the assess API/CLI request and response DTOs --------------------------------
+
+
+@dataclass(frozen=True)
+class AssessmentBody(_Contract):
+    """``AssessmentResult`` minus the run-bound ``posting``/``proposal_revision_ref``.
+
+    The model's answer for one job/resume pair, with the same field set and
+    the same omit-at-default JSON rules as ``AssessmentResult`` (C4).  The
+    strict bounds (``proposals.validate_assessment_bounds``) are applied by
+    the quick-assess parser BEFORE this ``from_json``, exactly as
+    ``parse_assessment_proposal`` does for the run path, so both paths share
+    one validator.
+    """
+
+    schema_version: ClassVar[str] = "scout-assessment-body:1"
+    matrix: tuple[RequirementMatrixRow, ...]
+    suggestions: tuple[str, ...]
+    questions: tuple[str, ...]
+    sponsorship: SponsorshipStatus | None = None
+    verdict: Verdict | None = None
+    structured_questions: tuple[AssessmentQuestion, ...] = ()
+    not_a_match_reason: str | None = None
+
+    def to_json(self) -> dict[str, object]:
+        value: dict[str, object] = {
+            "matrix": [row.to_json() for row in self.matrix],
+            "suggestions": _json_strings(self.suggestions),
+            "questions": _json_strings(self.questions),
+        }
+        if self.sponsorship is not None:
+            value["sponsorship"] = _json_enum(self.sponsorship)
+        if self.verdict is not None:
+            value["verdict"] = _json_enum(self.verdict)
+        if self.structured_questions:
+            value["structured_questions"] = [item.to_json() for item in self.structured_questions]
+        if self.not_a_match_reason is not None:
+            value["not_a_match_reason"] = self.not_a_match_reason
+        return value
+
+    @classmethod
+    def from_json(cls, obj: object) -> "AssessmentBody":
+        value = _object_with_optional(
+            obj,
+            ("matrix", "suggestions", "questions"),
+            ("sponsorship", "verdict", "structured_questions", "not_a_match_reason"),
+            "assessment_body",
+        )
+        if type(value["matrix"]) is not list:
+            _fail("wrong_type", "assessment_body.matrix must be an array")
+        sponsorship = None if "sponsorship" not in value else _enum(value["sponsorship"], SponsorshipStatus, "assessment_body.sponsorship")
+        verdict = None if "verdict" not in value else _enum(value["verdict"], Verdict, "assessment_body.verdict")
+        structured_questions: tuple[AssessmentQuestion, ...] = ()
+        if "structured_questions" in value:
+            if type(value["structured_questions"]) is not list:
+                _fail("wrong_type", "assessment_body.structured_questions must be an array")
+            structured_questions = tuple(AssessmentQuestion.from_json(item) for item in value["structured_questions"])
+        not_a_match_reason = None if "not_a_match_reason" not in value else _optional_string(value["not_a_match_reason"], "assessment_body.not_a_match_reason")
+        return cls(
+            tuple(RequirementMatrixRow.from_json(item) for item in value["matrix"]),
+            _strings(value["suggestions"], "suggestions", allow_empty=True),
+            _strings(value["questions"], "questions", allow_empty=True),
+            sponsorship,
+            verdict,
+            structured_questions,
+            not_a_match_reason,
+        )
+
+
+@dataclass(frozen=True)
+class AssessRequest(_Contract):
+    """``POST /api/assess`` body.  ``resume`` defaults to "the selected profile";
+    ``preferences``/``model_target`` default to the target's ``find-jobs.json``."""
+
+    schema_version: ClassVar[str] = "scout-assess-request:1"
+    job: AssessJobInput
+    resume: AssessResumeInput = field(default_factory=AssessResumeInput)
+    preferences: AssessPreferences | None = None
+    model_target: ModelTarget | None = None
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "job": self.job.to_json(),
+            "resume": self.resume.to_json(),
+            "preferences": None if self.preferences is None else self.preferences.to_json(),
+            "model_target": None if self.model_target is None else _json_enum(self.model_target),
+        }
+
+    @classmethod
+    def from_json(cls, obj: object) -> "AssessRequest":
+        value = _object_with_optional(
+            obj, ("job",), ("schema_version", "resume", "preferences", "model_target"), "assess_request"
+        )
+        if "schema_version" in value and value["schema_version"] != cls.schema_version:
+            _fail("bad_enum", "assess_request.schema_version is unsupported")
+        resume = value.get("resume")
+        preferences = value.get("preferences")
+        model_target = value.get("model_target")
+        return cls(
+            job=AssessJobInput.from_json(value["job"]),
+            resume=AssessResumeInput() if resume is None else AssessResumeInput.from_json(resume),
+            preferences=None if preferences is None else AssessPreferences.from_json(preferences),
+            model_target=None if model_target is None else _enum(model_target, ModelTarget, "assess_request.model_target"),
+        )
+
+
+@dataclass(frozen=True)
+class AssessResponse(_Contract):
+    """One quick assessment: what was assessed (identities only), the effective
+    preferences, the model's answer, and where it is stored.
+
+    Never carries resume text or full job text: ``job`` is serialized WITHOUT
+    its ``text`` field (``text_sha256`` stays), and ``ResolvedResume`` never
+    serializes its text at all.  ``from_json`` therefore yields an empty
+    ``job.text``.
+    """
+
+    schema_version: ClassVar[str] = "scout-assess-response:1"
+    job: ResolvedJob
+    resume: ResolvedResume
+    preferences: AssessPreferences
+    result: AssessmentBody
+    producer: Producer
+    usage: UsageBlock | None
+    instructions_digest: str
+    created_at: str
+    stored_path: str
+
+    def __post_init__(self) -> None:
+        if (
+            self.preferences.visa_sponsorship_required is None
+            or self.preferences.titles is None
+            or self.preferences.countries is None
+        ):
+            _fail("invalid_value", "assess_response.preferences must carry the effective values, never None")
+
+    def to_json(self) -> dict[str, object]:
+        job = self.job.to_json()
+        del job["text"]
+        return {
+            "schema_version": self.schema_version,
+            "job": job,
+            "resume": self.resume.to_json(),
+            "preferences": self.preferences.to_json(),
+            "result": self.result.to_json(),
+            "producer": self.producer.to_json(),
+            "usage": None if self.usage is None else self.usage.to_json(),
+            "instructions_digest": self.instructions_digest,
+            "created_at": self.created_at,
+            "stored_path": self.stored_path,
+        }
+
+    @classmethod
+    def from_json(cls, obj: object) -> "AssessResponse":
+        value = _object_with_optional(
+            obj,
+            (
+                "schema_version", "job", "resume", "preferences", "result", "producer", "usage",
+                "instructions_digest", "created_at", "stored_path",
+            ),
+            (),
+            "assess_response",
+        )
+        if value["schema_version"] != cls.schema_version:
+            _fail("bad_enum", "assess_response.schema_version is unsupported")
+        job = value["job"]
+        if type(job) is not dict:
+            _fail("wrong_type", "assess_response.job must be an object")
+        if "text" in job:
+            _fail("unknown_key", "assess_response.job never carries the job text")
+        usage = value["usage"]
+        return cls(
+            job=ResolvedJob.from_json({**job, "text": ""}),
+            resume=ResolvedResume.from_json(value["resume"]),
+            preferences=AssessPreferences.from_json(value["preferences"]),
+            result=AssessmentBody.from_json(value["result"]),
+            producer=Producer.from_json(value["producer"]),
+            usage=None if usage is None else UsageBlock.from_json(usage),
+            instructions_digest=_digest_value(value["instructions_digest"], "instructions_digest"),
+            created_at=_string(value["created_at"], "created_at"),
+            stored_path=_string(value["stored_path"], "stored_path"),
+        )
+
+
+@dataclass(frozen=True)
+class AssessmentsListResponse(_Contract):
+    """``GET /api/assessments``: stored quick assessments, newest first."""
+
+    schema_version: ClassVar[str] = "scout-assessments-response:1"
+    items: tuple[AssessResponse, ...]
+
+    def to_json(self) -> dict[str, object]:
+        return {"schema_version": self.schema_version, "items": [item.to_json() for item in self.items]}
+
+    @classmethod
+    def from_json(cls, obj: object) -> "AssessmentsListResponse":
+        value = _object_with_optional(obj, ("schema_version", "items"), (), "assessments_list_response")
+        if value["schema_version"] != cls.schema_version:
+            _fail("bad_enum", "assessments_list_response.schema_version is unsupported")
+        if type(value["items"]) is not list:
+            _fail("wrong_type", "assessments_list_response.items must be an array")
+        return cls(tuple(AssessResponse.from_json(item) for item in value["items"]))
+
+
 __all__ = [
     "FETCH_KINDS",
     "AssessJobInput",
     "AssessPreferences",
+    "AssessRequest",
+    "AssessResponse",
     "AssessResumeInput",
+    "AssessmentBody",
+    "AssessmentsListResponse",
     "ResolvedJob",
     "ResolvedResume",
     "text_identity",
