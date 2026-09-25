@@ -139,6 +139,11 @@ def resolve_preferences(
         visa_sponsorship_required=visa_default if given.visa_sponsorship_required is None else given.visa_sponsorship_required,
         titles=titles_default if given.titles is None else tuple(given.titles),
         countries=countries_default if given.countries is None else tuple(given.countries),
+        # assess-prompt-v2: the candidate's own location is NOT defaulted here
+        # (it stays ``None`` unless the request carried one, so the echoed
+        # preferences object is unchanged for existing callers); the config
+        # fallback lives in ``quick_assess._config_location``.
+        location=given.location,
     )
 
 

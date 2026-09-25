@@ -120,6 +120,15 @@ class AssessContext:
     # way -- the {{prior_answers}} paragraph is dropped from the prompt
     # entirely when this is empty, exactly like {{validation_error}}.
     prior_answers: tuple[PriorAnswer, ...] = ()
+    # assess-prompt-v2 (v0.1.9), operator decision: the candidate's OWN
+    # location (find-jobs.json's ``location`` field, as the operator wrote
+    # it -- "Denver, CO", "Toronto, ON, Canada"...) reaches the prompt as
+    # {{candidate_location}} so assess.md rule 4 can decide a posting's
+    # state/province restriction from it instead of asking every time.
+    # Empty renders as "unknown" (rule 4 then asks ONCE, with the stable
+    # ``location:<country>_region`` id). Defaults empty so every earlier
+    # caller and golden keeps rendering the same way.
+    location: str = ""
 
 
 @dataclass(frozen=True)
@@ -150,10 +159,17 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
     """Render the real find-jobs assessment prompt (U25) from the packaged template.
 
     Includes the role/title/company/location, the bounded posting text, the
-    resume text, the candidate's sponsorship constraint, and a precise JSON
-    schema with a short worked example so the model returns a shape that
-    parses on the first try.  On a retry (U22), the prior validation error is
-    fed back so the model can correct its own output.
+    resume text, the candidate's constraints (sponsorship, eligible
+    countries, own location, target titles), and a precise JSON schema so the
+    model returns a shape that parses on the first try.  On a retry (U22),
+    the prior validation error is fed back: the template's last paragraph
+    (the one carrying ``{{validation_error}}``) names the violated bound or
+    rule -- ``proposals.validate_assessment_bounds`` produces messages with
+    the count and the limit ("matrix has 14 rows; at most 12 allowed",
+    "verdict matched_above_threshold but 1 hard requirement is unmet (rule
+    7 ...)") -- and tells the model it cannot see the rejected attempt
+    (every attempt is a fresh, ephemeral session), so it produces a fresh
+    answer instead of "fixing" one it never saw.
     """
 
     values = {
@@ -166,6 +182,7 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
         "validation_error": (validation_error or "")[:_MAX_PROMPT_VALIDATION_ERROR],
         "countries": ", ".join(ctx.countries) if ctx.countries else "any",
         "titles": ", ".join(ctx.titles) if ctx.titles else "unspecified",
+        "candidate_location": ctx.location.strip() or "unknown",
         "prior_answers": "\n".join(
             f"- {item.question_id}: {item.answer}" for item in ctx.prior_answers
         ),

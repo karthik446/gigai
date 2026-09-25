@@ -142,7 +142,7 @@ def test_not_a_match_requires_at_least_one_hard_unmet_row() -> None:
         structured_questions=[],
         not_a_match_reason="claimed but nothing is unmet",
     )
-    with pytest.raises(FindJobsContractError, match="rule 4"):
+    with pytest.raises(FindJobsContractError, match="rule 7"):
         parse_assessment_proposal(new)
 
 
@@ -156,7 +156,7 @@ def test_not_a_match_with_only_an_unmet_nice_to_have_row_is_rejected() -> None:
         structured_questions=[],
         not_a_match_reason="claimed but only a nice-to-have is unmet",
     )
-    with pytest.raises(FindJobsContractError, match="rule 4"):
+    with pytest.raises(FindJobsContractError, match="rule 7"):
         parse_assessment_proposal(new)
 
 
@@ -170,13 +170,13 @@ def test_not_a_match_with_only_an_unmet_askable_row_is_rejected() -> None:
         structured_questions=[],
         not_a_match_reason="claimed but only an askable is unmet",
     )
-    with pytest.raises(FindJobsContractError, match="rule 4"):
+    with pytest.raises(FindJobsContractError, match="rule 7"):
         parse_assessment_proposal(new)
 
 
 def test_pending_user_answers_requires_at_least_one_structured_question() -> None:
     new = _new_shape_assessment(questions=[], structured_questions=[])
-    with pytest.raises(FindJobsContractError, match="rule 5"):
+    with pytest.raises(FindJobsContractError, match="rule 7"):
         parse_assessment_proposal(new)
 
 
@@ -188,7 +188,7 @@ def test_pending_user_answers_with_a_hard_unmet_row_is_rejected() -> None:
             {"requirement": "GCP", "class": "askable", "resume_evidence": [], "status": "unclear"},
         ],
     )
-    with pytest.raises(FindJobsContractError, match="rule 5"):
+    with pytest.raises(FindJobsContractError, match="rule 7"):
         parse_assessment_proposal(new)
 
 
@@ -212,7 +212,7 @@ def test_matched_above_threshold_with_a_hard_unmet_row_is_rejected() -> None:
         questions=[],
         structured_questions=[],
     )
-    with pytest.raises(FindJobsContractError, match="rule 3"):
+    with pytest.raises(FindJobsContractError, match="rule 7"):
         parse_assessment_proposal(new)
 
 
@@ -221,7 +221,7 @@ def test_matched_above_threshold_with_an_unresolved_structured_question_is_rejec
         verdict="matched_above_threshold",
         matrix=[{"requirement": "Python", "class": "hard", "resume_evidence": ["Built Python services"], "status": "met"}],
     )
-    with pytest.raises(FindJobsContractError, match="rule 3"):
+    with pytest.raises(FindJobsContractError, match="rule 7"):
         parse_assessment_proposal(new)
 
 
@@ -271,13 +271,122 @@ def test_unclassed_row_old_result_is_treated_as_hard_for_the_gate() -> None:
         questions=[],
         structured_questions=[],
     )
-    with pytest.raises(FindJobsContractError, match="rule 3"):
+    with pytest.raises(FindJobsContractError, match="rule 7"):
         parse_assessment_proposal(unclassed_unmet_matched)
 
 
 def test_absent_verdict_is_not_checked() -> None:
     old = _old_shape_assessment()
     parse_assessment_proposal(old)  # does not raise: no verdict claimed, nothing to check
+
+
+# --- assess-prompt-v2 (review F1/F9): the retry message names the rule AND the count ---------
+#
+# ``assessment_core.assess_once`` feeds ``str(exc)`` straight back to the model
+# on its one retry, inside assess.md's last paragraph. Every attempt is a fresh
+# ephemeral session, so the message has to carry everything the model needs:
+# the violated bound or rule, the number it found, and the limit. These pin
+# the EXACT text for three violations (the wording the prompt's retry tail
+# translates: "at most 12 allowed", "rule 7", "question_id ... is invalid").
+
+
+def test_retry_message_for_too_many_matrix_rows_names_the_count_and_the_bound() -> None:
+    new = _new_shape_assessment(
+        verdict="matched_above_threshold",
+        matrix=[
+            {"requirement": f"Requirement {i}", "class": "nice_to_have", "resume_evidence": [], "status": "met"}
+            for i in range(14)
+        ],
+        questions=[],
+        structured_questions=[],
+    )
+    with pytest.raises(FindJobsContractError) as excinfo:
+        parse_assessment_proposal(new)
+    assert str(excinfo.value) == "matrix has 14 rows; at most 12 allowed"
+
+
+def test_retry_message_for_matched_with_a_hard_unmet_row_names_the_rule_and_the_count() -> None:
+    new = _new_shape_assessment(
+        verdict="matched_above_threshold",
+        matrix=[{"requirement": "10+ years", "class": "hard", "resume_evidence": ["9 years"], "status": "unmet"}],
+        questions=[],
+        structured_questions=[],
+    )
+    with pytest.raises(FindJobsContractError) as excinfo:
+        parse_assessment_proposal(new)
+    assert str(excinfo.value) == (
+        "verdict matched_above_threshold but 1 hard requirement is unmet "
+        "(rule 7: any hard row with status unmet -> not_a_match)"
+    )
+
+
+def test_retry_message_for_a_bad_question_id_shows_the_id_and_the_form() -> None:
+    new = _new_shape_assessment(
+        structured_questions=[{"question_id": "cloud:gcp/aws", "question": "Which cloud?", "requirement": None}]
+    )
+    with pytest.raises(FindJobsContractError) as excinfo:
+        parse_assessment_proposal(new)
+    assert str(excinfo.value) == (
+        "question_id 'cloud:gcp/aws' is invalid: must be <category>:<value> with exactly one colon "
+        "and only lowercase letters, digits, '_', '.' or '-'"
+    )
+
+
+def test_retry_messages_never_refer_to_an_answer_the_model_cannot_see() -> None:
+    # Plural forms and the remaining rule-7 branches, plus the "no previous
+    # answer" property: the text describes the payload, never "your answer".
+    cases = [
+        (
+            _new_shape_assessment(
+                verdict="matched_above_threshold",
+                matrix=[
+                    {"requirement": "10+ years", "class": "hard", "resume_evidence": ["9 years"], "status": "unmet"},
+                    {"requirement": "Go", "class": "hard", "resume_evidence": ["no Go"], "status": "unmet"},
+                ],
+                questions=[],
+                structured_questions=[],
+            ),
+            "verdict matched_above_threshold but 2 hard requirements are unmet "
+            "(rule 7: any hard row with status unmet -> not_a_match)",
+        ),
+        (
+            _new_shape_assessment(
+                verdict="matched_above_threshold",
+                matrix=[{"requirement": "Python", "class": "hard", "resume_evidence": ["Built Python services"], "status": "met"}],
+            ),
+            "verdict matched_above_threshold but 1 question is open (rule 7: any question -> pending_user_answers)",
+        ),
+        (
+            _new_shape_assessment(questions=[], structured_questions=[]),
+            "verdict pending_user_answers but questions is empty "
+            "(rule 7: no hard unmet row and no question -> matched_above_threshold)",
+        ),
+        (
+            _new_shape_assessment(
+                verdict="not_a_match",
+                matrix=[{"requirement": "Python", "class": "hard", "resume_evidence": ["Built Python services"], "status": "met"}],
+                questions=[],
+                structured_questions=[],
+                not_a_match_reason="claimed but nothing is unmet",
+            ),
+            "verdict not_a_match but no hard requirement is unmet (rule 7: not_a_match needs a hard row with status unmet)",
+        ),
+        (
+            _new_shape_assessment(
+                structured_questions=[{"question_id": f"cat:{i}", "question": "x?", "requirement": None} for i in range(13)]
+            ),
+            "questions has 13 items; at most 12 allowed",
+        ),
+        (
+            _new_shape_assessment(verdict="matched_above_threshold", matrix=[], questions=[], structured_questions=[]),
+            "matrix has 0 rows; at least 1 row is required",
+        ),
+    ]
+    for payload, expected in cases:
+        with pytest.raises(FindJobsContractError) as excinfo:
+            parse_assessment_proposal(payload)
+        assert str(excinfo.value) == expected
+        assert "previous" not in str(excinfo.value) and "your answer" not in str(excinfo.value).lower()
 
 
 # --- structured_questions bounds ---------------------------------------------

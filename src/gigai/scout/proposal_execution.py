@@ -226,6 +226,11 @@ def _assess_node_body(
     # this is the profile's titles when one is selected, C11-adjacent).
     prompt_countries = tuple(getattr(sealed_config, "countries", ()) or ())
     prompt_titles = tuple(getattr(sealed_config, "roles", ()) or ())
+    # assess-prompt-v2 (v0.1.9), operator decision: {{candidate_location}} is
+    # the sealed config's own ``location`` (the operator's "Denver, CO" from
+    # find-jobs.json), so assess.md rule 4 can decide a posting's
+    # state/province restriction; None/empty renders "unknown".
+    prompt_location = str(getattr(sealed_config, "location", "") or "")
 
     # Candidate resolution mirrors acquire's own selection loop exactly
     # (coordinator decision, P2 dispatch): a candidate is a new/edited,
@@ -419,6 +424,7 @@ def _assess_node_body(
         visa_sponsorship_required=visa_sponsorship_required,
         countries=prompt_countries,
         titles=prompt_titles,
+        location=prompt_location,
     )
 
     for posting, posting_text in to_assess[: input.selection_cap]:

@@ -257,6 +257,7 @@ def _run_assess(
     visa_sponsorship_required: bool | None = None,
     countries: list[str] | None = None,
     roles: list[str] | None = None,
+    location: str | None = None,
     outcomes: dict[str, str] | None = None,
     selected_postings: list[PostingRow] | None = None,
     selection_cap: int = 10,
@@ -292,7 +293,7 @@ def _run_assess(
                         "schema_version": "find-jobs-config:1",
                         "roles": roles if roles is not None else ["Software Engineer"],
                         "merged_queries": ["software engineer"],
-                        "location": None,
+                        "location": location,
                         "remote": True,
                         "published_after": None,
                         "sources": {"exa": True, "ats": True, "hiringcafe": False},
@@ -443,6 +444,41 @@ def test_sealed_countries_and_profile_titles_reach_the_prompt(tmp_path: Path, mo
     assert "target titles the candidate is looking for = Senior Analytics Engineer" in prompt
 
 
+def test_sealed_config_location_reaches_the_prompt_as_the_candidate_location(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """assess-prompt-v2 (operator decision): find-jobs.json's ``location``
+    (sealed into the run input) is the candidate's own location on the
+    CANDIDATE CONSTRAINTS line, so assess.md rule 4 can decide a posting's
+    state/province restriction from it; a null config location renders
+    "unknown" (rule 4 then asks once with ``location:<country>_region``)."""
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/912",
+        text="Remote Canada. Open only to candidates residing in Ontario or Alberta.",
+    )
+    good = json.dumps({
+        "matrix": [{"requirement": "Residing in Ontario or Alberta", "class": "hard", "resume_evidence": ["Toronto, ON"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+    _output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000112",
+        postings=[posting], outputs=[good], monkeypatch=monkeypatch,
+        visa_sponsorship_required=False, countries=["CA"], location="Toronto, ON, Canada",
+    )
+    prompt = binding.port.prompts[0]
+    assert "{{candidate_location}}" not in prompt
+    assert "applied by rule 4): Toronto, ON, Canada; target titles" in prompt
+
+    _output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000113",
+        postings=[posting], outputs=[good], monkeypatch=monkeypatch,
+        visa_sponsorship_required=False, countries=["CA"], location=None,
+    )
+    assert "applied by rule 4): unknown; target titles" in binding.port.prompts[0]
+
+
 def test_sealed_empty_countries_renders_a_sane_default_not_a_dangling_placeholder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -557,7 +593,7 @@ def test_garbage_answer_retries_once_then_not_assessed_while_others_succeed(
         postings=[bad_posting, good_posting], outputs=[garbage, still_garbage, good], monkeypatch=monkeypatch,
     )
     assert len(binding.port.prompts) == 3  # 2 attempts for bad_posting + 1 for good_posting
-    assert "did not match the required JSON shape" in binding.port.prompts[1]
+    assert "A previous attempt at this same prompt was rejected by the validator: " in binding.port.prompts[1]
     assert len(output.not_assessed) == 1
     assert output.not_assessed[0].posting.normalized_url == bad_posting.normalized_url
     assert output.not_assessed[0].reason is NotAssessedReason.MODEL_OUTPUT_INVALID

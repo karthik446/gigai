@@ -144,3 +144,32 @@ def test_repeated_tokens_collapse_once() -> None:
     # A category word that also legitimately repeats in the value collapses
     # to a single occurrence rather than growing the id with duplicates.
     assert normalize_question_id("cloud:cloud_gcp") == normalize_question_id("cloud:gcp")
+
+
+# --- assess-prompt-v2: rule 4's ``location:<country>_region`` id is a fixed point --------------
+#
+# assess.md rule 4 names ONE id for "which state/province do you live in"
+# (asked once when the posting restricts a remote role to named regions and
+# the candidate's location is unknown) so P3's prior-answer join finds the
+# answer across postings. Plain per-side sorting would keep ``ca_region``
+# but turn ``us_region`` into ``region_us``; the normalizer emits the code
+# first for exactly this two-token shape.
+
+
+def test_region_ids_from_the_prompt_are_stable_under_normalization() -> None:
+    for question_id in ("location:ca_region", "location:us_region", "location:pl_region", "location:gb_region"):
+        assert normalize_question_id(question_id) == question_id
+
+
+def test_region_id_token_order_and_separator_drift_still_lands_on_the_prompt_form() -> None:
+    assert normalize_question_id("location:region_us") == "location:us_region"
+    assert normalize_question_id("Location:CA-Region") == "location:ca_region"
+    assert normalize_question_id(normalize_question_id("location:region_ca")) == "location:ca_region"
+
+
+def test_region_ordering_does_not_touch_other_location_values() -> None:
+    # Only "<two-letter code> + region" is special-cased; a three-token or
+    # non-code value keeps the sorted form every other id gets.
+    assert normalize_question_id("location:us_eligible_region") == normalize_question_id("location:eligible_us_region")
+    assert normalize_question_id("location:eastern_region") == "location:eastern_region"
+    assert normalize_question_id("location:region_bay") == "location:bay_region" or normalize_question_id("location:region_bay") == "location:region_bay"

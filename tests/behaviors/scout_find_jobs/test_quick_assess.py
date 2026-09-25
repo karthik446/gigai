@@ -302,6 +302,41 @@ def test_prompt_carries_countries_from_find_jobs_json_and_titles_from_the_profil
     assert _POSTING in prompt and "six years" in prompt
 
 
+def test_prompt_carries_the_candidate_location_from_find_jobs_json(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """assess-prompt-v2: the shared config's ``location`` ("Remote" in this
+    fixture) is the candidate's own location on the constraints line; it is
+    NOT echoed into ``preferences`` unless the request carried one, so the
+    stored/served preferences object is unchanged for every existing caller."""
+    binding, _ = _install(monkeypatch, [_GOOD_MATCH])
+
+    response = _run(fx, _pasted())
+
+    constraints = _constraints(binding.port.prompts[0])
+    assert "the candidate's own location (city, state/province, country as they wrote it; " in constraints
+    assert "applied by rule 4): Remote; target titles" in constraints
+    assert response.preferences.location is None
+    assert "location" not in response.preferences.to_json()
+
+
+def test_request_preferences_location_overrides_the_config_location(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    binding, _ = _install(monkeypatch, [_GOOD_MATCH])
+
+    response = _run(fx, _pasted(preferences=AssessPreferences(location="Toronto, ON, Canada")))
+
+    constraints = _constraints(binding.port.prompts[0])
+    assert "applied by rule 4): Toronto, ON, Canada; target titles" in constraints
+    assert "): Remote;" not in constraints
+    # The other preferences still resolve from the config/profile; the
+    # override is echoed and round-trips through the wire shape.
+    assert response.preferences == AssessPreferences(
+        visa_sponsorship_required=False,
+        titles=("staff ai engineer", "principal machine learning engineer"),
+        countries=("US",),
+        location="Toronto, ON, Canada",
+    )
+    assert AssessPreferences.from_json(response.preferences.to_json()) == response.preferences
+
+
 def test_request_preferences_override_countries_titles_and_visa(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
     binding, _ = _install(monkeypatch, [_GOOD_MATCH])
 
@@ -414,7 +449,7 @@ def test_invalid_model_output_retries_once_then_fails_typed_and_stores_nothing(f
         _run(fx, _pasted())
     assert excinfo.value.code == "model_output_invalid"
     assert len(binding.port.prompts) == 2
-    assert "did not match the required JSON shape" in binding.port.prompts[1]
+    assert "A previous attempt at this same prompt was rejected by the validator: " in binding.port.prompts[1]
     assert list_quick_assessments(fx.home_root, fx.target) == ()
 
 

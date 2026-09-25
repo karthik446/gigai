@@ -280,6 +280,26 @@ def _parse_body(raw: Mapping[str, object]) -> AssessmentBody:
     return AssessmentBody.from_json(dict(raw))
 
 
+def _config_location(target: Path) -> str:
+    """``find-jobs.json``'s ``location`` (the operator's own "Denver, CO"),
+    tolerantly: missing/unreadable/starter/null -> ``""`` (rendered
+    "unknown" by ``assessment_core.render_assess_prompt``).
+
+    assess-prompt-v2 (v0.1.9), operator decision: the candidate's location
+    reaches the prompt as {{candidate_location}} so assess.md rule 4 can
+    decide a posting's state/province restriction without asking; a request
+    ``preferences.location`` overrides it (see ``run_quick_assessment``).
+    """
+
+    path = target / "find-jobs.json"
+    if path.is_symlink() or not path.is_file():
+        return ""
+    try:
+        return FindJobsConfig.from_json(parse_json_bytes(path.read_bytes())).location or ""
+    except Exception:
+        return ""
+
+
 def _default_model_target(target: Path) -> ModelTarget:
     """``find-jobs.json``'s ``default_model_target``, tolerantly (missing/
     unreadable/starter -> the contract default, ``ollama_local``)."""
@@ -388,6 +408,12 @@ def run_quick_assessment(
     preferences = resolve_preferences(request.preferences, target=target, profile=profile)
     assert preferences.countries is not None and preferences.titles is not None
     assert preferences.visa_sponsorship_required is not None
+    # 3b. The candidate's own location (assess-prompt-v2): the request's
+    #     ``preferences.location`` when given, else find-jobs.json's
+    #     ``location``. Kept OUT of the echoed ``preferences`` unless the
+    #     request carried it, so a stored/served response's preferences
+    #     object is unchanged for every caller that never sends one.
+    candidate_location = preferences.location if preferences.location is not None else _config_location(target)
 
     # 4. Storage path first, so the response can name it and a prior
     #    ``created_at`` survives a re-assessment.
@@ -428,6 +454,7 @@ def run_quick_assessment(
                 countries=tuple(preferences.countries),
                 titles=tuple(preferences.titles),
                 prior_answers=prior_answers,
+                location=candidate_location,
             ),
             parse=_parse_body,
         )

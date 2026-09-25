@@ -184,6 +184,31 @@ def _side(tokens: list[str], *, exclude: frozenset[str] = frozenset()) -> list[s
     return sorted(kept)
 
 
+_COUNTRY_CODE = re.compile(r"\A[a-z]{2}\Z")
+
+
+def _region_order(value_tokens: list[str]) -> list[str]:
+    """Keep assess.md rule 4's ``location:<country>_region`` id stable.
+
+    assess-prompt-v2 (v0.1.9): the prompt names ONE fixed id for "which
+    state/province do you live in" -- ``location:ca_region``,
+    ``location:us_region`` -- so P3's prior-answer join finds the answer
+    across postings. Per-side token SORTING (step 4) would render that as
+    ``ca_region`` for Canada but ``region_us`` for the US (``r`` < ``u``),
+    i.e. ``normalize(x) != x`` for half the codes. A value that is exactly
+    a two-letter country code plus ``region`` (in either order) is therefore
+    emitted code-first, as the prompt writes it; every other value keeps the
+    sorted order. Idempotent: the re-ordered pair re-tokenizes to the same
+    two tokens and lands here again.
+    """
+
+    if len(value_tokens) == 2 and "region" in value_tokens:
+        other = value_tokens[0] if value_tokens[1] == "region" else value_tokens[1]
+        if _COUNTRY_CODE.fullmatch(other):
+            return [other, "region"]
+    return value_tokens
+
+
 def normalize_question_id(question_id: str) -> str:
     """Canonical form of ``question_id``: stable across the drift S29 r1 found.
 
@@ -221,7 +246,7 @@ def normalize_question_id(question_id: str) -> str:
         category_tokens_deduped = _side(value_tokens_raw)[:1]
 
     category = "_".join(category_tokens_deduped)
-    value = "_".join(value_tokens)
+    value = "_".join(_region_order(value_tokens))
     if not category or not value:
         return _SPLIT.sub("_", raw.lower()).strip("_")  # pragma: no cover - degenerate fallback
 

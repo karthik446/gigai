@@ -142,24 +142,35 @@ class AssessPreferences(_Contract):
     visa_sponsorship_required: bool | None = None
     titles: tuple[str, ...] | None = None
     countries: tuple[str, ...] | None = None
+    # assess-prompt-v2 (v0.1.9): the candidate's own location as they wrote
+    # it ("Toronto, ON, Canada"), a per-request override of find-jobs.json's
+    # ``location``; ``None`` means "use the config's". Additive: omitted from
+    # ``to_json`` when ``None`` so every stored/served preferences object
+    # stays byte-identical to before.
+    location: str | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "visa_sponsorship_required": self.visa_sponsorship_required,
             "titles": None if self.titles is None else list(self.titles),
             "countries": None if self.countries is None else list(self.countries),
         }
+        if self.location is not None:
+            value["location"] = self.location
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "AssessPreferences":
         value = _object_with_optional(
-            obj, (), ("visa_sponsorship_required", "titles", "countries"), "assess_preferences"
+            obj, (), ("visa_sponsorship_required", "titles", "countries", "location"), "assess_preferences"
         )
         countries = value.get("countries")
+        location = value.get("location")
         return cls(
             visa_sponsorship_required=_optional_bool(value.get("visa_sponsorship_required"), "visa_sponsorship_required"),
             titles=_optional_strings(value.get("titles"), "titles"),
             countries=None if countries is None else _country_codes(countries, "countries"),
+            location=None if location is None else _string(location, "location", nonempty=False),
         )
 
 

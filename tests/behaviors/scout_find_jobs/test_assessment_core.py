@@ -69,110 +69,200 @@ _VALIDATION_ERROR = "matrix[0].status must be one of met|partial|gap"
 # explicitly that a posting location matching one of these countries is MET,
 # not askable. Goldens below were re-captured again for the reworded line.
 #
-# P3 (v0.1.9) INTENTIONAL CHANGE: added rule 6 ("A question whose id has a
-# prior answer is resolved by that answer, never re-asked.") and a
-# {{prior_answers}} paragraph (dropped from the rendered prompt when
+# P3 (v0.1.9) INTENTIONAL CHANGE: added a "never re-ask an answered id" rule
+# and a {{prior_answers}} paragraph (dropped from the rendered prompt when
 # ``AssessContext.prior_answers`` is empty, exactly like
-# {{validation_error}} -- so this golden, captured with the P1-era ``_ctx()``
-# helper that still passes none, is unchanged except for the new rule 6
-# line). Goldens below were re-captured for rule 6.
+# {{validation_error}}).
+#
+# assess-prompt-v2 (v0.1.9) INTENTIONAL CHANGE (operator-approved
+# 2026-09-25; orchestrator/research/assess-prompt-review/review.md, F1-F9):
+# the instruction body was rewritten -- WHAT COUNTS AS A REQUIREMENT, class =
+# importance / status = evidence, rules 1-8 (years-first seniority, countries
+# + state/province regions decided from the candidate's own location, visa
+# yes/no, titles context-only, verdict from rows, prior answers never
+# re-asked), OUTPUT BOUNDS (1-12 rows, 0-12 questions, id charset), a new
+# {{candidate_location}} placeholder on the CANDIDATE CONSTRAINTS line
+# (renders "unknown" when ``AssessContext.location`` is empty, as ``_ctx()``
+# leaves it) and a retry tail that names the violated bound/rule and tells
+# the model it cannot see the rejected attempt. Goldens below were
+# RE-CAPTURED (EXECUTED) from ``render_assess_prompt`` on the same fixed
+# inputs; the sha256 constants guard the transcription.
 GOLDEN_PROMPT = (
-    "You are assessing one real job posting against one candidate's resume for GigAI Scout. "
-    "Return a workflow-state verdict, not a grader score: the verdict decides what GigAI does "
-    "next, so pick the state that describes the right NEXT ACTION, not just how good the fit "
-    "looks.\n\n"
-    "STATES (pick exactly one):\n"
-    '- "matched_above_threshold": every hard requirement is met or the posting states none; a '
-    "reasonable person would apply today without more info.\n"
-    '- "pending_user_answers": the posting is otherwise plausible, but at least one '
-    "requirement's status can only be resolved by asking the candidate something the resume "
-    "does not already confirm OR rule out. This includes named tools/cloud "
-    "platforms/technologies AND hard requirements like years of experience or seniority level, "
-    "whenever the resume is merely silent — not stated, not contradicted. Never re-ask "
-    "something the resume already states one way or the other.\n"
-    '- "not_a_match": at least one requirement is unambiguously unmet by clear, explicit resume '
-    'evidence (a stated gap, e.g. resume says "3 years" and posting requires "8+"), OR the '
-    "posting is a clear domain/seniority mismatch that the resume's own words directly "
-    'contradict (e.g. resume title/level literally says "Intern" against a posting for '
-    '"Staff"). Do NOT use not_a_match for silence — silence is always a question, never a '
-    "verdict, regardless of how important the requirement is.\n\n"
-    "REQUIREMENT CLASSES (classify each requirement you extract from the posting before you "
-    "can pick a verdict):\n"
-    "- HARD: seniority/level, required years of experience, explicit clearance, an explicitly "
-    "excluded domain (posting or candidate side), and — ONLY WHEN THE POSTING TEXT ITSELF "
-    "states a hard constraint — location/remote policy or visa sponsorship.\n"
-    "- ASKABLE: a named tool, cloud platform, or specific technology the resume neither "
-    "confirms nor rules out (e.g. posting wants GCP, resume only shows AWS — this is a "
-    "QUESTION, not a gap: clouds/tools are learnable, and the candidate may have unlisted "
-    "experience); ALSO any HARD requirement above whose status the resume simply does not "
-    "address (see rule 1).\n"
-    '- NICE_TO_HAVE: anything the posting phrases as "bonus", "plus", or "preferred but not '
-    'required", or a soft culture/stack-neighbor fit signal.\n\n'
-    "RULES:\n"
-    "1. Test every HARD requirement against the resume TEXT, not against your overall "
-    "impression:\n"
-    "   - Resume explicitly satisfies it -> met.\n"
-    "   - Resume explicitly and directly contradicts it (its own words state a lower "
-    "level/fewer years/wrong domain) -> unmet -> not_a_match.\n"
-    "   - Resume is simply silent (does not mention the topic at all) -> this is NOT unmet and "
-    "NOT met. Reclassify this specific requirement as ASKABLE and write a question for it. "
-    "Silence is never grounds for not_a_match, no matter how central the requirement looks.\n"
-    "2. For every ASKABLE requirement (named tool/platform/tech, or a HARD requirement "
-    "reclassified under rule 1), write ONE specific question tied to that exact requirement, "
-    'with a stable question_id slug in the form "<category>:<value>" (lowercase, e.g. '
-    '"cloud:gcp", "years:python", "clearance:secret", "seniority:staff") that names the '
-    "underlying fact, not the posting — the same real-world fact asked the same way across "
-    "different postings should reuse the same question_id. Never ask a question the resume "
-    "already answers — quote the resume text you checked in resume_evidence (empty list only "
-    "if truly silent) before writing each question.\n"
-    '3. verdict = "matched_above_threshold" only if there are zero not_a_match findings AND '
-    "zero unresolved askable questions.\n"
-    '4. verdict = "not_a_match" if any requirement is unmet per rule 1\'s explicit-contradiction '
-    "test.\n"
-    '5. verdict = "pending_user_answers" only when there is no not_a_match finding but at least '
-    "one askable question remains.\n"
-    "6. A question whose id has a prior answer is resolved by that answer, never re-asked.\n\n"
-    "Return JSON only (no prose, no markdown fences):\n"
+    "You are assessing one real job posting against one candidate's resume for GigAI Scout. Return a "
+    'workflow-state verdict, not a grader score: the verdict decides what GigAI does next, so pick the '
+    "state that describes the right NEXT ACTION, not just how good the fit looks. The candidate's facts "
+    'come from three places of equal authority: the RESUME text, the CANDIDATE CONSTRAINTS line near the '
+    "end (eligible countries, the candidate's own location, sponsorship need, target titles) and, when "
+    'present, the PRIOR ANSWERS list. "The candidate\'s facts" below always means all of them together.\n'
+    '\n'
+    'STATES (pick exactly one):\n'
+    '- "matched_above_threshold": every HARD requirement is met (or the posting states none) and no '
+    'question is open; a reasonable person would apply today without more info.\n'
+    '- "pending_user_answers": no HARD requirement is unmet, but at least one requirement\'s status can '
+    'only be resolved by asking the candidate something their facts neither confirm nor rule out. Never '
+    "re-ask something the candidate's facts already state one way or the other.\n"
+    '- "not_a_match": at least one HARD requirement is unmet by clear, explicit evidence in the '
+    'candidate\'s facts (a stated gap, e.g. resume says "3 years" and posting requires "8+"; or the '
+    'resume\'s own title/level literally says "Intern" against a posting that requires "Staff"). Never '
+    'use not_a_match for silence: silence is always a question, never a verdict, no matter how central '
+    'the requirement looks.\n'
+    '\n'
+    "WHAT COUNTS AS A REQUIREMENT (the ROLE line is the posting's title, not a requirement):\n"
+    '- Extract rows only from the posting\'s requirement sections ("Requirements", "What we look for", '
+    '"Required skills and experience", "Qualifications", "Nice to have", "Preferred", "Bonus" and the '
+    'like) plus any explicit location, residency, in-office, clearance or sponsorship statement anywhere '
+    'in the posting.\n'
+    '- Do NOT create rows for duties ("What you\'ll do"), company boilerplate, pay, benefits, start '
+    'dates, contract or internship length, onboarding trips, travel cadence (e.g. "quarterly in-person '
+    'sessions"), application rules, or behavioral and soft bullets (communication, ownership, curiosity, '
+    '"seeks feedback", "comfortable with ambiguity", "uses AI tools responsibly", "familiar with '
+    'standard IDEs and debugging practices"). None of these is ever a question.\n'
+    '- One bullet is ONE requirement, even when it lists several examples or sub-clauses. Test its '
+    'substance, not every example word: "advanced SQL ... joins, window functions, aggregations" is met '
+    'by demonstrated advanced SQL; "dbt, Airflow, Snowflake, or similar" is met by any comparable tool; '
+    '"statistical or ML models" is met by either.\n'
+    '- If the posting states no requirements at all, emit one row: requirement "No stated requirements", '
+    'class "nice_to_have", status "met", empty resume_evidence.\n'
+    '\n'
+    'REQUIREMENT CLASSES (assign exactly one to each row; the class says how important the row is, the '
+    'status says what the evidence shows):\n'
+    '- HARD: required years of experience; a level the posting states as a requirement (see rule 3); an '
+    'explicit clearance; an explicitly excluded domain; and a location/residency, in-office or '
+    'sponsorship statement the posting itself makes (see rules 4 and 5).\n'
+    '- ASKABLE: a named tool, cloud platform, language, framework, database, domain or specific '
+    'technology the posting requires. Lacking it is never disqualifying by itself (tools are learnable, '
+    'and the candidate may have unlisted experience), so an ASKABLE row is "met", "unclear" (ask about '
+    'it) or "unmet" (the candidate\'s facts rule it out; this does NOT force not_a_match).\n'
+    '- NICE_TO_HAVE: anything the posting phrases as "bonus", "plus", "preferred", "nice to have", or '
+    'lists under such a heading. A "preferred" option inside a required bullet ("Spark preferred; '
+    'Ray/Dask or similar", "GitHub preferred") does not make the bullet nice_to_have: the bullet stays '
+    'required and the preferred tool is just one way to meet it. NICE_TO_HAVE rows never change the '
+    'verdict and never produce a question.\n'
+    '\n'
+    'RULES:\n'
+    "1. Status is decided from the candidate's facts (resume text plus CANDIDATE CONSTRAINTS plus PRIOR "
+    'ANSWERS), never from your overall impression:\n'
+    '   - The facts satisfy the requirement\'s substance, stated or clearly paraphrased -> "met". Put the '
+    'quote or close paraphrase you relied on in resume_evidence.\n'
+    '   - The facts explicitly contradict it (their own words state a lower level, fewer years, the '
+    'wrong domain, or that the candidate lacks it) -> "unmet". Quote the contradicting text in '
+    'resume_evidence.\n'
+    '   - The facts are simply silent (the topic is not mentioned at all) -> "unclear", with an empty '
+    'resume_evidence list. Silence is never "unmet", no matter how central the requirement looks.\n'
+    '2. Questions: every HARD or ASKABLE row with status "unclear" gets exactly ONE question, and every '
+    "question points at exactly one such row (copy that row's requirement string verbatim into the "
+    'question\'s "requirement"). No question for a "met" or "unmet" row, and none for a NICE_TO_HAVE row. '
+    'If one underlying fact would resolve several rows, ask it once and reference the first of those '
+    'rows.\n'
+    '3. Seniority and level: when the posting states years of experience, years are the level test, and '
+    'the job title\'s suffix ("II", "Senior", "Staff", "Principal") is not a separate requirement. Only '
+    'when the posting requires a level in words ("Staff-level", "must be at Principal level") is level '
+    "itself a HARD row: met by the resume's stated level or by years that clearly exceed the posting's "
+    "stated minimum, unmet only when the resume's own title or level literally states a lower level, "
+    "unclear otherwise. Never infer the candidate's level from the target titles in CANDIDATE "
+    'CONSTRAINTS.\n'
+    "4. Location, residency and remote region: the eligible countries and the candidate's location in "
+    'CANDIDATE CONSTRAINTS are facts about the candidate, exactly like a resume statement. A remote '
+    'posting whose location or remote region is one of the eligible countries has its country '
+    'requirement MET. If the country list says "any", the candidate has declared no country restriction '
+    'and every remote location is met. When the posting restricts a remote role to named states or '
+    "provinces inside that country, that restriction is one HARD row decided from the candidate's "
+    'location: if the candidate\'s location names a state or province, the row is "met" when that region '
+    'is on the posting\'s list and "unmet" when it is not; if the candidate\'s location is "unknown" or '
+    'names no state or province, the row is "unclear" and you ask ONCE, with the question_id '
+    '"location:<country>_region" where <country> is the lowercase two-letter code of the posting\'s '
+    'country (e.g. "location:ca_region", "location:us_region"). Ask a location question in only two '
+    "other cases: (a) the posting's country matches none of the eligible countries and no other fact "
+    'answers it; (b) the posting requires in-office or hybrid presence in a named city and neither the '
+    "resume, the candidate's location nor the constraints place the candidate there (question_id "
+    '"location:<city>", e.g. "location:san_francisco"). Travel cadence, onboarding trips and '
+    '"remote-first" policy statements are not requirements and are never asked about.\n'
+    '5. Work authorization and sponsorship: "visa sponsorship required = yes" means the candidate needs '
+    'sponsorship. If the posting states it does not sponsor, or requires existing authorization with no '
+    'sponsorship, that is a HARD "unmet" row and the verdict is "not_a_match". If the posting says '
+    'nothing about sponsorship, do not ask about it. "visa sponsorship required = no" means the '
+    'candidate needs no sponsorship: any sponsorship, work-authorization or export-control statement is '
+    '"met", and you never ask about work authorization.\n'
+    '6. Target titles in CANDIDATE CONSTRAINTS describe what the candidate is looking for. They are '
+    'context only: never a requirement, never a reason for "not_a_match", and never evidence for or '
+    'against a level or a domain.\n'
+    '7. Verdict, computed from the rows only:\n'
+    '   - any HARD row "unmet" -> "not_a_match" (not_a_match_reason is one sentence naming that row);\n'
+    '   - otherwise, any question -> "pending_user_answers";\n'
+    '   - otherwise -> "matched_above_threshold".\n'
+    '   An ASKABLE or NICE_TO_HAVE row with status "unmet" never forces "not_a_match".\n'
+    '8. A question whose id has a prior answer (PRIOR ANSWERS) is resolved by that answer, never '
+    're-asked: set the row\'s status from the answer ("met" or "unmet"), cite the answer in '
+    'resume_evidence, and emit no question for it.\n'
+    '\n'
+    'OUTPUT BOUNDS (the validator rejects anything outside them, and you get exactly one retry):\n'
+    '- matrix: 1 to 12 rows. If the posting yields more, keep every HARD row, then ASKABLE rows, and '
+    'drop NICE_TO_HAVE rows first; merge closely related bullets into one row rather than exceed 12.\n'
+    '- questions: 0 to 12 objects, each with all three keys "question_id", "question", "requirement"; '
+    'never a bare string.\n'
+    '- question_id: exactly one colon, lowercase letters, digits and underscores only, in the form '
+    '"<category>:<value>". category is one of: years, seniority, clearance, domain, location, '
+    'authorization, cloud, language, framework, tool, database, skill, education, other. value names the '
+    'underlying real-world fact, not this posting, so the same fact asked across different postings '
+    'reuses the same id (e.g. "cloud:gcp", "years:python", "clearance:secret", "seniority:staff", '
+    '"location:san_francisco", "location:ca_region").\n'
+    '- Every string is under 700 characters; requirement text is copied or closely paraphrased from the '
+    'posting.\n'
+    '\n'
+    'Return JSON only (no prose, no markdown fences):\n'
     '{"verdict": "matched_above_threshold|pending_user_answers|not_a_match",\n'
     ' "matrix": [{"requirement": "<from the posting>", "class": "hard|askable|nice_to_have",\n'
     ' "status": "met|unmet|unclear", "resume_evidence": ["<quote or paraphrase, or empty>"]}],\n'
-    ' "questions": [{"question_id": "<category>:<value>", "question": "<specific>", '
-    '"requirement": "<matches a matrix requirement>"}],\n'
-    ' "not_a_match_reason": "<one sentence, or null if verdict is not not_a_match>"}\n\n'
-    "ROLE: Senior Backend Engineer\nCOMPANY: Acme Corp\nLOCATION: Denver, CO\n"
-    "POSTING TEXT:\n"
-    "We need 5+ years of Python. Remote OK.\nNo visa sponsorship available for this role.\n\n\n"
-    "RESUME:\n"
-    "Karthik built Python services for 6 years.\nOperated Kubernetes clusters in production.\n\n\n"
-    "CANDIDATE CONSTRAINTS: visa sponsorship required = no; the candidate is eligible to work "
-    "from these countries (this is a fact about the candidate, exactly like a resume statement "
-    "-- treat a posting's location/remote-region requirement as MET whenever the posting's own "
-    "location matches one of these countries, and only ask a location question when the "
-    "posting's location does not match any of them and the resume itself gives no other "
-    "answer): any; target titles the candidate is looking for = unspecified."
+    ' "questions": [{"question_id": "<category>:<value>", "question": "<specific>", "requirement": "<the '
+    'matrix row\'s requirement, verbatim>"}],\n'
+    ' "not_a_match_reason": "<one sentence, or null if verdict is not not_a_match>"}\n'
+    '\n'
+    'ROLE: Senior Backend Engineer\n'
+    'COMPANY: Acme Corp\n'
+    'LOCATION: Denver, CO\n'
+    'POSTING TEXT:\n'
+    'We need 5+ years of Python. Remote OK.\n'
+    'No visa sponsorship available for this role.\n'
+    '\n'
+    '\n'
+    'RESUME:\n'
+    'Karthik built Python services for 6 years.\n'
+    'Operated Kubernetes clusters in production.\n'
+    '\n'
+    '\n'
+    'CANDIDATE CONSTRAINTS: visa sponsorship required = no; the candidate is eligible to work from these '
+    'countries (a fact about the candidate, applied by rule 4; "any" means no country restriction): any; '
+    'the candidate\'s own location (city, state/province, country as they wrote it; "unknown" when not '
+    'given; applied by rule 4): unknown; target titles the candidate is looking for = unspecified.'
 )
 
 # Same fixed inputs, visa required = yes, retry with the validation error fed back.
 GOLDEN_RETRY_PROMPT = (
     GOLDEN_PROMPT.replace("visa sponsorship required = no;", "visa sponsorship required = yes;")
-    + "\n\nYour previous answer did not match the required JSON shape: "
+    + "\n\nA previous attempt at this same prompt was rejected by the validator: "
     + _VALIDATION_ERROR
-    + ". Return corrected JSON only, matching the schema exactly."
+    + '. You cannot see that attempt, so produce a fresh answer that avoids the named problem: "at most '
+    '12 allowed" or "at least 1 row is required" means a list broke OUTPUT BOUNDS (drop NICE_TO_HAVE '
+    'rows first, merge related bullets); "question_id ... is invalid" means an id broke the id form; '
+    '"rule 7" means the verdict contradicted the rows or questions (recompute it from the rows: any '
+    "HARD unmet -> not_a_match, else any question -> pending_user_answers, else "
+    'matched_above_threshold); "no JSON object" means the answer was not bare JSON. Return corrected '
+    "JSON only, matching the schema exactly."
 )
 
-# sha256 of the P3 prompts, recorded by the capture script above (the
-# strings above are the source of truth; the digests guard the
+# sha256 of the assess-prompt-v2 prompts, recorded by the capture script
+# above (the strings above are the source of truth; the digests guard the
 # transcription).
-GOLDEN_SHA256 = "ae583af5e4103f290a415859d08a34c37e5653697cf6189321d8530a291280a2"
-GOLDEN_RETRY_SHA256 = "8e308590841a04a6a121caf0cc5d741e63e1833e18b787a739813ae8d88afcdb"
-# 13,000-byte posting text and resume plus a 400-char validation error, P3:
+GOLDEN_SHA256 = "51bd4d48e2fc1e85e8d263bd91275c82abdb5241ddc8a28e6775522fd3245de9"
+GOLDEN_RETRY_SHA256 = "62fab7a1ed1e789436ced0dc8dce8963b5dacb12084d1b55ad7e5da9301574a1"
+# 13,000-byte posting text and resume plus a 400-char validation error:
 # the three ``_MAX_PROMPT_*`` bounds (12_000 / 12_000 / 300) produce this exact prompt.
-GOLDEN_BOUNDED_SHA256 = "3fd8f0b07fcf340e391695549b707c0cb2a78546a8a36ddd158473ab055ab064"
-GOLDEN_BOUNDED_LEN = 29_391
+GOLDEN_BOUNDED_SHA256 = "30e536f26a84783cefba6a942ceeebd2a7652a64c003afe47e570ccb05b88976"
+GOLDEN_BOUNDED_LEN = 35_491
 
 # Digest of the shipped ``assess.md`` bytes; bump ONLY when the template changes on purpose.
-# P3 (v0.1.9) INTENTIONAL CHANGE: bumped for rule 6 + the {{prior_answers}} placeholder.
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:0ed0f4410fda6fa6fa8d90bf38700d3487f51e3648a8840e7aee12c593f6a00d"
+# assess-prompt-v2 (v0.1.9) INTENTIONAL CHANGE: bumped for the rewritten body (see above).
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:3e5d14ed467fa3aa163c4d822cb8e26e0fd66a42b65fb07947a335a89c188367"
 
 
 def _sha256(text: str) -> str:
@@ -280,7 +370,7 @@ def test_prompt_bounds_match_the_pre_p1_constants() -> None:
 def test_empty_location_renders_unspecified_and_empty_error_omits_the_retry_paragraph() -> None:
     prompt = render_assess_prompt(_job(location=""), _ctx(), "")
     assert "LOCATION: unspecified" in prompt
-    assert "Your previous answer" not in prompt
+    assert "A previous attempt" not in prompt
     assert proposal_execution._assess_prompt(
         SimpleNamespace(to_json=lambda: {"title": _TITLE, "company": _COMPANY, "location": None}),
         _RESUME, _POSTING_TEXT, False,
@@ -297,7 +387,7 @@ def test_substituted_text_is_never_rescanned_for_placeholders() -> None:
 
 def test_prior_answers_render_into_the_prompt_and_are_omitted_when_empty() -> None:
     empty_prompt = render_assess_prompt(_job(), _ctx())
-    assert "PRIOR ANSWERS" not in empty_prompt
+    assert "PRIOR ANSWERS (from earlier assessments" not in empty_prompt
 
     ctx = AssessContext(
         resume_text=_RESUME.decode("utf-8"),
@@ -305,10 +395,10 @@ def test_prior_answers_render_into_the_prompt_and_are_omitted_when_empty() -> No
         prior_answers=(PriorAnswer(question_id="cloud:gcp", prompt="Have you used GCP?", answer="Yes, two years."),),
     )
     prompt = render_assess_prompt(_job(), ctx)
-    assert "PRIOR ANSWERS" in prompt
+    assert "PRIOR ANSWERS (from earlier assessments" in prompt
     assert "cloud:gcp: Yes, two years." in prompt
     # The one rule (assess.md, not a code rule) telling the model never to re-ask an answered id.
-    assert "6. A question whose id has a prior answer is resolved by that answer, never re-asked." in prompt
+    assert "8. A question whose id has a prior answer (PRIOR ANSWERS) is resolved by that answer, never re-asked" in prompt
 
 
 def test_an_answered_question_id_is_never_re_asked_in_the_fixture_reply() -> None:
@@ -333,6 +423,138 @@ def test_an_answered_question_id_is_never_re_asked_in_the_fixture_reply() -> Non
     assert outcome.parsed.questions == ()
 
 
+# --- assess-prompt-v2: the candidate's own location and rule 4's region paths ----------
+#
+# Operator decision (2026-09-25): a posting that restricts a remote role to
+# named states/provinces is decided from the candidate's OWN location
+# ({{candidate_location}}, find-jobs.json's ``location``), not always-met and
+# not always-asked. The model does the deciding; these hermetic cases pin
+# what the shipped path guarantees around it: the location reaches the
+# prompt (or renders "unknown"), rule 4 names the stable id, a region
+# verdict in each direction validates, the asked id survives normalization
+# unchanged, and a prior answer for that id is rendered so it is never
+# re-asked.
+
+_REGION_POSTING = (
+    "Remote Canada. This remote role is open only to candidates residing in Alberta, "
+    "British Columbia, Ontario or Saskatchewan.\nWe need 5+ years of Python."
+)
+
+
+def _region_job() -> AssessJob:
+    return _job(location="Remote Canada", posting_text=_REGION_POSTING)
+
+
+def _region_ctx(location: str, prior: tuple[PriorAnswer, ...] = ()) -> AssessContext:
+    return AssessContext(
+        resume_text=_RESUME.decode("utf-8"), visa_sponsorship_required=False,
+        countries=("CA",), location=location, prior_answers=prior,
+    )
+
+
+def _constraints_line(prompt: str) -> str:
+    lines = [line for line in prompt.splitlines() if line.startswith("CANDIDATE CONSTRAINTS")]
+    assert len(lines) == 1, prompt
+    return lines[0]
+
+
+def test_candidate_location_renders_on_the_constraints_line_and_rule_4_names_the_region_id() -> None:
+    prompt = render_assess_prompt(_region_job(), _region_ctx("Toronto, ON, Canada"))
+    assert "the candidate's own location (city, state/province, country as they wrote it; " in _constraints_line(prompt)
+    assert "applied by rule 4): Toronto, ON, Canada; target titles" in _constraints_line(prompt)
+    assert 'with the question_id "location:<country>_region"' in prompt
+    assert '"location:ca_region", "location:us_region"' in prompt
+    # Unknown: the placeholder never leaks and the word the rule keys on is rendered.
+    unknown = render_assess_prompt(_region_job(), _region_ctx(""))
+    assert "{{candidate_location}}" not in unknown
+    assert "applied by rule 4): unknown; target titles" in _constraints_line(unknown)
+    assert render_assess_prompt(_region_job(), _region_ctx("   ")) == unknown
+
+
+def test_region_known_and_listed_validates_as_a_match_with_no_question() -> None:
+    output = json.dumps({
+        "verdict": "matched_above_threshold",
+        "matrix": [
+            {"requirement": "Residing in Alberta, British Columbia, Ontario or Saskatchewan", "class": "hard",
+             "status": "met", "resume_evidence": ["candidate location: Toronto, ON, Canada"]},
+            {"requirement": "5+ years of Python", "class": "hard", "status": "met", "resume_evidence": ["6 years"]},
+        ],
+        "questions": [], "suggestions": [], "not_a_match_reason": None,
+    })
+    binding = _ScriptedBinding([output])
+    outcome = assess_once(binding, _region_job(), _region_ctx("Toronto, ON, Canada"), parse=_parse)
+    assert outcome.ok and outcome.attempts == 1
+    assert "Toronto, ON, Canada" in binding.port.prompts[0]
+    assert outcome.parsed.verdict.value == "matched_above_threshold"
+    assert outcome.parsed.structured_questions == ()
+
+
+def test_region_known_but_not_listed_validates_as_not_a_match_on_the_hard_row() -> None:
+    output = json.dumps({
+        "verdict": "not_a_match",
+        "matrix": [
+            {"requirement": "Residing in Alberta, British Columbia, Ontario or Saskatchewan", "class": "hard",
+             "status": "unmet", "resume_evidence": ["candidate location: Montreal, QC, Canada"]},
+            {"requirement": "5+ years of Python", "class": "hard", "status": "met", "resume_evidence": ["6 years"]},
+        ],
+        "questions": [], "suggestions": [],
+        "not_a_match_reason": "The candidate lives in Quebec, which is not one of the listed provinces.",
+    })
+    binding = _ScriptedBinding([output])
+    outcome = assess_once(binding, _region_job(), _region_ctx("Montreal, QC, Canada"), parse=_parse)
+    assert outcome.ok and outcome.attempts == 1
+    assert "Montreal, QC, Canada" in binding.port.prompts[0]
+    assert outcome.parsed.verdict.value == "not_a_match"
+    assert outcome.parsed.matrix[0].status.value == "unmet"
+
+
+def test_region_unknown_asks_once_with_the_stable_region_id() -> None:
+    output = json.dumps({
+        "verdict": "pending_user_answers",
+        "matrix": [
+            {"requirement": "Residing in Alberta, British Columbia, Ontario or Saskatchewan", "class": "hard",
+             "status": "unclear", "resume_evidence": []},
+            {"requirement": "5+ years of Python", "class": "hard", "status": "met", "resume_evidence": ["6 years"]},
+        ],
+        "questions": [{
+            "question_id": "location:ca_region",
+            "question": "Which Canadian province do you live in?",
+            "requirement": "Residing in Alberta, British Columbia, Ontario or Saskatchewan",
+        }],
+        "suggestions": [], "not_a_match_reason": None,
+    })
+    binding = _ScriptedBinding([output])
+    outcome = assess_once(binding, _region_job(), _region_ctx(""), parse=_parse)
+    assert outcome.ok
+    assert "applied by rule 4): unknown;" in binding.port.prompts[0]
+    assert outcome.parsed.verdict.value == "pending_user_answers"
+    # The id the prompt names is a fixed point of the boundary normalizer
+    # (question_ids.normalize_question_id), so P3's answer join finds it.
+    assert [q.question_id for q in outcome.parsed.structured_questions] == ["location:ca_region"]
+
+
+def test_region_unknown_with_a_prior_answer_is_resolved_not_re_asked() -> None:
+    prior = (PriorAnswer(question_id="location:ca_region", prompt="Which Canadian province do you live in?", answer="Ontario"),)
+    output = json.dumps({
+        "verdict": "matched_above_threshold",
+        "matrix": [
+            {"requirement": "Residing in Alberta, British Columbia, Ontario or Saskatchewan", "class": "hard",
+             "status": "met", "resume_evidence": ["prior answer location:ca_region: Ontario"]},
+            {"requirement": "5+ years of Python", "class": "hard", "status": "met", "resume_evidence": ["6 years"]},
+        ],
+        "questions": [], "suggestions": [], "not_a_match_reason": None,
+    })
+    binding = _ScriptedBinding([output])
+    outcome = assess_once(binding, _region_job(), _region_ctx("", prior), parse=_parse)
+    assert outcome.ok
+    prompt = binding.port.prompts[0]
+    assert "applied by rule 4): unknown;" in prompt
+    assert "PRIOR ANSWERS (from earlier assessments" in prompt and "- location:ca_region: Ontario" in prompt
+    assert "8. A question whose id has a prior answer (PRIOR ANSWERS) is resolved by that answer, never re-asked" in prompt
+    assert outcome.parsed.verdict.value == "matched_above_threshold"
+    assert outcome.parsed.structured_questions == ()
+
+
 # --- assess_once: retry, tolerant extraction, exception mapping --------------
 
 def test_assess_once_parses_on_the_first_try() -> None:
@@ -353,7 +575,7 @@ def test_assess_once_retries_once_and_feeds_the_validation_error_back() -> None:
     assert outcome.validation_error  # the first attempt's error, surfaced
     first, second = binding.port.prompts
     assert first == GOLDEN_PROMPT
-    assert second.startswith(GOLDEN_PROMPT + "\n\nYour previous answer did not match the required JSON shape: ")
+    assert second.startswith(GOLDEN_PROMPT + "\n\nA previous attempt at this same prompt was rejected by the validator: ")
     assert outcome.validation_error[:300] in second
     assert second.endswith(". Return corrected JSON only, matching the schema exactly.")
 
@@ -446,7 +668,10 @@ def test_instructions_load_from_the_package_and_the_digest_is_stable() -> None:
     assert INSTRUCTIONS_DIGEST == digest_imported_bytes(shipped) == SHIPPED_INSTRUCTIONS_DIGEST
     text = load_assess_instructions()
     assert text == shipped.decode("utf-8")[:-1] and shipped.endswith(b"\n")
-    for placeholder in ("title", "company", "location", "visa_required", "posting_text", "resume_text", "validation_error"):
+    for placeholder in (
+        "title", "company", "location", "visa_required", "posting_text", "resume_text", "countries",
+        "candidate_location", "titles", "prior_answers", "validation_error",
+    ):
         assert "{{" + placeholder + "}}" in text, placeholder
     assert load_assess_instructions() == text
 
