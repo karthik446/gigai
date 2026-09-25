@@ -86,7 +86,15 @@ def _managed_workpad(tmp_path: Path, name: str = "u26-raw-proof") -> Path:
 def _config(*, exa: bool = True, ats: bool = True) -> FindJobsConfig:
     payload = json.loads((FIXTURES / "fixture-find-jobs-config-v1.json").read_text())
     config = FindJobsConfig.from_json(payload)
-    return replace(config, sources=SourceToggles(exa=exa, ats=ats, hiringcafe=False))
+    # Q1 (v0.1.9): the publication window now applies to EVERY source's
+    # rows (filters.exclusion_reason), and the fixture config's fixed
+    # published_after (2026-09-15) would drop the September-dated rows the
+    # country/selection/replay cases below were built on. Those cases are
+    # about location and selection, not the window, so pin a far-past fixed
+    # date (a fixed date always wins over the rolling default, and unlike a
+    # rolling window it can't rot as the calendar moves past the fixture
+    # dates). The window itself is tested in test_rolling_window.py.
+    return replace(config, sources=SourceToggles(exa=exa, ats=ats, hiringcafe=False), published_after="2000-01-01T00:00:00Z")
 
 
 def _input(rows=(), *, config: FindJobsConfig | None = None):
@@ -537,9 +545,16 @@ def test_raw_ats_and_exa_responses_are_stored_gzip_with_index(monkeypatch, tmp_p
     raw_root = workpad / "runs" / context.run_id / "raw"
     index = json.loads((raw_root / "index.json").read_text())
     assert index["cap_bytes"] == 20 * 1024 * 1024
-    assert len(index["entries"]) == 2
+    # Q2: Greenhouse is fetched in two phases (content-free list, then one
+    # detail per title match), so the one matching job costs two captured
+    # responses next to Exa's one.
+    assert len(index["entries"]) == 3
     sources = {entry["source"] for entry in index["entries"]}
     assert sources == {"exa", "greenhouse"}
+    assert sorted(entry["url"] for entry in index["entries"] if entry["source"] == "greenhouse") == [
+        "https://boards-api.greenhouse.io/v1/boards/acme/jobs",
+        "https://boards-api.greenhouse.io/v1/boards/acme/jobs/1",
+    ]
     for entry in index["entries"]:
         assert entry["stored"] is True
         assert "path" in entry
@@ -592,12 +607,15 @@ def test_raw_payload_cap_stops_storing_further_entries(monkeypatch, tmp_path):
 
     raw_root = workpad / "runs" / context.run_id / "raw"
     index = json.loads((raw_root / "index.json").read_text())
-    assert len(index["entries"]) == 2
+    # Q2: two boards x (content-free list + one detail per matching job) =
+    # four captured responses; the handler answers every URL with the same
+    # ~5 KB list body, so only the first fits under the 200-byte cap.
+    assert len(index["entries"]) == 4
     stored = [entry for entry in index["entries"] if entry["stored"]]
     skipped = [entry for entry in index["entries"] if not entry["stored"]]
     assert len(stored) == 1
-    assert len(skipped) == 1
-    assert skipped[0]["skipped_reason"] == "raw_payload_cap_reached"
+    assert len(skipped) == 3
+    assert {entry["skipped_reason"] for entry in skipped} == {"raw_payload_cap_reached"}
 
     # regression-001: even with the cap truncating storage, the workpad must
     # still end up clean.

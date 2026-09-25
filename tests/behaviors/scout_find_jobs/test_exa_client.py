@@ -271,7 +271,15 @@ def test_every_emitted_row_round_trips_through_json(monkeypatch: pytest.MonkeyPa
     assert lever_row.title == "https://jobs.lever.co/beta/abcde"
 
 
-def test_omits_start_published_date_when_not_set(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sends_rolling_window_cutoff_when_no_fixed_date_is_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Q1 (v0.1.9): ``startPublishedDate`` used to be omitted when
+    ``published_after`` was unset; it is now ALWAYS sent, as the rolling
+    window's cutoff (``filters.published_cutoff``: ``now - max_age_days``,
+    default 60 days). The exact value is pinned in ``test_rolling_window.py``
+    (injected ``now``); here: present, ``Z``-suffixed, and ~60 days back."""
+
+    from datetime import datetime, timedelta, timezone
+
     monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "secret-exa-key")
     captured: list[httpx.Request] = []
 
@@ -279,10 +287,15 @@ def test_omits_start_published_date_when_not_set(monkeypatch: pytest.MonkeyPatch
         captured.append(request)
         return httpx.Response(200, json={"results": []})
 
+    before = datetime.now(timezone.utc)
     ExaSearchClient().search(_client(handler), _config(published_after=None))
+    after = datetime.now(timezone.utc)
 
     body = json.loads(captured[0].content)
-    assert "startPublishedDate" not in body
+    sent = body["startPublishedDate"]
+    assert sent.endswith("Z")
+    parsed = datetime.fromisoformat(sent.replace("Z", "+00:00"))
+    assert before - timedelta(days=60) <= parsed <= after - timedelta(days=60)
 
 
 def test_omits_user_location_when_countries_empty(monkeypatch: pytest.MonkeyPatch) -> None:

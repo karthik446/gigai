@@ -25,6 +25,19 @@ Layout, all under ``runs/<run_id>/progress/``:
 - ``cap.json``: ``{"cap": <int>, "candidate_count": <int>}``, written once
   acquire knows the selection cap and how many candidates it saw. Optional;
   absent until acquire has that information.
+- ``boards.json`` (Q2): ``{"total": <int>, "budget_seconds": <float>|null,
+  "status": "running"|"done", ...totals}``; written once acquire has planned
+  its ATS board fetches, replaced with the totals (requests, cache hits,
+  skipped, elapsed) when the fetch pass ends.
+- ``boards.jsonl`` (Q2): one JSON line per watchlist board as its fetch
+  finishes: ``{"provider", "board_token", "status": "fetched"|"cached"|
+  "failed"|"skipped", "requests", "cache", "postings", "matched",
+  "elapsed_ms", "code"}`` -- so a UI can show "board 212 of 3,000" and which
+  boards a run-time budget left unfetched.
+- ``watchlist-seed.json`` (Q2): what the catalog seeding pass did before the
+  boards were listed (``watchlist.WatchlistSeedResult.to_json()`` plus a
+  ``status``), or why it was skipped (``prefs_missing``); the explicit
+  record of an otherwise invisible watchlist change.
 
 Every write is append-only (jsonl) or whole-file replace (steps.json,
 cap.json) via a write-to-temp-then-rename, so a reader never observes a
@@ -44,7 +57,7 @@ scheduler).
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import os
@@ -56,6 +69,12 @@ _STEPS_FILENAME = "steps.json"
 _ACQUIRE_FILENAME = "acquire.jsonl"
 _ASSESS_FILENAME = "assess.jsonl"
 _CAP_FILENAME = "cap.json"
+# Q2 (acquire at scale): per-board progress + the watchlist seeding record.
+_BOARDS_FILENAME = "boards.jsonl"
+_BOARDS_SUMMARY_FILENAME = "boards.json"
+_WATCHLIST_SEED_FILENAME = "watchlist-seed.json"
+
+BOARD_STATUSES = ("fetched", "cached", "failed", "skipped")
 
 STEP_NAMES = ("acquire", "assess", "present")
 
@@ -267,6 +286,60 @@ class ProgressWriter:
             lambda: _replace_json(self._dir / _CAP_FILENAME, {"cap": cap, "candidate_count": candidate_count})
         )
 
+    # -- Q2: per-board progress + the seeding record ------------------------
+
+    def watchlist_seeded(self, payload: Mapping[str, object]) -> None:
+        """Replace ``watchlist-seed.json`` with what seeding did (or why not)."""
+
+        self._guard(lambda: _replace_json(self._dir / _WATCHLIST_SEED_FILENAME, dict(payload)))
+
+    def boards_planned(self, *, total: int, budget_seconds: float | None) -> None:
+        """Written once acquire knows how many boards it will fetch this run."""
+
+        self._guard(
+            lambda: _replace_json(
+                self._dir / _BOARDS_SUMMARY_FILENAME,
+                {"total": total, "budget_seconds": budget_seconds, "status": "running"},
+            )
+        )
+
+    def board_finished(
+        self,
+        *,
+        provider: str,
+        board_token: str,
+        status: str,
+        requests: int = 0,
+        cache: str | None = None,
+        postings: int = 0,
+        matched: int = 0,
+        elapsed_ms: int = 0,
+        code: str | None = None,
+    ) -> None:
+        """Append one line per board the moment its fetch settles."""
+
+        record: dict[str, object] = {
+            "provider": provider,
+            "board_token": board_token,
+            "status": status,
+            "requests": requests,
+            "cache": cache,
+            "postings": postings,
+            "matched": matched,
+            "elapsed_ms": elapsed_ms,
+            "at": _now(),
+        }
+        if code is not None:
+            record["code"] = code
+        self._guard(lambda: _append_line(self._dir / _BOARDS_FILENAME, record))
+
+    def boards_finished(self, summary: Mapping[str, object]) -> None:
+        """Replace ``boards.json`` with the fetch pass's final totals."""
+
+        self._guard(
+            lambda: _replace_json(self._dir / _BOARDS_SUMMARY_FILENAME, {**dict(summary), "status": "done"})
+        )
+
 
 @dataclass(frozen=True)
 class ProgressSnapshot:
@@ -278,6 +351,9 @@ class ProgressSnapshot:
     cap: int | None
     candidate_count: int | None
     not_assessed_counts: dict[str, int]
+    # Q2: additive, defaulted so every existing constructor call still works.
+    boards: dict[str, object] = field(default_factory=dict)
+    watchlist_seed: dict[str, object] | None = None
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -287,6 +363,8 @@ class ProgressSnapshot:
             "cap": self.cap,
             "candidate_count": self.candidate_count,
             "not_assessed_counts": self.not_assessed_counts,
+            "boards": self.boards,
+            "watchlist_seed": self.watchlist_seed,
         }
 
 
@@ -362,10 +440,61 @@ def read_progress(run_root: Path) -> ProgressSnapshot:
         cap=cap,
         candidate_count=candidate_count,
         not_assessed_counts=not_assessed_counts,
+        boards=_read_boards(directory),
+        watchlist_seed=_read_watchlist_seed(directory),
     )
 
 
+def _read_watchlist_seed(directory: Path) -> dict[str, object] | None:
+    payload = _read_json(directory / _WATCHLIST_SEED_FILENAME)
+    return dict(payload) if isinstance(payload, dict) else None
+
+
+def _read_boards(directory: Path) -> dict[str, object]:
+    """Fold ``boards.json`` + ``boards.jsonl`` into one live per-board view.
+
+    ``{}`` when acquire never planned a board fetch (no ATS source, or an
+    older run). Otherwise the planned ``total``/``budget_seconds``/``status``
+    plus counts derived from the per-board lines -- ``done`` (lines seen),
+    one count per :data:`BOARD_STATUSES` value, ``requests`` and
+    ``cache_hits`` summed, and ``skipped_boards`` (the ``provider:token``
+    of every board a run-time budget left unfetched) so a UI can name them.
+    The final totals ``boards_finished`` writes win over the derived counts
+    where both exist.
+    """
+
+    summary_raw = _read_json(directory / _BOARDS_SUMMARY_FILENAME)
+    lines = _read_jsonl(directory / _BOARDS_FILENAME)
+    if not isinstance(summary_raw, dict) and not lines:
+        return {}
+    summary: dict[str, object] = dict(summary_raw) if isinstance(summary_raw, dict) else {}
+    counts = {status: 0 for status in BOARD_STATUSES}
+    requests = 0
+    cache_hits = 0
+    skipped: list[str] = []
+    for line in lines:
+        status = line.get("status")
+        if isinstance(status, str) and status in counts:
+            counts[status] += 1
+        raw_requests = line.get("requests")
+        if isinstance(raw_requests, int) and not isinstance(raw_requests, bool):
+            requests += raw_requests
+        if line.get("cache") in {"hit", "revalidated"}:
+            cache_hits += 1
+        if status == "skipped":
+            skipped.append(f"{line.get('provider')}:{line.get('board_token')}")
+    derived: dict[str, object] = {
+        "done": len(lines),
+        **counts,
+        "requests": requests,
+        "cache_hits": cache_hits,
+        "skipped_boards": skipped,
+    }
+    return {**derived, **summary}
+
+
 __all__ = [
+    "BOARD_STATUSES",
     "STEP_NAMES",
     "ProgressSnapshot",
     "ProgressWriter",

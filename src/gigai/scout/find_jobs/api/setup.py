@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 from http import HTTPStatus
 
-from ..contracts import FindJobsConfig, FindJobsContractError, SourceToggles
+from ..contracts import MAX_AGE_DAYS_MAXIMUM, FindJobsConfig, FindJobsContractError, SourceToggles
 from .config import _prefs_prefill_from_config
 from .server import (
     ConfigMissingError,
@@ -88,6 +88,23 @@ def _setup_budget_usd_per_session(body: dict[str, object], errors: dict[str, str
     return float(value)
 
 
+def _setup_max_age_days(body: dict[str, object], errors: dict[str, str]) -> int | None:
+    """Q1 (v0.1.9): the optional rolling publication window the wizard sends.
+
+    ``None`` when absent (the save then leaves find-jobs.json's window
+    untouched -- see ``ScoutFindJobsBackend._update_find_jobs_config``).
+    Never a ``DiscoveryPrefs`` field.
+    """
+
+    if "max_age_days" not in body or body["max_age_days"] is None:
+        return None
+    value = body["max_age_days"]
+    if not isinstance(value, int) or isinstance(value, bool) or not (1 <= value <= MAX_AGE_DAYS_MAXIMUM):
+        errors["max_age_days"] = f"max_age_days must be an integer from 1 to {MAX_AGE_DAYS_MAXIMUM}"
+        return None
+    return value
+
+
 def _validate_setup_body(body: object) -> dict[str, object]:
     """Validate a ``PUT /api/setup`` body against the 11 S23 interview fields.
 
@@ -96,6 +113,10 @@ def _validate_setup_body(body: object) -> dict[str, object]:
     this module never has to import it eagerly (see CHANGE #3). Raises
     ``SetupValidationError`` (-> 400 with per-field messages) on any bad
     field; unknown top-level keys are also rejected to fail closed on typos.
+
+    Q1 (v0.1.9): plus one NON-prefs key, ``max_age_days`` (optional int,
+    1..365) -- present in the returned dict only when the body set it, and
+    stripped again by ``write_setup`` before ``DiscoveryPrefs`` is built.
     """
 
     if not isinstance(body, dict):
@@ -116,6 +137,7 @@ def _validate_setup_body(body: object) -> dict[str, object]:
         "dealbreaker_stack",
         "cadence_days",
         "budget_usd_per_session",
+        "max_age_days",
     }
     errors: dict[str, str] = {}
     unknown = set(body) - known_keys
@@ -139,11 +161,12 @@ def _validate_setup_body(body: object) -> dict[str, object]:
     dealbreaker_stack = _setup_field_string_list(body, "dealbreaker_stack", errors)
     cadence_days = _setup_cadence_days(body, errors)
     budget_usd_per_session = _setup_budget_usd_per_session(body, errors)
+    max_age_days = _setup_max_age_days(body, errors)
 
     if errors:
         raise SetupValidationError(errors)
 
-    return {
+    fields: dict[str, object] = {
         "roles": roles,
         "titles_to_avoid": titles_to_avoid,
         "countries": countries,
@@ -160,6 +183,9 @@ def _validate_setup_body(body: object) -> dict[str, object]:
         "cadence_days": cadence_days,
         "budget_usd_per_session": budget_usd_per_session,
     }
+    if max_age_days is not None:
+        fields["max_age_days"] = max_age_days
+    return fields
 
 
 class SetupRoutesMixin:

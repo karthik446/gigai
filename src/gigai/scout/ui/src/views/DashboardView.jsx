@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ProfileSwitcher from "../components/ProfileSwitcher.jsx";
 import DiscoverPanel from "../components/DiscoverPanel.jsx";
+import AddCompanyForm from "../components/AddCompanyForm.jsx";
 import { getDiscoverLatest, startDiscovery } from "../api.js";
 import { useApplications, useRuns } from "../hooks.js";
 import { relativeTimeLabel } from "../display.js";
@@ -267,6 +268,7 @@ export default function DashboardView({ profiles, selectedProfileId, onSelectPro
           error={discoverError}
         />
       )}
+      <AddCompanyForm />
 
       <section className="panel">
         <h2>Profile switcher</h2>

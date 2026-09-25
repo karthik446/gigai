@@ -1027,7 +1027,11 @@ class ScoutFindJobsBackend:
         """
 
         discovery = self._discovery_module()
-        prefs = discovery.DiscoveryPrefs(**prefs_fields)
+        # Q1 (v0.1.9): `max_age_days` is a find-jobs.json field the wizard
+        # sends on this same PUT; it is NEVER a DiscoveryPrefs field, so it
+        # is left out of the prefs dataclass here and consumed only by
+        # `_update_find_jobs_config` below.
+        prefs = discovery.DiscoveryPrefs(**{key: value for key, value in prefs_fields.items() if key != "max_age_days"})
         discovery.save_prefs(home_root=self.home_root, target=self._target_root(), prefs=prefs)
         self._update_find_jobs_config(prefs_fields)
 
@@ -1102,6 +1106,15 @@ class ScoutFindJobsBackend:
         ``default_assess_cap``, ``default_model_target``) is read from the
         existing file and kept unchanged.
 
+        Q1 (v0.1.9): the publication window. ``max_age_days`` is preserved
+        from the existing file on every save (a Preferences save that
+        doesn't mention it must never silently reset it); when the body
+        DOES carry ``max_age_days`` (the wizard always sends it), it is
+        written and ``published_after`` is cleared to ``None`` so the
+        rolling form wins over any older fixed date
+        (``filters.published_cutoff``'s rule: a fixed date, when set,
+        always wins -- so the wizard has to clear it to switch forms).
+
         No profile exists yet (no committed resume for this gig, so
         ``ensure_default_profile`` no-ops) -- the interview is allowed to run
         before a target has ever been configured, and before any resume is
@@ -1118,6 +1131,8 @@ class ScoutFindJobsBackend:
         city: str | None = prefs_fields["city"]  # type: ignore[assignment]
         countries: tuple[str, ...] = tuple(prefs_fields["countries"])  # type: ignore[arg-type]
         visa_sponsorship_required = bool(prefs_fields["visa_sponsorship_required"])
+        window_sent = prefs_fields.get("max_age_days") is not None
+        max_age_days_sent: int | None = prefs_fields.get("max_age_days") if window_sent else None  # type: ignore[assignment]
 
         from ... import profile_records
 
@@ -1158,6 +1173,7 @@ class ScoutFindJobsBackend:
                 default_model_target=ModelTarget.OLLAMA_LOCAL,
                 countries=countries,
                 visa_sponsorship_required=visa_sponsorship_required,
+                max_age_days=max_age_days_sent,
             )
         else:
             existing = FindJobsConfig.from_json(parse_json_bytes(path.read_bytes()))
@@ -1166,12 +1182,13 @@ class ScoutFindJobsBackend:
                 merged_queries=existing.merged_queries if profile is not None else roles,
                 location=city,
                 remote=remote,
-                published_after=existing.published_after,
+                published_after=None if window_sent else existing.published_after,
                 sources=existing.sources,
                 default_assess_cap=existing.default_assess_cap,
                 default_model_target=existing.default_model_target,
                 countries=countries,
                 visa_sponsorship_required=visa_sponsorship_required,
+                max_age_days=max_age_days_sent if window_sent else existing.max_age_days,
             )
         _atomic_write_json(path, config.to_json())
 
@@ -1313,6 +1330,8 @@ def _make_handler(
     from .runs_list import RunsListRoutesMixin
     from .setup import SetupRoutesMixin
     from .static import StaticRoutesMixin
+    from .tailored_resumes import TailoredResumesRoutesMixin
+    from .watchlist import WatchlistRoutesMixin
 
     class Handler(
         ConfigRoutesMixin,
@@ -1326,6 +1345,8 @@ def _make_handler(
         AnswersRoutesMixin,
         ApplicationsRoutesMixin,
         ResumeExtractRoutesMixin,
+        TailoredResumesRoutesMixin,
+        WatchlistRoutesMixin,
         StaticRoutesMixin,
         BaseHTTPRequestHandler,
     ):
@@ -1502,6 +1523,9 @@ def _make_handler(
                     if path == "/api/assessments":
                         self._handle_get_assessments()
                         return
+                    if path == "/api/tailored-resumes":
+                        self._handle_get_tailored_resumes()
+                        return
                     if path == "/api/answers":
                         self._handle_get_answers()
                         return
@@ -1510,6 +1534,9 @@ def _make_handler(
                         return
                     if path == "/api/applications":
                         self._handle_get_applications()
+                        return
+                    if path == "/api/watchlist":
+                        self._handle_get_watchlist()
                         return
                     run_id = _match_run_id(path, suffix="/results")
                     if run_id is not None:
@@ -1552,6 +1579,9 @@ def _make_handler(
                 if path == "/api/assess":
                     self._handle_post_assess()
                     return
+                if path == "/api/tailored-resumes":
+                    self._handle_post_tailored_resumes()
+                    return
                 if path == "/api/answers":
                     self._handle_post_answers()
                     return
@@ -1560,6 +1590,9 @@ def _make_handler(
                     return
                 if path == "/api/applications":
                     self._handle_post_applications()
+                    return
+                if path == "/api/watchlist":
+                    self._handle_post_watchlist()
                     return
                 profile_id = _match_profile_id(path, suffix="/archive")
                 if profile_id is not None:

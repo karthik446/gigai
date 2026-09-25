@@ -57,10 +57,11 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from datetime import datetime, timedelta, timezone
 
 import pycountry
 
-from .contracts import FindJobsConfig, NotAssessedReason, PostingRow, SponsorshipStatus
+from .contracts import DEFAULT_MAX_AGE_DAYS, FindJobsConfig, FindJobsContractError, NotAssessedReason, PostingRow, SponsorshipStatus
 
 # --- pycountry-derived country alias table -------------------------------
 #
@@ -597,19 +598,98 @@ def location_mismatch_detail(posting: PostingRow, config: FindJobsConfig) -> Not
     return NotAssessedReason.LOCATION_MISMATCH
 
 
-def exclusion_reason(posting: PostingRow, config: FindJobsConfig) -> NotAssessedReason | None:
+def _parse_published(value: str) -> datetime | None:
+    """Parse an ISO-8601 date or date-time; ``None`` if it doesn't parse.
+
+    Accepts every shape the sources actually produce -- Greenhouse/Ashby
+    ISO date-times with an offset or ``Z`` (``ats_board_clients.
+    _published_at_from_iso``), Lever's epoch-ms already rendered to a ``Z``
+    date-time, Exa's ``publishedDate`` -- and the operator's own
+    ``published_after`` (a bare ``YYYY-MM-DD`` is fine). A naive value is
+    read as UTC rather than rejected.
+    """
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def published_cutoff(config: FindJobsConfig, *, now: datetime | None = None) -> datetime:
+    """The earliest ``published_at`` (UTC, tz-aware) a posting may have under ``config``.
+
+    Q1 (v0.1.9): the ONE helper that turns the config's window into an
+    actual date, so Exa's ``startPublishedDate`` (``exa_client.py``) and the
+    post-fetch drop applied to every source's rows (``exclusion_reason``
+    below, via ``market_acquisition``'s drop loop) can never disagree. The
+    rule, in order (see ``FindJobsConfig``'s own docstring):
+
+    1. ``published_after`` set -> that fixed date wins, regardless of
+       ``max_age_days``. An unparsable fixed date is a config error and
+       raises ``FindJobsContractError`` (``invalid_value``) -- a typo in the
+       operator's file must fail loudly, never silently widen to the
+       default window.
+    2. else ``max_age_days`` set -> ``now - max_age_days``.
+    3. else -> ``now - DEFAULT_MAX_AGE_DAYS`` (60).
+
+    ``now`` is injectable for tests; production callers leave it ``None``.
+    """
+
+    if config.published_after is not None:
+        fixed = _parse_published(config.published_after)
+        if fixed is None:
+            raise FindJobsContractError("invalid_value", "find_jobs_config.published_after must be an ISO-8601 date or date-time")
+        return fixed
+    days = config.max_age_days if config.max_age_days is not None else DEFAULT_MAX_AGE_DAYS
+    current = now if now is not None else datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    return current - timedelta(days=days)
+
+
+def published_too_old(posting: PostingRow, config: FindJobsConfig, *, now: datetime | None = None) -> bool:
+    """``True`` only when ``posting.published_at`` is a parsable date BEFORE the cutoff.
+
+    A row with no ``published_at`` at all -- or one whose value doesn't
+    parse -- is KEPT (returns ``False``): the window can only judge a date
+    the source actually gave us, and there is no per-row field on the
+    sealed ``PostingRow`` to record "undated, kept" on, so that case is
+    simply never dropped here.
+    """
+
+    if posting.published_at is None:
+        return False
+    published = _parse_published(posting.published_at)
+    if published is None:
+        return False
+    return published < published_cutoff(config, now=now)
+
+
+def exclusion_reason(posting: PostingRow, config: FindJobsConfig, *, now: datetime | None = None) -> NotAssessedReason | None:
     """Why ``posting`` would be excluded from selection under ``config``.
 
     Pure and side-effect-free so both the acquire selection loop and
     assess's not-assessed labeling call the identical rule. Returns ``None``
-    when the posting is not excluded by either rule. Ambiguous locations
+    when the posting is not excluded by any rule. Ambiguous locations
     (``country_match`` returns ``None``) are never excluded -- only a
     definite non-match is. Always returns the coarse ``LOCATION_MISMATCH``
     for any location exclusion (including a region-only location, 0.1.8.1
     r1) -- see ``location_mismatch_detail`` for the finer-grained reason
     used by acquire's drop-count accounting.
+
+    Q1 (v0.1.9): the rolling publication window is checked FIRST
+    (``published_too_old``): it applies to every source's rows -- the ATS
+    boards never had any date filter before this, and Exa's own
+    ``startPublishedDate`` is only a request hint -- so a stale posting
+    drops as ``PUBLISHED_TOO_OLD`` whichever source returned it. ``now`` is
+    injectable for tests only.
     """
 
+    if published_too_old(posting, config, now=now):
+        return NotAssessedReason.PUBLISHED_TOO_OLD
     if config.countries:
         match = country_match(posting.location, config.countries, structured_countries=posting.countries)
         if match is False:
@@ -624,5 +704,7 @@ __all__ = [
     "exclusion_reason",
     "location_countries",
     "location_mismatch_detail",
+    "published_cutoff",
+    "published_too_old",
     "sponsorship_from_text",
 ]

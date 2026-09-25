@@ -332,6 +332,120 @@ def _attach_resume_to_profile(
     return profile_records.write_profile(resolved, profile_id=target_profile.profile_id, resume_ref=resume_ref)
 
 
+@resume_group.command("tailor")
+@click.option("--job-url", "job_url", help="Public job posting URL to fetch and tailor the resume to.")
+@click.option("--job-text", "job_text_file", help="File with the posting text (or - for stdin).")
+@click.option("--profile", "profile_id", help="Scout profile ID whose pinned resume to tailor (default: the selected profile).")
+@click.option("--resume", "resume_file", help="Resume text FILE (or - for stdin), used for this call only; never imported.")
+@click.option("--resume-text", "resume_text", help="Resume text inline, used for this call only; never imported.")
+@click.option("--title", "title", help="Job title override (pasted text has none).")
+@click.option("--company", "company", help="Company override (pasted text has none).")
+@click.option("--model-target", "model_target", type=click.Choice([item.value for item in ModelTarget]), help="Adapter kind to tailor with (default: find-jobs.json's default_model_target).")
+@click.option("--out", "out_file", type=click.Path(path_type=Path, dir_okay=False), help="Also write the markdown to FILE.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def resume_tailor_command(
+    job_url: str | None,
+    job_text_file: str | None,
+    profile_id: str | None,
+    resume_file: str | None,
+    resume_text: str | None,
+    title: str | None,
+    company: str | None,
+    model_target: str | None,
+    out_file: Path | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Tailor a resume to ONE job posting right now (Q3) -- markdown, every line sourced.
+
+    Pass exactly one of --job-url / --job-text, and at most one of --profile /
+    --resume / --resume-text (none means the selected profile's resume). Every
+    line of the output is either a resume line copied verbatim or a rewrite
+    that cites the resume lines / answered questions it came from; the
+    validator rejects any number or posting skill the cited sources do not
+    state (one retry, then an error). Synchronous: one model call plus at
+    most one retry. Prints the markdown path (and copies the markdown to
+    --out FILE when given).
+    """
+
+    from .find_jobs.assess_contracts import AssessJobInput, AssessResumeInput
+    from .find_jobs.contracts import FindJobsContractError
+    from .quick_assess import QuickAssessError
+    from .tailored_resume import TailorRequest, run_tailored_resume
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        target = resolved_target.expanduser().resolve(strict=True)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_resume_tailor_failed")
+        return
+
+    if job_url and job_text_file:
+        _fail(ValueError("pass exactly one of --job-url or --job-text"), as_json=as_json, fallback="job_input_invalid")
+        return
+    if sum(1 for item in (profile_id, resume_file, resume_text) if item) > 1:
+        _fail(ValueError("pass at most one of --profile, --resume or --resume-text"), as_json=as_json, fallback="resume_input_invalid")
+        return
+    try:
+        job_text = _read_text_option(job_text_file, flag="--job-text") if job_text_file else None
+        if resume_file:
+            resume_text = _read_text_option(resume_file, flag="--resume")
+    except OSError as exc:
+        _fail(exc, as_json=as_json, fallback="input_file_unreadable")
+        return
+
+    try:
+        request = TailorRequest(
+            job=AssessJobInput(job_url=job_url or None, job_text=job_text or None, title=title, company=company),
+            resume=AssessResumeInput(profile_id=profile_id or None, resume_text=resume_text or None),
+            model_target=None if model_target is None else ModelTarget(model_target),
+        )
+    except FindJobsContractError as exc:
+        _fail(exc, as_json=as_json, fallback="invalid_value")
+        return
+
+    if not as_json:
+        click.echo("Tailoring (one model call plus at most one retry; this can take a minute)...")
+    try:
+        response = run_tailored_resume(request, home_root=home_root, target=target)
+    except QuickAssessError as exc:
+        _fail(exc, as_json=as_json, fallback="scout_resume_tailor_failed")
+        return
+
+    out_path: Path | None = None
+    if out_file is not None:
+        out_path = out_file.expanduser()
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(response.markdown, encoding="utf-8")
+        except OSError as exc:
+            _fail(exc, as_json=as_json, fallback="output_file_unwritable")
+            return
+
+    if as_json:
+        _emit({"ok": True, **response.to_json(), "out_path": None if out_path is None else str(out_path)}, True, "")
+        return
+    job = response.job
+    heading = job.title or "(untitled posting)"
+    if job.company:
+        heading += f" at {job.company}"
+    result = response.result
+    rewritten = len(result.rewritten_lines())
+    click.echo(f"Tailored resume for {heading}:")
+    click.echo(f"  Resume: {response.resume.profile_id or 'pasted resume (not stored as a profile)'}")
+    click.echo(f"  Sections: {', '.join(section.heading for section in result.sections)}")
+    click.echo(f"  Lines: {result.line_count()} ({rewritten} rewritten, every one citing its resume lines / answers)")
+    click.echo(f"  Model: {response.producer.model_target.value} ({response.producer.adapter})")
+    click.echo(f"  Markdown: {response.markdown_path}")
+    click.echo(f"  Stored at {response.stored_path}")
+    if out_path is not None:
+        click.echo(f"  Copied to {out_path}")
+
+
 @scout_group.command("run")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
@@ -903,6 +1017,65 @@ def answer_command(
         result_json = reassessed_payload.get("result")
         verdict = result_json.get("verdict") if isinstance(result_json, dict) else None
         click.echo(f"  Re-assessed: verdict = {verdict}")
+
+
+# --- Q1 (v0.1.9, SCOPE-ADD-2): `gigai scout watchlist add <url>` -----------
+
+
+@scout_group.group("watchlist")
+def watchlist_group() -> None:
+    """Manage the ATS boards Scout polls directly (the watchlist)."""
+
+
+@watchlist_group.command("add")
+@click.argument("url")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def watchlist_add_command(url: str, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Add a company by its Greenhouse / Lever / Ashby board (or job) URL.
+
+    Every later find-jobs run polls the board directly, so a posting no
+    search engine surfaced (the UAT Kong case) is found as long as it is
+    inside the publication window. Idempotent: adding a board twice keeps
+    the one original entry. Any other host is refused.
+    """
+
+    from .find_jobs.watchlist import WatchlistUrlError, add_company_from_url, list_active, watchlist_entry_from_url
+
+    # The URL rule is pure: refuse a foreign host before resolving any
+    # target/gig at all, so a bad URL never surfaces as a workpad error.
+    try:
+        watchlist_entry_from_url(url)
+    except WatchlistUrlError as exc:
+        _fail(exc, as_json=as_json, fallback="watchlist_url_invalid")
+        return
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        target = resolved_target.expanduser().resolve(strict=True)
+        before = {item.watchlist_id for item in list_active(home_root, target)}
+        entry = add_company_from_url(url, home_root, target)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_watchlist_add_failed")
+        return
+
+    created = entry.watchlist_id not in before
+    payload = {
+        "ok": True,
+        "created": created,
+        "company": entry.company,
+        "provider": entry.provider.value,
+        "board_token": entry.board_token,
+        "watchlist_id": entry.watchlist_id,
+        "board_url": entry.first_seen.source_url,
+    }
+    if as_json:
+        _emit(payload, True, "")
+        return
+    verb = "Added" if created else "Already watching"
+    click.echo(f"{verb} {entry.company} ({entry.provider.value} board '{entry.board_token}').")
 
 
 __all__ = ["scout_group", "write_starter_find_jobs_config", "STARTER_FIND_JOBS_CONFIG"]

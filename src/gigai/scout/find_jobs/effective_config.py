@@ -45,6 +45,12 @@ def overlay_selected_profile(config: FindJobsConfig, profile: ProfileRecord | No
     shared file's own value -- ``titles_to_avoid`` is NOT a ``FindJobsConfig``
     field at all (it only feeds the shared discovery prefs' union, per the
     S25 spike's Q5 decision) and is never part of this overlay.
+
+    Q1 (v0.1.9): ``max_age_days`` / ``published_after`` (the publication
+    window) are SHARED fields, never per-profile -- ``dataclasses.replace``
+    carries them through untouched, exactly like ``countries``/``sources``;
+    ``test_rolling_window.py`` pins that so a future field-by-field rewrite
+    of this overlay can't silently drop the window.
     """
 
     if profile is None:

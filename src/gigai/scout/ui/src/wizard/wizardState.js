@@ -25,6 +25,22 @@ export const STEPS = ["Resume", "Target", "Companies", "Discovery + finish"];
 
 export const JEV_PRIVACY_LINE = "Your resume is sent to Jev to rank postings.";
 
+// Q1 (v0.1.9): the rolling publication window (find-jobs.json
+// `max_age_days`; contracts.DEFAULT_MAX_AGE_DAYS / MAX_AGE_DAYS_MAXIMUM).
+// The wizard always writes this rolling form; a hand-edited fixed
+// `published_after` is cleared by the save (the fixed date would otherwise
+// keep winning -- filters.published_cutoff's rule).
+export const DEFAULT_MAX_AGE_DAYS = 60;
+export const MAX_AGE_DAYS_MAXIMUM = 365;
+
+export function clampMaxAgeDays(value) {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return 1;
+  }
+  return Math.min(MAX_AGE_DAYS_MAXIMUM, parsed);
+}
+
 // The wizard's field state. `prefs` is GET /api/setup's saved prefs (200)
 // or the 404's `prefill`; `config` is GET /api/config's body (or null);
 // `selectedProfile` is the /api/profiles entry that is currently selected
@@ -33,6 +49,7 @@ export function initialFields({ prefs, config, selectedProfile }) {
   const p = prefs || {};
   const countries = Array.isArray(p.countries) && p.countries.length > 0 ? p.countries : ["US"];
   const configuredTarget = config && config.config && config.config.default_model_target;
+  const configuredWindow = config && config.config ? config.config.max_age_days : null;
   return {
     // screen 1
     profileMode: selectedProfile ? "update" : "new",
@@ -57,6 +74,7 @@ export function initialFields({ prefs, config, selectedProfile }) {
     workMode: p.work_mode || "any",
     city: p.city || "",
     visaSponsorshipRequired: Boolean(p.visa_sponsorship_required),
+    maxAgeDays: Number.isInteger(configuredWindow) && configuredWindow >= 1 ? clampMaxAgeDays(configuredWindow) : DEFAULT_MAX_AGE_DAYS,
     // screen 3
     excludeCompanies: p.exclude_companies || [],
     watchCompanies: p.watch_companies || [],
@@ -146,7 +164,7 @@ export function screenIsComplete(step, fields) {
     return fields.profileName.trim().length > 0 && hasResume(fields);
   }
   if (step === 2) {
-    return fields.titles.length > 0 && fields.countries.length > 0;
+    return fields.titles.length > 0 && fields.countries.length > 0 && fields.maxAgeDays >= 1;
   }
   if (step === 4) {
     return fields.cadenceDays >= 1 && fields.budgetUsdPerSession > 0;
@@ -190,6 +208,7 @@ export function setupBody(fields, existingPrefs) {
     dealbreaker_stack: prev.dealbreaker_stack || [],
     cadence_days: fields.cadenceDays,
     budget_usd_per_session: fields.budgetUsdPerSession,
+    max_age_days: clampMaxAgeDays(fields.maxAgeDays),
   };
 }
 
@@ -213,6 +232,7 @@ export function reviewRows(fields, resumes) {
     ["Countries", list(fields.countries)],
     ["Work mode", workModeText],
     ["Visa sponsorship required", fields.visaSponsorshipRequired ? "Yes (hard filter)" : "No"],
+    ["Posting age", `last ${clampMaxAgeDays(fields.maxAgeDays)} days`],
     ["Exclude companies", list(fields.excludeCompanies)],
     ["Always watch", list(fields.watchCompanies)],
     ["Discovery cadence", `${fields.cadenceDays} days`],

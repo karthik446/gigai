@@ -1,6 +1,6 @@
 import TagListInput from "../components/TagListInput.jsx";
 import CountryPicker from "../components/CountryPicker.jsx";
-import { WORK_MODES } from "./wizardState.js";
+import { MAX_AGE_DAYS_MAXIMUM, WORK_MODES, clampMaxAgeDays } from "./wizardState.js";
 
 // Screen 2 -- what to look for. Titles are pre-filled from screen 1's
 // suggested titles on the first visit (SetupWizard copies them once); no
@@ -102,6 +102,26 @@ export default function TargetScreen({ fields, setField, fieldErrors }) {
           </button>
         </div>
         {errors.visa_sponsorship_required && <div className="field-error">{errors.visa_sponsorship_required}</div>}
+      </div>
+
+      <div className="form-group">
+        <label className="form-label" htmlFor="wz-max-age-days">
+          Only postings from the last … days
+        </label>
+        <input
+          id="wz-max-age-days"
+          type="number"
+          className="text-input"
+          min={1}
+          max={MAX_AGE_DAYS_MAXIMUM}
+          value={fields.maxAgeDays}
+          onChange={(event) => setField("maxAgeDays", clampMaxAgeDays(event.target.value))}
+        />
+        <small className="wz-hint">
+          A rolling window: each run keeps postings published within this many days of the run. Applies to every
+          source (Exa and the ATS boards alike). Default 60.
+        </small>
+        {errors.max_age_days && <div className="field-error">{errors.max_age_days}</div>}
       </div>
     </section>
   );

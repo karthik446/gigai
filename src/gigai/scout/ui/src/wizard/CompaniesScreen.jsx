@@ -1,4 +1,5 @@
 import TagListInput from "../components/TagListInput.jsx";
+import AddCompanyForm from "../components/AddCompanyForm.jsx";
 
 // Screen 3 -- exclude / always-watch only. The mockup's "start from the
 // GigAI company catalog" panel depends on S26 (company directory, after
@@ -28,6 +29,11 @@ export default function CompaniesScreen({ fields, setField, fieldErrors }) {
         placeholder="optional…"
         error={errors.watch_companies}
       />
+
+      {/* Q1 (v0.1.9): adds the board to the watchlist immediately (POST
+          /api/watchlist, idempotent) -- independent of Finish, which only
+          saves the profile + preferences above. */}
+      <AddCompanyForm compact />
     </section>
   );
 }

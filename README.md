@@ -25,7 +25,10 @@ Scout ships with GigAI and implements `find-jobs`, a job-search workflow:
   without an explicit consent step in the UI first.
 
 Everything Scout writes stays under your configured GigAI home and the bound
-project's workpad. Scout is one Gig among others GigAI can host; it gets no
+project's workpad. Tailored resumes (`gigai scout resume tailor`, `POST
+/api/tailored-resumes`) are stored under the gig too (`scout/<project>/resumes/`,
+ephemeral pasted-resume runs under `ephemeral/`) and contain resume-derived
+text by design. Scout is one Gig among others GigAI can host; it gets no
 special runtime treatment.
 
 ## Install

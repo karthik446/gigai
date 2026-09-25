@@ -202,28 +202,34 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
     return "\n\n".join(_PLACEHOLDER.sub(fill, block) for block in blocks)
 
 
-def assess_once(
+def invoke_json_once(
     binding: object,
-    job: AssessJob,
-    ctx: AssessContext,
+    render: Callable[[str | None], str],
+    parse: Callable[[Mapping[str, object]], object],
     *,
-    parse: Callable[[dict[str, object]], object],
+    role: str = _ROLE,
 ) -> AssessAttempt:
-    """Assess one posting against one resume: invoke, extract, normalize, validate, retry once.
+    """One model call that must answer with a JSON object, retried at most once.
 
-    ``binding`` is an already-resolved ``ModelAdapterBinding`` (``request`` +
-    ``port.invoke``); ``parse`` is the strict contract parser applied to the
-    normalized payload (the caller adds whatever sealed identity its DTO
-    needs before validating).  Never raises for a model-boundary failure it
-    can name; re-raises anything it cannot.
+    Q3 (v0.1.9) lifted this loop out of ``assess_once`` unchanged so the
+    tailored-resume flow (``scout/tailored_resume.py``) can share it: the
+    two flows differ only in how they render the prompt (``render`` takes
+    the previous attempt's validation error, ``None`` on the first try) and
+    how they turn the extracted JSON object into a result (``parse`` may
+    raise ``FindJobsContractError``/``ValueError``/``TypeError`` to reject
+    it).  Everything else -- the exception mapping at the model boundary,
+    ``_extract_json_object``'s tolerant fence/prose handling, the single
+    retry with the error fed back, the ``AssessAttempt`` bookkeeping -- is
+    exactly the pre-Q3 ``assess_once`` body.  Never raises for a
+    model-boundary failure it can name; re-raises anything it cannot.
     """
 
     validation_error: str | None = None
     attempts = 0
     for attempt in range(2):
-        prompt = render_assess_prompt(job, ctx, validation_error)
+        prompt = render(validation_error)
         try:
-            request = binding.request(role=_ROLE, prompt=prompt)
+            request = binding.request(role=role, prompt=prompt)
             result = binding.port.invoke(request)
             attempts += 1
         except (ModelInvocationError, OSError, TimeoutError) as exc:
@@ -245,8 +251,7 @@ def assess_once(
             raise
         try:
             decoded = _extract_json_object(result.output_text)
-            normalized = _normalize_assessment_payload(decoded)
-            parsed = parse(normalized)
+            parsed = parse(decoded)
         except (FindJobsContractError, ValueError, TypeError) as exc:
             validation_error = str(exc)
             if attempt == 0:
@@ -258,7 +263,34 @@ def assess_once(
                 False, None, NotAssessedReason.MODEL_OUTPUT_INVALID, None, attempts, validation_error
             )
         return AssessAttempt(True, parsed, None, result.normalized_usage, attempts, validation_error)
-    raise AssertionError("assess_once: the retry loop always returns")  # pragma: no cover
+    raise AssertionError("invoke_json_once: the retry loop always returns")  # pragma: no cover
+
+
+def assess_once(
+    binding: object,
+    job: AssessJob,
+    ctx: AssessContext,
+    *,
+    parse: Callable[[dict[str, object]], object],
+) -> AssessAttempt:
+    """Assess one posting against one resume: invoke, extract, normalize, validate, retry once.
+
+    ``binding`` is an already-resolved ``ModelAdapterBinding`` (``request`` +
+    ``port.invoke``); ``parse`` is the strict contract parser applied to the
+    normalized payload (the caller adds whatever sealed identity its DTO
+    needs before validating).  Never raises for a model-boundary failure it
+    can name; re-raises anything it cannot.
+
+    A thin wrapper over ``invoke_json_once`` (Q3): the prompt is
+    ``render_assess_prompt`` and the parse step is the assessment-specific
+    ``_normalize_assessment_payload`` followed by the caller's ``parse``.
+    """
+
+    return invoke_json_once(
+        binding,
+        lambda validation_error: render_assess_prompt(job, ctx, validation_error),
+        lambda decoded: parse(_normalize_assessment_payload(decoded)),
+    )
 
 
 def _extract_json_object(raw: object) -> Mapping[str, object]:
@@ -510,6 +542,7 @@ __all__ = [
     "INSTRUCTIONS_DIGEST",
     "PriorAnswer",
     "assess_once",
+    "invoke_json_once",
     "load_assess_instructions",
     "render_assess_prompt",
 ]

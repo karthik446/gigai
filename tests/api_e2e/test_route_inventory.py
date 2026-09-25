@@ -24,7 +24,7 @@ JOURNEYS: dict[Route, str] = {
     Route("GET", "/api/health"): "test_setup_config_run_poll_results.py (server-start sanity)",
     Route("GET", "/api/config"): "test_setup_config_run_poll_results.py",
     Route("GET", "/api/setup"): "test_setup_config_run_poll_results.py (404 prefs_missing path)",
-    Route("PUT", "/api/setup"): "test_discover_fake_provider.py",
+    Route("PUT", "/api/setup"): "test_discover_fake_provider.py, test_watchlist_journey.py (Q1: max_age_days)",
     Route("POST", "/api/run"): "test_setup_config_run_poll_results.py, test_second_run_unchanged_skip.py, test_failed_run_then_next_run_assesses.py",
     Route("GET", "/api/runs/{run_id}"): "test_setup_config_run_poll_results.py, test_failed_run_then_next_run_assesses.py",
     Route("GET", "/api/runs/{run_id}/progress"): "test_setup_config_run_poll_results.py, test_failed_run_then_next_run_assesses.py",
@@ -45,6 +45,10 @@ JOURNEYS: dict[Route, str] = {
     Route("GET", "/api/runs"): "test_runs_list_journey.py",
     Route("GET", "/api/applications"): "test_applications_journey.py",
     Route("POST", "/api/applications"): "test_applications_journey.py",
+    Route("POST", "/api/tailored-resumes"): "test_tailored_resumes_journey.py",
+    Route("GET", "/api/tailored-resumes"): "test_tailored_resumes_journey.py",
+    Route("GET", "/api/watchlist"): "test_watchlist_journey.py",
+    Route("POST", "/api/watchlist"): "test_watchlist_journey.py",
 }
 
 

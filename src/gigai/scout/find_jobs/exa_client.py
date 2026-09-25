@@ -23,7 +23,11 @@ fields onto documented Exa request params so fewer irrelevant boards come
 back in the first place (selection/UI filtering, B1, still applies after):
 
 - ``config.published_after`` -> ``startPublishedDate`` (already present
-  before this change; ISO-8601 datetime string per the docs).
+  before this change; ISO-8601 datetime string per the docs). Q1 (v0.1.9):
+  now ALWAYS sent, as the effective window's cutoff from
+  ``filters.published_cutoff`` -- the fixed ``published_after`` when set,
+  else ``now - max_age_days`` (default 60 days) -- the same helper the
+  post-fetch drop uses for every source, so the two never disagree.
 - ``config.countries`` -> ``userLocation``, Exa's *only* documented location
   knob (a single two-letter ISO-3166-1 alpha-2 country code -- there is no
   free-text or multi-value location parameter in the schema). Sent only
@@ -61,6 +65,7 @@ prefers it over this Exa row (fuller title/location/text; U20).
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -75,7 +80,7 @@ from .contracts import (
     normalize_url,
     parse_board_url,
 )
-from .filters import sponsorship_from_text
+from .filters import published_cutoff, sponsorship_from_text
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
     import httpx
@@ -192,6 +197,14 @@ def _row_from_result(result: object, query: str) -> PostingRow | None:
     )
 
 
+def _exa_date(value: "datetime") -> str:
+    """Render a tz-aware cutoff as the ``Z``-suffixed ISO-8601 string Exa's
+    ``startPublishedDate`` takes (a fixed ``published_after`` of
+    ``2026-09-15T00:00:00Z`` round-trips unchanged)."""
+
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 class ExaSearchClient:
     """Concrete ``ExaSearchClient`` protocol implementation backed by Exa."""
 
@@ -211,8 +224,12 @@ class ExaSearchClient:
                 "includeDomains": list(ATS_INCLUDE_DOMAINS),
                 "contents": {"text": {"maxCharacters": EXA_TEXT_MAX_CHARACTERS}},
             }
-            if config.published_after is not None:
-                body["startPublishedDate"] = config.published_after
+            # Q1 (v0.1.9): always send the effective window's cutoff --
+            # the fixed `published_after` when set, else the rolling
+            # `max_age_days` (default 60) -- from the SAME helper the
+            # post-fetch drop uses (`filters.published_cutoff`), so Exa is
+            # never asked for a wider range than acquire would keep.
+            body["startPublishedDate"] = _exa_date(published_cutoff(config))
             if len(config.countries) == 1:
                 body["userLocation"] = config.countries[0]
             try:

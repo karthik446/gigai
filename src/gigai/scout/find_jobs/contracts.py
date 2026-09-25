@@ -208,6 +208,14 @@ class NotAssessedReason(StrEnum):
     # "wrong country" apart from "region label, no country at all" without
     # changing exclusion_reason's public return value.
     REGION_ONLY = "region_only"
+    # Q1 (v0.1.9, SCOPE-ADD-2): the posting's own `published_at` is older
+    # than the rolling window (`FindJobsConfig.max_age_days`, or the fixed
+    # `published_after` when set) -- see `filters.published_cutoff`. Applied
+    # to EVERY source (Exa already asked for `startPublishedDate`; the ATS
+    # boards never had any date filter, which is how a 2026-08-11 Kong
+    # posting could still slip through or be missed unpredictably). A row
+    # with NO `published_at` at all is never given this reason (kept).
+    PUBLISHED_TOO_OLD = "published_too_old"
 
 
 class _Contract:
@@ -406,9 +414,33 @@ class SourceToggles(_Contract):
         return cls(_bool(value["exa"], "source_toggles.exa"), _bool(value["ats"], "source_toggles.ats"), _bool(value["hiringcafe"], "source_toggles.hiringcafe"))
 
 
+# Q1 (v0.1.9): the rolling publication window used when a config sets
+# neither `max_age_days` nor a fixed `published_after`. 60 days is the
+# SCOPE-ADD-2 decision ("published_after becomes a rolling max_age_days,
+# default 60"). `filters.published_cutoff` is the ONE place that turns this
+# (or the config's own values) into an actual earliest-date at run time.
+DEFAULT_MAX_AGE_DAYS = 60
+MAX_AGE_DAYS_MAXIMUM = 365
+
+
 @dataclass(frozen=True)
 class FindJobsConfig(_Contract):
-    """Operator-authored ``<target_root>/find-jobs.json`` snapshot."""
+    """Operator-authored ``<target_root>/find-jobs.json`` snapshot.
+
+    Q1 (v0.1.9): ``max_age_days`` is the rolling publication window, an
+    additive optional key (omitted from ``to_json`` at its ``None`` default
+    so an existing file's digest is unchanged). How it combines with the
+    older fixed ``published_after`` -- exactly one rule, implemented once in
+    ``filters.published_cutoff``:
+
+    * ``published_after`` set (a fixed ISO date or date-time) -> that date
+      is the cutoff, whatever ``max_age_days`` says (a fixed date still wins).
+    * else ``max_age_days`` set -> ``now - max_age_days``.
+    * else -> ``now - DEFAULT_MAX_AGE_DAYS`` (60).
+
+    The setup wizard writes the rolling form (and clears ``published_after``
+    when it does); a hand-edited fixed date keeps working unchanged.
+    """
 
     schema_version: ClassVar[str] = "find-jobs-config:1"
     roles: tuple[str, ...]
@@ -421,6 +453,7 @@ class FindJobsConfig(_Contract):
     default_model_target: ModelTarget = ModelTarget.OLLAMA_LOCAL
     countries: tuple[str, ...] = ()
     visa_sponsorship_required: bool = False
+    max_age_days: int | None = None
 
     @property
     def source_toggles(self) -> SourceToggles:
@@ -456,6 +489,10 @@ class FindJobsConfig(_Contract):
             value["countries"] = _json_strings(self.countries)
         if self.visa_sponsorship_required:
             value["visa_sponsorship_required"] = self.visa_sponsorship_required
+        # Q1 (v0.1.9): same additive rule as C0's keys -- only present when
+        # set, so a config that never set it digests exactly as before.
+        if self.max_age_days is not None:
+            value["max_age_days"] = self.max_age_days
         return value
 
     @classmethod
@@ -463,13 +500,18 @@ class FindJobsConfig(_Contract):
         value = _object_with_optional(
             obj,
             ("schema_version", "roles", "merged_queries", "location", "remote", "published_after", "sources", "default_assess_cap", "default_model_target"),
-            ("countries", "visa_sponsorship_required"),
+            ("countries", "visa_sponsorship_required", "max_age_days"),
             "find_jobs_config",
         )
         if value["schema_version"] != cls.schema_version:
             _fail("bad_enum", "find_jobs_config.schema_version is unsupported")
         countries = () if "countries" not in value else _country_codes(value["countries"], "countries")
         visa_sponsorship_required = False if "visa_sponsorship_required" not in value else _bool(value["visa_sponsorship_required"], "visa_sponsorship_required")
+        max_age_days = (
+            None
+            if value.get("max_age_days") is None
+            else _integer(value["max_age_days"], "max_age_days", minimum=1, maximum=MAX_AGE_DAYS_MAXIMUM)
+        )
         return cls(
             _strings(value["roles"], "roles"),
             _strings(value["merged_queries"], "merged_queries"),
@@ -481,6 +523,7 @@ class FindJobsConfig(_Contract):
             _enum(value["default_model_target"], ModelTarget, "default_model_target"),
             countries,
             visa_sponsorship_required,
+            max_age_days,
         )
 
 
@@ -2161,7 +2204,7 @@ __all__ = [
     "ASSESS_CAPABILITY", "ASSESS_CAPABILITY_ID", "ASSESS_DECLARED_EFFECTS", "ASSESS_EFFECTS", "ASSESS_LOCAL_EFFECTS",
     "API_BIND", "ATSBoardClient", "ATSProvider", "AcquireInput", "AcquireNodeCallable", "AcquireOutput", "ExaSearchClient",
     "AggregateStatus", "ArtifactRef", "AssessmentQuestion", "AssessmentResult", "AssessInput", "AssessNodeCallable", "AssessOutput", "ConsentActor", "ConfigRequest", "ConfigResponse",
-    "DropCount",
+    "DEFAULT_MAX_AGE_DAYS", "DropCount", "MAX_AGE_DAYS_MAXIMUM",
     "EditedURL", "FindJobsConfig", "FindJobsContractError", "FailureRow", "FindJobsRunInput", "FindJobsConfig", "GoalError", "GoalStatus", "MatrixStatus", "ModelTarget", "NodeContext",
     "NodeFailure", "NodeReceipt", "NodeReceiptFixture", "NodeReceiptStatus", "NodeStatus", "NodeCallable", "NormalizedPostingRow", "NormalizedPublicPostingRow", "NotAssessedReason",
     "NotAssessedRow", "PRESENT_CAPABILITY", "PRESENT_CAPABILITY_ID", "PRESENT_DECLARED_EFFECTS", "PRESENT_EFFECTS", "PresentInput",

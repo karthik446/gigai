@@ -323,6 +323,70 @@ TEST_MODEL_EXTRACT_REPLY: dict[str, object] = {
     "titles": ["Staff Software Engineer", "Staff Backend Engineer"],
 }
 
+#: Q3 (v0.1.9): the first line of every ``tailored_resume.py`` prompt
+#: (``tailored_resume.TAILOR_PROMPT_HEADER`` -- the literal is repeated here so
+#: the fixture never imports that module; ``test_tailored_resume.py`` asserts
+#: the two stay identical). Its presence means "this is a tailoring, not an
+#: assessment": the fixture answers with a structurally valid tailored resume
+#: built FROM THE PROMPT ITSELF (the ``R1: ...`` resume line it carries, and
+#: the ``A cloud:gcp: ...`` answer when one is rendered), so the answer is
+#: valid against whatever resume a journey imported. The garbage/sleep
+#: markers above still apply first (they sit in the posting text, which the
+#: tailor prompt carries), so the 502/504 paths reuse the existing branches.
+TEST_MODEL_TAILOR_MARKER = "GigAI Scout tailored resume"
+#: Inside a tailor prompt only (a journey puts it in the posting text): the
+#: fixture answers with PLANTED FABRICATIONS -- a line stating a number its
+#: cited source never states, a line borrowing a posting-only skill, and a
+#: line citing a resume line past the end -- on BOTH attempts, so the
+#: product's validator must reject the answer (502 ``model_output_invalid``)
+#: and the eval's detector self-test can prove it catches each one.
+TEST_MODEL_FABRICATE_MARKER = "GIGAI-TEST-MODEL: fabricate"
+#: Q3 eval: the first line of ``tests/evals/fabrication_judge.md``; the
+#: fixture judge finds every claim supported (the offline harness proves the
+#: judge is wired and parsed, never that a fake model can judge).
+TEST_MODEL_JUDGE_MARKER = "GigAI Scout fabrication judge"
+TEST_MODEL_FABRICATED_NUMBER_LINE = "Led a team of 8 engineers for 12 years."
+TEST_MODEL_FABRICATED_TERM_LINE = "Deep Kubernetes and Terraform experience in production."
+
+
+def _test_model_prompt_source(prompt: str, prefix: str) -> str | None:
+    """The text after the first prompt line that starts with ``prefix`` (``"R1: "``, ``"A cloud:gcp: "``)."""
+
+    for line in prompt.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix):].strip()
+    return None
+
+
+def _test_model_tailor_reply(prompt: str) -> dict[str, object]:
+    """The fixture's tailored resume for ``prompt`` (see ``TEST_MODEL_TAILOR_MARKER``)."""
+
+    first_line = _test_model_prompt_source(prompt, "R1: ") or "Resume line one."
+    if TEST_MODEL_FABRICATE_MARKER in prompt:
+        return {
+            "header": [{"copy": 1}],
+            "sections": [
+                {
+                    "heading": "summary",
+                    "lines": [
+                        {"text": TEST_MODEL_FABRICATED_NUMBER_LINE, "refs": [{"kind": "resume", "line": 1}]},
+                        {"text": TEST_MODEL_FABRICATED_TERM_LINE, "refs": [{"kind": "resume", "line": 1}]},
+                        {"text": first_line, "refs": [{"kind": "resume", "line": 999}]},
+                    ],
+                }
+            ],
+        }
+    sections: list[dict[str, object]] = [
+        {"heading": "summary", "lines": [{"text": first_line, "refs": [{"kind": "resume", "line": 1}]}]},
+        {"heading": "skills", "lines": [{"copy": 1}]},
+    ]
+    gcp_answer = _test_model_prompt_source(prompt, "A cloud:gcp: ")
+    if gcp_answer:
+        sections.append(
+            {"heading": "other", "lines": [{"text": gcp_answer, "refs": [{"kind": "answer", "question_id": "cloud:gcp"}]}]}
+        )
+    return {"header": [{"copy": 1}], "sections": sections}
+
 
 def _test_model_handler(request: httpx.Request) -> httpx.Response:
     """Answer the three Ollama identity/chat calls without a model process.
@@ -387,6 +451,25 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
                     "done_reason": "stop",
                     "prompt_eval_count": 10,
                     "eval_count": 16,
+                },
+                request=request,
+            )
+        if TEST_MODEL_TAILOR_MARKER in prompt or TEST_MODEL_JUDGE_MARKER in prompt:
+            reply: dict[str, object] = (
+                _test_model_tailor_reply(prompt)
+                if TEST_MODEL_TAILOR_MARKER in prompt
+                else {"supported": True, "unsupported_span": None}
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "model": TEST_MODEL_NAME,
+                    "created_at": "2026-09-25T00:00:00Z",
+                    "message": {"role": "assistant", "content": json.dumps(reply, separators=(",", ":"))},
+                    "done": True,
+                    "done_reason": "stop",
+                    "prompt_eval_count": 10,
+                    "eval_count": 18,
                 },
                 request=request,
             )

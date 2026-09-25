@@ -8,6 +8,7 @@ acquisition journal.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import gzip
@@ -15,6 +16,9 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
+import threading
+import time
 from typing import Any, cast
 from urllib.parse import parse_qsl, urlsplit
 
@@ -22,6 +26,7 @@ import httpx
 
 from ...canonical import canonical_json_bytes, digest_imported_bytes
 from ..acquisition_records import import_public_rows
+from .ats_board_clients import BoardCache, BoardFetchStats
 from .contracts import (
     ATSBoardClient,
     ATSProvider,
@@ -61,6 +66,18 @@ from ...workpad import ResolvedWorkpad, resolve_workpad
 # very large/unbounded response set can't fill the workpad disk unbounded.
 RAW_PAYLOAD_CAP_BYTES = 20 * 1024 * 1024
 
+# Q2 (acquire at scale): the knobs for the ATS board fetch pass. Env vars so
+# an operator can tune a run without a config-contract change (the same
+# precedent as ``GIGAI_JEV_COST_CAP_USD``); ``AcquireLimits`` is also an
+# explicit ``acquire_node`` keyword for tests and callers.
+ATS_CONCURRENCY_ENV = "GIGAI_SCOUT_ATS_CONCURRENCY"
+ATS_MIN_INTERVAL_ENV = "GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS"
+ACQUIRE_BUDGET_ENV = "GIGAI_SCOUT_ACQUIRE_BUDGET_SECONDS"
+DEFAULT_ATS_CONCURRENCY_PER_PROVIDER = 4
+DEFAULT_ATS_MIN_INTERVAL_SECONDS = 0.125  # 8 requests/s per provider, across all its workers
+DEFAULT_ACQUIRE_BUDGET_SECONDS = 1200.0  # 20 minutes for the whole ATS pass
+BUDGET_EXCEEDED_CODE = "time_budget_exceeded"
+
 # Query parameter names ATS boards use to carry a job id when the posting is
 # served from a custom career-site domain rather than the board's own
 # subdomain (U20 dedupe): e.g. "https://www.pinterestcareers.com/jobs?gh_jid=…"
@@ -72,6 +89,331 @@ _NUMERIC_PATH_SEGMENT = re.compile(r"^\d{4,}$")
 
 class AcquireAllSourcesFailedError(FindJobsContractError):
     """Every enabled acquisition source failed; no batch was written."""
+
+
+@dataclass(frozen=True)
+class AcquireLimits:
+    """Q2: bounded concurrency, polite pacing and a run-time budget for the ATS pass.
+
+    ``concurrency_per_provider`` workers per ATS provider (Greenhouse, Lever
+    and Ashby each get their own pool, so one slow provider never starves
+    the others); ``min_request_interval_seconds`` between request *starts*
+    per provider, shared by that provider's workers (a token-bucket-style
+    pacer -- 0.125 s is 8 requests/s against one provider's public API);
+    ``time_budget_seconds`` for the whole board pass: boards not started by
+    then are skipped (recorded per board in progress and as one
+    ``time_budget_exceeded`` failure row), in-flight boards finish, and the
+    run seals cleanly with what it has. ``None``/``<= 0`` disables the
+    budget.
+    """
+
+    concurrency_per_provider: int = DEFAULT_ATS_CONCURRENCY_PER_PROVIDER
+    min_request_interval_seconds: float = DEFAULT_ATS_MIN_INTERVAL_SECONDS
+    time_budget_seconds: float | None = DEFAULT_ACQUIRE_BUDGET_SECONDS
+
+    @classmethod
+    def from_environment(cls, environ: Mapping[str, str] | None = None) -> "AcquireLimits":
+        env = os.environ if environ is None else environ
+
+        def _float(name: str, default: float | None) -> float | None:
+            raw = env.get(name)
+            if raw is None or not raw.strip():
+                return default
+            try:
+                return float(raw)
+            except ValueError:
+                return default
+
+        concurrency_raw = _float(ATS_CONCURRENCY_ENV, float(DEFAULT_ATS_CONCURRENCY_PER_PROVIDER))
+        concurrency = max(1, int(concurrency_raw)) if concurrency_raw is not None else DEFAULT_ATS_CONCURRENCY_PER_PROVIDER
+        interval = _float(ATS_MIN_INTERVAL_ENV, DEFAULT_ATS_MIN_INTERVAL_SECONDS)
+        budget = _float(ACQUIRE_BUDGET_ENV, DEFAULT_ACQUIRE_BUDGET_SECONDS)
+        return cls(
+            concurrency_per_provider=concurrency,
+            min_request_interval_seconds=max(0.0, interval if interval is not None else 0.0),
+            time_budget_seconds=budget if budget is not None and budget > 0 else None,
+        )
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "concurrency_per_provider": self.concurrency_per_provider,
+            "min_request_interval_seconds": self.min_request_interval_seconds,
+            "time_budget_seconds": self.time_budget_seconds,
+        }
+
+
+class _RateLimiter:
+    """Thread-safe pacer: request starts at least ``min_interval`` apart.
+
+    The slot is reserved under the lock and the sleep happens outside it, so
+    N workers sharing one limiter start their requests in a strict cadence
+    rather than all sleeping and then bursting together.
+    """
+
+    def __init__(self, min_interval: float) -> None:
+        self._min_interval = max(0.0, float(min_interval))
+        self._lock = threading.Lock()
+        self._next_start = 0.0
+
+    def wait(self) -> None:
+        if self._min_interval <= 0:
+            return
+        with self._lock:
+            now = time.monotonic()
+            start = max(now, self._next_start)
+            self._next_start = start + self._min_interval
+        delay = start - now
+        if delay > 0:
+            time.sleep(delay)
+
+
+class _ThrottledClient:
+    """Pass-through httpx-like client whose ``get``/``post`` wait on a limiter."""
+
+    def __init__(self, client: Any, limiter: _RateLimiter) -> None:
+        self._client = client
+        self._limiter = limiter
+
+    def get(self, url: str, *args: Any, **kwargs: Any) -> Any:
+        self._limiter.wait()
+        return self._client.get(url, *args, **kwargs)
+
+    def post(self, url: str, *args: Any, **kwargs: Any) -> Any:
+        self._limiter.wait()
+        return self._client.post(url, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+
+@dataclass(frozen=True)
+class _BoardOutcome:
+    board: WatchlistEntry
+    status: str  # "fetched" | "cached" | "failed" | "skipped"
+    rows: tuple[PostingRow, ...]
+    stats: BoardFetchStats | None
+    elapsed_ms: int
+    code: str | None
+
+
+def _board_order_key(board: WatchlistEntry) -> tuple[int, str, str]:
+    """User/discovery-added boards first, then the catalog's, each by (provider, token).
+
+    A run-time budget therefore always spends itself on the boards the
+    operator chose by hand (or Discover found for them) before the bulk
+    catalog seed -- and the order is deterministic run to run.
+    """
+
+    from_catalog = board.first_seen.query_key.startswith("catalog:")
+    return (1 if from_catalog else 0, board.provider.value, board.board_token)
+
+
+def _fetch_one_board(
+    board: WatchlistEntry,
+    *,
+    ats: ATSBoardClient,
+    client: Any,
+    config: FindJobsConfig,
+    cache: BoardCache | None,
+    deadline: float | None,
+) -> _BoardOutcome:
+    if deadline is not None and time.monotonic() >= deadline:
+        return _BoardOutcome(board, "skipped", (), None, 0, BUDGET_EXCEEDED_CODE)
+    started = time.monotonic()
+    fetch = getattr(ats, "fetch_board", None)
+    try:
+        if callable(fetch):
+            result = fetch(client, board.provider.value, board.board_token, config, cache=cache)
+            rows = tuple(result.rows)
+            stats: BoardFetchStats | None = result.stats
+        else:
+            rows = tuple(ats.list_board(client, board.provider.value, board.board_token, config))
+            stats = None
+    except Exception as exc:  # noqa: BLE001 - one board's failure is one failure row
+        elapsed = int((time.monotonic() - started) * 1000)
+        return _BoardOutcome(board, "failed", (), None, elapsed, type(exc).__name__.lower())
+    elapsed = int((time.monotonic() - started) * 1000)
+    cached = stats is not None and stats.cache in {"hit", "revalidated"} and stats.detail_fetched == 0
+    return _BoardOutcome(board, "cached" if cached else "fetched", rows, stats, elapsed, None)
+
+
+def _fetch_boards(
+    boards: Sequence[WatchlistEntry],
+    *,
+    ats: ATSBoardClient,
+    client: Any,
+    config: FindJobsConfig,
+    limits: AcquireLimits,
+    cache: BoardCache | None,
+    progress: ProgressWriter | None,
+    started_at: float,
+) -> tuple[list[PostingRow], list[FailureRow], dict[str, object]]:
+    """Fetch every watchlist board with per-provider pools, pacing and a budget.
+
+    Rows come back in the planned board order (never completion order), so
+    the sealed batch is deterministic regardless of thread timing; a
+    per-board progress line is written from this (main) thread as each
+    future settles. Returns ``(rows, failures, summary)``.
+    """
+
+    ordered = sorted(boards, key=_board_order_key)
+    budget = limits.time_budget_seconds if limits.time_budget_seconds and limits.time_budget_seconds > 0 else None
+    deadline = started_at + budget if budget is not None else None
+    if progress is not None:
+        progress.boards_planned(total=len(ordered), budget_seconds=budget)
+    workers = max(1, int(limits.concurrency_per_provider))
+    limiters: dict[str, _RateLimiter] = {}
+    throttled: dict[str, Any] = {}
+    executors: dict[str, ThreadPoolExecutor] = {}
+    futures: dict[Future[_BoardOutcome], int] = {}
+    outcomes: dict[int, _BoardOutcome] = {}
+    try:
+        for index, board in enumerate(ordered):
+            provider = board.provider.value
+            if provider not in executors:
+                limiters[provider] = _RateLimiter(limits.min_request_interval_seconds)
+                throttled[provider] = _ThrottledClient(client, limiters[provider]) if client is not None else None
+                executors[provider] = ThreadPoolExecutor(max_workers=workers, thread_name_prefix=f"scout-ats-{provider}")
+            future = executors[provider].submit(
+                _fetch_one_board,
+                board,
+                ats=ats,
+                client=throttled[provider],
+                config=config,
+                cache=cache,
+                deadline=deadline,
+            )
+            futures[future] = index
+        for future in as_completed(futures):
+            outcome = future.result()
+            outcomes[futures[future]] = outcome
+            if progress is not None:
+                stats = outcome.stats
+                progress.board_finished(
+                    provider=outcome.board.provider.value,
+                    board_token=outcome.board.board_token,
+                    status=outcome.status,
+                    requests=stats.requests if stats is not None else 0,
+                    cache=stats.cache if stats is not None else None,
+                    postings=stats.listed if stats is not None else len(outcome.rows),
+                    matched=len(outcome.rows),
+                    elapsed_ms=outcome.elapsed_ms,
+                    code=outcome.code,
+                )
+    finally:
+        for executor in executors.values():
+            executor.shutdown(wait=True)
+
+    rows: list[PostingRow] = []
+    failures: list[FailureRow] = []
+    counts = {"fetched": 0, "cached": 0, "failed": 0, "skipped": 0}
+    requests = 0
+    cache_hits = 0
+    listed = 0
+    prefiltered_out = 0
+    detail_fetched = 0
+    detail_cached = 0
+    for index in range(len(ordered)):
+        outcome = outcomes[index]
+        counts[outcome.status] = counts.get(outcome.status, 0) + 1
+        rows.extend(outcome.rows)
+        if outcome.stats is not None:
+            requests += outcome.stats.requests
+            cache_hits += 1 if outcome.stats.cache in {"hit", "revalidated"} else 0
+            listed += outcome.stats.listed
+            prefiltered_out += outcome.stats.prefiltered_out
+            detail_fetched += outcome.stats.detail_fetched
+            detail_cached += outcome.stats.detail_cached
+        if outcome.status == "failed":
+            failures.append(FailureRow(SourceKind.ATS, outcome.board.board_token, None, outcome.code or "error", "ATS board fetch failed"))
+    if counts["skipped"]:
+        failures.append(
+            FailureRow(
+                SourceKind.ATS,
+                "ats",
+                None,
+                BUDGET_EXCEEDED_CODE,
+                f"{counts['skipped']} of {len(ordered)} watchlist boards were not fetched: the "
+                f"{budget:.0f}s acquire time budget ran out",
+            )
+        )
+    summary: dict[str, object] = {
+        "total": len(ordered),
+        **counts,
+        "requests": requests,
+        "cache_hits": cache_hits,
+        "listed": listed,
+        "prefiltered_out": prefiltered_out,
+        "detail_fetched": detail_fetched,
+        "detail_cached": detail_cached,
+        "matched": len(rows),
+        "elapsed_seconds": round(time.monotonic() - started_at, 3),
+        "budget_seconds": budget,
+        "limits": limits.to_json(),
+    }
+    return rows, failures, summary
+
+
+def _board_cache(home_root: Path | None) -> BoardCache | None:
+    """``<home>/cache/scout/ats-boards`` (next to the H-1B cache), or ``None`` without a home."""
+
+    if home_root is None:
+        return None
+    return BoardCache(Path(home_root) / "cache" / "scout" / "ats-boards")
+
+
+def _seed_watchlist(
+    resolved: ResolvedWorkpad,
+    *,
+    home_root: Path | None,
+    target: Path | None,
+    progress: ProgressWriter | None,
+) -> FailureRow | None:
+    """Q2: seed the watchlist from the bundled catalog before listing boards.
+
+    Explicit, never silent: the outcome (seeded / skipped because no prefs
+    are saved yet / failed) is written to ``progress/watchlist-seed.json``
+    and printed on the run's stderr. Needs the requested ``target`` to find
+    the project's prefs (``<home>/scout/<project_id>/discovery/prefs.json``);
+    direct-call unit tests without one skip seeding exactly as before this
+    packet. A seeding failure never fails the run: the boards already on the
+    watchlist are still fetched, and the failure is one redacted row.
+    """
+
+    if home_root is None or target is None:
+        return None
+    try:
+        from .discovery.prefs import load_prefs
+
+        prefs = load_prefs(home_root=home_root, target=target)
+    except Exception as exc:  # noqa: BLE001 - unreadable prefs: record and carry on with the current watchlist
+        if progress is not None:
+            progress.watchlist_seeded({"status": "failed", "reason": "prefs_unreadable", "error": type(exc).__name__})
+        print(f"scout acquire: watchlist not seeded from the company catalog: prefs unreadable ({type(exc).__name__})", file=sys.stderr)
+        return None
+    if prefs is None:
+        if progress is not None:
+            progress.watchlist_seeded({"status": "skipped", "reason": "prefs_missing"})
+        print("scout acquire: watchlist not seeded from the company catalog: no setup preferences saved yet", file=sys.stderr)
+        return None
+    try:
+        from .watchlist import seed_watchlist_from_catalog
+
+        result = seed_watchlist_from_catalog(home_root, resolved, gig_id=resolved.gig_id, prefs=prefs)
+    except Exception as exc:  # noqa: BLE001 - recorded as a failure row; existing watchlist still runs
+        if progress is not None:
+            progress.watchlist_seeded({"status": "failed", "reason": "seed_failed", "error": type(exc).__name__})
+        print(f"scout acquire: watchlist seeding from the company catalog failed ({type(exc).__name__})", file=sys.stderr)
+        return FailureRow(SourceKind.ATS, "catalog", None, type(exc).__name__.lower(), "watchlist seeding from the company catalog failed")
+    if progress is not None:
+        progress.watchlist_seeded({"status": "seeded", **result.to_json()})
+    print(
+        f"scout acquire: watchlist seeded from company catalog {result.catalog_revision}: "
+        f"+{result.added} boards ({result.already_present} already present, "
+        f"{result.excluded_by_country} excluded by country, {result.excluded_by_company} excluded by company)",
+        file=sys.stderr,
+    )
+    return None
 
 
 def _now() -> str:
@@ -713,6 +1055,7 @@ def acquire_node(
     watchlist: WatchlistClient,
     home_root: Path | None = None,
     target: Path | None = None,
+    limits: AcquireLimits | None = None,
 ) -> AcquireOutput:
     # B4: `progress.finish_step("acquire", ...)` must run on every exit path
     # (success or a raised AcquireAllSourcesFailedError/other exception), so
@@ -732,6 +1075,7 @@ def acquire_node(
             home_root=home_root,
             target=target,
             progress=progress,
+            limits=limits if limits is not None else AcquireLimits.from_environment(),
         )
     except BaseException:
         if progress is not None:
@@ -753,7 +1097,9 @@ def _acquire_node_body(
     home_root: Path | None,
     target: Path | None,
     progress: ProgressWriter | None,
+    limits: AcquireLimits,
 ) -> AcquireOutput:
+    started_at = time.monotonic()
     batch_id = _safe_batch_id(context.operation_key)
     failures: list[FailureRow] = []
     rows: list[PostingRow] = list(input.rows)
@@ -778,16 +1124,48 @@ def _acquire_node_body(
             source_outcomes["exa"] = exa_ok
         if input.config.sources.ats:
             ats_ok = False
+            # Q2: seed the watchlist from the bundled company catalog (filtered
+            # by the saved prefs) BEFORE listing it, so a first run after setup
+            # already covers every catalog board the prefs admit.
+            seed_failure = _seed_watchlist(
+                _resolved(context, home_root, target), home_root=home_root, target=target, progress=progress
+            )
+            if seed_failure is not None:
+                failures.append(seed_failure)
             try:
                 boards = _watchlist_entries(watchlist)
                 if not boards:
                     ats_ok = True
-                for board in boards:
-                    try:
-                        rows.extend(ats.list_board(active_client, board.provider.value, board.board_token, input.config))
-                        ats_ok = True
-                    except Exception as exc:
-                        failures.append(FailureRow(SourceKind.ATS, board.board_token, None, type(exc).__name__.lower(), "ATS board fetch failed"))
+                else:
+                    # Q2: per-provider worker pools, a per-provider request
+                    # pacer, a per-board response cache (conditional GETs /
+                    # digest reuse), a title prefilter before any detail
+                    # request, a run-time budget that skips (and records)
+                    # the boards it can't reach, and one progress line per
+                    # board -- see `_fetch_boards`. Sealing, the reuse rule
+                    # and the diversity selection below are untouched.
+                    board_rows, board_failures, board_summary = _fetch_boards(
+                        boards,
+                        ats=ats,
+                        client=active_client,
+                        config=input.config,
+                        limits=limits,
+                        cache=_board_cache(home_root),
+                        progress=progress,
+                        started_at=started_at,
+                    )
+                    rows.extend(board_rows)
+                    failures.extend(board_failures)
+                    ats_ok = bool(board_summary.get("fetched") or board_summary.get("cached"))
+                    if progress is not None:
+                        progress.boards_finished(board_summary)
+                    print(
+                        "scout acquire: ATS boards {total}: {fetched} fetched, {cached} cached, {failed} failed, "
+                        "{skipped} skipped (budget); {requests} requests, {cache_hits} cache hits, "
+                        "{listed} postings listed, {prefiltered_out} prefiltered out, {matched} matched, "
+                        "{elapsed_seconds}s".format(**board_summary),
+                        file=sys.stderr,
+                    )
             except Exception as exc:
                 failures.append(FailureRow(SourceKind.ATS, "ats", None, type(exc).__name__.lower(), "ATS watchlist fetch failed"))
             source_outcomes["ats"] = ats_ok
@@ -809,7 +1187,15 @@ def _acquire_node_body(
         # actually produced and whether *any* source recorded a real
         # failure. `source_outcomes` is kept only for the error message's
         # per-source failure codes below, not as the raise condition itself.
-        if not rows and failures:
+        # Q2: the single `time_budget_exceeded` row is a bookkeeping marker
+        # (boards skipped, recorded per board in progress), not a source
+        # failure, UNLESS the budget left every board unfetched -- then the
+        # run genuinely produced nothing from ATS and must not seal an
+        # empty batch as success.
+        if not rows and (
+            any(failure.code != BUDGET_EXCEEDED_CODE for failure in failures)
+            or (failures and not source_outcomes.get("ats", False))
+        ):
             codes = ", ".join(f"{failure.source_kind.value}:{failure.code}" for failure in failures)
             detail = f" ({codes})" if codes else ""
             raise AcquireAllSourcesFailedError(
@@ -984,7 +1370,10 @@ def _acquire_node_body(
         "opportunity_id": "empty", "snapshot_id": digest_imported_bytes(b"empty")[:32], "source_kind": "agent_discovered", "title": "empty", "employer": "empty", "url": "https://example.invalid/empty", "acquisition_state": "excluded", "excluded_reason": "no_rows",
     }])
     if recording_client is not None:
-        _write_raw_payloads(resolved, context.run_id, recording_client.captured)
+        # Q2: board fetches complete on worker threads in arbitrary order;
+        # sort the captured responses so raw/index.json is deterministic.
+        captured = sorted(recording_client.captured, key=lambda item: (item.source, item.url, item.status_code))
+        _write_raw_payloads(resolved, context.run_id, captured)
     progress_files = sorted((resolved.path / "records" / "scout-acquisition" / batch_id / "progress").glob("*.json"))
     progress_ref = progress_files[-1].relative_to(resolved.path).as_posix() if progress_files else ""
     return AcquireOutput(
@@ -1006,4 +1395,11 @@ def _acquire_node_body(
     )
 
 
-__all__ = ["acquire_node"]
+__all__ = [
+    "ACQUIRE_BUDGET_ENV",
+    "ATS_CONCURRENCY_ENV",
+    "ATS_MIN_INTERVAL_ENV",
+    "BUDGET_EXCEEDED_CODE",
+    "AcquireLimits",
+    "acquire_node",
+]
