@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from typing import Callable, Iterator, TypeVar
+from typing import Callable, Iterable, Iterator, TypeVar
 
 from .canonical import (
     EntityPrefix,
@@ -1126,6 +1126,78 @@ def _read_handoff(path: Path) -> dict[str, object]:
     return metadata
 
 
+@dataclass(frozen=True)
+class _CommitFiles:
+    """The paths one publishing commit touched, indexed once per commit.
+
+    ``_validate_committed_artifact`` asks two things of a commit's file
+    list: "is ``checked`` in it?" and "does it name exactly one handoff?".
+    Answering both from a list was O(files) per artifact, so a snapshot of
+    N records published by one commit (a watchlist seed) paid O(N^2) --
+    see ``_capture_committed_snapshot``. Built once per distinct commit
+    and shared by every artifact that commit published.
+    """
+
+    names: frozenset[str]
+    handoffs: tuple[str, ...]
+
+    @classmethod
+    def from_names(cls, names: Iterable[str]) -> "_CommitFiles":
+        listed = tuple(names)
+        return cls(
+            frozenset(listed),
+            tuple(name for name in listed if name.startswith("handoffs/") and name.endswith(".txt")),
+        )
+
+
+class _HandoffIndex:
+    """One handoff document, parsed at most once, with its ``artifact_refs``
+
+    indexed by path. ``parsed()`` is lazy on purpose: it runs only when
+    ``_validate_committed_artifact`` reaches its front-matter step, so an
+    artifact whose earlier checks fail (multiple publishers, incomplete
+    publication) still raises that earlier error, exactly as it did when
+    every artifact re-parsed the handoff itself. A parse failure is
+    remembered and re-raised the same way on every later ``parsed()``.
+
+    The by-path index holds, for each path, the same ``[item ...]`` list
+    the former per-artifact scan ``[item for item in refs if
+    isinstance(item, dict) and item.get("path") == checked]`` produced
+    (``checked`` is always a ``str``; a ref whose ``path`` is not a ``str``
+    can never equal it, and is left out of the index for the same reason).
+    ``None`` in place of the index means ``artifact_refs`` was not a list.
+    """
+
+    __slots__ = ("_document", "_result")
+
+    def __init__(self, document: bytes) -> None:
+        self._document = document
+        self._result: (
+            tuple[dict[str, object], dict[str, list[dict[str, object]]] | None] | ValueError | None
+        ) = None
+
+    def parsed(self) -> tuple[dict[str, object], dict[str, list[dict[str, object]]] | None]:
+        if self._result is None:
+            try:
+                metadata, _body = parse_json_front_matter(self._document)
+            except ValueError as exc:
+                self._result = exc
+            else:
+                refs = metadata.get("artifact_refs")
+                by_path: dict[str, list[dict[str, object]]] | None = None
+                if isinstance(refs, list):
+                    by_path = {}
+                    for item in refs:
+                        if isinstance(item, dict):
+                            key = item.get("path")
+                            if isinstance(key, str):
+                                by_path.setdefault(key, []).append(item)
+                self._result = (metadata, by_path)
+        if isinstance(self._result, ValueError):
+            raise JournalConflictError("journal artifact publication is invalid") from self._result
+        return self._result
+
+
 def _validate_committed_artifact(
     *,
     path: str,
@@ -1133,8 +1205,8 @@ def _validate_committed_artifact(
     gig_id: str,
     candidates: list[str],
     commit: str,
-    names: list[str],
-    handoff_bytes: bytes,
+    files: _CommitFiles,
+    handoff: _HandoffIndex,
     data: bytes,
     allow_replaced_run_details: bool,
     allow_replaced_manifests: bool,
@@ -1145,6 +1217,13 @@ def _validate_committed_artifact(
     multi-artifact caller (``_capture_committed_snapshot``) can reuse the
     identical logic against git data it fetched in bulk, instead of each
     caller re-deriving its own copy. No git I/O happens in here.
+
+    ``files`` and ``handoff`` are the publishing commit's file list and its
+    handoff document, pre-indexed (``_CommitFiles`` / ``_HandoffIndex``) so
+    a caller checking many artifacts published by one commit builds each
+    once and shares it; every check below is then O(1) in the number of
+    sibling artifacts. The checks themselves, their order and their error
+    messages are unchanged.
     """
 
     # Immutable records have one publisher.  More than one means a legacy or
@@ -1157,19 +1236,14 @@ def _validate_committed_artifact(
     mutable_manifest = allow_replaced_manifests and bool(_MUTABLE_CAPABILITY_MANIFEST.fullmatch(path))
     if len(candidates) != 1 and not (mutable_run_details or mutable_manifest):
         raise JournalConflictError("journal immutable artifact has multiple publishers")
-    handoffs = [name for name in names if name.startswith("handoffs/") and name.endswith(".txt")]
-    if len(handoffs) != 1 or checked not in names:
+    if len(files.handoffs) != 1 or checked not in files.names:
         raise JournalConflictError("journal artifact publication is incomplete")
-    try:
-        metadata, _body = parse_json_front_matter(handoff_bytes)
-    except ValueError as exc:
-        raise JournalConflictError("journal artifact publication is invalid") from exc
+    metadata, refs_by_path = handoff.parsed()
     if metadata.get("gig_id") != gig_id:
         raise JournalConflictError("journal artifact belongs to another Gig")
-    refs = metadata.get("artifact_refs")
-    if not isinstance(refs, list):
+    if refs_by_path is None:
         raise JournalConflictError("journal artifact lacks authenticated references")
-    matches = [item for item in refs if isinstance(item, dict) and item.get("path") == checked]
+    matches = refs_by_path.get(checked, ())
     if len(matches) != 1:
         raise JournalConflictError("journal artifact reference is ambiguous")
     reference = matches[0]
@@ -1233,8 +1307,10 @@ def read_committed_artifact(
     # no real artifact path has ever hit it. `checked`/`path` below are
     # always the plain (unquoted) spelling, so without -z here `checked not
     # in names` would wrongly fail for a hypothetical non-ASCII path.
-    names = [name for name in _git(root, "show", "-z", "--format=", "--name-only", commit).stdout.split("\x00") if name]
-    handoffs = [name for name in names if name.startswith("handoffs/") and name.endswith(".txt")]
+    files = _CommitFiles.from_names(
+        name for name in _git(root, "show", "-z", "--format=", "--name-only", commit).stdout.split("\x00") if name
+    )
+    handoffs = files.handoffs
     try:
         handoff_bytes = _git_bytes(root, "show", f"{commit}:{handoffs[0]}") if len(handoffs) == 1 else b""
         data = _git_bytes(root, "show", f"{pinned_head}:{checked}")
@@ -1242,7 +1318,7 @@ def read_committed_artifact(
         raise JournalConflictError("journal artifact publication is invalid") from exc
     _validate_committed_artifact(
         path=path, checked=checked, gig_id=gig_id, candidates=candidates, commit=commit,
-        names=names, handoff_bytes=handoff_bytes, data=data,
+        files=files, handoff=_HandoffIndex(handoff_bytes), data=data,
         allow_replaced_run_details=allow_replaced_run_details,
         allow_replaced_manifests=allow_replaced_manifests,
     )
@@ -1400,6 +1476,19 @@ def _capture_committed_snapshot(
     for the distinct candidate commits' file lists, one ``git cat-file
     --batch`` for every blob -- three subprocess calls total instead of
     ~4 per artifact.
+
+    journal-snapshot-perf: the subprocess count was linear after uat-bug-008
+    but the CPU work was not. Every artifact re-parsed its publishing
+    commit's handoff (whose ``artifact_refs`` lists every sibling artifact)
+    and re-scanned that commit's file list, so a snapshot of N records
+    published together -- the Scout watchlist seed, ~10k records in one
+    commit -- was O(N^2): ~4 s at 1,000 records, ~16 s at 2,000, ~6 min at
+    10,370. Now each distinct commit's file list (``_CommitFiles``) and
+    each distinct handoff (``_HandoffIndex``, keyed by its commit-pinned
+    blob ref, i.e. immutable content) is indexed once per snapshot and
+    shared by every artifact it published; the per-artifact checks are
+    unchanged (same function, same order, same errors), see
+    ``tests/behaviors/runtime_run_authority/test_journal_snapshot_scaling.py``.
     """
 
     if not prefixes or any(
@@ -1409,8 +1498,29 @@ def _capture_committed_snapshot(
         raise JournalConflictError("journal snapshot prefixes are invalid")
     head = _head_commit(root)
     assert head is not None
-    result = _git_bytes(root, "ls-tree", "-r", "-z", "--name-only", head, "--", *prefixes)
-    all_paths = tuple(item.decode("utf-8") for item in result.split(b"\0") if item)
+    # Full ``ls-tree`` records (``<mode> <type> <oid>\t<path>``), not just
+    # ``--name-only``: the blob oid is what the bulk read below asks git
+    # for. Asking ``git cat-file --batch`` for ``<head>:<path>`` instead
+    # made git re-read and re-scan the containing tree for every path (a
+    # 10k-entry ``records/scout-watchlist/`` tree, 10k times): measured
+    # 1.6 s vs 0.24 s by oid at 4,000 blobs, and growing quadratically.
+    # The bytes are identical either way -- the oid IS the tree entry
+    # ``<head>:<path>`` resolves to.
+    result = _git_bytes(root, "ls-tree", "-r", "-z", head, "--", *prefixes)
+    blob_ref_by_path: dict[str, str] = {}
+    for item in result.split(b"\0"):
+        if not item:
+            continue
+        entry, _tab, raw_path = item.partition(b"\t")
+        path = raw_path.decode("utf-8")
+        fields = entry.decode("ascii", errors="strict").split(" ")
+        if len(fields) != 3 or not _tab:
+            raise JournalConflictError("journal snapshot tree listing is invalid")
+        _mode, kind, oid = fields
+        # A blob is read by oid; anything else (a gitlink) keeps the
+        # ``<head>:<path>`` spelling so it fails exactly as it always did.
+        blob_ref_by_path[path] = oid if kind == "blob" else f"{head}:{path}"
+    all_paths = tuple(blob_ref_by_path)
     paths: list[str] = []
     for path in all_paths:
         if not any(path.startswith(prefix) for prefix in prefixes):
@@ -1457,26 +1567,40 @@ def _capture_committed_snapshot(
                 if commit in names_by_commit:
                     names_by_commit[commit].append(path)
 
+    files_by_commit: dict[str, _CommitFiles] = {
+        commit: _CommitFiles.from_names(names) for commit, names in names_by_commit.items()
+    }
+    empty_files = _CommitFiles.from_names(())
     handoff_refs: dict[str, str] = {}  # path -> "<commit>:<handoff>" ref, when resolvable
     for path in paths:
         commit = candidates_by_path[path][0]
-        names = names_by_commit.get(commit, [])
-        handoffs = [name for name in names if name.startswith("handoffs/") and name.endswith(".txt")]
+        handoffs = files_by_commit.get(commit, empty_files).handoffs
         if len(handoffs) == 1:
             handoff_refs[path] = f"{commit}:{handoffs[0]}"
 
-    blob_refs = sorted({f"{head}:{checked_paths[path]}" for path in paths} | set(handoff_refs.values()))
+    blob_refs = sorted({blob_ref_by_path[path] for path in paths} | set(handoff_refs.values()))
     blobs = _batch_read_blobs(root, blob_refs)
 
+    # One _HandoffIndex per distinct handoff blob: parsed lazily on first use
+    # (so a per-artifact error that precedes the parse still wins), then
+    # shared by every artifact that handoff published.
+    handoff_index_by_ref: dict[str, _HandoffIndex] = {}
+    missing_handoff = _HandoffIndex(b"")
     artifacts: dict[str, bytes] = {}
     for path in paths:
         commit = candidates_by_path[path][0]
-        data = blobs.get(f"{head}:{checked_paths[path]}", b"")
-        handoff_bytes = blobs.get(handoff_refs.get(path, ""), b"")
+        data = blobs.get(blob_ref_by_path[path], b"")
+        ref = handoff_refs.get(path)
+        if ref is None:
+            handoff = missing_handoff
+        else:
+            handoff = handoff_index_by_ref.get(ref)
+            if handoff is None:
+                handoff = handoff_index_by_ref[ref] = _HandoffIndex(blobs.get(ref, b""))
         _validate_committed_artifact(
             path=path, checked=checked_paths[path], gig_id=gig_id,
             candidates=candidates_by_path[path], commit=commit,
-            names=names_by_commit.get(commit, []), handoff_bytes=handoff_bytes, data=data,
+            files=files_by_commit.get(commit, empty_files), handoff=handoff, data=data,
             allow_replaced_run_details=True,
             allow_replaced_manifests=True,
         )
