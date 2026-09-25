@@ -26,7 +26,10 @@ from tests.behaviors.scout_research.test_scout06_research_inputs import _fixture
 from tests.support.workpad_assertions import assert_managed_workpad_clean
 
 
-def _record(name: str, provider: ATSProvider, token: str, *, hq: str | None = "US", us_postings: int | None = 1, domain: str | None = None) -> CompanyRecord:
+def _record(
+    name: str, provider: ATSProvider, token: str, *, hq: str | None = "US", us_postings: int | None = 1,
+    domain: str | None = None, suspect: int | None = None,
+) -> CompanyRecord:
     return CompanyRecord(
         name=name,
         provider=provider,
@@ -35,6 +38,8 @@ def _record(name: str, provider: ATSProvider, token: str, *, hq: str | None = "U
         hq_country=hq,
         domain=domain,
         us_posting_count=us_postings,
+        staffing_suspect=suspect is not None,
+        staffing_confidence=suspect,
     )
 
 
@@ -60,24 +65,24 @@ def _existing_entry() -> WatchlistEntry:
 
 
 def test_filter_no_countries_pref_keeps_everything_not_excluded() -> None:
-    kept, by_country, by_company = catalog_records_for_prefs(_RECORDS, DiscoveryPrefs())
+    kept, by_country, by_company, _by_staffing = catalog_records_for_prefs(_RECORDS, DiscoveryPrefs())
     assert [r.board_token for r in kept] == ["acme", "bright", "kong", "orbit", "nowhere"]
     assert (by_country, by_company) == (0, 0)
 
 
 def test_filter_countries_keeps_hq_matches_and_us_postings_for_us() -> None:
-    kept, by_country, by_company = catalog_records_for_prefs(_RECORDS, DiscoveryPrefs(countries=("US",)))
+    kept, by_country, by_company, _by_staffing = catalog_records_for_prefs(_RECORDS, DiscoveryPrefs(countries=("US",)))
     # "nowhere" has no hq_country but has US postings on record -> kept for US.
     assert [r.board_token for r in kept] == ["acme", "kong", "nowhere"]
     assert (by_country, by_company) == (2, 0)
-    kept_gb, by_country_gb, _ = catalog_records_for_prefs(_RECORDS, DiscoveryPrefs(countries=("GB",)))
+    kept_gb, by_country_gb, _, _ = catalog_records_for_prefs(_RECORDS, DiscoveryPrefs(countries=("GB",)))
     assert [r.board_token for r in kept_gb] == ["bright"]
     assert by_country_gb == 4
 
 
 def test_filter_excludes_by_name_slug_or_domain_case_and_punctuation_insensitive() -> None:
     prefs = DiscoveryPrefs(countries=("US",), exclude_companies=("ACME", "Kong HQ"))
-    kept, by_country, by_company = catalog_records_for_prefs(_RECORDS, prefs)
+    kept, by_country, by_company, _by_staffing = catalog_records_for_prefs(_RECORDS, prefs)
     assert [r.board_token for r in kept] == ["nowhere"]
     assert by_company == 2
     assert by_country == 2
@@ -85,7 +90,7 @@ def test_filter_excludes_by_name_slug_or_domain_case_and_punctuation_insensitive
 
 def test_filter_watch_companies_bypass_the_country_filter_but_not_excludes() -> None:
     prefs = DiscoveryPrefs(countries=("US",), watch_companies=("Orbit", "bright"), exclude_companies=("orbit",))
-    kept, _by_country, by_company = catalog_records_for_prefs(_RECORDS, prefs)
+    kept, _by_country, by_company, _by_staffing = catalog_records_for_prefs(_RECORDS, prefs)
     assert "bright" in [r.board_token for r in kept]
     assert "orbit" not in [r.board_token for r in kept]
     assert by_company == 1
@@ -154,6 +159,19 @@ def test_a_prefs_change_only_adds_never_removes(tmp_path: Path) -> None:
     assert {e.board_token for e in list_active(home, target, gig_id)} == {"acme", "kong", "nowhere", "bright"}
 
 
+def _seeded_ids(workpad: Path) -> set[str]:
+    """The seeded watchlist ids, read from the committed record FILENAMES.
+
+    Not ``list_active``: over the full catalog (10,370 seeded records) a journal
+    snapshot costs ~6 minutes of CPU today -- ``_capture_committed_snapshot``
+    re-parses the seeding handoff (every artifact ref) once PER artifact
+    (catalog-repin measurement, 2026-09-25; flagged to the coordinator). The
+    per-record round trip is covered by the small-catalog tests above.
+    """
+
+    return {path.stem for path in (workpad / "records" / "scout-watchlist").glob("scout_watchlist:*.json")}
+
+
 def test_seeding_the_shipped_catalog_is_one_commit_and_leaves_the_workpad_clean(tmp_path: Path) -> None:
     home, target, gig_id = _fixture(tmp_path)
     shipped = load_company_catalog()
@@ -162,8 +180,71 @@ def test_seeding_the_shipped_catalog_is_one_commit_and_leaves_the_workpad_clean(
     assert result.catalog_digest == shipped.digest
     assert result.added == result.eligible > 0
     assert result.added <= len(shipped.records)
-    active = list_active(home, target, gig_id)
-    assert len(active) == result.added
     resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
+    assert len(_seeded_ids(resolved.path)) == result.added == len(result.added_watchlist_ids)
     assert_managed_workpad_clean(resolved.path)
     assert len(sorted((resolved.path / "records" / "operations").glob("scout_watchlist_seed-*.json"))) == 1
+
+
+# --- catalog-repin amendment: staffing suspects are not seeded by default ----
+# (orchestrator msg_b3ca2e58203a, 2026-09-25: the 48 rev3 ``staffing_suspect``
+# records stay in the catalog with the flag; default seeding skips them; the
+# operator can still add any such board explicitly.)
+
+_SUSPECT = _record("Mthree Recruiting", ATSProvider.GREENHOUSE, "mthree", suspect=52)
+
+
+def test_a_staffing_suspect_record_is_not_seeded_and_is_counted() -> None:
+    records = (*_RECORDS, _SUSPECT)
+    kept, by_country, by_company, by_staffing = catalog_records_for_prefs(records, DiscoveryPrefs(countries=("US",)))
+    assert [r.board_token for r in kept] == ["acme", "kong", "nowhere"]
+    assert (by_country, by_company, by_staffing) == (2, 0, 1)
+    # No country pref: still skipped -- the rule does not depend on the filter.
+    kept_all, _, _, by_staffing_all = catalog_records_for_prefs(records, DiscoveryPrefs())
+    assert "mthree" not in [r.board_token for r in kept_all] and by_staffing_all == 1
+    # An explicit exclude of the same company counts as the exclude, not the flag.
+    _, _, by_company_x, by_staffing_x = catalog_records_for_prefs(records, DiscoveryPrefs(exclude_companies=("mthree",)))
+    assert (by_company_x, by_staffing_x) == (1, 0)
+    # A watched company is kept even when flagged: the user asked for it by name.
+    kept_w, _, _, by_staffing_w = catalog_records_for_prefs(records, DiscoveryPrefs(countries=("US",), watch_companies=("Mthree Recruiting",)))
+    assert "mthree" in [r.board_token for r in kept_w] and by_staffing_w == 0
+
+
+def test_seeding_skips_staffing_suspects_and_the_receipt_says_so(tmp_path: Path) -> None:
+    home, target, gig_id = _fixture(tmp_path)
+    catalog = _catalog(*_RECORDS, _SUSPECT)
+    result = seed_watchlist_from_catalog(home, target, gig_id, prefs=DiscoveryPrefs(countries=("US",)), catalog=catalog, now="2026-09-25T00:00:00Z")
+    assert result.catalog_records == 6
+    assert result.eligible == result.added == 3
+    assert result.excluded_as_staffing_suspect == 1
+    assert result.to_json()["excluded_as_staffing_suspect"] == 1
+    active = {entry.board_token for entry in list_active(home, target, gig_id)}
+    assert active == {"acme", "kong", "nowhere"}
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
+    receipt = json.loads(next(iter(sorted((resolved.path / "records" / "operations").glob("scout_watchlist_seed-*.json")))).read_text())
+    assert receipt["excluded_as_staffing_suspect"] == 1 and receipt["added"] == 3
+
+    # The operator can still add the very same board explicitly (Q1's
+    # add-by-URL path), and a later seeding pass leaves it in place.
+    from gigai.scout.find_jobs.watchlist import add_company_from_url
+
+    added = add_company_from_url("https://job-boards.greenhouse.io/mthree", home, target, gig_id)
+    assert added.board_token == "mthree"
+    again = seed_watchlist_from_catalog(home, target, gig_id, prefs=DiscoveryPrefs(countries=("US",)), catalog=catalog)
+    assert again.added == 0 and again.excluded_as_staffing_suspect == 1
+    assert {entry.board_token for entry in list_active(home, target, gig_id)} == {"acme", "kong", "nowhere", "mthree"}
+    assert_managed_workpad_clean(resolved.path)
+
+
+def test_the_shipped_catalog_seeds_none_of_its_staffing_suspects(tmp_path: Path) -> None:
+    home, target, gig_id = _fixture(tmp_path)
+    shipped = load_company_catalog()
+    suspects = {record.watchlist_id for record in shipped.staffing_suspects()}
+    assert len(suspects) == 48
+    result = seed_watchlist_from_catalog(home, target, gig_id, prefs=DiscoveryPrefs(countries=("US",)))
+    assert result.excluded_as_staffing_suspect == 48
+    assert result.added == result.eligible == len(shipped.records) - 48 == 10370
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
+    seeded = _seeded_ids(resolved.path)
+    assert len(seeded) == 10370 and suspects.isdisjoint(seeded)
+    assert set(result.added_watchlist_ids) == seeded

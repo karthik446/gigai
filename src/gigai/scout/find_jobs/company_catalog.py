@@ -39,8 +39,21 @@ Swapping in a new seed file (the S26-full drop)
 The loader is format-agnostic to size: it accepts a JSON array of records
 or an object wrapping one (``{"companies": [...]}`` / ``{"records": [...]}``),
 never assumes a record count, and skips (counting) any record it cannot
-turn into a board -- an unknown ATS, a missing slug -- rather than failing
-the whole load over one bad row.
+turn into a board -- an unknown ATS, a missing slug, a malformed
+``staffing_suspect``/``staffing_confidence`` pair -- rather than failing
+the whole load over one bad row. Optional seed fields are read additively:
+the ``h1b`` aggregate (Q4b-data) and the rev3 staffing-suspect pair are
+``None``/``False`` when absent.
+
+Shipped revisions
+-----------------
+
+* ``s26-sample-2026-09-24`` -- the 285-record sample (Q2, 8,131 B gzip).
+* ``s26-full-rev3-2026-09-25`` -- the full seed, 10,418 records (greenhouse
+  4,649 / lever 2,405 / ashby 3,364; 48 ``staffing_suspect``; 1,345 with an
+  ``h1b`` object), 289,333 B gzip (catalog-repin). Built from
+  ``research/S26-us-company-directory/full/companies.json`` (rev3) with
+  :func:`build_catalog_resource`; every record parses (``skipped == 0``).
 """
 
 from __future__ import annotations
@@ -63,15 +76,18 @@ COMPANY_CATALOG_RESOURCE = "data/companies.json.gz"
 
 #: The seed run this resource came from. NOT ``gigai.catalog.CATALOG_REVISION``
 #: (the gig catalog) -- see the module docstring. Current value: the S26
-#: 376-verified / 285-included sample run of 2026-09-24
-#: (``research/S26-us-company-directory/sample/``); the full seed replaces
-#: it when it lands.
-COMPANY_CATALOG_REVISION = "s26-sample-2026-09-24"
+#: FULL seed, rev3 of 2026-09-25 (13842 candidates probed, 10697 boards
+#: verified live, 10418 included / 279 excluded; the rev3 offline
+#: re-classification keeps a Jev staffing verdict below confidence 70 as
+#: ``staffing_suspect`` instead of excluding it --
+#: ``research/S26-us-company-directory/full/coverage.md``). Replaced
+#: ``s26-sample-2026-09-24`` (the 285-record sample) on 2026-09-25.
+COMPANY_CATALOG_REVISION = "s26-full-rev3-2026-09-25"
 
 #: Pinned ``digest_imported_bytes`` of the shipped ``companies.json.gz``. A
 #: mismatch means the resource was swapped without updating this module (or
 #: was corrupted in packaging); :func:`load_company_catalog` fails closed.
-COMPANY_CATALOG_SHA256 = "sha256:382ec270270c57969767ff8e0a03328cf27a174b3c87e4c469136f30e3e7ebe7"
+COMPANY_CATALOG_SHA256 = "sha256:9bfdf50e910665e6b46b28094c600b666aa27c0ec77dd9e5167bf681c2304b1c"
 
 #: Scope decision (SCOPE-ADD-2, "Catalog delivery for 0.1.9"): the compressed
 #: seed inside the wheel stays at or under 5 MB.
@@ -171,6 +187,15 @@ class CompanyRecord:
     # carries the USCIS join object (see :class:`CompanyH1B`); ``None`` for
     # a null/absent/boolean ``h1b``. ``h1b`` (the bool) keeps its meaning.
     h1b_summary: CompanyH1B | None = None
+    # catalog-repin (S26 rev3, 2026-09-25): the seed's OPTIONAL
+    # ``staffing_suspect`` / ``staffing_confidence`` pair -- Jev called the
+    # company staffing/consulting at a confidence BELOW the exclusion
+    # threshold (70), so it stayed in the catalog flagged rather than being
+    # dropped on a weak verdict. Absent on every other record, read as
+    # ``False`` / ``None`` here. Nothing in seeding filters on it today; a
+    # stricter list is the orchestrator's call (see ``staffing_suspects``).
+    staffing_suspect: bool = False
+    staffing_confidence: int | None = None
 
     @property
     def watchlist_id(self) -> str:
@@ -195,7 +220,7 @@ class CompanyRecord:
         )
 
     def to_json(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "name": self.name,
             "ats": self.provider.value,
             "board_slug": self.board_token,
@@ -208,6 +233,12 @@ class CompanyRecord:
             "h1b": self.h1b,
             "last_verified": self.last_verified,
         }
+        if self.staffing_suspect:
+            # Same rule as the seed's own ``to_json``: the pair appears only
+            # on a flagged record, so unflagged records serialize unchanged.
+            value["staffing_suspect"] = True
+            value["staffing_confidence"] = self.staffing_confidence
+        return value
 
 
 @dataclass(frozen=True)
@@ -238,6 +269,11 @@ class CompanyCatalog:
             if record.h1b_summary is not None
         }
 
+    def staffing_suspects(self) -> tuple[CompanyRecord, ...]:
+        """The records the seed flagged ``staffing_suspect`` (S26 rev3: 48 of 10418)."""
+
+        return tuple(record for record in self.records if record.staffing_suspect)
+
     def summary(self) -> dict[str, object]:
         by_provider: dict[str, int] = {}
         for record in self.records:
@@ -249,6 +285,7 @@ class CompanyCatalog:
             "records": len(self.records),
             "skipped": self.skipped,
             "by_provider": dict(sorted(by_provider.items())),
+            "staffing_suspect": len(self.staffing_suspects()),
         }
 
 
@@ -286,6 +323,15 @@ def parse_company_record(raw: object) -> CompanyRecord | None:
     h1b_raw = raw.get("h1b")
     h1b = bool(h1b_raw) if not isinstance(h1b_raw, str) else h1b_raw.strip().lower() in {"1", "true", "yes"}
     h1b_summary = parse_company_h1b(h1b_raw)
+    staffing = _parse_staffing_flag(raw)
+    if staffing is None:
+        # Fail closed, like a bad token: a record whose staffing pair is
+        # malformed (a non-boolean flag, a confidence that is not an integer
+        # in 0..100, or a confidence without the flag -- the seed schema's
+        # ``dependencies``) is not a record this loader can vouch for, so it
+        # is skipped and counted rather than shipped unflagged.
+        return None
+    staffing_suspect, staffing_confidence = staffing
     return CompanyRecord(
         name=name.strip(),
         provider=provider,
@@ -299,7 +345,32 @@ def parse_company_record(raw: object) -> CompanyRecord | None:
         h1b=h1b,
         last_verified=_optional_str(raw.get("last_verified")),
         h1b_summary=h1b_summary,
+        staffing_suspect=staffing_suspect,
+        staffing_confidence=staffing_confidence,
     )
+
+
+def _parse_staffing_flag(raw: dict[str, Any]) -> tuple[bool, int | None] | None:
+    """``(staffing_suspect, staffing_confidence)`` from a seed row, or ``None`` when malformed.
+
+    Both keys are optional and additive (S26 ``schema.json``, rev3): the flag
+    must be a boolean when present, the confidence an integer in 0..100 that
+    never appears without the flag key. A well-formed row without the pair
+    reads as ``(False, None)``.
+    """
+
+    has_flag = "staffing_suspect" in raw
+    has_confidence = "staffing_confidence" in raw
+    flag = raw.get("staffing_suspect", False)
+    if not isinstance(flag, bool):
+        return None
+    if has_confidence and not has_flag:
+        return None
+    confidence = raw.get("staffing_confidence")
+    if confidence is not None:
+        if isinstance(confidence, bool) or not isinstance(confidence, int) or not 0 <= confidence <= 100:
+            return None
+    return flag, confidence
 
 
 def parse_catalog_payload(payload: object) -> tuple[tuple[CompanyRecord, ...], int]:

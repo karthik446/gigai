@@ -308,6 +308,10 @@ class WatchlistSeedResult:
     excluded_by_company: int
     added_watchlist_ids: tuple[str, ...]
     receipt_path: str | None
+    # catalog-repin amendment (orchestrator msg_b3ca2e58203a, 2026-09-25):
+    # records the seed flagged ``staffing_suspect`` are kept in the catalog
+    # but not seeded by default; counted here so the receipt says so.
+    excluded_as_staffing_suspect: int = 0
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -319,6 +323,7 @@ class WatchlistSeedResult:
             "already_present": self.already_present,
             "excluded_by_country": self.excluded_by_country,
             "excluded_by_company": self.excluded_by_company,
+            "excluded_as_staffing_suspect": self.excluded_as_staffing_suspect,
             "receipt_path": self.receipt_path,
         }
 
@@ -343,7 +348,7 @@ def _pref_keys(values: object) -> set[str]:
     return {key for key in (_company_key(str(value)) for value in (values or ())) if key}
 
 
-def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tuple[list[object], int, int]:
+def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tuple[list[object], int, int, int]:
     """Filter catalog records by ``prefs`` (``DiscoveryPrefs``-shaped).
 
     Rules, in order:
@@ -351,13 +356,18 @@ def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tup
     * ``exclude_companies`` (name/slug/domain, normalized like discovery's
       ``normalize_company``) always drops the record.
     * ``watch_companies`` always keeps it (the user asked for it by name), even
-      outside the country filter.
+      outside the country filter and even when it is a staffing suspect.
+    * a record the seed flagged ``staffing_suspect`` (S26 rev3: Jev leaned
+      staffing/consulting below the exclusion threshold) is not seeded by
+      default -- orchestrator decision 2026-09-25 (msg_b3ca2e58203a): kept in
+      the catalog with the flag, skipped here; the operator can still add
+      the board by name/URL (``add_company_from_url``, ``watch_companies``).
     * ``countries`` (ISO alpha-2) keeps a record whose ``hq_country`` matches,
       or -- when ``US`` is asked for -- one with US postings on record
       (``us_posting_count > 0``); no ``countries`` pref means no country
       filter at all.
 
-    Returns ``(kept, excluded_by_country, excluded_by_company)``.
+    Returns ``(kept, excluded_by_country, excluded_by_company, excluded_as_staffing_suspect)``.
     """
 
     excludes = _pref_keys(getattr(prefs, "exclude_companies", ()))
@@ -366,6 +376,7 @@ def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tup
     kept: list[object] = []
     by_country = 0
     by_company = 0
+    by_staffing = 0
     for record in records:
         keys = _record_keys(record)
         if keys & excludes:
@@ -373,6 +384,9 @@ def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tup
             continue
         if keys & watches:
             kept.append(record)
+            continue
+        if getattr(record, "staffing_suspect", False) is True:
+            by_staffing += 1
             continue
         if countries:
             hq = getattr(record, "hq_country", None)
@@ -383,7 +397,7 @@ def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tup
                 by_country += 1
                 continue
         kept.append(record)
-    return kept, by_country, by_company
+    return kept, by_country, by_company, by_staffing
 
 
 def seed_watchlist_from_catalog(
@@ -409,7 +423,7 @@ def seed_watchlist_from_catalog(
     records = tuple(getattr(active, "records", ()))
     revision = str(getattr(active, "revision", ""))
     digest = str(getattr(active, "digest", ""))
-    kept, by_country, by_company = catalog_records_for_prefs(records, prefs)
+    kept, by_country, by_company, by_staffing = catalog_records_for_prefs(records, prefs)
     observed_at = now or _now()
     resolved = _resolved(home_root, target, gig_id)
 
@@ -439,7 +453,7 @@ def seed_watchlist_from_catalog(
             added_ids.append(entry.watchlist_id)
         if not artifacts:
             return WatchlistSeedResult(
-                revision, digest, len(records), len(kept), 0, already, by_country, by_company, (), None,
+                revision, digest, len(records), len(kept), 0, already, by_country, by_company, (), None, by_staffing,
             )
         payload = {"catalog_revision": revision, "catalog_digest": digest, "watchlist_ids": sorted(added_ids)}
         payload_sha = digest_imported_bytes(canonical_json_bytes(payload))
@@ -460,6 +474,7 @@ def seed_watchlist_from_catalog(
             "already_present": already,
             "excluded_by_country": by_country,
             "excluded_by_company": by_company,
+            "excluded_as_staffing_suspect": by_staffing,
             "artifact_refs": refs,
             "created_at": observed_at,
         }
@@ -485,7 +500,7 @@ def seed_watchlist_from_catalog(
         )
         return WatchlistSeedResult(
             revision, digest, len(records), len(kept), len(added_ids), already, by_country, by_company,
-            tuple(added_ids), receipt_path,
+            tuple(added_ids), receipt_path, by_staffing,
         )
 
     return run_with_journal_writer(

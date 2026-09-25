@@ -6,6 +6,10 @@ record parses), its own revision (never the gig catalog's
 builder, and -- under ``make test-wheel`` -- that the INSTALLED wheel ships
 the same bytes (the same ``InstalledGigAI`` probe pattern
 ``test_assessment_core.py`` uses for the shipped instructions).
+
+catalog-repin (2026-09-25): the shipped resource is the S26 FULL seed, rev3
+(``s26-full-rev3-2026-09-25``); the counts below are pinned to that file so a
+swap of the resource shows up here as well as in the digest pin.
 """
 
 from __future__ import annotations
@@ -38,6 +42,16 @@ from gigai.scout.find_jobs.contracts import ATSProvider, SourceKind
 from tests.scenarios import InstalledGigAI
 
 
+# The S26 full seed, rev3 (research/S26-us-company-directory/full/coverage.md):
+# 10418 included records, every one a usable board (skipped 0), 48 flagged
+# staffing_suspect (confidence 14..69), 1345 with a USCIS h1b object.
+_SHIPPED_REVISION = "s26-full-rev3-2026-09-25"
+_SHIPPED_RECORDS = 10418
+_SHIPPED_BY_PROVIDER = {"ashby": 3364, "greenhouse": 4649, "lever": 2405}
+_SHIPPED_STAFFING_SUSPECTS = 48
+_SHIPPED_H1B_OBJECTS = 1345
+
+
 def test_shipped_catalog_matches_its_pinned_digest_and_size_budget() -> None:
     raw = read_catalog_resource_bytes()
     assert digest_imported_bytes(raw) == COMPANY_CATALOG_SHA256
@@ -53,12 +67,14 @@ def test_shipped_catalog_loads_with_its_own_revision_and_digest() -> None:
     # Its own revision: the gig catalog's revision tracks gig definitions and
     # is bumped per release; the company seed tracks the S26 run that made it.
     assert COMPANY_CATALOG_REVISION != CATALOG_REVISION
-    assert COMPANY_CATALOG_REVISION.startswith("s26-")
-    assert len(catalog.records) > 0
-    # The sample seed carries case-only duplicate Ashby slugs (OpenAI/openai)
-    # and two tokens with characters the board APIs can't take; those are
-    # folded/skipped at load, counted here, never silently.
-    assert catalog.skipped >= 0
+    assert COMPANY_CATALOG_REVISION == _SHIPPED_REVISION
+    assert COMPANY_CATALOG_REVISION.startswith("s26-full-")
+    assert len(catalog.records) == _SHIPPED_RECORDS
+    # The full seed's slugs were case-normalized and grammar-filtered by the
+    # seed job itself, so nothing is folded or skipped at load (the sample
+    # had 9 case-only Ashby duplicates and 2 unusable tokens).
+    assert catalog.skipped == 0
+    assert catalog.summary()["by_provider"] == _SHIPPED_BY_PROVIDER
     providers = {record.provider for record in catalog.records}
     assert providers <= {ATSProvider.GREENHOUSE, ATSProvider.LEVER, ATSProvider.ASHBY}
     keys = [(record.provider, record.board_token.lower()) for record in catalog.records]
@@ -73,9 +89,10 @@ def test_shipped_catalog_summary_is_json_safe_and_counts_by_provider() -> None:
     catalog = load_company_catalog()
     summary = catalog.summary()
     json.dumps(summary)
-    assert summary["records"] == len(catalog.records)
+    assert summary["records"] == len(catalog.records) == _SHIPPED_RECORDS
     assert sum(summary["by_provider"].values()) == len(catalog.records)  # type: ignore[union-attr]
     assert summary["revision"] == COMPANY_CATALOG_REVISION
+    assert summary["staffing_suspect"] == _SHIPPED_STAFFING_SUSPECTS
 
 
 def test_record_to_watchlist_entry_records_the_catalog_revision() -> None:
@@ -173,14 +190,16 @@ def test_installed_interpreter_ships_the_pinned_company_catalog(installed_gigai:
         "assert len(raw) <= COMPANY_CATALOG_SIZE_BUDGET_BYTES\n"
         "catalog = load_company_catalog()\n"
         "assert len(catalog.records) > 0\n"
-        "print(catalog.revision, catalog.digest, len(catalog.records))\n"
+        "print(catalog.revision, catalog.digest, len(catalog.records), len(catalog.staffing_suspects()))\n"
     )
     result = subprocess.run(
         [os.fspath(python), "-c", probe], capture_output=True, text=True, check=False, shell=False,
         cwd=Path(python).parent,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split()[:2] == [COMPANY_CATALOG_REVISION, COMPANY_CATALOG_SHA256]
+    assert result.stdout.split() == [
+        COMPANY_CATALOG_REVISION, COMPANY_CATALOG_SHA256, str(_SHIPPED_RECORDS), str(_SHIPPED_STAFFING_SUSPECTS),
+    ]
 
 
 @pytest.fixture
@@ -248,10 +267,75 @@ def test_catalog_h1b_by_board_indexes_only_records_with_an_aggregate_case_insens
 def test_shipped_catalog_carries_h1b_aggregates_for_every_true_flag_with_an_object() -> None:
     catalog = load_company_catalog()
     with_summary = [record for record in catalog.records if record.h1b_summary is not None]
-    assert with_summary, "the shipped sample records at least one USCIS match"
+    assert len(with_summary) == _SHIPPED_H1B_OBJECTS
     for record in with_summary:
         assert record.h1b is True
         assert record.h1b_summary.approvals >= 0
-        assert record.h1b_summary.denials is not None and record.h1b_summary.denials >= 0  # the sample carries denials
+        assert record.h1b_summary.denials is not None and record.h1b_summary.denials >= 0  # schema.json requires denials
         assert all(isinstance(year, str) and year for year in record.h1b_summary.fiscal_years)
     assert len(catalog.h1b_by_board()) == len(with_summary)
+
+
+# --- catalog-repin (S26 rev3): the optional staffing-suspect pair ----------
+
+
+def test_parse_company_record_reads_the_staffing_suspect_pair_additively() -> None:
+    flagged = parse_company_record({"name": "Sus", "ats": "greenhouse", "board_slug": "sus", "staffing_suspect": True, "staffing_confidence": 42})
+    assert flagged is not None and flagged.staffing_suspect is True and flagged.staffing_confidence == 42
+    assert flagged.to_json()["staffing_suspect"] is True and flagged.to_json()["staffing_confidence"] == 42
+    # Absent on every other record (the seed never writes ``false``): read as
+    # not flagged, and the JSON view carries neither key (byte-identical to
+    # the pre-rev3 shape).
+    plain = parse_company_record({"name": "Plain", "ats": "greenhouse", "board_slug": "plain"})
+    assert plain is not None and plain.staffing_suspect is False and plain.staffing_confidence is None
+    assert "staffing_suspect" not in plain.to_json() and "staffing_confidence" not in plain.to_json()
+    explicit_false = parse_company_record({"name": "F", "ats": "lever", "board_slug": "f", "staffing_suspect": False})
+    assert explicit_false is not None and explicit_false.staffing_suspect is False
+    # The flag without a confidence is still a flag.
+    bare = parse_company_record({"name": "B", "ats": "ashby", "board_slug": "b", "staffing_suspect": True})
+    assert bare is not None and bare.staffing_suspect is True and bare.staffing_confidence is None
+    assert bare.to_json()["staffing_confidence"] is None
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"staffing_suspect": "yes"},
+        {"staffing_suspect": 1},
+        {"staffing_suspect": None},
+        {"staffing_confidence": 42},  # confidence without the flag key (schema dependency)
+        {"staffing_suspect": True, "staffing_confidence": "42"},
+        {"staffing_suspect": True, "staffing_confidence": True},
+        {"staffing_suspect": True, "staffing_confidence": 101},
+        {"staffing_suspect": True, "staffing_confidence": -1},
+        {"staffing_suspect": True, "staffing_confidence": 4.2},
+    ],
+)
+def test_a_malformed_staffing_pair_fails_closed_like_a_bad_token(extra: dict[str, object]) -> None:
+    assert parse_company_record({"name": "X", "ats": "greenhouse", "board_slug": "x", **extra}) is None
+    rows = [{"name": "X", "ats": "greenhouse", "board_slug": "x", **extra}, {"name": "Y", "ats": "lever", "board_slug": "y"}]
+    records, skipped = parse_catalog_payload(rows)
+    assert [record.board_token for record in records] == ["y"] and skipped == 1
+
+
+def test_shipped_catalog_flags_exactly_the_rev3_staffing_suspects() -> None:
+    catalog = load_company_catalog()
+    suspects = catalog.staffing_suspects()
+    assert len(suspects) == _SHIPPED_STAFFING_SUSPECTS
+    assert all(record.staffing_suspect for record in suspects)
+    # rev3 keeps a Jev staffing verdict only below the exclusion threshold (70).
+    confidences = [record.staffing_confidence for record in suspects]
+    assert all(isinstance(value, int) and 0 <= value < 70 for value in confidences)
+    assert min(confidences) == 14 and max(confidences) == 69  # type: ignore[type-var]
+    assert sum(1 for record in catalog.records if record.staffing_suspect) == len(suspects)
+    assert all(record.staffing_confidence is None for record in catalog.records if not record.staffing_suspect)
+
+
+def test_shipped_catalog_hq_country_is_us_on_every_record() -> None:
+    """S26 is a US directory by construction (``hq_country`` always ``US``);
+    seeding's country filter therefore admits every record for ``countries=["US"]``
+    and ``us_posting_count`` decides nothing (6462 of 10418 have US postings)."""
+
+    catalog = load_company_catalog()
+    assert {record.hq_country for record in catalog.records} == {"US"}
+    assert sum(1 for record in catalog.records if (record.us_posting_count or 0) > 0) == 6462
