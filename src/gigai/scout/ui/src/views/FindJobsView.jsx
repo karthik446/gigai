@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
   buildRunRequest,
+  getAssessments,
   getRunProgress,
   getRunResults,
   getRunStatus,
@@ -12,9 +13,12 @@ import { mergeRows, rowsFromProgress, rowsFromResults } from "../boardRows.js";
 import ConfigPanel from "../components/ConfigPanel.jsx";
 import RunConfirmDialog from "../components/RunConfirmDialog.jsx";
 import NodeStatusList from "../components/NodeStatusList.jsx";
-import FindJobsPostingsBoard from "../components/FindJobsPostingsBoard.jsx";
+import JobsGrid from "../components/JobsGrid.jsx";
+import JobPage from "./JobPage.jsx";
 import { useRuns } from "../hooks.js";
 import { relativeTimeLabel } from "../display.js";
+import { buildJobs } from "../jobModel.js";
+import { useHashRoute } from "../routing.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "blocked", "cancelled", "interrupted"]);
 const POLL_INTERVAL_MS = 2000;
@@ -22,27 +26,30 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 
 // P9/P9c (F3): Find jobs, for the selected profile.
 //
-// P9c: past-run picker now wired to GET /api/runs?profile_id=<this
-// profile> -- selecting an entry loads that run's real, sealed
-// GET /api/runs/{id}/results (never a stub; the mockup's own
-// selectPastRun() was a documented no-op, see mockups/README.md's open
-// question #7 -- this replaces it with the real read).
+// Q4a (v0.1.9): the postings list is now the card grid (JobsGrid) and each
+// card opens a job page (JobPage) by hash route (#/jobs/<normalized_url>,
+// routing.js), so the browser back button returns to the grid with the
+// run, filters and cards intact (this view stays mounted for both).
+// The cards merge three existing reads (jobModel.buildJobs): the run's
+// rows + assessments, the Jev rank scores, and the quick-assess store
+// (GET /api/assessments?profile_id=…) where every job-page re-assessment
+// lands -- a card's verdict chip is always the latest of the two.
 //
-// Still DROPPED from the mockup (no backing API):
-//  - "New since last run" filter: no field computes it anywhere.
-//  - "Stack overlap with profile" on cards: no field computes it; Jev's
-//    `reasons`/`mismatch_flags` (category ids, never prose) are shown
-//    instead, since those DO exist (RankScore, jev_contracts.py).
+// When this tab opens with no run loaded (fresh load, back from another
+// tab, a deep link to a job page), the newest succeeded run for the
+// profile is loaded automatically (GET /api/runs, newest first) -- the
+// same read the past-run picker does, so a job page survives a reload.
 //
-// KEPT, on real data: run control + live step status (reused from App.jsx's
-// existing polling logic), posting cards with verdict + rank score/flags +
-// sponsorship + not-assessed reason (PostingCard.jsx, extended), the Jev
-// "no + strong mismatch" hidden-by-default filter (RankScore.hidden_by_default),
-// a "Prep for interview" command panel (gigai scout prep, S27), and a
-// "Mark applied" action per card (POST /api/applications).
-function PastRunPicker({ profileId, onSelect, disabled }) {
-  const { loading, runs, error } = useRuns(profileId);
-  if (loading || error || runs.length === 0) {
+// P9c: past-run picker wired to GET /api/runs?profile_id=<this profile>
+// -- selecting an entry loads that run's real, sealed
+// GET /api/runs/{id}/results (never a stub).
+//
+// Still DROPPED from the mockup (no backing API): "New since last run"
+// (no field computes it). Phase 2 fields (work_mode / pay / H-1B count,
+// tailored resume) render only once their APIs carry them -- see
+// jobModel.js / JobPage.jsx.
+function PastRunPicker({ runs, onSelect, disabled }) {
+  if (runs.length === 0) {
     return null;
   }
   return (
@@ -76,6 +83,10 @@ function PastRunPicker({ profileId, onSelect, disabled }) {
 }
 
 export default function FindJobsView({ profile, config, reloadConfig }) {
+  const route = useHashRoute();
+  const profileId = profile ? profile.profile_id : null;
+  const runsState = useRuns(profileId);
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [runSubmitting, setRunSubmitting] = useState(false);
   const [runError, setRunError] = useState(null);
@@ -85,7 +96,9 @@ export default function FindJobsView({ profile, config, reloadConfig }) {
   const [boardRows, setBoardRows] = useState([]);
   const [results, setResults] = useState(null);
   const [resultsError, setResultsError] = useState(null);
+  const [resultsLoading, setResultsLoading] = useState(false);
   const [rankScores, setRankScores] = useState([]);
+  const [quickItems, setQuickItems] = useState([]);
 
   const pollTimer = useRef(null);
   const progressPollTimer = useRef(null);
@@ -125,8 +138,32 @@ export default function FindJobsView({ profile, config, reloadConfig }) {
     setBoardRows([]);
     setResults(null);
     setResultsError(null);
+    setResultsLoading(false);
     setRankScores([]);
-  }, [profile?.profile_id, stopPolling, stopProgressPolling]);
+    setQuickItems([]);
+  }, [profileId, stopPolling, stopProgressPolling]);
+
+  // Q4a: the quick-assess store for this profile (job-page re-assessments,
+  // "Assess this posting", CLI/quick-assess of the same URL). Loaded with
+  // every results load; a job-page mutation merges its response in place.
+  const loadQuickItems = useCallback(() => {
+    if (!profileId) {
+      return;
+    }
+    getAssessments({ profileId })
+      .then((response) => setQuickItems(response.items || []))
+      .catch(() => setQuickItems([]));
+  }, [profileId]);
+
+  const handleQuickUpdated = useCallback((item) => {
+    if (!item || !item.job) {
+      return;
+    }
+    setQuickItems((prev) => {
+      const rest = prev.filter((existing) => existing.job.job_identity !== item.job.job_identity);
+      return [item, ...rest];
+    });
+  }, []);
 
   const pollProgress = useCallback((id) => {
     getRunProgress(id)
@@ -148,6 +185,24 @@ export default function FindJobsView({ profile, config, reloadConfig }) {
       .catch(() => setRankScores([]));
   }
 
+  const loadResults = useCallback(
+    (id) => {
+      setResultsLoading(true);
+      return getRunResults(id)
+        .then((response) => {
+          setResults(response.payload);
+          setResultsLoading(false);
+          loadRankScores(id);
+          loadQuickItems();
+        })
+        .catch((error) => {
+          setResultsLoading(false);
+          setResultsError(error.message || String(error));
+        });
+    },
+    [loadQuickItems],
+  );
+
   const pollStatus = useCallback(
     (id) => {
       getRunStatus(id)
@@ -155,12 +210,9 @@ export default function FindJobsView({ profile, config, reloadConfig }) {
           setRunStatus(status);
           if (TERMINAL_STATUSES.has(status.status)) {
             stopProgressPolling();
-            getRunResults(id)
-              .then((response) => {
-                setResults(response.payload);
-                loadRankScores(id);
-              })
-              .catch((error) => setResultsError(error.message || String(error)));
+            loadResults(id);
+            // The just-finished run's created_at feeds the verdict history.
+            runsState.reload();
           } else {
             pollTimer.current = setTimeout(() => pollStatus(id), POLL_INTERVAL_MS);
           }
@@ -171,7 +223,7 @@ export default function FindJobsView({ profile, config, reloadConfig }) {
           setResultsError(error.message || String(error));
         });
     },
-    [stopPolling, stopProgressPolling],
+    [stopPolling, stopProgressPolling, loadResults, runsState.reload],
   );
 
   function openDialog() {
@@ -186,27 +238,43 @@ export default function FindJobsView({ profile, config, reloadConfig }) {
   // P9c: load a PAST run's real, sealed results -- never starts a new run.
   // Stops any live poll first, so an in-progress run's cards can't keep
   // arriving and overwrite what the operator just chose to view.
-  function viewPastRun(pastRunId) {
-    stopPolling();
-    stopProgressPolling();
-    setRunError(null);
-    setResultsError(null);
-    setRunId(pastRunId);
-    boardRowsRef.current = [];
-    setBoardRows([]);
-    setProgress(null);
-    setRankScores([]);
-    getRunStatus(pastRunId)
-      .then((status) => {
-        setRunStatus(status);
-        return getRunResults(pastRunId);
-      })
-      .then((response) => {
-        setResults(response.payload);
-        loadRankScores(pastRunId);
-      })
-      .catch((error) => setResultsError(error.message || String(error)));
-  }
+  const viewPastRun = useCallback(
+    (pastRunId) => {
+      stopPolling();
+      stopProgressPolling();
+      setRunError(null);
+      setResultsError(null);
+      setRunId(pastRunId);
+      boardRowsRef.current = [];
+      setBoardRows([]);
+      setProgress(null);
+      setRankScores([]);
+      setResultsLoading(true);
+      getRunStatus(pastRunId)
+        .then((status) => {
+          setRunStatus(status);
+          return loadResults(pastRunId);
+        })
+        .catch((error) => {
+          setResultsLoading(false);
+          setResultsError(error.message || String(error));
+        });
+    },
+    [stopPolling, stopProgressPolling, loadResults],
+  );
+
+  // Q4a: nothing loaded yet -> show the newest succeeded run for this
+  // profile (the grid is empty otherwise, and a job page deep link would
+  // have nothing to find).
+  useEffect(() => {
+    if (runId || runsState.loading || runsState.error) {
+      return;
+    }
+    const newest = runsState.runs.find((run) => run.status === "succeeded");
+    if (newest) {
+      viewPastRun(newest.run_id);
+    }
+  }, [runId, runsState.loading, runsState.error, runsState.runs, viewPastRun]);
 
   async function handleConfirm({ selectionCap, modelTarget }) {
     if (!config) {
@@ -232,12 +300,8 @@ export default function FindJobsView({ profile, config, reloadConfig }) {
         pollTimer.current = setTimeout(() => pollStatus(response.run_id), POLL_INTERVAL_MS);
         progressPollTimer.current = setTimeout(() => pollProgress(response.run_id), 0);
       } else {
-        getRunResults(response.run_id)
-          .then((resultsResponse) => {
-            setResults(resultsResponse.payload);
-            loadRankScores(response.run_id);
-          })
-          .catch((error) => setResultsError(error.message || String(error)));
+        loadResults(response.run_id);
+        runsState.reload();
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
@@ -255,6 +319,14 @@ export default function FindJobsView({ profile, config, reloadConfig }) {
   const canRun = Boolean(config) && hasResume;
   const runActive = Boolean(runId && runStatus && !TERMINAL_STATUSES.has(runStatus.status));
   const rows = results ? rowsFromResults(results) : boardRows;
+  const visaRequired = Boolean(config && config.config && config.config.visa_sponsorship_required);
+  const currentRun = runsState.runs.find((run) => run.run_id === runId) || null;
+  const runCreatedAt = currentRun ? currentRun.created_at : null;
+
+  const jobs = useMemo(
+    () => buildJobs({ rows, rankScores, quickItems, runCreatedAt }),
+    [rows, rankScores, quickItems, runCreatedAt],
+  );
 
   if (!profile) {
     return (
@@ -263,6 +335,22 @@ export default function FindJobsView({ profile, config, reloadConfig }) {
       </div>
     );
   }
+
+  if (route.view === "job") {
+    const job = jobs.find((candidate) => candidate.id === route.jobId) || null;
+    return (
+      <JobPage
+        job={job}
+        jobId={route.jobId}
+        profileId={profile.profile_id}
+        visaRequired={visaRequired}
+        loading={resultsLoading || (runsState.loading && !runId)}
+        onQuickUpdated={handleQuickUpdated}
+      />
+    );
+  }
+
+  const runLabel = currentRun ? `run ${relativeTimeLabel(currentRun.created_at)}` : runActive ? "run in progress" : "";
 
   return (
     <div>
@@ -290,7 +378,7 @@ export default function FindJobsView({ profile, config, reloadConfig }) {
         {!hasResume && <p className="muted">Add a resume (see above) to enable a run.</p>}
 
         <div style={{ marginTop: 12 }}>
-          <PastRunPicker profileId={profile.profile_id} onSelect={viewPastRun} disabled={runActive} />
+          <PastRunPicker runs={runsState.runs} onSelect={viewPastRun} disabled={runActive} />
         </div>
       </section>
 
@@ -303,7 +391,15 @@ export default function FindJobsView({ profile, config, reloadConfig }) {
       {resultsError && <div className="callout danger">Could not load results: {resultsError}</div>}
 
       {(results || runActive) && (
-        <FindJobsPostingsBoard rows={rows} cap={null} rankScores={rankScores} profileId={profile.profile_id} />
+        <JobsGrid
+          jobs={jobs}
+          visaRequired={visaRequired}
+          runLabel={runLabel}
+          emptyMessage={runActive ? "Waiting for the first postings…" : "This run found no postings."}
+        />
+      )}
+      {!results && !runActive && !resultsLoading && !runsState.loading && runsState.runs.length === 0 && (
+        <p className="muted">No find-jobs run yet for this profile. Run one above to see its postings here.</p>
       )}
     </div>
   );

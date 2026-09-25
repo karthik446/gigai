@@ -34,7 +34,12 @@ from ....native_records import NativeRecordResult
 from ....private_records import PrivateRecordError
 from ...experience_answers import PriorAnswer, read_answers, record_answer
 from ...question_ids import normalize_question_id
-from ...quick_assess import QuickAssessError, find_quick_assessment_by_job_identity, run_quick_assessment
+from ...quick_assess import (
+    TRIGGER_ANSWER_PREFIX,
+    QuickAssessError,
+    find_quick_assessment_by_job_identity,
+    run_quick_assessment,
+)
 from ..assess_contracts import AssessJobInput, AssessRequest, AssessResumeInput
 
 _ANSWER_ERROR_STATUS: dict[str, HTTPStatus] = {
@@ -123,7 +128,7 @@ class AnswersRoutesMixin:
         reassessed: dict[str, object] | None = None
         if job_identity is not None:
             try:
-                reassessed = self._reassess(target, job_identity)
+                reassessed = self._reassess(target, job_identity, trigger=TRIGGER_ANSWER_PREFIX + normalized_question_id)
             except QuickAssessError as exc:
                 self._error(_status_for(exc.code), exc.code, str(exc))
                 return
@@ -138,12 +143,13 @@ class AnswersRoutesMixin:
             },
         )
 
-    def _reassess(self, target, job_identity: str) -> dict[str, object]:
+    def _reassess(self, target, job_identity: str, *, trigger: str) -> dict[str, object]:
         """Re-run the whole assessment for ``job_identity`` and return the
         new ``AssessResponse`` JSON. Raises ``QuickAssessError``
         (``reassess_not_found`` if nothing was ever assessed for this
         identity; ``reassess_unavailable`` for a pasted-text job with no
-        URL to re-fetch)."""
+        URL to re-fetch). ``trigger`` (Q4a) is recorded in the stored
+        verdict history: ``answer:<question_id>``."""
 
         previous = find_quick_assessment_by_job_identity(self._backend.home_root, target, job_identity)
         if previous is None:
@@ -157,7 +163,7 @@ class AnswersRoutesMixin:
             job=AssessJobInput(job_url=previous.job.source_url, title=previous.job.title or None, company=previous.job.company or None),
             resume=AssessResumeInput(profile_id=previous.resume.profile_id),
         )
-        response = run_quick_assessment(request, home_root=self._backend.home_root, target=target)
+        response = run_quick_assessment(request, home_root=self._backend.home_root, target=target, trigger=trigger)
         return response.to_json()
 
     def _handle_get_answers(self) -> None:

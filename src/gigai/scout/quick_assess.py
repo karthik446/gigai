@@ -68,6 +68,7 @@ from .find_jobs.assess_contracts import (
     AssessRequest,
     AssessResponse,
     ResolvedJob,
+    VerdictHistoryEntry,
 )
 from .find_jobs.contracts import (
     FindJobsConfig,
@@ -270,6 +271,38 @@ def _seam_deadline_seconds() -> float | None:
     return bindings._test_assess_timeout_seconds()
 
 
+# --- verdict history (Q4a) ----------------------------------------------------------
+
+#: ``VerdictHistoryEntry.trigger`` for the first assessment of a job.
+TRIGGER_ASSESS = "assess"
+#: ... for a later assessment with no answer in between (CLI/API assess again).
+TRIGGER_REASSESS = "reassess"
+#: ... prefix for a re-assessment after ``POST /api/answers`` (``answer:<question_id>``).
+TRIGGER_ANSWER_PREFIX = "answer:"
+
+
+def _history_with(previous: AssessResponse | None, entry: VerdictHistoryEntry) -> tuple[VerdictHistoryEntry, ...]:
+    """The stored history plus ``entry`` (operator answer 4: re-assess APPENDS).
+
+    A file written before the history field existed carries none; its one
+    known state (the verdict it holds, at its ``updated_at``) is
+    reconstructed as the first entry so the original assessment is never
+    lost from the timeline the job page shows.
+    """
+
+    entries: list[VerdictHistoryEntry] = list(previous.history) if previous is not None else []
+    if previous is not None and not entries:
+        entries.append(
+            VerdictHistoryEntry(
+                at=previous.updated_at or previous.created_at,
+                verdict=previous.result.verdict,
+                trigger=TRIGGER_ASSESS,
+            )
+        )
+    entries.append(entry)
+    return tuple(entries)
+
+
 # --- the assessment ----------------------------------------------------------------
 
 
@@ -367,8 +400,14 @@ def run_quick_assessment(
     home_root: Path,
     target: Path,
     config: GigAIConfig | None = None,
+    trigger: str | None = None,
 ) -> AssessResponse:
     """Assess ``request.job`` against ``request.resume`` and store the answer.
+
+    ``trigger`` names what caused this assessment in the stored verdict
+    history (Q4a): ``None`` (the default) records ``"assess"`` for a job
+    never assessed before and ``"reassess"`` otherwise; ``POST /api/answers``
+    passes ``"answer:<question_id>"``.
 
     Raises ``QuickAssessError`` with one of: ``job_input_invalid``,
     ``resume_input_invalid``, ``invalid_value`` (bad URL), ``job_text_unavailable``,
@@ -481,6 +520,9 @@ def run_quick_assessment(
         _PRODUCER_CALLABLE, _PRODUCER_VERSION, _PRODUCER_ACTOR, model_target, binding.port.name or model_target.value
     )
     assessed_at = _now()
+    if trigger is None:
+        trigger = TRIGGER_ASSESS if previous is None else TRIGGER_REASSESS
+    history = _history_with(previous, VerdictHistoryEntry(at=assessed_at, verdict=body.verdict, trigger=trigger))
     response = AssessResponse(
         job=job,
         resume=resume,
@@ -492,6 +534,7 @@ def run_quick_assessment(
         created_at=previous.created_at if previous is not None else assessed_at,
         stored_path=os.fspath(path),
         updated_at=assessed_at,
+        history=history,
     )
     atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
     return response
@@ -499,6 +542,9 @@ def run_quick_assessment(
 
 __all__ = [
     "EPHEMERAL_RESUME_KEY",
+    "TRIGGER_ANSWER_PREFIX",
+    "TRIGGER_ASSESS",
+    "TRIGGER_REASSESS",
     "QuickAssessError",
     "find_quick_assessment_by_job_identity",
     "list_quick_assessments",

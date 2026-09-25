@@ -32,6 +32,7 @@ from .contracts import (
     _fail,
     _json_enum,
     _json_strings,
+    _object,
     _object_with_optional,
     _optional_string,
     _string,
@@ -406,6 +407,45 @@ class AssessRequest(_Contract):
 
 
 @dataclass(frozen=True)
+class VerdictHistoryEntry(_Contract):
+    """Q4a (v0.1.9): one line of a quick assessment's verdict history.
+
+    ``at`` is when that assessment ran (the response's ``updated_at`` at the
+    time), ``verdict`` its verdict (``None`` for a result the prompt gave no
+    verdict for), and ``trigger`` names what caused it: ``"assess"`` (the
+    first assessment of this job), ``"reassess"`` (assessed again with no
+    answer in between: the CLI or ``POST /api/assess`` on a known job) or
+    ``"answer:<question_id>"`` (``POST /api/answers`` with ``reassess``).
+    Operator answer 4: a re-assessment APPENDS here, never rewrites.
+    """
+
+    at: str
+    verdict: Verdict | None
+    trigger: str
+
+    def __post_init__(self) -> None:
+        if not self.trigger:
+            _fail("invalid_value", "verdict_history_entry.trigger must not be empty")
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "at": self.at,
+            "verdict": None if self.verdict is None else _json_enum(self.verdict),
+            "trigger": self.trigger,
+        }
+
+    @classmethod
+    def from_json(cls, obj: object) -> "VerdictHistoryEntry":
+        value = _object(obj, ("at", "verdict", "trigger"), "verdict_history_entry")
+        verdict = value["verdict"]
+        return cls(
+            at=_string(value["at"], "verdict_history_entry.at"),
+            verdict=None if verdict is None else _enum(verdict, Verdict, "verdict_history_entry.verdict"),
+            trigger=_string(value["trigger"], "verdict_history_entry.trigger"),
+        )
+
+
+@dataclass(frozen=True)
 class AssessResponse(_Contract):
     """One quick assessment: what was assessed (identities only), the effective
     preferences, the model's answer, and where it is stored.
@@ -434,6 +474,12 @@ class AssessResponse(_Contract):
     # byte-identically; ``from_json`` fills it back in from ``created_at``
     # when absent.
     updated_at: str = ""
+    # Q4a (v0.1.9, additive): every assessment of this job/resume pair so
+    # far, oldest first -- appended on each assess/re-assess by
+    # ``quick_assess.run_quick_assessment``. Omitted from JSON when empty so
+    # a stored file written before this field still round-trips
+    # byte-identically; ``from_json`` reads a missing key as ``()``.
+    history: tuple[VerdictHistoryEntry, ...] = ()
 
     def __post_init__(self) -> None:
         if (
@@ -460,6 +506,8 @@ class AssessResponse(_Contract):
         }
         if self.updated_at and self.updated_at != self.created_at:
             value["updated_at"] = self.updated_at
+        if self.history:
+            value["history"] = [entry.to_json() for entry in self.history]
         return value
 
     @classmethod
@@ -470,7 +518,7 @@ class AssessResponse(_Contract):
                 "schema_version", "job", "resume", "preferences", "result", "producer", "usage",
                 "instructions_digest", "created_at", "stored_path",
             ),
-            ("updated_at",),
+            ("updated_at", "history"),
             "assess_response",
         )
         if value["schema_version"] != cls.schema_version:
@@ -483,6 +531,11 @@ class AssessResponse(_Contract):
         usage = value["usage"]
         created_at = _string(value["created_at"], "created_at")
         updated_at = _string(value["updated_at"], "updated_at") if "updated_at" in value else created_at
+        history: tuple[VerdictHistoryEntry, ...] = ()
+        if "history" in value:
+            if type(value["history"]) is not list:
+                _fail("wrong_type", "assess_response.history must be an array")
+            history = tuple(VerdictHistoryEntry.from_json(item) for item in value["history"])
         return cls(
             job=ResolvedJob.from_json({**job, "text": ""}),
             resume=ResolvedResume.from_json(value["resume"]),
@@ -494,6 +547,7 @@ class AssessResponse(_Contract):
             created_at=created_at,
             stored_path=_string(value["stored_path"], "stored_path"),
             updated_at=updated_at,
+            history=history,
         )
 
 
@@ -528,5 +582,6 @@ __all__ = [
     "AssessmentsListResponse",
     "ResolvedJob",
     "ResolvedResume",
+    "VerdictHistoryEntry",
     "text_identity",
 ]

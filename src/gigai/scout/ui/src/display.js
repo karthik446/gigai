@@ -87,6 +87,7 @@ const NOT_ASSESSED_REASON_LABELS = {
   region_only: "Filtered: location",
   sponsorship_excluded: "Filtered: sponsorship",
   model_output_invalid: "Model output invalid",
+  published_too_old: "Older than your time window",
 };
 
 // The longer, original sentence form -- kept for a detail/tooltip line
@@ -104,6 +105,7 @@ const NOT_ASSESSED_REASON_DETAILS = {
   region_only: "Location is a region label (e.g. AMER/EMEA/APAC/APJ), not a specific country.",
   sponsorship_excluded: "Posting does not offer visa sponsorship, which this config requires.",
   model_output_invalid: "The model's answer for this posting could not be parsed.",
+  published_too_old: "Published before the configured time window (max_age_days, or the fixed published_after date when set).",
 };
 
 export function notAssessedReasonLabel(reason) {
@@ -123,10 +125,14 @@ export function unchangedSinceLabel(fromRunDate) {
   return dateText ? `Unchanged since ${dateText}` : "Unchanged";
 }
 
+// Q4a: the mockup's three-state wording (cards-and-job-page.html r1):
+// stated by the posting -> "Sponsors visas" / "No sponsorship"; silent ->
+// "Unknown" (SponsorshipBadge appends the catalog's H-1B count there when
+// the posting carries one).
 const SPONSORSHIP_LABELS = {
-  offered: "Sponsorship offered",
+  offered: "Sponsors visas",
   not_offered: "No sponsorship",
-  unknown: "Sponsorship unknown",
+  unknown: "Unknown",
 };
 
 export function sponsorshipLabel(sponsorship) {
@@ -140,7 +146,7 @@ export function sponsorshipLabel(sponsorship) {
 // card-level badge PostingCard/AssessmentBody show alongside the matrix.
 const VERDICT_LABELS = {
   matched_above_threshold: "Matched",
-  pending_user_answers: "Needs your answer",
+  pending_user_answers: "Needs your answers",
   not_a_match: "Not a match",
 };
 

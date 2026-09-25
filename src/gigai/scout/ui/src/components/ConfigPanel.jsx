@@ -1,5 +1,18 @@
 import { resumeDisplayLabel, resumeIdsTooltip } from "../display.js";
 
+// Q1 (rolling window): exactly one publication cutoff rule
+// (FindJobsConfig, contracts.py): a fixed `published_after` date wins when
+// set; else the rolling `max_age_days` ("Last N days"); else no limit.
+export function publicationWindowLabel(config) {
+  if (config.published_after) {
+    return `After ${config.published_after}`;
+  }
+  if (typeof config.max_age_days === "number") {
+    return `Last ${config.max_age_days} days`;
+  }
+  return "no limit";
+}
+
 function SourceList({ sources }) {
   const active = Object.entries(sources)
     .filter(([, enabled]) => enabled)
@@ -54,8 +67,8 @@ export default function ConfigPanel({ config, resumePreview, resumeLabel, resume
           <div className="value">{config.remote ? "yes" : "no"}</div>
         </div>
         <div className="field">
-          <div className="label">Published after</div>
-          <div className="value">{config.published_after || "no limit"}</div>
+          <div className="label">Publication window</div>
+          <div className="value">{publicationWindowLabel(config)}</div>
         </div>
       </div>
       <div className="field-row">

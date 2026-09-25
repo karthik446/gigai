@@ -8,6 +8,7 @@ import ProfilesView from "./views/ProfilesView.jsx";
 import FindJobsView from "./views/FindJobsView.jsx";
 import QuickAssessPanel from "./views/QuickAssessPanel.jsx";
 import PendingAnswersView from "./views/PendingAnswersView.jsx";
+import { leaveJobPage, useHashRoute } from "./routing.js";
 
 const TABS = [
   { value: "dashboard", label: "Dashboard" },
@@ -71,6 +72,11 @@ export default function App() {
 
   const [tab, setTab] = useState("dashboard");
   const [editingSetup, setEditingSetup] = useState(false);
+  // Q4a: a job-page hash (#/jobs/<url>, routing.js) belongs to the Find
+  // jobs view whatever tab was last clicked -- a deep link or a reload on a
+  // job page lands there; clicking another tab leaves the job page first.
+  const route = useHashRoute();
+  const activeTab = route.view === "job" ? "findjobs" : tab;
 
   // S2-B: `gigai scout run` opens this UI; if no discovery prefs exist yet,
   // the interview shows first, ahead of every other view (CHANGE #2).
@@ -138,8 +144,11 @@ export default function App() {
               <button
                 key={item.value}
                 type="button"
-                className={tab === item.value ? "active" : ""}
-                onClick={() => setTab(item.value)}
+                className={activeTab === item.value ? "active" : ""}
+                onClick={() => {
+                  leaveJobPage();
+                  setTab(item.value);
+                }}
               >
                 {item.label}
               </button>
@@ -167,7 +176,7 @@ export default function App() {
             </div>
           )}
 
-          {tab === "dashboard" && (
+          {activeTab === "dashboard" && (
             <DashboardView
               profiles={profilesState.profiles}
               selectedProfileId={profilesState.selectedProfileId}
@@ -176,7 +185,7 @@ export default function App() {
             />
           )}
 
-          {tab === "profiles" && (
+          {activeTab === "profiles" && (
             <ProfilesView
               profiles={profilesState.profiles}
               selectedProfileId={profilesState.selectedProfileId}
@@ -186,15 +195,15 @@ export default function App() {
             />
           )}
 
-          {tab === "findjobs" && !configLoading && (
+          {activeTab === "findjobs" && !configLoading && (
             <FindJobsView profile={selectedProfile} config={configResponse} reloadConfig={reloadConfig} />
           )}
 
-          {tab === "quickassess" && (
+          {activeTab === "quickassess" && (
             <QuickAssessPanel profiles={profilesState.profiles} selectedProfileId={profilesState.selectedProfileId} />
           )}
 
-          {tab === "answers" && <PendingAnswersView />}
+          {activeTab === "answers" && <PendingAnswersView />}
 
           {setupState.prefs && (
             <div className="panel">
