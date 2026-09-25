@@ -1,0 +1,62 @@
+[
+  {
+    "board_token": null,
+    "careers_url": "https://www.capitalonecareers.com/job/remote/staff-full-stack-engineer/1732/100950788336",
+    "company": "Capital One",
+    "error": "not a recognized greenhouse/lever/ashby URL",
+    "is_usable_board": false,
+    "matching_role_us_count": 0,
+    "parses_as_ats": false,
+    "posting_count": 0,
+    "provider": null,
+    "resolved": false
+  },
+  {
+    "board_token": null,
+    "careers_url": "https://hirocareers.com/jobs/af4abc34-80bd-4535-95d4-7e5c1e540619",
+    "company": "Worldpay",
+    "error": "not a recognized greenhouse/lever/ashby URL",
+    "is_usable_board": false,
+    "matching_role_us_count": 0,
+    "parses_as_ats": false,
+    "posting_count": 0,
+    "provider": null,
+    "resolved": false
+  },
+  {
+    "board_token": null,
+    "careers_url": "https://offerpilotai.com/job/affirm-senior-software-engineer-3wvh9hj0bx",
+    "company": "Affirm",
+    "error": "not a recognized greenhouse/lever/ashby URL",
+    "is_usable_board": false,
+    "matching_role_us_count": 0,
+    "parses_as_ats": false,
+    "posting_count": 0,
+    "provider": null,
+    "resolved": false
+  },
+  {
+    "board_token": "close",
+    "careers_url": "https://jobs.ashbyhq.com/close/5bf4629b-d2ee-4129-980f-e31b96185c9c",
+    "company": "Close",
+    "error": null,
+    "is_usable_board": true,
+    "matching_role_us_count": 3,
+    "parses_as_ats": true,
+    "posting_count": 3,
+    "provider": "ashby",
+    "resolved": true
+  },
+  {
+    "board_token": null,
+    "careers_url": "https://offerpilotai.com/job/remote-senior-backend-engineer-e-40gjv0odha",
+    "company": "Remote",
+    "error": "not a recognized greenhouse/lever/ashby URL",
+    "is_usable_board": false,
+    "matching_role_us_count": 0,
+    "parses_as_ats": false,
+    "posting_count": 0,
+    "provider": null,
+    "resolved": false
+  }
+]

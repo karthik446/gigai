@@ -19,10 +19,10 @@ from ..external_recording import (
     _run_receipts,
 )
 from ..journal import JournalSnapshot
-from .find_jobs.contracts import aggregate_status
+from .find_jobs.contracts import NodeReceipt, aggregate_status
 from .posting_inputs import resolve_discovery_posting_input
 from .documents import DocumentRevision, SourceLineage
-from .proposal_records import read_proposal_revision
+from .proposal_records import _ASSESSMENT_SCHEMA, read_proposal_revision
 from .projection import ScoutProjectionError, ScoutReaderSet
 from ..validators import validate_serialized_contract
 
@@ -64,6 +64,24 @@ def _local_scope(value: Mapping[str, object], project: str, gig: str) -> bool:
 def _receipt_rows(snapshot: JournalSnapshot, project: str, gig: str) -> Iterable[tuple[dict[str, object], str, dict[str, object]]]:
     for path, raw in sorted(snapshot.artifacts.items()):
         if not (path.startswith("runs/") and "/receipts/" in path and path.endswith(".json")):
+            continue
+        # regression-003: `runs/{run_id}/receipts/*.json` is shared with
+        # find-jobs' own node receipts (`runs/{run_id}/receipts/
+        # {acquire,assess,present}.json`, `NodeReceipt`) -- a schema this
+        # function never produced and was never meant to read. Those carry
+        # `schema_version: "scout-node-receipt:1"`, distinct from every
+        # Discover external-recording envelope's `"1.0"`/`"2.0"` -- peeking
+        # at just that one field (a cheap, best-effort parse; a genuinely
+        # malformed file still falls through to the strict
+        # `_recorded_dispatch` path below and fails closed exactly as
+        # before) lets this reader skip a find-jobs receipt without
+        # weakening the check for an actual, malformed Discover one.
+        try:
+            peeked = parse_json_bytes(raw) if raw else None
+        except ValueError:
+            peeked = None
+        declared_schema = peeked.get("schema_version") if isinstance(peeked, dict) else None
+        if declared_schema == NodeReceipt.schema_version:
             continue
         try:
             receipt = _recorded_dispatch(
@@ -163,6 +181,19 @@ def _proposal_rows(resolved: Any, snapshot: JournalSnapshot, project: str, gig: 
         except Exception as exc:
             raise ScoutProjectionError("scout_report_proposal_invalid", "committed proposal revision is invalid") from exc
         if not _scope(value, project, gig):
+            continue
+        # regression-003 (same family as the receipt fix above):
+        # `records/scout-proposals/.../revisions/*.json` is shared with
+        # find-jobs' own committed ASSESSMENT revisions
+        # (`schema_version: "scout-assessment-revision:1"`, `proposal_
+        # records.save_assessment_revision`) -- a distinct shape with no
+        # `opportunity` key at all (`assessment.posting`/`assessment.
+        # matrix` instead). `read_proposal_revision` itself already knows
+        # this schema (it skips ONLY the pinned-record redemption step for
+        # it, still returning the value) -- this reader must likewise skip
+        # it rather than assume every record under this path is a Discover
+        # proposal.
+        if value.get("schema_version") == _ASSESSMENT_SCHEMA:
             continue
         opportunity = value["opportunity"]
         posting_ref = opportunity.get("posting_ref")

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import re
 
+from . import secrets_store
 from .config import CredentialReference
 
 
@@ -52,8 +54,16 @@ def reference_is_available(reference: CredentialReference) -> bool | None:
     return None
 
 
-def resolve_reference_value(reference: CredentialReference) -> str:
+def resolve_reference_value(
+    reference: CredentialReference, *, home_root: Path | None = None
+) -> str:
     """Resolve one credential only at the runtime adapter boundary.
+
+    ``home_root`` selects which operator home's secrets store to fall back
+    to when the environment variable isn't set (P1-8: previously always the
+    default home, regardless of what the caller resolved ``--home`` to).
+    Omitting it keeps today's behavior (env, then the default home). The
+    environment variable still wins either way.
 
     The value must remain transient and must never be returned to a domain,
     configuration, diagnostic, or serialization caller.
@@ -65,7 +75,9 @@ def resolve_reference_value(reference: CredentialReference) -> str:
             f"credential {reference.name!r} uses {reference.kind!r}, which is not "
             "available to the local G11 runtime resolver"
         )
-    value = os.environ.get(reference.reference)
+    value = os.environ.get(reference.reference) or secrets_store.get(
+        reference.reference, home_root=home_root
+    )
     if not value:
         raise CredentialUnavailableError(
             f"credential {reference.name!r} is not available in its configured environment reference"

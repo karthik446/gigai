@@ -1,0 +1,176 @@
+{
+  "cap_dollars": null,
+  "effort": "low",
+  "latency_seconds": 91.395,
+  "request": {
+    "effort": "low",
+    "exclusion_count": 3,
+    "outputSchema": {
+      "properties": {
+        "companies": {
+          "items": {
+            "properties": {
+              "ats_provider": {
+                "enum": [
+                  "greenhouse",
+                  "lever",
+                  "ashby",
+                  "other",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "board_token": {
+                "type": "string"
+              },
+              "careers_url": {
+                "format": "uri",
+                "type": "string"
+              },
+              "company": {
+                "type": "string"
+              },
+              "source": {
+                "format": "uri",
+                "type": "string"
+              },
+              "sponsorship": {
+                "enum": [
+                  "yes",
+                  "no",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "sponsorship_evidence": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "company",
+              "careers_url",
+              "ats_provider",
+              "sponsorship",
+              "sponsorship_evidence",
+              "source"
+            ],
+            "type": "object"
+          },
+          "maxItems": 15,
+          "type": "array"
+        }
+      },
+      "required": [
+        "companies"
+      ],
+      "type": "object"
+    },
+    "query": "Find US companies hiring for staff or senior backend engineer roles (remote or Denver, Colorado area) that use Greenhouse, Lever, or Ashby as their applicant tracking system AND are documented to sponsor US work visas (H-1B). Only return companies where you can identify the company's OWN job board base URL on one of these three platforms (e.g. https://boards.greenhouse.io/<company>, https://jobs.lever.co/<company>, or https://jobs.ashbyhq.com/<company> -- the board root, not a link to a specific job posting or a third-party aggregator like LinkedIn, Indeed, or another job site). Skip a company if you cannot find its own board URL on one of those three ATS platforms. For each company give: the company name, the exact board URL, the ATS provider, and visa sponsorship evidence with a source URL (an H-1B filing record, careers page, or job posting). Exclude: Coupang, ClickHouse, Gen Digital."
+  },
+  "response": {
+    "completedAt": "2026-09-24T04:16:13.648Z",
+    "costDollars": {
+      "agentCompute": 0.01,
+      "emails": 0,
+      "phoneNumbers": 0,
+      "search": 0.015,
+      "total": 0.025
+    },
+    "createdAt": "2026-09-24T04:14:44.588Z",
+    "id": "agent_run_19c86f9094e142efac7c8d93017871d6",
+    "object": "agent_run",
+    "output": {
+      "grounding": [],
+      "structured": {
+        "companies": []
+      },
+      "text": "No company met all of the stated constraints with sufficiently explicit evidence as of 2026-09-24. The strongest sponsorship matches were outside the allowed geography (for example, Seattle or San Mateo), while remote matches either lacked explicit employer sponsorship or did not clearly have a staff/senior backend title. Companies listed in the exclusion set were omitted."
+    },
+    "request": {
+      "effort": "low",
+      "input": {
+        "exclusion": [
+          {
+            "company": "Coupang"
+          },
+          {
+            "company": "ClickHouse"
+          },
+          {
+            "company": "Gen Digital"
+          }
+        ]
+      },
+      "outputSchema": {
+        "properties": {
+          "companies": {
+            "items": {
+              "properties": {
+                "ats_provider": {
+                  "enum": [
+                    "greenhouse",
+                    "lever",
+                    "ashby",
+                    "other",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "board_token": {
+                  "type": "string"
+                },
+                "careers_url": {
+                  "format": "uri",
+                  "type": "string"
+                },
+                "company": {
+                  "type": "string"
+                },
+                "source": {
+                  "format": "uri",
+                  "type": "string"
+                },
+                "sponsorship": {
+                  "enum": [
+                    "yes",
+                    "no",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "sponsorship_evidence": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "company",
+                "careers_url",
+                "ats_provider",
+                "sponsorship",
+                "sponsorship_evidence",
+                "source"
+              ],
+              "type": "object"
+            },
+            "maxItems": 15,
+            "type": "array"
+          }
+        },
+        "required": [
+          "companies"
+        ],
+        "type": "object"
+      },
+      "query": "Find US companies hiring for staff or senior backend engineer roles (remote or Denver, Colorado area) that use Greenhouse, Lever, or Ashby as their applicant tracking system AND are documented to sponsor US work visas (H-1B). Only return companies where you can identify the company's OWN job board base URL on one of these three platforms (e.g. https://boards.greenhouse.io/<company>, https://jobs.lever.co/<company>, or https://jobs.ashbyhq.com/<company> -- the board root, not a link to a specific job posting or a third-party aggregator like LinkedIn, Indeed, or another job site). Skip a company if you cannot find its own board URL on one of those three ATS platforms. For each company give: the company name, the exact board URL, the ATS provider, and visa sponsorship evidence with a source URL (an H-1B filing record, careers page, or job posting). Exclude: Coupang, ClickHouse, Gen Digital."
+    },
+    "status": "completed",
+    "stopReason": "schema_satisfied",
+    "usage": {
+      "agentComputeUnits": 0.1,
+      "emails": 0,
+      "phoneNumbers": 0,
+      "searches": 3
+    }
+  },
+  "run_label": "low_strict_v4_boardurl_repeat1"
+}

@@ -14,7 +14,6 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import re
 import uuid
 
 from .. import model_execution
@@ -26,7 +25,23 @@ from ..canonical import (
     parse_json_bytes,
     validate_entity_id,
 )
-from .find_jobs.contracts import FindJobsContractError
+from .assessment_core import (  # noqa: F401 - moved in P1; re-exported by the old names
+    _MAX_PROMPT_POSTING_TEXT,
+    _MAX_PROMPT_RESUME_TEXT,
+    _MAX_PROMPT_VALIDATION_ERROR,
+    _SPONSORSHIP_SYNONYMS,
+    _STATUS_SYNONYMS,
+    _extract_json_object,
+    _normalize_assessment_payload,
+    _normalize_sponsorship,
+    _normalize_status,
+    _normalize_string_list,
+    AssessContext,
+    AssessJob,
+    assess_once,
+    render_assess_prompt,
+)
+from .find_jobs.progress import ProgressWriter
 from ..journal import (
     JournalArtifact,
     JournalConflictError,
@@ -62,7 +77,6 @@ from ..model_execution import (
     SelectedReference,
 )
 from ..adapters.factory import AdapterFactoryError, resolve_model_adapter
-from ..adapters.port import ModelInvocationError
 from ..validators import validate_goal_graph, validate_serialized_contract
 from ..validators import validate_model_invocation
 
@@ -83,6 +97,36 @@ class ScoutProposalExecutionError(ValueError):
         self.code = code
 
 
+def _assess_progress_writer(context: "NodeContext", target: Path | None) -> ProgressWriter | None:
+    """Best-effort ``ProgressWriter`` for this run, mirroring acquire's own.
+
+    Assess's ``NodeContext`` always carries ``workpad_path`` (unlike acquire,
+    which may resolve through ``home_root``/``target``), so this reads that
+    directly rather than re-resolving the workpad -- one less way for a
+    progress-only failure to diverge from the sealed node's own resolution.
+
+    ``target`` (the operator's bound repo/target root, as ``present_api``
+    binds it) is NOT used here even when present: it can differ from the
+    workpad root whenever the active Gig's workpad isn't the target root
+    itself, and every other progress writer/reader -- acquire's own
+    ``_progress_writer`` in ``market_acquisition.py``, and
+    ``present_api.run_progress`` (``/progress``) -- always resolves and uses
+    the real workpad path. Writing under ``target`` instead leaves a stray
+    ``runs/`` dir in the operator's repo and the UI stuck on "waiting"
+    because ``/progress`` never looks there.
+    """
+
+    try:
+        run_id = getattr(context, "run_id", None)
+        workpad_path = getattr(context, "workpad_path", None)
+        root = Path(workpad_path) if isinstance(workpad_path, str) else None
+        if root is None or not isinstance(run_id, str) or not run_id:
+            return None
+        return ProgressWriter(root / "runs" / run_id)
+    except Exception:  # noqa: BLE001 - progress must never break the sealed run
+        return None
+
+
 def assess_node(
     context: "NodeContext",
     input: "AssessInput",
@@ -90,6 +134,42 @@ def assess_node(
     home_root: Path,
     target: Path | None,
     config: GigAIConfig,
+) -> "AssessOutput":
+    """Run the bounded find-jobs assess node (progress-wrapped; see ``_assess_node_body``)."""
+
+    progress = _assess_progress_writer(context, target)
+    if progress is not None:
+        progress.start_step("assess")
+    try:
+        output = _assess_node_body(
+            context, input, home_root=home_root, target=target, config=config, progress=progress
+        )
+    except BaseException as exc:
+        if progress is not None:
+            # uat-bug-005 part 2: carry the failure's own message into
+            # progress/steps.json so /progress (the UI's live-status read)
+            # doesn't leave the operator looking at a bare "failed" with no
+            # explanation -- str(exc) matches what the sealed node-failure
+            # receipt (run.py's _redacted_failure_message) is built from for
+            # every other exception type; only BaseException subclasses that
+            # aren't a plain str-able message (rare: e.g. a bare
+            # KeyboardInterrupt) would give an empty string here, which
+            # finish_step already tolerates as "no message" via `or None`.
+            progress.finish_step("assess", ok=False, message=str(exc) or None)
+        raise
+    if progress is not None:
+        progress.finish_step("assess", ok=True)
+    return output
+
+
+def _assess_node_body(
+    context: "NodeContext",
+    input: "AssessInput",
+    *,
+    home_root: Path,
+    target: Path | None,
+    config: GigAIConfig,
+    progress: ProgressWriter | None,
 ) -> "AssessOutput":
     """Run the bounded find-jobs assess node.
 
@@ -117,43 +197,129 @@ def assess_node(
     model_target = input.model_target.value
     if model_target not in {"ollama_local", "codex_cli", "openrouter_api"}:
         raise ScoutProposalExecutionError("model_target_invalid", "unsupported model target")
-    # ``target`` is the workpad root.  A configured target name, when supplied
-    # by callers, is preferred only if it is a string; the sealed enum remains
-    # the authority for routing and never falls back to another provider.
-    adapter_target = target if isinstance(target, str) else model_target
+    # U2 (0.1.8.1 UAT): the sealed enum value (ollama_local/codex_cli/
+    # openrouter_api) is an *adapter kind*, never a configured target's own
+    # name -- ``gigai setup`` names its targets "codex-default",
+    # "claude-default", etc, so ``resolve_model_adapter(config, "codex_cli")``
+    # (a literal lookup by name) always failed. Resolve the adapter kind
+    # through the operator's own configuration -- the configured target whose
+    # endpoint's adapter matches -- instead of hard-coding target name
+    # strings. No silent fallback to another provider (existing rule): an
+    # unmatched adapter kind fails loudly, naming the fix.
+    adapter_target = _resolve_configured_target_name_for_adapter(config, model_target)
     try:
-        binding = resolve_model_adapter(config, adapter_target)
+        binding = resolve_model_adapter(config, adapter_target, home_root=home_root)
     except (AdapterFactoryError, ModelTargetResolutionError, KeyError) as exc:
         # Missing credentials and unknown targets are setup errors, not a row
         # level model outage: callers must see them loudly.
         raise ScoutProposalExecutionError("model_target_unavailable", "sealed model target or credential is unavailable") from exc
 
-    root = Path(target) if isinstance(target, (Path, str)) and not isinstance(target, str) else Path(context.workpad_path)
+    root = Path(target) if isinstance(target, Path) else Path(context.workpad_path)
     resume = _read_pinned_resume(home_root, root, context.gig_id, input.pinned_resume)
     acquire_rows = _read_acquire_rows(root, input.acquire_batch_ref)
     policy = assess_invocation_policy(model_target, input)
     sealed_config = _read_sealed_config(root, context.run_id)
     visa_sponsorship_required = bool(getattr(sealed_config, "visa_sponsorship_required", False))
+    # P2 (v0.1.9), operator answer 5: {{countries}} comes from find-jobs.json;
+    # {{titles}} is the effective config's roles (overlay_selected_profile
+    # already replaces roles with the profile's titles before sealing, so
+    # this is the profile's titles when one is selected, C11-adjacent).
+    prompt_countries = tuple(getattr(sealed_config, "countries", ()) or ())
+    prompt_titles = tuple(getattr(sealed_config, "roles", ()) or ())
+    # assess-prompt-v2 (v0.1.9), operator decision: {{candidate_location}} is
+    # the sealed config's own ``location`` (the operator's "Denver, CO" from
+    # find-jobs.json), so assess.md rule 4 can decide a posting's
+    # state/province restriction; None/empty renders "unknown".
+    prompt_location = str(getattr(sealed_config, "location", "") or "")
 
     # Candidate resolution mirrors acquire's own selection loop exactly
     # (coordinator decision, P2 dispatch): a candidate is a new/edited,
     # role-matched row. Every candidate that isn't selected gets a reason
     # -- exclusion_reason() first (location_mismatch/sponsorship_excluded),
-    # then over_cap for an otherwise-eligible row acquire's cap left behind.
-    # Unchanged/duplicate/failed and role-mismatched rows are not
-    # candidates at all and never appear in candidate_rows.
+    # then B2's selection helper (duplicate/over_cap) for an otherwise-
+    # eligible row acquire's diversity selection left behind. Duplicate/
+    # failed and role-mismatched rows are not candidates at all and never
+    # appear in candidate_rows.
+    #
+    # uat-bug-009: UNCHANGED is no longer an automatic exclusion here either
+    # -- acquire itself only ever selects an UNCHANGED row into
+    # `input.selected_postings` (assess never widens the *selected* set on
+    # its own) when it found no successful prior assessment for the current
+    # resume revision (see `market_acquisition._prior_assessments`). So a
+    # selected UNCHANGED row is already-sealed selection authority the same
+    # as a selected NEW/EDITED row; an UNCHANGED row that ISN'T selected is
+    # independently re-checked here with the identical pure helpers acquire
+    # used, so the two call sites can never disagree about which UNCHANGED
+    # rows are genuinely skippable (has a valid prior assessment) versus
+    # eligible (recorded provisionally as OVER_CAP below, same as any other
+    # otherwise-eligible row acquire's diversity selection didn't pick).
+    from .find_jobs.contracts import PinnedResume
     from .find_jobs.filters import exclusion_reason
-    from .find_jobs.market_acquisition import _role_match
+    from .find_jobs.market_acquisition import _default_profile_id, _prior_assessments, _role_match
+    from .find_jobs.selection import select_for_assessment
+    from ..workpad import resolve_workpad
 
     selected_by_url = {item.normalized_url: item for item in input.selected_postings}
     roles = tuple(getattr(sealed_config, "roles", ())) if sealed_config is not None else ()
+    resume_revision_id = input.pinned_resume.revision_id if isinstance(input.pinned_resume, PinnedResume) else None
+    # S25 A2/F1-b: the corrected cache key adds `profile_id` ALONGSIDE the
+    # resume-revision dimension -- twin predicate with market_acquisition's
+    # own acquire-side carry-forward check (that module's
+    # `_run_profile_identity`/`_default_profile_id` docstrings have the full
+    # rationale; kept identical here by hand, since assess doesn't import
+    # acquire's candidate loop).
+    try:
+        resolved_for_profile = resolve_workpad(
+            home_root=home_root, requested_target=root, gig_id=context.gig_id, allow_semantic_state=True
+        )
+    except Exception:
+        resolved_for_profile = None
+    default_profile_id = _default_profile_id(resolved_for_profile)
+    sealed_run_input = _read_sealed_run_input(root, context.run_id)
+    current_profile_ref = getattr(sealed_run_input, "profile_ref", None)
+    current_profile_id = (
+        current_profile_ref.profile_id if current_profile_ref is not None else default_profile_id
+    )
+    prior_assessments = _prior_assessments(root, context.run_id, default_profile_id=default_profile_id)
     rows: list[object] = []
     not_assessed: list[object] = []
     to_assess: list[tuple[object, bytes | None]] = []
+    eligible_postings: list[object] = []
     for posting, outcome in acquire_rows:
-        if outcome not in (RowOutcome.NEW, RowOutcome.EDITED):
-            continue
         selected = selected_by_url.get(posting.normalized_url)
+        # uat-bug-009-r1: a selected row is already-sealed selection
+        # authority (see the `is_candidate` branch below) regardless of its
+        # acquire outcome -- a selected UNCHANGED row must fall through to
+        # be assessed, the same as a selected NEW/EDITED row, so this check
+        # comes first and never routes a selected row into the outcome
+        # branches below. Twin predicate: market_acquisition.py's own
+        # candidates loop (acquire side) applies the identical
+        # selected-first / unchanged-valid-prior-skip / other-outcomes-skip
+        # ordering; keep the two in sync by hand since assess doesn't import
+        # acquire's candidate loop.
+        if selected is not None:
+            pass
+        elif outcome is RowOutcome.UNCHANGED:
+            prior = prior_assessments.get(posting.normalized_url)
+            if (
+                prior is not None
+                and prior.result.posting.content_sha256 == posting.content_sha256
+                and resume_revision_id is not None
+                and prior.resume_revision_id == resume_revision_id
+                # S25 A2: profile_id must ALSO match -- twin predicate with
+                # market_acquisition's own acquire-side check (see its
+                # docstring for why `None == None` is a legitimate match:
+                # no profile has ever been migrated for this workpad at
+                # all, today's pre-F1-b behaviour, kept unchanged).
+                and prior.profile_id == current_profile_id
+            ):
+                # A genuinely skippable UNCHANGED row: not a candidate at
+                # all, same as before this fix. Its carried-forward result
+                # is surfaced by present_api.py from acquire's own
+                # AcquireOutput.carried_forward_assessments, not here.
+                continue
+        elif outcome not in (RowOutcome.NEW, RowOutcome.EDITED):
+            continue
         if selected is not None:
             # Already-sealed selection authority (AssessInput validates
             # every selected posting's role_match=True at construction) --
@@ -176,7 +342,66 @@ def assess_node(
             to_assess.append((posting, _posting_text_bytes(posting)))
             continue
         reason = exclusion_reason(posting, sealed_config) if sealed_config is not None else None
-        not_assessed.append(NotAssessedRow(posting, reason or NotAssessedReason.OVER_CAP))
+        if reason is not None:
+            not_assessed.append(NotAssessedRow(posting, reason))
+            continue
+        # Not excluded by location/visa/role -- an otherwise-eligible row
+        # that acquire's diversity selection (B2) didn't pick. Recorded
+        # provisionally; the actual duplicate/over_cap split is resolved
+        # below by re-running the same pure helper over the same eligible
+        # set, so this can never disagree with what acquire itself dropped.
+        eligible_postings.append(posting)
+        not_assessed.append(NotAssessedRow(posting, NotAssessedReason.OVER_CAP))
+
+    if eligible_postings:
+        # Recompute B2's selection over every eligible (not excluded,
+        # role-matched, new/edited) row -- selected postings plus the
+        # not-yet-labeled ones above -- from the same inputs acquire itself
+        # used (selection_cap; per_company stays at select_for_assessment's
+        # own default, matching acquire). Same pure helper, same inputs:
+        # its `dropped` map can only ever agree with acquire's own drop, so
+        # a selected posting recomputing as "dropped" here (e.g. an older
+        # sealed AssessInput from before this helper existed) never
+        # overrides the sealed selection authority above -- only the
+        # provisional OVER_CAP labels just added are refined.
+        #
+        # P6: acquire orders its own `candidates` by the SEALED
+        # `AcquireOutput.rank_scores` before calling `select_for_assessment`
+        # (market_acquisition.py); this twin recompute must reproduce that
+        # exact order from the same sealed scores, never re-rank by calling
+        # Jev again, or the two selections (and their duplicate/over_cap
+        # labels) could disagree. `_read_rank_scores` degrades to `()` for a
+        # run with no Jev key/pre-P6 run, in which case `_order_by_rank_scores`
+        # is a no-op and this list is in its original (pre-P6) order, exactly
+        # as before this packet.
+        selected_postings_as_rows = [
+            posting for posting, _outcome in acquire_rows if posting.normalized_url in selected_by_url
+        ]
+        rank_scores = _read_rank_scores(root, input.acquire_batch_ref)
+        ordered_eligible = _order_by_rank_scores(list(eligible_postings), rank_scores)
+        recomputed = select_for_assessment(
+            [*selected_postings_as_rows, *ordered_eligible],
+            cap=input.selection_cap,
+        )
+        drop_reason_by_url = {
+            url: (NotAssessedReason.DUPLICATE if reason == "duplicate" else NotAssessedReason.OVER_CAP)
+            for url, reason in recomputed.dropped.items()
+        }
+        not_assessed = [
+            NotAssessedRow(row.posting, drop_reason_by_url.get(row.posting.normalized_url, row.reason))
+            if row.posting.normalized_url in drop_reason_by_url
+            else row
+            for row in not_assessed
+        ]
+
+    if progress is not None:
+        # B4: every row/posting that is definitively not going to the model
+        # (unchanged, role-mismatch never even reaches this list, excluded,
+        # duplicate/over_cap) is recorded now, before the model loop even
+        # starts -- the UI's "why wasn't this assessed" text doesn't have to
+        # wait for the whole assess step to finish.
+        for entry in not_assessed:
+            progress.not_assessed(entry.posting.normalized_url, reason=entry.reason.value)
 
     assessments = []
     revisions = []
@@ -191,6 +416,17 @@ def assess_node(
     from .proposals import parse_assessment_proposal
     from .proposal_records import save_assessment_revision
 
+    # P1: the prompt -> invoke -> extract -> normalize -> validate -> retry
+    # loop is `assessment_core.assess_once`; this node keeps selection,
+    # reuse/skip, sealing, journaling and progress around it.
+    assess_context = AssessContext(
+        resume_text=resume.decode("utf-8", errors="replace"),
+        visa_sponsorship_required=visa_sponsorship_required,
+        countries=prompt_countries,
+        titles=prompt_titles,
+        location=prompt_location,
+    )
+
     for posting, posting_text in to_assess[: input.selection_cap]:
         if not posting_text:
             # U25: an older acquire batch (or a row the acquirer genuinely
@@ -199,70 +435,56 @@ def assess_node(
             # assessing it, so this single posting is skipped and the rest
             # of the batch continues (U22 per-posting isolation).
             not_assessed.append(NotAssessedRow(posting, NotAssessedReason.FAILED))
+            if progress is not None:
+                progress.not_assessed(posting.normalized_url, reason=NotAssessedReason.FAILED.value)
             continue
         attempted += 1
-        validation_error: str | None = None
-        outcome_recorded = False
-        for attempt in range(2):
-            prompt = _assess_prompt(posting, resume, posting_text, visa_sponsorship_required, validation_error)
-            try:
-                request = binding.request(role="reviewer", prompt=prompt)
-                result = binding.port.invoke(request)
-                model_attempts += 1
-            except (ModelInvocationError, OSError, TimeoutError) as exc:
-                reason = NotAssessedReason.MODEL_DENIED if getattr(exc, "code", "") in {"network_denied", "model_denied", "credential_denied"} else NotAssessedReason.MODEL_UNAVAILABLE
-                not_assessed.append(NotAssessedRow(posting, reason))
-                outcome_recorded = True
-                break
-            except Exception as exc:
-                if getattr(exc, "code", "") in {"model_denied", "network_denied", "model_unavailable"}:
-                    not_assessed.append(NotAssessedRow(posting, NotAssessedReason.MODEL_DENIED if getattr(exc, "code", "") == "model_denied" else NotAssessedReason.MODEL_UNAVAILABLE))
-                    outcome_recorded = True
-                    break
-                raise
-            raw = result.output_text
-            try:
-                decoded = _extract_json_object(raw)
-                normalized = _normalize_assessment_payload(decoded)
-                # The frozen assessment_result.posting field is the narrower
-                # SelectedPosting DTO, not the full PostingRow the model was
-                # shown; use the sealed selected-posting identity so parsing
-                # never fails on PostingRow's extra keys (provider,
-                # board_token, text, ...).
-                selected_posting = selected_by_url[posting.normalized_url]
-                normalized = {**normalized, "posting": selected_posting.to_json(), "proposal_revision_ref": None}
-                parsed = parse_assessment_proposal(normalized)
-            except (FindJobsContractError, ValueError, TypeError) as exc:
-                if attempt == 0:
-                    # U22: one retry, with the validation error fed back so
-                    # the model can correct its own shape, before giving up
-                    # on this single posting.
-                    validation_error = str(exc)
-                    continue
-                not_assessed.append(NotAssessedRow(posting, NotAssessedReason.MODEL_OUTPUT_INVALID))
-                outcome_recorded = True
-                break
-            saved = save_assessment_revision(
-                home_root=home_root,
-                target=resolved,
-                posting=selected_posting,
-                result=parsed,
-                producer=producer,
-                pinned_resume=input.pinned_resume,
+        if progress is not None:
+            # B4: a "started" line the instant this posting is handed to the
+            # model, so its card can show "assessing…" instead of sitting on
+            # "waiting" for however long the model call + retry takes.
+            progress.assessment_started(posting.normalized_url)
+        # The frozen assessment_result.posting field is the narrower
+        # SelectedPosting DTO, not the full PostingRow the model was
+        # shown; use the sealed selected-posting identity so parsing
+        # never fails on PostingRow's extra keys (provider,
+        # board_token, text, ...).
+        selected_posting = selected_by_url[posting.normalized_url]
+        selected_posting_json = selected_posting.to_json()
+
+        def parse_selected(normalized: dict[str, object], _posting_json: dict = selected_posting_json) -> object:
+            return parse_assessment_proposal(
+                {**normalized, "posting": _posting_json, "proposal_revision_ref": None}
             )
-            revision_ref = _revision_ref(saved)
-            assessments.append(replace(parsed, proposal_revision_ref=revision_ref))
-            if revision_ref:
-                revisions.append(revision_ref)
-            usage_values.append(result.normalized_usage)
-            outcome_recorded = True
-            break
-        if not outcome_recorded:
-            # Defensive: every branch above either records an outcome or
-            # raises. Reached only if the loop body changes; fail closed
-            # per posting rather than silently dropping it from the
-            # candidate/assessed partition invariant.
-            not_assessed.append(NotAssessedRow(posting, NotAssessedReason.MODEL_OUTPUT_INVALID))
+
+        outcome = assess_once(binding, _assess_job(posting, posting_text), assess_context, parse=parse_selected)
+        model_attempts += outcome.attempts
+        if not outcome.ok:
+            # MODEL_DENIED / MODEL_UNAVAILABLE / MODEL_OUTPUT_INVALID, mapped
+            # inside assess_once exactly as this loop mapped them before P1;
+            # every other exception has already propagated (U22 per-posting
+            # isolation applies only to failures the boundary can name).
+            reason = outcome.not_assessed_reason
+            not_assessed.append(NotAssessedRow(posting, reason))
+            if progress is not None:
+                progress.assessment_finished(posting.normalized_url, ok=False, reason=reason.value)
+            continue
+        parsed = outcome.parsed
+        saved = save_assessment_revision(
+            home_root=home_root,
+            target=resolved,
+            posting=selected_posting,
+            result=parsed,
+            producer=producer,
+            pinned_resume=input.pinned_resume,
+        )
+        revision_ref = _revision_ref(saved)
+        assessments.append(replace(parsed, proposal_revision_ref=revision_ref))
+        if revision_ref:
+            revisions.append(revision_ref)
+        usage_values.append(outcome.usage)
+        if progress is not None:
+            progress.assessment_finished(posting.normalized_url, ok=True, assessment_json=parsed.to_json())
 
     if attempted and model_attempts and not assessments:
         # Every posting that had text and reached the model failed there.
@@ -279,9 +501,78 @@ def assess_node(
     return AssessOutput(tuple(input.selected_postings), input.pinned_resume, input.target, input.selection_cap, SelectionRule.NEW_OR_EDITED_ROLE_MATCH, tuple(rows), tuple(assessments), tuple(not_assessed), tuple(revisions), ContractModelTarget(model_target), producer, usage, ())
 
 
-_MAX_PROMPT_POSTING_TEXT = 12_000
-_MAX_PROMPT_RESUME_TEXT = 12_000
-_MAX_PROMPT_VALIDATION_ERROR = 300
+def _resolve_configured_target_name_for_adapter(config: GigAIConfig, adapter_kind: str) -> str:
+    """The name of the configured, enabled target whose endpoint uses ``adapter_kind``.
+
+    U2 (0.1.8.1 UAT): the sealed model-target enum (``ollama_local`` /
+    ``codex_cli`` / ``openrouter_api``) names an *adapter kind*, not a
+    configured target -- ``gigai setup`` always names its targets
+    ``"<provider>-default"`` (``codex-default``, ``claude-default``, ...).
+    This maps through the operator's own configuration rather than a
+    hard-coded string list, so it keeps working whichever name setup or the
+    operator gave the target.
+
+    Fails loudly, naming the fix, when no configured+enabled target uses
+    this adapter kind (never silently falls back to another provider) and
+    when more than one does (ambiguous: the caller must disable/remove one
+    or the sealed enum cannot pick between them).
+
+    uat-bug-005: the 0.1.8.x README told users to create a target literally
+    named after the sealed value (e.g. ``codex_cli``) alongside ``gigai
+    setup``'s own ``codex-default``, both on the same endpoint. An enabled
+    target whose NAME equals the sealed value wins outright -- it is
+    unambiguous by construction, no adapter scan needed. Only when no target
+    is named exactly the sealed value does this fall back to the adapter
+    scan below (unchanged ambiguity behavior for everyone else).
+    """
+
+    exact_name_matches = [
+        target.name
+        for target in config.model_targets
+        if target.enabled and target.name == adapter_kind
+    ]
+    if len(exact_name_matches) == 1:
+        return exact_name_matches[0]
+
+    endpoint_names = {
+        endpoint.name for endpoint in config.endpoints if endpoint.adapter == adapter_kind
+    }
+    matches = [
+        target.name
+        for target in config.model_targets
+        if target.enabled and target.endpoint in endpoint_names
+    ]
+    if not matches:
+        raise ScoutProposalExecutionError(
+            "model_target_unavailable",
+            f"no configured model target uses adapter {adapter_kind!r}; "
+            f"run `gigai setup` to configure one (e.g. via --model-target "
+            f"NAME=ENDPOINT:MODEL) before assessing with this target",
+        )
+    if len(matches) > 1:
+        names = ", ".join(sorted(matches))
+        raise ScoutProposalExecutionError(
+            "model_target_unavailable",
+            f"multiple configured model targets use adapter {adapter_kind!r} "
+            f"({names}); only one may stay enabled -- disable or remove all "
+            f"but one, either by setting `enabled = false` on its "
+            f"`[[model_targets]]` entry in config.toml or deleting that "
+            f"entry, or by re-running `gigai setup` and unchecking it, so "
+            f"the sealed target {adapter_kind!r} can resolve unambiguously",
+        )
+    return matches[0]
+
+
+def _assess_job(posting: object, posting_text: bytes) -> AssessJob:
+    """The prompt-facing view of one posting row (title/company/location + bounded text)."""
+
+    posting_json = posting.to_json()
+    return AssessJob(
+        title=str(posting_json.get("title", "")),
+        company=str(posting_json.get("company", "")),
+        location=str(posting_json.get("location", "") or ""),
+        posting_text=posting_text.decode("utf-8", errors="replace"),
+    )
 
 
 def _assess_prompt(
@@ -293,191 +584,16 @@ def _assess_prompt(
 ) -> str:
     """Build the real find-jobs assessment prompt (U25).
 
-    Includes the role/title/company/location, the bounded posting text, the
-    resume text, the candidate's sponsorship constraint, and a precise JSON
-    schema with a short worked example so the model returns a shape that
-    parses on the first try.  On a retry (U22), the prior validation error is
-    fed back so the model can correct its own output.
+    P1: a thin wrapper over ``assessment_core.render_assess_prompt`` (the
+    template lives in ``scout/data/instructions/assess.md``); kept under this
+    name because the assess-node tests assert prompt contents through it.
     """
-    posting_json = posting.to_json()
-    title = posting_json.get("title", "")
-    company = posting_json.get("company", "")
-    location = posting_json.get("location", "") or "unspecified"
-    bounded_posting_text = posting_text.decode("utf-8", errors="replace")[:_MAX_PROMPT_POSTING_TEXT]
-    bounded_resume_text = resume.decode("utf-8", errors="replace")[:_MAX_PROMPT_RESUME_TEXT]
-    visa_line = "yes" if visa_sponsorship_required else "no"
-    schema = (
-        "Return JSON only (no prose, no markdown fences) matching exactly this shape:\n"
-        '{"matrix": [{"requirement": "<one concrete requirement drawn from the posting>", '
-        '"resume_evidence": ["<short quote or paraphrase from the resume>"], '
-        '"status": "met|partial|gap"}], '
-        '"suggestions": ["<short actionable suggestion>"], '
-        '"questions": ["<short clarifying question, if any>"], '
-        '"sponsorship": "offered|not_offered|unknown"}\n'
-        "Example:\n"
-        '{"matrix": [{"requirement": "5+ years backend Python", "resume_evidence": '
-        '["Built and operated Python services for 6 years"], "status": "met"}, '
-        '{"requirement": "Kubernetes production experience", "resume_evidence": [], "status": "gap"}], '
-        '"suggestions": ["Call out the on-call rotation experience explicitly."], '
-        '"questions": ["Is the Kubernetes requirement negotiable?"], "sponsorship": "unknown"}\n'
-        "Derive 5 to 12 concrete requirements FROM THE POSTING TEXT below (skills, years of "
-        "experience, clearance, location/remote terms, tooling) — do not invent generic "
-        "requirements not stated or clearly implied by the posting."
+
+    context = AssessContext(
+        resume_text=resume.decode("utf-8", errors="replace"),
+        visa_sponsorship_required=visa_sponsorship_required,
     )
-    parts = [
-        "You are assessing one real job posting against one candidate's resume for GigAI Scout.",
-        schema,
-        f"ROLE: {title}\nCOMPANY: {company}\nLOCATION: {location}",
-        f"CANDIDATE CONSTRAINT: visa sponsorship required = {visa_line}. "
-        "Read the posting text for its own sponsorship stance and report it "
-        'as "sponsorship": "offered", "not_offered", or "unknown".',
-        "POSTING TEXT (may be truncated):\n" + bounded_posting_text,
-        "RESUME (may be truncated):\n" + bounded_resume_text,
-    ]
-    if validation_error:
-        bounded_error = validation_error[:_MAX_PROMPT_VALIDATION_ERROR]
-        parts.append(
-            "Your previous answer did not match the required JSON shape: "
-            + bounded_error
-            + ". Return corrected JSON only, matching the schema exactly."
-        )
-    return "\n\n".join(parts)
-
-
-def _extract_json_object(raw: object) -> Mapping[str, object]:
-    """Extract one JSON object from model output that may be fenced/prose-wrapped.
-
-    Tolerant boundary parsing (U22), applied before normalization and before
-    strict contract validation: models sometimes wrap JSON in ``` fences or
-    prepend/append prose. This never relaxes the frozen contract itself —
-    ``parse_assessment_proposal`` still validates strictly after normalization.
-    """
-    if isinstance(raw, Mapping):
-        return raw
-    if not isinstance(raw, str):
-        raise ValueError("assessment output is not text or an object")
-    text = raw.strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
-    if fence:
-        text = fence.group(1).strip()
-    try:
-        decoded = json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            raise ValueError("assessment output contains no JSON object") from None
-        decoded = json.loads(text[start : end + 1])
-    if not isinstance(decoded, Mapping):
-        raise ValueError("assessment output is not a JSON object")
-    return decoded
-
-
-_STATUS_SYNONYMS = {
-    "met": "met",
-    "meets": "met",
-    "meet": "met",
-    "yes": "met",
-    "full": "met",
-    "partial": "partial",
-    "partially": "partial",
-    "partly": "partial",
-    "some": "partial",
-    "gap": "gap",
-    "missing": "gap",
-    "no": "gap",
-    "none": "gap",
-    "not_met": "gap",
-    "not met": "gap",
-}
-
-_SPONSORSHIP_SYNONYMS = {
-    "offered": "offered",
-    "offer": "offered",
-    "yes": "offered",
-    "available": "offered",
-    "not_offered": "not_offered",
-    "not offered": "not_offered",
-    "no": "not_offered",
-    "unavailable": "not_offered",
-    "unknown": "unknown",
-    "unclear": "unknown",
-    "n/a": "unknown",
-    "na": "unknown",
-}
-
-
-def _normalize_string_list(value: object) -> list[object]:
-    """A single string coerces to a one-item list; ``null``/missing to ``[]``."""
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list):
-        return list(value)
-    return [value]
-
-
-def _normalize_status(value: object) -> object:
-    if not isinstance(value, str):
-        return value
-    key = value.strip().lower()
-    return _STATUS_SYNONYMS.get(key, value)
-
-
-def _normalize_sponsorship(value: object) -> object:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        return value
-    key = value.strip().lower()
-    return _SPONSORSHIP_SYNONYMS.get(key, value)
-
-
-def _normalize_assessment_payload(decoded: Mapping[str, object]) -> dict[str, object]:
-    """Tolerant normalization at the model boundary, BEFORE strict validation (U22).
-
-    - extracts already happened in ``_extract_json_object``
-    - ``resume_evidence`` as a bare string becomes ``[string]``; ``null``/missing becomes ``[]``
-    - matrix ``status`` synonyms (yes/partially/no, meets/partial/missing, any case) map to met/partial/gap
-    - ``suggestions``/``questions`` as a bare string become ``[string]``; ``null``/missing become ``[]``
-    - unknown top-level keys are dropped so the frozen contract's closed-object check still applies cleanly
-    - ``sponsorship`` synonyms map to offered/not_offered/unknown; absent stays absent
-
-    This never loosens the frozen contract itself: ``parse_assessment_proposal``
-    still runs strict validation immediately after this step.
-    """
-    matrix = decoded.get("matrix")
-    normalized_matrix: list[object] = []
-    if isinstance(matrix, list):
-        for row in matrix:
-            if not isinstance(row, Mapping):
-                normalized_matrix.append(row)
-                continue
-            normalized_row: dict[str, object] = {
-                "requirement": row.get("requirement"),
-                "resume_evidence": [
-                    item for item in _normalize_string_list(row.get("resume_evidence")) if isinstance(item, str)
-                ],
-                "status": _normalize_status(row.get("status")),
-            }
-            normalized_matrix.append(normalized_row)
-    else:
-        normalized_matrix = matrix
-
-    result: dict[str, object] = {
-        "matrix": normalized_matrix,
-        "suggestions": [item for item in _normalize_string_list(decoded.get("suggestions")) if isinstance(item, str)],
-        "questions": [item for item in _normalize_string_list(decoded.get("questions")) if isinstance(item, str)],
-    }
-    if "sponsorship" in decoded:
-        sponsorship = _normalize_sponsorship(decoded.get("sponsorship"))
-        if sponsorship is not None:
-            result["sponsorship"] = sponsorship
-    # Drop any other unknown keys (e.g. a model echoing "posting" back, or
-    # inventing extra fields): the frozen contract is a closed object, and
-    # normalization's job is to fix shape, not to smuggle new keys through.
-    return result
+    return render_assess_prompt(_assess_job(posting, posting_text), context, validation_error)
 
 
 def assess_invocation_policy(model_target: str, input: object) -> InvocationPolicy:
@@ -497,7 +613,7 @@ def assess_invocation_policy(model_target: str, input: object) -> InvocationPoli
     )
 
 
-def _read_pinned_resume(home_root: Path, root: Path, gig_id: str, pinned: object) -> bytes:
+def read_pinned_resume(home_root: Path, root: Path, gig_id: str, pinned: object) -> bytes:
     from ..private_records import read_record
     value = read_record(home_root=home_root, requested_target=root, record_id=pinned.record_id, revision_id=pinned.revision_id, content=True, gig_id=gig_id)
     content = value.get("content")
@@ -506,6 +622,11 @@ def _read_pinned_resume(home_root: Path, root: Path, gig_id: str, pinned: object
     if digest_imported_bytes(content) != pinned.content_sha256:
         raise ScoutProposalExecutionError("resume_digest_mismatch", "pinned resume revision changed")
     return content
+
+
+# P4: ``find_jobs.resume_input`` reuses the digest-verifying reader; the old
+# private name stays an alias (the assess node and its tests patch that name).
+_read_pinned_resume = read_pinned_resume
 
 
 def _read_sealed_config(root: Path, run_id: str) -> object | None:
@@ -519,6 +640,19 @@ def _read_sealed_config(root: Path, run_id: str) -> object | None:
     rather than failing the node -- callers treat that as "no constraint"
     (visa not required, no country filter).
     """
+    run_input = _read_sealed_run_input(root, run_id)
+    return None if run_input is None else run_input.config
+
+
+def _read_sealed_run_input(root: Path, run_id: str) -> object | None:
+    """Read the full sealed ``FindJobsRunInput`` for this run, or ``None``.
+
+    S25 A2/F1-b: ``_read_sealed_config`` above only ever needed ``.config``;
+    the assess-side carry-forward predicate also needs ``.profile_ref``
+    (the run's own sealed profile identity), so this sibling reads the same
+    file once more rather than growing ``_read_sealed_config``'s return type
+    for its one existing caller.
+    """
     from .find_jobs.contracts import FindJobsRunInput
 
     path = root / "runs" / run_id / "sealed" / "find-jobs-run-input.json"
@@ -526,10 +660,9 @@ def _read_sealed_config(root: Path, run_id: str) -> object | None:
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        run_input = FindJobsRunInput.from_json(payload)
+        return FindJobsRunInput.from_json(payload)
     except (OSError, ValueError, TypeError):
         return None
-    return run_input.config
 
 
 def _read_acquire_rows(root: Path, batch_ref: str) -> tuple[tuple[object, object], ...]:
@@ -559,6 +692,63 @@ def _read_acquire_rows(root: Path, batch_ref: str) -> tuple[tuple[object, object
             outcome = RowOutcome.NEW
         result.append((PostingRow.from_json(posting_json), outcome))
     return tuple(result)
+
+
+def _read_rank_scores(root: Path, batch_ref: str) -> tuple:
+    """P6: the sealed ``AcquireOutput.rank_scores`` from this run's acquire batch.
+
+    Assess re-runs ``select_for_assessment`` over the eligible set for its
+    own not-assessed labeling (see the ordering call below); it must sort
+    that set by the SAME scores acquire itself used, or the twin recompute
+    could disagree with acquire's own selection. Reads the exact same
+    ``batch_ref`` file ``_read_acquire_rows`` reads, one key over
+    (``rank_scores``) -- degrades to ``()`` for any run sealed before P6, a
+    run with no Jev key, or a malformed/missing file (never raises: an
+    ordering enrichment must not fail assess).
+    """
+
+    from .find_jobs.jev_contracts import RankScore
+
+    try:
+        path = root / batch_ref
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    if not isinstance(value, Mapping):
+        return ()
+    items = value.get("rank_scores")
+    if not isinstance(items, list):
+        return ()
+    result = []
+    for item in items:
+        try:
+            result.append(RankScore.from_json(item))
+        except (ValueError, TypeError):
+            continue
+    return tuple(result)
+
+
+def _order_by_rank_scores(rows: list, rank_scores: tuple) -> list:
+    """Stable sort ``rows`` (objects with ``.normalized_url``) by ``rank_scores``.
+
+    Mirrors ``jev_rank.order_by_rank`` exactly (unscored/no-score rows last,
+    stable otherwise) but takes plain ``PostingRow`` objects rather than
+    requiring the whole ``jev_rank`` module's cache/HTTP machinery -- assess
+    only ever needs to reproduce acquire's ordering from already-sealed
+    scores, never to call Jev itself.
+    """
+
+    if not rank_scores:
+        return rows
+    by_url = {item.normalized_url: item for item in rank_scores}
+
+    def sort_key(row: object) -> tuple[int, int]:
+        score = by_url.get(getattr(row, "normalized_url", None))
+        if score is None or score.score is None:
+            return (1, 0)
+        return (0, -score.score)
+
+    return sorted(rows, key=sort_key)
 
 
 def _posting_text_bytes(posting: object) -> bytes | None:

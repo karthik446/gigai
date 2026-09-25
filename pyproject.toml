@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gigai"
-version = "0.1.8.1"
+version = "0.1.9.dev0"
 description = "Contract-first foundations for a local, user-controlled agent runtime"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,6 +23,9 @@ dependencies = [
   "click>=8.1",
   "httpx>=0.27",
   "jsonschema>=4.23",
+  "openpyxl>=3.1",
+  "pycountry>=24",
+  "python-dotenv>=1.0",
   "questionary>=2.1.1",
   "referencing>=0.36",
 ]
@@ -43,7 +46,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "gigai.schemas" = ["*.schema.json", "README.md", "SHA256SUMS"]
 "gigai.data" = ["*.json", "runtime-comparison-pack-v1.json"]
-"gigai.scout" = ["data/*.md", "data/goalgraphs/*.md", "data/ui/*.html", "data/ui/*.css", "data/tools/*/*.json"]
+"gigai.scout" = ["data/*.md", "data/*.json.gz", "data/goalgraphs/*.md", "data/instructions/*.md", "data/ui/*.html", "data/ui/*.css", "data/tools/*/*.json", "ui/dist/*", "ui/dist/assets/*"]
 "gigai" = ["static/*.css"]
 
 [tool.pytest.ini_options]
@@ -59,6 +62,4 @@ markers = [
 ]
 testpaths = [
   "tests",
-  "research/contract_spike/tests",
-  "research/phase0_spike/tests",
 ]

@@ -1,0 +1,389 @@
+{
+  "cap_dollars": null,
+  "effort": "low",
+  "latency_seconds": 37.736,
+  "request": {
+    "effort": "low",
+    "exclusion_count": 3,
+    "outputSchema": {
+      "properties": {
+        "companies": {
+          "items": {
+            "properties": {
+              "ats_provider": {
+                "enum": [
+                  "greenhouse",
+                  "lever",
+                  "ashby",
+                  "other",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "board_token": {
+                "type": "string"
+              },
+              "careers_url": {
+                "format": "uri",
+                "type": "string"
+              },
+              "company": {
+                "type": "string"
+              },
+              "source": {
+                "format": "uri",
+                "type": "string"
+              },
+              "sponsorship": {
+                "enum": [
+                  "yes",
+                  "no",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "sponsorship_evidence": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "company",
+              "careers_url",
+              "ats_provider",
+              "sponsorship",
+              "sponsorship_evidence",
+              "source"
+            ],
+            "type": "object"
+          },
+          "maxItems": 15,
+          "type": "array"
+        }
+      },
+      "required": [
+        "companies"
+      ],
+      "type": "object"
+    },
+    "query": "Find US companies that are actively hiring for staff or senior backend engineer roles (remote-friendly or based in/near Denver, Colorado) and that are known to sponsor H-1B or other US work visas for engineering hires. For each company return its careers page or job board URL, which applicant tracking system it uses if identifiable (Greenhouse, Lever, or Ashby), and evidence of visa sponsorship (an H-1B filing record, a careers page statement, or a job posting that says sponsorship is available), with a source URL for that evidence. Exclude: Coupang, ClickHouse, Gen Digital."
+  },
+  "response": {
+    "completedAt": "2026-09-24T04:02:13.215Z",
+    "costDollars": {
+      "agentCompute": 0.01,
+      "emails": 0,
+      "phoneNumbers": 0,
+      "search": 0.015,
+      "total": 0.025
+    },
+    "createdAt": "2026-09-24T04:01:36.661Z",
+    "id": "agent_run_c93b117f7ec44d76892753d7c7200f82",
+    "object": "agent_run",
+    "output": {
+      "grounding": [
+        {
+          "citations": [
+            {
+              "title": "Staff Full-stack Engineer at Capital One",
+              "url": "https://www.capitalonecareers.com/job/remote/staff-full-stack-engineer/1732/100950788336"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[0].careers_url"
+        },
+        {
+          "citations": [
+            {
+              "title": "Staff Full-stack Engineer at Capital One",
+              "url": "https://www.capitalonecareers.com/job/remote/staff-full-stack-engineer/1732/100950788336"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[0].ats_provider"
+        },
+        {
+          "citations": [
+            {
+              "title": "Staff Full-stack Engineer at Capital One",
+              "url": "https://www.capitalonecareers.com/job/remote/staff-full-stack-engineer/1732/100950788336"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[0].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "Staff Full-stack Engineer at Capital One",
+              "url": "https://www.capitalonecareers.com/job/remote/staff-full-stack-engineer/1732/100950788336"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[0].sponsorship_evidence"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Software Engineer - Backend (.Net) at Worldpay",
+              "url": "https://hirocareers.com/jobs/af4abc34-80bd-4535-95d4-7e5c1e540619"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[1].careers_url"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Software Engineer - Backend (.Net) at Worldpay",
+              "url": "https://hirocareers.com/jobs/af4abc34-80bd-4535-95d4-7e5c1e540619"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[1].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Software Engineer - Backend (.Net) at Worldpay",
+              "url": "https://hirocareers.com/jobs/af4abc34-80bd-4535-95d4-7e5c1e540619"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[1].sponsorship_evidence"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Software Engineer, Full Stack (Zero to One Labs) at Affirm",
+              "url": "https://offerpilotai.com/job/affirm-senior-software-engineer-3wvh9hj0bx"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[2].careers_url"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Software Engineer, Full Stack (Zero to One Labs) at Affirm",
+              "url": "https://offerpilotai.com/job/affirm-senior-software-engineer-3wvh9hj0bx"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[2].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Software Engineer, Full Stack (Zero to One Labs) at Affirm",
+              "url": "https://offerpilotai.com/job/affirm-senior-software-engineer-3wvh9hj0bx"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[2].sponsorship_evidence"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Backend Engineer - Backend Platform at Close",
+              "url": "https://jobs.ashbyhq.com/close/5bf4629b-d2ee-4129-980f-e31b96185c9c"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[3].careers_url"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Backend Engineer - Backend Platform at Close",
+              "url": "https://jobs.ashbyhq.com/close/5bf4629b-d2ee-4129-980f-e31b96185c9c"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[3].ats_provider"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Backend Engineer - Communications at Close",
+              "url": "https://hirocareers.com/jobs/4e235ab0-34d6-4b82-a646-ac6429c6e745"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[3].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Backend Engineer - Communications at Close",
+              "url": "https://hirocareers.com/jobs/4e235ab0-34d6-4b82-a646-ac6429c6e745"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[3].sponsorship_evidence"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Backend Engineer (Elixir) at Remote",
+              "url": "https://offerpilotai.com/job/remote-senior-backend-engineer-e-40gjv0odha"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[4].careers_url"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Backend Engineer (Elixir) at Remote",
+              "url": "https://offerpilotai.com/job/remote-senior-backend-engineer-e-40gjv0odha"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[4].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Backend Engineer (Elixir) at Remote",
+              "url": "https://offerpilotai.com/job/remote-senior-backend-engineer-e-40gjv0odha"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[4].sponsorship_evidence"
+        }
+      ],
+      "structured": {
+        "companies": [
+          {
+            "ats_provider": "other",
+            "careers_url": "https://www.capitalonecareers.com/job/remote/staff-full-stack-engineer/1732/100950788336",
+            "company": "Capital One",
+            "source": "https://www.capitalonecareers.com/job/remote/staff-full-stack-engineer/1732/100950788336",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "The active remote Staff Full-stack Engineer posting explicitly states: \u201cCapital One will consider sponsoring a new qualified applicant for employment authorization for this position.\u201d"
+          },
+          {
+            "ats_provider": "other",
+            "careers_url": "https://hirocareers.com/jobs/af4abc34-80bd-4535-95d4-7e5c1e540619",
+            "company": "Worldpay",
+            "source": "https://hirocareers.com/jobs/af4abc34-80bd-4535-95d4-7e5c1e540619",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "The current Denver Senior Software Engineer \u2013 Backend (.Net) listing identifies Worldpay as a confirmed H-1B sponsor and cites Department of Labor filings under WORLDPAY INTEGRATED PAYMENTS SOLUTIONS, INC.; the listing cautions that company sponsorship history does not guarantee sponsorship for this specific role."
+          },
+          {
+            "ats_provider": "unknown",
+            "careers_url": "https://offerpilotai.com/job/affirm-senior-software-engineer-3wvh9hj0bx",
+            "company": "Affirm",
+            "source": "https://offerpilotai.com/job/affirm-senior-software-engineer-3wvh9hj0bx",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "The active remote Senior Software Engineer, Full Stack posting reports verified U.S. Department of Labor sponsorship history for Affirm, including 239 H-1B approvals and 106 PERM certifications. It expressly notes this history does not guarantee sponsorship for the specific role."
+          },
+          {
+            "ats_provider": "ashby",
+            "board_token": "5bf4629b-d2ee-4129-980f-e31b96185c9c",
+            "careers_url": "https://jobs.ashbyhq.com/close/5bf4629b-d2ee-4129-980f-e31b96185c9c",
+            "company": "Close",
+            "source": "https://hirocareers.com/jobs/4e235ab0-34d6-4b82-a646-ac6429c6e745",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "The active USA-only, 100% remote Senior Backend Engineer \u2013 Backend Platform listing is accompanied by verified H-1B sponsor evidence identifying Department of Labor filings under CLOSE THE LOOP INC.; this is employer history rather than a guarantee for the individual role."
+          },
+          {
+            "ats_provider": "unknown",
+            "careers_url": "https://offerpilotai.com/job/remote-senior-backend-engineer-e-40gjv0odha",
+            "company": "Remote",
+            "source": "https://offerpilotai.com/job/remote-senior-backend-engineer-e-40gjv0odha",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "The current Senior Backend Engineer (Elixir) role is fully remote and the listing reports verified U.S. Department of Labor sponsorship history: 2 H-1B approvals, 100% approval rate, and sponsorship activity as recent as FY2026. The listing cautions that history does not guarantee sponsorship for this specific role."
+          }
+        ]
+      },
+      "text": "Five qualifying companies are listed with an active or recently published US remote/Denver-area staff or senior backend (or closely aligned senior engineering) role, careers/job-board URL, ATS where identifiable, and evidence of H-1B or other US work-visa sponsorship. Sponsorship-history evidence is not a promise that the specific requisition will sponsor; verify eligibility directly with each recruiter. Coverage is not exhaustive as of 2026-09-24."
+    },
+    "request": {
+      "effort": "low",
+      "input": {
+        "exclusion": [
+          {
+            "company": "Coupang"
+          },
+          {
+            "company": "ClickHouse"
+          },
+          {
+            "company": "Gen Digital"
+          }
+        ]
+      },
+      "outputSchema": {
+        "properties": {
+          "companies": {
+            "items": {
+              "properties": {
+                "ats_provider": {
+                  "enum": [
+                    "greenhouse",
+                    "lever",
+                    "ashby",
+                    "other",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "board_token": {
+                  "type": "string"
+                },
+                "careers_url": {
+                  "format": "uri",
+                  "type": "string"
+                },
+                "company": {
+                  "type": "string"
+                },
+                "source": {
+                  "format": "uri",
+                  "type": "string"
+                },
+                "sponsorship": {
+                  "enum": [
+                    "yes",
+                    "no",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "sponsorship_evidence": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "company",
+                "careers_url",
+                "ats_provider",
+                "sponsorship",
+                "sponsorship_evidence",
+                "source"
+              ],
+              "type": "object"
+            },
+            "maxItems": 15,
+            "type": "array"
+          }
+        },
+        "required": [
+          "companies"
+        ],
+        "type": "object"
+      },
+      "query": "Find US companies that are actively hiring for staff or senior backend engineer roles (remote-friendly or based in/near Denver, Colorado) and that are known to sponsor H-1B or other US work visas for engineering hires. For each company return its careers page or job board URL, which applicant tracking system it uses if identifiable (Greenhouse, Lever, or Ashby), and evidence of visa sponsorship (an H-1B filing record, a careers page statement, or a job posting that says sponsorship is available), with a source URL for that evidence. Exclude: Coupang, ClickHouse, Gen Digital."
+    },
+    "status": "completed",
+    "stopReason": "schema_satisfied",
+    "usage": {
+      "agentComputeUnits": 0.1,
+      "emails": 0,
+      "phoneNumbers": 0,
+      "searches": 3
+    }
+  },
+  "run_label": "low_strict_v1"
+}

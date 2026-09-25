@@ -81,6 +81,12 @@ class ScoutProjection:
     evidence: tuple[dict[str, object], ...] = ()
     applications: tuple[dict[str, object], ...] = ()
     runs: tuple[dict[str, object], ...] = ()
+    # S25 F1-a: a read-only profiles view, built from the same pinned
+    # snapshot as every other row above -- never a second authority. No
+    # reader wiring here (F1-b's job): nothing else in this projection joins
+    # against these rows yet.
+    profiles: tuple[dict[str, object], ...] = ()
+    selected_profile_id: str | None = None
     cursor: dict[str, object] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
@@ -97,6 +103,8 @@ class ScoutProjection:
             "evidence": [dict(item) for item in self.evidence],
             "applications": [dict(item) for item in self.applications],
             "runs": [dict(item) for item in self.runs],
+            "profiles": [dict(item) for item in self.profiles],
+            "selected_profile_id": self.selected_profile_id,
         }
 
 
@@ -212,6 +220,20 @@ def _record_rows(snapshot: JournalSnapshot, project: str, gig: str) -> tuple[lis
     return records, questions
 
 
+def _event_ref_value(event: Mapping[str, object]) -> object:
+    """Return an application event's one posting identity.
+
+    A1: core's committed event carries exactly one of ``opportunity_ref``
+    (a Discover opportunity) or ``external_ref`` (a bounded opaque string --
+    here, a find-jobs posting's ``normalized_url``, joined below). Grouping
+    and the report both need this generic identity regardless of which
+    field is present.
+    """
+    if "opportunity_ref" in event:
+        return event.get("opportunity_ref")
+    return event.get("external_ref")
+
+
 def _application_rows(snapshot: JournalSnapshot, project: str, gig: str, opportunity_reader: ProjectionReader | None = None) -> list[dict[str, object]]:
     sequences: dict[str, int] = {}
     for handoff_path, raw in snapshot.artifacts.items():
@@ -250,13 +272,41 @@ def _application_rows(snapshot: JournalSnapshot, project: str, gig: str, opportu
     values.sort(key=lambda item: (str(item.get("occurred_at", "")), int(item.get("journal_sequence", 0)), str(item.get("event_id", ""))))
     by_opportunity: dict[str, list[dict[str, object]]] = {}
     for event in values:
-        by_opportunity.setdefault(str(event["opportunity_ref"]), []).append(event)
+        by_opportunity.setdefault(str(_event_ref_value(event)), []).append(event)
     for group in by_opportunity.values():
         superseded = {item.get("supersedes") for item in group}
         for item in group:
             item["current"] = item.get("event_id") not in superseded
             item["current_status"] = item.get("event_kind") if item["current"] else None
     return values
+
+
+def _profile_rows(snapshot: JournalSnapshot, project: str, gig: str) -> tuple[list[dict[str, object]], str | None]:
+    """Read profiles (S25 F1-a) directly off the pinned snapshot.
+
+    Profiles are append-only write-file chains (each edit is a NEW file at
+    the next seq under ``records/scout-profiles/<profile_id>/writes/``,
+    never an overwrite -- see ``profile_records``'s module docstring,
+    "Storage layout amendment"); the CURRENT profile is the write at the
+    highest seq. This never runs the migration
+    (``profile_records.ensure_default_profile``/``selected_profile``): the
+    projection is a read-only cache of whatever is already committed, and
+    the migration is invoked only from Scout's own read paths per the
+    architecture rule (never from core, never from this reader).
+    """
+
+    from .profile_records import ProfileRecordError, _current_profiles, _current_selection
+
+    try:
+        current = _current_profiles(snapshot.artifacts)
+        selection = _current_selection(snapshot.artifacts)
+    except ProfileRecordError as exc:
+        raise ScoutProjectionError("projection_profile_invalid", "committed profile or selection is invalid") from exc
+
+    profiles = [record.to_json() for record in current.values()]
+    profiles.sort(key=lambda item: (str(item.get("created_at", "")), str(item.get("profile_id", ""))))
+    selected_profile_id = selection.selected_profile_id if selection is not None else None
+    return profiles, selected_profile_id
 
 
 def _verify_opportunities(applications: list[dict[str, object]], opportunities: list[dict[str, object]]) -> None:
@@ -266,7 +316,11 @@ def _verify_opportunities(applications: list[dict[str, object]], opportunities: 
         if _OPPORTUNITY.fullmatch(str(item.get("opportunity_id"))) and isinstance(item.get("snapshot_id"), str)
     }
     for event in applications:
-        event["opportunity_verified"] = any(
+        # external_ref events name no Discover opportunity at all (A1); only
+        # opportunity_ref events can verify against this Discover identity
+        # set. external_ref's own join is a separate, find-jobs-side lookup
+        # (see _posting_rows / A1's join below), not "verified" in this sense.
+        event["opportunity_verified"] = "opportunity_ref" in event and any(
             item[0] == event.get("opportunity_ref") for item in identities
         )
 
@@ -284,6 +338,48 @@ def _verify_proposals(proposals: list[dict[str, object]], opportunities: list[di
         ) in identities
 
 
+def _posting_by_normalized_url(snapshot: JournalSnapshot) -> dict[str, dict[str, object]]:
+    """Read every committed find-jobs posting off this snapshot, by normalized_url.
+
+    A1: the Scout-side join for ``external_ref`` events. ``runs/<run_id>/
+    outputs/acquire.json`` is the same committed ``AcquireOutput`` shape
+    ``interview_prep.posting`` reads for prep (``PostingRow.normalized_url``
+    is find-jobs' own posting identity, a separate system from Discover's
+    ``opportunity_id`` -- see that module's docstring). Malformed acquire
+    output at a path this snapshot happened to include is skipped rather
+    than failing the whole projection: this join is best-effort, not
+    authority over whether the event itself is valid.
+    """
+    postings: dict[str, dict[str, object]] = {}
+    for path in sorted(snapshot.artifacts):
+        if not (path.startswith("runs/") and path.endswith("/outputs/acquire.json")):
+            continue
+        try:
+            value = parse_json_bytes(snapshot.artifacts[path])
+            acquire = AcquireOutput.from_json(value)
+        except (ValueError, FindJobsContractError):
+            continue
+        for row in acquire.rows:
+            postings.setdefault(row.posting.normalized_url, row.posting.to_json())
+    return postings
+
+
+def _link_external_refs(applications: list[dict[str, object]], snapshot: JournalSnapshot) -> None:
+    """Annotate each external_ref application with its find-jobs posting, if any.
+
+    A1 (5): an external_ref matching no posting still shows -- unlinked, not
+    dropped, not an error; ``linked_posting`` is ``None`` in that case. An
+    opportunity_ref event is untouched (``linked_posting`` stays absent).
+    """
+    postings: dict[str, dict[str, object]] | None = None
+    for event in applications:
+        if "external_ref" not in event:
+            continue
+        if postings is None:
+            postings = _posting_by_normalized_url(snapshot)
+        event["linked_posting"] = postings.get(str(event.get("external_ref")))
+
+
 def projection_from_snapshot(*, snapshot: JournalSnapshot, project_id: str, gig_id: str, readers: ScoutReaderSet | None = None, require_opportunity_links: bool = False) -> ScoutProjection:
     """Build a deterministic view from one pinned journal snapshot.
 
@@ -299,8 +395,10 @@ def projection_from_snapshot(*, snapshot: JournalSnapshot, project_id: str, gig_
     documents = _rows(readers.documents, snapshot, project_id, gig_id)
     evidence = _rows(readers.evidence, snapshot, project_id, gig_id)
     runs = _rows(readers.runs, snapshot, project_id, gig_id)
+    profiles, selected_profile_id = _profile_rows(snapshot, project_id, gig_id)
     _verify_opportunities(applications, opportunities)
     _verify_proposals(proposals, opportunities)
+    _link_external_refs(applications, snapshot)
     if require_opportunity_links and any(not item["opportunity_verified"] for item in applications):
         raise ScoutProjectionError("projection_opportunity_missing", "application event does not name a committed opportunity")
     cursor = {"schema_version": "scout-projection:1", "journal_head": snapshot.head}
@@ -316,6 +414,8 @@ def projection_from_snapshot(*, snapshot: JournalSnapshot, project_id: str, gig_
         evidence=tuple(evidence),
         applications=tuple(applications),
         runs=tuple(runs),
+        profiles=tuple(profiles),
+        selected_profile_id=selected_profile_id,
         cursor=cursor,
     )
 
@@ -337,6 +437,8 @@ def query_projection(projection: ScoutProjection) -> sqlite3.Connection:
         CREATE TABLE evidence (evidence_id TEXT, payload BLOB NOT NULL);
         CREATE TABLE applications (event_id TEXT PRIMARY KEY, opportunity_ref TEXT, event_kind TEXT, current INTEGER, payload BLOB NOT NULL);
         CREATE TABLE runs (run_id TEXT, status TEXT, payload BLOB NOT NULL);
+        CREATE TABLE profiles (profile_id TEXT, state TEXT, origin TEXT, payload BLOB NOT NULL);
+        CREATE TABLE profile_selection (selected_profile_id TEXT);
         CREATE TABLE scout_cursor (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     """)
     connection.executemany("INSERT INTO opportunities VALUES (?, ?, ?)", [(item.get("opportunity_id"), item.get("snapshot_id"), canonical_json_bytes(item)) for item in projection.opportunities])
@@ -346,6 +448,8 @@ def query_projection(projection: ScoutProjection) -> sqlite3.Connection:
     connection.executemany("INSERT INTO evidence VALUES (?, ?)", [(item.get("evidence_id") or item.get("claim_id"), canonical_json_bytes(item)) for item in projection.evidence])
     connection.executemany("INSERT INTO applications VALUES (?, ?, ?, ?, ?)", [(item.get("event_id"), item.get("opportunity_ref"), item.get("event_kind"), int(bool(item.get("current"))), canonical_json_bytes(item)) for item in projection.applications])
     connection.executemany("INSERT INTO runs VALUES (?, ?, ?)", [(item.get("run_id"), item.get("status"), canonical_json_bytes(item)) for item in projection.runs])
+    connection.executemany("INSERT INTO profiles VALUES (?, ?, ?, ?)", [(item.get("profile_id"), item.get("state"), item.get("origin"), canonical_json_bytes(item)) for item in projection.profiles])
+    connection.execute("INSERT INTO profile_selection VALUES (?)", (projection.selected_profile_id,))
     connection.executemany("INSERT INTO scout_cursor VALUES (?, ?)", [("journal_head", projection.journal_head), ("schema_version", projection.schema_version)])
     connection.commit()
     return connection
@@ -369,7 +473,7 @@ def read_cached_projection(*, workpad: Path) -> ScoutProjection:
         payload = json.loads(bytes(row[0]))
         if not isinstance(payload, dict):
             raise ValueError("projection payload is not an object")
-        fields = {"schema_version", "project_id", "gig_id", "journal_head", "cursor", "opportunities", "proposals", "questions", "documents", "evidence", "applications", "runs"}
+        fields = {"schema_version", "project_id", "gig_id", "journal_head", "cursor", "opportunities", "proposals", "questions", "documents", "evidence", "applications", "runs", "profiles", "selected_profile_id"}
         if set(payload) != fields:
             raise ValueError("projection payload has unexpected fields")
         return ScoutProjection(**payload)

@@ -47,6 +47,9 @@ jobs:
     name: Exact-tag CI
     needs: preflight
     uses: ./.github/workflows/pull_request.yaml
+    permissions:
+      contents: read
+      actions: read
     with:
       profile: release
       ref: refs/tags/${{ github.ref_name }}
@@ -180,6 +183,7 @@ jobs:
           ref: refs/tags/${{ github.ref_name }}
           sparse-checkout: |
             CHANGELOG.md
+            tools/release_notes.py
           sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
@@ -231,28 +235,10 @@ jobs:
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          python - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          version = os.environ["VERSION"]
-          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
-          # Sections are "### X.Y.Z" headings under "## Released versions".
-          pattern = re.compile(
-              rf"^### {re.escape(version)}$\n(.*?)(?=^### |\Z)",
-              re.MULTILINE | re.DOTALL,
-          )
-          match = pattern.search(changelog)
-          notes_path = Path("release-notes.md")
-          if match:
-              body = match.group(1).strip("\n")
-              notes_path.write_text(body + "\n", encoding="utf-8")
-              print(f"extracted CHANGELOG section for {version}")
-          else:
-              notes_path.write_text("", encoding="utf-8")
-              print(f"no CHANGELOG section found for {version}; falling back to --generate-notes")
-          PY
+          if ! python tools/release_notes.py --version "${VERSION}" > release-notes.md; then
+            : > release-notes.md
+            echo "no CHANGELOG section found for ${VERSION}; falling back to --generate-notes"
+          fi
       - env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -279,6 +265,9 @@ jobs:
     name: Full compatibility matrix (post-release)
     needs: github-release
     uses: ./.github/workflows/pull_request.yaml
+    permissions:
+      contents: read
+      actions: read
     with:
       profile: full
       ref: refs/tags/${{ github.ref_name }}

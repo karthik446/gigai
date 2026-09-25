@@ -33,7 +33,13 @@ from ...canonical import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
+    from pathlib import Path
+
     import httpx
+
+    # P6: type-only, to avoid a real import cycle with jev_contracts.py
+    # (which imports from this module); see AcquireOutput.rank_scores.
+    from .jev_contracts import RankScore
 
 
 class FindJobsContractError(ValueError):
@@ -136,8 +142,32 @@ class AggregateStatus(StrEnum):
 
 class MatrixStatus(StrEnum):
     MET = "met"
+    UNMET = "unmet"
+    UNCLEAR = "unclear"
+    # P2 (v0.1.9): the S29 r1 assess prompt only ever emits met/unmet/unclear.
+    # PARTIAL/GAP are kept solely so an OLD serialized assessment result (the
+    # pre-P2 prompt's met/partial/gap vocabulary) still parses; the P2
+    # normalizer maps a new model's partial->unclear and gap->unmet before
+    # validation, so no live code path emits these two anymore (operator
+    # decision #10, plan section 8).
     PARTIAL = "partial"
     GAP = "gap"
+
+
+class Verdict(StrEnum):
+    """P2 (v0.1.9): the workflow-state verdict from the S29 r1 assess prompt."""
+
+    MATCHED_ABOVE_THRESHOLD = "matched_above_threshold"
+    PENDING_USER_ANSWERS = "pending_user_answers"
+    NOT_A_MATCH = "not_a_match"
+
+
+class RequirementClass(StrEnum):
+    """P2 (v0.1.9): per-matrix-row classification the S29 r1 prompt assigns."""
+
+    HARD = "hard"
+    ASKABLE = "askable"
+    NICE_TO_HAVE = "nice_to_have"
 
 
 class SponsorshipStatus(StrEnum):
@@ -154,6 +184,29 @@ class SponsorshipStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+class WorkMode(StrEnum):
+    """Q4b-data (v0.1.9): the posting's work mode as the ATS payload STATES it.
+
+    ``PostingRow.work_mode`` is set only from a provider's own structured
+    field (Lever ``workplaceType``, Ashby ``workplaceType``/``isRemote``),
+    never inferred from the location or description text. Greenhouse has no
+    such field, so its rows never carry one. ``None`` (the default, omitted
+    from JSON) means "the payload did not say" -- not "onsite".
+    """
+
+    REMOTE = "remote"
+    HYBRID = "hybrid"
+    ONSITE = "onsite"
+
+
+class PayPeriod(StrEnum):
+    """The interval a :class:`PostingPay` range is quoted per (Q4b-data)."""
+
+    YEAR = "year"
+    HOUR = "hour"
+    MONTH = "month"
+
+
 class NotAssessedReason(StrEnum):
     UNCHANGED = "unchanged"
     DUPLICATE = "duplicate"
@@ -166,6 +219,26 @@ class NotAssessedReason(StrEnum):
     LOCATION_MISMATCH = "location_mismatch"
     SPONSORSHIP_EXCLUDED = "sponsorship_excluded"
     MODEL_OUTPUT_INVALID = "model_output_invalid"
+    # 0.1.8.1 r1 (B1 coordinator review): a finer-grained sub-case of
+    # LOCATION_MISMATCH, used only for AcquireOutput.dropped_counts'
+    # per-reason auditability -- a location that resolves to *only* region
+    # tokens ("AMER"/"EMEA"/"APAC"/"LATAM"/"Remote - Americas") rather than
+    # a recognized-but-wrong country. `exclusion_reason` itself keeps
+    # returning LOCATION_MISMATCH for this case (its existing, stable
+    # contract that proposal_execution.py's not-assessed labeling relies
+    # on); only market_acquisition.py's drop-count bucketing distinguishes
+    # the two, so a coordinator/operator reading dropped_counts can tell
+    # "wrong country" apart from "region label, no country at all" without
+    # changing exclusion_reason's public return value.
+    REGION_ONLY = "region_only"
+    # Q1 (v0.1.9, SCOPE-ADD-2): the posting's own `published_at` is older
+    # than the rolling window (`FindJobsConfig.max_age_days`, or the fixed
+    # `published_after` when set) -- see `filters.published_cutoff`. Applied
+    # to EVERY source (Exa already asked for `startPublishedDate`; the ATS
+    # boards never had any date filter, which is how a 2026-08-11 Kong
+    # posting could still slip through or be missed unpredictably). A row
+    # with NO `published_at` at all is never given this reason (kept).
+    PUBLISHED_TOO_OLD = "published_too_old"
 
 
 class _Contract:
@@ -285,6 +358,18 @@ def _optional_digest(value: object, name: str) -> str | None:
     return _digest_value(value, name)
 
 
+def _optional_amount(value: object, name: str) -> int | float | None:
+    """A non-negative JSON number (int or float, never a bool), or ``None``."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        _fail("wrong_type", f"{name} must be a number or null")
+    if value != value or value < 0:  # NaN or negative
+        _fail("invalid_value", f"{name} must be a non-negative number")
+    return value
+
+
 def _datetime_string(value: object, name: str, *, optional: bool = False) -> str | None:
     if value is None and optional:
         return None
@@ -364,9 +449,33 @@ class SourceToggles(_Contract):
         return cls(_bool(value["exa"], "source_toggles.exa"), _bool(value["ats"], "source_toggles.ats"), _bool(value["hiringcafe"], "source_toggles.hiringcafe"))
 
 
+# Q1 (v0.1.9): the rolling publication window used when a config sets
+# neither `max_age_days` nor a fixed `published_after`. 60 days is the
+# SCOPE-ADD-2 decision ("published_after becomes a rolling max_age_days,
+# default 60"). `filters.published_cutoff` is the ONE place that turns this
+# (or the config's own values) into an actual earliest-date at run time.
+DEFAULT_MAX_AGE_DAYS = 60
+MAX_AGE_DAYS_MAXIMUM = 365
+
+
 @dataclass(frozen=True)
 class FindJobsConfig(_Contract):
-    """Operator-authored ``<target_root>/find-jobs.json`` snapshot."""
+    """Operator-authored ``<target_root>/find-jobs.json`` snapshot.
+
+    Q1 (v0.1.9): ``max_age_days`` is the rolling publication window, an
+    additive optional key (omitted from ``to_json`` at its ``None`` default
+    so an existing file's digest is unchanged). How it combines with the
+    older fixed ``published_after`` -- exactly one rule, implemented once in
+    ``filters.published_cutoff``:
+
+    * ``published_after`` set (a fixed ISO date or date-time) -> that date
+      is the cutoff, whatever ``max_age_days`` says (a fixed date still wins).
+    * else ``max_age_days`` set -> ``now - max_age_days``.
+    * else -> ``now - DEFAULT_MAX_AGE_DAYS`` (60).
+
+    The setup wizard writes the rolling form (and clears ``published_after``
+    when it does); a hand-edited fixed date keeps working unchanged.
+    """
 
     schema_version: ClassVar[str] = "find-jobs-config:1"
     roles: tuple[str, ...]
@@ -379,6 +488,7 @@ class FindJobsConfig(_Contract):
     default_model_target: ModelTarget = ModelTarget.OLLAMA_LOCAL
     countries: tuple[str, ...] = ()
     visa_sponsorship_required: bool = False
+    max_age_days: int | None = None
 
     @property
     def source_toggles(self) -> SourceToggles:
@@ -414,6 +524,10 @@ class FindJobsConfig(_Contract):
             value["countries"] = _json_strings(self.countries)
         if self.visa_sponsorship_required:
             value["visa_sponsorship_required"] = self.visa_sponsorship_required
+        # Q1 (v0.1.9): same additive rule as C0's keys -- only present when
+        # set, so a config that never set it digests exactly as before.
+        if self.max_age_days is not None:
+            value["max_age_days"] = self.max_age_days
         return value
 
     @classmethod
@@ -421,13 +535,18 @@ class FindJobsConfig(_Contract):
         value = _object_with_optional(
             obj,
             ("schema_version", "roles", "merged_queries", "location", "remote", "published_after", "sources", "default_assess_cap", "default_model_target"),
-            ("countries", "visa_sponsorship_required"),
+            ("countries", "visa_sponsorship_required", "max_age_days"),
             "find_jobs_config",
         )
         if value["schema_version"] != cls.schema_version:
             _fail("bad_enum", "find_jobs_config.schema_version is unsupported")
         countries = () if "countries" not in value else _country_codes(value["countries"], "countries")
         visa_sponsorship_required = False if "visa_sponsorship_required" not in value else _bool(value["visa_sponsorship_required"], "visa_sponsorship_required")
+        max_age_days = (
+            None
+            if value.get("max_age_days") is None
+            else _integer(value["max_age_days"], "max_age_days", minimum=1, maximum=MAX_AGE_DAYS_MAXIMUM)
+        )
         return cls(
             _strings(value["roles"], "roles"),
             _strings(value["merged_queries"], "merged_queries"),
@@ -439,6 +558,51 @@ class FindJobsConfig(_Contract):
             _enum(value["default_model_target"], ModelTarget, "default_model_target"),
             countries,
             visa_sponsorship_required,
+            max_age_days,
+        )
+
+
+@dataclass(frozen=True)
+class PostingPay(_Contract):
+    """A pay range the ATS payload STATES for one posting (Q4b-data, v0.1.9).
+
+    Read only from a provider's structured compensation field (Lever
+    ``salaryRange``, Ashby ``compensation`` components, Greenhouse
+    ``pay_input_ranges``), never parsed out of the description text. At
+    least one bound is present; ``currency`` is the payload's own code
+    (``"USD"`` etc.) and ``period`` the interval it is quoted per -- ``None``
+    when the payload names no interval (Greenhouse's ranges carry none, and
+    a period is never inferred; coordinator answer 2026-09-25).
+    """
+
+    schema_version: ClassVar[str] = "scout-posting-pay:1"
+    min: int | float | None
+    max: int | float | None
+    currency: str
+    period: PayPeriod | None
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "min": self.min,
+            "max": self.max,
+            "currency": self.currency,
+            "period": None if self.period is None else _json_enum(self.period),
+        }
+
+    @classmethod
+    def from_json(cls, obj: object) -> "PostingPay":
+        value = _object(obj, ("min", "max", "currency", "period"), "posting_pay")
+        minimum = _optional_amount(value["min"], "posting_pay.min")
+        maximum = _optional_amount(value["max"], "posting_pay.max")
+        if minimum is None and maximum is None:
+            _fail("invalid_value", "posting_pay needs at least one of min/max")
+        if minimum is not None and maximum is not None and minimum > maximum:
+            _fail("invalid_value", "posting_pay.min must not exceed posting_pay.max")
+        return cls(
+            minimum,
+            maximum,
+            _string(value["currency"], "posting_pay.currency"),
+            None if value["period"] is None else _enum(value["period"], PayPeriod, "posting_pay.period"),  # type: ignore[arg-type]
         )
 
 
@@ -460,6 +624,25 @@ class PostingRow(_Contract):
     query_key: str
     text: str | None = None
     sponsorship: SponsorshipStatus | None = None
+    # C0 (v0.1.8.1 B1): ISO-3166 alpha-2 codes read from a provider's own
+    # structured location field (Lever's `country`, Ashby's
+    # `address.postalAddress.addressCountry` + `secondaryLocations`, both
+    # normalized to alpha-2), when the provider returns one. `None` means no
+    # structured signal was available (Greenhouse/Exa rows, or a Lever/Ashby
+    # row whose structured field itself came back null) -- callers fall back
+    # to parsing `location`'s free text. An empty tuple is a *trusted* zero
+    # result (the field was present but named no recognized country), not
+    # "unknown" -- see `filters.country_match`.
+    countries: tuple[str, ...] | None = None
+    # Q4b-data (v0.1.9): the work mode and pay range the ATS payload states
+    # (see `WorkMode`/`PostingPay`). Both additive and optional, omitted from
+    # JSON at their None default, so every earlier row's to_json() -- and
+    # therefore its digest -- is byte-identical to before. Neither takes part
+    # in a row's change-detection identity (`content_sha256` hashes title +
+    # text only), so an existing posting is never re-selected as "edited"
+    # just because these fields appeared.
+    work_mode: WorkMode | None = None
+    pay: PostingPay | None = None
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {
@@ -482,6 +665,14 @@ class PostingRow(_Contract):
             value["text"] = self.text
         if self.sponsorship is not None:
             value["sponsorship"] = _json_enum(self.sponsorship)
+        # C0 (v0.1.8.1 B1): countries is additive/optional the same way;
+        # omitted at its None default so a pre-B1 row's digest is unaffected.
+        if self.countries is not None:
+            value["countries"] = _json_strings(self.countries)
+        if self.work_mode is not None:
+            value["work_mode"] = _json_enum(self.work_mode)
+        if self.pay is not None:
+            value["pay"] = self.pay.to_json()
         return value
 
     @classmethod
@@ -489,10 +680,13 @@ class PostingRow(_Contract):
         value = _object_with_optional(
             obj,
             ("url", "normalized_url", "provider", "board_token", "company", "title", "location", "published_at", "content_sha256", "source_kind", "query_key"),
-            ("text", "sponsorship"),
+            ("text", "sponsorship", "countries", "work_mode", "pay"),
             "posting_row",
         )
         sponsorship = None if "sponsorship" not in value else _enum(value["sponsorship"], SponsorshipStatus, "posting_row.sponsorship")
+        countries = None if "countries" not in value else _country_codes(value["countries"], "posting_row.countries")
+        work_mode = None if "work_mode" not in value else _enum(value["work_mode"], WorkMode, "posting_row.work_mode")
+        pay = None if "pay" not in value else PostingPay.from_json(value["pay"])
         return cls(
             _string(value["url"], "url"),
             _string(value["normalized_url"], "normalized_url"),
@@ -507,6 +701,9 @@ class PostingRow(_Contract):
             _string(value["query_key"], "query_key"),
             _optional_string(value.get("text"), "posting_row.text") if "text" in value else None,
             sponsorship,
+            countries,
+            work_mode=work_mode,  # type: ignore[arg-type]
+            pay=pay,
         )
 
 
@@ -743,6 +940,39 @@ class PinnedResume(_Contract):
 
 
 @dataclass(frozen=True)
+class ProfileRef(_Contract):
+    """S25 F1-b: which interested profile (and exact content) a run used.
+
+    ``{profile_id, revision, content_digest}`` -- the sealed identity Q3/A2
+    of the S25 spike define. ``revision`` is the profile record's own
+    monotonic integer; ``content_digest`` is the run's own sealed copy of
+    the profile's ``content_digest`` at seal time (independently verifiable
+    without trusting the live profile record or journal history -- see
+    ``profile_records.retrieve_profile_revision``).
+    """
+
+    profile_id: str
+    revision: int
+    content_digest: str
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "profile_id": self.profile_id,
+            "revision": self.revision,
+            "content_digest": self.content_digest,
+        }
+
+    @classmethod
+    def from_json(cls, obj: object) -> "ProfileRef":
+        value = _object(obj, ("profile_id", "revision", "content_digest"), "profile_ref")
+        return cls(
+            _string(value["profile_id"], "profile_ref.profile_id"),
+            _integer(value["revision"], "profile_ref.revision", minimum=1),
+            _digest_value(value["content_digest"], "profile_ref.content_digest"),
+        )
+
+
+@dataclass(frozen=True)
 class FindJobsRunInput(_Contract):
     """Sealed run snapshot written before graph allocation and execution."""
 
@@ -753,9 +983,15 @@ class FindJobsRunInput(_Contract):
     selection_rule: SelectionRule
     model_target: ModelTarget
     pinned_resume: PinnedResume
+    # S25 F1-b: additive/optional (_object_with_optional), never required --
+    # ``None`` only for a run sealed before F1-b shipped (or a caller that
+    # never resolves a profile at all, matching PostingRow's own text/
+    # sponsorship precedent, contracts.py:516-539). Omitted from to_json() at
+    # its None default so an old sealed input's digest stays unaffected.
+    profile_ref: ProfileRef | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "schema_version": self.schema_version,
             "config": self.config.to_json(),
             "config_digest": self.config_digest,
@@ -764,16 +1000,25 @@ class FindJobsRunInput(_Contract):
             "model_target": _json_enum(self.model_target),
             "pinned_resume": self.pinned_resume.to_json(),
         }
+        if self.profile_ref is not None:
+            value["profile_ref"] = self.profile_ref.to_json()
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "FindJobsRunInput":
-        value = _object(obj, ("schema_version", "config", "config_digest", "selection_cap", "selection_rule", "model_target", "pinned_resume"), "find_jobs_run_input")
+        value = _object_with_optional(
+            obj,
+            ("schema_version", "config", "config_digest", "selection_cap", "selection_rule", "model_target", "pinned_resume"),
+            ("profile_ref",),
+            "find_jobs_run_input",
+        )
         if value["schema_version"] != cls.schema_version:
             _fail("bad_enum", "find_jobs_run_input.schema_version is unsupported")
         config = FindJobsConfig.from_json(value["config"])
         config_digest = _digest_value(value["config_digest"], "config_digest")
         if config_digest != config.digest():
             _fail("invalid_value", "find_jobs_run_input.config_digest must equal config.digest()")
+        profile_ref = None if "profile_ref" not in value else ProfileRef.from_json(value["profile_ref"])
         return cls(
             config,
             config_digest,
@@ -781,6 +1026,7 @@ class FindJobsRunInput(_Contract):
             _enum(value["selection_rule"], SelectionRule, "selection_rule"),
             _enum(value["model_target"], ModelTarget, "model_target"),
             PinnedResume.from_json(value["pinned_resume"]),
+            profile_ref,
         )
 
 
@@ -903,6 +1149,62 @@ class URLSetDiff(_Contract):
 
 
 @dataclass(frozen=True)
+class DropCount(_Contract):
+    """How many acquired rows were dropped for one reason (0.1.8.1 B1).
+
+    B1: acquire now drops country/location/remote/role-non-matching rows
+    right after fetch instead of leaving them for the UI to filter (raw/
+    keeps everything for audit/replay -- see ``_write_raw_payloads``). This
+    is the per-reason accounting of that drop, additive on
+    :class:`AcquireOutput` so it's visible on the run without re-deriving it
+    from ``raw/`` vs ``outputs/acquire.json``.
+    """
+
+    reason: NotAssessedReason
+    count: int
+
+    def to_json(self) -> dict[str, object]:
+        return {"reason": _json_enum(self.reason), "count": self.count}
+
+    @classmethod
+    def from_json(cls, obj: object) -> "DropCount":
+        value = _object(obj, ("reason", "count"), "drop_count")
+        return cls(_enum(value["reason"], NotAssessedReason, "drop_count.reason"), _integer(value["count"], "drop_count.count", minimum=0))
+
+
+@dataclass(frozen=True)
+class CarriedForwardAssessment(_Contract):
+    """uat-bug-009: a posting skipped as UNCHANGED, plus its earlier result.
+
+    Produced only when acquire finds a *successful* assessment of the exact
+    same content digest, for the current resume revision, from an earlier
+    run -- the only case where skipping a posting as "unchanged" is still
+    correct (see ``market_acquisition._prior_assessments``). Additive on
+    :class:`AcquireOutput`, never on the assessed/not-assessed partition
+    :class:`PresentPayload` enforces (a posting cannot be both): the UI
+    layer (``present_api.py``, ``ResultsView.jsx``/``boardRows.js``) merges
+    this alongside the NotAssessedRow(UNCHANGED) entry so the card shows the
+    carried fit/reasons instead of a bare "Not assessed", labelled with the
+    run it came from.
+    """
+
+    normalized_url: str
+    result: "AssessmentResult"
+    from_run_date: str | None
+
+    def to_json(self) -> dict[str, object]:
+        return {"normalized_url": self.normalized_url, "result": self.result.to_json(), "from_run_date": self.from_run_date}
+
+    @classmethod
+    def from_json(cls, obj: object) -> "CarriedForwardAssessment":
+        value = _object(obj, ("normalized_url", "result", "from_run_date"), "carried_forward_assessment")
+        from_run_date = value["from_run_date"]
+        if from_run_date is not None and not isinstance(from_run_date, str):
+            _fail("wrong_type", "carried_forward_assessment.from_run_date must be a string or null")
+        return cls(_string(value["normalized_url"], "normalized_url"), AssessmentResult.from_json(value["result"]), from_run_date)
+
+
+@dataclass(frozen=True)
 class AcquireOutput(_Contract):
     schema_version: ClassVar[str] = "scout-find-jobs-acquire-output:1"
     batch_id: str
@@ -914,9 +1216,26 @@ class AcquireOutput(_Contract):
     url_set_diff: URLSetDiff
     watchlist_refs: tuple[str, ...]
     selected_postings: tuple[SelectedPosting, ...]
+    # C0 (v0.1.8.1 B1): additive/optional -- per-reason counts of rows
+    # dropped right after fetch (before ``rows``/``url_set_diff`` are even
+    # computed), so old serialized acquire outputs (pre-B1, no drop stage)
+    # still parse with this at its `()` default.
+    dropped_counts: tuple[DropCount, ...] = ()
+    # uat-bug-009: additive/optional -- every UNCHANGED row skipped this run
+    # because a successful prior assessment for the current resume revision
+    # was found, plus that earlier result. `()` default keeps an old
+    # serialized acquire output (pre-uat-bug-009) parsing unchanged.
+    carried_forward_assessments: tuple[CarriedForwardAssessment, ...] = ()
+    # P6: additive/optional -- one Jev pre-rank score per candidate row, in
+    # the order the ranking call scored them; `()` for a run with no Jev key
+    # (fail open) or one sealed before P6 shipped. `RankScore` lives in
+    # ``jev_contracts.py`` (plan's shared-DTO rule); imported lazily here so
+    # this module -- imported by ``jev_contracts.py`` itself -- never forms
+    # an import cycle.
+    rank_scores: tuple["RankScore", ...] = ()
 
     def to_json(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "schema_version": self.schema_version,
             "batch_id": self.batch_id,
             "batch_ref": self.batch_ref,
@@ -928,14 +1247,43 @@ class AcquireOutput(_Contract):
             "watchlist_refs": _json_strings(self.watchlist_refs),
             "selected_postings": [posting.to_json() for posting in self.selected_postings],
         }
+        if self.dropped_counts:
+            value["dropped_counts"] = [item.to_json() for item in self.dropped_counts]
+        if self.carried_forward_assessments:
+            value["carried_forward_assessments"] = [item.to_json() for item in self.carried_forward_assessments]
+        if self.rank_scores:
+            value["rank_scores"] = [item.to_json() for item in self.rank_scores]
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "AcquireOutput":
-        value = _object(obj, ("schema_version", "batch_id", "batch_ref", "progress_ref", "progress_status", "rows", "failures", "url_set_diff", "watchlist_refs", "selected_postings"), "acquire_output")
+        value = _object_with_optional(
+            obj,
+            ("schema_version", "batch_id", "batch_ref", "progress_ref", "progress_status", "rows", "failures", "url_set_diff", "watchlist_refs", "selected_postings"),
+            ("dropped_counts", "carried_forward_assessments", "rank_scores"),
+            "acquire_output",
+        )
         if value["schema_version"] != cls.schema_version:
             _fail("bad_enum", "acquire_output.schema_version is unsupported")
         if type(value["rows"]) is not list or type(value["failures"]) is not list or type(value["selected_postings"]) is not list:
             _fail("wrong_type", "acquire_output arrays are malformed")
+        dropped_counts: tuple[DropCount, ...] = ()
+        if "dropped_counts" in value:
+            if type(value["dropped_counts"]) is not list:
+                _fail("wrong_type", "acquire_output.dropped_counts must be an array")
+            dropped_counts = tuple(DropCount.from_json(item) for item in value["dropped_counts"])
+        carried_forward_assessments: tuple[CarriedForwardAssessment, ...] = ()
+        if "carried_forward_assessments" in value:
+            if type(value["carried_forward_assessments"]) is not list:
+                _fail("wrong_type", "acquire_output.carried_forward_assessments must be an array")
+            carried_forward_assessments = tuple(CarriedForwardAssessment.from_json(item) for item in value["carried_forward_assessments"])
+        rank_scores: tuple["RankScore", ...] = ()
+        if "rank_scores" in value:
+            if type(value["rank_scores"]) is not list:
+                _fail("wrong_type", "acquire_output.rank_scores must be an array")
+            from .jev_contracts import RankScore
+
+            rank_scores = tuple(RankScore.from_json(item) for item in value["rank_scores"])
         return cls(
             _string(value["batch_id"], "batch_id"),
             _string(value["batch_ref"], "batch_ref"),
@@ -946,6 +1294,9 @@ class AcquireOutput(_Contract):
             URLSetDiff.from_json(value["url_set_diff"]),
             _strings(value["watchlist_refs"], "watchlist_refs", allow_empty=True),
             tuple(SelectedPosting.from_json(item) for item in value["selected_postings"]),
+            dropped_counts,
+            carried_forward_assessments,
+            rank_scores,
         )
 
 
@@ -954,14 +1305,21 @@ class RequirementMatrixRow(_Contract):
     requirement: str
     resume_evidence: tuple[str, ...]
     status: MatrixStatus
+    # P2 (v0.1.9): additive, JSON key "class" (a reserved word); omitted
+    # when None so an old serialized matrix row is byte-identical to before.
+    requirement_class: RequirementClass | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {"requirement": self.requirement, "resume_evidence": _json_strings(self.resume_evidence), "status": _json_enum(self.status)}
+        value: dict[str, object] = {"requirement": self.requirement, "resume_evidence": _json_strings(self.resume_evidence), "status": _json_enum(self.status)}
+        if self.requirement_class is not None:
+            value["class"] = _json_enum(self.requirement_class)
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "RequirementMatrixRow":
-        value = _object(obj, ("requirement", "resume_evidence", "status"), "matrix_row")
-        return cls(_string(value["requirement"], "requirement"), _strings(value["resume_evidence"], "resume_evidence", allow_empty=True), _enum(value["status"], MatrixStatus, "status"))
+        value = _object_with_optional(obj, ("requirement", "resume_evidence", "status"), ("class",), "matrix_row")
+        requirement_class = None if "class" not in value else _enum(value["class"], RequirementClass, "matrix_row.class")
+        return cls(_string(value["requirement"], "requirement"), _strings(value["resume_evidence"], "resume_evidence", allow_empty=True), _enum(value["status"], MatrixStatus, "status"), requirement_class)
 
 
 @dataclass(frozen=True)
@@ -980,6 +1338,34 @@ class NotAssessedRow(_Contract):
         return cls(PostingRow.from_json(value["posting"]), _enum(value["reason"], NotAssessedReason, "reason"))
 
 
+_QUESTION_ID = re.compile(r"\A[a-z0-9._-]+:[a-z0-9._-]+\Z")
+
+
+@dataclass(frozen=True)
+class AssessmentQuestion(_Contract):
+    """P2 (v0.1.9): one structured, askable question from the S29 r1 prompt.
+
+    ``question_id`` fits the same pattern as ``experience_qa``'s
+    ``question_id`` (C10) so an answered question can be recorded there
+    without translation: ``"<category>:<value>"``, lowercase.
+    """
+
+    question_id: str
+    question: str
+    requirement: str | None
+
+    def to_json(self) -> dict[str, object]:
+        return {"question_id": self.question_id, "question": self.question, "requirement": self.requirement}
+
+    @classmethod
+    def from_json(cls, obj: object) -> "AssessmentQuestion":
+        value = _object(obj, ("question_id", "question", "requirement"), "assessment_question")
+        question_id = _string(value["question_id"], "assessment_question.question_id")
+        if not _QUESTION_ID.fullmatch(question_id):
+            _fail("invalid_value", "assessment_question.question_id must match <category>:<value>")
+        return cls(question_id, _string(value["question"], "assessment_question.question"), _optional_string(value["requirement"], "assessment_question.requirement"))
+
+
 @dataclass(frozen=True)
 class AssessmentResult(_Contract):
     posting: SelectedPosting
@@ -988,6 +1374,12 @@ class AssessmentResult(_Contract):
     questions: tuple[str, ...]
     proposal_revision_ref: str | None
     sponsorship: SponsorshipStatus | None = None
+    # P2 (v0.1.9): additive verdict/structured-question fields (plan section
+    # "P2"). All three are omitted at their defaults so an old serialized
+    # assessment result's to_json() stays byte-identical to before.
+    verdict: Verdict | None = None
+    structured_questions: tuple[AssessmentQuestion, ...] = ()
+    not_a_match_reason: str | None = None
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {"posting": self.posting.to_json(), "matrix": [row.to_json() for row in self.matrix], "suggestions": _json_strings(self.suggestions), "questions": _json_strings(self.questions), "proposal_revision_ref": self.proposal_revision_ref}
@@ -996,15 +1388,43 @@ class AssessmentResult(_Contract):
         # old assessment result's to_json() is byte-identical to before.
         if self.sponsorship is not None:
             value["sponsorship"] = _json_enum(self.sponsorship)
+        if self.verdict is not None:
+            value["verdict"] = _json_enum(self.verdict)
+        if self.structured_questions:
+            value["structured_questions"] = [item.to_json() for item in self.structured_questions]
+        if self.not_a_match_reason is not None:
+            value["not_a_match_reason"] = self.not_a_match_reason
         return value
 
     @classmethod
     def from_json(cls, obj: object) -> "AssessmentResult":
-        value = _object_with_optional(obj, ("posting", "matrix", "suggestions", "questions", "proposal_revision_ref"), ("sponsorship",), "assessment_result")
+        value = _object_with_optional(
+            obj,
+            ("posting", "matrix", "suggestions", "questions", "proposal_revision_ref"),
+            ("sponsorship", "verdict", "structured_questions", "not_a_match_reason"),
+            "assessment_result",
+        )
         if type(value["matrix"]) is not list:
             _fail("wrong_type", "assessment_result.matrix must be an array")
         sponsorship = None if "sponsorship" not in value else _enum(value["sponsorship"], SponsorshipStatus, "assessment_result.sponsorship")
-        return cls(SelectedPosting.from_json(value["posting"]), tuple(RequirementMatrixRow.from_json(item) for item in value["matrix"]), _strings(value["suggestions"], "suggestions", allow_empty=True), _strings(value["questions"], "questions", allow_empty=True), _optional_string(value["proposal_revision_ref"], "proposal_revision_ref"), sponsorship)
+        verdict = None if "verdict" not in value else _enum(value["verdict"], Verdict, "assessment_result.verdict")
+        structured_questions: tuple[AssessmentQuestion, ...] = ()
+        if "structured_questions" in value:
+            if type(value["structured_questions"]) is not list:
+                _fail("wrong_type", "assessment_result.structured_questions must be an array")
+            structured_questions = tuple(AssessmentQuestion.from_json(item) for item in value["structured_questions"])
+        not_a_match_reason = None if "not_a_match_reason" not in value else _optional_string(value["not_a_match_reason"], "assessment_result.not_a_match_reason")
+        return cls(
+            SelectedPosting.from_json(value["posting"]),
+            tuple(RequirementMatrixRow.from_json(item) for item in value["matrix"]),
+            _strings(value["suggestions"], "suggestions", allow_empty=True),
+            _strings(value["questions"], "questions", allow_empty=True),
+            _optional_string(value["proposal_revision_ref"], "proposal_revision_ref"),
+            sponsorship,
+            verdict,
+            structured_questions,
+            not_a_match_reason,
+        )
 
 
 @dataclass(frozen=True)
@@ -1508,7 +1928,13 @@ PRESENT_DECLARED_EFFECTS = PRESENT_EFFECTS
 
 
 class ExaSearchClient(Protocol):
-    def search(self, client: "httpx.Client", config: FindJobsConfig) -> tuple[PostingRow, ...]: ...
+    def search(
+        self,
+        client: "httpx.Client",
+        config: FindJobsConfig,
+        *,
+        home_root: Path | None = None,
+    ) -> tuple[PostingRow, ...]: ...
 
 
 class ATSBoardClient(Protocol):
@@ -1873,13 +2299,14 @@ __all__ = [
     "ACQUIRE_CAPABILITY", "ACQUIRE_CAPABILITY_ID", "ACQUIRE_DECLARED_EFFECTS", "ACQUIRE_EFFECTS",
     "ASSESS_CAPABILITY", "ASSESS_CAPABILITY_ID", "ASSESS_DECLARED_EFFECTS", "ASSESS_EFFECTS", "ASSESS_LOCAL_EFFECTS",
     "API_BIND", "ATSBoardClient", "ATSProvider", "AcquireInput", "AcquireNodeCallable", "AcquireOutput", "ExaSearchClient",
-    "AggregateStatus", "ArtifactRef", "AssessmentResult", "AssessInput", "AssessNodeCallable", "AssessOutput", "ConsentActor", "ConfigRequest", "ConfigResponse",
+    "AggregateStatus", "ArtifactRef", "AssessmentQuestion", "AssessmentResult", "AssessInput", "AssessNodeCallable", "AssessOutput", "ConsentActor", "ConfigRequest", "ConfigResponse",
+    "DEFAULT_MAX_AGE_DAYS", "DropCount", "MAX_AGE_DAYS_MAXIMUM",
     "EditedURL", "FindJobsConfig", "FindJobsContractError", "FailureRow", "FindJobsRunInput", "FindJobsConfig", "GoalError", "GoalStatus", "MatrixStatus", "ModelTarget", "NodeContext",
     "NodeFailure", "NodeReceipt", "NodeReceiptFixture", "NodeReceiptStatus", "NodeStatus", "NodeCallable", "NormalizedPostingRow", "NormalizedPublicPostingRow", "NotAssessedReason",
     "NotAssessedRow", "PRESENT_CAPABILITY", "PRESENT_CAPABILITY_ID", "PRESENT_DECLARED_EFFECTS", "PRESENT_EFFECTS", "PresentInput",
-    "PresentNodeCallable", "PresentOutput", "PresentPayload", "PinnedResume", "PostingRow", "PostingRowResult", "Producer", "ROUTES",
-    "ProgressStatus", "RequirementMatrixRow", "RowOutcome", "RouteSpec", "RunLookupRequest", "RunRequest", "RunResponse", "RunResultsResponse", "RunStatusResponse",
-    "SelectedPosting", "SelectionReason", "SelectionReasonCode", "SelectionRule", "SourceKind", "SourceToggles", "SponsorshipStatus", "UIConsentEnvelope", "URLChangeDetectionClient", "URLObservation", "URLSetDiff",
-    "UsageBlock", "WatchlistClient", "WatchlistEntry", "WatchlistFixture", "WatchlistFirstSeen", "aggregate_status", "content_hash",
+    "PayPeriod", "PresentNodeCallable", "PresentOutput", "PresentPayload", "PinnedResume", "PostingPay", "PostingRow", "PostingRowResult", "Producer", "ProfileRef", "ROUTES",
+    "ProgressStatus", "RequirementClass", "RequirementMatrixRow", "RowOutcome", "RouteSpec", "RunLookupRequest", "RunRequest", "RunResponse", "RunResultsResponse", "RunStatusResponse",
+    "SelectedPosting", "SelectionReason", "SelectionReasonCode", "SelectionRule", "SourceKind", "SourceToggles", "SponsorshipStatus", "UIConsentEnvelope", "URLChangeDetectionClient", "URLObservation", "URLSetDiff", "Verdict",
+    "UsageBlock", "WatchlistClient", "WatchlistEntry", "WatchlistFixture", "WatchlistFirstSeen", "WorkMode", "aggregate_status", "content_hash",
     "diff_url_sets", "normalize_url", "parse_board_url",
 ]

@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import threading
 import traceback
 import uuid
 from typing import Callable, Mapping
@@ -69,6 +70,7 @@ from .scout.find_jobs.contracts import (
     PresentInput,
     Producer,
     PinnedResume,
+    ProfileRef,
     RunRequest,
     SelectionReasonCode,
     UsageBlock,
@@ -163,10 +165,67 @@ class _FindJobsRunExecution:
     input_bytes: bytes
 
 
-def resolve_newest_resume(
+@dataclass(frozen=True)
+class ResumeDetails:
+    """``resolve_newest_resume``'s pick, plus the reference's display metadata.
+
+    ``pinned`` is the exact same ``PinnedResume`` ``resolve_newest_resume``
+    returns (record_id/revision_id/content digest) -- a sealed shape used by
+    the find-jobs run input contract. ``label``/``created_at`` come from the
+    winning ``g45_reference`` import record (uat-bug-004: the Configuration
+    card shows these instead of raw ids) and are additive display-only
+    fields, never part of the sealed run input.
+    """
+
+    pinned: PinnedResume
+    label: str | None
+    created_at: str | None
+
+
+_RESUME_DETAILS_CACHE_LOCK = threading.Lock()
+# uat-bug-008: resolving the newest resume replays every committed
+# records/references/run-inputs artifact (one `git log` per path -- see
+# journal._capture_committed_snapshot) each time it runs, so a few dozen
+# journal commits made this take seconds, and /api/config called it twice
+# (once via resume_preview, once via resume_metadata). Cache the resolved
+# ResumeDetails per workpad, keyed by the workpad's exact git HEAD: any new
+# commit (including `gigai scout resume add`) changes HEAD and misses the
+# cache, so a cached entry can never serve a resume that predates the
+# newest commit. The HEAD read itself is one cheap `git rev-parse`, not the
+# expensive snapshot walk.
+_resume_details_cache: dict[tuple[str, str], "ResumeDetails | RunError"] = {}
+
+
+def _cheap_workpad_head(root: Path) -> str | None:
+    """One cheap ``git rev-parse HEAD`` against the workpad -- never the
+
+    expensive committed-artifact snapshot walk. Returns ``None`` (never
+    cached) if the workpad has no commits yet or git is unavailable, so a
+    lookup failure always falls through to the real resolution below.
+    """
+
+    try:
+        result = _git(root, "rev-parse", "--verify", "HEAD", check=False)
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    head = result.stdout.strip()
+    return head or None
+
+
+def resolve_newest_resume_details(
     home_root: Path, target: Path | None
-) -> PinnedResume:
-    """Resolve the newest committed ``resume`` record and exact revision."""
+) -> ResumeDetails:
+    """Resolve the newest committed ``resume`` record, its exact revision,
+
+    and the reference's display metadata (label + created date). The single
+    implementation of "which resume wins" lives here; ``resolve_newest_resume``
+    is a thin wrapper returning just the sealed ``PinnedResume`` piece.
+
+    Cached per workpad, keyed by its exact git HEAD (see
+    ``_resume_details_cache``) -- a fresh commit always misses.
+    """
 
     from . import private_records
     from .scout.inputs import _record_revision
@@ -178,6 +237,28 @@ def resolve_newest_resume(
             gig_id=None,
             allow_semantic_state=True,
         )
+    except Exception as exc:
+        raise RunError("find_jobs_resume_required: committed resume records are unavailable") from exc
+
+    cache_key: tuple[str, str] | None = None
+    head = _cheap_workpad_head(resolved.path)
+    if head is not None:
+        cache_key = (str(resolved.path), head)
+        with _RESUME_DETAILS_CACHE_LOCK:
+            cached = _resume_details_cache.get(cache_key)
+        if cached is not None:
+            if isinstance(cached, RunError):
+                raise cached
+            return cached
+
+    def _cache_error(message: str) -> RunError:
+        error = RunError(message)
+        if cache_key is not None:
+            with _RESUME_DETAILS_CACHE_LOCK:
+                _resume_details_cache[cache_key] = error
+        return error
+
+    try:
         imports = private_records.list_imports(
             home_root=home_root,
             requested_target=target,
@@ -185,14 +266,17 @@ def resolve_newest_resume(
             gig_id=resolved.gig_id,
         )
     except Exception as exc:
-        raise RunError("find_jobs_resume_required: committed resume records are unavailable") from exc
+        raise _cache_error(
+            "find_jobs_resume_required: committed resume records are unavailable"
+        ) from exc
+
     resume_imports = [
         item
         for item in imports
         if item.get("kind") == "resume" and isinstance(item.get("reference_id"), str)
     ]
     if not resume_imports:
-        raise RunError("find_jobs_resume_required: no committed resume is available")
+        raise _cache_error("find_jobs_resume_required: no committed resume is available")
     resume_imports.sort(
         key=lambda item: (str(item.get("created_at", "")), str(item.get("reference_id", "")))
     )
@@ -231,7 +315,9 @@ def resolve_newest_resume(
                 continue
             linked.append((imported, record_id, revision_id, dict(content)))
     if not linked:
-        raise RunError("find_jobs_resume_required: no committed resume record revision is available")
+        raise _cache_error(
+            "find_jobs_resume_required: no committed resume record revision is available"
+        )
     imported, record_id, revision_id, content_ref = max(
         linked,
         key=lambda item: (
@@ -263,9 +349,69 @@ def resolve_newest_resume(
         snapshot_ref = content_ref.get("snapshot_ref")
         if isinstance(snapshot_ref, Mapping) and snapshot_ref.get("content_sha256") != digest:
             raise ValueError("resume content digest differs from its committed snapshot")
-        return PinnedResume(record_id, revision_id, digest)
+        label = imported.get("label")
+        created_at = imported.get("created_at")
+        result = ResumeDetails(
+            pinned=PinnedResume(record_id, revision_id, digest),
+            label=label if isinstance(label, str) else None,
+            created_at=created_at if isinstance(created_at, str) else None,
+        )
     except Exception as exc:
-        raise RunError("find_jobs_resume_required: selected resume is unavailable") from exc
+        raise _cache_error(
+            "find_jobs_resume_required: selected resume is unavailable"
+        ) from exc
+    if cache_key is not None:
+        with _RESUME_DETAILS_CACHE_LOCK:
+            _resume_details_cache[cache_key] = result
+    return result
+
+
+def resolve_newest_resume(
+    home_root: Path, target: Path | None
+) -> PinnedResume:
+    """Resolve the newest committed ``resume`` record and exact revision."""
+
+    return resolve_newest_resume_details(home_root, target).pinned
+
+
+def resolve_profile_resume(
+    resolved: ResolvedWorkpad, record_id: str, revision_id: str, *, home_root: Path, target: Path | None
+) -> PinnedResume:
+    """Pin the EXACT resume revision a caller already resolved (S25 F1-b).
+
+    Unlike ``resolve_newest_resume_details``, this never re-derives
+    ``gig_id`` internally (r2's named defect, S25 spike Q2 item 2 /
+    ``run.py:197-202``'s ``gig_id=None`` hardcode) -- it takes an
+    already-resolved workpad and reads exactly the ``(record_id,
+    revision_id)`` pair the caller names (a profile's own pinned
+    ``resume_ref``), never "the newest" or "the active gig's." Core stays
+    profile-unaware: this function has no idea a "profile" exists -- its
+    caller (Scout's ``profile_records.selected_profile``, or the F1-b
+    server.py seam) supplies the pinned identity to look up.
+
+    Raises ``RunError`` if the exact revision is no longer readable (the
+    record was deleted, or the revision id is wrong) -- never silently
+    falls back to "newest" for a stale/missing pin.
+    """
+
+    from . import private_records
+
+    try:
+        selected = private_records.read_record(
+            home_root=home_root,
+            requested_target=target,
+            record_id=record_id,
+            revision_id=revision_id,
+            content=True,
+            gig_id=resolved.gig_id,  # pinned; never re-resolved
+        )
+    except Exception as exc:
+        raise RunError("find_jobs_resume_required: pinned profile resume is unavailable") from exc
+    content = selected.get("content")
+    if not isinstance(content, bytes):
+        raise RunError("find_jobs_resume_required: pinned profile resume content is unavailable")
+    digest = digest_imported_bytes(content)
+    return PinnedResume(record_id, revision_id, digest)
 
 
 _ZERO_USAGE = {
@@ -918,6 +1064,8 @@ def launch_find_jobs_run(
     run_request: RunRequest,
     config_bytes: bytes,
     ui_loopback_verified: bool,
+    profile_ref: Mapping[str, object] | None = None,
+    pinned_resume_ref: Mapping[str, str] | None = None,
 ) -> str:
     """Seal and launch one local find-jobs Run from the API boundary.
 
@@ -926,6 +1074,21 @@ def launch_find_jobs_run(
     Run ID.  The worker receives only the canonical DTO snapshot and the exact
     pinned resume triple; it never reloads the mutable target configuration or
     selects a newer resume at execution time.
+
+    S25 F1-b: ``profile_ref``/``pinned_resume_ref`` are additive, plain-value,
+    keyword-only parameters -- CORE STAYS PROFILE-UNAWARE, this module never
+    imports ``gigai.scout.profile_records`` or anything else from ``scout``
+    beyond the existing data-contract import above. The ONLY caller that
+    resolves a profile is Scout's own ``ScoutFindJobsBackend.start_run``
+    (``scout/find_jobs/api/server.py``), which passes plain mappings here.
+    When both are given (a profile-aware caller): ``pinned_resume_ref``
+    (``{record_id, revision_id}``) REPLACES the "resolve the newest resume"
+    lookup below, and ``profile_ref`` (``{profile_id, revision,
+    content_digest}``) is sealed into the run input via ``ProfileRef``. When
+    both are ``None`` (every existing caller, and any caller that hasn't
+    resolved a profile), behaviour is exactly today's: newest-resume lookup,
+    no ``profile_ref`` sealed -- byte-identical to the pre-F1-b sealed input,
+    so an old caller's digest is unaffected.
     """
 
     if not isinstance(run_request, RunRequest):
@@ -941,9 +1104,30 @@ def launch_find_jobs_run(
         raise RunError("find_jobs_config_digest_mismatch: config digest does not match run request")
     canonical_config_bytes = canonical_json_bytes(config.to_json())
     try:
-        pinned_resume = resolve_newest_resume(home_root, target)
+        if pinned_resume_ref is not None:
+            resolved = resolve_workpad(
+                home_root=home_root, requested_target=target, gig_id=None, allow_semantic_state=True
+            )
+            pinned_resume = resolve_profile_resume(
+                resolved,
+                pinned_resume_ref["record_id"],
+                pinned_resume_ref["revision_id"],
+                home_root=home_root,
+                target=target,
+            )
+        else:
+            pinned_resume = resolve_newest_resume(home_root, target)
     except RunError:
         raise
+    sealed_profile_ref = (
+        None
+        if profile_ref is None
+        else ProfileRef(
+            str(profile_ref["profile_id"]),
+            int(profile_ref["revision"]),  # type: ignore[call-overload]
+            str(profile_ref["content_digest"]),
+        )
+    )
     sealed_input = FindJobsRunInput(
         config=config,
         config_digest=config_digest,
@@ -951,6 +1135,7 @@ def launch_find_jobs_run(
         selection_rule=run_request.selection_rule,
         model_target=run_request.model_target,
         pinned_resume=pinned_resume,
+        profile_ref=sealed_profile_ref,
     )
     execution = _FindJobsRunExecution(
         request=run_request,
@@ -5113,4 +5298,6 @@ __all__ = [
     "launch_run",
     "read_run_details",
     "resolve_newest_resume",
+    "resolve_newest_resume_details",
+    "ResumeDetails",
 ]

@@ -24,11 +24,51 @@ from gigai.scout.template import scout_candidate_inventory
 from gigai.setup import build_config, run_setup
 from gigai.workpad import select_active_workpad
 
+from tests.support.workpad_assertions import assert_managed_workpad_clean
+
 from .conftest import load_fixture
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, Path]:
-    """Create and approve a fresh Scout candidate through the normal path."""
+_DEFAULT_ENDPOINTS = (Endpoint("local-test", "ollama_local", base_url="http://127.0.0.1:11434"),)
+_DEFAULT_MODEL_TARGETS = (
+    ConfigModelTarget(
+        name="ollama_local",
+        endpoint="local-test",
+        model=TEST_MODEL_NAME,
+        capabilities=("text",),
+        max_output_tokens=512,
+        reasoning_effort=None,
+        model_digest=TEST_MODEL_DIGEST,
+        context_tokens=2048,
+        max_response_bytes=65536,
+    ),
+)
+_DEFAULT_PROFILES = (Profile("default", "ollama_local", "ollama_local", "ollama_local"),)
+
+
+def _fixture(
+    tmp_path: Path,
+    *,
+    endpoints: tuple[Endpoint, ...] = _DEFAULT_ENDPOINTS,
+    model_targets: tuple[ConfigModelTarget, ...] = _DEFAULT_MODEL_TARGETS,
+    profiles: tuple[Profile, ...] = _DEFAULT_PROFILES,
+) -> tuple[Path, Path, Path]:
+    """Create and approve a fresh Scout candidate through the normal path.
+
+    ``endpoints``/``model_targets``/``profiles`` default to the fixed
+    single-``ollama_local`` config every existing caller here relies on
+    (reached in the test child process only when
+    ``GIGAI_SCOUT_FIND_JOBS_TEST_MODEL=1`` swaps in a ``MockTransport`` --
+    see ``bindings._patch_test_model_transport``). A caller can override them
+    to build a different sealed-config shape -- for example, two enabled
+    targets on the same adapter with neither named the sealed enum value, so
+    the real assess node's adapter-resolution ambiguity error
+    (``proposal_execution._resolve_configured_target_name_for_adapter``)
+    fires for real, end to end, through the HTTP API and a spawned child
+    process (run-status-and-logs' assess-failure repro).
+
+    Returns ``(home, target, workpad_path)``.
+    """
 
     home, target = tmp_path / "home", tmp_path / "target"
     target.mkdir()
@@ -52,21 +92,9 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path]:
         workpad_root=tmp_path / "workpads",
         editor_argv=("/usr/bin/true",),
         open_with_target=False,
-        endpoints=(Endpoint("local-test", "ollama_local", base_url="http://127.0.0.1:11434"),),
-        model_targets=(
-            ConfigModelTarget(
-                name="ollama_local",
-                endpoint="local-test",
-                model=TEST_MODEL_NAME,
-                capabilities=("text",),
-                max_output_tokens=512,
-                reasoning_effort=None,
-                model_digest=TEST_MODEL_DIGEST,
-                context_tokens=2048,
-                max_response_bytes=65536,
-            ),
-        ),
-        profiles=(Profile("default", "ollama_local", "ollama_local", "ollama_local"),),
+        endpoints=endpoints,
+        model_targets=model_targets,
+        profiles=profiles,
     )
     run_setup(config)
     initialized = initialize_defaults(
@@ -83,7 +111,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path]:
         gig_id=instance.gig_id,
         proposal_id=str(instance.proposal_id),
     )
-    select_active_workpad(
+    resolved = select_active_workpad(
         home_root=home,
         requested_target=target,
         gig_id=instance.gig_id,
@@ -125,7 +153,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path]:
         sources=SourceToggles(exa=True, ats=True, hiringcafe=False),
     )
     config_path.write_bytes(canonical_json_bytes(find_jobs_config.to_json()))
-    return home, target
+    return home, target, resolved.path
 
 
 # Generous headroom over the server's own documented allocation budget
@@ -173,7 +201,7 @@ def test_m1_real_api_run_child_process_and_second_run_dedup(
 ) -> None:
     """The child registry hook is proven by requiring all real node receipts."""
 
-    home, target = _fixture(tmp_path)
+    home, target, workpad = _fixture(tmp_path)
     monkeypatch.setenv("EXA_API_KEY", "m1-test-key")
     # The bindings construct these MockTransports in the spawned child.  A
     # parent transport cannot be pickled through multiprocessing.spawn.
@@ -224,6 +252,29 @@ def test_m1_real_api_run_child_process_and_second_run_dedup(
             assert len(first_payload["node_receipts"]) == 3
             assert first_payload["pinned_resume"] == config_body["resume_preview"]
 
+            # B4: the non-authoritative progress files must exist once the
+            # real acquire->assess->present traversal has finished, and must
+            # agree with the sealed outputs -- every acquired posting is a
+            # progress line, and every sealed assessment shows up assessed.
+            progress_response = client.get(f"/api/runs/{run_id}/progress")
+            assert progress_response.status_code == 200, progress_response.text
+            progress_body = progress_response.json()
+            assert progress_body["steps"]["acquire"]["status"] == "done"
+            assert progress_body["steps"]["assess"]["status"] == "done"
+            sealed_urls = {row["posting"]["normalized_url"] for row in first_payload["rows"]}
+            progress_urls = {item["normalized_url"] for item in progress_body["postings"]}
+            assert sealed_urls <= progress_urls
+            sealed_assessed_urls = {
+                item["posting"]["normalized_url"] for item in first_payload["assessments"]
+            }
+            progress_assessed_urls = {
+                item["normalized_url"]
+                for item in progress_body["assessments"]
+                if item.get("status") == "assessed"
+            }
+            assert sealed_assessed_urls <= progress_assessed_urls
+            assert progress_body["cap"] is not None
+
             second_response = client.post("/api/run", json=request_body)
             assert second_response.status_code == 202, second_response.text
             second_run_id = second_response.json()["run_id"]
@@ -248,3 +299,8 @@ def test_m1_real_api_run_child_process_and_second_run_dedup(
     # The reference-add path pinned the exact committed revision that the run
     # sealed; this also prevents a successful run from hiding a mutable resume.
     assert backend.resume_preview() == resolve_newest_resume(home, target)
+
+    # regression-001: two real find-jobs runs (each through the recording
+    # HTTP client and each writing progress files) must never leave the
+    # managed workpad divergent.
+    assert_managed_workpad_clean(workpad)

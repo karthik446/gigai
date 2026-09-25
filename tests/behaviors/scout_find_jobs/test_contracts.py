@@ -20,6 +20,7 @@ from gigai.scout.find_jobs.contracts import (
     ConfigRequest,
     ConfigResponse,
     ConsentActor,
+    DropCount,
     EditedURL,
     FailureRow,
     FindJobsConfig,
@@ -33,7 +34,9 @@ from gigai.scout.find_jobs.contracts import (
     NodeReceiptFixture,
     NotAssessedReason,
     NotAssessedRow,
+    PayPeriod,
     PinnedResume,
+    PostingPay,
     PostingRow,
     PostingRowResult,
     PresentInput,
@@ -59,6 +62,7 @@ from gigai.scout.find_jobs.contracts import (
     WatchlistEntry,
     WatchlistFirstSeen,
     WatchlistFixture,
+    WorkMode,
     aggregate_status,
     diff_url_sets,
     normalize_url,
@@ -233,6 +237,81 @@ def test_posting_row_sponsorship_rejects_bad_enum() -> None:
     with pytest.raises(FindJobsContractError) as raised:
         PostingRow.from_json(posting)
     assert raised.value.code == "bad_enum"
+
+
+# --- 0.1.8.1 B1: PostingRow.countries (structured, ISO alpha-2, additive) --
+
+
+def test_old_shape_posting_row_without_countries_parses() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    old_posting = acquire["rows"][0]["posting"]  # type: ignore[index]
+    assert "countries" not in old_posting
+    row = PostingRow.from_json(old_posting)
+    assert row.countries is None
+    assert row.to_json() == old_posting
+
+
+def test_posting_row_countries_round_trip() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    old_posting = deepcopy(acquire["rows"][0]["posting"])  # type: ignore[index]
+    old_posting["countries"] = ["US"]
+    row = PostingRow.from_json(old_posting)
+    assert row.countries == ("US",)
+    assert row.to_json() == old_posting
+
+
+def test_posting_row_countries_empty_tuple_round_trips_as_trusted_zero_result() -> None:
+    # An empty list is a real, structured "no recognized country" answer
+    # (not "field absent") -- it must round-trip distinctly from the field
+    # being missing entirely (see test_old_shape_posting_row_without_countries_parses).
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    old_posting = deepcopy(acquire["rows"][0]["posting"])  # type: ignore[index]
+    old_posting["countries"] = []
+    row = PostingRow.from_json(old_posting)
+    assert row.countries == ()
+    assert row.to_json() == old_posting
+
+
+def test_posting_row_countries_rejects_non_alpha2() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    posting = deepcopy(acquire["rows"][0]["posting"])  # type: ignore[index]
+    posting["countries"] = ["USA"]
+    with pytest.raises(FindJobsContractError) as raised:
+        PostingRow.from_json(posting)
+    assert raised.value.code == "invalid_value"
+
+
+# --- 0.1.8.1 B1: AcquireOutput.dropped_counts (additive) -------------------
+
+
+def test_old_shape_acquire_output_without_dropped_counts_parses() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    assert "dropped_counts" not in acquire
+    output = AcquireOutput.from_json(acquire)
+    assert output.dropped_counts == ()
+    assert output.to_json() == acquire
+
+
+def test_acquire_output_dropped_counts_round_trip() -> None:
+    acquire = deepcopy(load_fixture("fixture-acquire-batch-v1.json"))
+    acquire["dropped_counts"] = [{"reason": "location_mismatch", "count": 3}, {"reason": "role_mismatch", "count": 1}]
+    output = AcquireOutput.from_json(acquire)
+    assert output.dropped_counts == (
+        DropCount(NotAssessedReason.LOCATION_MISMATCH, 3),
+        DropCount(NotAssessedReason.ROLE_MISMATCH, 1),
+    )
+    assert output.to_json() == acquire
+
+
+def test_acquire_output_dropped_counts_region_only_round_trip() -> None:
+    # 0.1.8.1 r1 (B1 coordinator review): REGION_ONLY is a new
+    # NotAssessedReason value, additive to the enum -- must serialize/parse
+    # like any other existing reason.
+    acquire = deepcopy(load_fixture("fixture-acquire-batch-v1.json"))
+    acquire["dropped_counts"] = [{"reason": "region_only", "count": 3}]
+    output = AcquireOutput.from_json(acquire)
+    assert output.dropped_counts == (DropCount(NotAssessedReason.REGION_ONLY, 3),)
+    assert output.to_json() == acquire
 
 
 def test_old_shape_assessment_result_without_sponsorship_parses() -> None:
@@ -610,3 +689,57 @@ def test_effect_sets_and_model_target_are_frozen() -> None:
     assert PRESENT_EFFECTS == {"write_workpad"}
     assert set(ModelTarget) == {ModelTarget.OLLAMA_LOCAL, ModelTarget.CODEX_CLI, ModelTarget.OPENROUTER_API}
     assert not hasattr(RowOutcome, "PENDING")
+
+
+# --- Q4b-data (v0.1.9): PostingRow.work_mode / PostingRow.pay (additive) --
+
+
+def test_old_shape_posting_row_without_work_mode_or_pay_parses_and_round_trips_byte_identically() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    old_posting = acquire["rows"][0]["posting"]  # type: ignore[index]
+    assert "work_mode" not in old_posting and "pay" not in old_posting
+    row = PostingRow.from_json(old_posting)
+    assert row.work_mode is None and row.pay is None
+    assert row.to_json() == old_posting
+    assert canonical_json_bytes(row.to_json()) == canonical_json_bytes(old_posting)
+
+
+def test_posting_row_work_mode_and_pay_round_trip() -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    posting = deepcopy(acquire["rows"][0]["posting"])  # type: ignore[index]
+    posting["work_mode"] = "hybrid"
+    posting["pay"] = {"min": 120000, "max": 150000.5, "currency": "USD", "period": "year"}
+    row = PostingRow.from_json(posting)
+    assert row.work_mode is WorkMode.HYBRID
+    assert row.pay == PostingPay(120000, 150000.5, "USD", PayPeriod.YEAR)
+    assert row.to_json() == posting
+    # period null (Greenhouse) and a one-sided range both round-trip.
+    posting["pay"] = {"min": None, "max": 90, "currency": "USD", "period": None}
+    del posting["work_mode"]
+    row = PostingRow.from_json(posting)
+    assert row.pay == PostingPay(None, 90, "USD", None) and row.work_mode is None
+    assert row.to_json() == posting
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "code"),
+    [
+        ("work_mode", "office", "bad_enum"),
+        ("work_mode", 1, "wrong_type"),
+        ("pay", {"min": 1, "max": 2, "currency": "USD", "period": "week"}, "bad_enum"),
+        ("pay", {"min": None, "max": None, "currency": "USD", "period": "year"}, "invalid_value"),
+        ("pay", {"min": 5, "max": 2, "currency": "USD", "period": "year"}, "invalid_value"),
+        ("pay", {"min": -1, "max": 2, "currency": "USD", "period": "year"}, "invalid_value"),
+        ("pay", {"min": True, "max": 2, "currency": "USD", "period": "year"}, "wrong_type"),
+        ("pay", {"min": 1, "max": 2, "currency": "USD"}, "missing_key"),
+        ("pay", {"min": 1, "max": 2, "currency": "USD", "period": "year", "title": "x"}, "unknown_key"),
+        ("pay", "100k-150k", "wrong_type"),
+    ],
+)
+def test_posting_row_work_mode_and_pay_fail_closed(field: str, value: object, code: str) -> None:
+    acquire = load_fixture("fixture-acquire-batch-v1.json")
+    posting = deepcopy(acquire["rows"][0]["posting"])  # type: ignore[index]
+    posting[field] = value
+    with pytest.raises(FindJobsContractError) as raised:
+        PostingRow.from_json(posting)
+    assert raised.value.code == code

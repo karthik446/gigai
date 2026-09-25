@@ -41,6 +41,17 @@ WORKPAD_V2_GITIGNORE = (
     b"/README.md\n/CHANGELOG.md\n/gig.py\n/tools/\n/goalgraphs/\n/ui/\n"
 )
 WORKPAD_LAYOUT_PATH = "manifests/workpad-layout.json"
+# Run-local artifacts that are additive, never journaled, and never named
+# explicitly by any commit: unlike WORKPAD_GITIGNORE/WORKPAD_V2_GITIGNORE
+# (a tracked, byte-exact layout declaration every caller validates), these
+# patterns live in the untracked `.git/info/exclude` so they can be extended
+# without disturbing that committed contract or its hash. Generic run-local
+# artifact roots (not gig-specific names) so core stays free of gig imports.
+RUN_LOCAL_ARTIFACT_EXCLUDES = (
+    "/runs/*/raw/",
+    "/runs/*/progress/",
+    "/runs/*/logs/",
+)
 _V2_ROOTS = frozenset({
     "README.md", "CHANGELOG.md", "gig.py", "tools", "goalgraphs", "ui",
     "docs", "references", "run-inputs", "records", "indexes", "reports",
@@ -272,7 +283,8 @@ def resolve_workpad(
         selected = binding.active_gig_id
         if selected is None:
             raise NoActiveGigError(
-                "no_active_gig: the target has no explicitly selected active Gig"
+                "no_active_gig: the target has no explicitly selected active Gig; "
+                "run `gigai gig use <gig_id>` to select one"
             )
         with registry.transaction() as transaction:
             if transaction.find_project_workpad(bound.project_id, selected) is None:
@@ -287,7 +299,8 @@ def resolve_workpad(
             active = transaction.find_active_workpad(bound.project_id)
         if active is None:
             raise NoActiveGigError(
-                "no_active_gig: the target has no explicitly selected active Gig"
+                "no_active_gig: the target has no explicitly selected active Gig; "
+                "run `gigai gig use <gig_id>` to select one"
             )
         selected = active.gig_id
 
@@ -457,7 +470,42 @@ def _initialize_workpad_repository(root: Path, project_id: str, gig_id: str) -> 
         stream.flush()
         os.fsync(stream.fileno())
     ignore.chmod(0o600)
+    ensure_run_local_artifact_excludes(root)
     _validate_workpad_repository(root, project_id, gig_id)
+
+
+def ensure_run_local_artifact_excludes(root: Path) -> bool:
+    """Add any missing ``RUN_LOCAL_ARTIFACT_EXCLUDES`` lines to ``.git/info/exclude``.
+
+    Idempotent and additive-only: existing lines (including ones an operator
+    or a future packet added) are never rewritten or reordered, only
+    appended to. Safe to call on every workpad creation and, cheaply, before
+    every clean-authority check on an existing workpad -- it does one
+    ``read_text``/``write_text`` and never touches tracked history or the
+    journal/database locks. Returns True if the file was changed.
+    """
+
+    exclude_path = root / ".git" / "info" / "exclude"
+    try:
+        existing = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
+    except OSError:
+        return False
+    existing_lines = set(existing.splitlines())
+    missing = [line for line in RUN_LOCAL_ARTIFACT_EXCLUDES if line not in existing_lines]
+    if not missing:
+        return False
+    exclude_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    addition = "".join(f"{line}\n" for line in missing)
+    if existing and not existing.endswith("\n"):
+        addition = "\n" + addition
+    try:
+        with exclude_path.open("a", encoding="utf-8") as stream:
+            stream.write(addition)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError:
+        return False
+    return True
 
 
 def _validate_workpad_repository(
@@ -650,10 +698,11 @@ def _resolve_bound_project(
             target = resolve_target(requested_target, cwd=cwd)
         except GitTargetError:
             # An explicitly initialized non-Git target is still a valid implicit
-            # target for commands run from that directory.  resolve_target
-            # deliberately rejects implicit non-Git paths because it has no
-            # registry context; use the registry only for this exact, already
-            # bound directory and never infer a parent or neighboring target.
+            # target for commands run from that directory, or from a subfolder
+            # of it.  resolve_target deliberately rejects implicit non-Git
+            # paths because it has no registry context; use the registry only
+            # to recognize an already-bound directory (walking up from cwd to
+            # find it) and never to infer a sibling or unrelated target.
             if requested_target is not None:
                 raise
             current = (cwd or Path.cwd()).resolve(strict=True)
@@ -662,14 +711,19 @@ def _resolve_bound_project(
                 create=False,
                 tolerate_invalid_rows=tolerate_invalid_registry_rows,
             )
+            found_root: Path | None = None
             with registry.transaction() as transaction:
-                record = transaction.find_target(current)
-            if record is None or record.target_kind != "non-git":
+                for candidate in (current, *current.parents):
+                    record = transaction.find_target(candidate)
+                    if record is not None and record.target_kind == "non-git":
+                        found_root = candidate
+                        break
+            if found_root is None:
                 raise
             target = ResolvedTarget(
                 requested_path=current,
                 requested_identity=current,
-                root=current,
+                root=found_root,
                 kind="non-git",
             )
         registry, _ = open_project_registry(
@@ -817,6 +871,7 @@ __all__ = [
     "OpenResult",
     "PROVISION_FAILPOINTS",
     "ProvisionedWorkpad",
+    "RUN_LOCAL_ARTIFACT_EXCLUDES",
     "ResolvedWorkpad",
     "WORKPAD_GITIGNORE",
     "WORKPAD_V2_GITIGNORE",
@@ -827,6 +882,7 @@ __all__ = [
     "WorkpadError",
     "WorkpadPermissionError",
     "WorkpadUnavailableError",
+    "ensure_run_local_artifact_excludes",
     "open_locations",
     "provision_workpad",
     "register_existing_workpad",

@@ -1,0 +1,26 @@
+[
+  {
+    "board_token": "Instrumentl",
+    "careers_url": "https://jobs.lever.co/Instrumentl",
+    "company": "Instrumentl",
+    "error": null,
+    "is_usable_board": true,
+    "matching_role_us_count": 1,
+    "parses_as_ats": true,
+    "posting_count": 1,
+    "provider": "lever",
+    "resolved": true
+  },
+  {
+    "board_token": "Instrumentl",
+    "careers_url": "https://jobs.lever.co/Instrumentl",
+    "company": "Senior Backend Engineer",
+    "error": null,
+    "is_usable_board": true,
+    "matching_role_us_count": 1,
+    "parses_as_ats": true,
+    "posting_count": 1,
+    "provider": "lever",
+    "resolved": true
+  }
+]

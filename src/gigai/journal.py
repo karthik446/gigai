@@ -6,14 +6,16 @@ import base64
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import fnmatch
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
-from typing import Callable, Iterator, TypeVar
+from typing import Callable, Iterable, Iterator, TypeVar
 
 from .canonical import (
     EntityPrefix,
@@ -27,6 +29,7 @@ from .canonical import (
 )
 from .diagnostics import run_mount_probes
 from .workpad import (
+    RUN_LOCAL_ARTIFACT_EXCLUDES,
     WORKPAD_GITIGNORE,
     WORKPAD_GIT_USER_EMAIL,
     WORKPAD_GIT_USER_NAME,
@@ -119,6 +122,8 @@ TRANSITIONS = frozenset(
         "template_instance_bound",
         "scout_source_materialized",
         "scout_public_acquisition_progress",
+        "scout_profile_revised",
+        "scout_profile_selected",
         "capability_review_decided",
         "capability_successor_prepared",
         "private_reference_imported",
@@ -588,7 +593,52 @@ def _lock_owner(path: Path) -> str:
     return value or "unknown"
 
 
+_MOUNT_PROBE_CACHE_LOCK = threading.Lock()
+# probe-cache: every journal writer acquisition used to spawn
+# `python -m gigai.diagnostics --contend-lock` (~0.35s) to prove the
+# workpad's interprocess advisory lock actually excludes, on every single
+# records/profile/run operation -- a fixed structural cost paid over and
+# over for a fact that does not change while the mount stays the same.
+# Cache only a PASS, per process, keyed by the resolved root plus its
+# (st_dev, st_ino): a remount or a replaced directory changes one of those
+# and re-probes. A FAIL is never cached -- a failing probe must keep
+# raising on every acquisition, since "the mount broke mid-session" is
+# exactly the case this exists to catch. `gigai doctor` never consults this
+# cache; it always calls `run_mount_probes` directly so an operator's
+# diagnostic reflects the mount right now.
+_mount_probe_cache: dict[tuple[str, int, int], bool] = {}
+
+
+def _mount_probe_cache_key(root: Path) -> tuple[str, int, int] | None:
+    """Identity of the mount to cache a PASS against, or ``None`` if it
+
+    cannot be established (the probe then always runs, uncached).
+    """
+
+    try:
+        stat = root.stat()
+    except OSError:
+        return None
+    return (os.fspath(root), stat.st_dev, stat.st_ino)
+
+
 def _require_mount_probes(root: Path) -> None:
+    cache_key = _mount_probe_cache_key(root)
+    if cache_key is None:
+        _run_and_raise_on_failure(root)
+        return
+    with _MOUNT_PROBE_CACHE_LOCK:
+        if _mount_probe_cache.get(cache_key):
+            return
+        # Hold the lock across the probe itself (it is a subprocess-bound
+        # call, not a hot path once warm) so two threads racing on the same
+        # mount's first acquisition probe at most once for a PASS, never
+        # concurrently.
+        _run_and_raise_on_failure(root)
+        _mount_probe_cache[cache_key] = True
+
+
+def _run_and_raise_on_failure(root: Path) -> None:
     failed = [check.id for check in run_mount_probes(root) if check.status != "PASS"]
     if failed:
         raise InterprocessLockUnavailable(
@@ -1076,27 +1126,106 @@ def _read_handoff(path: Path) -> dict[str, object]:
     return metadata
 
 
-def read_committed_artifact(
-    *, workpad: Path, project_id: str, gig_id: str, path: str, head: str | None = None,
-    allow_replaced_run_details: bool = False,
-    allow_replaced_manifests: bool = False,
-) -> tuple[bytes, str]:
-    """Return an exact immutable artifact only when its publication is proven.
+@dataclass(frozen=True)
+class _CommitFiles:
+    """The paths one publishing commit touched, indexed once per commit.
 
-    A schema-valid file in the working tree is deliberately insufficient: the
-    path must have been added by a journal commit and be listed, with its exact
-    bytes, in that commit's handoff metadata.  Callers must not follow paths
-    from the record itself before this check succeeds.
+    ``_validate_committed_artifact`` asks two things of a commit's file
+    list: "is ``checked`` in it?" and "does it name exactly one handoff?".
+    Answering both from a list was O(files) per artifact, so a snapshot of
+    N records published by one commit (a watchlist seed) paid O(N^2) --
+    see ``_capture_committed_snapshot``. Built once per distinct commit
+    and shared by every artifact that commit published.
     """
 
-    _validate_ids(project_id, gig_id, None)
-    checked = _validate_artifacts((JournalArtifact(path, b""),))[0].path
-    root = _validate_workpad(workpad, project_id, gig_id)
-    pinned_head = head or _head_commit(root)
-    commits = _git(root, "log", "--format=%H", pinned_head, "--", checked, check=False)
-    candidates = [line for line in commits.stdout.splitlines() if line]
-    if not candidates:
-        raise JournalArtifactMissingError("journal artifact is not committed")
+    names: frozenset[str]
+    handoffs: tuple[str, ...]
+
+    @classmethod
+    def from_names(cls, names: Iterable[str]) -> "_CommitFiles":
+        listed = tuple(names)
+        return cls(
+            frozenset(listed),
+            tuple(name for name in listed if name.startswith("handoffs/") and name.endswith(".txt")),
+        )
+
+
+class _HandoffIndex:
+    """One handoff document, parsed at most once, with its ``artifact_refs``
+
+    indexed by path. ``parsed()`` is lazy on purpose: it runs only when
+    ``_validate_committed_artifact`` reaches its front-matter step, so an
+    artifact whose earlier checks fail (multiple publishers, incomplete
+    publication) still raises that earlier error, exactly as it did when
+    every artifact re-parsed the handoff itself. A parse failure is
+    remembered and re-raised the same way on every later ``parsed()``.
+
+    The by-path index holds, for each path, the same ``[item ...]`` list
+    the former per-artifact scan ``[item for item in refs if
+    isinstance(item, dict) and item.get("path") == checked]`` produced
+    (``checked`` is always a ``str``; a ref whose ``path`` is not a ``str``
+    can never equal it, and is left out of the index for the same reason).
+    ``None`` in place of the index means ``artifact_refs`` was not a list.
+    """
+
+    __slots__ = ("_document", "_result")
+
+    def __init__(self, document: bytes) -> None:
+        self._document = document
+        self._result: (
+            tuple[dict[str, object], dict[str, list[dict[str, object]]] | None] | ValueError | None
+        ) = None
+
+    def parsed(self) -> tuple[dict[str, object], dict[str, list[dict[str, object]]] | None]:
+        if self._result is None:
+            try:
+                metadata, _body = parse_json_front_matter(self._document)
+            except ValueError as exc:
+                self._result = exc
+            else:
+                refs = metadata.get("artifact_refs")
+                by_path: dict[str, list[dict[str, object]]] | None = None
+                if isinstance(refs, list):
+                    by_path = {}
+                    for item in refs:
+                        if isinstance(item, dict):
+                            key = item.get("path")
+                            if isinstance(key, str):
+                                by_path.setdefault(key, []).append(item)
+                self._result = (metadata, by_path)
+        if isinstance(self._result, ValueError):
+            raise JournalConflictError("journal artifact publication is invalid") from self._result
+        return self._result
+
+
+def _validate_committed_artifact(
+    *,
+    path: str,
+    checked: str,
+    gig_id: str,
+    candidates: list[str],
+    commit: str,
+    files: _CommitFiles,
+    handoff: _HandoffIndex,
+    data: bytes,
+    allow_replaced_run_details: bool,
+    allow_replaced_manifests: bool,
+) -> None:
+    """The exact publication/authenticity checks ``read_committed_artifact``
+
+    applies to one already-fetched artifact -- pulled out so a batched,
+    multi-artifact caller (``_capture_committed_snapshot``) can reuse the
+    identical logic against git data it fetched in bulk, instead of each
+    caller re-deriving its own copy. No git I/O happens in here.
+
+    ``files`` and ``handoff`` are the publishing commit's file list and its
+    handoff document, pre-indexed (``_CommitFiles`` / ``_HandoffIndex``) so
+    a caller checking many artifacts published by one commit builds each
+    once and shares it; every check below is then O(1) in the number of
+    sibling artifacts. The checks themselves, their order and their error
+    messages are unchanged.
+    """
+
     # Immutable records have one publisher.  More than one means a legacy or
     # malicious replacement and is not an authority source.
     # Run details are deliberately mutable scheduler state: each goal
@@ -1107,22 +1236,14 @@ def read_committed_artifact(
     mutable_manifest = allow_replaced_manifests and bool(_MUTABLE_CAPABILITY_MANIFEST.fullmatch(path))
     if len(candidates) != 1 and not (mutable_run_details or mutable_manifest):
         raise JournalConflictError("journal immutable artifact has multiple publishers")
-    commit = candidates[0]
-    names = _git(root, "show", "--format=", "--name-only", commit).stdout.splitlines()
-    handoffs = [name for name in names if name.startswith("handoffs/") and name.endswith(".txt")]
-    if len(handoffs) != 1 or checked not in names:
+    if len(files.handoffs) != 1 or checked not in files.names:
         raise JournalConflictError("journal artifact publication is incomplete")
-    try:
-        metadata, _body = parse_json_front_matter(_git_bytes(root, "show", f"{commit}:{handoffs[0]}"))
-        data = _git_bytes(root, "show", f"{pinned_head}:{checked}")
-    except (ValueError, JournalConflictError) as exc:
-        raise JournalConflictError("journal artifact publication is invalid") from exc
+    metadata, refs_by_path = handoff.parsed()
     if metadata.get("gig_id") != gig_id:
         raise JournalConflictError("journal artifact belongs to another Gig")
-    refs = metadata.get("artifact_refs")
-    if not isinstance(refs, list):
+    if refs_by_path is None:
         raise JournalConflictError("journal artifact lacks authenticated references")
-    matches = [item for item in refs if isinstance(item, dict) and item.get("path") == checked]
+    matches = refs_by_path.get(checked, ())
     if len(matches) != 1:
         raise JournalConflictError("journal artifact reference is ambiguous")
     reference = matches[0]
@@ -1146,7 +1267,194 @@ def read_committed_artifact(
             raise JournalConflictError("mutable capability manifest is invalid") from exc
         if not valid or not isinstance(manifest, dict) or manifest.get("manifest_id") != Path(path).stem or manifest.get("gig_id") != gig_id:
             raise JournalConflictError("mutable capability manifest owner or schema is invalid")
+
+
+def read_committed_artifact(
+    *, workpad: Path, project_id: str, gig_id: str, path: str, head: str | None = None,
+    allow_replaced_run_details: bool = False,
+    allow_replaced_manifests: bool = False,
+) -> tuple[bytes, str]:
+    """Return an exact immutable artifact only when its publication is proven.
+
+    A schema-valid file in the working tree is deliberately insufficient: the
+    path must have been added by a journal commit and be listed, with its exact
+    bytes, in that commit's handoff metadata.  Callers must not follow paths
+    from the record itself before this check succeeds.
+    """
+
+    _validate_ids(project_id, gig_id, None)
+    checked = _validate_artifacts((JournalArtifact(path, b""),))[0].path
+    root = _validate_workpad(workpad, project_id, gig_id)
+    pinned_head = head or _head_commit(root)
+    commits = _git(root, "log", "--format=%H", pinned_head, "--", checked, check=False)
+    candidates = [line for line in commits.stdout.splitlines() if line]
+    if not candidates:
+        raise JournalArtifactMissingError("journal artifact is not committed")
+    # Same early exit as before extracting _validate_committed_artifact: a
+    # multi-publisher conflict (the common tamper/legacy case) is rejected
+    # before any further git I/O, not just before the final return.
+    mutable_run_details = allow_replaced_run_details and path.startswith("runs/") and path.endswith("/run-details.json")
+    mutable_manifest = allow_replaced_manifests and bool(_MUTABLE_CAPABILITY_MANIFEST.fullmatch(path))
+    if len(candidates) != 1 and not (mutable_run_details or mutable_manifest):
+        raise JournalConflictError("journal immutable artifact has multiple publishers")
+    commit = candidates[0]
+    # -z: without it, git C-quotes/octal-escapes any non-ASCII path byte in
+    # --name-only output (e.g. "r\303\251sum\303\251..." for "résum...") --
+    # uat-bug-008-r1's equivalence test caught this same gap in the new
+    # batched code and traced it back to this pre-existing line, latent in
+    # production today only because every real committed path is built from
+    # a UUID (references/record path components are ASCII hex+hyphens), so
+    # no real artifact path has ever hit it. `checked`/`path` below are
+    # always the plain (unquoted) spelling, so without -z here `checked not
+    # in names` would wrongly fail for a hypothetical non-ASCII path.
+    files = _CommitFiles.from_names(
+        name for name in _git(root, "show", "-z", "--format=", "--name-only", commit).stdout.split("\x00") if name
+    )
+    handoffs = files.handoffs
+    try:
+        handoff_bytes = _git_bytes(root, "show", f"{commit}:{handoffs[0]}") if len(handoffs) == 1 else b""
+        data = _git_bytes(root, "show", f"{pinned_head}:{checked}")
+    except JournalConflictError as exc:
+        raise JournalConflictError("journal artifact publication is invalid") from exc
+    _validate_committed_artifact(
+        path=path, checked=checked, gig_id=gig_id, candidates=candidates, commit=commit,
+        files=files, handoff=_HandoffIndex(handoff_bytes), data=data,
+        allow_replaced_run_details=allow_replaced_run_details,
+        allow_replaced_manifests=allow_replaced_manifests,
+    )
     return data, commit
+
+
+def _parse_z_name_only_log(stdout: str) -> dict[str, list[str]]:
+    """Parse ``git log -z --format=%x01%H --name-only``'s output into
+
+    ``path -> [commits]`` (newest first). ``-z`` is required, not optional:
+    without it, git C-quotes any path with a non-ASCII byte (wraps it in
+    ``"..."`` and octal-escapes each such byte -- e.g. ``r\\303\\251sum...``
+    for ``résum...``), which would never match that same path's plain UTF-8
+    spelling from ``git ls-tree -z --name-only`` (uat-bug-008-r1: caught by
+    the equivalence test on a unicode path -- the batched snapshot raised
+    ``JournalArtifactMissingError`` where the old per-path implementation
+    correctly found the commit). The ``%x01`` marker (a byte that can't
+    start a real path) disambiguates a commit-sha record from a filename
+    record after splitting on ``\\0``, without guessing from a chunk's
+    shape (a 40-hex-character filename would otherwise be misread as a
+    sha) -- the first record after a sha is prefixed with ``\\n`` (git's
+    blank subject-line separator before the name-only listing); later
+    filenames in the same commit are not.
+    """
+
+    by_path: dict[str, list[str]] = {}
+    current_commit: str | None = None
+    for chunk in stdout.split("\x00"):
+        if not chunk:
+            continue
+        if chunk[0] == "\x01":
+            current_commit = chunk[1:]
+            continue
+        name = chunk[1:] if chunk[0] == "\n" else chunk
+        if name and current_commit is not None:
+            by_path.setdefault(name, []).append(current_commit)
+    return by_path
+
+
+def _batch_publishing_commits(
+    root: Path, head: str, prefixes: tuple[str, ...]
+) -> dict[str, list[str]]:
+    """``path -> [commits that touched it]`` (newest first) for every path
+
+    under ``prefixes`` reachable from ``head`` -- one ``git log`` walk of
+    that slice of history, instead of a separate ``git log --format=%H
+    <head> -- <path>`` per artifact (what ``read_committed_artifact`` does
+    for a single path). Same commit set and order a per-path call would
+    return for each of those paths; see the equivalence test in
+    ``tests/behaviors/runtime_run_authority/test_journal_snapshot_equivalence.py``.
+    """
+
+    result = _git(
+        root, "log", "-z", "--format=%x01%H", "--name-only", head, "--", *prefixes,
+        check=False,
+    )
+    return _parse_z_name_only_log(result.stdout)
+
+
+def _batch_read_blobs(root: Path, refs: list[str]) -> dict[str, bytes]:
+    """``git cat-file --batch`` for every ``<ref>:<path>`` in ``refs`` at once,
+
+    instead of one ``git show <ref>:<path>`` subprocess per blob. Missing
+    objects surface as a ``JournalConflictError`` exactly like
+    ``_git_bytes(root, "show", ref)`` would (via its non-zero exit), not
+    silently -- ``git cat-file --batch`` reports those as a ``missing``
+    line rather than exiting non-zero, so that line is checked explicitly.
+    """
+
+    if not refs:
+        return {}
+    executable = shutil.which("git")
+    if executable is None:
+        raise JournalConflictError("Git executable is unavailable")
+    process = subprocess.run(
+        [executable, "-C", os.fspath(root), "cat-file", "--batch"],
+        input=("\n".join(refs) + "\n").encode("utf-8"),
+        env={**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_OPTIONAL_LOCKS": "0"},
+        capture_output=True, text=False, check=False, shell=False,
+    )
+    if process.returncode != 0:
+        raise JournalConflictError("journal Git object lookup failed")
+    stdout = process.stdout
+    blobs: dict[str, bytes] = {}
+    offset = 0
+    for ref in refs:
+        header_end = stdout.index(b"\n", offset)
+        header = stdout[offset:header_end].decode("utf-8", errors="strict")
+        offset = header_end + 1
+        if header.endswith(" missing"):
+            raise JournalConflictError("journal Git object lookup failed")
+        parts = header.split(" ")
+        if len(parts) != 3:
+            raise JournalConflictError("journal Git object lookup failed")
+        size = int(parts[2])
+        blobs[ref] = stdout[offset : offset + size]
+        offset += size + 1  # the trailing newline after each blob's content
+    return blobs
+
+
+# Pre-split once: each RUN_LOCAL_ARTIFACT_EXCLUDES entry is a gitignore-
+# style "/runs/*/progress/" line (leading "/" = anchored to the workpad
+# root; trailing "/" = that directory and everything beneath it; "*" =
+# exactly one path segment, gitignore semantics, never "**"/recursive).
+# Stored here as its bare segment tuple (("runs", "*", "progress")) for
+# `_is_run_local_artifact`'s own segment-wise match.
+_RUN_LOCAL_ARTIFACT_PREFIX_PARTS: tuple[tuple[str, ...], ...] = tuple(
+    tuple(line.strip("/").split("/")) for line in RUN_LOCAL_ARTIFACT_EXCLUDES
+)
+
+
+def _is_run_local_artifact(relative: str) -> bool:
+    """True for a path under one of ``RUN_LOCAL_ARTIFACT_EXCLUDES``'s roots.
+
+    These roots (``runs/*/raw/``, ``runs/*/progress/``, ``runs/*/logs/``)
+    are additive, working-tree-only evidence a run writes directly to disk
+    (e.g. ``progress.py``'s ``acquire.jsonl``/``assess.jsonl``) and never
+    journals -- ``workpad.ensure_run_local_artifact_excludes`` already
+    excludes them from git itself (``.git/info/exclude``) for exactly this
+    reason. A committed-snapshot read (``_capture_committed_snapshot``) must
+    tolerate their presence in the working tree rather than treating them as
+    unexplained "extra" evidence: this is the one place that check is
+    relaxed, and ONLY for a path strictly under one of these exact roots --
+    a symlink anywhere under them, or any other stray file, is still
+    rejected by the caller's existing checks (this function only ever
+    answers "skip the committed-membership check for this path", never
+    "skip every check").
+    """
+
+    parts = Path(relative).parts
+    for prefix_parts in _RUN_LOCAL_ARTIFACT_PREFIX_PARTS:
+        if len(parts) <= len(prefix_parts):  # strictly under the root, not the root itself
+            continue
+        if all(fnmatch.fnmatchcase(part, pattern) for part, pattern in zip(parts, prefix_parts)):
+            return True
+    return False
 
 
 def _capture_committed_snapshot(
@@ -1155,7 +1463,33 @@ def _capture_committed_snapshot(
     gig_id: str,
     prefixes: tuple[str, ...],
 ) -> JournalSnapshot:
-    """Enumerate private authority from a pinned Git tree, never ``glob``."""
+    """Enumerate private authority from a pinned Git tree, never ``glob``.
+
+    uat-bug-008: this used to call ``read_committed_artifact`` once per
+    committed path, each doing 3-4 of its own ``git`` subprocess calls --
+    O(commits x paths) subprocess spawns for a snapshot. ``root`` is
+    already ``_validate_workpad``-validated by the writer lock this runs
+    under (see ``JournalWriter.snapshot``'s docstring), so re-validating it
+    per path was pure waste. This batches the same checks
+    (``_validate_committed_artifact``) over data fetched in bulk: one
+    ``git log`` walk for publishing commits, one ``git show --name-only``
+    for the distinct candidate commits' file lists, one ``git cat-file
+    --batch`` for every blob -- three subprocess calls total instead of
+    ~4 per artifact.
+
+    journal-snapshot-perf: the subprocess count was linear after uat-bug-008
+    but the CPU work was not. Every artifact re-parsed its publishing
+    commit's handoff (whose ``artifact_refs`` lists every sibling artifact)
+    and re-scanned that commit's file list, so a snapshot of N records
+    published together -- the Scout watchlist seed, ~10k records in one
+    commit -- was O(N^2): ~4 s at 1,000 records, ~16 s at 2,000, ~6 min at
+    10,370. Now each distinct commit's file list (``_CommitFiles``) and
+    each distinct handoff (``_HandoffIndex``, keyed by its commit-pinned
+    blob ref, i.e. immutable content) is indexed once per snapshot and
+    shared by every artifact it published; the per-artifact checks are
+    unchanged (same function, same order, same errors), see
+    ``tests/behaviors/runtime_run_authority/test_journal_snapshot_scaling.py``.
+    """
 
     if not prefixes or any(
         not prefix.endswith("/") or Path(prefix).is_absolute() or ".." in Path(prefix).parts
@@ -1163,10 +1497,32 @@ def _capture_committed_snapshot(
     ):
         raise JournalConflictError("journal snapshot prefixes are invalid")
     head = _head_commit(root)
-    result = _git_bytes(root, "ls-tree", "-r", "-z", "--name-only", head, "--", *prefixes)
-    paths = tuple(item.decode("utf-8") for item in result.split(b"\0") if item)
-    artifacts: dict[str, bytes] = {}
-    for path in paths:
+    assert head is not None
+    # Full ``ls-tree`` records (``<mode> <type> <oid>\t<path>``), not just
+    # ``--name-only``: the blob oid is what the bulk read below asks git
+    # for. Asking ``git cat-file --batch`` for ``<head>:<path>`` instead
+    # made git re-read and re-scan the containing tree for every path (a
+    # 10k-entry ``records/scout-watchlist/`` tree, 10k times): measured
+    # 1.6 s vs 0.24 s by oid at 4,000 blobs, and growing quadratically.
+    # The bytes are identical either way -- the oid IS the tree entry
+    # ``<head>:<path>`` resolves to.
+    result = _git_bytes(root, "ls-tree", "-r", "-z", head, "--", *prefixes)
+    blob_ref_by_path: dict[str, str] = {}
+    for item in result.split(b"\0"):
+        if not item:
+            continue
+        entry, _tab, raw_path = item.partition(b"\t")
+        path = raw_path.decode("utf-8")
+        fields = entry.decode("ascii", errors="strict").split(" ")
+        if len(fields) != 3 or not _tab:
+            raise JournalConflictError("journal snapshot tree listing is invalid")
+        _mode, kind, oid = fields
+        # A blob is read by oid; anything else (a gitlink) keeps the
+        # ``<head>:<path>`` spelling so it fails exactly as it always did.
+        blob_ref_by_path[path] = oid if kind == "blob" else f"{head}:{path}"
+    all_paths = tuple(blob_ref_by_path)
+    paths: list[str] = []
+    for path in all_paths:
         if not any(path.startswith(prefix) for prefix in prefixes):
             raise JournalConflictError("journal snapshot escaped its requested family")
         # Top-level provisioning manifests are mutable indexes (for example
@@ -1183,8 +1539,68 @@ def _capture_committed_snapshot(
             )
         ):
             continue
-        data, _publisher = read_committed_artifact(
-            workpad=root, project_id=project_id, gig_id=gig_id, path=path, head=head,
+        paths.append(path)
+
+    publishing_commits = _batch_publishing_commits(root, head, prefixes)
+    checked_paths: dict[str, str] = {
+        path: _validate_artifacts((JournalArtifact(path, b""),))[0].path for path in paths
+    }
+    candidates_by_path: dict[str, list[str]] = {}
+    for path in paths:
+        candidates = publishing_commits.get(checked_paths[path], [])
+        if not candidates:
+            raise JournalArtifactMissingError("journal artifact is not committed")
+        candidates_by_path[path] = candidates
+
+    distinct_commits = sorted({candidates[0] for candidates in candidates_by_path.values()})
+    names_by_commit: dict[str, list[str]] = {commit: [] for commit in distinct_commits}
+    if distinct_commits:
+        # -z (see _parse_z_name_only_log): without it a non-ASCII filename
+        # comes back C-quoted/octal-escaped and would never match the same
+        # path's plain UTF-8 spelling used everywhere else in this function.
+        names_result = _git(
+            root, "show", "-z", "--format=%x01%H", "--name-only", *distinct_commits, check=False
+        )
+        path_to_commits = _parse_z_name_only_log(names_result.stdout)
+        for path, commits in path_to_commits.items():
+            for commit in commits:
+                if commit in names_by_commit:
+                    names_by_commit[commit].append(path)
+
+    files_by_commit: dict[str, _CommitFiles] = {
+        commit: _CommitFiles.from_names(names) for commit, names in names_by_commit.items()
+    }
+    empty_files = _CommitFiles.from_names(())
+    handoff_refs: dict[str, str] = {}  # path -> "<commit>:<handoff>" ref, when resolvable
+    for path in paths:
+        commit = candidates_by_path[path][0]
+        handoffs = files_by_commit.get(commit, empty_files).handoffs
+        if len(handoffs) == 1:
+            handoff_refs[path] = f"{commit}:{handoffs[0]}"
+
+    blob_refs = sorted({blob_ref_by_path[path] for path in paths} | set(handoff_refs.values()))
+    blobs = _batch_read_blobs(root, blob_refs)
+
+    # One _HandoffIndex per distinct handoff blob: parsed lazily on first use
+    # (so a per-artifact error that precedes the parse still wins), then
+    # shared by every artifact that handoff published.
+    handoff_index_by_ref: dict[str, _HandoffIndex] = {}
+    missing_handoff = _HandoffIndex(b"")
+    artifacts: dict[str, bytes] = {}
+    for path in paths:
+        commit = candidates_by_path[path][0]
+        data = blobs.get(blob_ref_by_path[path], b"")
+        ref = handoff_refs.get(path)
+        if ref is None:
+            handoff = missing_handoff
+        else:
+            handoff = handoff_index_by_ref.get(ref)
+            if handoff is None:
+                handoff = handoff_index_by_ref[ref] = _HandoffIndex(blobs.get(ref, b""))
+        _validate_committed_artifact(
+            path=path, checked=checked_paths[path], gig_id=gig_id,
+            candidates=candidates_by_path[path], commit=commit,
+            files=files_by_commit.get(commit, empty_files), handoff=handoff, data=data,
             allow_replaced_run_details=True,
             allow_replaced_manifests=True,
         )
@@ -1219,7 +1635,9 @@ def _capture_committed_snapshot(
                     )
                 ):
                     continue
-                if candidate.is_symlink() or relative not in artifacts:
+                if candidate.is_symlink():
+                    raise JournalConflictError("journal working evidence is extra or redirected")
+                if relative not in artifacts and not _is_run_local_artifact(relative):
                     raise JournalConflictError("journal working evidence is extra or redirected")
     return JournalSnapshot(head, artifacts)
 
@@ -1242,6 +1660,18 @@ def _fsync_directory(directory: Path) -> None:
         os.close(descriptor)
 
 
+# `git commit` otherwise forks `git maintenance run --auto --detach`, whose
+# default tasks keep rewriting `.git/objects` after the commit returned:
+# `repack -d` prunes the packed loose objects and removes their now-empty
+# fan-out directories, and the commit-graph task writes `objects/info`.  A
+# journal `git add` racing that prune fails with "unable to create temporary
+# file", and a workpad removed under the repack sees `objects/pack` re-created
+# (".git: Directory not empty").  The journal is the only writer of its
+# workpad; it never wants background maintenance.  `gc.auto=0` covers gits
+# older than `maintenance.auto` (2.29), which run `gc --auto` directly.
+_GIT_NO_AUTO_MAINTENANCE = ("-c", "maintenance.auto=false", "-c", "gc.auto=0")
+
+
 def _git(
     root: Path, *args: str, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
@@ -1249,7 +1679,7 @@ def _git(
     if executable is None:
         raise JournalConflictError("Git executable is unavailable")
     result = subprocess.run(
-        [executable, "-C", os.fspath(root), *args],
+        [executable, "-C", os.fspath(root), *_GIT_NO_AUTO_MAINTENANCE, *args],
         env={
             **os.environ,
             "GIT_CONFIG_GLOBAL": "/dev/null",

@@ -182,7 +182,8 @@ label.form-label {
 }
 
 input[type="number"],
-select {
+select,
+.text-input {
   width: 100%;
   padding: 8px;
   border: 1px solid var(--border);
@@ -250,6 +251,19 @@ select {
 .status-badge.gap {
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+/* P2 (v0.1.9): the S29 r1 assess prompt's met/unmet/unclear vocabulary.
+   unmet reads like gap (a hard miss); unclear reads like partial (a
+   question, not yet resolved). partial/gap above stay for old results. */
+.status-badge.unmet {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.status-badge.unclear {
+  background: var(--warn-bg);
+  color: var(--warn);
 }
 
 .status-badge.sponsorship-offered {
@@ -380,6 +394,161 @@ table.matrix-table td {
   color: var(--muted);
 }
 
+/* B4: progressive posting cards -- replaces the long postings table. */
+.posting-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.posting-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+
+.posting-card summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.posting-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.posting-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.posting-card-heading a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.posting-card-heading a:hover {
+  text-decoration: underline;
+}
+
+.posting-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  align-items: center;
+}
+
+.status-badge.posting-status-acquired {
+  background: #eef0f4;
+  color: var(--muted);
+}
+
+.status-badge.posting-status-assessing {
+  background: #eaf0ff;
+  color: #1a3aa3;
+}
+
+.status-badge.posting-status-assessed {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.status-badge.posting-status-not_assessed {
+  background: #eef0f4;
+  color: var(--muted);
+}
+
+.status-badge.posting-status-failed {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.chip-group select {
+  padding: 4px 8px;
+  font-size: 0.85rem;
+  border-radius: 6px;
+}
+
+/* S2-B: the setup interview's tag-list inputs (roles, exclude/watch
+   companies, industries, stack) and country picker. */
+.tag-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.tag-input-error {
+  border-color: var(--danger);
+}
+
+.tag-input-field {
+  flex: 1 1 120px;
+  min-width: 120px;
+  border: none;
+  outline: none;
+  padding: 4px 2px;
+  font-size: 0.9rem;
+  background: transparent;
+  color: var(--text);
+}
+
+.tag-removable {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tag-remove {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.tag-remove:hover {
+  color: var(--danger);
+}
+
+.field-error {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+.toggle-row {
+  display: flex;
+  gap: 8px;
+}
+
+.toggle-button {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.toggle-button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
 @media (max-width: 480px) {
   .field-row {
     flex-direction: column;
@@ -394,4 +563,937 @@ table.matrix-table td {
     flex-direction: column;
     gap: 10px;
   }
+
+  .pipeline-row {
+    flex-direction: column;
+  }
+
+  .pipeline-stage {
+    text-align: left;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+}
+
+/* P9 (v0.1.9): F3 app views (dashboard/profiles/find-jobs) + the Q&A loop's
+   inline answer box. Tokens/class names match
+   orchestrator/docs/v0.1.9/mockups/scout-app-views.html so the shipped UI
+   reads as the same product as the approved mockup. */
+
+.top-nav {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.top-nav button {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.top-nav button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.profile-switcher {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.profile-pill {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  min-width: 150px;
+  text-align: left;
+}
+
+.profile-pill.active {
+  border-color: var(--accent);
+  background: #eef0f4;
+}
+
+.profile-pill .pname {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.profile-pill .presume {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.stat-tile {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #eef0f4;
+}
+
+.stat-tile .stat-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.stat-tile .stat-value {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.pipeline-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+
+.pipeline-stage {
+  flex: 1;
+  min-width: 100px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.pipeline-stage .stage-count {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.pipeline-stage .stage-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.action-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+
+.action-item:last-child {
+  border-bottom: none;
+}
+
+.fit-verdict {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 0.88rem;
+}
+
+.reasons-list {
+  margin: 4px 0 0 0;
+  padding-left: 18px;
+  font-size: 0.85rem;
+}
+
+.reasons-list li {
+  margin-bottom: 2px;
+}
+
+.prep-panel {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  font-size: 0.85rem;
+}
+
+.prep-panel h4 {
+  margin: 8px 0 4px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.prep-panel ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.prep-panel pre {
+  background: #eef0f4;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  overflow-x: auto;
+}
+
+.not-assessed-summary {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+
+.not-assessed-summary summary {
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.progress-bar-track {
+  background: #eef0f4;
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+  margin: 10px 0;
+}
+
+.progress-bar-fill {
+  background: var(--accent);
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.node-status-pill.running {
+  border-color: var(--accent);
+}
+
+.node-status-pill.done {
+  border-color: var(--ok);
+}
+
+.run-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+table.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+table.data-table th,
+table.data-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+table.data-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.structured-question-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.structured-question {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
+.question-id {
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: #eef0f4;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.answer-form {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.answer-form .text-input {
+  flex: 1;
+}
+
+.privacy-note {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-style: italic;
+  margin-top: 6px;
+}
+
+/* Q4a (v0.1.9): the Find-jobs card grid + job page. Class names and
+   tokens follow orchestrator/docs/v0.1.9/mockups/cards-and-job-page.html
+   (the approved design), light theme only like the rest of this app. */
+
+:root {
+  --chip-bg: #eef0f4;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: inherit;
+  font-family: inherit;
+  padding: 0;
+}
+
+/* Filters */
+.filter-bar { display: flex; flex-direction: column; gap: 10px; }
+.filter-row { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: flex-end; }
+.filter-group { display: flex; flex-direction: column; gap: 4px; }
+.filter-group .chip-group-label { margin-bottom: 0; }
+.filter-search { flex: 1 1 220px; }
+.filter-search input { width: 100%; padding: 7px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.88rem; background: var(--panel); color: var(--text); font-family: inherit; }
+.filter-company select { min-width: 160px; width: auto; padding: 7px; font-size: 0.88rem; }
+.filter-toggle { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--muted); }
+.result-count { font-size: 0.82rem; color: var(--muted); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Card grid */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.job-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  cursor: pointer;
+  text-decoration: none;
+  color: var(--text);
+  box-shadow: var(--shadow);
+  transition: border-color 0.12s ease, transform 0.12s ease;
+  min-width: 0;
+}
+
+.job-card:hover,
+.job-card:focus-visible { border-color: var(--accent); outline: none; transform: translateY(-1px); }
+.job-card.dimmed { opacity: 0.72; }
+.job-card .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.job-card .card-title { font-weight: 600; font-size: 0.98rem; line-height: 1.3; }
+.job-card .card-company { font-size: 0.85rem; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
+.card-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.job-card .card-age { font-size: 0.78rem; color: var(--muted); margin-left: auto; white-space: nowrap; }
+
+.ats-badge {
+  font-size: 0.68rem;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-weight: 600;
+  display: inline-block;
+  white-space: nowrap;
+  background: var(--chip-bg);
+  color: var(--muted);
+}
+.ats-badge.ats-greenhouse { background: #e6f4ea; color: #1b6b3a; }
+.ats-badge.ats-lever { background: #eaf0ff; color: #1a3aa3; }
+.ats-badge.ats-ashby { background: #fff4dc; color: #8a5a00; }
+.ats-badge .ats-via { font-weight: 400; opacity: 0.8; }
+/* Q4a-nav-r1: the "Quick assess" source chip on on-demand jobs (QuickAssessChip.jsx) */
+.ats-badge.ats-quick { background: #efe9ff; color: #4b2ea8; }
+
+.jev-badge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 46px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.68rem;
+  line-height: 1.1;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.jev-badge .jev-score { font-size: 1.05rem; font-weight: 700; color: var(--text); }
+.jev-badge.strong { border-color: var(--ok); background: var(--ok-bg); }
+.jev-badge.strong .jev-score { color: var(--ok); }
+.jev-badge.maybe { border-color: var(--warn); background: var(--warn-bg); }
+.jev-badge.maybe .jev-score { color: var(--warn); }
+.jev-badge.no { border-color: var(--danger); background: var(--danger-bg); }
+.jev-badge.no .jev-score { color: var(--danger); }
+.jev-badge.unscored { border-style: dashed; }
+
+.verdict-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+.verdict-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.verdict-chip.matched_above_threshold { background: var(--ok-bg); color: var(--ok); }
+.verdict-chip.pending_user_answers { background: var(--warn-bg); color: var(--warn); }
+.verdict-chip.not_a_match { background: var(--danger-bg); color: var(--danger); }
+.verdict-chip.not_assessed,
+.verdict-chip.assessed { background: var(--chip-bg); color: var(--muted); }
+
+.req-summary { margin: 0; padding: 0; list-style: none; font-size: 0.82rem; display: flex; flex-direction: column; gap: 3px; }
+.req-summary li { display: flex; gap: 6px; align-items: baseline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.req-summary li .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; position: relative; top: -1px; }
+.req-summary li .txt { overflow: hidden; text-overflow: ellipsis; }
+.dot.met { background: var(--ok); }
+.dot.unclear,
+.dot.partial { background: var(--warn); }
+.dot.unmet,
+.dot.gap { background: var(--danger); }
+.req-summary .more { color: var(--muted); }
+
+.mode-chip { font-size: 0.72rem; border-radius: 999px; padding: 2px 8px; border: 1px solid var(--border); color: var(--text); background: var(--chip-bg); }
+.pay { font-size: 0.82rem; font-weight: 600; }
+.empty-state { text-align: center; color: var(--muted); padding: 32px 12px; grid-column: 1 / -1; }
+
+/* Job page */
+.back-link { display: inline-block; margin-bottom: 10px; color: var(--accent); text-decoration: none; font-size: 0.88rem; }
+.job-header { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.job-header .job-title { font-size: 1.35rem; margin: 0 0 4px; line-height: 1.25; }
+.job-header .job-sub { color: var(--muted); font-size: 0.9rem; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.job-header .job-facts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.job-header .header-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.job-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.jev-reasons { font-size: 0.78rem; color: var(--muted); text-align: right; max-width: 260px; }
+.panel h3 { font-size: 0.95rem; margin: 16px 0 8px; }
+.panel h3:first-child { margin-top: 0; }
+
+.two-col { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 760px) {
+  /* Q4b-ui: minmax(0, …) like the desktop rule -- a bare 1fr is
+     minmax(auto, 1fr), so the requirement table / prep command's intrinsic
+     width pushed the column (and the page) past the viewport on a phone. */
+  .two-col { grid-template-columns: minmax(0, 1fr); }
+  .job-header .header-side { align-items: flex-start; }
+  .jev-reasons { text-align: left; }
+}
+
+.jd-box {
+  white-space: pre-wrap;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  max-height: 260px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  background: var(--bg);
+  overflow-wrap: anywhere;
+}
+.jd-box.expanded { max-height: none; }
+.jd-box:not(.expanded)::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 56px;
+  background: linear-gradient(to bottom, transparent, var(--bg));
+}
+.jd-toggle { margin-top: 8px; }
+
+.req-class { margin-left: 6px; font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+.question-requirement { font-size: 0.8rem; margin-top: 2px; }
+.question-prior { font-size: 0.78rem; margin: 4px 0 0; }
+.reassess-progress { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--muted); margin: 6px 0 0; }
+.spinner { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.history { list-style: none; margin: 0; padding: 0; }
+.history li { display: grid; grid-template-columns: 16px 1fr; gap: 10px; padding: 6px 0; position: relative; }
+.history li::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--border); margin-top: 5px; }
+.history li.matched_above_threshold::before { background: var(--ok); }
+.history li.pending_user_answers::before { background: var(--warn); }
+.history li.not_a_match::before { background: var(--danger); }
+.history li:not(:last-child)::after { content: ""; position: absolute; left: 4.5px; top: 20px; bottom: -8px; width: 1px; background: var(--border); }
+.history .h-when { font-size: 0.75rem; color: var(--muted); }
+.history .h-trigger { font-size: 0.8rem; color: var(--muted); }
+
+@media (max-width: 480px) {
+  .card-grid { grid-template-columns: 1fr; }
+  .filter-row { flex-direction: column; align-items: stretch; }
+  /* Q4a-nav: in a column the 220px flex-basis became the search box's HEIGHT. */
+  .filter-search { flex: 0 0 auto; }
+  .filter-company select { width: 100%; }
+}
+
+/* Q4a-nav (v0.1.9): one persistent top bar, breadcrumbs, the Jobs summary
+   strip, and the 390px collapse. The old .top-nav / .profile-switcher /
+   .profile-pill rules above are unused now (kept for the wizard's shared
+   tokens only). */
+
+.app-main {
+  padding-top: 4px;
+}
+
+.app-loading {
+  padding: 24px 0;
+  color: var(--muted);
+}
+
+.top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 16px;
+}
+
+.top-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  min-height: 48px;
+}
+
+.top-bar .brand {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--text);
+  text-decoration: none;
+  letter-spacing: 0.01em;
+  padding: 6px 8px 6px 4px;
+  white-space: nowrap;
+}
+
+.top-links {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.top-link,
+.menu-links .top-gear {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.top-link:hover,
+.top-gear:hover {
+  background: #eef0f4;
+}
+
+.top-link.active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.top-link.active .nav-badge {
+  background: var(--accent-contrast);
+  color: var(--accent);
+}
+
+.top-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.profile-select select {
+  padding: 6px 28px 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-family: inherit;
+  max-width: 220px;
+  text-overflow: ellipsis;
+}
+
+.top-profile-note {
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+.top-gear {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  padding: 7px;
+  border-radius: 999px;
+  text-decoration: none;
+}
+
+.top-gear.active {
+  color: var(--accent);
+  background: #eef0f4;
+}
+
+.top-gear .gear-label {
+  display: none;
+  font-size: 0.9rem;
+}
+
+.menu-toggle {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.menu-sheet {
+  border-top: 1px solid var(--border);
+  padding: 8px 10px 12px;
+}
+
+.menu-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menu-links .top-link,
+.menu-links .top-gear {
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 1rem;
+}
+
+.menu-links .top-gear .gear-label {
+  display: inline;
+}
+
+.menu-profile {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.menu-profile .profile-select,
+.menu-profile .profile-select select {
+  width: 100%;
+  max-width: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Breadcrumb: Jobs › Company · Title */
+.breadcrumb {
+  margin-bottom: 10px;
+  font-size: 0.88rem;
+}
+
+.breadcrumb ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.breadcrumb li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.breadcrumb a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.breadcrumb [aria-current="page"] {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70vw;
+}
+
+.crumb-sep {
+  color: var(--muted);
+}
+
+/* Summary strip (the Dashboard's, now on top of Jobs) */
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.summary-strip.compact {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 10px 0 0;
+}
+
+.summary-strip .stat-tile {
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.summary-strip .stat-value {
+  font-size: 1.05rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.stat-link:hover {
+  border-color: var(--accent);
+}
+
+.jobs-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.jobs-header-row h2 {
+  margin: 0;
+}
+
+.jobs-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.jobs-header-actions .button {
+  text-decoration: none;
+}
+
+.jobs-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px 18px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 0.85rem;
+}
+
+.past-run-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.past-run-picker .chip-group-label {
+  margin: 0;
+}
+
+.past-run-picker select {
+  width: auto;
+  max-width: 100%;
+  padding: 6px 8px;
+  font-size: 0.85rem;
+}
+
+.small {
+  font-size: 0.78rem;
+}
+
+.run-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  background: #eef0f4;
+}
+
+.run-status.succeeded {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.run-status.failed,
+.run-status.blocked {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.applications-table td,
+.runs-table td {
+  vertical-align: top;
+}
+
+.applications-table tr.superseded {
+  opacity: 0.6;
+}
+
+/* The bar collapses to a menu below 640px (the operator's 390px phone
+   width included): links and the profile switcher move into the sheet. */
+@media (max-width: 640px) {
+  .top-links,
+  .top-right {
+    display: none;
+  }
+
+  .menu-toggle {
+    display: inline-flex;
+  }
+
+  .top-bar {
+    border-radius: 8px;
+    margin-bottom: 12px;
+  }
+
+  .summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .summary-strip.compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .jobs-header-actions {
+    width: 100%;
+  }
+
+  .jobs-header-actions .button {
+    flex: 1;
+    text-align: center;
+  }
+
+  .breadcrumb [aria-current="page"] {
+    max-width: 60vw;
+  }
+
+  .past-run-picker {
+    width: 100%;
+  }
+
+  .past-run-picker select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .applications-table,
+  .runs-table {
+    font-size: 0.8rem;
+  }
+}
+
+/* Q4b-ui (v0.1.9): the tailored-resume panel on the job page (mockup's
+   "Tailored resume" block, light theme like the rest of the app). */
+.resume-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.resume-legend { display: flex; gap: 10px; font-size: 0.75rem; color: var(--muted); align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.tailor-meta { font-size: 0.8rem; color: var(--muted); margin: 0 0 8px; }
+.prov { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; flex-shrink: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.prov.resume { background: var(--ok-bg); color: var(--ok); }
+.prov.rewritten { background: #eaf0ff; color: #1a3aa3; }
+.prov.blank { visibility: hidden; }
+.md-preview { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); padding: 10px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; line-height: 1.5; overflow-x: auto; }
+.md-line { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: start; padding: 1px 0; white-space: pre-wrap; word-break: break-word; cursor: pointer; border-radius: 4px; }
+.md-line.blank,
+.md-line.heading { cursor: default; }
+.md-line.heading { font-weight: 700; }
+.md-line:not(.blank):not(.heading):hover,
+.md-line.open { background: var(--chip-bg); }
+.md-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.src-list { display: block; margin: 4px 0 6px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 0.76rem; white-space: normal; }
+.src-item { display: block; border-left: 2px solid var(--border); padding: 3px 8px; margin-top: 3px; }
+.src-kind { font-weight: 600; margin-right: 6px; }
+.src-kind.resume { color: var(--ok); }
+.src-kind.answer { color: var(--accent); }
+.src-note { color: var(--muted); margin-right: 6px; }
+.src-note::before { content: "· "; }
+.src-text { display: block; color: var(--muted); margin-top: 1px; }
+.resume-stats { font-size: 0.78rem; color: var(--muted); margin-top: 8px; }
+.tailor-progress { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--muted); margin: 0 0 10px; }
+.tailor-error { margin: 0 0 10px; font-size: 0.85rem; }
+@media (max-width: 480px) {
+  .resume-toolbar .button { width: 100%; }
 }

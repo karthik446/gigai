@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import functools
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -25,11 +27,26 @@ class HttpModelAdapter:
         credential: CredentialReference,
         base_url: str,
         credential_resolver: CredentialResolver | None = None,
+        home_root: Path | None = None,
         client: httpx.Client | None = None,
     ) -> None:
+        """``home_root`` (P1-8 follow-up) selects which operator home the
+
+        default resolver's secrets-store fallback uses when the environment
+        variable isn't set. It's applied only when ``credential_resolver``
+        is omitted -- an explicit ``credential_resolver`` (tests, or a
+        caller with its own resolution policy) always wins and is used
+        as-is, unaware of ``home_root``. Omitting both keeps today's default
+        resolver (env, then the default home). ``resolve_reference_value``
+        is imported only here (the sole raw-credential-resolution call site
+        below the model port), never by the adapter factory.
+        """
+
         self._credential = credential
         self._base_url = base_url.rstrip("/")
-        self._credential_resolver = credential_resolver or resolve_reference_value
+        self._credential_resolver = credential_resolver or functools.partial(
+            resolve_reference_value, home_root=home_root
+        )
         self._client = client
 
     def _post_json(

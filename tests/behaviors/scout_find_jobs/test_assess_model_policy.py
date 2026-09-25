@@ -7,12 +7,14 @@ import pytest
 
 from gigai.adapters.port import InvocationResult, ModelInvocationError, NormalizedUsage
 from gigai.canonical import digest_imported_bytes, parse_json_bytes
-from gigai.config import load_config
+from gigai.config import CredentialReference, Endpoint, load_config
+from gigai.config import ModelTarget as ConfigModelTarget
 from gigai.lifecycle import approve_offline, create_offline
 from gigai.private_records import create_record, import_reference, migrate_workpad_layout
 from gigai.scout.find_jobs.contracts import (
     ATSProvider,
     AssessInput,
+    AssessmentQuestion,
     AssessmentResult,
     MatrixStatus,
     ModelTarget,
@@ -21,12 +23,14 @@ from gigai.scout.find_jobs.contracts import (
     PinnedResume,
     PostingRow,
     Producer,
+    RequirementClass,
     RequirementMatrixRow,
     SelectedPosting,
     SelectionReason,
     SelectionReasonCode,
     SourceKind,
     SponsorshipStatus,
+    Verdict,
 )
 from gigai.scout.proposal_execution import (
     ScoutProposalExecutionError,
@@ -148,12 +152,37 @@ def _assess_fixture(tmp_path: Path) -> tuple[dict, Path]:
     home = tmp_path / "home"
     target = tmp_path / "target"
     target.mkdir()
+    # U2: assess_node resolves the sealed "ollama_local" enum to whichever
+    # configured target uses that adapter kind, so the fixture needs a real
+    # one (named however setup would name it) even though the model call
+    # itself is scripted via the resolve_model_adapter monkeypatch below.
     run_setup(
         build_config(
             home_root=home,
             workpad_root=tmp_path / "workpads",
             editor_argv=("/usr/bin/true",),
             open_with_target=False,
+            endpoints=(
+                Endpoint(name="offline", adapter="deterministic"),
+                Endpoint(name="ollama", adapter="ollama_local", base_url="http://127.0.0.1:11434"),
+            ),
+            model_targets=(
+                ConfigModelTarget(
+                    name="offline-default",
+                    endpoint="offline",
+                    model="fixture-v1",
+                    capabilities=("text",),
+                    max_output_tokens=64,
+                ),
+                ConfigModelTarget(
+                    name="ollama-default",
+                    endpoint="ollama",
+                    model="fixture-model",
+                    capabilities=("text",),
+                    max_output_tokens=512,
+                    model_digest="sha256:" + "c" * 64,
+                ),
+            ),
         )
     )
     initialize_target(
@@ -197,14 +226,16 @@ def _posting(
     text: str | None,
     location: str = "Denver, CO",
     sponsorship: SponsorshipStatus | None = None,
+    company: str = "Acme",
+    title: str = "Software Engineer",
 ) -> PostingRow:
     return PostingRow(
         url=normalized_url,
         normalized_url=normalized_url,
         provider=ATSProvider.GREENHOUSE,
         board_token="acme",
-        company="Acme",
-        title="Software Engineer",
+        company=company,
+        title=title,
         location=location,
         published_at="2026-09-20T00:00:00Z",
         content_sha256="sha256:" + "a" * 64,
@@ -225,6 +256,8 @@ def _run_assess(
     monkeypatch: pytest.MonkeyPatch,
     visa_sponsorship_required: bool | None = None,
     countries: list[str] | None = None,
+    roles: list[str] | None = None,
+    location: str | None = None,
     outcomes: dict[str, str] | None = None,
     selected_postings: list[PostingRow] | None = None,
     selection_cap: int = 10,
@@ -258,9 +291,9 @@ def _run_assess(
                     "schema_version": "scout-find-jobs-run-input:1",
                     "config": {
                         "schema_version": "find-jobs-config:1",
-                        "roles": ["Software Engineer"],
+                        "roles": roles if roles is not None else ["Software Engineer"],
                         "merged_queries": ["software engineer"],
-                        "location": None,
+                        "location": location,
                         "remote": True,
                         "published_after": None,
                         "sources": {"exa": True, "ats": True, "hiringcafe": False},
@@ -317,7 +350,8 @@ def _run_assess(
     )
     binding = _ScriptedBinding(outputs)
     monkeypatch.setattr(
-        "gigai.scout.proposal_execution.resolve_model_adapter", lambda config, adapter_target: binding
+        "gigai.scout.proposal_execution.resolve_model_adapter",
+        lambda config, adapter_target, **_kwargs: binding,
     )
     output = assess_node(context, assess_input, home_root=fixture["home"], target=target, config=fixture["config"])
     return output, binding
@@ -379,6 +413,103 @@ def test_visa_sponsorship_required_reaches_the_prompt(tmp_path: Path, monkeypatc
     assert "visa sponsorship required = yes" in binding.port.prompts[0]
 
 
+def test_sealed_countries_and_profile_titles_reach_the_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """P2-r2 (v0.1.9): {{countries}}/{{titles}} come from the SEALED effective
+    config -- find-jobs.json's own countries, and roles (the profile's titles
+    after overlay_selected_profile replaces roles with them, C11-adjacent) --
+    never from the resume text. This is the hermetic counterpart to the P2
+    live acceptance's "fair test": prove the plumbing puts the real-user
+    context on the prompt, without a live model call."""
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/909",
+        text="We need Kubernetes experience.",
+    )
+    good = json.dumps({
+        "matrix": [{"requirement": "Kubernetes", "resume_evidence": ["Ran production Kubernetes clusters"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+    _output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000110",
+        postings=[posting], outputs=[good], monkeypatch=monkeypatch,
+        visa_sponsorship_required=False, countries=["PL", "CA"], roles=["Senior Analytics Engineer"],
+    )
+    prompt = binding.port.prompts[0]
+    # P2-r2: the eligible-countries clause states the meaning explicitly (a
+    # matching posting location is MET, not askable) after the fair-test live
+    # acceptance found a bare fact list wasn't enough for the model to use.
+    assert "eligible to work from these countries" in prompt
+    assert "): PL, CA;" in prompt
+    assert "target titles the candidate is looking for = Senior Analytics Engineer" in prompt
+
+
+def test_sealed_config_location_reaches_the_prompt_as_the_candidate_location(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """assess-prompt-v2 (operator decision): find-jobs.json's ``location``
+    (sealed into the run input) is the candidate's own location on the
+    CANDIDATE CONSTRAINTS line, so assess.md rule 4 can decide a posting's
+    state/province restriction from it; a null config location renders
+    "unknown" (rule 4 then asks once with ``location:<country>_region``)."""
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/912",
+        text="Remote Canada. Open only to candidates residing in Ontario or Alberta.",
+    )
+    good = json.dumps({
+        "matrix": [{"requirement": "Residing in Ontario or Alberta", "class": "hard", "resume_evidence": ["Toronto, ON"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+    _output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000112",
+        postings=[posting], outputs=[good], monkeypatch=monkeypatch,
+        visa_sponsorship_required=False, countries=["CA"], location="Toronto, ON, Canada",
+    )
+    prompt = binding.port.prompts[0]
+    assert "{{candidate_location}}" not in prompt
+    assert "applied by rule 4): Toronto, ON, Canada; target titles" in prompt
+
+    _output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000113",
+        postings=[posting], outputs=[good], monkeypatch=monkeypatch,
+        visa_sponsorship_required=False, countries=["CA"], location=None,
+    )
+    assert "applied by rule 4): unknown; target titles" in binding.port.prompts[0]
+
+
+def test_sealed_empty_countries_renders_a_sane_default_not_a_dangling_placeholder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty countries (no find-jobs.json filter) must render as a plain word
+    the model can read, never a bare "{{countries}}" or an empty string that
+    looks like truncated output. ``FindJobsConfig.roles`` itself must not be
+    empty (a real DTO bound, not exercised here); the no-profile-selected
+    case still carries the shared config's own roles, unaffected by
+    countries being empty."""
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/910",
+        text="We need Kubernetes experience.",
+    )
+    good = json.dumps({
+        "matrix": [{"requirement": "Kubernetes", "resume_evidence": ["Ran production Kubernetes clusters"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+    _output, binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000111",
+        postings=[posting], outputs=[good], monkeypatch=monkeypatch,
+        visa_sponsorship_required=False, countries=[],
+    )
+    prompt = binding.port.prompts[0]
+    assert "{{countries}}" not in prompt
+    assert "{{titles}}" not in prompt
+    assert "): any;" in prompt
+    assert "target titles the candidate is looking for = Software Engineer" in prompt  # _run_assess's default roles
+
+
 def test_string_resume_evidence_is_normalized_and_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """U22 real failure: Codex returned resume_evidence as a string, not an array."""
     fixture, target = _assess_fixture(tmp_path)
@@ -402,6 +533,40 @@ def test_string_resume_evidence_is_normalized_and_passes(tmp_path: Path, monkeyp
     assert assessed.matrix[0].resume_evidence == ("Ran production Kubernetes clusters",)
     assert assessed.matrix[0].status is MatrixStatus.MET
     assert assessed.sponsorship is SponsorshipStatus.NOT_OFFERED
+
+
+def test_verdict_carrying_answer_reaches_the_saved_assessment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """P2 (v0.1.9): a full S29 r1-shaped answer (verdict, class, structured
+    questions) survives assess_node end to end -- normalize, validate, save."""
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/909",
+        text="We need GCP experience.",
+    )
+    verdict_answer = json.dumps({
+        "verdict": "pending_user_answers",
+        "matrix": [
+            {"requirement": "Python", "class": "hard", "resume_evidence": ["Built Python services"], "status": "met"},
+            {"requirement": "GCP", "class": "askable", "resume_evidence": [], "status": "unclear"},
+        ],
+        "suggestions": [],
+        "questions": [
+            {"question_id": "cloud:gcp", "question": "Have you used GCP?", "requirement": "GCP"}
+        ],
+        "not_a_match_reason": None,
+    })
+    output, _binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000109",
+        postings=[posting], outputs=[verdict_answer], monkeypatch=monkeypatch,
+    )
+    assert len(output.assessments) == 1
+    assessed = output.assessments[0]
+    assert assessed.verdict is Verdict.PENDING_USER_ANSWERS
+    assert assessed.matrix[1].requirement_class is RequirementClass.ASKABLE
+    assert assessed.matrix[1].status is MatrixStatus.UNCLEAR
+    assert assessed.structured_questions == (AssessmentQuestion("cloud:gcp", "Have you used GCP?", "GCP"),)
+    assert assessed.questions == ("Have you used GCP?",)  # C9: the shipped UI keeps reading strings
+    assert assessed.proposal_revision_ref  # saved via save_assessment_revision, same as any other result
 
 
 def test_garbage_answer_retries_once_then_not_assessed_while_others_succeed(
@@ -428,7 +593,7 @@ def test_garbage_answer_retries_once_then_not_assessed_while_others_succeed(
         postings=[bad_posting, good_posting], outputs=[garbage, still_garbage, good], monkeypatch=monkeypatch,
     )
     assert len(binding.port.prompts) == 3  # 2 attempts for bad_posting + 1 for good_posting
-    assert "did not match the required JSON shape" in binding.port.prompts[1]
+    assert "A previous attempt at this same prompt was rejected by the validator: " in binding.port.prompts[1]
     assert len(output.not_assessed) == 1
     assert output.not_assessed[0].posting.normalized_url == bad_posting.normalized_url
     assert output.not_assessed[0].reason is NotAssessedReason.MODEL_OUTPUT_INVALID
@@ -468,7 +633,11 @@ def test_fenced_json_output_is_extracted_before_normalization(tmp_path: Path, mo
         postings=[posting], outputs=[fenced], monkeypatch=monkeypatch,
     )
     assert len(output.assessments) == 1
-    assert output.assessments[0].matrix[0].status is MatrixStatus.PARTIAL
+    # P2 (v0.1.9): the normalizer maps the old prompt's "partially" synonym
+    # onto the new prompt's "unclear" word (plan section "P2", operator
+    # answer 10) -- the old PARTIAL enum member is kept only to parse an
+    # already-stored old-shape result, never emitted by live normalization.
+    assert output.assessments[0].matrix[0].status is MatrixStatus.UNCLEAR
 
 
 def test_model_denied_is_not_assessed_without_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -503,6 +672,14 @@ def test_candidate_partition_mixes_assessed_over_cap_and_exclusions(
     over_cap_posting = _posting(
         normalized_url="https://boards.greenhouse.io/acme/jobs/1002",
         text="We need Rust experience.",
+        # wire-selection: a distinct company+title from assessed_posting so
+        # this row is genuinely over the cap once select_for_assessment is
+        # wired in, not a "duplicate" of assessed_posting (the shared "Acme"
+        # / "Software Engineer" defaults would otherwise dedupe the two).
+        # Title keeps "Software Engineer" so it still role-matches the
+        # sealed config's roles=["Software Engineer"].
+        company="Globex",
+        title="Senior Software Engineer",
     )
     location_mismatch_posting = _posting(
         normalized_url="https://boards.greenhouse.io/acme/jobs/1003",
@@ -552,16 +729,26 @@ def test_candidate_partition_mixes_assessed_over_cap_and_exclusions(
     assert by_url[over_cap_posting.normalized_url].reason is NotAssessedReason.OVER_CAP
     assert by_url[location_mismatch_posting.normalized_url].reason is NotAssessedReason.LOCATION_MISMATCH
     assert by_url[sponsorship_excluded_posting.normalized_url].reason is NotAssessedReason.SPONSORSHIP_EXCLUDED
-    assert unchanged_posting.normalized_url not in by_url
+    # uat-bug-009: an UNCHANGED row is no longer excluded from candidates
+    # outright -- this fixture has no `outputs/assess.json` anywhere on disk
+    # (no earlier run ever produced a successful assessment for it), so it's
+    # still eligible for selection under the cap, same as any other
+    # candidate. It shares its default company/title ("Acme"/"Software
+    # Engineer") with `assessed_posting`, which is already selected/in-cap,
+    # so `select_for_assessment` correctly dedupes it as DUPLICATE rather
+    # than assessing it a second time or counting it as a fresh OVER_CAP.
+    assert by_url[unchanged_posting.normalized_url].reason is NotAssessedReason.DUPLICATE
 
-    # candidate_rows: complete, non-overlapping partition (T4), and the
-    # unchanged row is not a candidate at all.
+    # candidate_rows: complete, non-overlapping partition (T4). uat-bug-009:
+    # the unchanged row IS a candidate now (no prior successful assessment
+    # exists for it anywhere), unlike before this fix.
     candidate_urls = {row.posting.normalized_url for row in output.candidate_rows}
     assert candidate_urls == {
         assessed_posting.normalized_url,
         over_cap_posting.normalized_url,
         location_mismatch_posting.normalized_url,
         sponsorship_excluded_posting.normalized_url,
+        unchanged_posting.normalized_url,
     }
     assessed_urls = {a.posting.normalized_url for a in output.assessments}
     not_assessed_urls = set(by_url)
@@ -573,3 +760,323 @@ def test_candidate_partition_mixes_assessed_over_cap_and_exclusions(
     from gigai.scout.find_jobs.contracts import AssessOutput
 
     assert AssessOutput.from_json(output.to_json()) == output
+
+
+def test_candidate_dropped_as_duplicate_is_labelled_duplicate_not_over_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """wire-selection (B2): a candidate that select_for_assessment drops for
+    being a near-identical duplicate of the selected posting -- same
+    company + normalized title + country -- must be labelled
+    NotAssessedReason.DUPLICATE, not the OVER_CAP fallback the un-wired
+    code used for every unselected row regardless of why it was dropped.
+    """
+    fixture, target = _assess_fixture(tmp_path)
+
+    assessed_posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/2001",
+        text="We need Go experience.",
+    )
+    duplicate_posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/2002",
+        text="We need Rust experience.",
+        # Same company + title + location as assessed_posting (and the
+        # fixture's shared published_at) -- select_for_assessment's dedupe
+        # key, so this is a genuine duplicate, not an over-cap drop.
+    )
+
+    good = json.dumps({
+        "matrix": [{"requirement": "Go", "resume_evidence": ["Built Go services"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+
+    output, _binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000202",
+        postings=[assessed_posting, duplicate_posting],
+        selected_postings=[assessed_posting],
+        selection_cap=1,
+        countries=["US"],
+        visa_sponsorship_required=False,
+        outputs=[good],
+        monkeypatch=monkeypatch,
+    )
+
+    by_url = {row.posting.normalized_url: row for row in output.not_assessed}
+    assert len(output.assessments) == 1
+    assert by_url[duplicate_posting.normalized_url].reason is NotAssessedReason.DUPLICATE
+
+
+# --- U2: sealed enum -> configured target resolution (0.1.8.1 UAT) ---
+
+
+def test_resolve_configured_target_name_for_adapter_finds_setup_named_target(tmp_path: Path) -> None:
+    """setup names targets "codex-default" etc; the sealed enum is "codex_cli"."""
+    from gigai.scout.proposal_execution import _resolve_configured_target_name_for_adapter
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(
+            Endpoint(name="offline", adapter="deterministic"),
+            Endpoint(name="codex", adapter="codex_cli"),
+        ),
+        model_targets=(
+            ConfigModelTarget("offline-default", "offline", "fixture-v1", ("text",), 64),
+            ConfigModelTarget("codex-default", "codex", "default", ("text",), 512),
+        ),
+    )
+    assert _resolve_configured_target_name_for_adapter(config, "codex_cli") == "codex-default"
+
+
+def test_resolve_configured_target_name_for_adapter_fails_loudly_when_unmatched(tmp_path: Path) -> None:
+    from gigai.scout.proposal_execution import (
+        ScoutProposalExecutionError,
+        _resolve_configured_target_name_for_adapter,
+    )
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+    )
+    with pytest.raises(ScoutProposalExecutionError, match="no configured model target uses adapter 'openrouter_api'"):
+        _resolve_configured_target_name_for_adapter(config, "openrouter_api")
+
+
+def test_resolve_configured_target_name_for_adapter_fails_loudly_when_ambiguous(tmp_path: Path) -> None:
+    """No silent fallback: two targets of the same adapter kind is also an error."""
+    from gigai.scout.proposal_execution import (
+        ScoutProposalExecutionError,
+        _resolve_configured_target_name_for_adapter,
+    )
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(
+            Endpoint(name="offline", adapter="deterministic"),
+            Endpoint(name="codex", adapter="codex_cli"),
+            Endpoint(name="codex-alt", adapter="codex_cli"),
+        ),
+        model_targets=(
+            ConfigModelTarget("offline-default", "offline", "fixture-v1", ("text",), 64),
+            ConfigModelTarget("codex-default", "codex", "default", ("text",), 512),
+            ConfigModelTarget("codex-alt-default", "codex-alt", "default", ("text",), 512),
+        ),
+    )
+    with pytest.raises(ScoutProposalExecutionError, match="multiple configured model targets use adapter 'codex_cli'"):
+        _resolve_configured_target_name_for_adapter(config, "codex_cli")
+
+
+def test_resolve_configured_target_name_for_adapter_exact_name_wins_over_ambiguous_scan(
+    tmp_path: Path,
+) -> None:
+    """uat-bug-005 repro: the 0.1.8.x README told users to create a target
+    literally named "codex_cli" alongside setup's own "codex-default", both
+    on the same codex endpoint. The sealed value "codex_cli" must resolve to
+    the exactly-named target instead of raising the adapter-scan ambiguity
+    error -- today (before the fix) this raises "multiple configured model
+    targets use adapter 'codex_cli'"."""
+    from gigai.scout.proposal_execution import _resolve_configured_target_name_for_adapter
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(
+            Endpoint(name="offline", adapter="deterministic"),
+            Endpoint(name="codex", adapter="codex_cli"),
+        ),
+        model_targets=(
+            ConfigModelTarget("offline-default", "offline", "fixture-v1", ("text",), 64),
+            ConfigModelTarget("codex-default", "codex", "default", ("text",), 512),
+            ConfigModelTarget("codex_cli", "codex", "default", ("text",), 512),
+        ),
+    )
+    assert _resolve_configured_target_name_for_adapter(config, "codex_cli") == "codex_cli"
+
+
+@pytest.mark.parametrize(
+    "sealed_value,exact_endpoint_name,exact_adapter,credential,base_url",
+    [
+        ("codex_cli", "codex", "codex_cli", None, None),
+        ("ollama_local", "ollama", "ollama_local", None, "http://127.0.0.1:11434"),
+        ("openrouter_api", "openrouter", "openrouter_api", "openrouter-api", None),
+    ],
+)
+def test_resolve_configured_target_name_for_adapter_exact_name_wins_for_every_sealed_value(
+    tmp_path: Path,
+    sealed_value: str,
+    exact_endpoint_name: str,
+    exact_adapter: str,
+    credential: str | None,
+    base_url: str | None,
+) -> None:
+    """Same exact-name-wins path for every sealed adapter kind, not just codex_cli."""
+    from gigai.scout.proposal_execution import _resolve_configured_target_name_for_adapter
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        credentials=(
+            (CredentialReference(name=credential, kind="environment", reference="OPENROUTER_API_KEY"),)
+            if credential
+            else ()
+        ),
+        endpoints=(
+            Endpoint(name="offline", adapter="deterministic"),
+            Endpoint(name=exact_endpoint_name, adapter=exact_adapter, credential=credential, base_url=base_url),
+            Endpoint(
+                name=f"{exact_endpoint_name}-alt",
+                adapter=exact_adapter,
+                credential=credential,
+                base_url=base_url,
+            ),
+        ),
+        model_targets=(
+            ConfigModelTarget("offline-default", "offline", "fixture-v1", ("text",), 64),
+            ConfigModelTarget(
+                f"{exact_endpoint_name}-default",
+                exact_endpoint_name,
+                "default",
+                ("text",),
+                512,
+                model_digest=("sha256:" + "c" * 64) if exact_adapter == "ollama_local" else None,
+            ),
+            ConfigModelTarget(
+                sealed_value,
+                f"{exact_endpoint_name}-alt",
+                "default",
+                ("text",),
+                512,
+                model_digest=("sha256:" + "d" * 64) if exact_adapter == "ollama_local" else None,
+            ),
+        ),
+    )
+    assert _resolve_configured_target_name_for_adapter(config, sealed_value) == sealed_value
+
+
+def test_resolve_configured_target_name_for_adapter_ambiguous_error_names_targets_and_fix(
+    tmp_path: Path,
+) -> None:
+    """When several enabled targets share an adapter and none is named the
+    sealed value, the error must name the targets and how to fix it (disable
+    or remove one via config.toml or `gigai setup`)."""
+    from gigai.scout.proposal_execution import (
+        ScoutProposalExecutionError,
+        _resolve_configured_target_name_for_adapter,
+    )
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(
+            Endpoint(name="offline", adapter="deterministic"),
+            Endpoint(name="codex", adapter="codex_cli"),
+            Endpoint(name="codex-alt", adapter="codex_cli"),
+        ),
+        model_targets=(
+            ConfigModelTarget("offline-default", "offline", "fixture-v1", ("text",), 64),
+            ConfigModelTarget("codex-default", "codex", "default", ("text",), 512),
+            ConfigModelTarget("codex-alt-default", "codex-alt", "default", ("text",), 512),
+        ),
+    )
+    with pytest.raises(ScoutProposalExecutionError) as excinfo:
+        _resolve_configured_target_name_for_adapter(config, "codex_cli")
+    message = str(excinfo.value)
+    assert "codex-default" in message
+    assert "codex-alt-default" in message
+    assert "config.toml" in message or "gigai setup" in message
+
+
+def test_resolve_configured_target_name_for_adapter_ignores_disabled_targets(tmp_path: Path) -> None:
+    from gigai.scout.proposal_execution import _resolve_configured_target_name_for_adapter
+
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        endpoints=(
+            Endpoint(name="offline", adapter="deterministic"),
+            Endpoint(name="codex", adapter="codex_cli"),
+            Endpoint(name="codex-alt", adapter="codex_cli"),
+        ),
+        model_targets=(
+            ConfigModelTarget("offline-default", "offline", "fixture-v1", ("text",), 64),
+            ConfigModelTarget("codex-default", "codex", "default", ("text",), 512, enabled=False),
+            ConfigModelTarget("codex-alt-default", "codex-alt", "default", ("text",), 512),
+        ),
+    )
+    assert _resolve_configured_target_name_for_adapter(config, "codex_cli") == "codex-alt-default"
+
+
+def test_assess_node_resolves_the_real_adapter_without_a_literal_enum_named_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: assess_node must not call resolve_model_adapter with the
+    literal enum string "ollama_local" -- it must pass the configured
+    target's own name ("ollama-default" in this fixture)."""
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/u2",
+        text="We need Python experience.",
+    )
+    good = json.dumps({
+        "matrix": [{"requirement": "Python", "resume_evidence": ["Built APIs"], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+    })
+    run_id = "run_00000000-0000-4000-8000-000000000901"
+    run_dir = target / "runs" / run_id
+    (run_dir / "outputs").mkdir(parents=True)
+    (run_dir / "outputs" / "acquire.json").write_text(
+        json.dumps({"rows": [{"posting": posting.to_json(), "outcome": "new"}]})
+    )
+    selected = (SelectedPosting(posting.normalized_url, posting.url, posting.content_sha256, True),)
+    context = NodeContext(
+        run_id=run_id,
+        project_id=fixture["resolved"].project_id,
+        gig_id=fixture["gig_id"],
+        graph_id="graph_find_jobs_test",
+        graph_version=1,
+        goal_slug="assess",
+        manifest_digest="sha256:" + "0" * 64,
+        operation_key="assess-test",
+        target_observation_digest="sha256:" + "0" * 64,
+        workpad_path=str(fixture["resolved"].path),
+        redeemed_consent_ref="none",
+        model_target=ModelTarget.OLLAMA_LOCAL,
+    )
+    assess_input = AssessInput(
+        acquire_batch_ref=str(run_dir / "outputs" / "acquire.json"),
+        acquire_output_digest="sha256:" + "0" * 64,
+        selected_postings=selected,
+        selection_cap=10,
+        selection_reasons=(SelectionReason(posting.normalized_url, SelectionReasonCode.NEW),),
+        pinned_resume=fixture["pinned"],
+        target=str(target),
+        model_target=ModelTarget.OLLAMA_LOCAL,
+        answer_association_version="scout-answer-association:1",
+    )
+    seen_targets: list[str] = []
+
+    def _fake_resolve(config, adapter_target, **_kwargs):
+        seen_targets.append(adapter_target)
+        return _ScriptedBinding([good])
+
+    monkeypatch.setattr("gigai.scout.proposal_execution.resolve_model_adapter", _fake_resolve)
+    output = assess_node(context, assess_input, home_root=fixture["home"], target=target, config=fixture["config"])
+    assert seen_targets == ["ollama-default"]
+    assert len(output.assessments) == 1

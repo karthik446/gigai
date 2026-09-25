@@ -1,0 +1,325 @@
+{
+  "cap_dollars": 2.0,
+  "effort": "auto",
+  "latency_seconds": 128.671,
+  "request": {
+    "effort": "auto",
+    "exclusion_count": 3,
+    "outputSchema": {
+      "properties": {
+        "companies": {
+          "items": {
+            "properties": {
+              "ats_provider": {
+                "enum": [
+                  "greenhouse",
+                  "lever",
+                  "ashby",
+                  "other",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "board_token": {
+                "type": "string"
+              },
+              "careers_url": {
+                "format": "uri",
+                "type": "string"
+              },
+              "company": {
+                "type": "string"
+              },
+              "source": {
+                "format": "uri",
+                "type": "string"
+              },
+              "sponsorship": {
+                "enum": [
+                  "yes",
+                  "no",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "sponsorship_evidence": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "company",
+              "careers_url",
+              "ats_provider",
+              "sponsorship",
+              "sponsorship_evidence",
+              "source"
+            ],
+            "type": "object"
+          },
+          "maxItems": 15,
+          "type": "array"
+        }
+      },
+      "required": [
+        "companies"
+      ],
+      "type": "object"
+    },
+    "query": "Find US companies hiring for staff or senior backend engineer roles (remote or Denver, Colorado area) that use Greenhouse, Lever, or Ashby as their applicant tracking system AND are documented to sponsor US work visas (H-1B). Only return companies where you can identify the company's OWN job board base URL on one of these three platforms (e.g. https://boards.greenhouse.io/<company>, https://jobs.lever.co/<company>, or https://jobs.ashbyhq.com/<company> -- the board root, not a link to a specific job posting or a third-party aggregator like LinkedIn, Indeed, or another job site). Skip a company if you cannot find its own board URL on one of those three ATS platforms. For each company give: the company name, the exact board URL, the ATS provider, and visa sponsorship evidence with a source URL (an H-1B filing record, careers page, or job posting). Exclude: Coupang, ClickHouse, Gen Digital."
+  },
+  "response": {
+    "completedAt": "2026-09-24T04:08:41.925Z",
+    "costDollars": {
+      "agentCompute": 0.308,
+      "emails": 0,
+      "phoneNumbers": 0,
+      "search": 0.276,
+      "total": 0.584
+    },
+    "createdAt": "2026-09-24T04:06:36.242Z",
+    "id": "agent_run_cf6add13310d428db458eb002def5d5b",
+    "object": "agent_run",
+    "output": {
+      "grounding": [
+        {
+          "citations": [
+            {
+              "url": "https://jobs.ashbyhq.com/solanalabs"
+            },
+            {
+              "url": "https://jobs.ashbyhq.com/solanalabs/bf8c6a28-c0c4-4877-9368-66cb34ceff3a"
+            },
+            {
+              "url": "https://h1bsponsordata.com/employer/solana-labs"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[0]"
+        },
+        {
+          "citations": [
+            {
+              "url": "https://jobs.ashbyhq.com/clubhouse"
+            },
+            {
+              "url": "https://jobs.ashbyhq.com/clubhouse/db75584c-f380-4cb3-b535-6e39980d26c2/application"
+            },
+            {
+              "url": "https://bluedoor.sh/data/h1b-jobs/companies/clubhouse"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[1]"
+        },
+        {
+          "citations": [
+            {
+              "url": "https://jobs.ashbyhq.com/eightsleep"
+            },
+            {
+              "url": "https://jobs.ashbyhq.com/eightsleep/d48659e7-608b-4c0e-9e5f-4131b5df50ca"
+            },
+            {
+              "url": "https://www.ellis.com/visa-sponsors/eight-sleep-inc/h1b"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[2]"
+        },
+        {
+          "citations": [
+            {
+              "url": "https://job-boards.greenhouse.io/cresta"
+            },
+            {
+              "url": "https://job-boards.greenhouse.io/cresta/jobs/5133464008"
+            },
+            {
+              "url": "https://bluedoor.sh/data/h1b-jobs/companies/cresta-intelligence-inc"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[3]"
+        },
+        {
+          "citations": [
+            {
+              "url": "https://boards.greenhouse.io/corelight"
+            },
+            {
+              "url": "https://boards.greenhouse.io/corelight/jobs/7926834?gh_jid=7926834"
+            },
+            {
+              "url": "https://www.ellis.com/visa-sponsors/corelight-inc/h1b"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[4]"
+        },
+        {
+          "citations": [
+            {
+              "url": "https://job-boards.greenhouse.io/launchdarkly"
+            },
+            {
+              "url": "https://job-boards.greenhouse.io/launchdarkly/jobs/7861200003"
+            },
+            {
+              "url": "https://bluedoor.sh/data/h1b-jobs/companies/launchdarkly"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[5]"
+        }
+      ],
+      "structured": {
+        "companies": [
+          {
+            "ats_provider": "ashby",
+            "board_token": "solanalabs",
+            "careers_url": "https://jobs.ashbyhq.com/solanalabs",
+            "company": "Solana Labs",
+            "source": "https://h1bsponsordata.com/employer/solana-labs",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "Solana Labs, Inc. has filed 2 H-1B labor condition applications with the U.S. Department of Labor since FY2018 (1 certified)."
+          },
+          {
+            "ats_provider": "ashby",
+            "board_token": "clubhouse",
+            "careers_url": "https://jobs.ashbyhq.com/clubhouse",
+            "company": "Clubhouse",
+            "source": "https://bluedoor.sh/data/h1b-jobs/companies/clubhouse",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "Clubhouse filed 18 H-1B labor condition applications with the U.S. Department of Labor in FY2016\u2013FY2025; 17 were certified."
+          },
+          {
+            "ats_provider": "ashby",
+            "board_token": "eightsleep",
+            "careers_url": "https://jobs.ashbyhq.com/eightsleep",
+            "company": "Eight Sleep",
+            "source": "https://www.ellis.com/visa-sponsors/eight-sleep-inc/h1b",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "Eight Sleep, Inc. has filed 11 H-1B labor condition applications with the Department of Labor, covering 11 positions."
+          },
+          {
+            "ats_provider": "greenhouse",
+            "board_token": "cresta",
+            "careers_url": "https://job-boards.greenhouse.io/cresta",
+            "company": "Cresta",
+            "source": "https://bluedoor.sh/data/h1b-jobs/companies/cresta-intelligence-inc",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "Cresta Intelligence Inc. filed 53 H-1B labor condition applications in FY2018\u2013FY2026; all 53 were certified, and USCIS records show 20 approved H-1B petitions."
+          },
+          {
+            "ats_provider": "greenhouse",
+            "board_token": "corelight",
+            "careers_url": "https://boards.greenhouse.io/corelight",
+            "company": "Corelight",
+            "source": "https://www.ellis.com/visa-sponsors/corelight-inc/h1b",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "Corelight, Inc. has filed 37 H-1B labor condition applications with the Department of Labor, covering 37 positions."
+          },
+          {
+            "ats_provider": "greenhouse",
+            "board_token": "launchdarkly",
+            "careers_url": "https://job-boards.greenhouse.io/launchdarkly",
+            "company": "LaunchDarkly",
+            "source": "https://bluedoor.sh/data/h1b-jobs/companies/launchdarkly",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "LaunchDarkly filed 31 H-1B labor condition applications in FY2018\u2013FY2026; all 31 were certified, and USCIS records show 7 approved H-1B petitions."
+          }
+        ]
+      },
+      "text": "All returned companies have an active senior backend role that is remote in the U.S./North America and an observed first-party Greenhouse or Ashby board root. H-1B evidence is employer-level filing history; it documents sponsorship history, not necessarily sponsorship for the particular requisition."
+    },
+    "request": {
+      "budget": {
+        "maxCostDollars": 2
+      },
+      "effort": "auto",
+      "input": {
+        "exclusion": [
+          {
+            "company": "Coupang"
+          },
+          {
+            "company": "ClickHouse"
+          },
+          {
+            "company": "Gen Digital"
+          }
+        ]
+      },
+      "outputSchema": {
+        "properties": {
+          "companies": {
+            "items": {
+              "properties": {
+                "ats_provider": {
+                  "enum": [
+                    "greenhouse",
+                    "lever",
+                    "ashby",
+                    "other",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "board_token": {
+                  "type": "string"
+                },
+                "careers_url": {
+                  "format": "uri",
+                  "type": "string"
+                },
+                "company": {
+                  "type": "string"
+                },
+                "source": {
+                  "format": "uri",
+                  "type": "string"
+                },
+                "sponsorship": {
+                  "enum": [
+                    "yes",
+                    "no",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "sponsorship_evidence": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "company",
+                "careers_url",
+                "ats_provider",
+                "sponsorship",
+                "sponsorship_evidence",
+                "source"
+              ],
+              "type": "object"
+            },
+            "maxItems": 15,
+            "type": "array"
+          }
+        },
+        "required": [
+          "companies"
+        ],
+        "type": "object"
+      },
+      "query": "Find US companies hiring for staff or senior backend engineer roles (remote or Denver, Colorado area) that use Greenhouse, Lever, or Ashby as their applicant tracking system AND are documented to sponsor US work visas (H-1B). Only return companies where you can identify the company's OWN job board base URL on one of these three platforms (e.g. https://boards.greenhouse.io/<company>, https://jobs.lever.co/<company>, or https://jobs.ashbyhq.com/<company> -- the board root, not a link to a specific job posting or a third-party aggregator like LinkedIn, Indeed, or another job site). Skip a company if you cannot find its own board URL on one of those three ATS platforms. For each company give: the company name, the exact board URL, the ATS provider, and visa sponsorship evidence with a source URL (an H-1B filing record, careers page, or job posting). Exclude: Coupang, ClickHouse, Gen Digital."
+    },
+    "status": "completed",
+    "stopReason": "schema_satisfied",
+    "usage": {
+      "agentComputeUnits": 3.08,
+      "emails": 0,
+      "phoneNumbers": 0,
+      "searches": 55
+    }
+  },
+  "run_label": "auto_strict_v4_cap2"
+}
