@@ -6,6 +6,7 @@ import base64
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import fnmatch
 import os
 from pathlib import Path
 import re
@@ -28,6 +29,7 @@ from .canonical import (
 )
 from .diagnostics import run_mount_probes
 from .workpad import (
+    RUN_LOCAL_ARTIFACT_EXCLUDES,
     WORKPAD_GITIGNORE,
     WORKPAD_GIT_USER_EMAIL,
     WORKPAD_GIT_USER_NAME,
@@ -1341,6 +1343,44 @@ def _batch_read_blobs(root: Path, refs: list[str]) -> dict[str, bytes]:
     return blobs
 
 
+# Pre-split once: each RUN_LOCAL_ARTIFACT_EXCLUDES entry is a gitignore-
+# style "/runs/*/progress/" line (leading "/" = anchored to the workpad
+# root; trailing "/" = that directory and everything beneath it; "*" =
+# exactly one path segment, gitignore semantics, never "**"/recursive).
+# Stored here as its bare segment tuple (("runs", "*", "progress")) for
+# `_is_run_local_artifact`'s own segment-wise match.
+_RUN_LOCAL_ARTIFACT_PREFIX_PARTS: tuple[tuple[str, ...], ...] = tuple(
+    tuple(line.strip("/").split("/")) for line in RUN_LOCAL_ARTIFACT_EXCLUDES
+)
+
+
+def _is_run_local_artifact(relative: str) -> bool:
+    """True for a path under one of ``RUN_LOCAL_ARTIFACT_EXCLUDES``'s roots.
+
+    These roots (``runs/*/raw/``, ``runs/*/progress/``, ``runs/*/logs/``)
+    are additive, working-tree-only evidence a run writes directly to disk
+    (e.g. ``progress.py``'s ``acquire.jsonl``/``assess.jsonl``) and never
+    journals -- ``workpad.ensure_run_local_artifact_excludes`` already
+    excludes them from git itself (``.git/info/exclude``) for exactly this
+    reason. A committed-snapshot read (``_capture_committed_snapshot``) must
+    tolerate their presence in the working tree rather than treating them as
+    unexplained "extra" evidence: this is the one place that check is
+    relaxed, and ONLY for a path strictly under one of these exact roots --
+    a symlink anywhere under them, or any other stray file, is still
+    rejected by the caller's existing checks (this function only ever
+    answers "skip the committed-membership check for this path", never
+    "skip every check").
+    """
+
+    parts = Path(relative).parts
+    for prefix_parts in _RUN_LOCAL_ARTIFACT_PREFIX_PARTS:
+        if len(parts) <= len(prefix_parts):  # strictly under the root, not the root itself
+            continue
+        if all(fnmatch.fnmatchcase(part, pattern) for part, pattern in zip(parts, prefix_parts)):
+            return True
+    return False
+
+
 def _capture_committed_snapshot(
     root: Path,
     project_id: str,
@@ -1471,7 +1511,9 @@ def _capture_committed_snapshot(
                     )
                 ):
                     continue
-                if candidate.is_symlink() or relative not in artifacts:
+                if candidate.is_symlink():
+                    raise JournalConflictError("journal working evidence is extra or redirected")
+                if relative not in artifacts and not _is_run_local_artifact(relative):
                     raise JournalConflictError("journal working evidence is extra or redirected")
     return JournalSnapshot(head, artifacts)
 
