@@ -530,6 +530,53 @@ def _validate_assessment_extensions(
                 findings.append(_finding(f"{field}[{index}]", "invalid_text", f"{field} item is invalid"))
 
 
+_QUESTION_ID_RE = re.compile(r"\A[a-z0-9._-]+:[a-z0-9._-]+\Z")
+
+
+def _validate_structured_questions(items: object) -> None:
+    """P2 (v0.1.9) bounds for ``structured_questions``: same list cap as every
+    other assessment list (``_MAX_ITEMS``), same per-string cap as a plain
+    question (``_MAX_QUESTION``), plus the ``question_id`` shape check
+    (C10-compatible: fits ``experience_qa``'s own pattern too)."""
+
+    if items is None:
+        return
+    if not isinstance(items, list) or len(items) > _MAX_ITEMS:
+        raise FindJobsContractError("invalid_value", "assessment_result.structured_questions is out of bounds")
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise FindJobsContractError("invalid_value", "assessment_result.structured_questions item must be an object")
+        question_id = item.get("question_id")
+        question = item.get("question")
+        requirement = item.get("requirement")
+        if type(question_id) is not str or not _QUESTION_ID_RE.fullmatch(question_id):
+            raise FindJobsContractError("invalid_value", "assessment_result.structured_questions question_id is invalid")
+        if type(question) is not str or not question.strip() or len(question) > _MAX_QUESTION or "\x00" in question:
+            raise FindJobsContractError("invalid_value", "assessment_result.structured_questions question is invalid")
+        if requirement is not None and (type(requirement) is not str or len(requirement) > _MAX_TEXT or "\x00" in requirement):
+            raise FindJobsContractError("invalid_value", "assessment_result.structured_questions requirement is invalid")
+
+
+def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
+    """P2 (v0.1.9): verdict must agree with the matrix/questions it came with
+    (plan section "P2"; rules 3-5 of the S29 r1 instructions). Absent verdict
+    (an old-shape or non-verdict answer) is not checked -- this rule only
+    binds a payload that actually claims a verdict."""
+
+    verdict = raw.get("verdict")
+    if verdict is None:
+        return
+    matrix = raw.get("matrix")
+    rows = matrix if isinstance(matrix, list) else []
+    unmet_rows = sum(1 for row in rows if isinstance(row, Mapping) and row.get("status") == "unmet")
+    structured = raw.get("structured_questions")
+    question_count = len(structured) if isinstance(structured, list) else 0
+    if verdict == "not_a_match" and unmet_rows < 1:
+        raise FindJobsContractError("invalid_value", "not_a_match verdict requires at least one unmet matrix row")
+    if verdict == "pending_user_answers" and question_count < 1:
+        raise FindJobsContractError("invalid_value", "pending_user_answers verdict requires at least one structured question")
+
+
 def parse_assessment_proposal(raw: Mapping[str, object]) -> AssessmentResult:
     """Parse the frozen find-jobs assessment DTO without coercion."""
     if not isinstance(raw, Mapping):
@@ -545,6 +592,8 @@ def parse_assessment_proposal(raw: Mapping[str, object]) -> AssessmentResult:
             for item in items
         ):
             raise FindJobsContractError("invalid_value", f"assessment_result.{field} is out of bounds")
+    _validate_structured_questions(raw.get("structured_questions"))
+    _validate_verdict_consistency(raw)
     try:
         return AssessmentResult.from_json(dict(raw))
     except FindJobsContractError:

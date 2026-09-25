@@ -66,6 +66,7 @@ from .api.static import _UI_DIST_RELATIVE_PARTS
 
 _TEST_HTTP_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_HTTP"
 _TEST_MODEL_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_MODEL"
+_TEST_JEV_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_JEV"
 
 
 def _run_forever(bind: tuple[str, int], *, backend: Backend | None = None) -> None:
@@ -99,11 +100,11 @@ def main(argv: list[str] | None = None) -> None:
         dest="allow_test_seams",
         action="store_true",
         default=False,
-        help="allow starting with GIGAI_SCOUT_FIND_JOBS_TEST_HTTP/_MODEL test seams active",
+        help="allow starting with GIGAI_SCOUT_FIND_JOBS_TEST_HTTP/_MODEL/_JEV test seams active",
     )
     args = parser.parse_args(argv)
 
-    active_seam_vars = [name for name in (_TEST_HTTP_ENV, _TEST_MODEL_ENV) if os.environ.get(name)]
+    active_seam_vars = [name for name in (_TEST_HTTP_ENV, _TEST_MODEL_ENV, _TEST_JEV_ENV) if os.environ.get(name)]
     if active_seam_vars and not args.allow_test_seams:
         joined = " and ".join(active_seam_vars)
         print(

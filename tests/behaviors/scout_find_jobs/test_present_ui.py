@@ -295,6 +295,7 @@ def test_get_run_results_happy_path(running_server) -> None:
     expected["resume_label"] = None
     expected["resume_created_at"] = None
     expected["carried_forward_assessments"] = []
+    expected["rank_scores"] = []
     assert response.json() == expected
 
 

@@ -37,6 +37,10 @@ if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
 
     import httpx
 
+    # P6: type-only, to avoid a real import cycle with jev_contracts.py
+    # (which imports from this module); see AcquireOutput.rank_scores.
+    from .jev_contracts import RankScore
+
 
 class FindJobsContractError(ValueError):
     """A serialized find-jobs contract failed closed.
@@ -138,8 +142,32 @@ class AggregateStatus(StrEnum):
 
 class MatrixStatus(StrEnum):
     MET = "met"
+    UNMET = "unmet"
+    UNCLEAR = "unclear"
+    # P2 (v0.1.9): the S29 r1 assess prompt only ever emits met/unmet/unclear.
+    # PARTIAL/GAP are kept solely so an OLD serialized assessment result (the
+    # pre-P2 prompt's met/partial/gap vocabulary) still parses; the P2
+    # normalizer maps a new model's partial->unclear and gap->unmet before
+    # validation, so no live code path emits these two anymore (operator
+    # decision #10, plan section 8).
     PARTIAL = "partial"
     GAP = "gap"
+
+
+class Verdict(StrEnum):
+    """P2 (v0.1.9): the workflow-state verdict from the S29 r1 assess prompt."""
+
+    MATCHED_ABOVE_THRESHOLD = "matched_above_threshold"
+    PENDING_USER_ANSWERS = "pending_user_answers"
+    NOT_A_MATCH = "not_a_match"
+
+
+class RequirementClass(StrEnum):
+    """P2 (v0.1.9): per-matrix-row classification the S29 r1 prompt assigns."""
+
+    HARD = "hard"
+    ASKABLE = "askable"
+    NICE_TO_HAVE = "nice_to_have"
 
 
 class SponsorshipStatus(StrEnum):
@@ -1059,6 +1087,13 @@ class AcquireOutput(_Contract):
     # was found, plus that earlier result. `()` default keeps an old
     # serialized acquire output (pre-uat-bug-009) parsing unchanged.
     carried_forward_assessments: tuple[CarriedForwardAssessment, ...] = ()
+    # P6: additive/optional -- one Jev pre-rank score per candidate row, in
+    # the order the ranking call scored them; `()` for a run with no Jev key
+    # (fail open) or one sealed before P6 shipped. `RankScore` lives in
+    # ``jev_contracts.py`` (plan's shared-DTO rule); imported lazily here so
+    # this module -- imported by ``jev_contracts.py`` itself -- never forms
+    # an import cycle.
+    rank_scores: tuple["RankScore", ...] = ()
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {
@@ -1077,6 +1112,8 @@ class AcquireOutput(_Contract):
             value["dropped_counts"] = [item.to_json() for item in self.dropped_counts]
         if self.carried_forward_assessments:
             value["carried_forward_assessments"] = [item.to_json() for item in self.carried_forward_assessments]
+        if self.rank_scores:
+            value["rank_scores"] = [item.to_json() for item in self.rank_scores]
         return value
 
     @classmethod
@@ -1084,7 +1121,7 @@ class AcquireOutput(_Contract):
         value = _object_with_optional(
             obj,
             ("schema_version", "batch_id", "batch_ref", "progress_ref", "progress_status", "rows", "failures", "url_set_diff", "watchlist_refs", "selected_postings"),
-            ("dropped_counts", "carried_forward_assessments"),
+            ("dropped_counts", "carried_forward_assessments", "rank_scores"),
             "acquire_output",
         )
         if value["schema_version"] != cls.schema_version:
@@ -1101,6 +1138,13 @@ class AcquireOutput(_Contract):
             if type(value["carried_forward_assessments"]) is not list:
                 _fail("wrong_type", "acquire_output.carried_forward_assessments must be an array")
             carried_forward_assessments = tuple(CarriedForwardAssessment.from_json(item) for item in value["carried_forward_assessments"])
+        rank_scores: tuple["RankScore", ...] = ()
+        if "rank_scores" in value:
+            if type(value["rank_scores"]) is not list:
+                _fail("wrong_type", "acquire_output.rank_scores must be an array")
+            from .jev_contracts import RankScore
+
+            rank_scores = tuple(RankScore.from_json(item) for item in value["rank_scores"])
         return cls(
             _string(value["batch_id"], "batch_id"),
             _string(value["batch_ref"], "batch_ref"),
@@ -1113,6 +1157,7 @@ class AcquireOutput(_Contract):
             tuple(SelectedPosting.from_json(item) for item in value["selected_postings"]),
             dropped_counts,
             carried_forward_assessments,
+            rank_scores,
         )
 
 
@@ -1121,14 +1166,21 @@ class RequirementMatrixRow(_Contract):
     requirement: str
     resume_evidence: tuple[str, ...]
     status: MatrixStatus
+    # P2 (v0.1.9): additive, JSON key "class" (a reserved word); omitted
+    # when None so an old serialized matrix row is byte-identical to before.
+    requirement_class: RequirementClass | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {"requirement": self.requirement, "resume_evidence": _json_strings(self.resume_evidence), "status": _json_enum(self.status)}
+        value: dict[str, object] = {"requirement": self.requirement, "resume_evidence": _json_strings(self.resume_evidence), "status": _json_enum(self.status)}
+        if self.requirement_class is not None:
+            value["class"] = _json_enum(self.requirement_class)
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "RequirementMatrixRow":
-        value = _object(obj, ("requirement", "resume_evidence", "status"), "matrix_row")
-        return cls(_string(value["requirement"], "requirement"), _strings(value["resume_evidence"], "resume_evidence", allow_empty=True), _enum(value["status"], MatrixStatus, "status"))
+        value = _object_with_optional(obj, ("requirement", "resume_evidence", "status"), ("class",), "matrix_row")
+        requirement_class = None if "class" not in value else _enum(value["class"], RequirementClass, "matrix_row.class")
+        return cls(_string(value["requirement"], "requirement"), _strings(value["resume_evidence"], "resume_evidence", allow_empty=True), _enum(value["status"], MatrixStatus, "status"), requirement_class)
 
 
 @dataclass(frozen=True)
@@ -1147,6 +1199,34 @@ class NotAssessedRow(_Contract):
         return cls(PostingRow.from_json(value["posting"]), _enum(value["reason"], NotAssessedReason, "reason"))
 
 
+_QUESTION_ID = re.compile(r"\A[a-z0-9._-]+:[a-z0-9._-]+\Z")
+
+
+@dataclass(frozen=True)
+class AssessmentQuestion(_Contract):
+    """P2 (v0.1.9): one structured, askable question from the S29 r1 prompt.
+
+    ``question_id`` fits the same pattern as ``experience_qa``'s
+    ``question_id`` (C10) so an answered question can be recorded there
+    without translation: ``"<category>:<value>"``, lowercase.
+    """
+
+    question_id: str
+    question: str
+    requirement: str | None
+
+    def to_json(self) -> dict[str, object]:
+        return {"question_id": self.question_id, "question": self.question, "requirement": self.requirement}
+
+    @classmethod
+    def from_json(cls, obj: object) -> "AssessmentQuestion":
+        value = _object(obj, ("question_id", "question", "requirement"), "assessment_question")
+        question_id = _string(value["question_id"], "assessment_question.question_id")
+        if not _QUESTION_ID.fullmatch(question_id):
+            _fail("invalid_value", "assessment_question.question_id must match <category>:<value>")
+        return cls(question_id, _string(value["question"], "assessment_question.question"), _optional_string(value["requirement"], "assessment_question.requirement"))
+
+
 @dataclass(frozen=True)
 class AssessmentResult(_Contract):
     posting: SelectedPosting
@@ -1155,6 +1235,12 @@ class AssessmentResult(_Contract):
     questions: tuple[str, ...]
     proposal_revision_ref: str | None
     sponsorship: SponsorshipStatus | None = None
+    # P2 (v0.1.9): additive verdict/structured-question fields (plan section
+    # "P2"). All three are omitted at their defaults so an old serialized
+    # assessment result's to_json() stays byte-identical to before.
+    verdict: Verdict | None = None
+    structured_questions: tuple[AssessmentQuestion, ...] = ()
+    not_a_match_reason: str | None = None
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {"posting": self.posting.to_json(), "matrix": [row.to_json() for row in self.matrix], "suggestions": _json_strings(self.suggestions), "questions": _json_strings(self.questions), "proposal_revision_ref": self.proposal_revision_ref}
@@ -1163,15 +1249,43 @@ class AssessmentResult(_Contract):
         # old assessment result's to_json() is byte-identical to before.
         if self.sponsorship is not None:
             value["sponsorship"] = _json_enum(self.sponsorship)
+        if self.verdict is not None:
+            value["verdict"] = _json_enum(self.verdict)
+        if self.structured_questions:
+            value["structured_questions"] = [item.to_json() for item in self.structured_questions]
+        if self.not_a_match_reason is not None:
+            value["not_a_match_reason"] = self.not_a_match_reason
         return value
 
     @classmethod
     def from_json(cls, obj: object) -> "AssessmentResult":
-        value = _object_with_optional(obj, ("posting", "matrix", "suggestions", "questions", "proposal_revision_ref"), ("sponsorship",), "assessment_result")
+        value = _object_with_optional(
+            obj,
+            ("posting", "matrix", "suggestions", "questions", "proposal_revision_ref"),
+            ("sponsorship", "verdict", "structured_questions", "not_a_match_reason"),
+            "assessment_result",
+        )
         if type(value["matrix"]) is not list:
             _fail("wrong_type", "assessment_result.matrix must be an array")
         sponsorship = None if "sponsorship" not in value else _enum(value["sponsorship"], SponsorshipStatus, "assessment_result.sponsorship")
-        return cls(SelectedPosting.from_json(value["posting"]), tuple(RequirementMatrixRow.from_json(item) for item in value["matrix"]), _strings(value["suggestions"], "suggestions", allow_empty=True), _strings(value["questions"], "questions", allow_empty=True), _optional_string(value["proposal_revision_ref"], "proposal_revision_ref"), sponsorship)
+        verdict = None if "verdict" not in value else _enum(value["verdict"], Verdict, "assessment_result.verdict")
+        structured_questions: tuple[AssessmentQuestion, ...] = ()
+        if "structured_questions" in value:
+            if type(value["structured_questions"]) is not list:
+                _fail("wrong_type", "assessment_result.structured_questions must be an array")
+            structured_questions = tuple(AssessmentQuestion.from_json(item) for item in value["structured_questions"])
+        not_a_match_reason = None if "not_a_match_reason" not in value else _optional_string(value["not_a_match_reason"], "assessment_result.not_a_match_reason")
+        return cls(
+            SelectedPosting.from_json(value["posting"]),
+            tuple(RequirementMatrixRow.from_json(item) for item in value["matrix"]),
+            _strings(value["suggestions"], "suggestions", allow_empty=True),
+            _strings(value["questions"], "questions", allow_empty=True),
+            _optional_string(value["proposal_revision_ref"], "proposal_revision_ref"),
+            sponsorship,
+            verdict,
+            structured_questions,
+            not_a_match_reason,
+        )
 
 
 @dataclass(frozen=True)
@@ -2046,14 +2160,14 @@ __all__ = [
     "ACQUIRE_CAPABILITY", "ACQUIRE_CAPABILITY_ID", "ACQUIRE_DECLARED_EFFECTS", "ACQUIRE_EFFECTS",
     "ASSESS_CAPABILITY", "ASSESS_CAPABILITY_ID", "ASSESS_DECLARED_EFFECTS", "ASSESS_EFFECTS", "ASSESS_LOCAL_EFFECTS",
     "API_BIND", "ATSBoardClient", "ATSProvider", "AcquireInput", "AcquireNodeCallable", "AcquireOutput", "ExaSearchClient",
-    "AggregateStatus", "ArtifactRef", "AssessmentResult", "AssessInput", "AssessNodeCallable", "AssessOutput", "ConsentActor", "ConfigRequest", "ConfigResponse",
+    "AggregateStatus", "ArtifactRef", "AssessmentQuestion", "AssessmentResult", "AssessInput", "AssessNodeCallable", "AssessOutput", "ConsentActor", "ConfigRequest", "ConfigResponse",
     "DropCount",
     "EditedURL", "FindJobsConfig", "FindJobsContractError", "FailureRow", "FindJobsRunInput", "FindJobsConfig", "GoalError", "GoalStatus", "MatrixStatus", "ModelTarget", "NodeContext",
     "NodeFailure", "NodeReceipt", "NodeReceiptFixture", "NodeReceiptStatus", "NodeStatus", "NodeCallable", "NormalizedPostingRow", "NormalizedPublicPostingRow", "NotAssessedReason",
     "NotAssessedRow", "PRESENT_CAPABILITY", "PRESENT_CAPABILITY_ID", "PRESENT_DECLARED_EFFECTS", "PRESENT_EFFECTS", "PresentInput",
     "PresentNodeCallable", "PresentOutput", "PresentPayload", "PinnedResume", "PostingRow", "PostingRowResult", "Producer", "ProfileRef", "ROUTES",
-    "ProgressStatus", "RequirementMatrixRow", "RowOutcome", "RouteSpec", "RunLookupRequest", "RunRequest", "RunResponse", "RunResultsResponse", "RunStatusResponse",
-    "SelectedPosting", "SelectionReason", "SelectionReasonCode", "SelectionRule", "SourceKind", "SourceToggles", "SponsorshipStatus", "UIConsentEnvelope", "URLChangeDetectionClient", "URLObservation", "URLSetDiff",
+    "ProgressStatus", "RequirementClass", "RequirementMatrixRow", "RowOutcome", "RouteSpec", "RunLookupRequest", "RunRequest", "RunResponse", "RunResultsResponse", "RunStatusResponse",
+    "SelectedPosting", "SelectionReason", "SelectionReasonCode", "SelectionRule", "SourceKind", "SourceToggles", "SponsorshipStatus", "UIConsentEnvelope", "URLChangeDetectionClient", "URLObservation", "URLSetDiff", "Verdict",
     "UsageBlock", "WatchlistClient", "WatchlistEntry", "WatchlistFixture", "WatchlistFirstSeen", "aggregate_status", "content_hash",
     "diff_url_sets", "normalize_url", "parse_board_url",
 ]

@@ -220,6 +220,12 @@ def _assess_node_body(
     policy = assess_invocation_policy(model_target, input)
     sealed_config = _read_sealed_config(root, context.run_id)
     visa_sponsorship_required = bool(getattr(sealed_config, "visa_sponsorship_required", False))
+    # P2 (v0.1.9), operator answer 5: {{countries}} comes from find-jobs.json;
+    # {{titles}} is the effective config's roles (overlay_selected_profile
+    # already replaces roles with the profile's titles before sealing, so
+    # this is the profile's titles when one is selected, C11-adjacent).
+    prompt_countries = tuple(getattr(sealed_config, "countries", ()) or ())
+    prompt_titles = tuple(getattr(sealed_config, "roles", ()) or ())
 
     # Candidate resolution mirrors acquire's own selection loop exactly
     # (coordinator decision, P2 dispatch): a candidate is a new/edited,
@@ -353,11 +359,23 @@ def _assess_node_body(
         # sealed AssessInput from before this helper existed) never
         # overrides the sealed selection authority above -- only the
         # provisional OVER_CAP labels just added are refined.
+        #
+        # P6: acquire orders its own `candidates` by the SEALED
+        # `AcquireOutput.rank_scores` before calling `select_for_assessment`
+        # (market_acquisition.py); this twin recompute must reproduce that
+        # exact order from the same sealed scores, never re-rank by calling
+        # Jev again, or the two selections (and their duplicate/over_cap
+        # labels) could disagree. `_read_rank_scores` degrades to `()` for a
+        # run with no Jev key/pre-P6 run, in which case `_order_by_rank_scores`
+        # is a no-op and this list is in its original (pre-P6) order, exactly
+        # as before this packet.
         selected_postings_as_rows = [
             posting for posting, _outcome in acquire_rows if posting.normalized_url in selected_by_url
         ]
+        rank_scores = _read_rank_scores(root, input.acquire_batch_ref)
+        ordered_eligible = _order_by_rank_scores(list(eligible_postings), rank_scores)
         recomputed = select_for_assessment(
-            [*selected_postings_as_rows, *eligible_postings],
+            [*selected_postings_as_rows, *ordered_eligible],
             cap=input.selection_cap,
         )
         drop_reason_by_url = {
@@ -399,6 +417,8 @@ def _assess_node_body(
     assess_context = AssessContext(
         resume_text=resume.decode("utf-8", errors="replace"),
         visa_sponsorship_required=visa_sponsorship_required,
+        countries=prompt_countries,
+        titles=prompt_titles,
     )
 
     for posting, posting_text in to_assess[: input.selection_cap]:
@@ -587,7 +607,7 @@ def assess_invocation_policy(model_target: str, input: object) -> InvocationPoli
     )
 
 
-def _read_pinned_resume(home_root: Path, root: Path, gig_id: str, pinned: object) -> bytes:
+def read_pinned_resume(home_root: Path, root: Path, gig_id: str, pinned: object) -> bytes:
     from ..private_records import read_record
     value = read_record(home_root=home_root, requested_target=root, record_id=pinned.record_id, revision_id=pinned.revision_id, content=True, gig_id=gig_id)
     content = value.get("content")
@@ -596,6 +616,11 @@ def _read_pinned_resume(home_root: Path, root: Path, gig_id: str, pinned: object
     if digest_imported_bytes(content) != pinned.content_sha256:
         raise ScoutProposalExecutionError("resume_digest_mismatch", "pinned resume revision changed")
     return content
+
+
+# P4: ``find_jobs.resume_input`` reuses the digest-verifying reader; the old
+# private name stays an alias (the assess node and its tests patch that name).
+_read_pinned_resume = read_pinned_resume
 
 
 def _read_sealed_config(root: Path, run_id: str) -> object | None:
@@ -661,6 +686,63 @@ def _read_acquire_rows(root: Path, batch_ref: str) -> tuple[tuple[object, object
             outcome = RowOutcome.NEW
         result.append((PostingRow.from_json(posting_json), outcome))
     return tuple(result)
+
+
+def _read_rank_scores(root: Path, batch_ref: str) -> tuple:
+    """P6: the sealed ``AcquireOutput.rank_scores`` from this run's acquire batch.
+
+    Assess re-runs ``select_for_assessment`` over the eligible set for its
+    own not-assessed labeling (see the ordering call below); it must sort
+    that set by the SAME scores acquire itself used, or the twin recompute
+    could disagree with acquire's own selection. Reads the exact same
+    ``batch_ref`` file ``_read_acquire_rows`` reads, one key over
+    (``rank_scores``) -- degrades to ``()`` for any run sealed before P6, a
+    run with no Jev key, or a malformed/missing file (never raises: an
+    ordering enrichment must not fail assess).
+    """
+
+    from .find_jobs.jev_contracts import RankScore
+
+    try:
+        path = root / batch_ref
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    if not isinstance(value, Mapping):
+        return ()
+    items = value.get("rank_scores")
+    if not isinstance(items, list):
+        return ()
+    result = []
+    for item in items:
+        try:
+            result.append(RankScore.from_json(item))
+        except (ValueError, TypeError):
+            continue
+    return tuple(result)
+
+
+def _order_by_rank_scores(rows: list, rank_scores: tuple) -> list:
+    """Stable sort ``rows`` (objects with ``.normalized_url``) by ``rank_scores``.
+
+    Mirrors ``jev_rank.order_by_rank`` exactly (unscored/no-score rows last,
+    stable otherwise) but takes plain ``PostingRow`` objects rather than
+    requiring the whole ``jev_rank`` module's cache/HTTP machinery -- assess
+    only ever needs to reproduce acquire's ordering from already-sealed
+    scores, never to call Jev itself.
+    """
+
+    if not rank_scores:
+        return rows
+    by_url = {item.normalized_url: item for item in rank_scores}
+
+    def sort_key(row: object) -> tuple[int, int]:
+        score = by_url.get(getattr(row, "normalized_url", None))
+        if score is None or score.score is None:
+            return (1, 0)
+        return (0, -score.score)
+
+    return sorted(rows, key=sort_key)
 
 
 def _posting_text_bytes(posting: object) -> bytes | None:

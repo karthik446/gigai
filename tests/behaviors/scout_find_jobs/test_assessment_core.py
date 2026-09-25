@@ -47,54 +47,105 @@ _RESUME = b"Karthik built Python services for 6 years.\nOperated Kubernetes clus
 _POSTING_TEXT = b"We need 5+ years of Python. Remote OK.\nNo visa sponsorship available for this role.\n"
 _VALIDATION_ERROR = "matrix[0].status must be one of met|partial|gap"
 
-# Captured verbatim from the pre-P1 ``_assess_prompt`` (visa required = no, no retry).
+# P2 (v0.1.9) INTENTIONAL CHANGE: the template body was replaced with S29
+# r1's verdict instructions (plan section "P2"; operator answers 5 and 10),
+# so these goldens were RE-CAPTURED from the new ``render_assess_prompt`` on
+# the same fixed inputs the pre-P1 capture used (visa required = no, no
+# retry; countries/titles default empty since ``_ctx()`` below still omits
+# them). The old pre-P1 goldens they replace lived at these same sha256/len
+# values with the met|partial|gap prompt; that prompt is gone from the live
+# path (P2 rules 3-5 vocabulary is met|unmet|unclear plus a verdict).
 GOLDEN_PROMPT = (
-    "You are assessing one real job posting against one candidate's resume for GigAI Scout.\n\n"
-    "Return JSON only (no prose, no markdown fences) matching exactly this shape:\n"
-    '{"matrix": [{"requirement": "<one concrete requirement drawn from the posting>", '
-    '"resume_evidence": ["<short quote or paraphrase from the resume>"], '
-    '"status": "met|partial|gap"}], '
-    '"suggestions": ["<short actionable suggestion>"], '
-    '"questions": ["<short clarifying question, if any>"], '
-    '"sponsorship": "offered|not_offered|unknown"}\n'
-    "Example:\n"
-    '{"matrix": [{"requirement": "5+ years backend Python", "resume_evidence": '
-    '["Built and operated Python services for 6 years"], "status": "met"}, '
-    '{"requirement": "Kubernetes production experience", "resume_evidence": [], "status": "gap"}], '
-    '"suggestions": ["Call out the on-call rotation experience explicitly."], '
-    '"questions": ["Is the Kubernetes requirement negotiable?"], "sponsorship": "unknown"}\n'
-    "Derive 5 to 12 concrete requirements FROM THE POSTING TEXT below (skills, years of "
-    "experience, clearance, location/remote terms, tooling) — do not invent generic "
-    "requirements not stated or clearly implied by the posting.\n\n"
-    "ROLE: Senior Backend Engineer\nCOMPANY: Acme Corp\nLOCATION: Denver, CO\n\n"
-    "CANDIDATE CONSTRAINT: visa sponsorship required = no. "
-    "Read the posting text for its own sponsorship stance and report it "
-    'as "sponsorship": "offered", "not_offered", or "unknown".\n\n'
-    "POSTING TEXT (may be truncated):\n"
+    "You are assessing one real job posting against one candidate's resume for GigAI Scout. "
+    "Return a workflow-state verdict, not a grader score: the verdict decides what GigAI does "
+    "next, so pick the state that describes the right NEXT ACTION, not just how good the fit "
+    "looks.\n\n"
+    "STATES (pick exactly one):\n"
+    '- "matched_above_threshold": every hard requirement is met or the posting states none; a '
+    "reasonable person would apply today without more info.\n"
+    '- "pending_user_answers": the posting is otherwise plausible, but at least one '
+    "requirement's status can only be resolved by asking the candidate something the resume "
+    "does not already confirm OR rule out. This includes named tools/cloud "
+    "platforms/technologies AND hard requirements like years of experience or seniority level, "
+    "whenever the resume is merely silent — not stated, not contradicted. Never re-ask "
+    "something the resume already states one way or the other.\n"
+    '- "not_a_match": at least one requirement is unambiguously unmet by clear, explicit resume '
+    'evidence (a stated gap, e.g. resume says "3 years" and posting requires "8+"), OR the '
+    "posting is a clear domain/seniority mismatch that the resume's own words directly "
+    'contradict (e.g. resume title/level literally says "Intern" against a posting for '
+    '"Staff"). Do NOT use not_a_match for silence — silence is always a question, never a '
+    "verdict, regardless of how important the requirement is.\n\n"
+    "REQUIREMENT CLASSES (classify each requirement you extract from the posting before you "
+    "can pick a verdict):\n"
+    "- HARD: seniority/level, required years of experience, explicit clearance, an explicitly "
+    "excluded domain (posting or candidate side), and — ONLY WHEN THE POSTING TEXT ITSELF "
+    "states a hard constraint — location/remote policy or visa sponsorship.\n"
+    "- ASKABLE: a named tool, cloud platform, or specific technology the resume neither "
+    "confirms nor rules out (e.g. posting wants GCP, resume only shows AWS — this is a "
+    "QUESTION, not a gap: clouds/tools are learnable, and the candidate may have unlisted "
+    "experience); ALSO any HARD requirement above whose status the resume simply does not "
+    "address (see rule 1).\n"
+    '- NICE_TO_HAVE: anything the posting phrases as "bonus", "plus", or "preferred but not '
+    'required", or a soft culture/stack-neighbor fit signal.\n\n'
+    "RULES:\n"
+    "1. Test every HARD requirement against the resume TEXT, not against your overall "
+    "impression:\n"
+    "   - Resume explicitly satisfies it -> met.\n"
+    "   - Resume explicitly and directly contradicts it (its own words state a lower "
+    "level/fewer years/wrong domain) -> unmet -> not_a_match.\n"
+    "   - Resume is simply silent (does not mention the topic at all) -> this is NOT unmet and "
+    "NOT met. Reclassify this specific requirement as ASKABLE and write a question for it. "
+    "Silence is never grounds for not_a_match, no matter how central the requirement looks.\n"
+    "2. For every ASKABLE requirement (named tool/platform/tech, or a HARD requirement "
+    "reclassified under rule 1), write ONE specific question tied to that exact requirement, "
+    'with a stable question_id slug in the form "<category>:<value>" (lowercase, e.g. '
+    '"cloud:gcp", "years:python", "clearance:secret", "seniority:staff") that names the '
+    "underlying fact, not the posting — the same real-world fact asked the same way across "
+    "different postings should reuse the same question_id. Never ask a question the resume "
+    "already answers — quote the resume text you checked in resume_evidence (empty list only "
+    "if truly silent) before writing each question.\n"
+    '3. verdict = "matched_above_threshold" only if there are zero not_a_match findings AND '
+    "zero unresolved askable questions.\n"
+    '4. verdict = "not_a_match" if any requirement is unmet per rule 1\'s explicit-contradiction '
+    "test.\n"
+    '5. verdict = "pending_user_answers" only when there is no not_a_match finding but at least '
+    "one askable question remains.\n\n"
+    "Return JSON only (no prose, no markdown fences):\n"
+    '{"verdict": "matched_above_threshold|pending_user_answers|not_a_match",\n'
+    ' "matrix": [{"requirement": "<from the posting>", "class": "hard|askable|nice_to_have",\n'
+    ' "status": "met|unmet|unclear", "resume_evidence": ["<quote or paraphrase, or empty>"]}],\n'
+    ' "questions": [{"question_id": "<category>:<value>", "question": "<specific>", '
+    '"requirement": "<matches a matrix requirement>"}],\n'
+    ' "not_a_match_reason": "<one sentence, or null if verdict is not not_a_match>"}\n\n'
+    "ROLE: Senior Backend Engineer\nCOMPANY: Acme Corp\nLOCATION: Denver, CO\n"
+    "POSTING TEXT:\n"
     "We need 5+ years of Python. Remote OK.\nNo visa sponsorship available for this role.\n\n\n"
-    "RESUME (may be truncated):\n"
-    "Karthik built Python services for 6 years.\nOperated Kubernetes clusters in production.\n"
+    "RESUME:\n"
+    "Karthik built Python services for 6 years.\nOperated Kubernetes clusters in production.\n\n\n"
+    "CANDIDATE CONSTRAINTS: visa sponsorship required = no; countries = any; target titles = "
+    "unspecified."
 )
 
-# Captured verbatim from the pre-P1 ``_assess_prompt`` (visa required = yes, retry with error).
+# Same fixed inputs, visa required = yes, retry with the validation error fed back.
 GOLDEN_RETRY_PROMPT = (
-    GOLDEN_PROMPT.replace("visa sponsorship required = no.", "visa sponsorship required = yes.")
+    GOLDEN_PROMPT.replace("visa sponsorship required = no;", "visa sponsorship required = yes;")
     + "\n\nYour previous answer did not match the required JSON shape: "
     + _VALIDATION_ERROR
     + ". Return corrected JSON only, matching the schema exactly."
 )
 
-# sha256 of the pre-P1 prompts, recorded by the capture script (the strings
+# sha256 of the P2 prompts, recorded by the capture script above (the strings
 # above are the source of truth; the digests guard the transcription).
-GOLDEN_SHA256 = "cac149fe1117234554864fc32e405a0820a44104b11af0be2733d089831cb8fa"
-GOLDEN_RETRY_SHA256 = "83877b9445e9da0b53d3f3054d649bfa7cfef971ccca794e222fc789455c96b2"
-# 13,000-byte posting text and resume plus a 400-char validation error, pre-P1:
+GOLDEN_SHA256 = "1b845c0245b32debca7692b1d7521607fe89a95c9725f55b3e116ac0033e706c"
+GOLDEN_RETRY_SHA256 = "7d64ac8748fb713432b317febda6c633f0e8a6577e3f35a176b0b6112d465671"
+# 13,000-byte posting text and resume plus a 400-char validation error, P2:
 # the three ``_MAX_PROMPT_*`` bounds (12_000 / 12_000 / 300) produce this exact prompt.
-GOLDEN_BOUNDED_SHA256 = "825a00d5a138a16288975fb8d86abfe390dfd63e4d53c209d50a99f41540950a"
-GOLDEN_BOUNDED_LEN = 25_856
+GOLDEN_BOUNDED_SHA256 = "9145fdffbfa5d0565b585aa19b2a7b52b8da7bf6f203312b6dfe095155b304ad"
+GOLDEN_BOUNDED_LEN = 28_899
 
 # Digest of the shipped ``assess.md`` bytes; bump ONLY when the template changes on purpose.
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:9c3ded47473b118269cd7908fad3599ea95da086906f5f969bfa0c8a9544506b"
+# P2 (v0.1.9) INTENTIONAL CHANGE: bumped for the S29 r1 template replacement.
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:85c6e1d95d2e3b5bef94149b7eeedbf4482f5fc9fef509cf800e247a6ef3d346"
 
 
 def _sha256(text: str) -> str:

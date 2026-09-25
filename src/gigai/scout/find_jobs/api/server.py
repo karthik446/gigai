@@ -1304,6 +1304,7 @@ def _make_handler(
     from .config import ConfigRoutesMixin
     from .discover import DiscoverRoutesMixin
     from .profiles import ProfilesRoutesMixin
+    from .rank import RankRoutesMixin
     from .runs import RunRoutesMixin
     from .setup import SetupRoutesMixin
     from .static import StaticRoutesMixin
@@ -1314,6 +1315,7 @@ def _make_handler(
         DiscoverRoutesMixin,
         RunRoutesMixin,
         ProfilesRoutesMixin,
+        RankRoutesMixin,
         StaticRoutesMixin,
         BaseHTTPRequestHandler,
     ):
@@ -1528,6 +1530,10 @@ def _make_handler(
                 profile_id = _match_profile_id(path, suffix="/archive")
                 if profile_id is not None:
                     self._handle_post_profile_archive(profile_id)
+                    return
+                run_id = _match_run_id(path, suffix="/rank")
+                if run_id is not None:
+                    self._handle_post_rank(run_id)
                     return
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
             except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET

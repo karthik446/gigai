@@ -253,6 +253,19 @@ select,
   color: var(--danger);
 }
 
+/* P2 (v0.1.9): the S29 r1 assess prompt's met/unmet/unclear vocabulary.
+   unmet reads like gap (a hard miss); unclear reads like partial (a
+   question, not yet resolved). partial/gap above stay for old results. */
+.status-badge.unmet {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.status-badge.unclear {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
 .status-badge.sponsorship-offered {
   background: var(--ok-bg);
   color: var(--ok);

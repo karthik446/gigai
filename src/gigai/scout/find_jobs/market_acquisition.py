@@ -12,10 +12,13 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import gzip
 import json
+import os
 from pathlib import Path
 import re
 from typing import Any, cast
 from urllib.parse import parse_qsl, urlsplit
+
+import httpx
 
 from ...canonical import canonical_json_bytes, digest_imported_bytes
 from ..acquisition_records import import_public_rows
@@ -28,6 +31,7 @@ from .contracts import (
     CarriedForwardAssessment,
     DropCount,
     FailureRow,
+    FindJobsConfig,
     FindJobsContractError,
     NodeContext,
     NotAssessedReason,
@@ -48,6 +52,7 @@ from .contracts import (
     parse_board_url,
 )
 from .filters import exclusion_reason, location_mismatch_detail
+from .jev_rank import order_by_rank
 from .progress import ProgressWriter
 from .selection import select_for_assessment
 from ...workpad import ResolvedWorkpad, resolve_workpad
@@ -78,7 +83,7 @@ def _safe_batch_id(value: str) -> str:
     return (value or "acquire")[:120]
 
 
-def _job_id_from_url(url: str) -> str | None:
+def job_id_from_url(url: str) -> str | None:
     """Best-effort ATS job id extracted from a posting URL (U20 dedupe).
 
     Checks known job-id query parameters first (``gh_jid`` etc., used by
@@ -103,6 +108,11 @@ def _job_id_from_url(url: str) -> str | None:
         if _NUMERIC_PATH_SEGMENT.match(part):
             return part
     return None
+
+
+# P4: ``job_input.resolve_job`` reuses the parser; the old private name stays
+# an alias so existing callers/tests keep working.
+_job_id_from_url = job_id_from_url
 
 
 def _dedupe_identity(row: PostingRow) -> str:
@@ -347,6 +357,130 @@ def _run_profile_identity(root: Path, run_id: str, *, default_profile_id: str | 
         return None
     profile_id = sealed.profile_ref.profile_id if sealed.profile_ref is not None else default_profile_id
     return _RunProfileIdentity(sealed.pinned_resume.revision_id, profile_id)
+
+
+def _read_sealed_run_input_for_rank(root: Path, run_id: str) -> object | None:
+    """Same sealed-file read as ``_run_profile_identity``, returning the whole DTO."""
+
+    path = root / "runs" / run_id / "sealed" / "find-jobs-run-input.json"
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        from .contracts import FindJobsRunInput
+
+        return FindJobsRunInput.from_json(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
+def _read_resume_text_for_rank(
+    resolved: ResolvedWorkpad, sealed: object, *, home_root: Path
+) -> str | None:
+    """The sealed run's pinned resume text, or ``None`` if it can't be read.
+
+    P6: ranking is display-ordering only, never a sealed authority the way
+    ``proposal_execution._read_pinned_resume`` is for assess -- so this
+    degrades to ``None`` (no rank calls made) on any failure (resume record
+    missing, digest mismatch, I/O error) rather than raising and failing the
+    whole acquire step. Never verifies the digest match `_read_pinned_resume`
+    enforces; a stale/rotated resume at rank time just means a slightly-stale
+    score, corrected the moment the real assess call re-derives the matrix.
+    """
+
+    try:
+        from ..private_records import read_record
+
+        value = read_record(
+            home_root=home_root,
+            requested_target=resolved.path,
+            record_id=sealed.pinned_resume.record_id,  # type: ignore[attr-defined]
+            revision_id=sealed.pinned_resume.revision_id,  # type: ignore[attr-defined]
+            content=True,
+            gig_id=resolved.gig_id,
+        )
+    except Exception:
+        return None
+    content = value.get("content")
+    if not isinstance(content, bytes):
+        return None
+    return content.decode("utf-8", errors="replace")
+
+
+def _jev_http_client() -> httpx.Client:
+    """The transport ``_rank_candidates`` uses for its Jev calls.
+
+    A module-level function (not inlined) so ``bindings.py`` can monkeypatch
+    it under ``GIGAI_SCOUT_FIND_JOBS_TEST_JEV=1`` -- the same seam shape as
+    ``proposal_execution.resolve_model_adapter`` (C1): the production test
+    harness patches exactly this name, never a value imported from it.
+    """
+
+    return httpx.Client(timeout=30.0)
+
+
+def _rank_candidates(
+    candidates: list[PostingRow],
+    *,
+    resolved: ResolvedWorkpad,
+    run_id: str,
+    config: FindJobsConfig,
+    profile_id: str | None,
+    resume_revision_id: str | None,
+    home_root: Path | None,
+) -> tuple:
+    """P6: score ``candidates`` with Jev, or return ``()`` (fail open).
+
+    Never raises -- every precondition (no key, no sealed run input, no
+    readable resume, a Jev transport failure) degrades to ``()``, which
+    leaves ``candidates``' selection order exactly as it was before P6
+    (``order_by_rank`` is a no-op on an empty ``scores`` tuple). Cost cap:
+    ``GIGAI_JEV_COST_CAP_USD`` env var when set (plan section 8, answer 7),
+    else ``jev_rank.DEFAULT_COST_CAP_USD``.
+    """
+
+    if not candidates or home_root is None:
+        return ()
+    from .jev_client import JevClient, JevClientError, has_api_key, require_api_key
+
+    if not has_api_key(home_root=home_root):
+        return ()
+    sealed = _read_sealed_run_input_for_rank(resolved.path, run_id)
+    if sealed is None:
+        return ()
+    resume_text = _read_resume_text_for_rank(resolved, sealed, home_root=home_root)
+    if not resume_text:
+        return ()
+    from .jev_rank import DEFAULT_COST_CAP_USD, RankPreferences, rank_postings
+
+    cost_cap_raw = os.environ.get("GIGAI_JEV_COST_CAP_USD")
+    try:
+        cost_cap = float(cost_cap_raw) if cost_cap_raw else DEFAULT_COST_CAP_USD
+    except ValueError:
+        cost_cap = DEFAULT_COST_CAP_USD
+    try:
+        api_key = require_api_key(home_root=home_root)
+        client = JevClient(api_key, _jev_http_client())
+        prefs = RankPreferences(
+            target_titles=tuple(config.roles),
+            countries=tuple(config.countries),
+            visa_sponsorship_required=bool(config.visa_sponsorship_required),
+        )
+        scores, _total_cost, _capped = rank_postings(
+            tuple(candidates),
+            client=client,
+            resume_text=resume_text,
+            prefs=prefs,
+            profile_id=profile_id,
+            resume_revision_id=resume_revision_id,
+            home_root=home_root,
+            target=resolved.path,
+            cost_cap_usd=cost_cap,
+        )
+        return scores
+    except JevClientError:
+        return ()
+    except Exception:
+        return ()
 
 
 @dataclass(frozen=True)
@@ -790,13 +924,36 @@ def _acquire_node_body(
         if input.selection_rule is SelectionRule.NEW_OR_EDITED_ROLE_MATCH and is_candidate:
             candidates.append(row)
 
+    # P6: Jev pre-rank orders `candidates` before B2's diversity selection
+    # picks from them, so a strong-fit posting wins a company-cap tie over a
+    # weak one. Fails open by design (no key, no resume, any Jev error) --
+    # `_rank_candidates` never raises; an empty `rank_scores` leaves
+    # `candidates` in its original (pre-P6) order, so a run with no Jev key
+    # behaves exactly as it did before this packet. `rank_scores` is sealed
+    # onto `AcquireOutput` below (additive) so assess's own twin recompute
+    # (`proposal_execution.py`'s eligible_postings ordering) can reuse the
+    # SAME scores rather than re-calling Jev -- the two orderings can never
+    # disagree, and a re-assess never re-spends.
+    rank_scores = _rank_candidates(
+        candidates,
+        resolved=resolved,
+        run_id=context.run_id,
+        config=input.config,
+        profile_id=current_profile_id,
+        resume_revision_id=current_resume_revision_id,
+        home_root=home_root,
+    )
+    candidates = list(order_by_rank(tuple(candidates), rank_scores))
+
     # B2 (0.1.8.1 live UAT): the naive first-N-in-batch-order walk let one
     # board's postings fill the entire selection (a run saw 5/5 picks from
     # ClickHouse alone, 3 sharing a title). `select_for_assessment` (a pure,
     # independently-tested module) replaces that walk: dedupe near-identical
     # postings, cap how many one company can contribute, then round-robin
     # fill the remaining cap across companies -- deterministic regardless of
-    # `candidates`' order, so re-running on the same batch is a no-op.
+    # `candidates`' order, so re-running on the same batch is a no-op. P6's
+    # rank ordering above only breaks *ties* within what this still selects
+    # -- the dedupe/company-cap/diversity rules themselves are unchanged.
     selection = select_for_assessment(candidates, cap=input.selection_cap)
     # `select_for_assessment` returns the same `PostingRow` objects it was
     # given (see selection.py's `ordered_selected`); the narrower `Candidate`
@@ -845,6 +1002,7 @@ def _acquire_node_body(
             CarriedForwardAssessment(url, prior.result, prior.run_date)
             for url, prior in sorted(carried_forward.items())
         ),
+        rank_scores=rank_scores,
     )
 
 

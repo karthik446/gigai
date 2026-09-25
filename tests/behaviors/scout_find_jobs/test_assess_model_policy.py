@@ -14,6 +14,7 @@ from gigai.private_records import create_record, import_reference, migrate_workp
 from gigai.scout.find_jobs.contracts import (
     ATSProvider,
     AssessInput,
+    AssessmentQuestion,
     AssessmentResult,
     MatrixStatus,
     ModelTarget,
@@ -22,12 +23,14 @@ from gigai.scout.find_jobs.contracts import (
     PinnedResume,
     PostingRow,
     Producer,
+    RequirementClass,
     RequirementMatrixRow,
     SelectedPosting,
     SelectionReason,
     SelectionReasonCode,
     SourceKind,
     SponsorshipStatus,
+    Verdict,
 )
 from gigai.scout.proposal_execution import (
     ScoutProposalExecutionError,
@@ -433,6 +436,40 @@ def test_string_resume_evidence_is_normalized_and_passes(tmp_path: Path, monkeyp
     assert assessed.sponsorship is SponsorshipStatus.NOT_OFFERED
 
 
+def test_verdict_carrying_answer_reaches_the_saved_assessment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """P2 (v0.1.9): a full S29 r1-shaped answer (verdict, class, structured
+    questions) survives assess_node end to end -- normalize, validate, save."""
+    fixture, target = _assess_fixture(tmp_path)
+    posting = _posting(
+        normalized_url="https://boards.greenhouse.io/acme/jobs/909",
+        text="We need GCP experience.",
+    )
+    verdict_answer = json.dumps({
+        "verdict": "pending_user_answers",
+        "matrix": [
+            {"requirement": "Python", "class": "hard", "resume_evidence": ["Built Python services"], "status": "met"},
+            {"requirement": "GCP", "class": "askable", "resume_evidence": [], "status": "unclear"},
+        ],
+        "suggestions": [],
+        "questions": [
+            {"question_id": "cloud:gcp", "question": "Have you used GCP?", "requirement": "GCP"}
+        ],
+        "not_a_match_reason": None,
+    })
+    output, _binding = _run_assess(
+        fixture, target, run_id="run_00000000-0000-4000-8000-000000000109",
+        postings=[posting], outputs=[verdict_answer], monkeypatch=monkeypatch,
+    )
+    assert len(output.assessments) == 1
+    assessed = output.assessments[0]
+    assert assessed.verdict is Verdict.PENDING_USER_ANSWERS
+    assert assessed.matrix[1].requirement_class is RequirementClass.ASKABLE
+    assert assessed.matrix[1].status is MatrixStatus.UNCLEAR
+    assert assessed.structured_questions == (AssessmentQuestion("cloud:gcp", "Have you used GCP?", "GCP"),)
+    assert assessed.questions == ("Have you used GCP?",)  # C9: the shipped UI keeps reading strings
+    assert assessed.proposal_revision_ref  # saved via save_assessment_revision, same as any other result
+
+
 def test_garbage_answer_retries_once_then_not_assessed_while_others_succeed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -497,7 +534,11 @@ def test_fenced_json_output_is_extracted_before_normalization(tmp_path: Path, mo
         postings=[posting], outputs=[fenced], monkeypatch=monkeypatch,
     )
     assert len(output.assessments) == 1
-    assert output.assessments[0].matrix[0].status is MatrixStatus.PARTIAL
+    # P2 (v0.1.9): the normalizer maps the old prompt's "partially" synonym
+    # onto the new prompt's "unclear" word (plan section "P2", operator
+    # answer 10) -- the old PARTIAL enum member is kept only to parse an
+    # already-stored old-shape result, never emitted by live normalization.
+    assert output.assessments[0].matrix[0].status is MatrixStatus.UNCLEAR
 
 
 def test_model_denied_is_not_assessed_without_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

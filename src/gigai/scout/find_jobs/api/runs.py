@@ -166,6 +166,25 @@ class RunRoutesMixin:
         except Exception:  # noqa: BLE001 - display-only enrichment must never break /results
             carried_forward = ()
         body["carried_forward_assessments"] = [item.to_json() for item in carried_forward]
+        # P6: additive -- Jev's pre-rank scores for this run's postings
+        # against the gig's selected profile. `compute_rank_scores` is
+        # cache-first (jev_rank.py), so this never re-spends after a `/rank`
+        # call already scored the same rows for the same profile/resume
+        # revision; no key, no rows, or any Jev failure degrades to an
+        # empty response (fail open), never breaking /results itself.
+        try:
+            from .rank import compute_rank_scores
+
+            rank_response = compute_rank_scores(
+                home_root=self._backend.home_root,
+                target=self._backend.target,
+                run_id=run_id,
+                profile_id=None,
+            )
+            rank_scores = rank_response.scores
+        except Exception:  # noqa: BLE001 - display-only enrichment must never break /results
+            rank_scores = ()
+        body["rank_scores"] = [item.to_json() for item in rank_scores]
         self._write_json(HTTPStatus.OK, body)
 
     def _handle_get_run_progress(self, run_id: str) -> None:

@@ -94,6 +94,12 @@ class AssessContext:
 
     resume_text: str
     visa_sponsorship_required: bool
+    # P2 (v0.1.9): operator answers 5 -- {{countries}} (from find-jobs.json)
+    # and {{titles}} (one line, from the profile/effective config). Both
+    # default empty so every P1-era caller (and the golden-prompt tests that
+    # never pass them) keeps rendering the same way.
+    countries: tuple[str, ...] = ()
+    titles: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -138,6 +144,8 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
         "posting_text": job.posting_text[:_MAX_PROMPT_POSTING_TEXT],
         "resume_text": ctx.resume_text[:_MAX_PROMPT_RESUME_TEXT],
         "validation_error": (validation_error or "")[:_MAX_PROMPT_VALIDATION_ERROR],
+        "countries": ", ".join(ctx.countries) if ctx.countries else "any",
+        "titles": ", ".join(ctx.titles) if ctx.titles else "unspecified",
     }
     blocks = load_assess_instructions().split("\n\n")
     if not validation_error:
@@ -246,16 +254,36 @@ _STATUS_SYNONYMS = {
     "meet": "met",
     "yes": "met",
     "full": "met",
-    "partial": "partial",
-    "partially": "partial",
-    "partly": "partial",
-    "some": "partial",
-    "gap": "gap",
-    "missing": "gap",
-    "no": "gap",
-    "none": "gap",
-    "not_met": "gap",
-    "not met": "gap",
+    # The S29 r1 prompt (P2, v0.1.9) speaks met|unmet|unclear directly.
+    "unmet": "unmet",
+    "unclear": "unclear",
+    # The pre-P2 prompt's partial/gap vocabulary is gone from the live
+    # prompt, but old synonyms still map onto the new words (plan section
+    # "P2", operator answer 10): partial -> unclear, gap -> unmet.
+    "partial": "unclear",
+    "partially": "unclear",
+    "partly": "unclear",
+    "some": "unclear",
+    "gap": "unmet",
+    "missing": "unmet",
+    "no": "unmet",
+    "none": "unmet",
+    "not_met": "unmet",
+    "not met": "unmet",
+}
+
+_CLASS_SYNONYMS = {
+    "hard": "hard",
+    "askable": "askable",
+    "nice_to_have": "nice_to_have",
+    "nice-to-have": "nice_to_have",
+    "nice to have": "nice_to_have",
+}
+
+_VERDICT_SYNONYMS = {
+    "matched_above_threshold": "matched_above_threshold",
+    "pending_user_answers": "pending_user_answers",
+    "not_a_match": "not_a_match",
 }
 
 _SPONSORSHIP_SYNONYMS = {
@@ -292,6 +320,43 @@ def _normalize_status(value: object) -> object:
     return _STATUS_SYNONYMS.get(key, value)
 
 
+def _normalize_class(value: object) -> object:
+    if value is None or not isinstance(value, str):
+        return value
+    key = value.strip().lower()
+    return _CLASS_SYNONYMS.get(key, value)
+
+
+def _normalize_verdict(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    key = value.strip().lower()
+    return _VERDICT_SYNONYMS.get(key, value)
+
+
+def _normalize_question_item(item: object) -> object | None:
+    """One entry of the new structured ``questions`` list, or ``None`` to drop it.
+
+    Tolerates a bare string (treated as the question text with no id/
+    requirement -- dropped, since a question_id is required downstream) and
+    a mapping missing ``requirement`` (defaults to ``None``).
+    """
+    if isinstance(item, str):
+        return None
+    if not isinstance(item, Mapping):
+        return None
+    question_id = item.get("question_id")
+    question = item.get("question")
+    if not isinstance(question_id, str) or not isinstance(question, str):
+        return None
+    requirement = item.get("requirement")
+    return {
+        "question_id": question_id.strip().lower(),
+        "question": question,
+        "requirement": requirement if isinstance(requirement, str) else None,
+    }
+
+
 def _normalize_sponsorship(value: object) -> object:
     if value is None:
         return None
@@ -306,8 +371,20 @@ def _normalize_assessment_payload(decoded: Mapping[str, object]) -> dict[str, ob
 
     - extracts already happened in ``_extract_json_object``
     - ``resume_evidence`` as a bare string becomes ``[string]``; ``null``/missing becomes ``[]``
-    - matrix ``status`` synonyms (yes/partially/no, meets/partial/missing, any case) map to met/partial/gap
-    - ``suggestions``/``questions`` as a bare string become ``[string]``; ``null``/missing become ``[]``
+    - matrix ``status`` synonyms (yes/partially/no, meets/partial/missing, any case) map to
+      met/unmet/unclear (P2, v0.1.9): the old prompt's partial/gap words map onto the new
+      prompt's unclear/unmet respectively, since the old prompt is gone from the live path
+    - matrix ``class`` (P2): hard/askable/nice_to_have, case/hyphen tolerant; absent stays absent
+    - ``suggestions`` as a bare string becomes ``[string]``; ``null``/missing become ``[]``
+    - ``questions`` (P2): the S29 r1 prompt returns a list of
+      ``{question_id, question, requirement}`` objects. Each valid object becomes one
+      ``structured_questions`` entry (question_id lowercased) AND contributes its
+      ``question`` text to the plain-string ``questions`` list the shipped UI still reads
+      (C9); a bare string entry (the pre-P2 prompt's shape) is kept only in the plain
+      ``questions`` list, since it carries no question_id to structure.
+    - ``verdict``/``not_a_match_reason`` (P2): passed through when present; consistency
+      between verdict and the matrix/questions is enforced downstream, in ``parse``
+      (``proposals.parse_assessment_proposal``), not here.
     - unknown top-level keys are dropped so the frozen contract's closed-object check still applies cleanly
     - ``sponsorship`` synonyms map to offered/not_offered/unknown; absent stays absent
 
@@ -328,19 +405,48 @@ def _normalize_assessment_payload(decoded: Mapping[str, object]) -> dict[str, ob
                 ],
                 "status": _normalize_status(row.get("status")),
             }
+            if "class" in row:
+                requirement_class = _normalize_class(row.get("class"))
+                if requirement_class is not None:
+                    normalized_row["class"] = requirement_class
             normalized_matrix.append(normalized_row)
     else:
         normalized_matrix = matrix
 
+    raw_questions = _normalize_string_list(decoded.get("questions"))
+    plain_questions: list[str] = []
+    structured_questions: list[object] = []
+    for item in raw_questions:
+        if isinstance(item, str):
+            plain_questions.append(item)
+            continue
+        normalized_item = _normalize_question_item(item)
+        if normalized_item is None:
+            continue
+        structured_questions.append(normalized_item)
+        plain_questions.append(normalized_item["question"])
+
     result: dict[str, object] = {
         "matrix": normalized_matrix,
         "suggestions": [item for item in _normalize_string_list(decoded.get("suggestions")) if isinstance(item, str)],
-        "questions": [item for item in _normalize_string_list(decoded.get("questions")) if isinstance(item, str)],
+        "questions": plain_questions,
     }
+    if structured_questions:
+        result["structured_questions"] = structured_questions
     if "sponsorship" in decoded:
         sponsorship = _normalize_sponsorship(decoded.get("sponsorship"))
         if sponsorship is not None:
             result["sponsorship"] = sponsorship
+    if "verdict" in decoded:
+        verdict = _normalize_verdict(decoded.get("verdict"))
+        if verdict is not None:
+            result["verdict"] = verdict
+    if "not_a_match_reason" in decoded:
+        reason = decoded.get("not_a_match_reason")
+        if isinstance(reason, str):
+            result["not_a_match_reason"] = reason
+        elif reason is None:
+            result["not_a_match_reason"] = None
     # Drop any other unknown keys (e.g. a model echoing "posting" back, or
     # inventing extra fields): the frozen contract is a closed object, and
     # normalization's job is to fix shape, not to smuggle new keys through.

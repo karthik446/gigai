@@ -56,6 +56,9 @@ TEST_MODEL_DIGEST = "sha256:" + ("0" * 64)
 _HOME_ROOT_ENV = "GIGAI_SCOUT_FIND_JOBS_HOME_ROOT"
 _TEST_HTTP_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_HTTP"
 _TEST_MODEL_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_MODEL"
+# P6: the seam name harness.py's own docstring already reserved for the
+# fake Jev client (mirrors _TEST_HTTP_ENV/_TEST_MODEL_ENV's shape exactly).
+_TEST_JEV_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_JEV"
 _TIMEOUT = httpx.Timeout(20.0, connect=5.0)
 _LIVE_BINDINGS: dict[tuple[Path, Path], tuple[RegisteredNode, ...]] = {}
 
@@ -133,6 +136,30 @@ def _test_http_enabled() -> bool:
     return os.environ.get(_TEST_HTTP_ENV) == "1"
 
 
+_TEST_GENERIC_PAGE_HTML = (
+    "<html><head><title>Backend Engineer - Example Careers</title></head><body>"
+    "<h1>Backend Engineer</h1>"
+    "<p>Example Corp builds reliable Python services for a growing customer base. "
+    "We are hiring a backend engineer to own our ingestion pipeline end to end.</p>"
+    "<h2>What you will do</h2><ul>"
+    "<li>Design and operate HTTP services in Python.</li>"
+    "<li>Own reliability: tracing, alerting, and on-call for the systems you build.</li>"
+    "<li>Review code and mentor engineers across the platform group.</li></ul>"
+    "<h2>What we look for</h2><ul>"
+    "<li>Five or more years building production backend systems.</li>"
+    "<li>Depth in Python and PostgreSQL; comfort with distributed systems.</li>"
+    "<li>Clear written communication.</li></ul>"
+    "<p>Example Corp is unable to sponsor visas for this position.</p>"
+    "</body></html>"
+)
+_TEST_JS_SHELL_HTML = (
+    '<!doctype html><html><head><meta charset="utf-8"><title>Job Application</title>'
+    '<script src="https://boards.greenhouse.io/embed/job_app.js"></script>'
+    "<script>window.__GH__={board:'acme',job:101};document.addEventListener('DOMContentLoaded',"
+    "function(){window.__GH__.render();});</script></head><body><div id=\"app\"></div></body></html>"
+)
+
+
 def _test_provider_handler(request: httpx.Request) -> httpx.Response:
     """Serve the fixed Exa/Greenhouse fixtures used by the child-process test."""
 
@@ -150,6 +177,28 @@ def _test_provider_handler(request: httpx.Request) -> httpx.Response:
             },
             request=request,
         )
+    # P4 quick-assess job-input fixtures: the Greenhouse SINGLE-job endpoint
+    # (checked before the host-only board match below), a generic HTML career
+    # page, and a Greenhouse JavaScript shell whose text is too short to be a
+    # posting (so ``resolve_job`` falls back to the board listing).
+    if request.method == "GET" and request.url.host == "boards-api.greenhouse.io" and request.url.path == "/v1/boards/acme/jobs/101":
+        return httpx.Response(
+            200,
+            json={
+                "id": 101,
+                "title": "Software Engineer",
+                "absolute_url": "https://boards.greenhouse.io/acme/jobs/101",
+                "location": {"name": "Denver, CO"},
+                "updated_at": "2026-09-22T00:00:00Z",
+                "company_name": "Acme",
+                "content": "&lt;p&gt;Build reliable Python services.&lt;/p&gt;",
+            },
+            request=request,
+        )
+    if request.method == "GET" and request.url.host == "careers.example.test" and request.url.path == "/jobs/9":
+        return httpx.Response(200, text=_TEST_GENERIC_PAGE_HTML, headers={"content-type": "text/html; charset=utf-8"}, request=request)
+    if request.method == "GET" and request.url.host == "boards.greenhouse.io" and request.url.path == "/acme/jobs/101":
+        return httpx.Response(200, text=_TEST_JS_SHELL_HTML, headers={"content-type": "text/html; charset=utf-8"}, request=request)
     if request.method == "GET" and request.url.host == "boards-api.greenhouse.io":
         return httpx.Response(
             200,
@@ -191,15 +240,34 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
                     "role": "assistant",
                     "content": json.dumps(
                         {
+                            # P2 (v0.1.9): a verdict-carrying fixture answer, so
+                            # the api-e2e/child-process journeys exercise the
+                            # new S29 r1 shape end to end (structured
+                            # questions -> pending_user_answers).
+                            "verdict": "pending_user_answers",
                             "matrix": [
                                 {
                                     "requirement": "Python",
+                                    "class": "hard",
                                     "resume_evidence": ["Built Python services"],
                                     "status": "met",
-                                }
+                                },
+                                {
+                                    "requirement": "GCP",
+                                    "class": "askable",
+                                    "resume_evidence": [],
+                                    "status": "unclear",
+                                },
                             ],
                             "suggestions": ["Keep the service example."],
-                            "questions": ["Which platform would you prefer?"]
+                            "questions": [
+                                {
+                                    "question_id": "cloud:gcp",
+                                    "question": "Which platform would you prefer?",
+                                    "requirement": "GCP",
+                                }
+                            ],
+                            "not_a_match_reason": None,
                         },
                         separators=(",", ":"),
                     ),
@@ -212,6 +280,78 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
             request=request,
         )
     return httpx.Response(404, json={"error": "test fixture route not found"}, request=request)
+
+
+def _test_jev_handler(request: httpx.Request) -> httpx.Response:
+    """Fake ``POST /v1/decide`` for the offline P6 journeys (no live Jev call).
+
+    Shape mirrors ``jev-api-notes.md``'s EXECUTED response exactly (``model``,
+    ``answers.<key>.{choice|score|noul}``, ``usage.cost_usd``) so
+    ``jev_client._parse_response`` exercises the real parsing path. Every
+    posting scores ``strong``/``score=8`` with no mismatch flags -- the
+    journeys assert on ordering and cache behavior, not on a specific
+    fit/score value, so one fixed answer is enough (a per-request-body
+    branch would only be needed if a journey asserted a *different* score
+    for a different posting, which none do).
+    """
+
+    if request.method == "POST" and request.url.host == "jevtypesafeai.com" and request.url.path == "/api/v1/decide":
+        return httpx.Response(
+            200,
+            json={
+                "model": "jev-test",
+                "answers": {
+                    "fit": {"choice": "strong", "confidence": 0.9},
+                    "score": {"score": 8},
+                    "top_reason": {"choice": "stack_match"},
+                    "flag_domain": {"noul": 0.0},
+                    "flag_seniority": {"noul": 0.0},
+                    "flag_stack": {"noul": 0.0},
+                    "flag_location": {"noul": 0.0},
+                    "flag_sponsorship": {"noul": 0.0},
+                },
+                "usage": {"input_tokens": 1200, "cost_usd": 0.0005, "credits_remaining_usd": 9.9995},
+            },
+            request=request,
+        )
+    return httpx.Response(404, json={"error": "test fixture route not found"}, request=request)
+
+
+def _test_jev_enabled() -> bool:
+    return os.environ.get(_TEST_JEV_ENV) == "1"
+
+
+def _patch_test_jev_transport() -> None:
+    """Inject a MockTransport into P6's real Jev client for offline journeys only.
+
+    Same seam shape as ``_patch_test_model_transport``: the production test
+    harness patches exactly two module attributes --
+    ``market_acquisition._jev_http_client`` (the acquire node's own ranking
+    call) and ``api.rank._jev_http_client`` (the ``/rank`` route's call) --
+    never a value imported from either, so both call sites are intercepted
+    wherever they run (including a spawned child process for acquire, where
+    a parent-process transport object cannot be pickled -- the same reason
+    the HTTP/model seams build their MockTransport freshly here rather than
+    passing one in).
+    """
+
+    if not _test_jev_enabled():
+        return
+
+    def jev_test_client() -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(_test_jev_handler), timeout=_TIMEOUT)
+
+    setattr(jev_test_client, "_scout_test_transport", True)
+
+    from . import market_acquisition as scout_market_acquisition
+
+    if not getattr(scout_market_acquisition._jev_http_client, "_scout_test_transport", False):
+        scout_market_acquisition._jev_http_client = jev_test_client  # type: ignore[assignment]
+
+    from .api import rank as scout_rank_api
+
+    if not getattr(scout_rank_api._jev_http_client, "_scout_test_transport", False):
+        scout_rank_api._jev_http_client = jev_test_client  # type: ignore[assignment]
 
 
 def _http_client() -> httpx.Client:
@@ -435,6 +575,7 @@ def _register_nodes(
 
     config = load_config(home)
     _patch_test_model_transport(config)
+    _patch_test_jev_transport()
     http_client = _http_client()
     watchlist = _BoundWatchlist(home, root)
     acquire = partial(

@@ -123,6 +123,9 @@ def test_setup_config_run_poll_results_journey(tmp_path: Path, monkeypatch: pyte
         assert payload["rows"], "acquire must have found the fixture Greenhouse posting"
         assert payload["assessments"], "assess must have produced at least one assessment"
         assert payload["assessments"][0]["matrix"]
+        # P2 (v0.1.9): the verdict-carrying fixture model answer flows through
+        # to the API's own assessment payload (plan section "P2").
+        assert payload["assessments"][0]["verdict"] == "pending_user_answers"
         assert len(payload["node_receipts"]) == 3
         results_latency.assert_within_budget()
         workpad = resolve_workpad_path(home, target)
