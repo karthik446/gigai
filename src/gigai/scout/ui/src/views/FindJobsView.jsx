@@ -387,6 +387,7 @@ export default function FindJobsView({
         job={job}
         jobId={jobId}
         profileId={profile.profile_id}
+        profileLabel={profile.label}
         visaRequired={visaRequired}
         loading={resultsLoading || (runsState.loading && !runId)}
         onQuickUpdated={handleQuickUpdated}

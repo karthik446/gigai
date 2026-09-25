@@ -17,6 +17,7 @@ export function rowsFromProgress(progress) {
       status,
       assessment: assessmentEntry?.assessment || null,
       notAssessedReason: assessmentEntry?.reason || null,
+      h1b: null, // the live snapshot has no catalog join; the sealed results row does
     };
   });
 }
@@ -52,6 +53,9 @@ export function rowsFromResults(payload) {
       assessment: assessment || carriedForward?.result || null,
       notAssessedReason,
       fromRunDate: carriedForward?.from_run_date || null,
+      // Q4b: rows[].h1b {approvals, fiscal_years} (the company catalog's
+      // H-1B join, Q4b-data) -- null when the row does not carry it.
+      h1b: row.h1b || null,
     };
   });
 }

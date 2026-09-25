@@ -24,7 +24,8 @@ import { jobHash } from "../routing.js";
 // Operator answer 2: the requirement summary only after assess; an
 // unassessed card shows Jev's reasons instead (or the not-assessed reason
 // when Jev never scored it). Operator answer 3: work-mode/pay chips only
-// when the posting lists them (phase 2 fields) -- no "not listed" chips.
+// when the posting lists them (Q4b fields: posting.work_mode, posting.pay;
+// rows[].h1b goes on the sponsorship chip) -- no "not listed" chips.
 function RequirementSummary({ assessment }) {
   const { shown, more } = requirementSummary(assessment);
   if (shown.length === 0) {
@@ -101,7 +102,7 @@ export default function JobCard({ job, visaRequired }) {
 
       <div className="card-chips">
         <VerdictChip verdict={job.verdict} assessment={job.assessment} />
-        {visaRequired && <SponsorshipBadge sponsorship={job.sponsorship} h1bFilings={posting.h1b_filings_fy2024} />}
+        {visaRequired && <SponsorshipBadge sponsorship={job.sponsorship} h1b={job.h1b} />}
         {job.status === "carried_forward" && <span className="tag">{unchangedSinceLabel(job.fromRunDate)}</span>}
       </div>
 

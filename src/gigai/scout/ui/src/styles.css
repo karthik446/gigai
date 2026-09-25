@@ -996,7 +996,10 @@ table.data-table th {
 
 .two-col { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 @media (max-width: 760px) {
-  .two-col { grid-template-columns: 1fr; }
+  /* Q4b-ui: minmax(0, …) like the desktop rule -- a bare 1fr is
+     minmax(auto, 1fr), so the requirement table / prep command's intrinsic
+     width pushed the column (and the page) past the viewport on a phone. */
+  .two-col { grid-template-columns: minmax(0, 1fr); }
   .job-header .header-side { align-items: flex-start; }
   .jev-reasons { text-align: left; }
 }
@@ -1461,4 +1464,36 @@ table.data-table th {
   .runs-table {
     font-size: 0.8rem;
   }
+}
+
+/* Q4b-ui (v0.1.9): the tailored-resume panel on the job page (mockup's
+   "Tailored resume" block, light theme like the rest of the app). */
+.resume-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.resume-legend { display: flex; gap: 10px; font-size: 0.75rem; color: var(--muted); align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.tailor-meta { font-size: 0.8rem; color: var(--muted); margin: 0 0 8px; }
+.prov { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; flex-shrink: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.prov.resume { background: var(--ok-bg); color: var(--ok); }
+.prov.rewritten { background: #eaf0ff; color: #1a3aa3; }
+.prov.blank { visibility: hidden; }
+.md-preview { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); padding: 10px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; line-height: 1.5; overflow-x: auto; }
+.md-line { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: start; padding: 1px 0; white-space: pre-wrap; word-break: break-word; cursor: pointer; border-radius: 4px; }
+.md-line.blank,
+.md-line.heading { cursor: default; }
+.md-line.heading { font-weight: 700; }
+.md-line:not(.blank):not(.heading):hover,
+.md-line.open { background: var(--chip-bg); }
+.md-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.src-list { display: block; margin: 4px 0 6px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 0.76rem; white-space: normal; }
+.src-item { display: block; border-left: 2px solid var(--border); padding: 3px 8px; margin-top: 3px; }
+.src-kind { font-weight: 600; margin-right: 6px; }
+.src-kind.resume { color: var(--ok); }
+.src-kind.answer { color: var(--accent); }
+.src-note { color: var(--muted); margin-right: 6px; }
+.src-note::before { content: "· "; }
+.src-text { display: block; color: var(--muted); margin-top: 1px; }
+.resume-stats { font-size: 0.78rem; color: var(--muted); margin-top: 8px; }
+.tailor-progress { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--muted); margin: 0 0 10px; }
+.tailor-error { margin: 0 0 10px; font-size: 0.85rem; }
+@media (max-width: 480px) {
+  .resume-toolbar .button { width: 100%; }
 }

@@ -14,11 +14,13 @@
 // Pure functions, no React: the merge/sort/filter rules are the part of
 // this packet most worth reading in one place.
 //
-// Phase 2 hooks (fields that arrive with Q2's acquire changes / catalog
-// join; rendered by JobCard/JobPage ONLY when present, no placeholder):
-//   posting.work_mode            "remote" | "hybrid" | "onsite"
-//   posting.pay                  {min, max, currency, period}
-//   posting.h1b_filings_fy2024   integer, the catalog's H-1B count
+// Q4b fields (Q4b-data adds them; rendered by JobCard/JobPage ONLY when
+// present, no placeholder chips -- operator answer 3):
+//   posting.work_mode   "remote" | "hybrid" | "onsite"   -> workModeLabel
+//   posting.pay         {min, max, currency, period}     -> payLabel
+//   rows[].h1b          {approvals, fiscal_years}        -> h1bLabel, the
+//                       sponsorship chip's suffix when the posting is silent
+//                       (carried on the job as `job.h1b`, from boardRows)
 import { displayCompanyName, notAssessedReasonLabel } from "./display.js";
 
 export const VERDICT_LABELS = {
@@ -131,10 +133,31 @@ export function payLabel(pay) {
   }
   const currency = pay.currency || "";
   const symbol = currency === "USD" ? "$" : currency === "EUR" ? "€" : currency === "GBP" ? "£" : currency ? `${currency} ` : "";
-  const amount = (value) => (value >= 10000 ? `${Math.round(value / 1000)}k` : String(value));
+  // "$180k–$220k / yr", "from $180k / yr", "up to $220k / yr", "$65–$80 / hr".
+  const amount = (value) => `${symbol}${value >= 10000 ? `${Math.round(value / 1000)}k` : String(value)}`;
   const range = hasMin && hasMax ? `${amount(pay.min)}–${amount(pay.max)}` : hasMin ? `from ${amount(pay.min)}` : `up to ${amount(pay.max)}`;
-  const period = pay.period === "hour" ? "/hr" : pay.period === "year" ? "/yr" : pay.period ? `/${pay.period}` : "";
-  return `${symbol}${range}${period}`;
+  const period = PERIOD_LABELS[pay.period] || (pay.period ? String(pay.period) : "");
+  return period ? `${range} / ${period}` : range;
+}
+
+const PERIOD_LABELS = { year: "yr", month: "mo", week: "wk", day: "day", hour: "hr" };
+
+// "9 H-1B approvals (FY2026)" from rows[].h1b {approvals, fiscal_years}
+// (USCIS approvals, never "filings" -- coordinator msg_0f0cf5a89665); null
+// unless `approvals` is a positive number, so no record and zero approvals
+// both leave the chip a plain "Unknown". Several fiscal years read
+// "FY2024–2026"; none reads without the parenthesis.
+export function h1bLabel(h1b) {
+  if (!h1b || typeof h1b !== "object" || typeof h1b.approvals !== "number" || h1b.approvals <= 0) {
+    return null;
+  }
+  const count = `${h1b.approvals} H-1B approval${h1b.approvals === 1 ? "" : "s"}`;
+  const years = Array.isArray(h1b.fiscal_years) ? h1b.fiscal_years.filter((year) => Number.isInteger(year)).sort((a, b) => a - b) : [];
+  if (years.length === 0) {
+    return count;
+  }
+  const span = years.length === 1 ? `FY${years[0]}` : `FY${years[0]}–${years[years.length - 1]}`;
+  return `${count} (${span})`;
 }
 
 export function workModeLabel(posting) {
@@ -191,6 +214,7 @@ export function buildJobs({ rows, rankScores, quickItems, runCreatedAt }) {
       assessmentSource,
       verdict: effectiveVerdict(assessment),
       sponsorship: (assessment && assessment.sponsorship) || posting.sponsorship || "unknown",
+      h1b: row.h1b || null,
     };
   });
 
@@ -243,6 +267,7 @@ export function quickOnlyJob(item, rank = null) {
     assessmentSource: assessment ? "quick" : null,
     verdict: effectiveVerdict(assessment),
     sponsorship: (assessment && assessment.sponsorship) || "unknown",
+    h1b: null, // the store's ResolvedJob carries no catalog join
   };
 }
 
@@ -301,7 +326,11 @@ export function verdictHistoryFor(job) {
   return entries.sort((a, b) => (a.at || "").localeCompare(b.at || ""));
 }
 
-export function triggerLabel(trigger) {
+// `promptFor(question_id)` (optional) resolves an id to the question's
+// prompt text: question ids are normalized tokens (orchestrator rule,
+// coordinator msg_54bb50ff18c5), so a person reads the prompt, and the id
+// is secondary detail the caller may show beside it.
+export function triggerLabel(trigger, promptFor) {
   if (trigger === "run") {
     return "Assessed by a find-jobs run";
   }
@@ -312,9 +341,41 @@ export function triggerLabel(trigger) {
     return "Assessed again";
   }
   if (typeof trigger === "string" && trigger.startsWith("answer:")) {
-    return `Re-assessed after you answered ${trigger.slice("answer:".length)}`;
+    const id = trigger.slice("answer:".length);
+    const prompt = typeof promptFor === "function" ? promptFor(id) : null;
+    return prompt ? `Re-assessed after you answered “${prompt}”` : `Re-assessed after you answered ${id}`;
   }
   return trigger || "";
+}
+
+// The id inside an "answer:<question_id>" trigger, for the secondary detail.
+export function triggerQuestionId(trigger) {
+  return typeof trigger === "string" && trigger.startsWith("answer:") ? trigger.slice("answer:".length) : null;
+}
+
+// question_id -> prompt text, from every place a prompt is known: the
+// assessments' own structured_questions (`question`; pass every assessment
+// the job has -- a re-assessed job's latest result may carry no questions
+// while the run's result still names them) and the recorded answers (GET
+// /api/answers rows carry `prompt`). An answer recorded without a prompt
+// is stored with the id AS its prompt (the CLI / a bare POST), which is no
+// prompt at all: skipped, so the caller falls back to the id honestly.
+export function questionPromptIndex({ answers, assessment, assessments }) {
+  const index = new Map();
+  const usable = (id, text) => id && typeof text === "string" && text.trim() && text.trim() !== id;
+  [assessment].concat(assessments || []).forEach((item) => {
+    ((item && item.structured_questions) || []).forEach((question) => {
+      if (question && usable(question.question_id, question.question) && !index.has(question.question_id)) {
+        index.set(question.question_id, question.question.trim());
+      }
+    });
+  });
+  (answers || []).forEach((answer) => {
+    if (answer && usable(answer.question_id, answer.prompt) && !index.has(answer.question_id)) {
+      index.set(answer.question_id, answer.prompt.trim());
+    }
+  });
+  return index;
 }
 
 // --- sort + filter ----------------------------------------------------------------

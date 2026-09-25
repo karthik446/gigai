@@ -96,7 +96,10 @@ async function request(method, path, body) {
     const code = errorBody && typeof errorBody.code === "string" ? errorBody.code : undefined;
     const detail = errorBody && typeof errorBody.message === "string" ? errorBody.message : undefined;
     const { code: _code, message: _message, ...extra } = errorBody || {};
-    throw new ApiError(response.status, messageForStatus(path, response.status, code, detail), code, extra);
+    // Q4b-ui: `detail` is the server's own message verbatim, for callers
+    // that render it (the tailored-resume panel: model_output_invalid names
+    // the line that failed a guard) instead of the per-status text above.
+    throw new ApiError(response.status, messageForStatus(path, response.status, code, detail), code, { ...extra, detail });
   }
 
   return payload;
@@ -259,6 +262,28 @@ export function getApplications() {
 
 export function postApplication(fields) {
   return request("POST", "/api/applications", fields);
+}
+
+// Q3/Q4b-ui: one tailored resume for one posting (find_jobs/api/
+// tailored_resumes.py). POST is synchronous (~20-30 s: one model call, one
+// retry on a rejected draft); its errors are 422 (bad request), 502
+// model_output_invalid (the draft failed a guard; the message names the
+// line), 504 tailor_timeout. GET lists the stored ones, newest first,
+// optionally filtered by profile_id and/or job_identity.
+export function postTailoredResume(request_) {
+  return request("POST", "/api/tailored-resumes", request_);
+}
+
+export function getTailoredResumes(params) {
+  const query = new URLSearchParams();
+  if (params && params.profileId) {
+    query.set("profile_id", params.profileId);
+  }
+  if (params && params.jobIdentity) {
+    query.set("job_identity", params.jobIdentity);
+  }
+  const qs = query.toString();
+  return request("GET", `/api/tailored-resumes${qs ? `?${qs}` : ""}`);
 }
 
 export { ApiError };

@@ -7,6 +7,7 @@ import SponsorshipBadge from "../components/SponsorshipBadge.jsx";
 import ProviderBadge from "../components/ProviderBadge.jsx";
 import QuickAssessChip from "../components/QuickAssessChip.jsx";
 import PrepPanel from "../components/PrepPanel.jsx";
+import TailoredResumePanel from "../components/TailoredResumePanel.jsx";
 import { displayCompanyName, notAssessedReasonDetail, unchangedSinceLabel } from "../display.js";
 import {
   VERDICT_LABELS,
@@ -16,7 +17,9 @@ import {
   jevReasonsLine,
   notAssessedLine,
   payLabel,
+  questionPromptIndex,
   triggerLabel,
+  triggerQuestionId,
   verdictHistoryFor,
   workModeLabel,
 } from "../jobModel.js";
@@ -50,10 +53,11 @@ import { JOBS_HASH } from "../routing.js";
 //   history     jobModel.verdictHistoryFor: the run's own entry + the quick
 //               store's history[] (Q4a's one backend addition)
 //
-// Phase 2 hooks: work_mode / pay / h1b_filings_fy2024 render only when the
-// posting carries them; the tailored-resume panel (Q3's
-// /api/tailored-resumes) mounts in the right column below the history
-// (see the marked spot in the JSX) once that route lands.
+// Q4b: work_mode / pay (posting) and h1b (the row, via job.h1b) render only
+// when present -- no placeholder chips (operator answer 3); the
+// tailored-resume panel (Q3's /api/tailored-resumes) sits in the right
+// column below the history: GET the latest stored one for this profile +
+// job on load, POST {job:{job_url}, resume:{profile_id}} on "Tailor resume".
 function MarkApplied({ normalizedUrl, applications, onRecorded }) {
   const [state, setState] = useState("idle"); // idle | saving | error
   const [error, setError] = useState(null);
@@ -124,7 +128,7 @@ function JobDescription({ posting }) {
   );
 }
 
-function VerdictHistory({ job }) {
+function VerdictHistory({ job, promptFor }) {
   const entries = verdictHistoryFor(job);
   return (
     <section className="panel">
@@ -147,7 +151,15 @@ function VerdictHistory({ job }) {
                       {dateTimeLabel(entry.at) || "this run"}
                     </span>
                   </div>
-                  <div className="h-trigger">{triggerLabel(entry.trigger)}</div>
+                  <div className="h-trigger">
+                    {triggerLabel(entry.trigger, promptFor)}
+                    {triggerQuestionId(entry.trigger) && promptFor(triggerQuestionId(entry.trigger)) && (
+                      <>
+                        {" "}
+                        <code className="question-id">{triggerQuestionId(entry.trigger)}</code>
+                      </>
+                    )}
+                  </div>
                 </div>
               </li>
             ))}
@@ -195,7 +207,7 @@ function AssessNow({ posting, onAssessed }) {
   );
 }
 
-export default function JobPage({ job, jobId, profileId, visaRequired, loading, onQuickUpdated, onApplicationsChanged }) {
+export default function JobPage({ job, jobId, profileId, profileLabel, visaRequired, loading, onQuickUpdated, onApplicationsChanged }) {
   const [answers, setAnswers] = useState([]);
   const [applications, setApplications] = useState([]);
 
@@ -243,6 +255,16 @@ export default function JobPage({ job, jobId, profileId, visaRequired, loading, 
   const mode = workModeLabel(posting);
   const pay = payLabel(posting.pay);
   const priorAnswers = new Map(answers.map((answer) => [answer.question_id, answer]));
+  // A question is shown by its prompt wherever it appears (the history's
+  // "after you answered …", the tailored resume's answer refs); the id is
+  // secondary detail. Prompts come from the recorded answers and the
+  // assessment's own questions.
+  const questionPrompts = questionPromptIndex({
+    answers,
+    assessment,
+    assessments: [job.row && job.row.assessment, job.quick && job.quick.result],
+  });
+  const promptFor = (id) => questionPrompts.get(id) || null;
 
   const crumbTitle = [displayCompanyName(posting.company), posting.title].filter(Boolean).join(" · ") || "(untitled posting)";
 
@@ -273,7 +295,7 @@ export default function JobPage({ job, jobId, profileId, visaRequired, loading, 
               {mode && <span className="mode-chip">{mode}</span>}
               {pay && <span className="pay">{pay}</span>}
               <VerdictChip verdict={job.verdict} assessment={assessment} />
-              {visaRequired && <SponsorshipBadge sponsorship={job.sponsorship} h1bFilings={posting.h1b_filings_fy2024} />}
+              {visaRequired && <SponsorshipBadge sponsorship={job.sponsorship} h1b={job.h1b} />}
               {job.status === "carried_forward" && <span className="tag">{unchangedSinceLabel(job.fromRunDate)}</span>}
             </div>
             {assessment && assessment.not_a_match_reason && (
@@ -330,10 +352,15 @@ export default function JobPage({ job, jobId, profileId, visaRequired, loading, 
           {assessment && posting.url && <PrepPanel postingUrl={posting.url} profileId={profileId} />}
         </div>
         <div>
-          <VerdictHistory job={job} />
-          {/* Phase 2 (Q3): the tailored-resume panel mounts here, fed by
-              POST /api/tailored-resumes {job_identity: posting.normalized_url,
-              profile_id: profileId} once that route lands. */}
+          <VerdictHistory job={job} promptFor={promptFor} />
+          <TailoredResumePanel
+            jobIdentity={job.id}
+            jobUrl={posting.url || null}
+            profileId={profileId}
+            profileLabel={profileLabel}
+            company={displayCompanyName(posting.company)}
+            questionPrompts={questionPrompts}
+          />
         </div>
       </div>
     </div>
