@@ -457,6 +457,19 @@ def test_parse_judge_answer_rejects_every_malformed_batch(decoded: dict, message
     assert str(info.value) == message
 
 
+def test_judge_prompt_states_the_verbless_bullet_convention_and_stays_strict_on_role_framing() -> None:
+    prompt = harness.render_judge_prompt(_CLAIMS)
+    assert "a verbless resume bullet under an employment or project entry means the candidate did that work, so adding the plain verb is supported" in prompt
+    assert '"NLP pipelines for document classification (spaCy, scikit-learn)" supports "Built NLP pipelines for document classification using spaCy"' in prompt
+    assert "role framing stays strict: upgrading participation into initiation or ownership is unsupported" in prompt
+    assert '"with SLOs" -> "introducing SLOs", "worked on" -> "led", "part of" -> "owned"' in prompt
+    assert "the upgraded words are the unsupported span" in prompt
+    # Both conventions live in the rules paragraph, before the retry paragraph and the claims.
+    rules = prompt.split("\n\n")[0]
+    assert "verbless resume bullet" in rules and "role framing stays strict" in rules
+    assert "{{" not in prompt
+
+
 def test_judge_prompt_template_has_only_known_placeholders_and_needs_a_claim() -> None:
     template = harness.load_judge_template()
     assert template.startswith(bindings.TEST_MODEL_JUDGE_MARKER + "\n")

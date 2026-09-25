@@ -445,8 +445,9 @@ TERM_STOP_WORDS: frozenset[str] = frozenset(
 
 _TERM_TOKEN = re.compile(r"[A-Za-z.][A-Za-z0-9+#.]*(?:[/-][A-Za-z0-9+#.]+)*")
 #: What ends a sentence for the "Capitalized only at a sentence start" rule.
-#: List separators (``;`` ``,`` ``:`` ``|`` bullets and dashes) are NOT breaks:
-#: "Requirements: Python; Kubernetes; Terraform" and "- Kubernetes" name skills.
+#: List separators (``;`` ``,`` ``:`` ``|`` and dashes) are NOT breaks:
+#: "Requirements: Python; Kubernetes; Terraform" names skills.  A bullet start
+#: is handled by ``posting_terms`` itself (bare list item vs sentence-like).
 _SENTENCE_BREAKS = frozenset(".!?\n(\"'[")
 
 
@@ -519,6 +520,33 @@ def _at_sentence_start(text: str, offset: int) -> bool:
     return not before or before[-1] in _SENTENCE_BREAKS
 
 
+#: A bullet marker (``-`` ``*`` ``•`` ``–`` ``—`` ``·`` or ``1.``/``1)``) and the
+#: whitespace around it, when that is all that precedes a token on its line.
+_BULLET_PREFIX = re.compile(r"[ \t]*(?:[-*•–—·]|\d+[.)])[ \t]+\Z")
+_TRAILING_PARENTHETICAL = re.compile(r"\s*\([^()]*\)\s*\Z")
+#: A bullet item with at most this many word tokens (after dropping a trailing
+#: parenthetical and punctuation) is a bare list item: ``- Snowflake``,
+#: ``- Apache Kafka``, ``- Terraform (3+ years)``.  Longer bullets read as
+#: sentences (``- Improve platform reliability through ...``).
+_BARE_LIST_ITEM_MAX_TOKENS = 3
+
+
+def _bullet_item(text: str, offset: int) -> str | None:
+    """The rest of the line when the token at ``offset`` is the first word of a
+    bullet item, else ``None``."""
+
+    line_start = text.rfind("\n", 0, offset) + 1
+    if not _BULLET_PREFIX.fullmatch(text, line_start, offset):
+        return None
+    line_end = text.find("\n", offset)
+    return text[offset:] if line_end == -1 else text[offset:line_end]
+
+
+def _is_bare_list_item(item: str) -> bool:
+    trimmed = _TRAILING_PARENTHETICAL.sub("", item).strip().rstrip(".;:,")
+    return len(trimmed.split()) <= _BARE_LIST_ITEM_MAX_TOKENS
+
+
 def posting_terms(posting_text: str, *, exclude: Iterable[str] = ()) -> frozenset[str]:
     """The skill/tool/technology terms a posting names, canonical and lowercased.
 
@@ -526,10 +554,16 @@ def posting_terms(posting_text: str, *, exclude: Iterable[str] = ()) -> frozense
     an inner dot, inner capitals, or all caps: ``C++``, ``k8s``, ``Node.js``,
     ``PostgreSQL``, ``AWS``) or when it is a Capitalized word that occurs at
     least once NOT at the start of a sentence (``Python``, ``Kafka``, and a
-    list item after ``;``/``,``/``:``/a bullet; a sentence-initial "Build"
-    never qualifies on its own).  Stop words and
-    every token of ``exclude`` (the posting's own title/company/location)
-    are dropped, as is any token in the stop list once lowercased.
+    list item after ``;``/``,``/``:``; a sentence-initial "Build" never
+    qualifies on its own).  The first word of a bullet counts when the bullet
+    is a bare list item (``- Snowflake``, ``- Terraform (3+ years)``: at most
+    ``_BARE_LIST_ITEM_MAX_TOKENS`` word tokens) or when the word is in
+    ``TERM_ALIASES`` (``- Kubernetes and Terraform at scale``); a sentence-like
+    bullet's first word is sentence-initial otherwise (``- Improve platform
+    reliability ...`` does not make "improve" a term) unless it is Capitalized
+    elsewhere mid-sentence.  Stop words and every token of ``exclude`` (the
+    posting's own title/company/location) are dropped, as is any token in the
+    stop list once lowercased.
     """
 
     excluded: set[str] = set()
@@ -543,8 +577,13 @@ def posting_terms(posting_text: str, *, exclude: Iterable[str] = ()) -> frozense
             continue
         if _is_technical(token):
             technical.add(token)
-        elif token[0].isupper() and len(token) >= 2 and not _at_sentence_start(posting_text, offset):
-            capitalized_mid_sentence.add(token)
+        elif token[0].isupper() and len(token) >= 2:
+            item = _bullet_item(posting_text, offset)
+            if item is not None:
+                if _is_bare_list_item(item) or lowered in TERM_ALIASES:
+                    capitalized_mid_sentence.add(token)
+            elif not _at_sentence_start(posting_text, offset):
+                capitalized_mid_sentence.add(token)
     terms: set[str] = set()
     for token in technical | capitalized_mid_sentence:
         canonical = canonical_term(token)
@@ -563,14 +602,29 @@ def matrix_terms(rows: Iterable[MatrixRow], *, exclude: Iterable[str] = ()) -> f
     return posting_terms(text, exclude=exclude)
 
 
+def source_terms(text: str) -> set[str]:
+    """``text_terms`` of a cited source plus the parts of its hyphenated
+    compounds: ``Terraform-managed`` supports both ``terraform-managed`` and
+    ``terraform`` (an alias such as ``ci-cd`` stays whole).  Source side only:
+    a source that states the compound states the tool."""
+
+    variants = text_terms(text)
+    for token, _offset in _tokens_with_parts(text):
+        if "-" in token and token.lower() not in TERM_ALIASES:
+            for part in token.split("-"):
+                if part:
+                    variants |= _term_variants(part)
+    return variants
+
+
 def unsupported_posting_terms(text: str, sources: Iterable[str], terms: Iterable[str]) -> tuple[str, ...]:
     """The posting terms ``text`` uses that none of ``sources`` mentions (canonical, sorted)."""
 
     line_terms = text_terms(text)
-    source_terms: set[str] = set()
+    supported: set[str] = set()
     for source in sources:
-        source_terms |= text_terms(source)
-    return tuple(sorted(term for term in set(terms) if term in line_terms and term not in source_terms))
+        supported |= source_terms(source)
+    return tuple(sorted(term for term in set(terms) if term in line_terms and term not in supported))
 
 
 # --- the validated result --------------------------------------------------------------
@@ -897,13 +951,18 @@ def validate_tailored_output(decoded: Mapping[str, object], job: TailorJob, ctx:
 # --- markdown, rendered by code -----------------------------------------------------------
 
 _LEADING_MARKERS = re.compile(r"\A(?:[#>*\-•–—]+\s*)+")
+#: Paired strong-emphasis markers (``**...**``, ``__...__``); both ends go together.
+_EMPHASIS_PAIRS = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*|__(?=\S)(.+?)(?<=\S)__")
 
 
 def _display(text: str) -> str:
     """A copied resume line without its own markdown/bullet markers, so the
-    renderer can choose the marker for the position it lands in."""
+    renderer can choose the marker for the position it lands in.  A paired
+    emphasis (``**Analytics Engineer — Northwind** (2022)``) loses BOTH ends,
+    never just the leading one; the stored JSON text stays verbatim."""
 
-    stripped = _LEADING_MARKERS.sub("", text).strip()
+    unemphasized = _EMPHASIS_PAIRS.sub(lambda m: m.group(1) or m.group(2), text)
+    stripped = _LEADING_MARKERS.sub("", unemphasized).strip()
     return stripped or text.strip()
 
 
