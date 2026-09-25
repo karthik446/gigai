@@ -87,6 +87,20 @@ _VALIDATION_ERROR = "matrix[0].status must be one of met|partial|gap"
 # the model it cannot see the rejected attempt. Goldens below were
 # RE-CAPTURED (EXECUTED) from ``render_assess_prompt`` on the same fixed
 # inputs; the sha256 constants guard the transcription.
+#
+# assess-prompt-v3 (v0.1.9) INTENTIONAL CHANGE (operator-approved 2026-09-25,
+# msg_7fe22ed8286e as amended by msg_40ceefd7c540; evidence in
+# orchestrator/research/evals/2026-09-25-first-live.md): three gaps the first
+# live eval found. Rule 4 fails a posting whose remote/residency/office country
+# is outside the eligible countries as a HARD unmet row with not_a_match_reason
+# naming the country (never a location ask; the old ask case (a) is gone). Rule 1
+# gives judgement guidance on explicit resume disclaimers ("has not worked on
+# X" against a core HARD requirement usually means unmet; partial evidence such
+# as "writes little product code" stays an ask) and makes degree/enrolment
+# requirements ASKABLE, never unmet on the resume alone (stated enrolment meets
+# it; otherwise asked once as "education:enrolled"). Goldens and the shipped digest below were RE-CAPTURED
+# (EXECUTED) from ``render_assess_prompt`` on the same fixed inputs; the retry
+# tail and every placeholder are unchanged.
 GOLDEN_PROMPT = (
     "You are assessing one real job posting against one candidate's resume for GigAI Scout. Return a "
     'workflow-state verdict, not a grader score: the verdict decides what GigAI does next, so pick the '
@@ -130,9 +144,10 @@ GOLDEN_PROMPT = (
     'explicit clearance; an explicitly excluded domain; and a location/residency, in-office or '
     'sponsorship statement the posting itself makes (see rules 4 and 5).\n'
     '- ASKABLE: a named tool, cloud platform, language, framework, database, domain or specific '
-    'technology the posting requires. Lacking it is never disqualifying by itself (tools are learnable, '
-    'and the candidate may have unlisted experience), so an ASKABLE row is "met", "unclear" (ask about '
-    'it) or "unmet" (the candidate\'s facts rule it out; this does NOT force not_a_match).\n'
+    'technology the posting requires, and any degree, enrolment or student-status requirement (see rule '
+    '1). Lacking it is never disqualifying by itself (tools are learnable, and the candidate may have '
+    'unlisted experience), so an ASKABLE row is "met", "unclear" (ask about it) or "unmet" (the '
+    "candidate's facts rule it out; this does NOT force not_a_match).\n"
     '- NICE_TO_HAVE: anything the posting phrases as "bonus", "plus", "preferred", "nice to have", or '
     'lists under such a heading. A "preferred" option inside a required bullet ("Spark preferred; '
     'Ray/Dask or similar", "GitHub preferred") does not make the bullet nice_to_have: the bullet stays '
@@ -146,7 +161,18 @@ GOLDEN_PROMPT = (
     'quote or close paraphrase you relied on in resume_evidence.\n'
     '   - The facts explicitly contradict it (their own words state a lower level, fewer years, the '
     'wrong domain, or that the candidate lacks it) -> "unmet". Quote the contradicting text in '
-    'resume_evidence.\n'
+    'resume_evidence. An explicit disclaimer in the resume ("has not worked on X", "does not do X", "no '
+    'experience with X") is a judgement call, not a keyword match: weigh how explicit the statement is '
+    'and how central the requirement is to the role. A clear disclaimer against a core HARD requirement '
+    'usually means "unmet" (a resume that says "has not worked on cloud infrastructure, SRE, or platform '
+    'engineering" is unmet for an SRE posting\'s production-infrastructure requirement; do not ask about '
+    'it), while partial or adjacent evidence is not a contradiction ("writes little product code" or '
+    '"minimal application-level coding" against a required language does not rule the language out: that '
+    'row stays "unclear" and you ask). A degree, enrolment or student-status requirement ("currently '
+    'pursuing a degree", "enrolled student") is ASKABLE and is never "unmet" on the resume alone: a '
+    'resume that states current enrolment meets it; a completed degree or years of full-time work do not '
+    'settle whether the candidate is enrolled now, so otherwise the row is "unclear" and you ask once, '
+    'with the question_id "education:enrolled".\n'
     '   - The facts are simply silent (the topic is not mentioned at all) -> "unclear", with an empty '
     'resume_evidence list. Silence is never "unmet", no matter how central the requirement looks.\n'
     '2. Questions: every HARD or ASKABLE row with status "unclear" gets exactly ONE question, and every '
@@ -162,21 +188,26 @@ GOLDEN_PROMPT = (
     "unclear otherwise. Never infer the candidate's level from the target titles in CANDIDATE "
     'CONSTRAINTS.\n'
     "4. Location, residency and remote region: the eligible countries and the candidate's location in "
-    'CANDIDATE CONSTRAINTS are facts about the candidate, exactly like a resume statement. A remote '
-    'posting whose location or remote region is one of the eligible countries has its country '
-    'requirement MET. If the country list says "any", the candidate has declared no country restriction '
-    'and every remote location is met. When the posting restricts a remote role to named states or '
-    "provinces inside that country, that restriction is one HARD row decided from the candidate's "
-    'location: if the candidate\'s location names a state or province, the row is "met" when that region '
-    'is on the posting\'s list and "unmet" when it is not; if the candidate\'s location is "unknown" or '
-    'names no state or province, the row is "unclear" and you ask ONCE, with the question_id '
+    'CANDIDATE CONSTRAINTS are facts about the candidate, exactly like a resume statement. A posting '
+    'whose stated country (its LOCATION line, remote region, residency requirement or office country) is '
+    'one of the eligible countries has its country requirement MET; when the posting names several '
+    'countries, one match is enough, and a posting that names no country states no country requirement. '
+    'If the country list says "any", the candidate has declared no country restriction and every '
+    'location is met. A posting that restricts remote work, residency or the office to a country that is '
+    'NOT one of the eligible countries (e.g. "Remote - Poland" against eligible countries "US, GB") is '
+    'one HARD row with status "unmet" and the verdict is "not_a_match", with not_a_match_reason naming '
+    'that country: never ask a location question about it, because the candidate has already stated '
+    'where they can work. When the posting restricts a remote role to named states or provinces inside '
+    "an eligible country, that restriction is one HARD row decided from the candidate's location: if the "
+    'candidate\'s location names a state or province, the row is "met" when that region is on the '
+    'posting\'s list and "unmet" when it is not; if the candidate\'s location is "unknown" or names no '
+    'state or province, the row is "unclear" and you ask ONCE, with the question_id '
     '"location:<country>_region" where <country> is the lowercase two-letter code of the posting\'s '
-    'country (e.g. "location:ca_region", "location:us_region"). Ask a location question in only two '
-    "other cases: (a) the posting's country matches none of the eligible countries and no other fact "
-    'answers it; (b) the posting requires in-office or hybrid presence in a named city and neither the '
-    "resume, the candidate's location nor the constraints place the candidate there (question_id "
-    '"location:<city>", e.g. "location:san_francisco"). Travel cadence, onboarding trips and '
-    '"remote-first" policy statements are not requirements and are never asked about.\n'
+    'country (e.g. "location:ca_region", "location:us_region"). Ask a location question in only one '
+    'other case: the posting requires in-office or hybrid presence in a named city inside an eligible '
+    "country and neither the resume, the candidate's location nor the constraints place the candidate "
+    'there (question_id "location:<city>", e.g. "location:san_francisco"). Travel cadence, onboarding '
+    'trips and "remote-first" policy statements are not requirements and are never asked about.\n'
     '5. Work authorization and sponsorship: "visa sponsorship required = yes" means the candidate needs '
     'sponsorship. If the posting states it does not sponsor, or requires existing authorization with no '
     'sponsorship, that is a HARD "unmet" row and the verdict is "not_a_match". If the posting says '
@@ -253,16 +284,17 @@ GOLDEN_RETRY_PROMPT = (
 # sha256 of the assess-prompt-v2 prompts, recorded by the capture script
 # above (the strings above are the source of truth; the digests guard the
 # transcription).
-GOLDEN_SHA256 = "51bd4d48e2fc1e85e8d263bd91275c82abdb5241ddc8a28e6775522fd3245de9"
-GOLDEN_RETRY_SHA256 = "62fab7a1ed1e789436ced0dc8dce8963b5dacb12084d1b55ad7e5da9301574a1"
+GOLDEN_SHA256 = "752b8c78726efa2953aec6c6e56d3965dfa7c4fe3f7a92aedee07af205ec2f15"
+GOLDEN_RETRY_SHA256 = "935ccb6e3170444429d87bbfeb93a616901b5bf4f47a1161992d4c79f2135976"
 # 13,000-byte posting text and resume plus a 400-char validation error:
 # the three ``_MAX_PROMPT_*`` bounds (12_000 / 12_000 / 300) produce this exact prompt.
-GOLDEN_BOUNDED_SHA256 = "30e536f26a84783cefba6a942ceeebd2a7652a64c003afe47e570ccb05b88976"
-GOLDEN_BOUNDED_LEN = 35_491
+GOLDEN_BOUNDED_SHA256 = "7e34543e25ccfc63d40c0e9d6af94b6ec31a7db3194243c891d10c5d7f6336bc"
+GOLDEN_BOUNDED_LEN = 37_177
 
 # Digest of the shipped ``assess.md`` bytes; bump ONLY when the template changes on purpose.
 # assess-prompt-v2 (v0.1.9) INTENTIONAL CHANGE: bumped for the rewritten body (see above).
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:3e5d14ed467fa3aa163c4d822cb8e26e0fd66a42b65fb07947a335a89c188367"
+# assess-prompt-v3 (v0.1.9) INTENTIONAL CHANGE: bumped again for the three rules (see above).
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:e41292f11ef1bdbc257650ed201699882e225f4bd20e247337f368e59cf25873"
 
 
 def _sha256(text: str) -> str:
@@ -421,6 +453,32 @@ def test_an_answered_question_id_is_never_re_asked_in_the_fixture_reply() -> Non
     assert outcome.ok
     assert "cloud:gcp: Yes, two years on GCP." in binding.port.prompts[0]
     assert outcome.parsed.questions == ()
+
+
+# --- assess-prompt-v3: the three rules are in the shipped prompt --------------------
+
+def test_prompt_carries_the_v3_guidance() -> None:
+    """Hermetic check that the three assess-prompt-v3 rules render (no model call).
+
+    (1) rule D: a remote/residency/office country outside the eligible countries is a
+    HARD unmet row with a not_a_match_reason naming the country, never a location ask;
+    (2) explicit disclaimers are judgement guidance, partial evidence stays an ask;
+    (3) enrolment is ASKABLE and asked once as ``education:enrolled`` (a fixed point of
+    ``normalize_question_id``), so the eval's flipped intern row can be asked, not failed.
+    """
+
+    prompt = render_assess_prompt(_job(), _ctx())
+    assert 'to a country that is NOT one of the eligible countries (e.g. "Remote - Poland" against eligible countries "US, GB") is one HARD row with status "unmet"' in prompt
+    assert "with not_a_match_reason naming that country: never ask a location question about it" in prompt
+    assert "Ask a location question in only one other case" in prompt and "(a) the posting's country matches none" not in prompt
+    assert "is a judgement call, not a keyword match: weigh how explicit the statement is and how central the requirement is" in prompt
+    assert '"writes little product code" or "minimal application-level coding" against a required language does not rule the language out' in prompt
+    assert 'A degree, enrolment or student-status requirement ("currently pursuing a degree", "enrolled student") is ASKABLE and is never "unmet" on the resume alone: a resume that states current enrolment meets it' in prompt
+    assert 'you ask once, with the question_id "education:enrolled"' in prompt
+    assert "any degree, enrolment or student-status requirement (see rule 1)" in prompt
+    from gigai.scout.question_ids import normalize_question_id
+
+    assert normalize_question_id("education:enrolled") == "education:enrolled" == normalize_question_id("education:enrolled_degree")
 
 
 # --- assess-prompt-v2: the candidate's own location and rule 4's region paths ----------

@@ -16,6 +16,7 @@ import re
 from typing import Any
 
 from gigai.scout.assessment_core import _MAX_PROMPT_POSTING_TEXT, _MAX_PROMPT_RESUME_TEXT, AssessContext, AssessJob, render_assess_prompt
+from gigai.scout.question_ids import normalize_question_id
 
 from tests.evals import run_assess_eval as harness
 
@@ -184,9 +185,33 @@ def test_question_helpers() -> None:
     assert harness.possible_false_ask("cloud:aws", "Deep Terraform, AWS/GCP experience")
     assert not harness.possible_false_ask("cloud:gcp", "AWS only")
     assert not harness.possible_false_ask("years:backend_systems", "backend engineer, 6 years")
-    exact, by_category = harness.question_hits(["cloud:aws", "database:mysql"], ["cloud:aws", "database:mysql_or_postgres", "tool:ide"])
-    assert exact == {"cloud:aws"}
+    exact, normalized, by_category = harness.question_hits(["cloud:aws", "database:mysql"], ["cloud:aws", "database:mysql_or_postgres", "tool:ide"])
+    assert exact == normalized == {"cloud:aws"}
     assert by_category == {"cloud:aws", "database:mysql"}
+    # assess-prompt-v3: vocabulary drift is scored through the product normalizer on BOTH sides.
+    # tool/tools/technology -> tooling, domain -> industry, token order and separators collapse;
+    # the raw exact figure stays byte-equal only. Hits are reported as the labelled ids.
+    exact, normalized, by_category = harness.question_hits(
+        ["tool:x", "domain:trading_infrastructure", "language:kotlin_or_python", "cloud:gcp"],
+        ["tooling:x", "industry:infrastructure-trading", "language:python_or_kotlin", "years:ml"],
+    )
+    assert exact == set()
+    assert normalized == {"tool:x", "domain:trading_infrastructure", "language:kotlin_or_python"}
+    assert by_category == {"tool:x", "domain:trading_infrastructure", "language:kotlin_or_python"}
+
+
+def test_expected_ids_are_the_normalizers_canonical_form() -> None:
+    """assess-prompt-v3: a label equals ``normalize_question_id(label)``.
+
+    The harness scores through the normalizer, the tailor eval's ``answers.json``
+    keys on these ids and P3's prior-answer join stores canonical ids, so a label
+    that is not its own canonical form would never be joined against a stored
+    answer. Every id, excluded rows included.
+    """
+
+    for label in harness.load_labels(include_excluded=True):
+        for question_id in label.expected_question_ids:
+            assert normalize_question_id(question_id) == question_id, (label.key, question_id)
 
 
 # --- metrics --------------------------------------------------------------------------------
@@ -259,8 +284,10 @@ def test_summarize_computes_every_planned_metric() -> None:
 
     recall = metrics["question_recall"]
     assert recall["rows"] == 1  # r4's invalid row cannot be scored
-    assert (recall["expected_ids"], recall["hit_exact"], recall["hit_category"]) == (3, 1, 2)
-    assert (recall["recall_exact"], recall["recall_category"]) == (0.3333, 0.6667)
+    assert (recall["expected_ids"], recall["hit_exact"], recall["hit_normalized"], recall["hit_category"]) == (3, 1, 1, 2)
+    assert (recall["recall_exact"], recall["recall_normalized"], recall["recall_category"]) == (0.3333, 0.3333, 0.6667)
+    assert recall["per_row"][0]["observed_normalized"] == ["cloud:aws", "database:flavour_mysql"]
+    assert recall["per_row"][0]["hit_normalized"] == ["cloud:aws"]
 
     false_asks = metrics["false_asks"]
     assert false_asks["clean_fit_questions"] == 1 and false_asks["bar_zero_met"] is False

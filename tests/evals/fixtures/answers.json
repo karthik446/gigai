@@ -1,6 +1,6 @@
 {
  "schema": "gigai-tailor-eval-answers:1",
- "notes": "Q3 (v0.1.9): per resume, one fixed answer for every expected_question_id labels.csv lists for that resume, so the tailor eval exercises answer refs (A <question_id>) as citable sources. Answers are fixed text written by the packet author, not model output; a negative answer is a fact the model must not cite as a claim (the judge's job to catch).",
+ "notes": "Q3 (v0.1.9): per resume, one fixed answer for every expected_question_id labels.csv lists for that resume, so the tailor eval exercises answer refs (A <question_id>) as citable sources. Answers are fixed text written by the packet author, not model output; a negative answer is a fact the model must not cite as a claim (the judge's job to catch). assess-prompt-v3 (2026-09-25): question_ids are in normalize_question_id canonical form, matching labels.csv (a label equals its own normalization).",
  "answers": {
   "cf-analytics-engineer-pl": [],
   "cf-analytics-intern-sf": [],
@@ -10,17 +10,17 @@
   "cf-senior-ml-fraud-ca": [],
   "r1-ml-staff": [
    {
-    "question_id": "technology:ml_lifecycle_tooling",
+    "question_id": "tooling:lifecycle_ml",
     "answer": "Yes. I have used MLflow for experiment tracking and model registry, and Kubeflow pipelines for training jobs."
    },
    {
-    "question_id": "tool:ai_developer_tools",
+    "question_id": "tooling:ai_developer",
     "answer": "Yes, I use AI coding assistants daily for drafting code and reviewing diffs."
    }
   ],
   "r2-fullstack-staff": [
    {
-    "question_id": "years:cross_functional_analytics",
+    "question_id": "years:analytics_cross_functional",
     "answer": "About four years working with product and analytics partners on experiments."
    },
    {
@@ -28,11 +28,11 @@
     "answer": "Yes: async services, typing, packaging and profiling in Python."
    },
    {
-    "question_id": "skill:statistical_experimentation",
+    "question_id": "skill:experimentation_statistical",
     "answer": "Yes, I have designed and analyzed A/B tests with a data science partner."
    },
    {
-    "question_id": "language:python_or_kotlin",
+    "question_id": "language:kotlin_or_python",
     "answer": "Python: yes, it is my primary language. Kotlin: no."
    }
   ],
@@ -42,7 +42,7 @@
     "answer": "Yes, I have run production services on AWS (EC2, S3, RDS)."
    },
    {
-    "question_id": "technology:experimentation_platforms",
+    "question_id": "tooling:experimentation_platforms",
     "answer": "No hands-on experience with a dedicated experimentation platform."
    },
    {
@@ -54,35 +54,39 @@
     "answer": "Yes, I built a backend-for-frontend layer for a mobile client."
    },
    {
-    "question_id": "language:python_or_kotlin",
+    "question_id": "language:kotlin_or_python",
     "answer": "Python: yes, it is my primary language. Kotlin: no."
    }
   ],
   "r4-dataeng-senior": [
    {
-    "question_id": "skill:statistical_ml_models",
+    "question_id": "skill:ml_models_statistical",
     "answer": "Yes, I have built regression and gradient-boosted models for forecasting pipelines."
    },
    {
-    "question_id": "skill:causal_inference_experiments",
+    "question_id": "skill:causal_experiments_inference",
     "answer": "Some: I have analyzed A/B tests and one difference-in-differences study with a data science partner."
    },
    {
-    "question_id": "technology:ml_model_deployment",
+    "question_id": "tooling:deployment_ml_model",
     "answer": "Yes, I have deployed batch-scoring models as scheduled jobs in a data pipeline."
    },
    {
     "question_id": "workflow:git_pull_requests",
     "answer": "Yes, every change I ship goes through Git pull requests with review."
+   },
+   {
+    "question_id": "education:enrolled",
+    "answer": "No. I completed my B.S. and have worked full time since; I am not currently enrolled in a degree program."
    }
   ],
   "r5-platform-sre-senior": [
    {
-    "question_id": "language:java_cpp_go",
+    "question_id": "language:cpp_go_java",
     "answer": "Go: yes, daily. Java and C++: no."
    },
    {
-    "question_id": "domain:trading_infrastructure",
+    "question_id": "industry:infrastructure_trading",
     "answer": "No trading-infrastructure experience."
    },
    {
@@ -90,15 +94,15 @@
     "answer": "Seven years building backend systems in production."
    },
    {
-    "question_id": "location:in_office_austin_seattle_london",
+    "question_id": "location:austin_in_london_office_seattle",
     "answer": "No, I cannot work in-office in Austin, Seattle or London."
    },
    {
-    "question_id": "technology:bare_metal_provisioning",
+    "question_id": "tooling:bare_metal_provisioning",
     "answer": "Yes, I have provisioned bare-metal hosts with PXE boot and Ansible."
    },
    {
-    "question_id": "authorization:us_export_control",
+    "question_id": "eligible:control_export_us",
     "answer": "Yes, I am a US person for export-control purposes."
    },
    {
@@ -106,7 +110,7 @@
     "answer": "I have not held a principal title; my current level is senior."
    },
    {
-    "question_id": "language:go_ruby_python",
+    "question_id": "language:go_python_ruby",
     "answer": "Go and Python: yes. Ruby: no."
    }
   ]

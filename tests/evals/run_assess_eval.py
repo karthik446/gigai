@@ -26,7 +26,8 @@ Modes
 
 Metrics (``metrics`` in the report; see ``summarize``): verdict agreement,
 clean-fit match rate (every failure listed with the model's questions),
-question recall (exact and category level) on rows with expected ids, false
+question recall (normalized exact -- both sides through the product's
+``normalize_question_id`` -- plus category and raw exact) on rows with expected ids, false
 asks (clean-fit rows: every question is one by construction; other rows: a
 token heuristic lists *possible* false asks for review), Jev as a pre-filter
 (``--with-jev``: does every matched/pending-labelled posting land in the
@@ -61,6 +62,8 @@ import sys
 import tempfile
 import time
 from typing import TYPE_CHECKING, Any
+
+from gigai.scout.question_ids import normalize_question_id
 
 if TYPE_CHECKING:  # pragma: no cover - the product imports stay lazy so `--dry-run`/the offline test import nothing heavy
     from gigai.config import GigAIConfig
@@ -284,14 +287,26 @@ def possible_false_ask(question_id: str, resume_text: str) -> bool:
     return all(token in words for token in tokens)
 
 
-def question_hits(expected: Sequence[str], observed: Sequence[str]) -> tuple[set[str], set[str]]:
-    """``(exact_hits, category_hits)``: expected ids matched by an observed id exactly, or by category."""
+def question_hits(expected: Sequence[str], observed: Sequence[str]) -> tuple[set[str], set[str], set[str]]:
+    """``(exact_hits, normalized_hits, category_hits)`` over the expected ids.
+
+    assess-prompt-v3 (2026-09-25): vocabulary drift is a HARNESS concern, not a
+    prompt one. Both sides go through the product's ``normalize_question_id``
+    (the same canonicalization P3's prior-answer join applies) before the
+    normalized-exact and category comparisons, so ``tool:x`` labelled against an
+    observed ``tooling:x`` counts as exact -- that is the number that says an
+    answer recorded on one posting is found on the next. The raw exact figure
+    (byte-equal ids) stays for reference only. Every returned set holds the
+    expected ids as labelled, so callers can report per label.
+    """
 
     observed_set = set(observed)
-    observed_categories = {question_category(item) for item in observed}
+    observed_normalized = {normalize_question_id(item) for item in observed}
+    observed_categories = {question_category(item) for item in observed_normalized}
     exact = {item for item in expected if item in observed_set}
-    by_category = {item for item in expected if question_category(item) in observed_categories}
-    return exact, by_category
+    normalized = {item for item in expected if normalize_question_id(item) in observed_normalized}
+    by_category = {item for item in expected if question_category(normalize_question_id(item)) in observed_categories}
+    return exact, normalized, by_category
 
 
 # --- the model side ------------------------------------------------------------------
@@ -394,10 +409,12 @@ def annotate_row(row: dict[str, Any], resume_text: str) -> dict[str, Any]:
 
     observed = [item["question_id"] for item in row.get("questions", [])]  # type: ignore[index]
     expected = list(row.get("expected_question_ids", []))  # type: ignore[arg-type]
-    exact, by_category = question_hits(expected, observed)
+    exact, normalized, by_category = question_hits(expected, observed)
     row["agreement"] = (row["verdict"] == row["expected_verdict"]) if row.get("ok") else None
     row["question_ids"] = observed
+    row["question_ids_normalized"] = [normalize_question_id(item) for item in observed]
     row["expected_hits_exact"] = sorted(exact)
+    row["expected_hits_normalized"] = sorted(normalized)
     row["expected_hits_category"] = sorted(by_category)
     row["possible_false_asks"] = [item for item in observed if possible_false_ask(item, resume_text)]
     return row
@@ -462,6 +479,7 @@ def summarize(rows: Sequence[Mapping[str, Any]], *, planned: int, max_calls: int
     recall_rows = [row for row in valid if row["expected_question_ids"]]
     expected_total = sum(len(row["expected_question_ids"]) for row in recall_rows)  # type: ignore[arg-type]
     exact_total = sum(len(row["expected_hits_exact"]) for row in recall_rows)  # type: ignore[arg-type]
+    normalized_total = sum(len(row["expected_hits_normalized"]) for row in recall_rows)  # type: ignore[arg-type]
     category_total = sum(len(row["expected_hits_category"]) for row in recall_rows)  # type: ignore[arg-type]
     asked_when_expected = [row for row in recall_rows if row["question_ids"]]
 
@@ -530,8 +548,10 @@ def summarize(rows: Sequence[Mapping[str, Any]], *, planned: int, max_calls: int
             "rows_that_asked": len(asked_when_expected),
             "expected_ids": expected_total,
             "hit_exact": exact_total,
+            "hit_normalized": normalized_total,
             "hit_category": category_total,
             "recall_exact": _rate(exact_total, expected_total),
+            "recall_normalized": _rate(normalized_total, expected_total),  # headline: answer reuse across postings works
             "recall_category": _rate(category_total, expected_total),
             "per_row": [
                 {
@@ -540,7 +560,9 @@ def summarize(rows: Sequence[Mapping[str, Any]], *, planned: int, max_calls: int
                     "uncertain": row["uncertain"],
                     "expected": list(row["expected_question_ids"]),  # type: ignore[arg-type]
                     "observed": list(row["question_ids"]),  # type: ignore[arg-type]
+                    "observed_normalized": list(row["question_ids_normalized"]),  # type: ignore[arg-type]
                     "hit_exact": list(row["expected_hits_exact"]),  # type: ignore[arg-type]
+                    "hit_normalized": list(row["expected_hits_normalized"]),  # type: ignore[arg-type]
                     "hit_category": list(row["expected_hits_category"]),  # type: ignore[arg-type]
                 }
                 for row in recall_rows
@@ -812,6 +834,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fake-model", action="store_true", help="offline: a temp home with the ollama_local fixture target and the GIGAI_SCOUT_FIND_JOBS_TEST_MODEL seam")
     parser.add_argument("--fake-jev", action="store_true", help="offline: the GIGAI_SCOUT_FIND_JOBS_TEST_JEV seam for --with-jev")
     parser.add_argument("--dry-run", action="store_true", help="print the planned rows and exit without any model or Jev call")
+    parser.add_argument("--rescore", type=Path, default=None, metavar="REPORT_JSON", help="no calls: re-annotate the stored rows of this report with the current scoring code and write the re-scored report to --report (the stored jev section is kept)")
     parser.add_argument("--quiet", action="store_true")
     return parser
 
@@ -831,7 +854,7 @@ def _print_summary(metrics: Mapping[str, Any], report_path: Path, *, out=sys.std
     for failure in clean["failures"]:  # type: ignore[union-attr]
         asked = "; ".join(f"{item['question_id']}: {item['question']}" for item in failure["questions"]) or "-"
         print(f"  FAIL {failure['resume_id']} x {failure['posting_id']}: {failure['verdict']} | questions: {asked} | reason: {failure['not_a_match_reason']}", file=out)
-    print(f"question recall: exact {recall['hit_exact']}/{recall['expected_ids']} ({recall['recall_exact']}), category {recall['hit_category']}/{recall['expected_ids']} ({recall['recall_category']}) over {recall['rows']} rows", file=out)
+    print(f"question recall: normalized exact {recall['hit_normalized']}/{recall['expected_ids']} ({recall['recall_normalized']}), category {recall['hit_category']}/{recall['expected_ids']} ({recall['recall_category']}), raw exact {recall['hit_exact']}/{recall['expected_ids']} ({recall['recall_exact']}) over {recall['rows']} rows", file=out)
     print(f"false asks on clean fits: {false_asks['clean_fit_questions']} (bar 0 met: {false_asks['bar_zero_met']}); possible false asks to review: {len(false_asks['possible'])}", file=out)
     print(f"cross-profile: {cross['discriminated']}/{cross['pairs']} differently-labelled pairs discriminated ({cross['rate']})", file=out)
     print(
@@ -845,11 +868,38 @@ def _print_summary(metrics: Mapping[str, Any], report_path: Path, *, out=sys.std
     print(f"report: {report_path}", file=out)
 
 
+def rescore_report(source: Mapping[str, Any], resumes: Mapping[str, Resume], *, now: datetime) -> dict[str, Any]:
+    """The same report with every row re-annotated and the metrics recomputed by the current code.
+
+    Rows keep their stored verdicts, questions, matrix, usage and their stored
+    expected labels (what the model was scored against at the time); only the
+    derived judgements (hits, false-ask flags) and ``metrics`` change, so two
+    runs of different prompts compare like for like under one scoring rule.
+    """
+
+    rows = [annotate_row(dict(row), resumes[row["resume_id"]].text) for row in source["rows"]]
+    run = dict(source["run"])
+    metrics = summarize(rows, planned=int(source["metrics"]["calls"]["planned"]), max_calls=int(run["max_calls"]), jev=source["metrics"].get("jev"))
+    run["rescored_from"] = {"head": run.get("head"), "finished_at": run.get("finished_at"), "instructions_digest": run.get("instructions_digest")}
+    run["rescored_at"] = now.isoformat().replace("+00:00", "Z")
+    run["rescored_head"] = _git_head()
+    return {"schema": source["schema"], "run": run, "rows": rows, "metrics": metrics}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     now = datetime.now(UTC)
     postings = load_postings()
     resumes = load_resumes()
+    if args.rescore is not None:
+        source = json.loads(args.rescore.read_text(encoding="utf-8"))
+        report = rescore_report(source, resumes, now=now)
+        report_path = args.report or args.rescore.with_name(args.rescore.stem + "-rescored.json")
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        if not args.quiet:
+            _print_summary(report["metrics"], report_path)
+        return 0
     labels = load_labels()
     excluded = [label for label in load_labels(include_excluded=True) if label.excluded]
     rows_to_call = plan_rows(labels, sample=args.sample, seed=args.seed, clean_fit_only=args.clean_fit_only, resume_ids=args.resume, posting_ids=args.posting)
