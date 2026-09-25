@@ -19,6 +19,7 @@ RULES:
 3. verdict = "matched_above_threshold" only if there are zero not_a_match findings AND zero unresolved askable questions.
 4. verdict = "not_a_match" if any requirement is unmet per rule 1's explicit-contradiction test.
 5. verdict = "pending_user_answers" only when there is no not_a_match finding but at least one askable question remains.
+6. A question whose id has a prior answer is resolved by that answer, never re-asked.
 
 Return JSON only (no prose, no markdown fences):
 {"verdict": "matched_above_threshold|pending_user_answers|not_a_match",
@@ -37,5 +38,8 @@ RESUME:
 {{resume_text}}
 
 CANDIDATE CONSTRAINTS: visa sponsorship required = {{visa_required}}; the candidate is eligible to work from these countries (this is a fact about the candidate, exactly like a resume statement -- treat a posting's location/remote-region requirement as MET whenever the posting's own location matches one of these countries, and only ask a location question when the posting's location does not match any of them and the resume itself gives no other answer): {{countries}}; target titles the candidate is looking for = {{titles}}.
+
+PRIOR ANSWERS (from earlier assessments -- resolve any matching question with these instead of re-asking; per rule 6, a question whose id has a prior answer is resolved by that answer, never re-asked):
+{{prior_answers}}
 
 Your previous answer did not match the required JSON shape: {{validation_error}}. Return corrected JSON only, matching the schema exactly.

@@ -1301,6 +1301,7 @@ def _make_handler(
     *,
     run_start_timeout_seconds: float = RUN_START_TIMEOUT_SECONDS,
 ) -> type[BaseHTTPRequestHandler]:
+    from .answers import AnswersRoutesMixin
     from .assess import AssessRoutesMixin
     from .config import ConfigRoutesMixin
     from .discover import DiscoverRoutesMixin
@@ -1318,6 +1319,7 @@ def _make_handler(
         ProfilesRoutesMixin,
         RankRoutesMixin,
         AssessRoutesMixin,
+        AnswersRoutesMixin,
         StaticRoutesMixin,
         BaseHTTPRequestHandler,
     ):
@@ -1494,6 +1496,9 @@ def _make_handler(
                     if path == "/api/assessments":
                         self._handle_get_assessments()
                         return
+                    if path == "/api/answers":
+                        self._handle_get_answers()
+                        return
                     run_id = _match_run_id(path, suffix="/results")
                     if run_id is not None:
                         self._handle_get_run_results(run_id)
@@ -1534,6 +1539,9 @@ def _make_handler(
                     return
                 if path == "/api/assess":
                     self._handle_post_assess()
+                    return
+                if path == "/api/answers":
+                    self._handle_post_answers()
                     return
                 profile_id = _match_profile_id(path, suffix="/archive")
                 if profile_id is not None:

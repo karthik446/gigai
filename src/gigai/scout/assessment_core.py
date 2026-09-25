@@ -41,6 +41,7 @@ import re
 from ..adapters.port import ModelInvocationError, NormalizedUsage
 from ..canonical import digest_imported_bytes
 from .find_jobs.contracts import FindJobsContractError, NotAssessedReason
+from .question_ids import normalize_question_id
 
 _INSTRUCTIONS_RESOURCE = "scout/data/instructions/assess.md"
 _ROLE = "reviewer"
@@ -51,6 +52,7 @@ _MAX_PROMPT_VALIDATION_ERROR = 300
 
 _PLACEHOLDER = re.compile(r"\{\{([a-z_]+)\}\}")
 _VALIDATION_PLACEHOLDER = "{{validation_error}}"
+_PRIOR_ANSWERS_PLACEHOLDER = "{{prior_answers}}"
 
 # Exception mapping at the model boundary, exactly as the pre-P1 loop had it:
 # a transport/adapter failure whose code is one of these is the operator's own
@@ -89,6 +91,17 @@ class AssessJob:
 
 
 @dataclass(frozen=True)
+class PriorAnswer:
+    """One previously answered question, as the prompt needs it: id + text
+    only (never the record/revision it lives in -- that is
+    ``experience_answers.PriorAnswer``'s job; the caller converts)."""
+
+    question_id: str
+    prompt: str
+    answer: str
+
+
+@dataclass(frozen=True)
 class AssessContext:
     """The candidate side of one assessment."""
 
@@ -100,6 +113,13 @@ class AssessContext:
     # never pass them) keeps rendering the same way.
     countries: tuple[str, ...] = ()
     titles: tuple[str, ...] = ()
+    # P3 (v0.1.9): prior answers from earlier assessments (Q&A loop), keyed
+    # by NORMALIZED question_id (``question_ids.normalize_question_id``) by
+    # the caller before this reaches the prompt. Empty by default so every
+    # pre-P3 caller (and the golden-prompt tests) keeps rendering the same
+    # way -- the {{prior_answers}} paragraph is dropped from the prompt
+    # entirely when this is empty, exactly like {{validation_error}}.
+    prior_answers: tuple[PriorAnswer, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -146,10 +166,15 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
         "validation_error": (validation_error or "")[:_MAX_PROMPT_VALIDATION_ERROR],
         "countries": ", ".join(ctx.countries) if ctx.countries else "any",
         "titles": ", ".join(ctx.titles) if ctx.titles else "unspecified",
+        "prior_answers": "\n".join(
+            f"- {item.question_id}: {item.answer}" for item in ctx.prior_answers
+        ),
     }
     blocks = load_assess_instructions().split("\n\n")
     if not validation_error:
         blocks = [block for block in blocks if _VALIDATION_PLACEHOLDER not in block]
+    if not ctx.prior_answers:
+        blocks = [block for block in blocks if _PRIOR_ANSWERS_PLACEHOLDER not in block]
 
     def fill(match: re.Match[str]) -> str:
         key = match.group(1)
@@ -351,7 +376,15 @@ def _normalize_question_item(item: object) -> object | None:
         return None
     requirement = item.get("requirement")
     return {
-        "question_id": question_id.strip().lower(),
+        # P3 (v0.1.9): the S29 r1 rerun logs show the model's own slug for
+        # the SAME real-world fact drifting across calls (word choice,
+        # separator, token order); the normalizer (question_ids.py) is
+        # applied here, at the model boundary, so every structured question
+        # this normalizer ever emits is already in canonical form -- the
+        # Q&A loop's prior-answer join (assessment_core's own
+        # {{prior_answers}} rendering, and experience_answers.read_answers)
+        # never has to re-normalize a value that passed through here.
+        "question_id": normalize_question_id(question_id.strip().lower()),
         "question": question,
         "requirement": requirement if isinstance(requirement, str) else None,
     }
@@ -458,6 +491,7 @@ __all__ = [
     "AssessContext",
     "AssessJob",
     "INSTRUCTIONS_DIGEST",
+    "PriorAnswer",
     "assess_once",
     "load_assess_instructions",
     "render_assess_prompt",

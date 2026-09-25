@@ -29,6 +29,7 @@ from gigai.scout.assessment_core import (
     AssessAttempt,
     AssessContext,
     AssessJob,
+    PriorAnswer,
     assess_once,
     load_assess_instructions,
     render_assess_prompt,
@@ -67,6 +68,14 @@ _VALIDATION_ERROR = "matrix[0].status must be one of met|partial|gap"
 # (assess.md only; no verdict-consistency code rule touched) to say
 # explicitly that a posting location matching one of these countries is MET,
 # not askable. Goldens below were re-captured again for the reworded line.
+#
+# P3 (v0.1.9) INTENTIONAL CHANGE: added rule 6 ("A question whose id has a
+# prior answer is resolved by that answer, never re-asked.") and a
+# {{prior_answers}} paragraph (dropped from the rendered prompt when
+# ``AssessContext.prior_answers`` is empty, exactly like
+# {{validation_error}} -- so this golden, captured with the P1-era ``_ctx()``
+# helper that still passes none, is unchanged except for the new rule 6
+# line). Goldens below were re-captured for rule 6.
 GOLDEN_PROMPT = (
     "You are assessing one real job posting against one candidate's resume for GigAI Scout. "
     "Return a workflow-state verdict, not a grader score: the verdict decides what GigAI does "
@@ -121,7 +130,8 @@ GOLDEN_PROMPT = (
     '4. verdict = "not_a_match" if any requirement is unmet per rule 1\'s explicit-contradiction '
     "test.\n"
     '5. verdict = "pending_user_answers" only when there is no not_a_match finding but at least '
-    "one askable question remains.\n\n"
+    "one askable question remains.\n"
+    "6. A question whose id has a prior answer is resolved by that answer, never re-asked.\n\n"
     "Return JSON only (no prose, no markdown fences):\n"
     '{"verdict": "matched_above_threshold|pending_user_answers|not_a_match",\n'
     ' "matrix": [{"requirement": "<from the posting>", "class": "hard|askable|nice_to_have",\n'
@@ -150,20 +160,19 @@ GOLDEN_RETRY_PROMPT = (
     + ". Return corrected JSON only, matching the schema exactly."
 )
 
-# sha256 of the P2-r2 prompts, recorded by the capture script above (the
+# sha256 of the P3 prompts, recorded by the capture script above (the
 # strings above are the source of truth; the digests guard the
 # transcription).
-GOLDEN_SHA256 = "54b09bea14d79ee3f6a28a19021f51f3ba9340978960c44673afe4eb9e1f841b"
-GOLDEN_RETRY_SHA256 = "4213ef94c51bf51d8adcc397b76895fcd0ccd8ebba593873482138b87d54435d"
-# 13,000-byte posting text and resume plus a 400-char validation error, P2-r2:
+GOLDEN_SHA256 = "ae583af5e4103f290a415859d08a34c37e5653697cf6189321d8530a291280a2"
+GOLDEN_RETRY_SHA256 = "8e308590841a04a6a121caf0cc5d741e63e1833e18b787a739813ae8d88afcdb"
+# 13,000-byte posting text and resume plus a 400-char validation error, P3:
 # the three ``_MAX_PROMPT_*`` bounds (12_000 / 12_000 / 300) produce this exact prompt.
-GOLDEN_BOUNDED_SHA256 = "cdb58b6790c383453cd06647743a61af715cf2ced6519851c209ee3058283b63"
-GOLDEN_BOUNDED_LEN = 29_305
+GOLDEN_BOUNDED_SHA256 = "3fd8f0b07fcf340e391695549b707c0cb2a78546a8a36ddd158473ab055ab064"
+GOLDEN_BOUNDED_LEN = 29_391
 
 # Digest of the shipped ``assess.md`` bytes; bump ONLY when the template changes on purpose.
-# P2-r2 (v0.1.9) INTENTIONAL CHANGE: bumped again for the eligible-countries
-# wording fix (see the comment above GOLDEN_PROMPT).
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:f3e28113aa3e4ed2de62df000367a7d715ee5b682cf9027c9ffe3539ac789707"
+# P3 (v0.1.9) INTENTIONAL CHANGE: bumped for rule 6 + the {{prior_answers}} placeholder.
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:0ed0f4410fda6fa6fa8d90bf38700d3487f51e3648a8840e7aee12c593f6a00d"
 
 
 def _sha256(text: str) -> str:
@@ -282,6 +291,46 @@ def test_substituted_text_is_never_rescanned_for_placeholders() -> None:
     prompt = render_assess_prompt(_job(posting_text="literal {{resume_text}} in a posting"), _ctx())
     assert "literal {{resume_text}} in a posting" in prompt
     assert prompt.count(_RESUME.decode("utf-8")) == 1
+
+
+# --- P3: prior answers render into the prompt --------------------------------
+
+def test_prior_answers_render_into_the_prompt_and_are_omitted_when_empty() -> None:
+    empty_prompt = render_assess_prompt(_job(), _ctx())
+    assert "PRIOR ANSWERS" not in empty_prompt
+
+    ctx = AssessContext(
+        resume_text=_RESUME.decode("utf-8"),
+        visa_sponsorship_required=False,
+        prior_answers=(PriorAnswer(question_id="cloud:gcp", prompt="Have you used GCP?", answer="Yes, two years."),),
+    )
+    prompt = render_assess_prompt(_job(), ctx)
+    assert "PRIOR ANSWERS" in prompt
+    assert "cloud:gcp: Yes, two years." in prompt
+    # The one rule (assess.md, not a code rule) telling the model never to re-ask an answered id.
+    assert "6. A question whose id has a prior answer is resolved by that answer, never re-asked." in prompt
+
+
+def test_an_answered_question_id_is_never_re_asked_in_the_fixture_reply() -> None:
+    """The fixture model, told a fact is already answered, does not ask about it again."""
+
+    ctx = AssessContext(
+        resume_text=_RESUME.decode("utf-8"),
+        visa_sponsorship_required=False,
+        prior_answers=(PriorAnswer(question_id="cloud:gcp", prompt="Have you used GCP?", answer="Yes, two years on GCP."),),
+    )
+    output = json.dumps({
+        "verdict": "matched_above_threshold",
+        "matrix": [{"requirement": "GCP", "class": "askable", "resume_evidence": ["Yes, two years on GCP."], "status": "met"}],
+        "suggestions": [],
+        "questions": [],
+        "sponsorship": "not_offered",
+    })
+    binding = _ScriptedBinding([output])
+    outcome = assess_once(binding, _job(), ctx, parse=_parse)
+    assert outcome.ok
+    assert "cloud:gcp: Yes, two years on GCP." in binding.port.prompts[0]
+    assert outcome.parsed.questions == ()
 
 
 # --- assess_once: retry, tolerant extraction, exception mapping --------------

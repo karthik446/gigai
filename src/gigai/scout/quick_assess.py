@@ -59,7 +59,10 @@ from ..adapters.factory import AdapterFactoryError
 from ..canonical import digest_imported_bytes, parse_json_bytes
 from ..config import GigAIConfig, load_config
 from ..model_targets import ModelTargetResolutionError
-from .assessment_core import INSTRUCTIONS_DIGEST, AssessContext, AssessJob, assess_once
+from .assessment_core import INSTRUCTIONS_DIGEST, AssessContext, AssessJob
+from .assessment_core import PriorAnswer as CorePriorAnswer
+from .assessment_core import assess_once
+from .experience_answers import read_answers
 from .find_jobs.assess_contracts import (
     AssessmentBody,
     AssessRequest,
@@ -136,11 +139,17 @@ def _read_stored(path: Path) -> AssessResponse | None:
 def list_quick_assessments(
     home_root: Path, target: Path, *, profile_id: str | None = None, verdict: str | None = None
 ) -> tuple[AssessResponse, ...]:
-    """Every stored quick assessment for this project, newest ``created_at`` first.
+    """Every stored quick assessment for this project, newest ``updated_at`` first.
 
     ``profile_id`` narrows to one resume identity (``"ephemeral"`` selects
     the pasted-resume assessments); ``verdict`` narrows to one verdict value.
     Files that no longer parse are skipped, never raised.
+
+    P3 (v0.1.9): ordered by ``updated_at`` (last ASSESSED, which a
+    re-assessment after answers bumps) rather than P5's ``created_at`` --
+    P5 had nothing that recorded a re-assessment, so the two were always
+    equal; P3's Q&A loop is exactly what makes them diverge, and the
+    re-assessed item belongs first.
     """
 
     if profile_id is not None and not _SAFE_RESUME_KEY.fullmatch(profile_id):
@@ -163,8 +172,21 @@ def list_quick_assessments(
             if verdict is not None and (stored.result.verdict is None or stored.result.verdict.value != verdict):
                 continue
             items.append(stored)
-    items.sort(key=lambda item: (item.created_at, item.stored_path), reverse=True)
+    items.sort(key=lambda item: (item.updated_at, item.stored_path), reverse=True)
     return tuple(items)
+
+
+def find_quick_assessment_by_job_identity(
+    home_root: Path, target: Path, job_identity: str
+) -> AssessResponse | None:
+    """The stored quick assessment for ``job_identity``, across every resume
+    identity directory (P3's re-assess: the request names only the job, not
+    which profile/ephemeral resume it was originally assessed against)."""
+
+    for item in list_quick_assessments(home_root, target):
+        if item.job.job_identity == job_identity:
+            return item
+    return None
 
 
 # --- model binding observation --------------------------------------------------------
@@ -349,6 +371,7 @@ def run_quick_assessment(
 
     # 2. Resume identity + text (the pinned profile resume, or ephemeral).
     profile = None
+    resolved = None
     try:
         if request.resume.is_ephemeral:
             resume = resolve_resume(request.resume, resolved=None, home_root=home_root, target=target)  # type: ignore[arg-type]
@@ -374,6 +397,23 @@ def run_quick_assessment(
         raise QuickAssessError("target_unavailable", "this folder is not bound to a GigAI project") from exc
     previous = _read_stored(path)
 
+    # 4b. Prior answers (P3's Q&A loop): every answered ``experience_qa``
+    #     question in this gig, rendered into the prompt so the model never
+    #     re-asks something the operator already answered (assess.md rule
+    #     6). A pasted-text assess with no bound gig (``_resolve_workpad``
+    #     never ran) has none to offer -- that is fine, not fatal: prior
+    #     answers are cross-posting convenience, not a requirement.
+    prior_answers: tuple[CorePriorAnswer, ...] = ()
+    try:
+        gig_resolved = resolved if resolved is not None else _resolve_workpad(home_root, target)
+        stored_answers = read_answers(home_root=home_root, requested_target=target, gig_id=gig_resolved.gig_id)
+        prior_answers = tuple(
+            CorePriorAnswer(question_id=item.question_id, prompt=item.prompt, answer=item.answer)
+            for item in stored_answers.values()
+        )
+    except QuickAssessError:
+        pass
+
     # 5. Model target -> adapter (C1/C11), then the shared core (P1).
     model_target = request.model_target or _default_model_target(target)
     active = config if config is not None else load_config(home_root)
@@ -387,6 +427,7 @@ def run_quick_assessment(
                 visa_sponsorship_required=preferences.visa_sponsorship_required,
                 countries=tuple(preferences.countries),
                 titles=tuple(preferences.titles),
+                prior_answers=prior_answers,
             ),
             parse=_parse_body,
         )
@@ -412,6 +453,7 @@ def run_quick_assessment(
     producer = Producer(
         _PRODUCER_CALLABLE, _PRODUCER_VERSION, _PRODUCER_ACTOR, model_target, binding.port.name or model_target.value
     )
+    assessed_at = _now()
     response = AssessResponse(
         job=job,
         resume=resume,
@@ -420,8 +462,9 @@ def run_quick_assessment(
         producer=producer,
         usage=usage,
         instructions_digest=INSTRUCTIONS_DIGEST,
-        created_at=previous.created_at if previous is not None else _now(),
+        created_at=previous.created_at if previous is not None else assessed_at,
         stored_path=os.fspath(path),
+        updated_at=assessed_at,
     )
     atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
     return response
@@ -430,6 +473,7 @@ def run_quick_assessment(
 __all__ = [
     "EPHEMERAL_RESUME_KEY",
     "QuickAssessError",
+    "find_quick_assessment_by_job_identity",
     "list_quick_assessments",
     "quick_assess_dir",
     "quick_assess_path",

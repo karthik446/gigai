@@ -801,4 +801,108 @@ def assess_command(
     click.echo(f"  Stored at {response.stored_path}")
 
 
+@scout_group.command("answer")
+@click.argument("question_id")
+@click.option("--answer-text", "answer_text", help="Answer text inline.")
+@click.option("--answer-file", "answer_file", help="Answer text FILE (or - for stdin).")
+@click.option("--reassess", "reassess", help="Job URL or job_identity to re-assess with this answer applied.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def answer_command(
+    question_id: str,
+    answer_text: str | None,
+    answer_file: str | None,
+    reassess: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Answer QUESTION_ID once; the answer is reused across every posting.
+
+    Pass exactly one of --answer-text / --answer-file. The answer is written
+    to this gig's ``experience_qa`` records (a fresh record, or an append,
+    with automatic rollover at 32 answers per record) and reused by every
+    later ``gigai scout assess`` call whose prompt renders a matching
+    question_id (the normalizer makes a drifted id from a different call
+    still match the same real-world fact). Pass --reassess JOB_URL_OR_ID to
+    re-run the whole assessment for that job immediately, with this answer
+    applied.
+    """
+
+    from ..private_records import PrivateRecordError
+    from .experience_answers import record_answer
+    from .find_jobs.assess_contracts import AssessJobInput, AssessRequest, AssessResumeInput
+    from .find_jobs.contracts import FindJobsContractError
+    from .question_ids import normalize_question_id
+    from .quick_assess import QuickAssessError, find_quick_assessment_by_job_identity, run_quick_assessment
+
+    if bool(answer_text) == bool(answer_file):
+        _fail(ValueError("pass exactly one of --answer-text or --answer-file"), as_json=as_json, fallback="answer_invalid")
+        return
+    try:
+        answer = answer_text if answer_text is not None else _read_text_option(answer_file, flag="--answer-file")  # type: ignore[arg-type]
+    except OSError as exc:
+        _fail(exc, as_json=as_json, fallback="input_file_unreadable")
+        return
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        target = resolved_target.expanduser().resolve(strict=True)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_answer_failed")
+        return
+
+    try:
+        result = record_answer(home_root=home_root, requested_target=target, question_id=question_id, prompt=question_id, answer=answer)
+    except PrivateRecordError as exc:
+        _fail(exc, as_json=as_json, fallback="answer_invalid")
+        return
+
+    normalized_question_id = normalize_question_id(question_id)
+    reassessed_payload: dict[str, object] | None = None
+    if reassess:
+        try:
+            previous = find_quick_assessment_by_job_identity(home_root, target, reassess)
+            job_identity = reassess
+            if previous is None:
+                # Accept a raw job URL too (not only a stored job_identity):
+                # normalize it the same way resolve_job would, by reusing
+                # its own normalization through a throwaway resolution.
+                from .find_jobs.contracts import normalize_url
+
+                job_identity = normalize_url(reassess)
+                previous = find_quick_assessment_by_job_identity(home_root, target, job_identity)
+            if previous is None:
+                raise QuickAssessError("reassess_not_found", f"no stored assessment for {reassess!r}")
+            if previous.job.source_url is None:
+                raise QuickAssessError("reassess_unavailable", "this job was assessed from pasted text, which is never stored; run `gigai scout assess` again")
+            request = AssessRequest(
+                job=AssessJobInput(job_url=previous.job.source_url, title=previous.job.title or None, company=previous.job.company or None),
+                resume=AssessResumeInput(profile_id=previous.resume.profile_id),
+            )
+            response = run_quick_assessment(request, home_root=home_root, target=target)
+        except (QuickAssessError, FindJobsContractError) as exc:
+            _fail(exc, as_json=as_json, fallback="scout_answer_failed")
+            return
+        reassessed_payload = response.to_json()
+
+    payload = {
+        "ok": True,
+        "record_id": result.record_id,
+        "revision_id": result.revision_id,
+        "question_id": normalized_question_id,
+        "reassessed": reassessed_payload,
+    }
+    if as_json:
+        _emit(payload, True, "")
+        return
+    click.echo(f"Recorded answer for {normalized_question_id} at {result.revision_id}.")
+    if reassessed_payload is not None:
+        result_json = reassessed_payload.get("result")
+        verdict = result_json.get("verdict") if isinstance(result_json, dict) else None
+        click.echo(f"  Re-assessed: verdict = {verdict}")
+
+
 __all__ = ["scout_group", "write_starter_find_jobs_config", "STARTER_FIND_JOBS_CONFIG"]

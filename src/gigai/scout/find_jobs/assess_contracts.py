@@ -415,6 +415,14 @@ class AssessResponse(_Contract):
     instructions_digest: str
     created_at: str
     stored_path: str
+    # P3 (v0.1.9, additive): the last time this job/resume pair was
+    # assessed -- distinct from ``created_at`` (kept from the FIRST write,
+    # C4-style), so a re-assessment (P3's Q&A loop) can be told apart from
+    # the original one. Omitted from JSON when equal to ``created_at`` (the
+    # P5-era shape: never re-assessed yet) so a P5 response round-trips
+    # byte-identically; ``from_json`` fills it back in from ``created_at``
+    # when absent.
+    updated_at: str = ""
 
     def __post_init__(self) -> None:
         if (
@@ -427,7 +435,7 @@ class AssessResponse(_Contract):
     def to_json(self) -> dict[str, object]:
         job = self.job.to_json()
         del job["text"]
-        return {
+        value: dict[str, object] = {
             "schema_version": self.schema_version,
             "job": job,
             "resume": self.resume.to_json(),
@@ -439,6 +447,9 @@ class AssessResponse(_Contract):
             "created_at": self.created_at,
             "stored_path": self.stored_path,
         }
+        if self.updated_at and self.updated_at != self.created_at:
+            value["updated_at"] = self.updated_at
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "AssessResponse":
@@ -448,7 +459,7 @@ class AssessResponse(_Contract):
                 "schema_version", "job", "resume", "preferences", "result", "producer", "usage",
                 "instructions_digest", "created_at", "stored_path",
             ),
-            (),
+            ("updated_at",),
             "assess_response",
         )
         if value["schema_version"] != cls.schema_version:
@@ -459,6 +470,8 @@ class AssessResponse(_Contract):
         if "text" in job:
             _fail("unknown_key", "assess_response.job never carries the job text")
         usage = value["usage"]
+        created_at = _string(value["created_at"], "created_at")
+        updated_at = _string(value["updated_at"], "updated_at") if "updated_at" in value else created_at
         return cls(
             job=ResolvedJob.from_json({**job, "text": ""}),
             resume=ResolvedResume.from_json(value["resume"]),
@@ -467,8 +480,9 @@ class AssessResponse(_Contract):
             producer=Producer.from_json(value["producer"]),
             usage=None if usage is None else UsageBlock.from_json(usage),
             instructions_digest=_digest_value(value["instructions_digest"], "instructions_digest"),
-            created_at=_string(value["created_at"], "created_at"),
+            created_at=created_at,
             stored_path=_string(value["stored_path"], "stored_path"),
+            updated_at=updated_at,
         )
 
 

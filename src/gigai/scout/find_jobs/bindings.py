@@ -292,6 +292,17 @@ def _test_model_prompt(request: httpx.Request) -> str:
     )
 
 
+#: P3 (v0.1.9): a marker the fixture recognizes in the RENDERED
+#: {{prior_answers}} block (``assessment_core.render_assess_prompt`` writes
+#: one ``- <question_id>: <answer>`` line per prior answer) -- never in the
+#: posting text itself, unlike the garbage/sleep markers above. Its presence
+#: means "cloud:gcp is already answered", which the fixture's own GCP
+#: question is the one thing standing in the way of a match, so this alone
+#: decides pending vs matched (the plan's own "keyed on prompt content" line
+#: for this file).
+_TEST_MODEL_ANSWERED_GCP_MARKER = "cloud:gcp:"
+
+
 def _test_model_handler(request: httpx.Request) -> httpx.Response:
     """Answer the three Ollama identity/chat calls without a model process.
 
@@ -301,6 +312,16 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
     core's one retry then fails ``model_output_invalid``); one carrying
     ``TEST_MODEL_SLEEP_MARKER`` sleeps ``TEST_MODEL_SLEEP_SECONDS`` first
     (past the journey's 1 s ``GIGAI_SCOUT_ASSESS_TIMEOUT_SECONDS``).
+
+    P3: a THIRD marker, but this one is never placed by a caller -- it is
+    ``assessment_core.render_assess_prompt``'s own rendering of a prior
+    answer for ``cloud:gcp`` (``experience_answers``'s Q&A loop). Its
+    presence in the prompt flips the fixture's answer from
+    ``pending_user_answers`` (GCP unresolved) to ``matched_above_threshold``
+    (GCP now resolved by the prior answer, per assess.md rule 6) -- this is
+    what lets ``test_answers_journey.py`` prove a re-assessment's verdict
+    actually changes after ``POST /api/answers``, through the SAME fixture
+    every other assess journey uses, rather than a second bespoke one.
     """
 
     if request.method == "GET" and request.url.path == "/api/version":
@@ -329,6 +350,12 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
                 },
                 request=request,
             )
+        gcp_answered = _TEST_MODEL_ANSWERED_GCP_MARKER in prompt
+        gcp_row = (
+            {"requirement": "GCP", "class": "askable", "resume_evidence": ["Prior answer on file"], "status": "met"}
+            if gcp_answered
+            else {"requirement": "GCP", "class": "askable", "resume_evidence": [], "status": "unclear"}
+        )
         return httpx.Response(
             200,
             json={
@@ -342,7 +369,7 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
                             # the api-e2e/child-process journeys exercise the
                             # new S29 r1 shape end to end (structured
                             # questions -> pending_user_answers).
-                            "verdict": "pending_user_answers",
+                            "verdict": "matched_above_threshold" if gcp_answered else "pending_user_answers",
                             "matrix": [
                                 {
                                     "requirement": "Python",
@@ -350,21 +377,20 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
                                     "resume_evidence": ["Built Python services"],
                                     "status": "met",
                                 },
-                                {
-                                    "requirement": "GCP",
-                                    "class": "askable",
-                                    "resume_evidence": [],
-                                    "status": "unclear",
-                                },
+                                gcp_row,
                             ],
                             "suggestions": ["Keep the service example."],
-                            "questions": [
-                                {
-                                    "question_id": "cloud:gcp",
-                                    "question": "Which platform would you prefer?",
-                                    "requirement": "GCP",
-                                }
-                            ],
+                            "questions": (
+                                []
+                                if gcp_answered
+                                else [
+                                    {
+                                        "question_id": "cloud:gcp",
+                                        "question": "Which platform would you prefer?",
+                                        "requirement": "GCP",
+                                    }
+                                ]
+                            ),
                             "not_a_match_reason": None,
                         },
                         separators=(",", ":"),
