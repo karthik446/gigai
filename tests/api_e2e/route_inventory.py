@@ -16,14 +16,22 @@ the dispatch's new home, instead.
 The dispatch (there is no ``do_PATCH``/``do_DELETE`` today -- confirmed by
 the same grep ``test_present_csrf.py``'s docstring already used to justify
 its own route list) each contain a flat chain of ``if path ==
-"<literal>":`` / ``if path.startswith("<literal>"):`` comparisons, plus one
-parametric-path helper: ``_match_run_id(path, suffix="<literal>")`` for the
-three ``/api/runs/{run_id}...`` routes. This scanner recognizes exactly
-those two shapes inside each ``do_*`` method body:
+"<literal>":`` / ``if path.startswith("<literal>"):`` comparisons, plus two
+parametric-path helpers of the same shape: ``_match_run_id(path,
+suffix="<literal>")`` for the three ``/api/runs/{run_id}...`` routes, and
+(F1-c) ``_match_profile_id(path, suffix="<literal>")`` for
+``/api/profiles/{profile_id}...``. This scanner recognizes exactly these
+shapes inside each ``do_*`` method body:
 
 1. ``if path == "<literal>":`` -> a fixed route on that method.
 2. ``_match_run_id(path, suffix="<literal>")`` -> the parametric route
-   ``/api/runs/{run_id}<literal>`` on that method (GET only today).
+   ``/api/runs/{run_id}<literal>`` on that method.
+3. ``_match_profile_id(path, suffix="<literal>")`` -> the parametric route
+   ``/api/profiles/{profile_id}<literal>`` on that method.
+
+``_PARAMETRIC_MATCHERS`` is this scanner's registry of recognized helper
+names -> route prefix; a third helper of the same shape only needs an entry
+there, not a new AST-walking branch.
 
 It deliberately does not try to recognize an arbitrary new dispatch shape a
 future route might use (e.g. a regex route table) -- if the dispatch's shape
@@ -73,21 +81,33 @@ def _literal_str(node: ast.AST) -> str | None:
     return None
 
 
-def _match_run_id_suffix(call: ast.Call) -> str | None:
-    """Return the ``suffix=`` literal of a ``_match_run_id(path, suffix=...)``
-    call, or ``None`` if this isn't that call shape."""
+# F1-c: `_match_profile_id(path, suffix=...)` is `_match_run_id`'s exact
+# shape, reused for `/api/profiles/{profile_id}<suffix>` -- mapped to the
+# same `{run_id}`-style placeholder convention this scanner already uses.
+_PARAMETRIC_MATCHERS = {
+    "_match_run_id": "/api/runs/{run_id}",
+    "_match_profile_id": "/api/profiles/{profile_id}",
+}
+
+
+def _parametric_route_suffix(call: ast.Call) -> tuple[str, str] | None:
+    """Return ``(route_prefix, suffix)`` for a recognized ``_match_*_id(path,
+    suffix=...)`` call, or ``None`` if this isn't one of those call shapes."""
 
     func = call.func
     name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-    if name != "_match_run_id":
+    prefix = _PARAMETRIC_MATCHERS.get(name) if isinstance(name, str) else None
+    if prefix is None:
         return None
     for keyword in call.keywords:
         if keyword.arg == "suffix":
-            return _literal_str(keyword.value)
+            literal = _literal_str(keyword.value)
+            return (prefix, literal) if literal is not None else None
     # Positional suffix (never used in present_api.py today, but handled so
     # a future refactor to positional args doesn't silently blind this scan).
     if len(call.args) >= 2:
-        return _literal_str(call.args[1])
+        literal = _literal_str(call.args[1])
+        return (prefix, literal) if literal is not None else None
     return None
 
 
@@ -114,9 +134,10 @@ def _routes_in_do_method(method_node: ast.FunctionDef, http_method: str) -> set[
                 if literal is not None:
                     routes.add(Route(http_method, literal))
         if isinstance(node, ast.Call):
-            suffix = _match_run_id_suffix(node)
-            if suffix is not None:
-                routes.add(Route(http_method, f"/api/runs/{{run_id}}{suffix}"))
+            matched = _parametric_route_suffix(node)
+            if matched is not None:
+                prefix, suffix = matched
+                routes.add(Route(http_method, f"{prefix}{suffix}"))
     return routes
 
 

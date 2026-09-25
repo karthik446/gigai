@@ -24,6 +24,7 @@ from gigai.private_records import create_record, import_reference
 from gigai.scout.find_jobs.contracts import PinnedResume
 from gigai.scout.profile_records import (
     ProfileRecordError,
+    create_profile,
     ensure_default_profile,
     list_profiles,
     retrieve_profile_revision,
@@ -533,6 +534,105 @@ def test_archived_profile_cannot_be_selected(tmp_path: Path):
     with pytest.raises(ProfileRecordError) as excinfo:
         switch_selected_profile(fx.resolved, profile_id=default_profile.profile_id)
     assert excinfo.value.code == "scout_profile_archived"
+
+
+# ---------------------------------------------------------------------------
+# create_profile: F1-c's "mint a brand-new, operator-named profile" primitive
+# (approved by the coordinator so F1-c's api/profiles.py never has to reach
+# into this module's private write-shaping helpers from outside it).
+# ---------------------------------------------------------------------------
+
+
+def test_create_profile_reads_back_as_current(tmp_path: Path):
+    fx = build_gig_with_resume(tmp_path)
+    resume_ref = PinnedResume(fx.resume_record_id, fx.resume_revision_id, "sha256:" + "1" * 64)
+    created = create_profile(
+        fx.resolved,
+        label="Staff full-stack",
+        titles=("staff full-stack engineer",),
+        titles_to_avoid=("junior",),
+        queries=("staff full-stack engineer",),
+        resume_ref=resume_ref,
+    )
+    assert created.origin == "operator_created"
+    assert created.state == "active"
+    assert created.revision == 1
+    assert created.seq == 1
+    assert created.label == "Staff full-stack"
+    assert created.titles == ("staff full-stack engineer",)
+    assert created.titles_to_avoid == ("junior",)
+    assert created.resume_ref == resume_ref
+
+    profiles = {item.profile_id: item for item in list_profiles(fx.resolved)}
+    assert created.profile_id in profiles
+    assert profiles[created.profile_id] == created
+    assert_managed_workpad_clean(fx.resolved.path)
+
+
+def test_create_profile_does_not_change_selection(tmp_path: Path):
+    fx = build_gig_with_resume(tmp_path)
+    migration = ensure_default_profile(fx.resolved, home_root=fx.home_root, target=fx.target)
+    assert migration is not None
+    default_profile_id = migration.profile_id
+
+    resume_ref = PinnedResume(fx.resume_record_id, fx.resume_revision_id, "sha256:" + "2" * 64)
+    create_profile(
+        fx.resolved,
+        label="second",
+        titles=("staff backend engineer",),
+        titles_to_avoid=(),
+        queries=("staff backend engineer",),
+        resume_ref=resume_ref,
+    )
+
+    selection = selected_profile(fx.resolved, home_root=fx.home_root, target=fx.target)
+    assert selection is not None
+    assert selection.profile_id == default_profile_id
+    assert_managed_workpad_clean(fx.resolved.path)
+
+
+def test_two_creates_get_distinct_profile_ids(tmp_path: Path):
+    fx = build_gig_with_resume(tmp_path)
+    resume_ref = PinnedResume(fx.resume_record_id, fx.resume_revision_id, "sha256:" + "3" * 64)
+    first = create_profile(
+        fx.resolved, label="one", titles=("a",), titles_to_avoid=(), queries=("a",), resume_ref=resume_ref
+    )
+    second = create_profile(
+        fx.resolved, label="two", titles=("b",), titles_to_avoid=(), queries=("b",), resume_ref=resume_ref
+    )
+    assert first.profile_id != second.profile_id
+    profile_ids = {item.profile_id for item in list_profiles(fx.resolved)}
+    assert {first.profile_id, second.profile_id} <= profile_ids
+    assert_managed_workpad_clean(fx.resolved.path)
+
+
+def test_create_profile_works_without_a_migrated_default(tmp_path: Path):
+    """A gig with no ``find-jobs.json``/committed resume yet (so no default
+    profile could ever be migrated) can still have its first profile
+    created this way -- ``resume_ref`` is caller-supplied, never re-resolved
+    from "newest", so ``create_profile`` has no dependency on
+    ``ensure_default_profile`` having run first."""
+
+    fx = build_gig_with_resume(tmp_path, write_config=False)
+    assert not (fx.target / "find-jobs.json").exists()
+    assert ensure_default_profile(fx.resolved, home_root=fx.home_root, target=fx.target) is None
+    assert list_profiles(fx.resolved) == ()
+
+    resume_ref = PinnedResume(fx.resume_record_id, fx.resume_revision_id, "sha256:" + "4" * 64)
+    created = create_profile(
+        fx.resolved,
+        label="first ever",
+        titles=("staff ai engineer",),
+        titles_to_avoid=(),
+        queries=("staff ai engineer",),
+        resume_ref=resume_ref,
+    )
+    assert created.origin == "operator_created"
+    assert [item.profile_id for item in list_profiles(fx.resolved)] == [created.profile_id]
+    # Still no selection: creating never selects (same rule as with a
+    # migrated default present).
+    assert selected_profile(fx.resolved, home_root=fx.home_root, target=fx.target) is None
+    assert_managed_workpad_clean(fx.resolved.path)
 
 
 # ---------------------------------------------------------------------------

@@ -773,6 +773,39 @@ class PinnedResume(_Contract):
 
 
 @dataclass(frozen=True)
+class ProfileRef(_Contract):
+    """S25 F1-b: which interested profile (and exact content) a run used.
+
+    ``{profile_id, revision, content_digest}`` -- the sealed identity Q3/A2
+    of the S25 spike define. ``revision`` is the profile record's own
+    monotonic integer; ``content_digest`` is the run's own sealed copy of
+    the profile's ``content_digest`` at seal time (independently verifiable
+    without trusting the live profile record or journal history -- see
+    ``profile_records.retrieve_profile_revision``).
+    """
+
+    profile_id: str
+    revision: int
+    content_digest: str
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "profile_id": self.profile_id,
+            "revision": self.revision,
+            "content_digest": self.content_digest,
+        }
+
+    @classmethod
+    def from_json(cls, obj: object) -> "ProfileRef":
+        value = _object(obj, ("profile_id", "revision", "content_digest"), "profile_ref")
+        return cls(
+            _string(value["profile_id"], "profile_ref.profile_id"),
+            _integer(value["revision"], "profile_ref.revision", minimum=1),
+            _digest_value(value["content_digest"], "profile_ref.content_digest"),
+        )
+
+
+@dataclass(frozen=True)
 class FindJobsRunInput(_Contract):
     """Sealed run snapshot written before graph allocation and execution."""
 
@@ -783,9 +816,15 @@ class FindJobsRunInput(_Contract):
     selection_rule: SelectionRule
     model_target: ModelTarget
     pinned_resume: PinnedResume
+    # S25 F1-b: additive/optional (_object_with_optional), never required --
+    # ``None`` only for a run sealed before F1-b shipped (or a caller that
+    # never resolves a profile at all, matching PostingRow's own text/
+    # sponsorship precedent, contracts.py:516-539). Omitted from to_json() at
+    # its None default so an old sealed input's digest stays unaffected.
+    profile_ref: ProfileRef | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "schema_version": self.schema_version,
             "config": self.config.to_json(),
             "config_digest": self.config_digest,
@@ -794,16 +833,25 @@ class FindJobsRunInput(_Contract):
             "model_target": _json_enum(self.model_target),
             "pinned_resume": self.pinned_resume.to_json(),
         }
+        if self.profile_ref is not None:
+            value["profile_ref"] = self.profile_ref.to_json()
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "FindJobsRunInput":
-        value = _object(obj, ("schema_version", "config", "config_digest", "selection_cap", "selection_rule", "model_target", "pinned_resume"), "find_jobs_run_input")
+        value = _object_with_optional(
+            obj,
+            ("schema_version", "config", "config_digest", "selection_cap", "selection_rule", "model_target", "pinned_resume"),
+            ("profile_ref",),
+            "find_jobs_run_input",
+        )
         if value["schema_version"] != cls.schema_version:
             _fail("bad_enum", "find_jobs_run_input.schema_version is unsupported")
         config = FindJobsConfig.from_json(value["config"])
         config_digest = _digest_value(value["config_digest"], "config_digest")
         if config_digest != config.digest():
             _fail("invalid_value", "find_jobs_run_input.config_digest must equal config.digest()")
+        profile_ref = None if "profile_ref" not in value else ProfileRef.from_json(value["profile_ref"])
         return cls(
             config,
             config_digest,
@@ -811,6 +859,7 @@ class FindJobsRunInput(_Contract):
             _enum(value["selection_rule"], SelectionRule, "selection_rule"),
             _enum(value["model_target"], ModelTarget, "model_target"),
             PinnedResume.from_json(value["pinned_resume"]),
+            profile_ref,
         )
 
 
@@ -2002,7 +2051,7 @@ __all__ = [
     "EditedURL", "FindJobsConfig", "FindJobsContractError", "FailureRow", "FindJobsRunInput", "FindJobsConfig", "GoalError", "GoalStatus", "MatrixStatus", "ModelTarget", "NodeContext",
     "NodeFailure", "NodeReceipt", "NodeReceiptFixture", "NodeReceiptStatus", "NodeStatus", "NodeCallable", "NormalizedPostingRow", "NormalizedPublicPostingRow", "NotAssessedReason",
     "NotAssessedRow", "PRESENT_CAPABILITY", "PRESENT_CAPABILITY_ID", "PRESENT_DECLARED_EFFECTS", "PRESENT_EFFECTS", "PresentInput",
-    "PresentNodeCallable", "PresentOutput", "PresentPayload", "PinnedResume", "PostingRow", "PostingRowResult", "Producer", "ROUTES",
+    "PresentNodeCallable", "PresentOutput", "PresentPayload", "PinnedResume", "PostingRow", "PostingRowResult", "Producer", "ProfileRef", "ROUTES",
     "ProgressStatus", "RequirementMatrixRow", "RowOutcome", "RouteSpec", "RunLookupRequest", "RunRequest", "RunResponse", "RunResultsResponse", "RunStatusResponse",
     "SelectedPosting", "SelectionReason", "SelectionReasonCode", "SelectionRule", "SourceKind", "SourceToggles", "SponsorshipStatus", "UIConsentEnvelope", "URLChangeDetectionClient", "URLObservation", "URLSetDiff",
     "UsageBlock", "WatchlistClient", "WatchlistEntry", "WatchlistFixture", "WatchlistFirstSeen", "aggregate_status", "content_hash",

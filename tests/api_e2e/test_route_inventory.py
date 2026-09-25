@@ -31,6 +31,11 @@ JOURNEYS: dict[Route, str] = {
     Route("GET", "/api/runs/{run_id}/results"): "test_setup_config_run_poll_results.py, test_second_run_unchanged_skip.py",
     Route("POST", "/api/discover"): "test_discover_fake_provider.py",
     Route("GET", "/api/discover/latest"): "test_discover_fake_provider.py",
+    Route("GET", "/api/profiles"): "test_profiles_journey.py",
+    Route("POST", "/api/profiles"): "test_profiles_journey.py",
+    Route("PUT", "/api/profiles/{profile_id}"): "test_profiles_journey.py",
+    Route("POST", "/api/profiles/{profile_id}/archive"): "test_profiles_journey.py",
+    Route("POST", "/api/profiles/selection"): "test_profiles_journey.py",
 }
 
 
@@ -71,6 +76,11 @@ def test_scanner_finds_the_known_routes() -> None:
         Route("GET", "/api/runs/{run_id}/results"),
         Route("POST", "/api/discover"),
         Route("GET", "/api/discover/latest"),
+        Route("GET", "/api/profiles"),
+        Route("POST", "/api/profiles"),
+        Route("PUT", "/api/profiles/{profile_id}"),
+        Route("POST", "/api/profiles/{profile_id}/archive"),
+        Route("POST", "/api/profiles/selection"),
     ):
         assert expected in discovered, f"scanner failed to find {expected} -- found: {sorted(discovered)}"
 

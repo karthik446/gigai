@@ -271,8 +271,48 @@ def _prior_observations(root: Path, current_batch: str) -> dict[str, str | None]
     return result
 
 
-def _resume_revision_for_run(root: Path, run_id: str) -> str | None:
-    """The pinned resume's ``revision_id`` sealed for this run, if resolvable.
+def _default_profile_id(resolved: ResolvedWorkpad | None) -> str | None:
+    """The gig's migrated-default profile id, or ``None`` if unresolvable.
+
+    S25 F1-b / Legacy-run policy: a run sealed before F1-b (no
+    ``profile_ref``) is attributed to the gig's ``origin ==
+    "migrated_default"`` profile for cache-key purposes -- never "visible to
+    all profiles," never "excluded" (see the S25 spike's Legacy-run policy
+    section). ``resolved`` is ``None`` for the many direct-call unit tests
+    that construct a fake/non-journaled workpad (``_resolved`` in this same
+    module returns a plain ``ResolvedWorkpad`` for those, but
+    ``profile_records.list_profiles`` requires a REAL journaled workpad) --
+    degrades to ``None`` rather than raise, exactly like
+    ``_run_profile_identity``'s own "no sealed input -> None" precedent:
+    callers treat ``None`` as "cannot attribute," never a match.
+    """
+
+    if resolved is None:
+        return None
+    try:
+        from .. import profile_records
+    except ImportError:
+        return None
+    try:
+        profiles = profile_records.list_profiles(resolved)
+    except Exception:
+        return None
+    for profile in profiles:
+        if profile.origin == "migrated_default":
+            return profile.profile_id
+    return None
+
+
+@dataclass(frozen=True)
+class _RunProfileIdentity:
+    """A run's sealed ``(resume_revision_id, profile_id)`` pair for the A2 cache key."""
+
+    resume_revision_id: str
+    profile_id: str | None
+
+
+def _run_profile_identity(root: Path, run_id: str, *, default_profile_id: str | None) -> _RunProfileIdentity | None:
+    """The pinned resume revision + profile identity sealed for ``run_id``.
 
     uat-bug-009: reads ``runs/<run_id>/sealed/find-jobs-run-input.json`` --
     the same sealed file ``proposal_execution.py``'s own ``_read_sealed_config``
@@ -285,6 +325,14 @@ def _resume_revision_for_run(root: Path, run_id: str) -> str | None:
     the same as "no config": never a match, so an unchanged row's prior
     assessment is never trusted without a known, current resume revision to
     compare it against.
+
+    S25 A2/F1-b: the corrected cache key adds ``profile_id`` ALONGSIDE
+    ``resume_revision_id`` (never replacing it -- r1's design defect the
+    coordinator's r2 review fixed, see the S25 spike's A2 section). A run
+    with a sealed ``profile_ref`` uses its own ``profile_id`` directly; a
+    legacy run (no ``profile_ref``) is attributed to ``default_profile_id``
+    (the Legacy-run policy) but KEEPS its own sealed
+    ``pinned_resume.revision_id`` -- never coerced to any fixed stand-in.
     """
 
     path = root / "runs" / run_id / "sealed" / "find-jobs-run-input.json"
@@ -294,9 +342,11 @@ def _resume_revision_for_run(root: Path, run_id: str) -> str | None:
         from .contracts import FindJobsRunInput
 
         payload = json.loads(path.read_text(encoding="utf-8"))
-        return FindJobsRunInput.from_json(payload).pinned_resume.revision_id
+        sealed = FindJobsRunInput.from_json(payload)
     except (OSError, ValueError, TypeError, KeyError):
         return None
+    profile_id = sealed.profile_ref.profile_id if sealed.profile_ref is not None else default_profile_id
+    return _RunProfileIdentity(sealed.pinned_resume.revision_id, profile_id)
 
 
 @dataclass(frozen=True)
@@ -305,10 +355,13 @@ class _PriorAssessment:
 
     result: "AssessmentResult"
     resume_revision_id: str
+    profile_id: str | None
     run_date: str | None
 
 
-def _prior_assessments(root: Path, current_run_id: str) -> dict[str, _PriorAssessment]:
+def _prior_assessments(
+    root: Path, current_run_id: str, *, default_profile_id: str | None = None
+) -> dict[str, _PriorAssessment]:
     """Every URL's latest successful assessment from an earlier run's sealed output.
 
     uat-bug-009 root cause: acquire's candidate loop excluded every
@@ -333,6 +386,13 @@ def _prior_assessments(root: Path, current_run_id: str) -> dict[str, _PriorAsses
     *result* to prefer when a posting was assessed successfully more than
     once, and the newest successful one is always the more useful carry-
     forward, so last-write-wins over ``sorted()`` order is adequate).
+
+    S25 A2/F1-b: each entry also carries the PRODUCING run's profile
+    identity (``_run_profile_identity``, legacy runs attributed to
+    ``default_profile_id``) -- the caller compares it against the CURRENT
+    run's own profile identity before trusting a carry-forward, so a
+    profile-B run never carries forward profile-A's assessment of the same
+    URL even if their resume revisions happened to coincide.
     """
 
     from .contracts import AssessOutput
@@ -351,13 +411,15 @@ def _prior_assessments(root: Path, current_run_id: str) -> dict[str, _PriorAsses
         except (OSError, ValueError, TypeError):
             continue
         resume_revision_id = output.pinned_resume.revision_id
+        identity = _run_profile_identity(root, run_id, default_profile_id=default_profile_id)
+        profile_id = identity.profile_id if identity is not None else default_profile_id
         run_date = None
         try:
             run_date = datetime.fromtimestamp(output_file.stat().st_mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
         except OSError:
             pass
         for assessment in output.assessments:
-            result[assessment.posting.normalized_url] = _PriorAssessment(assessment, resume_revision_id, run_date)
+            result[assessment.posting.normalized_url] = _PriorAssessment(assessment, resume_revision_id, profile_id, run_date)
     return result
 
 
@@ -676,8 +738,18 @@ def _acquire_node_body(
     # changed/unresolvable resume revision makes an earlier assessment not
     # count (never a match), so it never wrongly skips a posting the
     # operator's new resume hasn't actually been assessed against.
-    current_resume_revision_id = _resume_revision_for_run(resolved.path, context.run_id)
-    prior_assessments = _prior_assessments(resolved.path, context.run_id)
+    #
+    # S25 A2/F1-b: the corrected cache key adds `profile_id` ALONGSIDE the
+    # resume-revision dimension (never replacing it -- see
+    # `_run_profile_identity`'s own docstring for the r1 design defect this
+    # fixes). A legacy run (no sealed `profile_ref`) is attributed to the
+    # gig's migrated-default profile for this comparison, resolved once per
+    # acquire call.
+    default_profile_id = _default_profile_id(resolved)
+    current_identity = _run_profile_identity(resolved.path, context.run_id, default_profile_id=default_profile_id)
+    current_resume_revision_id = None if current_identity is None else current_identity.resume_revision_id
+    current_profile_id = None if current_identity is None else current_identity.profile_id
+    prior_assessments = _prior_assessments(resolved.path, context.run_id, default_profile_id=default_profile_id)
     results: list[PostingRowResult] = []
     candidates: list[PostingRow] = []
     carried_forward: dict[str, _PriorAssessment] = {}
@@ -697,6 +769,15 @@ def _acquire_node_body(
                 and prior.result.posting.content_sha256 == row.content_sha256
                 and current_resume_revision_id is not None
                 and prior.resume_revision_id == current_resume_revision_id
+                # S25 A2: profile_id must ALSO match -- a profile-B run never
+                # carries forward profile-A's assessment of the same URL,
+                # even when their resume revisions happen to coincide.
+                # `None == None` is a legitimate match: no profile has ever
+                # been migrated for this workpad at all (no profile system
+                # engaged), which is exactly today's pre-F1-b behaviour and
+                # must keep working unchanged, not be newly blocked by an
+                # unattributable-profile false negative.
+                and prior.profile_id == current_profile_id
             ):
                 carried_forward[row.normalized_url] = prior
             else:

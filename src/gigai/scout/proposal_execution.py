@@ -231,13 +231,32 @@ def _assess_node_body(
     # otherwise-eligible row acquire's diversity selection didn't pick).
     from .find_jobs.contracts import PinnedResume
     from .find_jobs.filters import exclusion_reason
-    from .find_jobs.market_acquisition import _prior_assessments, _role_match
+    from .find_jobs.market_acquisition import _default_profile_id, _prior_assessments, _role_match
     from .find_jobs.selection import select_for_assessment
+    from ..workpad import resolve_workpad
 
     selected_by_url = {item.normalized_url: item for item in input.selected_postings}
     roles = tuple(getattr(sealed_config, "roles", ())) if sealed_config is not None else ()
     resume_revision_id = input.pinned_resume.revision_id if isinstance(input.pinned_resume, PinnedResume) else None
-    prior_assessments = _prior_assessments(root, context.run_id)
+    # S25 A2/F1-b: the corrected cache key adds `profile_id` ALONGSIDE the
+    # resume-revision dimension -- twin predicate with market_acquisition's
+    # own acquire-side carry-forward check (that module's
+    # `_run_profile_identity`/`_default_profile_id` docstrings have the full
+    # rationale; kept identical here by hand, since assess doesn't import
+    # acquire's candidate loop).
+    try:
+        resolved_for_profile = resolve_workpad(
+            home_root=home_root, requested_target=root, gig_id=context.gig_id, allow_semantic_state=True
+        )
+    except Exception:
+        resolved_for_profile = None
+    default_profile_id = _default_profile_id(resolved_for_profile)
+    sealed_run_input = _read_sealed_run_input(root, context.run_id)
+    current_profile_ref = getattr(sealed_run_input, "profile_ref", None)
+    current_profile_id = (
+        current_profile_ref.profile_id if current_profile_ref is not None else default_profile_id
+    )
+    prior_assessments = _prior_assessments(root, context.run_id, default_profile_id=default_profile_id)
     rows: list[object] = []
     not_assessed: list[object] = []
     to_assess: list[tuple[object, bytes | None]] = []
@@ -263,6 +282,12 @@ def _assess_node_body(
                 and prior.result.posting.content_sha256 == posting.content_sha256
                 and resume_revision_id is not None
                 and prior.resume_revision_id == resume_revision_id
+                # S25 A2: profile_id must ALSO match -- twin predicate with
+                # market_acquisition's own acquire-side check (see its
+                # docstring for why `None == None` is a legitimate match:
+                # no profile has ever been migrated for this workpad at
+                # all, today's pre-F1-b behaviour, kept unchanged).
+                and prior.profile_id == current_profile_id
             ):
                 # A genuinely skippable UNCHANGED row: not a candidate at
                 # all, same as before this fix. Its carried-forward result
@@ -767,6 +792,19 @@ def _read_sealed_config(root: Path, run_id: str) -> object | None:
     rather than failing the node -- callers treat that as "no constraint"
     (visa not required, no country filter).
     """
+    run_input = _read_sealed_run_input(root, run_id)
+    return None if run_input is None else run_input.config
+
+
+def _read_sealed_run_input(root: Path, run_id: str) -> object | None:
+    """Read the full sealed ``FindJobsRunInput`` for this run, or ``None``.
+
+    S25 A2/F1-b: ``_read_sealed_config`` above only ever needed ``.config``;
+    the assess-side carry-forward predicate also needs ``.profile_ref``
+    (the run's own sealed profile identity), so this sibling reads the same
+    file once more rather than growing ``_read_sealed_config``'s return type
+    for its one existing caller.
+    """
     from .find_jobs.contracts import FindJobsRunInput
 
     path = root / "runs" / run_id / "sealed" / "find-jobs-run-input.json"
@@ -774,10 +812,9 @@ def _read_sealed_config(root: Path, run_id: str) -> object | None:
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        run_input = FindJobsRunInput.from_json(payload)
+        return FindJobsRunInput.from_json(payload)
     except (OSError, ValueError, TypeError):
         return None
-    return run_input.config
 
 
 def _read_acquire_rows(root: Path, batch_ref: str) -> tuple[tuple[object, object], ...]:

@@ -24,6 +24,44 @@ The fix has two parts:
 This file builds a real managed workpad in a temp home through the real
 CLI/API paths (no network, no mocked git) shaped like the operator's:
 several resume imports plus a few dozen other journal commits.
+
+F1-b1-r1 (coordinator's lane, a regression this packet introduced and then
+split honestly rather than silently widening the original bound):
+``ScoutFindJobsBackend.read_config()`` now also resolves the gig's SELECTED
+profile (S25 F1-b's own overlay), which is a SECOND
+``run_with_journal_writer`` acquisition per cold call -- and every such
+acquisition used to pay a fixed, structural core cost this packet does
+not own or touch: ``journal._require_mount_probes`` -> ``diagnostics.
+_interprocess_lock_check`` spawning a whole new Python subprocess
+(``sys.executable -m gigai.diagnostics --contend-lock``) to prove the
+workpad's exclusion lock actually excludes, regardless of what git work
+followed (profiled: ~0.35s on this fixture, on top of the pre-existing
+~0.97s single resume resolution -- cProfile evidence in the worker
+report). Two ADDITIONAL fixes landed alongside the bound split below (see
+``server.py``'s ``_selected_profile``/``profile_records.
+ensure_default_profile`` for the full writeup):
+  - a real deadlock: the migration's own resume lookup
+    (``_resolve_newest_resume_for_gig`` -> ``private_records.list_imports``)
+    opens its OWN ``run_with_journal_writer`` -- nesting that inside an
+    already-held writer lock hangs forever (the per-workpad lock is not
+    reentrant). Fixed by checking for an existing default profile in its
+    own, separate writer acquisition FIRST, and only resolving+opening a
+    second writer for the resume + create when one is truly needed.
+  - a cache-key timing bug: caching the selected profile under the
+    PRE-call git HEAD (mirroring ``run.py``'s pure-read resume cache
+    naively) guarantees a miss on every call after the first, because
+    THIS call can itself commit (the first-ever migration) -- the cache
+    key must be the POST-call HEAD.
+
+F1-b1-r2 (2026-09-25): the proposed core packet landed
+(``86e8b69``, "cache a passing workpad mount probe per process") --
+``journal.py`` now caches a PASSING mount probe per process (keyed by the
+workpad root plus its ``st_dev``/``st_ino``), so only the FIRST
+``run_with_journal_writer`` acquisition in this test process ever pays the
+subprocess spawn; every acquisition after that (including the SECOND one
+this packet's own profile resolution added) is a cache hit. The
+already-migrated/cold-cache bound below is tightened back to its original
+1.0s.
 """
 
 from __future__ import annotations
@@ -45,12 +83,28 @@ from gigai.scout.template import scout_candidate_inventory
 from gigai.setup import build_config, run_setup
 from gigai.workpad import resolve_workpad, select_active_workpad
 
-# Generous bound (ticket's own suggestion): real, non-instrumented timings on
-# this exact fixture land around 0.1-1.0s cold and ~0.08s warm; 1s leaves
-# ample headroom against CI/parallel-test contention while still catching
-# a regression back to the old per-artifact-subprocess behavior (which took
-# low double-digit seconds on a fixture this size).
+# uat-bug-008's original bound, for an ALREADY-migrated gig with a cold
+# (fresh-process) cache -- the normal path an operator hits on every Scout
+# server start. F1-b1-r1 widened this to 1.5s because /api/config now also
+# resolves the selected profile (one MORE run_with_journal_writer
+# acquisition than pre-F1-b), and every such acquisition paid the core
+# mount-probe subprocess spawn documented in this module's own docstring
+# (~0.35s). F1-b1-r2: tightened back to the original 1.0s now that the
+# proposed core probe-cache packet (``86e8b69``) landed -- the extra
+# journal writer acquisition this packet adds no longer pays the probe
+# subprocess after the first one per process, so there is no longer a
+# structural reason for this bound to be wider than uat-bug-008's own.
 _COLD_TIMING_BOUND_SECONDS = 1.0
+
+# F1-b1-r1: a SEPARATE, wider bound for the RARE case this bound above does
+# not cover -- the very first /api/config call on a gig that has never
+# migrated a default profile yet. That call pays for TWO resume
+# resolutions (the migration's own, to build the new profile's
+# ``resume_ref``, plus ``resume_details()``'s) rather than one, since the
+# migration's commit invalidates any cache entry the first resolution
+# would have warmed. Coordinator decision: accept this as a legitimate,
+# one-time-per-gig cost rather than engineer around it.
+_FIRST_MIGRATION_TIMING_BOUND_SECONDS = 2.0
 
 _ENDPOINTS = (Endpoint("local-test", "ollama_local", base_url="http://127.0.0.1:11434"),)
 _MODEL_TARGETS = (
@@ -172,10 +226,33 @@ def operator_shaped_workpad(tmp_path: Path) -> tuple[Path, Path, str]:
     return _operator_shaped_workpad(tmp_path)
 
 
+def _clear_process_caches() -> None:
+    """Simulate a fresh server process's cold in-memory caches.
+
+    F1-b1-r1: both ``run.py``'s per-journal-head resume cache and
+    ``server.py``'s per-journal-head selected-profile cache are plain
+    module-level dicts -- cleared directly here (never through a public
+    API, since neither module exposes one; this is the honest way to
+    reproduce "a fresh server process's first request" without actually
+    spawning a second process).
+    """
+
+    from gigai import run as run_module
+    from gigai.scout.find_jobs.api import server as server_module
+
+    run_module._resume_details_cache.clear()
+    server_module._selected_profile_cache.clear()
+
+
 def test_get_config_resolves_the_resume_in_well_under_a_second(
     operator_shaped_workpad: tuple[Path, Path, str],
 ) -> None:
-    """The exact calls ``_handle_get_config`` makes must be fast even cold.
+    """The exact calls ``_handle_get_config`` makes must be fast even cold,
+
+    on an ALREADY-migrated gig (a default profile already exists from an
+    earlier call -- the normal path an operator hits on every Scout server
+    start, since the gig migrated once, long ago). Only the in-memory
+    caches are cold here, never the on-disk migration state.
 
     Fails on the pre-fix code (``git show HEAD:src/gigai/run.py`` /
     ``git show HEAD:src/gigai/journal.py`` swapped in): that version takes
@@ -186,6 +263,12 @@ def test_get_config_resolves_the_resume_in_well_under_a_second(
     home, target, _gig_id = operator_shaped_workpad
     backend = ScoutFindJobsBackend(home_root=home, target=target)
 
+    # Migrate once, unmeasured -- this call's own cost belongs to
+    # ``test_first_ever_config_call_on_an_unmigrated_gig`` below, not here.
+    backend.read_config()
+    backend.resume_details()
+    _clear_process_caches()
+
     started = time.monotonic()
     config, _config_bytes = backend.read_config()
     resume_result = backend.resume_details()
@@ -194,6 +277,37 @@ def test_get_config_resolves_the_resume_in_well_under_a_second(
     assert elapsed < _COLD_TIMING_BOUND_SECONDS, (
         f"GET /api/config's resume resolution took {elapsed:.3f}s, "
         f"expected < {_COLD_TIMING_BOUND_SECONDS}s"
+    )
+    assert config is not None
+    assert resume_result is not None
+    assert resume_result.pinned is not None
+
+
+def test_first_ever_config_call_on_an_unmigrated_gig(
+    operator_shaped_workpad: tuple[Path, Path, str],
+) -> None:
+    """F1-b1-r1: the VERY FIRST ``/api/config`` call on a gig that has never
+
+    migrated a default profile yet pays for the one-time migration too --
+    a second resume resolution (the migration's own, to build the new
+    profile's ``resume_ref``) on top of ``resume_details()``'s, since the
+    migration's own commit invalidates any cache entry the first
+    resolution would otherwise have warmed. This is a legitimate,
+    one-time-per-gig cost (coordinator decision, 2026-09-25), bounded
+    separately and more generously than the already-migrated case above.
+    """
+
+    home, target, _gig_id = operator_shaped_workpad
+    backend = ScoutFindJobsBackend(home_root=home, target=target)
+
+    started = time.monotonic()
+    config, _config_bytes = backend.read_config()
+    resume_result = backend.resume_details()
+    elapsed = time.monotonic() - started
+
+    assert elapsed < _FIRST_MIGRATION_TIMING_BOUND_SECONDS, (
+        f"the first-ever /api/config call (including migration) took "
+        f"{elapsed:.3f}s, expected < {_FIRST_MIGRATION_TIMING_BOUND_SECONDS}s"
     )
     assert config is not None
     assert resume_result is not None
@@ -282,4 +396,38 @@ def test_resume_add_invalidates_the_cache_never_serves_a_stale_resume(
     assert after is not None
     assert after.pinned.record_id != before.pinned.record_id, (
         "cache served a stale resume after `gigai scout resume add`"
+    )
+
+
+def test_profile_edit_invalidates_the_selected_profile_cache(
+    operator_shaped_workpad: tuple[Path, Path, str],
+) -> None:
+    """F1-b1-r1's own required test: the selected-profile cache
+
+    (``server.py``'s ``_selected_profile_cache``) must never serve a stale
+    effective config after the selected profile's content changes -- a
+    real journal commit (``write_profile``), the same shape a setup-
+    interview save or a profile switch produces. The very next
+    ``read_config()`` call must see the NEW titles, never the cached ones.
+    """
+
+    from gigai.scout.profile_records import selected_profile, write_profile
+    from gigai.workpad import resolve_workpad as _resolve_workpad
+
+    home, target, _gig_id = operator_shaped_workpad
+    backend = ScoutFindJobsBackend(home_root=home, target=target)
+
+    before, _ = backend.read_config()
+    assert before.roles == ("software engineer",)  # warms the cache
+
+    resolved = _resolve_workpad(
+        home_root=home, requested_target=target, gig_id=None, allow_semantic_state=True
+    )
+    profile = selected_profile(resolved, home_root=home, target=target)
+    assert profile is not None
+    write_profile(resolved, profile_id=profile.profile_id, titles=("staff backend engineer",), queries=("staff backend engineer",))
+
+    after, _ = backend.read_config()
+    assert after.roles == ("staff backend engineer",), (
+        "read_config() served a stale effective config after a profile edit"
     )

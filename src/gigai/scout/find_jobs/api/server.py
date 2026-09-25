@@ -60,6 +60,7 @@ from .common import (
     _match_run_id,
     _receipt_span_ms,
 )
+from .profiles import _match_profile_id
 
 # _TEST_HTTP_ENV/_TEST_MODEL_ENV live in present_api.py now -- they're only
 # read by main(), which moved there too (see the MONKEYPATCH TRAP note near
@@ -343,6 +344,23 @@ def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
             temporary.unlink()
 
 
+_SELECTED_PROFILE_CACHE_LOCK = threading.Lock()
+# F1-b1-r1 (coordinator's lane, uat-bug-008 regression): resolving the
+# selected profile (``profile_records.selected_profile``, migrate-on-first-
+# read + a journal snapshot) replays the whole committed journal exactly
+# like the resume resolution uat-bug-008 already fixed for -- and F1-b's
+# ``read_config()``/``start_run()`` call it on every request, undoing that
+# fix's latency bound. Reuse ``run.py``'s own cache MECHANISM (its cheap
+# ``_cheap_workpad_head`` git-rev-parse helper, never its resume-specific
+# dict) rather than inventing a second one: cache the resolved selected
+# profile per workpad, keyed by the workpad's exact git HEAD. Any new
+# commit (a profile edit, a selection switch, a resume add, a migration)
+# changes HEAD and misses the cache, so a cached entry can never serve a
+# stale selection or profile content.
+_UNSET = object()  # distinguishes "not cached" from a cached "no profile" (None)
+_selected_profile_cache: dict[tuple[str, str], object] = {}
+
+
 class ScoutFindJobsBackend:
     """The production localhost backend for the Scout find-jobs API."""
 
@@ -395,18 +413,105 @@ class ScoutFindJobsBackend:
             raise LookupError(run_id)
         return resolved
 
+    def _resolved_gig(self):
+        """Resolve this target's active gig, once, for a profile-aware read.
+
+        S25 F1-b: the ONLY two callers that need the gig's selected profile
+        (``read_config``, ``start_run``) share this one resolution helper --
+        never re-derived per field, and never imported into ``run.py``/core
+        (``profile_records`` stays a Scout-only import, confined to this
+        server module and ``effective_config.py``).
+        """
+
+        from ....workpad import resolve_workpad
+
+        return resolve_workpad(
+            home_root=self.home_root,
+            requested_target=self._target_root(),
+            gig_id=None,
+            allow_semantic_state=True,
+        )
+
+    def _selected_profile(self):
+        """The active gig's selected profile, or ``None`` (see ``selected_profile``'s
+
+        own docstring for the only cases that legitimately return ``None``:
+        no ``find-jobs.json`` yet, or no committed resume for this gig).
+        Migrates on first read (``ensure_default_profile``); never raises for
+        a not-yet-migrated gig.
+
+        F1-b1-r1: cached per workpad, keyed by the workpad's exact git HEAD
+        (``_selected_profile_cache``) -- a repeat call against an unchanged
+        workpad does no journal replay at all, matching uat-bug-008's own
+        resume-cache bound; any new commit misses the cache. The HEAD read
+        itself reuses ``run._cheap_workpad_head`` (one cheap ``git rev-parse``,
+        never the expensive snapshot walk) -- the SAME mechanism ``run.py``'s
+        resume cache already uses, not a second one.
+
+        Unlike ``run.py``'s own resume cache (a pure read, so its pre-call
+        HEAD is always also its post-call HEAD), this call can ITSELF
+        commit -- the first-ever call migrates a default profile into
+        existence. Keying on the pre-call HEAD would cache the result under
+        a head that's already stale the instant the migration lands,
+        guaranteeing a miss (and a second, needlessly expensive
+        idempotent-migration replay) on the very next call. The cache key is
+        therefore always the POST-call HEAD.
+
+        On an ALREADY-migrated gig (the common case, every request after
+        the first ever), ``ensure_default_profile``'s own existence
+        pre-check short-circuits before resolving any resume at all (see
+        that function's docstring) -- this path never pre-resolves a resume
+        here, so it never pays for a resolution ``resume_details()`` would
+        otherwise duplicate. Only the RARE first-ever migration pays for a
+        second resume lookup (bounded separately -- see
+        ``test_config_latency.py``'s split between an already-migrated and
+        a first-ever-migration cold call).
+        """
+
+        from .... import run
+        from ... import profile_records
+
+        resolved = self._resolved_gig()
+        pre_head = run._cheap_workpad_head(resolved.path)
+        if pre_head is not None:
+            with _SELECTED_PROFILE_CACHE_LOCK:
+                cached = _selected_profile_cache.get((str(resolved.path), pre_head), _UNSET)
+            if cached is not _UNSET:
+                return cached
+
+        profile = profile_records.selected_profile(
+            resolved, home_root=self.home_root, target=self._target_root()
+        )
+        post_head = run._cheap_workpad_head(resolved.path)
+        if post_head is not None:
+            with _SELECTED_PROFILE_CACHE_LOCK:
+                _selected_profile_cache[(str(resolved.path), post_head)] = profile
+        return profile
+
     def read_config(self) -> tuple[FindJobsConfig, bytes]:
+        """The EFFECTIVE config: the shared ``find-jobs.json`` with the
+
+        selected profile's ``titles``/``queries`` overlaid onto ``roles``/
+        ``merged_queries`` (S25 F1-b, coordinator decision: "the config the
+        UI sees IS the effective config" -- see ``effective_config.py``).
+        This is what ``GET /api/config``'s ``config_digest`` and every
+        ``RunRequest.config_digest`` staleness check are computed over.
+        """
+
+        from ....canonical import parse_json_bytes
+        from ..effective_config import overlay_selected_profile
+
         path = self._target_root() / "find-jobs.json"
         if path.is_symlink() or not path.is_file():
             raise ConfigMissingError(path)
         try:
-            from ....canonical import parse_json_bytes
-
-            config = FindJobsConfig.from_json(parse_json_bytes(path.read_bytes()))
+            shared_config = FindJobsConfig.from_json(parse_json_bytes(path.read_bytes()))
         except FindJobsContractError:
             raise
         except (OSError, ValueError) as exc:
             raise FindJobsContractError("invalid_value", "find-jobs.json is not valid JSON") from exc
+        profile = self._selected_profile()
+        config = overlay_selected_profile(shared_config, profile)
         return config, canonical_json_bytes(config.to_json())
 
     def resume_preview(self) -> PinnedResume | None:
@@ -454,20 +559,71 @@ class ScoutFindJobsBackend:
         config_bytes: bytes,
         on_run_allocated: Callable[[str], None],
     ) -> None:
+        """Seal and launch a run against the SELECTED profile (S25 F1-b).
+
+        ``config_bytes`` (the caller's shared-config snapshot, from the
+        route's own ``read_config()``/digest check -- unowned here, F1-c's
+        ``runs.py``) is never trusted for the actual launch: this method
+        re-resolves the gig and its selected profile fresh, at launch time,
+        and rebuilds the EFFECTIVE config from scratch the same way
+        ``read_config()`` does (never the client's bytes) -- a profile
+        switch between "load the form" and "click Run" is then a genuine,
+        detectable staleness: the effective digest ``run.launch_find_jobs_
+        run`` recomputes will differ from ``run_request.config_digest`` (the
+        form's snapshot), and that call's own unchanged digest guard raises
+        ``find_jobs_config_digest_mismatch`` -> 409, exactly like any other
+        stale-form edit.
+        """
+
         from .... import run
+        from ....canonical import canonical_json_bytes
         from ..bindings import register_find_jobs_nodes
+        from ..effective_config import overlay_selected_profile
 
         target = self._target_root()
         # This call binds the parent (for the launch hook) and causes the
         # spawned child to bind itself before executing any Goal.
         register_find_jobs_nodes(home_root=self.home_root, target=target)
+
+        resolved = self._resolved_gig()
+        from ... import profile_records
+        from ....canonical import parse_json_bytes
+
+        profile = profile_records.selected_profile(resolved, home_root=self.home_root, target=target)
+        # read_config()'s return value IS the effective config (F1-b), so it
+        # cannot be reused here -- re-derive the SHARED find-jobs.json
+        # directly (same read read_config() itself does) to avoid
+        # double-overlaying a profile onto an already-overlaid config.
+        path = target / "find-jobs.json"
+        if path.is_symlink() or not path.is_file():
+            raise ConfigMissingError(path)
+        shared_config = FindJobsConfig.from_json(parse_json_bytes(path.read_bytes()))
+        effective_config = overlay_selected_profile(shared_config, profile)
+        effective_config_bytes = canonical_json_bytes(effective_config.to_json())
+
+        profile_ref = (
+            None
+            if profile is None
+            else {
+                "profile_id": profile.profile_id,
+                "revision": profile.revision,
+                "content_digest": profile.content_digest,
+            }
+        )
+        pinned_resume_ref = (
+            None
+            if profile is None
+            else {"record_id": profile.resume_ref.record_id, "revision_id": profile.resume_ref.revision_id}
+        )
         try:
             run_id = run.launch_find_jobs_run(
                 home_root=self.home_root,
                 target=target,
                 run_request=run_request,
-                config_bytes=config_bytes,
+                config_bytes=effective_config_bytes,
                 ui_loopback_verified=True,
+                profile_ref=profile_ref,
+                pinned_resume_ref=pinned_resume_ref,
             )
         except RunError as exc:
             message = str(exc)
@@ -741,33 +897,72 @@ class ScoutFindJobsBackend:
         return prefs.to_json()
 
     def _update_find_jobs_config(self, prefs_fields: dict[str, object]) -> None:
-        """Apply the setup answers onto ``find-jobs.json``, keeping every other field.
+        """Apply the setup answers onto the SELECTED profile + ``find-jobs.json``.
 
-        CHANGE #1: writes ``roles``, ``merged_queries`` (mirrored from
+        S25 F1-b (coordinator decision): ``roles``/``titles_to_avoid`` (->
+        ``titles``/``titles_to_avoid``) and ``merged_queries`` (mirrored from
         ``roles``, matching the starter config's own convention -- see
-        ``scout_cli.STARTER_FIND_JOBS_CONFIG``), ``location`` (from
-        ``city``), ``remote`` (derived from ``work_mode``), ``countries``,
-        and ``visa_sponsorship_required``. Every other ``FindJobsConfig``
-        field (``published_after``, ``sources``, ``default_assess_cap``,
-        ``default_model_target``) is read from the existing file and kept
-        unchanged. If no ``find-jobs.json`` exists yet, one is written from
-        ``FindJobsConfig``'s own defaults for the untouched fields plus the
-        interview answers -- the interview is allowed to run before a target
-        has ever been configured.
+        ``scout_cli.STARTER_FIND_JOBS_CONFIG``) now go to the gig's SELECTED
+        profile via ``profile_records.write_profile`` (a revision bump when
+        they actually changed, per F1-a's bump rule) -- never into the
+        shared ``find-jobs.json``'s ``roles``/``merged_queries`` once a
+        profile exists, so acquire's post-migration precedence test (profile
+        titles win over the shared file) stays true after a setup-interview
+        save too. ``location`` (from ``city``), ``remote`` (derived from
+        ``work_mode``), ``countries``, and ``visa_sponsorship_required``
+        still go to the shared file, unchanged from before F1-b; every other
+        ``FindJobsConfig`` field (``published_after``, ``sources``,
+        ``default_assess_cap``, ``default_model_target``) is read from the
+        existing file and kept unchanged.
+
+        No profile exists yet (no committed resume for this gig, so
+        ``ensure_default_profile`` no-ops) -- the interview is allowed to run
+        before a target has ever been configured, and before any resume is
+        added: titles/queries fall back to the shared file exactly as
+        pre-F1-b, so a later resume add's migration still picks up what the
+        operator entered here as the default profile's initial titles.
         """
 
         path = self._target_root() / "find-jobs.json"
         roles: tuple[str, ...] = tuple(prefs_fields["roles"])  # type: ignore[arg-type]
+        titles_to_avoid: tuple[str, ...] = tuple(prefs_fields.get("titles_to_avoid", ()))  # type: ignore[arg-type]
         work_mode = prefs_fields["work_mode"]
         remote = work_mode in ("remote", "any")
         city: str | None = prefs_fields["city"]  # type: ignore[assignment]
         countries: tuple[str, ...] = tuple(prefs_fields["countries"])  # type: ignore[arg-type]
         visa_sponsorship_required = bool(prefs_fields["visa_sponsorship_required"])
 
+        from ... import profile_records
+
+        # F1-b1-r1 (coordinator's lane): the setup interview is allowed to
+        # run before a target has ever been configured -- no `gigai setup`
+        # yet, no workpad, nothing to resolve a gig against at all. That
+        # is a WorkpadUnavailableError (or any other resolution failure),
+        # never a crash: fall back to `profile = None` (today's, pre-F1-b
+        # behaviour -- write straight to the shared file below) exactly as
+        # if no profile could ever exist yet.
+        profile = None
+        try:
+            resolved = self._resolved_gig()
+        except Exception:
+            resolved = None
+        if resolved is not None:
+            profile = profile_records.selected_profile(
+                resolved, home_root=self.home_root, target=self._target_root()
+            )
+        if profile is not None:
+            profile_records.write_profile(
+                resolved,
+                profile_id=profile.profile_id,
+                titles=roles,
+                titles_to_avoid=titles_to_avoid,
+                queries=roles,
+            )
+
         if path.is_symlink() or not path.is_file():
             config = FindJobsConfig(
-                roles=roles,
-                merged_queries=roles,
+                roles=() if profile is not None else roles,
+                merged_queries=() if profile is not None else roles,
                 location=city,
                 remote=remote,
                 published_after=None,
@@ -780,8 +975,8 @@ class ScoutFindJobsBackend:
         else:
             existing = FindJobsConfig.from_json(parse_json_bytes(path.read_bytes()))
             config = FindJobsConfig(
-                roles=roles,
-                merged_queries=roles,
+                roles=existing.roles if profile is not None else roles,
+                merged_queries=existing.merged_queries if profile is not None else roles,
                 location=city,
                 remote=remote,
                 published_after=existing.published_after,
@@ -921,6 +1116,7 @@ def _make_handler(
 ) -> type[BaseHTTPRequestHandler]:
     from .config import ConfigRoutesMixin
     from .discover import DiscoverRoutesMixin
+    from .profiles import ProfilesRoutesMixin
     from .runs import RunRoutesMixin
     from .setup import SetupRoutesMixin
     from .static import StaticRoutesMixin
@@ -930,6 +1126,7 @@ def _make_handler(
         SetupRoutesMixin,
         DiscoverRoutesMixin,
         RunRoutesMixin,
+        ProfilesRoutesMixin,
         StaticRoutesMixin,
         BaseHTTPRequestHandler,
     ):
@@ -1100,6 +1297,9 @@ def _make_handler(
                     if path == "/api/discover/latest":
                         self._handle_get_discover_latest()
                         return
+                    if path == "/api/profiles":
+                        self._handle_get_profiles()
+                        return
                     run_id = _match_run_id(path, suffix="/results")
                     if run_id is not None:
                         self._handle_get_run_results(run_id)
@@ -1132,6 +1332,16 @@ def _make_handler(
                 if path == "/api/discover":
                     self._handle_post_discover()
                     return
+                if path == "/api/profiles":
+                    self._handle_post_profiles()
+                    return
+                if path == "/api/profiles/selection":
+                    self._handle_post_profiles_selection()
+                    return
+                profile_id = _match_profile_id(path, suffix="/archive")
+                if profile_id is not None:
+                    self._handle_post_profile_archive(profile_id)
+                    return
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
             except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET
                 _logger.exception("unhandled exception in POST %s", path)
@@ -1146,6 +1356,10 @@ def _make_handler(
             try:
                 if path == "/api/setup":
                     self._handle_put_setup()
+                    return
+                profile_id = _match_profile_id(path, suffix="")
+                if profile_id is not None:
+                    self._handle_put_profile(profile_id)
                     return
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
             except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET

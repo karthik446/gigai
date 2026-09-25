@@ -451,6 +451,7 @@ def ensure_default_profile(
     home_root: Path,
     target: Path,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+    resolved_resume: tuple[str, PinnedResume] | None = None,
 ) -> MigrationResult | None:
     """Add-only, idempotent, first-read migration: default profile + its selection.
 
@@ -475,7 +476,28 @@ def ensure_default_profile(
     no second profile). Defensive: if a selection already exists (not
     possible in 0.1.9's F1 window, but checked anyway), it is never
     overwritten.
+
+    F1-b1-r1: ``resolved_resume`` is an OPTIONAL ``(gig_id, PinnedResume)``
+    pre-resolved pin -- a caller that has ALREADY resolved "the newest
+    resume" for this exact gig (e.g. ``server.py``'s ``read_config``, which
+    needs it again right after for ``resume_details()`` and would otherwise
+    warm ``run.py``'s own resume cache only to have this function replay
+    the identical, expensive lookup a second time) can hand it in here
+    instead of making this function resolve it again via
+    ``_resolve_newest_resume_for_gig``. The given ``gig_id`` MUST equal
+    ``resolved.gig_id``, checked explicitly -- never trusted silently -- so
+    a caller cannot (even by a coding mistake) pin one gig's profile to
+    another gig's resume; a mismatch raises ``ProfileRecordError``. Every
+    other caller (the common case) passes nothing and this function
+    resolves the pin itself, pinned to ``resolved.gig_id`` throughout,
+    exactly as before.
     """
+
+    if resolved_resume is not None and resolved_resume[0] != resolved.gig_id:
+        _fail(
+            "scout_profile_resume_gig_mismatch",
+            "resolved_resume's gig_id does not match the gig being migrated",
+        )
 
     config_path = Path(target) / "find-jobs.json"
     if config_path.is_symlink() or not config_path.is_file():
@@ -485,10 +507,69 @@ def ensure_default_profile(
     except Exception:
         return None
 
-    try:
-        pinned = _resolve_newest_resume_for_gig(resolved, home_root=home_root, target=target)
-    except NoResumeAvailable:
+    # api-e2e finding (coordinator, 2026-09-25): the setup flow writes
+    # find-jobs.json TWICE -- once as the STARTER placeholder config
+    # (`scout_cli.write_starter_find_jobs_config`, before the operator has
+    # entered anything), then again with the real interview answers
+    # (`ScoutFindJobsBackend._update_find_jobs_config`). A read that lands
+    # between those two writes (e.g. the setup interview's own GET /api/
+    # setup, which is profile-aware once F1-b's read paths land) would
+    # otherwise migrate the PLACEHOLDER roles into a real, committed
+    # default-profile write -- and since a profile's titles win over the
+    # shared file once one exists (F1-b's own precedence rule), the real
+    # roles written moments later would be silently ignored forever. Never
+    # migrate while the file still IS the starter placeholder, verbatim
+    # (compare the two revision-bumping fields the migration would copy,
+    # not the whole file, so an operator who deliberately kept every other
+    # starter default but typed real roles still migrates normally).
+    from .scout_cli import STARTER_FIND_JOBS_CONFIG
+
+    if (
+        config.roles == STARTER_FIND_JOBS_CONFIG.roles
+        and config.merged_queries == STARTER_FIND_JOBS_CONFIG.merged_queries
+    ):
         return None
+
+    # F1-b1-r1 (coordinator's lane, uat-bug-008 regression): the idempotent
+    # no-op path -- by far the common case, since a gig migrates at most
+    # once -- used to pay for `_resolve_newest_resume_for_gig`'s expensive
+    # "newest committed resume" lookup (a `private_records.list_imports` +
+    # `read_record` scan, itself another full journal-writer acquisition)
+    # EVERY call, even when no resume was ever going to be needed because a
+    # default profile already exists. `read_config()` calls this on every
+    # request, so that unconditional lookup alone doubled /api/config's
+    # per-request cost (the same expensive query `resume_details()` already
+    # makes, right next to this call).
+    #
+    # Fixed: check for an existing default profile in a SEPARATE, cheap
+    # writer acquisition first, and only resolve the resume (and re-open
+    # the writer for the actual create) when we're truly about to create
+    # one. The resume lookup CANNOT be moved inside the create operation's
+    # own writer callback below: `_resolve_newest_resume_for_gig` calls
+    # `private_records.list_imports`, which opens its OWN
+    # `run_with_journal_writer` -- nesting that inside an already-held
+    # writer lock deadlocks (the per-workpad lock is not reentrant).
+    def _check_existing(writer):
+        snapshot = writer.snapshot((_PROFILES_ROOT, _SELECTION_ROOT))
+        current = _current_profiles(snapshot.artifacts)
+        return _existing_default_profile(current)
+
+    existing = run_with_journal_writer(
+        workpad=resolved.path,
+        project_id=resolved.project_id,
+        gig_id=resolved.gig_id,
+        operation=_check_existing,
+    )
+    if existing is not None:
+        return MigrationResult(profile_id=existing.profile_id, revision=existing.revision, created=False)
+
+    if resolved_resume is not None:
+        pinned = resolved_resume[1]
+    else:
+        try:
+            pinned = _resolve_newest_resume_for_gig(resolved, home_root=home_root, target=target)
+        except NoResumeAvailable:
+            return None
 
     def operation(writer):
         snapshot = writer.snapshot((_PROFILES_ROOT, _SELECTION_ROOT))
@@ -565,6 +646,88 @@ def _artifact_ref(path: str, data: bytes) -> dict[str, object]:
         "media_type": "application/json",
         "size_bytes": len(data),
     }
+
+
+def create_profile(
+    resolved: ResolvedWorkpad,
+    *,
+    label: str,
+    titles: tuple[str, ...],
+    titles_to_avoid: tuple[str, ...],
+    queries: tuple[str, ...],
+    resume_ref: PinnedResume,
+    uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
+) -> ProfileRecord:
+    """Mint a brand-new, operator-named profile (F1-c's "create").
+
+    Distinct from ``ensure_default_profile`` (migration-only: fixed
+    ``origin="migrated_default"``, ``label="default"``, titles/queries
+    derived from ``find-jobs.json``, and bundles the gig's initial
+    selection write in the same commit) and from ``write_profile`` (edits
+    an EXISTING ``profile_id``, never mints one). This is the third write
+    shape: seq 1, revision 1, ``origin="operator_created"``, exactly the
+    caller-given content -- same single write path (schema-validated
+    ``ProfileRecord``, ``content_digest`` computed the one place
+    ``_content_digest`` does it), the same journal writer lock, and the
+    same ``PROFILE_TRANSITION`` name every other profile write uses.
+
+    Never touches the gig's selection: creating a profile does not select
+    it (F1-c's caller switches separately via ``switch_selected_profile``
+    if that's what the operator asked for). Works the same whether or not
+    a migrated default profile already exists in this gig -- there is no
+    dependency on ``ensure_default_profile`` having run first; a gig with
+    no committed resume/``find-jobs.json`` yet (so no default profile) can
+    still have its first profile created this way, since ``resume_ref`` is
+    caller-supplied here, never re-resolved from "newest".
+    """
+
+    def operation(writer):
+        snapshot = writer.snapshot((_PROFILES_ROOT, _SELECTION_ROOT))
+        current = _current_profiles(snapshot.artifacts)
+        profile_id = f"profile_{uuid_factory()}"
+        while profile_id in current:  # astronomically unlikely; defensive only
+            profile_id = f"profile_{uuid_factory()}"
+
+        digest = _content_digest(
+            titles=titles, titles_to_avoid=titles_to_avoid, queries=queries, resume_ref=resume_ref
+        )
+        now = _now()
+        record = ProfileRecord(
+            schema_version=SCHEMA_VERSION,
+            profile_id=profile_id,
+            seq=1,
+            revision=1,
+            label=label,
+            state="active",
+            origin="operator_created",
+            resume_ref=resume_ref,
+            titles=titles,
+            titles_to_avoid=titles_to_avoid,
+            queries=queries,
+            content_digest=digest,
+            created_at=now,
+            updated_at=now,
+            parent_seq=None,
+        )
+        record_bytes = _validated(record)
+        path = _write_path(profile_id, 1)
+        writer.record(
+            JournalTransition(
+                f"handoff_{uuid_factory()}",
+                PROFILE_TRANSITION,
+                "Created a new scout profile.",
+                (JournalArtifact(path, record_bytes),),
+                {"artifact_refs": [_artifact_ref(path, record_bytes)]},
+            )
+        )
+        return record
+
+    return run_with_journal_writer(
+        workpad=resolved.path,
+        project_id=resolved.project_id,
+        gig_id=resolved.gig_id,
+        operation=operation,
+    )
 
 
 def selected_profile(
@@ -883,6 +1046,7 @@ __all__ = [
     "ProfileRecord",
     "ProfileRecordError",
     "ProfileSelection",
+    "create_profile",
     "ensure_default_profile",
     "list_profiles",
     "retrieve_profile_revision",
