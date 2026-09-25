@@ -21,20 +21,34 @@ Detection, per ACCEPTED line (the product already rejected the rest):
    eval-only prompt ``tests/evals/fabrication_judge.md``: every accepted
    rewritten line is a numbered CLAIM with its cited R/A source texts
    verbatim, and the judge answers ``{"verdicts": [{"line", "supported",
-   "unsupported_span"}, ...]}``.  The harness demands exactly one verdict per
-   claim (a missing, repeated, extra or malformed verdict is a judge failure
-   for that resume; ``invoke_json_once`` feeds the error back and retries
-   once, then the resume counts under ``judge_failures``).
-``fabricated = guard hit OR not supported``.  Copy lines never reach the
-judge: code checks them verbatim against the resume line they name.  The
-report lists EVERY accepted line with its cited source text (and the span
-the judge flagged), so the operator can spot-check -- self-judging is
-acceptable for 0.1.9 only because this human check exists (orchestrator
-review, §8 answer 5); ``metrics.samples`` renders two tailored resumes (one
-clean fit, one other) as markdown with every line's sources for that read.
+   "unsupported_span", "severity"}, ...]}``.  The harness demands exactly one
+   verdict per claim (a missing, repeated, extra or malformed verdict is a
+   judge failure for that resume; ``invoke_json_once`` feeds the error back
+   and retries once, then the resume counts under ``judge_failures``).
 
-Bars (``metrics.bars``): ``fabricated_claims == 0`` live (an unjudged
-rewritten line also fails the bar when the judge is enabled);
+Severity (tailor-r3).  An unsupported verdict names its severity, by the
+definition the judge prompt carries verbatim: HARD = a span that adds a fact
+absent from the cited sources, or attributes to the candidate an action or
+outcome the source attributes to something else or does not state;
+PRECISION = modality/qualifier drift on a fact the source does state
+(``auditable`` -> ``audited``).  A missing or invalid severity on an
+unsupported verdict is a judge failure (retried once through the shared
+loop, then reported).  Per accepted line, ``severity`` is ``"hard"`` when a
+guard hit it, a copy line is not verbatim, or the judge said hard;
+``"precision"`` when the judge said precision; ``None`` when clean.
+``fabricated = guard hit OR not supported`` (hard + precision) is kept for
+the run-to-run tables.  Copy lines never reach the judge: code checks them
+verbatim against the resume line they name.  The report lists EVERY flagged
+line (hard and precision) with its cited source text and the span the judge
+flagged, so the operator can read each one -- self-judging is acceptable for
+0.1.9 only because this human check exists (orchestrator review, §8 answer
+5); ``metrics.samples`` renders two tailored resumes (one clean fit, one
+other) as markdown with every line's sources for that read.
+
+Bars (``metrics.bars``): ``hard_fabrications == 0`` (``HARD_FABRICATIONS_BAR``;
+an unjudged rewritten line also fails it when the judge is enabled, and no
+valid resume never passes it vacuously); ``precision_rate`` = judge-precision
+lines / all accepted lines ``< 0.02`` (``PRECISION_RATE_BAR``);
 invalid-after-retry < 5% (``INVALID_AFTER_RETRY_BAR``, shared with the assess
 eval).
 
@@ -106,8 +120,10 @@ EVAL_DIR = Path(__file__).resolve().parent
 ANSWERS_PATH = FIXTURES_DIR / "answers.json"
 JUDGE_PROMPT_PATH = EVAL_DIR / "fabrication_judge.md"
 DEFAULT_MAX_CALLS = 25  # tailor + judge attempts, retries included (operator-approved cap for the live run)
-REPORT_SCHEMA = "gigai-tailor-eval-report:2"
-FABRICATED_CLAIMS_BAR = 0
+REPORT_SCHEMA = "gigai-tailor-eval-report:3"
+HARD_FABRICATIONS_BAR = 0  # guard hits + copy lines not verbatim + judge "hard"
+PRECISION_RATE_BAR = 0.02  # judge "precision" lines / all accepted lines, strictly below
+SEVERITIES = ("hard", "precision")
 GUARDS = ("numeric", "posting_term", "provenance", "copy_line_shape")
 ROLE_TAILOR = "tailor"
 ROLE_JUDGE = "judge"
@@ -352,7 +368,13 @@ def render_judge_prompt(claims: Sequence[JudgeClaim], template: str | None = Non
 
 
 def parse_judge_answer(decoded: Mapping[str, Any], expected: int) -> dict[int, dict[str, Any]]:
-    """Exactly one verdict per claim 1..``expected``; anything else is a judge failure (ValueError -> retry once)."""
+    """Exactly one verdict per claim 1..``expected``; anything else is a judge failure (ValueError -> retry once).
+
+    Each verdict is ``{"supported", "unsupported_span", "severity"}``: an
+    unsupported verdict must name a severity in ``SEVERITIES`` (missing or
+    anything else is a judge failure); a supported verdict's span and
+    severity are normalised to ``None`` whatever the judge wrote.
+    """
 
     verdicts = decoded.get("verdicts")
     if type(verdicts) is not list:
@@ -374,7 +396,10 @@ def parse_judge_answer(decoded: Mapping[str, Any], expected: int) -> dict[int, d
         span = item.get("unsupported_span")
         if span is not None and not isinstance(span, str):
             raise ValueError(f"the verdict for claim {line} has an unsupported_span that is not a string or null")
-        seen[line] = {"supported": supported, "unsupported_span": span if not supported else None}
+        severity = item.get("severity")
+        if not supported and severity not in SEVERITIES:
+            raise ValueError(f"the verdict for claim {line} is unsupported but its severity is {severity!r}; it must be \"hard\" or \"precision\"")
+        seen[line] = {"supported": supported, "unsupported_span": span if not supported else None, "severity": severity if not supported else None}
     missing = [number for number in range(1, expected + 1) if number not in seen]
     if missing:
         raise ValueError(f"{len(seen)} verdicts for {expected} claims; missing claim(s) {missing}")
@@ -422,6 +447,24 @@ def detect_line(text: str, sources: Sequence[str], terms: Sequence[str] | frozen
     numbers = [mention.span for mention in unsupported_numbers(text, sources)]
     borrowed = list(unsupported_posting_terms(text, sources, terms))
     return {"numeric_hits": numbers, "term_hits": borrowed, "guard_hit": bool(numbers or borrowed)}
+
+
+def line_severity(entry: Mapping[str, Any]) -> str | None:
+    """``"hard"`` when a guard hit the line, a copy line is not verbatim or the judge said hard; ``"precision"`` when the judge said precision; else ``None``.
+
+    A guard hit outranks the judge: the deterministic guards name a fact
+    the sources never state, which is the HARD definition by construction.
+    """
+
+    if entry["kind"] == "copy":
+        return None if entry.get("verbatim", True) else "hard"
+    if entry.get("guard_hit"):
+        return "hard"
+    judge = entry.get("judge") or {}
+    if judge.get("supported") is False:
+        severity = judge.get("severity")
+        return severity if severity in SEVERITIES else "hard"  # a stored verdict without a severity (pre-r3) reads as hard, never as clean
+    return None
 
 
 def classify_validation_error(message: str | None) -> str | None:
@@ -603,12 +646,14 @@ def tailor_row(
             row["copy_lines"] += 1
             entry["verbatim"] = line.refs[0].text == line.text  # checked in code, never by the judge
             entry["fabricated"] = not entry["verbatim"]
+            entry["severity"] = None if entry["verbatim"] else "hard"
         else:
             row["rewritten_lines"] += 1
             entry.update(detect_line(line.text, [text for _, text in cited], terms))
             entry["claim"] = len(claims) + 1
             entry["judge"] = None
             entry["fabricated"] = entry["guard_hit"]
+            entry["severity"] = "hard" if entry["guard_hit"] else None
             claims.append(JudgeClaim(entry["claim"], line.text, cited))
         row["lines"].append(entry)
     rewritten = [entry for entry in row["lines"] if entry["kind"] == "rewritten"]
@@ -632,6 +677,7 @@ def tailor_row(
                 for entry in rewritten:
                     entry["judge"] = verdict["verdicts"][entry["claim"]]
                     entry["fabricated"] = entry["guard_hit"] or entry["judge"]["supported"] is False
+                    entry["severity"] = line_severity(entry)
             else:
                 row["unjudged_lines"] = len(rewritten)
     elif judge:
@@ -671,7 +717,7 @@ def render_sample_markdown(row: Mapping[str, Any]) -> str:
             elif judge["supported"]:
                 verdict_text = "supported"
             else:
-                verdict_text = f"UNSUPPORTED span: {judge['unsupported_span']!r}"
+                verdict_text = f"UNSUPPORTED ({judge.get('severity') or 'no severity'}) span: {judge['unsupported_span']!r}"
             hits = ""
             if entry.get("numeric_hits") or entry.get("term_hits"):
                 hits = f"; guard hits numeric={entry.get('numeric_hits')} terms={entry.get('term_hits')}"
@@ -752,6 +798,12 @@ def summarize(
     term_hits = sum(1 for row in valid for entry in row["lines"] if entry.get("term_hits"))
     non_verbatim = sum(1 for row in valid for entry in row["lines"] if entry["kind"] == "copy" and not entry["verbatim"])
     judge_unsupported = sum(1 for row in valid for entry in row["lines"] if (entry.get("judge") or {}).get("supported") is False)
+    judge_hard = sum(1 for row in valid for entry in row["lines"] if (entry.get("judge") or {}).get("supported") is False and (entry["judge"].get("severity") or "hard") == "hard")
+    judge_precision = sum(1 for row in valid for entry in row["lines"] if (entry.get("judge") or {}).get("severity") == "precision")
+    hard = [entry for entry in fabricated if line_severity(entry) == "hard"]
+    precision = [entry for entry in fabricated if line_severity(entry) == "precision"]
+    accepted_lines = rewritten + copied
+    precision_rate = _rate(len(precision), accepted_lines)
     judge_calls = sum(int(row["judge_calls"]) for row in valid)
     judge_attempts = sum(int(row["judge_attempts"]) for row in valid)
     judge_failures = sum(1 for row in valid if row["judge_ok"] is False)
@@ -773,7 +825,8 @@ def summarize(
                 guard_rejections[guard]["invalid_after_retry"] += 1  # the last attempt, and the row is invalid
     tailor_calls = [call for call in calls if call.role == ROLE_TAILOR]
     judge_call_log = [call for call in calls if call.role == ROLE_JUDGE]
-    fabricated_bar_met = len(valid) > 0 and len(fabricated) == FABRICATED_CLAIMS_BAR and (not judge or unjudged == 0)
+    hard_bar_met = len(valid) > 0 and len(hard) == HARD_FABRICATIONS_BAR and (not judge or unjudged == 0)
+    precision_bar_met = precision_rate is not None and precision_rate < PRECISION_RATE_BAR and (not judge or unjudged == 0)
     return {
         "calls": {
             "max_calls": max_calls,
@@ -788,7 +841,10 @@ def summarize(
         "lines": {"total": lines, "copy": copied, "rewritten": rewritten, "answer_refs": answer_refs, "expanded_refs": expanded_refs},
         "fabrication": {
             "fabricated_claims": len(fabricated),
-            "fabrication_rate": _rate(len(fabricated), rewritten + copied),
+            "fabrication_rate": _rate(len(fabricated), accepted_lines),
+            "hard_fabrications": len(hard),
+            "precision_lines": len(precision),
+            "precision_rate": precision_rate,
             "numeric_guard_hits": numeric_hits,
             "posting_term_guard_hits": term_hits,
             "copy_lines_not_verbatim": non_verbatim,
@@ -797,10 +853,12 @@ def summarize(
             "judge_attempts": judge_attempts,
             "judge_retries": judge_retries,
             "judge_unsupported": judge_unsupported,
+            "judge_hard": judge_hard,
+            "judge_precision": judge_precision,
             "judge_failures": judge_failures,
             "judge_stopped_at_cap": judge_stopped,
             "unjudged_rewritten_lines": unjudged,
-            "lines": fabricated,
+            "lines": [{**entry, "severity": line_severity(entry)} for entry in fabricated],  # EVERY flagged line, hard and precision, with its sources
         },
         "guard_rejections": {
             **guard_rejections,
@@ -846,8 +904,10 @@ def summarize(
             "model_cost_usd": "unavailable",
         },
         "bars": {
-            "fabricated_claims_bar": FABRICATED_CLAIMS_BAR,
-            "fabricated_claims_bar_met": fabricated_bar_met,
+            "hard_fabrications_bar": HARD_FABRICATIONS_BAR,
+            "hard_fabrications_bar_met": hard_bar_met,
+            "precision_rate_bar": PRECISION_RATE_BAR,
+            "precision_rate_bar_met": precision_bar_met,
             "invalid_after_retry_bar_met": (invalid_rate is not None and invalid_rate < INVALID_AFTER_RETRY_BAR),
         },
         "samples": pick_samples(rows),
@@ -901,14 +961,17 @@ def _print_summary(metrics: Mapping[str, Any], report_path: Path, *, out=sys.std
         file=out,
     )
     print(f"lines: {lines['total']} ({lines['copy']} copied, {lines['rewritten']} rewritten, {lines['answer_refs']} answer refs, {lines.get('expanded_refs', 0)} expanded resume refs)", file=out)
+    bars = metrics["bars"]
     print(
-        f"fabricated claims: {fab['fabricated_claims']} (rate {fab['fabrication_rate']}; bar 0 met: {metrics['bars']['fabricated_claims_bar_met']}) -- numeric {fab['numeric_guard_hits']}, posting-term {fab['posting_term_guard_hits']}, copy-not-verbatim {fab['copy_lines_not_verbatim']}, judge-unsupported {fab['judge_unsupported']}; judge failures {fab['judge_failures']} (retries {fab['judge_retries']}), unjudged rewritten lines {fab['unjudged_rewritten_lines']}",
+        f"hard fabrications: {fab['hard_fabrications']} (bar {bars['hard_fabrications_bar']} met: {bars['hard_fabrications_bar_met']}) -- numeric {fab['numeric_guard_hits']}, posting-term {fab['posting_term_guard_hits']}, copy-not-verbatim {fab['copy_lines_not_verbatim']}, judge-hard {fab['judge_hard']}; "
+        f"precision lines: {fab['precision_lines']} (rate {fab['precision_rate']}; bar < {bars['precision_rate_bar']} met: {bars['precision_rate_bar_met']}); "
+        f"flagged lines in all {fab['fabricated_claims']} (rate {fab['fabrication_rate']}); judge-unsupported {fab['judge_unsupported']}, judge failures {fab['judge_failures']} (retries {fab['judge_retries']}), unjudged rewritten lines {fab['unjudged_rewritten_lines']}",
         file=out,
     )
     for entry in fab["lines"]:
-        cited = "; ".join(f"{source['label']}: {source['text']}" for source in entry["sources"])
+        cited = "; ".join(f"{_source_label(source)}: {source['text']}" for source in entry["sources"])
         span = (entry.get("judge") or {}).get("unsupported_span")
-        print(f"  FAB {entry['resume_id']} x {entry['posting_id']} {entry['where']}: {entry['text']!r} | span: {span!r} | numeric {entry.get('numeric_hits')} terms {entry.get('term_hits')} | sources: {cited}", file=out)
+        print(f"  FAB [{entry['severity']}] {entry['resume_id']} x {entry['posting_id']} {entry['where']}: {entry['text']!r} | span: {span!r} | numeric {entry.get('numeric_hits')} terms {entry.get('term_hits')} | sources: {cited}", file=out)
     print(
         "guard rejections (retried / invalid after retry): "
         + ", ".join(f"{guard} {guards[guard]['retried']}/{guards[guard]['invalid_after_retry']}" for guard in GUARDS)

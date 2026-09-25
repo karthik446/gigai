@@ -395,7 +395,8 @@ def _test_model_judge_reply(prompt: str) -> dict[str, object]:
     """The fixture's batched judge answer: every ``CLAIM <n>:`` block in ``prompt`` supported."""
 
     numbers = [int(match.group(1)) for match in _TEST_MODEL_JUDGE_CLAIM.finditer(prompt)]
-    return {"verdicts": [{"line": number, "supported": True, "unsupported_span": None} for number in numbers]}
+    # tailor-r3: a supported verdict carries severity null (hard / precision only when unsupported).
+    return {"verdicts": [{"line": number, "supported": True, "unsupported_span": None, "severity": None} for number in numbers]}
 
 
 def _test_model_handler(request: httpx.Request) -> httpx.Response:
