@@ -401,6 +401,71 @@ def test_run_restarts_a_live_server_recorded_with_an_older_gigai_version(stop_af
     assert _process_is_alive(new_pid)
 
 
+def test_run_restarts_a_live_server_with_same_version_but_a_different_build(stop_after) -> None:
+    """uat-bug-006-r2: same ``gigai_version`` + same ``package_path`` (every
+    branch reinstall lands on the same ``0.1.9.dev0`` dev version at the same
+    uv tool path) but a different recorded ``build_id`` -- must be treated
+    exactly like the old-version case: stopped and replaced, never reused,
+    or a same-version reinstall silently keeps serving the pre-reinstall
+    code (the operator's actual symptom).
+    """
+
+    home, target = stop_after
+    first_port = _free_port()
+    second_port = _free_port()
+
+    first = _run_cli(home, target, "run", "--port", str(first_port), "--no-browser")
+    pid = int(first["pid"])  # type: ignore[arg-type]
+    assert _process_is_alive(pid)
+    assert first["build_id"]
+
+    # Rewrite the state file as if a rebuild had happened in place: same
+    # version, same package path, but a different build identity (a fresh
+    # `uv tool install` from a new commit on the same branch/version).
+    from gigai.workpad import resolve_bound_project
+
+    bound = resolve_bound_project(home_root=home, requested_target=target)
+    state_path = run_supervisor._state_path(home, bound.project_id)
+    raw = json.loads(state_path.read_text(encoding="utf-8"))
+    assert raw["gigai_version"] == run_supervisor._installed_gigai_version()
+    assert raw["package_path"] == run_supervisor._installed_package_path()
+    raw["build_id"] = "a-different-build-than-what-is-installed-now"
+    state_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    second = _run_cli(home, target, "run", "--port", str(second_port), "--no-browser")
+    assert second["reused"] is False, (
+        "same version + same package path but a different build identity must "
+        "be restarted, not reused -- this is uat-bug-006-r2's exact repro"
+    )
+    assert second["restarted_from_version"] is not None
+    new_pid = int(second["pid"])  # type: ignore[arg-type]
+    assert new_pid != pid
+    assert _wait_until_gone(pid), "the stale-build server must have been stopped"
+    assert _process_is_alive(new_pid)
+
+    status_payload = _run_cli(home, target, "status")
+    assert status_payload["state"] == "running"
+    assert status_payload["pid"] == new_pid
+
+
+def test_run_reuses_a_live_server_with_the_same_build_id(stop_after) -> None:
+    """The identity check must not over-trigger: an unchanged install (same
+    version, package path, and build identity) is reused, same as today."""
+
+    home, target = stop_after
+    port = _free_port()
+
+    first = _run_cli(home, target, "run", "--port", str(port), "--no-browser")
+    assert first["reused"] is False
+    pid = int(first["pid"])  # type: ignore[arg-type]
+    assert first["build_id"] == run_supervisor._installed_build_id()
+
+    second = _run_cli(home, target, "run", "--port", str(port), "--no-browser")
+    assert second["reused"] is True
+    assert second["pid"] == pid
+    assert _process_is_alive(pid)
+
+
 def test_run_reuses_a_live_server_with_the_same_version_and_package_path(stop_after) -> None:
     home, target = stop_after
     port = _free_port()

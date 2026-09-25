@@ -125,3 +125,74 @@ def test_a_state_file_with_an_old_version_is_stopped_and_replaced(
 
     assert not _process_is_alive(old_pid)
     assert_clean_and_healthy(workpad, home)
+
+
+def test_a_state_file_with_the_same_version_but_a_different_build_is_stopped_and_replaced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """uat-bug-006-r2: same ``gigai_version``/``package_path`` (a same-version
+    reinstall -- every dev branch build lands on ``0.1.9.dev0`` at the same uv
+    tool path) but a different recorded ``build_id`` must be stopped and
+    replaced too, at the HTTP level, not just the supervisor-level contract
+    ``test_scout_run_supervisor.py`` already proves. This is the operator's
+    actual r2 symptom: a reinstall from the same branch left the old server
+    answering, so the new UI talked to old routes.
+    """
+
+    home, target = setup_and_init(tmp_path)
+    add_resume(home, target, tmp_path)
+
+    first_server = start_server(home, target, monkeypatch=monkeypatch)
+    old_pid = first_server.pid
+    try:
+        health = first_server.client.get("/api/health")
+        assert health.status_code == 200, health.text
+        first_server.client.close()
+
+        # Rewrite the state file as if a rebuild had happened in place: same
+        # version, same package path, but a different build identity (a
+        # fresh `uv tool install` from a new commit on the same branch).
+        bound = resolve_bound_project(home_root=home, requested_target=target)
+        state_path = run_supervisor._state_path(home, bound.project_id)
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
+        assert raw["gigai_version"] == run_supervisor._installed_gigai_version()
+        assert raw["package_path"] == run_supervisor._installed_package_path()
+        raw["build_id"] = "a-different-build-than-what-is-installed-now"
+        state_path.write_text(json.dumps(raw), encoding="utf-8")
+
+        second_port = free_port()
+        result = run_supervisor.start(
+            home_root=home,
+            requested_target=target,
+            port=second_port,
+            foreground=False,
+            open_browser=False,
+            allow_test_seams=True,
+        )
+        assert result.reused is False, (
+            "same version + same package path but a different build identity "
+            "must be restarted, not reused -- uat-bug-006-r2's exact repro"
+        )
+        assert result.restarted_from_version is not None
+        new_pid = result.state.pid
+        assert new_pid != old_pid
+        assert _wait_until_gone(old_pid), "the stale-build server must have been stopped"
+        assert _process_is_alive(new_pid)
+
+        new_client = httpx.Client(base_url=result.state.url, timeout=20.0)
+        try:
+            health_response = new_client.get("/api/health")
+            assert health_response.status_code == 200, health_response.text
+
+            config_response = new_client.get("/api/config")
+            assert config_response.status_code == 200, config_response.text
+            assert config_response.json()["resume_preview"] is not None
+
+            workpad = resolve_workpad_path(home, target)
+        finally:
+            new_client.close()
+    finally:
+        run_supervisor.stop(home_root=home, requested_target=target)
+
+    assert not _process_is_alive(old_pid)
+    assert_clean_and_healthy(workpad, home)

@@ -6,12 +6,32 @@
 const STATUS_MESSAGES = {
   400: "The run request was malformed. Reload and try again.",
   403: "This action was refused: consent was missing, stale, or the target isn't allowed from this UI.",
-  404: "That run could not be found.",
   409: "The configuration changed since it was loaded. Reload the config and try again.",
   422: "The server rejected this request as invalid. Reload and try again.",
   503: "This feature is not available yet.",
   504: "The server timed out handling this request. It may still be running; try checking status again shortly.",
 };
+
+// uat-bug-006-r2: a 404 is only "that run could not be found" for a
+// run-scoped route (/api/runs/{id}[/...]) -- every 404 IS "not_found"
+// server-side (present_api.py's server.py uses that one code for both a
+// route that doesn't exist at all, "no such route", and a run id that
+// doesn't exist, "run not found"), so the code alone can't tell them apart.
+// A stale/pre-upgrade Scout server serving an older route table 404s on
+// routes like /api/profiles or /api/runs itself (not a specific run) --
+// showing "That run could not be found." there is actively misleading (the
+// operator's actual repro: a same-version reinstall left an old server
+// running, and the UI told them a run was missing when no run was ever
+// requested). A generic route-level 404 shows the server's own message, or
+// a hint to restart Scout when the server has none.
+const RUN_SCOPED_PATH = /^\/api\/runs\/[^/]+(\/|$)/;
+
+function messageFor404(path, detail) {
+  if (RUN_SCOPED_PATH.test(path)) {
+    return "That run could not be found.";
+  }
+  return detail || "The Scout server is out of date: run `gigai scout run` to restart it.";
+}
 
 // Error codes whose backend message is specific enough to show as-is,
 // instead of the generic per-status text above. config_missing in
@@ -39,9 +59,12 @@ class ApiError extends Error {
   }
 }
 
-function messageForStatus(status, code, detail) {
+function messageForStatus(path, status, code, detail) {
   if (code && CODES_WITH_OWN_MESSAGE.has(code) && detail) {
     return detail;
+  }
+  if (status === 404) {
+    return messageFor404(path, detail);
   }
   return STATUS_MESSAGES[status] || detail || `Request failed with status ${status}.`;
 }
@@ -73,7 +96,7 @@ async function request(method, path, body) {
     const code = errorBody && typeof errorBody.code === "string" ? errorBody.code : undefined;
     const detail = errorBody && typeof errorBody.message === "string" ? errorBody.message : undefined;
     const { code: _code, message: _message, ...extra } = errorBody || {};
-    throw new ApiError(response.status, messageForStatus(response.status, code, detail), code, extra);
+    throw new ApiError(response.status, messageForStatus(path, response.status, code, detail), code, extra);
   }
 
   return payload;

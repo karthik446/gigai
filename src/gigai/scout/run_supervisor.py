@@ -16,6 +16,7 @@ just started.
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import os
 import signal
 import socket
@@ -30,7 +31,7 @@ from urllib.request import urlopen
 
 import gigai
 
-from ..canonical import canonical_json_bytes, parse_json_bytes
+from ..canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes
 from ..workpad import resolve_bound_project
 from .find_jobs.contracts import API_BIND
 from .template import install_scout
@@ -47,6 +48,63 @@ def _installed_package_path() -> str:
     """The directory the running ``gigai`` package was imported from."""
 
     return str(Path(gigai.__file__).resolve().parent)
+
+
+def _installed_build_id() -> str:
+    """An identity for *this* install of gigai that changes on every rebuild
+    (uat-bug-006-r2): ``gigai_version``/``package_path`` alone are not enough
+    -- every dev branch build lands on the same ``0.1.9.dev0`` version at the
+    same uv tool path, so a stale reinstall looked identical to a fresh one.
+
+    Preference order, all read through ``importlib.metadata`` (never a
+    hard-coded dist-info path, so this keeps working across uv/pip layouts):
+
+    1. ``direct_url.json``'s ``vcs_info.commit_id`` -- present for a VCS
+       install (``uv tool install git+...``, the branch-install dev channel
+       every operator UAT actually uses). Exact and human-legible (a commit
+       sha), and changes on every real reinstall from a new commit.
+    2. A digest of the installed dist-info ``RECORD`` -- covers a non-VCS
+       wheel/sdist install (e.g. from a built artifact, no ``vcs_info``).
+       ``RECORD`` lists every installed file with a content hash, so it
+       changes on every rebuild that actually changes what got installed.
+    3. A fallback stable for the lifetime of *this* source tree, for a
+       source checkout / editable install where neither of the above pins a
+       build: an editable install's ``direct_url.json`` has no ``vcs_info``
+       (just ``{"url": "file://...", "dir_info": {"editable": true}}``) and
+       its ``RECORD`` never changes on a source edit (it lists the editable
+       ``.pth``/dist-info shim files, not the project's source files, and
+       carries no hash for ``RECORD`` itself). This never raises: an
+       operator's editable/dev checkout must never crash ``scout run``.
+    """
+
+    try:
+        dist = importlib.metadata.distribution("gigai")
+    except importlib.metadata.PackageNotFoundError:
+        return "source-checkout:no-dist-info"
+
+    direct_url_text = dist.read_text("direct_url.json")
+    if direct_url_text:
+        try:
+            direct_url = json.loads(direct_url_text)
+        except ValueError:
+            direct_url = None
+        if isinstance(direct_url, dict):
+            commit_id = direct_url.get("vcs_info", {}).get("commit_id")
+            if isinstance(commit_id, str) and commit_id:
+                return f"commit:{commit_id}"
+
+    record_text = dist.read_text("RECORD")
+    if record_text:
+        digest = digest_imported_bytes(record_text.encode("utf-8"))
+        return f"record:{digest}"
+
+    # Neither file is present (a layout ``importlib.metadata`` can still
+    # resolve a distribution for but without dist-info files, e.g. an
+    # unusual finder) -- fall back to something stable per install location
+    # rather than crash.
+    origin = getattr(dist, "_path", None) or _installed_package_path()
+    return f"path:{origin}"
+
 
 # Deferred import: scout_cli imports this module (to build the `run`/`stop`/
 # `status` commands), so importing scout_cli at module load time here would
@@ -83,6 +141,10 @@ class ScoutRunState:
     # that predates recording a version at all).
     gigai_version: str | None = None
     package_path: str | None = None
+    # ``None`` means "written by a build before uat-bug-006-r2" -- also
+    # treated as outdated, same reasoning: a state file that predates
+    # recording a build identity at all must never be trusted as current.
+    build_id: str | None = None
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -95,12 +157,14 @@ class ScoutRunState:
             "started_at": self.started_at,
             "gigai_version": self.gigai_version,
             "package_path": self.package_path,
+            "build_id": self.build_id,
         }
 
     @classmethod
     def from_json(cls, data: dict[str, object]) -> "ScoutRunState":
         gigai_version = data.get("gigai_version")
         package_path = data.get("package_path")
+        build_id = data.get("build_id")
         return cls(
             project_id=str(data["project_id"]),
             pid=int(data["pid"]),  # type: ignore[arg-type]
@@ -110,15 +174,21 @@ class ScoutRunState:
             started_at=str(data["started_at"]),
             gigai_version=str(gigai_version) if gigai_version is not None else None,
             package_path=str(package_path) if package_path is not None else None,
+            build_id=str(build_id) if build_id is not None else None,
         )
 
     def is_outdated(self) -> bool:
-        """True if this state predates the installed gigai, or lacks a
-        recorded version entirely (older builds never wrote one)."""
+        """True if this state predates the installed gigai, lacks a recorded
+        version/build identity entirely (older builds never wrote one), or
+        was written by a different build of the same version at the same
+        package path (uat-bug-006-r2: every dev branch reinstall lands on
+        the same ``0.1.9.dev0`` version and uv tool path, so version+path
+        alone can't tell a stale reinstall from a fresh one)."""
 
         return (
             self.gigai_version != _installed_gigai_version()
             or self.package_path != _installed_package_path()
+            or self.build_id != _installed_build_id()
         )
 
 
@@ -409,6 +479,7 @@ def start(
             started_at=_now_iso(),
             gigai_version=_installed_gigai_version(),
             package_path=_installed_package_path(),
+            build_id=_installed_build_id(),
         )
         _write_state(home_root, state)
         try:
@@ -440,6 +511,7 @@ def start(
         started_at=_now_iso(),
         gigai_version=_installed_gigai_version(),
         package_path=_installed_package_path(),
+        build_id=_installed_build_id(),
     )
 
     deadline = time.monotonic() + HEALTH_TIMEOUT_SECONDS
