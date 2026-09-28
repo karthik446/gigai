@@ -28,6 +28,8 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import sys
+import textwrap
 
 from ..default_init import DefaultInitError, default_inventory, initialize_defaults, normalize_username
 from ..registry import ProjectRecord, RegistryError, WorkspaceOwnerRecord, open_project_registry
@@ -159,6 +161,38 @@ def _display_path(path: Path) -> str:
     return os.fspath(path)
 
 
+def _terminal_columns() -> int | None:
+    """Width of the terminal the notice is shown in; ``None`` when it is not a terminal."""
+
+    try:
+        return os.get_terminal_size(sys.stderr.fileno()).columns
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
+def _fit_terminal(message: str, *, keep_together: str, columns: int | None) -> str:
+    """``message`` broken into lines the terminal shows without wrapping them itself.
+
+    The notice is longer than most terminals are wide. A terminal that wraps
+    it on its own can end a row on the space of ``use --target``; the row's
+    trailing space is dropped when the text is copied, which reads
+    ``use--target`` (uat-bug-019). Breaking the lines here, never inside
+    ``keep_together``, keeps that space away from the end of a row. Output
+    that is not a terminal stays one line.
+    """
+
+    if columns is None or len(message) < columns:
+        return message
+    joined = keep_together.replace(" ", "\0")
+    lines = textwrap.wrap(
+        message.replace(keep_together, joined),
+        width=max(columns - 1, len(keep_together)),
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return "\n".join(lines).replace("\0", " ")
+
+
 def _notify_earlier_projects(home_root: Path, notify: Callable[[str], None]) -> None:
     """Name each earlier Scout project once; never fails the command it rides on."""
 
@@ -189,11 +223,17 @@ def _notify_earlier_projects(home_root: Path, notify: Callable[[str], None]) -> 
         # show it again on every command. Stay quiet instead.
         return
     lives_in = _display_path(home_scout_target(home_root))
+    columns = _terminal_columns()
     for folder in unseen:
         shown = _display_path(folder)
+        hint = f"use --target {shown}"
         notify(
-            f"Scout now lives in {lives_in}; your earlier data in {shown} is untouched; "
-            f"use --target {shown} to open it."
+            _fit_terminal(
+                f"Scout now lives in {lives_in}; your earlier data in {shown} is untouched; "
+                f"{hint} to open it.",
+                keep_together=hint,
+                columns=columns,
+            )
         )
 
 

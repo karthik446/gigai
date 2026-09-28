@@ -24,6 +24,7 @@ import subprocess
 import sys
 import time
 import webbrowser
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import URLError
@@ -32,6 +33,7 @@ from urllib.request import urlopen
 import gigai
 
 from ..canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes
+from ..registry import RegistryError, open_project_registry
 from ..workpad import resolve_bound_project
 from .find_jobs.contracts import API_BIND
 from .template import install_scout
@@ -118,6 +120,8 @@ def _write_starter_find_jobs_config(target_root: Path) -> bool:
 DEFAULT_PORT = API_BIND[1]
 HEALTH_TIMEOUT_SECONDS = 15.0
 STOP_TIMEOUT_SECONDS = 5.0
+# How long a port may stay bound after the server that held it was stopped.
+PORT_RELEASE_TIMEOUT_SECONDS = 2.0
 # The test suite's CI latency scale (tests/support/latency.py). Read here
 # because the health wait runs inside the product, where a test-side bound
 # cannot reach it; it can only widen the wait, never shorten it.
@@ -316,7 +320,10 @@ def _pid_is_our_server(pid: int) -> bool:
 
 
 def _read_state(home_root: Path, project_id: str) -> ScoutRunState | None:
-    path = _state_path(home_root, project_id)
+    return _read_state_file(_state_path(home_root, project_id))
+
+
+def _read_state_file(path: Path) -> ScoutRunState | None:
     if path.is_symlink() or not path.is_file():
         return None
     try:
@@ -374,6 +381,28 @@ def _tail(path: Path, *, lines: int = 40) -> str:
 
 
 @dataclass(frozen=True)
+class OtherScoutServer:
+    """A live Scout server recorded for another project under the same GigAI home."""
+
+    project_id: str
+    pid: int
+    port: int
+    url: str
+    # The folder that project is registered at; ``None`` when the registry
+    # no longer knows the project.
+    target: str | None
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "project_id": self.project_id,
+            "pid": self.pid,
+            "port": self.port,
+            "url": self.url,
+            "target": self.target,
+        }
+
+
+@dataclass(frozen=True)
 class ScoutRunResult:
     state: ScoutRunState
     reused: bool
@@ -382,6 +411,9 @@ class ScoutRunResult:
     # when a live server was stopped and replaced because it predated the
     # installed gigai (uat-bug-006). ``None`` otherwise.
     restarted_from_version: str | None = None
+    # Set when another project's live Scout server held the requested port
+    # and was stopped so this one could start (uat-bug-019).
+    stopped_other: OtherScoutServer | None = None
 
 
 def ensure_scout_ready(*, home_root: Path, requested_target: Path | None) -> None:
@@ -414,6 +446,88 @@ def _existing_live_state(home_root: Path, project_id: str) -> tuple[ScoutRunStat
     return state, False
 
 
+def _project_target(home_root: Path, project_id: str) -> str | None:
+    try:
+        registry, _created = open_project_registry(home_root, create=False)
+        record = registry.find_project(project_id)
+    except RegistryError:
+        return None
+    return record.target_locator if record is not None else None
+
+
+def _pid_serves_port(pid: int, port: int) -> bool:
+    """Whether our server at ``pid`` is the one recorded for ``port``.
+
+    The detached child names its port on its command line, so a pid the OS
+    reused for a *different* project's Scout server is not mistaken for the
+    one a state file recorded. A ``--foreground`` run may leave the port to
+    its default and then has nothing to compare; the recorded port stands.
+    """
+
+    parts = (_command_line_for_pid(pid) or "").split()
+    named = [parts[index + 1] for index, part in enumerate(parts[:-1]) if part == "--port"]
+    return not named or named[-1] == str(port)
+
+
+def _other_live_servers(
+    home_root: Path, project_id: str
+) -> tuple[tuple[Path, OtherScoutServer], ...]:
+    """Live Scout servers recorded for every project except ``project_id``.
+
+    Same identity check the same-project restart uses (uat-bug-006-r2): the
+    pid is alive *and* is our server, never a pid the OS reused. A state file
+    that fails it belongs to its own project's ``run``/``status``/``stop`` to
+    clean up and is left alone here.
+    """
+
+    found: list[tuple[Path, OtherScoutServer]] = []
+    for path in sorted((home_root / "run" / "scout").glob("*.json")):
+        state = _read_state_file(path)
+        if state is None or project_id in (state.project_id, path.stem):
+            continue
+        if not _pid_is_our_server(state.pid) or not _pid_serves_port(state.pid, state.port):
+            continue
+        found.append(
+            (
+                path,
+                OtherScoutServer(
+                    project_id=state.project_id,
+                    pid=state.pid,
+                    port=state.port,
+                    url=state.url,
+                    target=_project_target(home_root, state.project_id),
+                ),
+            )
+        )
+    return tuple(found)
+
+
+def _stop_other_server_on_port(
+    home_root: Path, project_id: str, port: int
+) -> OtherScoutServer | None:
+    """Stop another project's live Scout server holding ``port``, the way ``stop`` does."""
+
+    for path, other in _other_live_servers(home_root, project_id):
+        if other.port != port:
+            continue
+        _stop_pid(other.pid)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return other
+    return None
+
+
+def _port_is_released(port: int) -> bool:
+    deadline = time.monotonic() + PORT_RELEASE_TIMEOUT_SECONDS
+    while not _port_is_free(port):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
 def start(
     *,
     home_root: Path,
@@ -422,6 +536,7 @@ def start(
     foreground: bool,
     open_browser: bool,
     allow_test_seams: bool = False,
+    on_stopped_other: Callable[[OtherScoutServer], None] | None = None,
 ) -> ScoutRunResult:
     """Ensure Scout is set up, then reuse or start the supervised API+UI.
 
@@ -437,6 +552,10 @@ def start(
     active in the child's environment (double-gated: both the env var and
     this flag are required) -- test-gap-001's API e2e suite is the only
     caller that ever sets it.
+
+    ``on_stopped_other`` is called as soon as another project's Scout server
+    was stopped to free the port (uat-bug-019), before this one starts, so
+    the caller can say so even when the start then fails.
     """
 
     home_root = home_root.expanduser().resolve(strict=False)
@@ -459,11 +578,21 @@ def start(
         _remove_state(home_root, project_id)
 
     requested_port = port if port is not None else DEFAULT_PORT
+    stopped_other: OtherScoutServer | None = None
     if not _port_is_free(requested_port):
-        raise ScoutRunError(
-            "scout_run_port_in_use",
-            f"port {requested_port} is already in use; pass --port to choose a different one",
-        )
+        # uat-bug-019: the port may be held by a Scout server recorded for
+        # another project (after uat-bug-017 moved Scout to <home>/scout,
+        # the earlier project's server still holds the default port). Only
+        # a recorded, identity-checked Scout server is ever stopped; anything
+        # else on the port keeps the error below.
+        stopped_other = _stop_other_server_on_port(home_root, project_id, requested_port)
+        if stopped_other is not None and on_stopped_other is not None:
+            on_stopped_other(stopped_other)
+        if stopped_other is None or not _port_is_released(requested_port):
+            raise ScoutRunError(
+                "scout_run_port_in_use",
+                f"port {requested_port} is already in use; pass --port to choose a different one",
+            )
 
     log_path = _log_path(home_root, project_id)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -509,6 +638,7 @@ def start(
             reused=False,
             cleaned_stale=cleaned_stale,
             restarted_from_version=restarted_from_version,
+            stopped_other=stopped_other,
         )
 
     with log_path.open("ab") as log_file:
@@ -560,6 +690,7 @@ def start(
         reused=False,
         cleaned_stale=cleaned_stale,
         restarted_from_version=restarted_from_version,
+        stopped_other=stopped_other,
     )
 
 
@@ -633,6 +764,9 @@ class ScoutStatus:
     # installed gigai (or has no recorded version -- older builds).
     outdated: bool = False
     outdated_version: str | None = None
+    # Live Scout servers recorded for other projects (uat-bug-019). Reported
+    # only: ``status`` never stops anything.
+    other_servers: tuple[OtherScoutServer, ...] = ()
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -643,6 +777,7 @@ class ScoutStatus:
             "log_path": self.log_path,
             "started_at": self.started_at,
             "outdated": self.outdated,
+            "other_servers": [other.to_json() for other in self.other_servers],
         }
 
 
@@ -650,9 +785,10 @@ def status(*, home_root: Path, requested_target: Path | None) -> ScoutStatus:
     home_root = home_root.expanduser().resolve(strict=False)
     bound_project = resolve_bound_project(home_root=home_root, requested_target=requested_target)
     project_id = bound_project.project_id
+    other_servers = tuple(other for _path, other in _other_live_servers(home_root, project_id))
     saved = _read_state(home_root, project_id)
     if saved is None:
-        return ScoutStatus(state="stopped", project_id=project_id)
+        return ScoutStatus(state="stopped", project_id=project_id, other_servers=other_servers)
     if not _process_is_alive(saved.pid):
         return ScoutStatus(
             state="crashed",
@@ -661,13 +797,14 @@ def status(*, home_root: Path, requested_target: Path | None) -> ScoutStatus:
             pid=saved.pid,
             log_path=saved.log_path,
             started_at=saved.started_at,
+            other_servers=other_servers,
         )
     if not _pid_is_our_server(saved.pid):
         # The pid is alive but isn't our server -- the OS reused it for an
         # unrelated process since we last held it. Clean up the stale state
         # rather than reporting "running" (P1 #9, pr37-review-findings.md).
         _remove_state(home_root, project_id)
-        return ScoutStatus(state="stopped", project_id=project_id)
+        return ScoutStatus(state="stopped", project_id=project_id, other_servers=other_servers)
     return ScoutStatus(
         state="running",
         project_id=project_id,
@@ -677,11 +814,13 @@ def status(*, home_root: Path, requested_target: Path | None) -> ScoutStatus:
         started_at=saved.started_at,
         outdated=saved.is_outdated(),
         outdated_version=saved.gigai_version,
+        other_servers=other_servers,
     )
 
 
 __all__ = [
     "DEFAULT_PORT",
+    "OtherScoutServer",
     "ScoutRunError",
     "ScoutRunResult",
     "ScoutRunState",

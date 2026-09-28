@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
@@ -28,8 +29,11 @@ from .find_jobs.discovery import (
     run_discovery,
 )
 from .interview_prep import InterviewPrepError, build_prep
-from .target_resolution import ScoutTargetError, resolve_scout_target
+from .target_resolution import ScoutTargetError, _display_path, resolve_scout_target
 from .template import ScoutInstallError, install_scout
+
+if TYPE_CHECKING:
+    from .run_supervisor import OtherScoutServer
 
 
 def _resolved_target(
@@ -452,6 +456,14 @@ def resume_tailor_command(
         click.echo(f"  Copied to {out_path}")
 
 
+def _other_server_label(other: OtherScoutServer) -> str:
+    """The folder another project's Scout server serves, the way the operator types it."""
+
+    if other.target is None:
+        return f"project {other.project_id}"
+    return _display_path(Path(other.target))
+
+
 @scout_group.command("run")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
@@ -481,6 +493,14 @@ def run_command(
 
     from . import run_supervisor
 
+    def _stopped_other(other: OtherScoutServer) -> None:
+        if as_json:
+            return
+        click.echo(
+            f"Stopped the Scout server for {_other_server_label(other)} (pid {other.pid}) "
+            f"so this one can use port {other.port}."
+        )
+
     home_root = home_value or default_home_root()
     try:
         resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
@@ -490,6 +510,7 @@ def run_command(
             port=port,
             foreground=foreground,
             open_browser=not no_browser,
+            on_stopped_other=_stopped_other,
         )
     except (ScoutTargetError, run_supervisor.ScoutRunError, WorkpadError, ScoutInstallError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_run_failed")
@@ -500,6 +521,7 @@ def run_command(
         "reused": result.reused,
         "cleaned_stale": result.cleaned_stale,
         "restarted_from_version": result.restarted_from_version,
+        "stopped_other": result.stopped_other.to_json() if result.stopped_other is not None else None,
         **result.state.to_json(),
     }
     if as_json:
@@ -572,6 +594,11 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
         )
     else:
         click.echo("stopped")
+    for other in current.other_servers:
+        click.echo(
+            f"The Scout server for {_other_server_label(other)} is running at {other.url} "
+            f"(pid {other.pid}); `gigai scout run` stops it when it holds the port this one needs."
+        )
 
 
 def _relative_days_ago(iso_timestamp: str) -> str:
