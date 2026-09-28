@@ -117,16 +117,84 @@ export function getRunStatus(runId) {
   return request("GET", `/api/runs/${encodeURIComponent(runId)}`);
 }
 
-export function getRunResults(runId) {
-  return request("GET", `/api/runs/${encodeURIComponent(runId)}/results`);
+// run-reads-fast (uat-bug-022): a run's results are read a page at a time
+// (find_jobs/api/run_reads.py). A page is the no-query response's shape for
+// `limit` rows from `offset`, in the grid's own order, plus `total` /
+// `limit` / `offset`, the run's `counts` and `created_at`. No posting
+// carries its `text` (getRunPosting reads one posting whole), and each row
+// has `rank_score`: the Jev score already stored for it, or null. The read
+// never asks Jev.
+//
+// The server sends `carried_forward_assessments` beside `payload`, and the
+// cards are built from `payload` alone (boardRows.rowsFromResults reads
+// `payload.carried_forward_assessments`): a page is answered with the list
+// in both places, so a posting a run found unchanged shows the assessment
+// it carried forward.
+export const RESULTS_PAGE_SIZE = 100;
+
+export async function getRunResultsPage(runId, { limit = RESULTS_PAGE_SIZE, offset = 0 } = {}) {
+  const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  const response = await request("GET", `/api/runs/${encodeURIComponent(runId)}/results?${query}`);
+  const carried = response.carried_forward_assessments || [];
+  return { ...response, carried_forward_assessments: carried, payload: { ...response.payload, carried_forward_assessments: carried } };
+}
+
+// Two pages of one run as one response: the later page's rows, assessments,
+// not-assessed rows and carried-forward assessments after the earlier one's.
+export function mergeRunResultsPages(earlier, later) {
+  const carried = earlier.carried_forward_assessments.concat(later.carried_forward_assessments);
+  return {
+    ...earlier,
+    payload: {
+      ...earlier.payload,
+      rows: earlier.payload.rows.concat(later.payload.rows),
+      assessments: earlier.payload.assessments.concat(later.payload.assessments),
+      not_assessed: earlier.payload.not_assessed.concat(later.payload.not_assessed),
+      carried_forward_assessments: carried,
+    },
+    carried_forward_assessments: carried,
+  };
+}
+
+// Every page of a run's results, merged. `onPage(response)` is called after
+// each page with everything read so far, so a caller can draw the first page
+// (the top of the grid) while the rest loads; returning false from it stops
+// the read (the caller moved to another run).
+export async function getRunResults(runId, { pageSize = RESULTS_PAGE_SIZE, onPage } = {}) {
+  let merged = await getRunResultsPage(runId, { limit: pageSize, offset: 0 });
+  let wanted = !onPage || onPage(merged) !== false;
+  while (wanted && merged.payload.rows.length < merged.total) {
+    const page = await getRunResultsPage(runId, { limit: pageSize, offset: merged.payload.rows.length });
+    if (page.payload.rows.length === 0) {
+      break; // the run has fewer rows than the first page said: never loop on an empty page
+    }
+    merged = mergeRunResultsPages(merged, page);
+    wanted = !onPage || onPage(merged) !== false;
+  }
+  return merged;
+}
+
+// The stored Jev scores of a results response, in POST /rank's `scores`
+// shape (jobModel.buildJobs' `rankScores`).
+export function storedRankScores(response) {
+  return response.payload.rows.map((row) => row.rank_score).filter(Boolean);
+}
+
+// One posting of a run, complete: {row: {posting (with its text), outcome,
+// rank_score, h1b?, job_state?}, assessment, not_assessed_reason,
+// carried_forward}. `normalizedUrl` is the posting's normalized_url.
+export function getRunPosting(runId, normalizedUrl) {
+  const query = new URLSearchParams({ url: normalizedUrl });
+  return request("GET", `/api/runs/${encodeURIComponent(runId)}/posting?${query}`);
 }
 
 // B4: the non-authoritative live-progress view (steps + postings +
 // assessments as they happen). Never the final-results authority -- see
 // present_api.py's run_progress docstring -- but lets the UI render cards
-// well before the sealed outputs exist.
+// well before the sealed outputs exist. run-reads-fast: read as its summary,
+// which has no posting text and no list of skipped boards.
 export function getRunProgress(runId) {
-  return request("GET", `/api/runs/${encodeURIComponent(runId)}/progress`);
+  return request("GET", `/api/runs/${encodeURIComponent(runId)}/progress?summary=1`);
 }
 
 // Builds the fixed-shape consent envelope (D5). Every field except the two
@@ -242,11 +310,20 @@ export function postRank(runId, fields) {
 // P9c: every find-jobs run for this target (newest first), with per-run
 // counts (found/new/assessed/matched) -- the dashboard's "last run"/"new
 // since last run", the Profiles run-history table, and the Find-jobs
-// past-run picker. Optionally scoped to one profile.
+// past-run picker. Optionally scoped to one profile. run-reads-fast:
+// `status` keeps the runs with that status and `limit` the newest N, so
+// {profileId, status: "succeeded", limit: 1} is the run the Jobs page opens
+// on, read without the history behind it.
 export function getRuns(params) {
   const query = new URLSearchParams();
   if (params && params.profileId) {
     query.set("profile_id", params.profileId);
+  }
+  if (params && params.status) {
+    query.set("status", params.status);
+  }
+  if (params && params.limit) {
+    query.set("limit", String(params.limit));
   }
   const qs = query.toString();
   return request("GET", `/api/runs${qs ? `?${qs}` : ""}`);

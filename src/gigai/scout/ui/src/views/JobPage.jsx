@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ApiError, getAnswers, postApplication, postAssess } from "../api.js";
+import { ApiError, getAnswers, getRunPosting, postApplication, postAssess } from "../api.js";
 import AssessmentBody from "../components/AssessmentBody.jsx";
 import RequirementActions from "../components/RequirementActions.jsx";
 import JevBadge from "../components/JevBadge.jsx";
@@ -225,6 +225,7 @@ function BackToList({ from }) {
 export default function JobPage({
   job,
   jobId,
+  runId,
   from,
   profileId,
   profileLabel,
@@ -236,6 +237,24 @@ export default function JobPage({
 }) {
   const [answers, setAnswers] = useState([]);
   const [tailorError, setTailorError] = useState(null);
+  // run-reads-fast (uat-bug-022): a run's rows come without their posting
+  // text (the grid does not show it). This page reads its own posting,
+  // text included, from GET /api/runs/{run_id}/posting.
+  const [postingText, setPostingText] = useState(null);
+  const needsText = Boolean(runId && job && job.row && !job.posting.text);
+  useEffect(() => {
+    setPostingText(null);
+    if (!needsText) {
+      return undefined;
+    }
+    let current = true;
+    getRunPosting(runId, jobId)
+      .then((response) => current && setPostingText(response.row.posting.text || null))
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [runId, jobId, needsText]);
 
   const handleApplicationRecorded = useCallback(() => {
     if (onApplicationsChanged) {
@@ -254,7 +273,10 @@ export default function JobPage({
     window.scrollTo(0, 0);
   }, [jobId]);
 
-  const posting = job ? job.posting : null;
+  const posting = useMemo(
+    () => (job && postingText && !job.posting.text ? { ...job.posting, text: postingText } : job ? job.posting : null),
+    [job, postingText],
+  );
   const assessment = job ? job.assessment : null;
   const jobUrl = posting && posting.url ? posting.url : null;
   const priorAnswers = useMemo(() => new Map(answers.map((answer) => [answer.question_id, answer])), [answers]);

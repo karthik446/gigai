@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, buildRunRequest, getAssessments, getRunProgress, getRunResults, getRunStatus, postRank, startRun } from "../api.js";
+import { ApiError, buildRunRequest, getAssessments, getRunProgress, getRunResults, getRuns, getRunStatus, postRank, startRun } from "../api.js";
 import { mergeRows, rowsFromProgress, rowsFromResults } from "../boardRows.js";
 import RunConfirmDialog from "../components/RunConfirmDialog.jsx";
 import NodeStatusList from "../components/NodeStatusList.jsx";
@@ -124,6 +124,14 @@ export default function FindJobsView({
   const [results, setResults] = useState(null);
   const [resultsError, setResultsError] = useState(null);
   const [resultsLoading, setResultsLoading] = useState(false);
+  // run-reads-fast (uat-bug-022): what the loaded run's results say about
+  // the run itself ({created_at, counts}), so its labels do not wait for
+  // the runs list; and whether the run to open on is still being looked up.
+  const [runMeta, setRunMeta] = useState(null);
+  const [newestLoading, setNewestLoading] = useState(true);
+  // True while pages after the first are still coming: a job page for a
+  // posting that is not in yet says "Loading", not "not found".
+  const [pagesLoading, setPagesLoading] = useState(false);
   const [rankScores, setRankScores] = useState([]);
   const [quickItems, setQuickItems] = useState([]);
   // Assessments made against a PASTED resume: the store files them under no
@@ -187,6 +195,9 @@ export default function FindJobsView({
     boardRowsRef.current = [];
     setBoardRows([]);
     setResults(null);
+    setRunMeta(null);
+    setNewestLoading(true);
+    setPagesLoading(false);
     setResultsError(null);
     setResultsLoading(false);
     setRankScores([]);
@@ -280,20 +291,38 @@ export default function FindJobsView({
   const loadResults = useCallback(
     (id) => {
       setResultsLoading(true);
-      return getRunResults(id)
-        .then((response) => {
+      setPagesLoading(true);
+      // run-reads-fast: the results come a page at a time, the top of the
+      // grid first. The first page is drawn as soon as it is in; the later
+      // ones add their cards to it.
+      let drawn = false;
+      return getRunResults(id, {
+        onPage: (response) => {
+          if (shownRunId.current !== id) {
+            return false; // another run is shown now: stop reading this one
+          }
+          setResults(response.payload);
+          if (!drawn) {
+            drawn = true;
+            setRunMeta({ created_at: response.created_at, counts: response.counts });
+            setResultsLoading(false);
+            loadQuickItems();
+          }
+          return true;
+        },
+      })
+        .then(() => {
           if (shownRunId.current !== id) {
             return;
           }
-          setResults(response.payload);
-          setResultsLoading(false);
+          setPagesLoading(false);
           loadRankScores(id);
-          loadQuickItems();
         })
         .catch((error) => {
           if (shownRunId.current !== id) {
             return;
           }
+          setPagesLoading(false);
           setResultsLoading(false);
           setResultsError(error.message || String(error));
         });
@@ -357,6 +386,7 @@ export default function FindJobsView({
       setProgress(null);
       setRankScores([]);
       setResults(null);
+      setRunMeta(null);
       setResultsLoading(true);
       getRunStatus(pastRunId)
         .then((status) => {
@@ -396,16 +426,30 @@ export default function FindJobsView({
 
   // Q4a: nothing loaded yet -> show the newest succeeded run for this
   // profile (the grid is empty otherwise, and a job page deep link would
-  // have nothing to find).
+  // have nothing to find). run-reads-fast: that run is asked for on its
+  // own (one small read), so the grid never waits for the whole runs list.
   useEffect(() => {
-    if (runId || routeRunId || runsState.loading || runsState.error) {
-      return;
+    if (!profileId || runId || routeRunId) {
+      setNewestLoading(false);
+      return undefined;
     }
-    const newest = runsState.runs.find((run) => run.status === "succeeded");
-    if (newest) {
-      viewPastRun(newest.run_id);
-    }
-  }, [runId, routeRunId, runsState.loading, runsState.error, runsState.runs, viewPastRun]);
+    let current = true;
+    setNewestLoading(true);
+    getRuns({ profileId, status: "succeeded", limit: 1 })
+      .then((response) => {
+        if (!current) {
+          return;
+        }
+        setNewestLoading(false);
+        if (response.runs.length > 0 && shownRunId.current === null) {
+          viewPastRun(response.runs[0].run_id);
+        }
+      })
+      .catch(() => current && setNewestLoading(false));
+    return () => {
+      current = false;
+    };
+  }, [profileId, runId, routeRunId, viewPastRun]);
 
   async function handleConfirm({ selectionCap, modelTarget }) {
     if (!config) {
@@ -420,6 +464,7 @@ export default function FindJobsView({
       showRun(response.run_id);
       setRunStatus({ run_id: response.run_id, status: response.status, node_receipts: response.node_receipts });
       setResults(null);
+      setRunMeta(null);
       setResultsError(null);
       setProgress(null);
       setRankScores([]);
@@ -451,7 +496,7 @@ export default function FindJobsView({
   const rows = useMemo(() => (results ? rowsFromResults(results) : boardRows), [results, boardRows]);
   const visaRequired = Boolean(config && config.config && config.config.visa_sponsorship_required);
   const currentRun = runsState.runs.find((run) => run.run_id === runId) || null;
-  const runCreatedAt = currentRun ? currentRun.created_at : null;
+  const runCreatedAt = currentRun ? currentRun.created_at : runMeta ? runMeta.created_at : null;
   const newestRun = runsState.runs[0] || null;
 
   const applications = applicationsState.applications;
@@ -521,7 +566,8 @@ export default function FindJobsView({
         profileId={profile.profile_id}
         profileLabel={profile.label}
         visaRequired={visaRequired}
-        loading={fromAssessments ? quickLoading : resultsLoading || quickLoading || (runsState.loading && !runId)}
+        runId={runId}
+        loading={fromAssessments ? quickLoading : resultsLoading || pagesLoading || quickLoading || (newestLoading && !runId)}
         onQuickUpdated={handleQuickUpdated}
         onApplicationsChanged={applicationsState.reload}
         onTailored={handleTailored}

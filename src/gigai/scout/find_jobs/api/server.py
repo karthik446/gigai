@@ -755,11 +755,12 @@ class ScoutFindJobsBackend:
     def _payload(self, run_id: str):
         from ...projection import build_present_payload
 
-        self._require_run(run_id)
+        resolved = self._require_run(run_id)
         return build_present_payload(
             home_root=self.home_root,
             target=self._target_root(),
             run_id=run_id,
+            resolved=resolved,
         )
 
     def carried_forward_assessments(self, run_id: str) -> tuple:
@@ -826,26 +827,25 @@ class ScoutFindJobsBackend:
                 )
                 return RunStatusResponse(run_id, AggregateStatus.RUNNING, ())
             raise
-        payload = self._payload(run_id)
         detail_status = str(details.get("status", "running"))
-        if detail_status == "preparing":
-            status = AggregateStatus.PENDING
-        elif detail_status in {"running", "verifying"}:
-            status = AggregateStatus.RUNNING
-        else:
-            try:
-                status = AggregateStatus(detail_status)
-            except ValueError:
-                status = payload.status
-        receipts = payload.node_receipts
         # A partial receipt set is not enough to satisfy the DTO invariant
         # while the scheduler is still running; terminal reads expose all
         # receipts and the C-1 payload remains the result authority.
+        # run-reads-fast (uat-bug-022): so a poll of a run that is still
+        # going reads no sealed artifact at all.
+        if detail_status == "preparing":
+            return RunStatusResponse(run_id, AggregateStatus.PENDING, ())
+        if detail_status in {"running", "verifying"}:
+            return RunStatusResponse(run_id, AggregateStatus.RUNNING, ())
+        payload = self._payload(run_id)
+        try:
+            status = AggregateStatus(detail_status)
+        except ValueError:
+            status = payload.status
         if status in {AggregateStatus.PENDING, AggregateStatus.RUNNING}:
-            receipts = ()
-        else:
-            self._log_run_terminal_once(run_id, status, payload)
-        return RunStatusResponse(run_id, status, receipts)
+            return RunStatusResponse(run_id, status, ())
+        self._log_run_terminal_once(run_id, status, payload)
+        return RunStatusResponse(run_id, status, payload.node_receipts)
 
     def _log_run_terminal_once(
         self, run_id: str, status: "AggregateStatus", payload
@@ -1589,13 +1589,26 @@ def _make_handler(
                     if path == "/api/secrets/status":
                         self._handle_get_secrets_status()
                         return
+                    # run-reads-fast (uat-bug-022): with a query these two are
+                    # the page-sized reads (``run_reads.py``); with none they
+                    # answer what they always did.
                     run_id = _match_run_id(path, suffix="/results")
                     if run_id is not None:
-                        self._handle_get_run_results(run_id)
+                        if urlsplit(self.path).query:
+                            self._handle_get_run_results_page(run_id)
+                        else:
+                            self._handle_get_run_results(run_id)
                         return
                     run_id = _match_run_id(path, suffix="/progress")
                     if run_id is not None:
-                        self._handle_get_run_progress(run_id)
+                        if urlsplit(self.path).query:
+                            self._handle_get_run_progress_summary(run_id)
+                        else:
+                            self._handle_get_run_progress(run_id)
+                        return
+                    run_id = _match_run_id(path, suffix="/posting")
+                    if run_id is not None:
+                        self._handle_get_run_posting(run_id)
                         return
                     run_id = _match_run_id(path, suffix="")
                     if run_id is not None:

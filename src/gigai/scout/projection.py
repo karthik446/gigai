@@ -9,17 +9,26 @@ tracker to trust model-owned identifiers.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 import json
+import logging
 from pathlib import Path
 import re
 import sqlite3
+import threading
 from typing import Any, Protocol
 
 from ..application_events import ApplicationEventError, validate_application_links
 from ..canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes, parse_json_front_matter
-from ..journal import JournalArtifactMissingError, JournalSnapshot, read_committed_artifact, read_committed_snapshot
+from ..journal import (
+    JournalArtifactMissingError,
+    JournalError,
+    JournalSnapshot,
+    read_committed_artifact,
+    read_committed_snapshot,
+)
 from ..private_records import RECORD_DIRECTORY_PATTERN
 from ..index import database_lock
 from .find_jobs.contracts import (
@@ -589,42 +598,254 @@ def _read_run_input(*, resolved: Any, run_id: str) -> FindJobsRunInput:
         raise ScoutProjectionError("present_payload_run_input_invalid", "the run's sealed find-jobs input is malformed") from exc
 
 
-def _read_node_receipt(*, resolved: Any, run_id: str, goal_slug: str) -> NodeReceipt | None:
-    path = f"runs/{run_id}/receipts/{goal_slug}.json"
-    value = _read_run_json(resolved=resolved, path=path)
-    if value is None:
-        return None
-    try:
-        return NodeReceipt.from_json(value)
-    except FindJobsContractError as exc:
-        raise ScoutProjectionError("present_payload_receipt_invalid", f"{path} is not a valid node receipt") from exc
+# run-reads-fast (uat-bug-022): one run's committed evidence, read in one pass.
+#
+# ``build_present_payload`` used to read the run input, two outputs and three
+# receipts with one ``read_committed_artifact`` each: about 10 git
+# subprocesses per artifact, 60 per payload, and ``GET /api/runs`` built a
+# payload per run on top of the one ``run_status`` builds. A run's directory
+# is now read with ONE committed snapshot (about 17 subprocesses whatever the
+# run holds, and one snapshot for several runs), and a finished run's
+# evidence is kept: a sealed artifact has one publisher and never changes.
+_TERMINAL_RUN_STATUSES = frozenset({"succeeded", "failed", "blocked", "cancelled", "interrupted"})
+# A snapshot that meets a journal transition in flight is retried under the
+# writer lock. A run read does not queue behind a long transition for it: the
+# path-by-path read below takes no lock.
+_RUN_EVIDENCE_LOCK_TIMEOUT_SECONDS = 1.0
+# The runs a page is reading now: the one on screen and the one before it.
+# ``GET /api/runs`` keeps its own small row per run (``api/runs_list.py``).
+_RUN_EVIDENCE_CACHE_SIZE = 2
+_RUN_EVIDENCE_CACHE_LOCK = threading.Lock()
+# The Scout server's one log (``find_jobs/api/server.py``'s LOGGER_NAME).
+_run_read_logger = logging.getLogger("gigai.scout.server")
+_run_evidence_cache: "OrderedDict[tuple[str, str], tuple[str, RunEvidence]]" = OrderedDict()
 
 
-def _read_node_output(*, resolved: Any, run_id: str, goal_slug: str, dto: type) -> Any | None:
-    path = f"runs/{run_id}/outputs/{goal_slug}.json"
-    value = _read_run_json(resolved=resolved, path=path)
-    if value is None:
-        return None
-    try:
-        return dto.from_json(value)
-    except FindJobsContractError as exc:
-        raise ScoutProjectionError("present_payload_output_invalid", f"{path} is not a valid {dto.__name__}") from exc
+@dataclass(frozen=True)
+class RunEvidence:
+    """What one find-jobs run has committed so far.
 
-
-def build_present_payload(*, home_root: Path, target: Path | None, run_id: str) -> PresentPayload:
-    """Rebuild the present-node payload for one run from committed evidence.
-
-    Snapshot-derived and rebuildable: every field comes from the run's sealed
-    input plus each node's committed output/receipt at the I-2 storage
-    convention (``runs/{run_id}/{outputs,receipts}/{acquire,assess,present}.json``).
-    A goal that has not run yet is simply absent; this never mutates
-    application/tracking state.
+    ``details`` is the committed ``run-details.json``; a node that has not
+    run yet has no output and no receipt, and ``run_input`` is ``None``
+    until the run has sealed it.
     """
-    resolved = resolve_workpad(home_root=home_root, requested_target=target, gig_id=None)
-    run_input = _read_run_input(resolved=resolved, run_id=run_id)
 
-    acquire_output = _read_node_output(resolved=resolved, run_id=run_id, goal_slug="acquire", dto=AcquireOutput)
-    assess_output = _read_node_output(resolved=resolved, run_id=run_id, goal_slug="assess", dto=AssessOutput)
+    run_id: str
+    details: Mapping[str, object] | None
+    run_input: FindJobsRunInput | None
+    acquire_output: AcquireOutput | None
+    assess_output: AssessOutput | None
+    receipts: tuple[NodeReceipt, ...]
+
+    @property
+    def details_status(self) -> str | None:
+        value = self.details.get("status") if self.details is not None else None
+        return value if isinstance(value, str) else None
+
+    @property
+    def started_at(self) -> str | None:
+        value = self.details.get("started_at") if self.details is not None else None
+        return value if isinstance(value, str) else None
+
+    @property
+    def terminal(self) -> bool:
+        return self.details_status in _TERMINAL_RUN_STATUSES
+
+    @property
+    def status(self) -> AggregateStatus:
+        """The receipts' aggregate: what a payload's ``status`` is."""
+
+        if not self.receipts:
+            return AggregateStatus.PENDING
+        return AggregateStatus(aggregate_status(receipt.status for receipt in self.receipts))
+
+
+def working_run_details_digest(resolved: Any, run_id: str) -> str | None:
+    """The digest of the run's ``run-details.json`` as it is on disk now.
+
+    What a kept read of a finished run is filed under: a run whose details
+    are replaced is read again. ``None`` when the file cannot be read.
+    """
+
+    path = resolved.path / "runs" / run_id / "run-details.json"
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        return digest_imported_bytes(path.read_bytes())
+    except OSError:
+        return None
+
+
+def _committed_run_bytes(resolved: Any, path: str) -> bytes | None:
+    try:
+        raw, _commit = read_committed_artifact(
+            workpad=resolved.path,
+            project_id=resolved.project_id,
+            gig_id=resolved.gig_id,
+            path=path,
+            allow_replaced_run_details=True,
+        )
+    except JournalArtifactMissingError:
+        return None
+    return raw
+
+
+def _snapshot_run_artifacts(resolved: Any, run_ids: Sequence[str]) -> Mapping[str, bytes] | None:
+    """Every committed artifact of ``run_ids``, or ``None`` when no snapshot can be taken now."""
+
+    try:
+        return read_committed_snapshot(
+            workpad=resolved.path,
+            project_id=resolved.project_id,
+            gig_id=resolved.gig_id,
+            prefixes=tuple(f"runs/{run_id}/" for run_id in run_ids),
+            lock_timeout_seconds=_RUN_EVIDENCE_LOCK_TIMEOUT_SECONDS,
+        ).artifacts
+    except JournalError as exc:
+        # A run that is writing right now (a file on disk its commit has not
+        # reached), or a busy writer lock: read path by path, as before.
+        # Said in the log: the path-by-path read is the slow one.
+        _run_read_logger.info(
+            "run evidence is read path by path, no snapshot could be taken: runs=%s (%s)",
+            ",".join(run_ids),
+            type(exc).__name__,
+        )
+        return None
+
+
+def _run_evidence_from(run_id: str, read: Callable[[str], bytes | None]) -> tuple[RunEvidence, str | None]:
+    """``read``'s artifacts as one run's evidence, and the digest of its committed details."""
+
+    def parsed(path: str) -> dict[str, object] | None:
+        raw = read(path)
+        if raw is None:
+            return None
+        try:
+            value = parse_json_bytes(raw)
+        except ValueError as exc:
+            raise ScoutProjectionError("present_payload_artifact_invalid", f"{path} is not JSON") from exc
+        if not isinstance(value, dict):
+            raise ScoutProjectionError("present_payload_artifact_invalid", f"{path} is not a JSON object")
+        return value
+
+    def output(goal_slug: str, dto: type) -> Any | None:
+        path = f"runs/{run_id}/outputs/{goal_slug}.json"
+        value = parsed(path)
+        if value is None:
+            return None
+        try:
+            return dto.from_json(value)
+        except FindJobsContractError as exc:
+            raise ScoutProjectionError("present_payload_output_invalid", f"{path} is not a valid {dto.__name__}") from exc
+
+    def receipt(goal_slug: str) -> NodeReceipt | None:
+        path = f"runs/{run_id}/receipts/{goal_slug}.json"
+        value = parsed(path)
+        if value is None:
+            return None
+        try:
+            return NodeReceipt.from_json(value)
+        except FindJobsContractError as exc:
+            raise ScoutProjectionError("present_payload_receipt_invalid", f"{path} is not a valid node receipt") from exc
+
+    details_raw = read(f"runs/{run_id}/run-details.json")
+    details: dict[str, object] | None = None
+    if details_raw is not None:
+        try:
+            value = parse_json_bytes(details_raw)
+        except ValueError:
+            value = None
+        details = value if isinstance(value, dict) else None
+
+    run_input: FindJobsRunInput | None = None
+    sealed = parsed(f"runs/{run_id}/sealed/find-jobs-run-input.json")
+    if sealed is not None:
+        try:
+            run_input = FindJobsRunInput.from_json(sealed)
+        except FindJobsContractError as exc:
+            raise ScoutProjectionError("present_payload_run_input_invalid", "the run's sealed find-jobs input is malformed") from exc
+
+    evidence = RunEvidence(
+        run_id=run_id,
+        details=details,
+        run_input=run_input,
+        acquire_output=output("acquire", AcquireOutput),
+        assess_output=output("assess", AssessOutput),
+        receipts=tuple(item for item in (receipt(slug) for slug in _GOAL_SLUGS) if item is not None),
+    )
+    return evidence, (digest_imported_bytes(details_raw) if details_raw is not None else None)
+
+
+def _kept_run_evidence(resolved: Any, run_id: str, digest: str | None) -> RunEvidence | None:
+    if digest is None:
+        return None
+    key = (str(resolved.path), run_id)
+    with _RUN_EVIDENCE_CACHE_LOCK:
+        kept = _run_evidence_cache.get(key)
+        if kept is None or kept[0] != digest:
+            return None
+        _run_evidence_cache.move_to_end(key)
+        return kept[1]
+
+
+def _keep_run_evidence(resolved: Any, evidence: RunEvidence, digest: str) -> None:
+    key = (str(resolved.path), evidence.run_id)
+    with _RUN_EVIDENCE_CACHE_LOCK:
+        _run_evidence_cache[key] = (digest, evidence)
+        _run_evidence_cache.move_to_end(key)
+        while len(_run_evidence_cache) > _RUN_EVIDENCE_CACHE_SIZE:
+            _run_evidence_cache.popitem(last=False)
+
+
+def read_runs_evidence(resolved: Any, run_ids: Sequence[str]) -> dict[str, RunEvidence]:
+    """The committed evidence of each of ``run_ids``, with one snapshot for all of them.
+
+    A run read while it is writing falls back to a snapshot of its own, then
+    to the path-by-path read; the other runs keep the one snapshot's result.
+    """
+
+    found: dict[str, RunEvidence] = {}
+    working: dict[str, str | None] = {}
+    for run_id in dict.fromkeys(run_ids):
+        digest = working_run_details_digest(resolved, run_id)
+        kept = _kept_run_evidence(resolved, run_id, digest)
+        if kept is not None:
+            found[run_id] = kept
+        else:
+            working[run_id] = digest
+    if not working:
+        return found
+
+    artifacts = _snapshot_run_artifacts(resolved, tuple(working))
+    if artifacts is None and len(working) > 1:
+        for run_id in working:
+            found.update(read_runs_evidence(resolved, (run_id,)))
+        return found
+    for run_id, digest in working.items():
+        read = artifacts.get if artifacts is not None else (lambda path: _committed_run_bytes(resolved, path))
+        evidence, committed_digest = _run_evidence_from(run_id, read)
+        # Kept only when what is on disk is what was committed: the key a
+        # later read looks it up by is the file on disk.
+        if evidence.terminal and digest is not None and digest == committed_digest:
+            _keep_run_evidence(resolved, evidence, digest)
+        found[run_id] = evidence
+    return found
+
+
+def read_run_evidence(resolved: Any, run_id: str) -> RunEvidence:
+    """One run's committed evidence (``read_runs_evidence`` for one run)."""
+
+    return read_runs_evidence(resolved, (run_id,))[run_id]
+
+
+def present_payload_from(evidence: RunEvidence) -> PresentPayload:
+    """The present-node payload of a run, from its committed evidence."""
+
+    run_input = evidence.run_input
+    if run_input is None:
+        raise ScoutProjectionError("present_payload_run_input_missing", "the run's sealed find-jobs input has not been published")
+    acquire_output = evidence.acquire_output
+    assess_output = evidence.assess_output
 
     rows = acquire_output.rows if acquire_output is not None else ()
     failures = list(acquire_output.failures) if acquire_output is not None else []
@@ -635,27 +856,32 @@ def build_present_payload(*, home_root: Path, target: Path | None, run_id: str) 
     not_assessed = assess_output.not_assessed if assess_output is not None else ()
     pinned_resume = assess_output.pinned_resume if assess_output is not None else run_input.pinned_resume
 
-    receipts = tuple(
-        receipt
-        for receipt in (
-            _read_node_receipt(resolved=resolved, run_id=run_id, goal_slug=slug)
-            for slug in _GOAL_SLUGS
-        )
-        if receipt is not None
-    )
-    status = AggregateStatus(aggregate_status(receipt.status for receipt in receipts)) if receipts else AggregateStatus.PENDING
-
     return PresentPayload(
-        run_id=run_id,
+        run_id=evidence.run_id,
         config=run_input.config,
         pinned_resume=pinned_resume,
         rows=tuple(rows),
         failures=tuple(failures),
         assessments=tuple(assessments),
         not_assessed=tuple(not_assessed),
-        node_receipts=receipts,
-        status=status,
+        node_receipts=evidence.receipts,
+        status=evidence.status,
     )
+
+
+def build_present_payload(*, home_root: Path, target: Path | None, run_id: str, resolved: Any | None = None) -> PresentPayload:
+    """Rebuild the present-node payload for one run from committed evidence.
+
+    Snapshot-derived and rebuildable: every field comes from the run's sealed
+    input plus each node's committed output/receipt at the I-2 storage
+    convention (``runs/{run_id}/{outputs,receipts}/{acquire,assess,present}.json``).
+    A goal that has not run yet is simply absent; this never mutates
+    application/tracking state. ``resolved`` is the caller's own resolved
+    workpad, when it has one already.
+    """
+    if resolved is None:
+        resolved = resolve_workpad(home_root=home_root, requested_target=target, gig_id=None)
+    return present_payload_from(read_run_evidence(resolved, run_id))
 
 
 def present_node(context: NodeContext, input: PresentInput, *, home_root: Path, target: Path | None) -> PresentOutput:
@@ -710,6 +936,7 @@ def present_node(context: NodeContext, input: PresentInput, *, home_root: Path, 
 
 __all__ = [
     "ProjectionReader", "ScoutProjection", "ScoutProjectionError", "ScoutReaderSet",
-    "build_present_payload", "present_node",
+    "RunEvidence", "build_present_payload", "present_node", "present_payload_from",
+    "read_run_evidence", "read_runs_evidence", "working_run_details_digest",
     "projection_from_snapshot", "query_projection", "read_cached_projection", "rebuild_projection",
 ]

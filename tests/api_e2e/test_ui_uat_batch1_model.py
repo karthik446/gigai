@@ -452,7 +452,9 @@ def test_a_failed_run_says_where_it_failed(out: dict) -> None:
 def test_a_run_page_shows_only_its_own_run() -> None:
     view = (UI_SRC / "views" / "FindJobsView.jsx").read_text(encoding="utf-8")
     # Every response handler checks the run the view shows NOW.
-    for call in ("getRunResults(id)", "getRunProgress(id)", "getRunStatus(id)", "getRunStatus(pastRunId)", "postRank(id, {})"):
+    # run-reads-fast: getRunResults takes an onPage callback now; every page
+    # it hands over is checked the same way.
+    for call in ("getRunResults(id, {", "getRunProgress(id)", "getRunStatus(id)", "getRunStatus(pastRunId)", "postRank(id, {})"):
         start = view.index(call)
         assert "shownRunId.current" in view[start : start + 260], f"{call}: its response is not checked against the shown run"
     assert "setRunId(" not in view.replace("setRunId(id);", "", 1).replace("[runId, setRunId]", ""), "set the shown run through showRun() only"

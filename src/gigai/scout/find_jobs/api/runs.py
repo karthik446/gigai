@@ -279,21 +279,15 @@ class RunRoutesMixin:
             carried_forward = ()
         body["carried_forward_assessments"] = [item.to_json() for item in carried_forward]
         # P6: additive -- Jev's pre-rank scores for this run's postings
-        # against the gig's selected profile. `compute_rank_scores` is
-        # cache-first (jev_rank.py), so this never re-spends after a `/rank`
-        # call already scored the same rows for the same profile/resume
-        # revision; no key, no rows, or any Jev failure degrades to an
-        # empty response (fail open), never breaking /results itself.
+        # against the gig's selected profile. run-reads-fast (uat-bug-022,
+        # uat-bug-021 addendum 2): a read only READS scores, the ones
+        # already stored (the score cache, then the run's own sealed
+        # scores; ``run_reads.stored_rank_scores``). It used to score
+        # every row not yet cached, one Jev call each, inside this GET. A
+        # row with no stored score has no entry; no profile, no key or an
+        # unreadable cache is an empty list, never a broken /results.
         try:
-            from .rank import compute_rank_scores
-
-            rank_response = compute_rank_scores(
-                home_root=self._backend.home_root,
-                target=self._backend.target,
-                run_id=run_id,
-                profile_id=None,
-            )
-            rank_scores = rank_response.scores
+            rank_scores = self._run_stored_rank_scores(run_id)
         except Exception:  # noqa: BLE001 - display-only enrichment must never break /results
             rank_scores = ()
         body["rank_scores"] = [item.to_json() for item in rank_scores]

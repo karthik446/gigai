@@ -7,13 +7,24 @@ picker (all dropped by P9a for lack of this route -- see
 Read-only. Runs are discovered the same way ``run_plan_already_handed_off``
 already does (``run.py``'s own convention): a ``glob`` of ``runs/run_*`` on
 the RESOLVED WORKPAD PATH, never a full journal replay to enumerate run ids
--- there is no committed index of "every run_id" to read instead. Each
-run's own fields then come from exactly the same calls ``GET
-/api/runs/{run_id}``/``.../results`` already make
-(``self._backend.run_status``/``self._backend.run_results``via
-``build_present_payload``) -- this route adds no new replay depth per run,
-per the task's own "never replays the journal per run beyond what the
-existing run routes already do" rule.
+-- there is no committed index of "every run_id" to read instead.
+
+run-reads-fast (uat-bug-022): this route built every run's results
+(``run_status`` plus ``build_present_payload``, about 140 git subprocesses
+a run) on every call; at 500 postings a run that was 16 s. It now reads
+every run it has not seen with ONE committed snapshot
+(``projection.read_runs_evidence``) and keeps a finished run's row (its
+status, counts, profile and start time: a few hundred bytes), filed under
+the digest of the run's ``run-details.json`` on disk. A later call reads
+that small file for each run and nothing else; a run whose details are
+replaced is read again. A run that is still going is read on every call,
+its status from ``run_status`` as before. No results payload is built.
+
+``?status=<status>`` keeps the runs with that status and ``?limit=N``
+(1..500) the newest N of what the filters keep. With a limit the runs are
+read newest first, a few at a time, until N are found: "the newest
+succeeded run of this profile" (what the Jobs page opens on) reads that run
+and not the history behind it.
 
 ``profile_id``: read from the run's own sealed
 ``runs/{run_id}/sealed/find-jobs-run-input.json`` (``FindJobsRunInput.
@@ -23,7 +34,9 @@ falls back to the gig's current ``selected_profile()`` (the F1-a migration
 target every such gig has exactly one of) -- matching the task spec's own
 wording, "legacy runs -> the migrated default profile."
 
-Counts come from the run's own sealed outputs (never re-derived): ``found``
+Counts come from the run's own sealed outputs, ``outputs/acquire.json`` and
+``outputs/assess.json``, counted where they are read (``run_reads.
+run_counts``; no counts file is written): ``found``
 = every acquired row (``AcquireOutput.rows``), ``new`` = rows whose
 ``outcome`` is ``RowOutcome.NEW``, ``assessed`` = every produced
 assessment (``AssessOutput.assessments``), ``matched`` = assessments whose
@@ -34,7 +47,20 @@ carries no ``verdict`` at all -- ``None`` never counts as matched).
 from __future__ import annotations
 
 from http import HTTPStatus
+import threading
 from urllib.parse import parse_qs, urlsplit
+
+from .run_reads import RunReadsRoutesMixin, _query_int, run_counts
+
+RUNS_LIST_LIMIT_MAX = 500
+# How many runs a limited list reads at a time while it looks for its N.
+_LIMITED_READ_SIZE = 4
+
+_RUN_ROW_CACHE_LOCK = threading.Lock()
+# (workpad, run_id) -> (digest of run-details.json on disk, the run's row).
+# Finished runs only: their sealed outputs have one publisher and never
+# change. One small row per run this process has listed.
+_run_row_cache: dict[tuple[str, str], tuple[str, dict[str, object]]] = {}
 
 
 def _run_ids_newest_first(resolved) -> list[str]:
@@ -100,23 +126,72 @@ def _run_profile_id(*, resolved, run_id: str, default_profile_id: str | None) ->
     return default_profile_id
 
 
-def _run_counts(payload) -> dict[str, int]:
-    from ..contracts import RowOutcome, Verdict
+def _run_row(evidence, *, status: str) -> dict[str, object]:
+    """One run's row, but for the default a legacy run's ``profile_id`` falls back to."""
 
-    found = len(payload.rows)
-    new = sum(1 for row in payload.rows if row.outcome == RowOutcome.NEW)
-    assessed = len(payload.assessments)
-    matched = sum(1 for item in payload.assessments if item.verdict == Verdict.MATCHED_ABOVE_THRESHOLD)
-    return {"found": found, "new": new, "assessed": assessed, "matched": matched}
+    profile_ref = evidence.run_input.profile_ref if evidence.run_input is not None else None
+    return {
+        "run_id": evidence.run_id,
+        "created_at": evidence.started_at,
+        "profile_id": profile_ref.profile_id if profile_ref is not None else None,
+        "status": status,
+        "counts": run_counts(evidence),
+    }
 
 
-class RunsListRoutesMixin:
-    """``Handler`` mixin: ``GET /api/runs``."""
+def _finished_status(evidence) -> str:
+    from ..contracts import AggregateStatus
+
+    try:
+        return AggregateStatus(evidence.details_status).value
+    except ValueError:
+        return evidence.status.value
+
+
+def _run_rows(backend, resolved, run_ids: list[str]) -> list[dict[str, object]]:
+    """Every listed run's row, reading only the runs this process has no row for."""
+
+    from ...projection import read_runs_evidence, working_run_details_digest
+
+    workpad = str(resolved.path)
+    rows: dict[str, dict[str, object]] = {}
+    unread: dict[str, str | None] = {}
+    for run_id in run_ids:
+        digest = working_run_details_digest(resolved, run_id)
+        with _RUN_ROW_CACHE_LOCK:
+            kept = _run_row_cache.get((workpad, run_id))
+        if kept is not None and kept[0] == digest:
+            rows[run_id] = kept[1]
+        else:
+            unread[run_id] = digest
+
+    evidence_by_run = read_runs_evidence(resolved, tuple(unread)) if unread else {}
+    for run_id, digest in unread.items():
+        evidence = evidence_by_run[run_id]
+        if evidence.terminal:
+            row = _run_row(evidence, status=_finished_status(evidence))
+            if digest is not None and digest == working_run_details_digest(resolved, run_id):
+                with _RUN_ROW_CACHE_LOCK:
+                    _run_row_cache[(workpad, run_id)] = (digest, row)
+        else:
+            try:
+                status_response = backend.run_status(run_id)
+            except LookupError:
+                continue  # run-details vanished between the glob and this read -- skip, don't fail the whole list
+            row = _run_row(evidence, status=status_response.status.value)
+        rows[run_id] = row
+    return [rows[run_id] for run_id in run_ids if run_id in rows]
+
+
+class RunsListRoutesMixin(RunReadsRoutesMixin):
+    """``Handler`` mixin: ``GET /api/runs``, and ``run_reads.py``'s run page reads.
+
+    ``RunReadsRoutesMixin`` is composed through this class so the handler's
+    own list of mixins (``server._make_handler``) is left as it is.
+    """
 
     def _handle_get_runs_list(self) -> None:
         from ....workpad import resolve_workpad
-        from ...profile_records import ProfileRecordError, selected_profile
-        from ...projection import build_present_payload
 
         backend = self._backend
         target = getattr(backend, "target", None)
@@ -124,8 +199,19 @@ class RunsListRoutesMixin:
             self._error(HTTPStatus.NOT_FOUND, "target_unavailable", "a target path is required")
             return
 
-        query = parse_qs(urlsplit(self.path).query, keep_blank_values=False)
-        filter_profile_id = (query.get("profile_id") or [None])[0]
+        query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+        # A blank filter is no filter, as before; a blank limit is refused.
+        filter_profile_id = (query.get("profile_id") or [None])[0] or None
+        filter_status = (query.get("status") or [None])[0] or None
+        try:
+            limit = _query_int(query, "limit", minimum=1, maximum=RUNS_LIST_LIMIT_MAX)
+        except ValueError:
+            self._error(
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                "invalid_value",
+                f"limit must be a whole number from 1 to {RUNS_LIST_LIMIT_MAX}",
+            )
+            return
 
         try:
             resolved = resolve_workpad(
@@ -135,44 +221,41 @@ class RunsListRoutesMixin:
             self._error(HTTPStatus.NOT_FOUND, "not_found", "no target is configured")
             return
 
-        try:
-            default_selection = selected_profile(resolved, home_root=backend.home_root, target=target)
-        except ProfileRecordError:
-            default_selection = None
-        default_profile_id = default_selection.profile_id if default_selection is not None else None
-
+        run_ids = _run_ids_newest_first(resolved)
+        read_size = len(run_ids) if limit is None else max(limit, _LIMITED_READ_SIZE)
+        default_profile_id: str | None = None
+        default_read = False
         runs: list[dict[str, object]] = []
-        for run_id in _run_ids_newest_first(resolved):
-            try:
-                status_response = backend.run_status(run_id)
-            except LookupError:
-                continue  # run-details vanished between the glob and this read -- skip, don't fail the whole list
-            profile_id = _run_profile_id(resolved=resolved, run_id=run_id, default_profile_id=default_profile_id)
-            if filter_profile_id is not None and profile_id != filter_profile_id:
-                continue
-            try:
-                payload = build_present_payload(home_root=backend.home_root, target=target, run_id=run_id)
-            except LookupError:
-                continue
-            created_at = None
-            details_path = resolved.path / "runs" / run_id / "run-details.json"
-            try:
-                from ....canonical import parse_json_bytes
-
-                details = parse_json_bytes(details_path.read_bytes())
-                if isinstance(details, dict) and isinstance(details.get("started_at"), str):
-                    created_at = details["started_at"]
-            except (OSError, ValueError):
-                created_at = None
-            runs.append({
-                "run_id": run_id,
-                "created_at": created_at,
-                "profile_id": profile_id,
-                "status": status_response.status.value,
-                "counts": _run_counts(payload),
-            })
+        for start in range(0, len(run_ids), max(read_size, 1)):
+            for row in _run_rows(backend, resolved, run_ids[start : start + read_size]):
+                profile_id = row["profile_id"]
+                if profile_id is None:
+                    if not default_read:
+                        default_profile_id = self._default_profile_id(resolved)
+                        default_read = True
+                    profile_id = default_profile_id
+                if filter_profile_id is not None and profile_id != filter_profile_id:
+                    continue
+                if filter_status is not None and row["status"] != filter_status:
+                    continue
+                runs.append({**row, "profile_id": profile_id})
+            if limit is not None and len(runs) >= limit:
+                del runs[limit:]
+                break
 
         self._write_json(HTTPStatus.OK, {"schema_version": "scout-runs-list-response:1", "runs": runs})
+
+    def _default_profile_id(self, resolved) -> str | None:
+        """The migrated default profile: what a run sealed before F1-b ran against."""
+
+        from ...profile_records import ProfileRecordError, selected_profile
+
+        backend = self._backend
+        try:
+            selection = selected_profile(resolved, home_root=backend.home_root, target=backend.target)
+        except ProfileRecordError:
+            selection = None
+        return selection.profile_id if selection is not None else None
 
 
 __all__ = ["RunsListRoutesMixin"]
