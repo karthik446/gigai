@@ -9,7 +9,13 @@ import re
 import uuid
 
 from ...canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes
-from ...journal import JournalArtifact, JournalTransition, run_with_journal_writer
+from ...journal import (
+    JournalArtifact,
+    JournalArtifactMissingError,
+    JournalTransition,
+    read_committed_artifact,
+    run_with_journal_writer,
+)
 from .contracts import (
     ATSProvider,
     FindJobsContractError,
@@ -348,6 +354,63 @@ def _pref_keys(values: object) -> set[str]:
     return {key for key in (_company_key(str(value)) for value in (values or ())) if key}
 
 
+def _seed_selection_key(prefs: object) -> str:
+    """Stable identity for the preference fields that select catalog boards.
+
+    Only ``countries``, ``exclude_companies``, and ``watch_companies`` affect
+    :func:`catalog_records_for_prefs`.  Normalize them exactly as that filter
+    does, so reordering or duplicate values does not turn a completed seed
+    into a new one.
+    """
+
+    selection = {
+        "countries": sorted({str(code).upper() for code in (getattr(prefs, "countries", ()) or ())}),
+        "exclude_companies": sorted(_pref_keys(getattr(prefs, "exclude_companies", ()))),
+        "watch_companies": sorted(_pref_keys(getattr(prefs, "watch_companies", ()))),
+    }
+    return digest_imported_bytes(canonical_json_bytes(selection))
+
+
+def _seed_receipt_key(revision: str, digest: str, selection_key: str) -> str:
+    """Derive the one receipt path that proves this exact seed is complete."""
+
+    return f"scout_watchlist_seed:{revision}:{digest}:{selection_key}"
+
+
+def _has_current_seed_receipt(
+    resolved: ResolvedWorkpad, *, revision: str, digest: str, selection_key: str
+) -> bool:
+    """Read one authenticated receipt, never a watchlist snapshot.
+
+    The receipt path is deterministic from the catalog identity and the three
+    selection preferences.  Its journal validation also makes a deleted
+    watchlist record deliberately irrelevant on this same revision: seeding
+    must not silently recreate a user's removal.
+    """
+
+    key = _seed_receipt_key(revision, digest, selection_key)
+    try:
+        data, _commit = read_committed_artifact(
+            workpad=resolved.path,
+            project_id=resolved.project_id,
+            gig_id=resolved.gig_id,
+            path=_receipt_path("scout_watchlist_seed", key),
+        )
+    except JournalArtifactMissingError:
+        return False
+    try:
+        receipt = parse_json_bytes(data)
+    except ValueError:
+        return False
+    return isinstance(receipt, dict) and (
+        receipt.get("operation") == "scout_watchlist_seed"
+        and receipt.get("operation_key") == key
+        and receipt.get("catalog_revision") == revision
+        and receipt.get("catalog_digest") == digest
+        and receipt.get("outcome") == "committed"
+    )
+
+
 def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tuple[list[object], int, int, int]:
     """Filter catalog records by ``prefs`` (``DiscoveryPrefs``-shaped).
 
@@ -426,14 +489,25 @@ def seed_watchlist_from_catalog(
     kept, by_country, by_company, by_staffing = catalog_records_for_prefs(records, prefs)
     observed_at = now or _now()
     resolved = _resolved(home_root, target, gig_id)
+    selection_key = _seed_selection_key(prefs)
+    receipt_key = _seed_receipt_key(revision, digest, selection_key)
 
     def publish(writer: object) -> WatchlistSeedResult:
+        # This direct authenticated receipt read is intentionally before any
+        # snapshot.  A matching receipt says this catalog revision/digest and
+        # these selecting preferences were already reconciled, so neither a
+        # journal write nor an O(watchlist) read is justified.
+        if _has_current_seed_receipt(
+            resolved, revision=revision, digest=digest, selection_key=selection_key
+        ):
+            return WatchlistSeedResult(
+                revision, digest, len(records), len(kept), 0, len(kept), by_country, by_company, (), None, by_staffing,
+            )
         # Case-insensitive on purpose: the record path is a filename, and a
         # case-insensitive filesystem (macOS) would make ``...:Abe.json`` and
         # ``...:abe.json`` the same file -- the journal refuses that as a
         # byte conflict. An existing entry under either spelling counts as
         # present.
-        existing = {entry.watchlist_id.lower() for entry in _snapshot_entries(writer)}
         snapshot = writer.snapshot(("records/scout-watchlist/",))  # type: ignore[attr-defined]
         present_paths = {path.lower() for path in snapshot.artifacts}
         artifacts: list[JournalArtifact] = []
@@ -443,10 +517,9 @@ def seed_watchlist_from_catalog(
         for record in kept:
             entry = record.to_watchlist_entry(revision=revision, observed_at=observed_at)  # type: ignore[attr-defined]
             record_path = f"records/scout-watchlist/{entry.watchlist_id}.json"
-            if entry.watchlist_id.lower() in existing or record_path.lower() in present_paths:
+            if record_path.lower() in present_paths:
                 already += 1
                 continue
-            existing.add(entry.watchlist_id.lower())
             record_bytes = canonical_json_bytes(entry.to_json())
             artifacts.append(JournalArtifact(record_path, record_bytes))
             refs.append(_ref(record_path, record_bytes))
@@ -457,15 +530,14 @@ def seed_watchlist_from_catalog(
             )
         payload = {"catalog_revision": revision, "catalog_digest": digest, "watchlist_ids": sorted(added_ids)}
         payload_sha = digest_imported_bytes(canonical_json_bytes(payload))
-        key = f"scout_watchlist_seed:{revision}:{payload_sha.removeprefix('sha256:')[:16]}"
-        receipt_path = _receipt_path("scout_watchlist_seed", key)
+        receipt_path = _receipt_path("scout_watchlist_seed", receipt_key)
         receipt = {
             "schema_version": "1.0",
             "operation_id": f"operation_{uuid.uuid4()}",
             "project_id": resolved.project_id,
             "gig_id": resolved.gig_id,
             "operation": "scout_watchlist_seed",
-            "operation_key": key,
+            "operation_key": receipt_key,
             "payload_sha256": payload_sha,
             "catalog_revision": revision,
             "catalog_digest": digest,
@@ -484,7 +556,7 @@ def seed_watchlist_from_catalog(
             "project_id": resolved.project_id,
             "gig_id": resolved.gig_id,
             "operation": "scout_watchlist_seed",
-            "operation_key": key,
+            "operation_key": receipt_key,
             "catalog_revision": revision,
             "catalog_digest": digest,
             "artifact_refs": [*refs, _ref(receipt_path, receipt_bytes)],

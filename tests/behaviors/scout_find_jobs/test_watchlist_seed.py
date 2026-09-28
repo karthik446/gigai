@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
+from unittest.mock import patch
 
+from gigai.journal import JournalWriter
 from gigai.scout.find_jobs.company_catalog import CompanyCatalog, CompanyRecord, load_company_catalog
 from gigai.scout.find_jobs.contracts import ATSProvider, WatchlistEntry
 from gigai.scout.find_jobs.discovery.prefs import DiscoveryPrefs
@@ -157,6 +160,80 @@ def test_a_prefs_change_only_adds_never_removes(tmp_path: Path) -> None:
     )
     assert later.added == 1 and later.added_watchlist_ids == ("scout_watchlist:lever:bright",)
     assert {e.board_token for e in list_active(home, target, gig_id)} == {"acme", "kong", "nowhere", "bright"}
+
+
+def test_same_catalog_and_selecting_prefs_read_one_receipt_without_snapshot_or_write(tmp_path: Path) -> None:
+    home, target, gig_id = _fixture(tmp_path)
+    catalog = _catalog(*_RECORDS)
+    prefs = DiscoveryPrefs(countries=("US",), exclude_companies=("Nowhere",), watch_companies=("Bright Ltd",))
+    first = seed_watchlist_from_catalog(home, target, gig_id, prefs=prefs, catalog=catalog)
+    assert first.added == 3
+
+    calls = {"snapshot": 0, "record": 0}
+    original_snapshot = JournalWriter.snapshot
+    original_record = JournalWriter.record
+
+    def snapshot_spy(self: JournalWriter, *args: object, **kwargs: object) -> object:
+        calls["snapshot"] += 1
+        return original_snapshot(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    def record_spy(self: JournalWriter, *args: object, **kwargs: object) -> object:
+        calls["record"] += 1
+        return original_record(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    with patch.object(JournalWriter, "snapshot", snapshot_spy), patch.object(JournalWriter, "record", record_spy):
+        second = seed_watchlist_from_catalog(home, target, gig_id, prefs=prefs, catalog=catalog)
+
+    assert second.added == 0 and second.already_present == first.eligible
+    assert second.receipt_path is None
+    assert calls == {"snapshot": 0, "record": 0}
+
+
+def test_new_catalog_revision_seeds_only_the_delta(tmp_path: Path) -> None:
+    home, target, gig_id = _fixture(tmp_path)
+    first_catalog = _catalog(_RECORDS[0], _RECORDS[2], revision="test-rev-1")
+    second_catalog = _catalog(
+        _RECORDS[0], _RECORDS[2], _record("Delta", ATSProvider.LEVER, "delta"), revision="test-rev-2"
+    )
+    prefs = DiscoveryPrefs(countries=("US",))
+    assert seed_watchlist_from_catalog(home, target, gig_id, prefs=prefs, catalog=first_catalog).added == 2
+    later = seed_watchlist_from_catalog(home, target, gig_id, prefs=prefs, catalog=second_catalog)
+    assert later.added == 1
+    assert later.added_watchlist_ids == ("scout_watchlist:lever:delta",)
+
+
+def test_changed_selecting_pref_reseeds_only_the_delta(tmp_path: Path) -> None:
+    home, target, gig_id = _fixture(tmp_path)
+    catalog = _catalog(*_RECORDS)
+    assert seed_watchlist_from_catalog(
+        home, target, gig_id, prefs=DiscoveryPrefs(countries=("US",)), catalog=catalog
+    ).added == 3
+    later = seed_watchlist_from_catalog(
+        home, target, gig_id, prefs=DiscoveryPrefs(countries=("US", "GB")), catalog=catalog
+    )
+    assert later.added == 1
+    assert later.added_watchlist_ids == ("scout_watchlist:lever:bright",)
+
+
+def test_a_removed_company_is_not_readded_on_the_same_seed_identity(tmp_path: Path) -> None:
+    """The current contract has no watchlist archive/tombstone operation.
+
+    Model a removal as a clean later commit deleting one seeded record.  The
+    receipt fast path must still not resurrect it on the same catalog/prefs.
+    """
+
+    home, target, gig_id = _fixture(tmp_path)
+    catalog = _catalog(_RECORDS[0], _RECORDS[2])
+    prefs = DiscoveryPrefs(countries=("US",))
+    seed_watchlist_from_catalog(home, target, gig_id, prefs=prefs, catalog=catalog)
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
+    removed = "records/scout-watchlist/scout_watchlist:ashby:kong.json"
+    subprocess.run(["git", "-C", str(resolved.path), "rm", removed], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(resolved.path), "commit", "--quiet", "-m", "test watchlist removal"], check=True)
+
+    again = seed_watchlist_from_catalog(home, target, gig_id, prefs=prefs, catalog=catalog)
+    assert again.added == 0
+    assert not (resolved.path / removed).exists()
 
 
 def _seeded_ids(workpad: Path) -> set[str]:
