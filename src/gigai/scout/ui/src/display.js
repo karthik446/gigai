@@ -127,12 +127,13 @@ export function unchangedSinceLabel(fromRunDate) {
 
 // Q4a: the mockup's three-state wording (cards-and-job-page.html r1):
 // stated by the posting -> "Sponsors visas" / "No sponsorship"; silent ->
-// "Unknown" (SponsorshipBadge appends the catalog's H-1B count there when
-// the posting carries one).
+// "Sponsorship not stated" (uat-batch1 N9: "Unknown · 32 H-1B approvals"
+// read as a contradiction; SponsorshipBadge appends the catalog's H-1B
+// count there when the posting carries one).
 const SPONSORSHIP_LABELS = {
   offered: "Sponsors visas",
   not_offered: "No sponsorship",
-  unknown: "Unknown",
+  unknown: "Sponsorship not stated",
 };
 
 export function sponsorshipLabel(sponsorship) {

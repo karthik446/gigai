@@ -9,6 +9,7 @@ import Breadcrumb from "../components/Breadcrumb.jsx";
 import JobPage from "./JobPage.jsx";
 import { relativeTimeLabel } from "../display.js";
 import { buildJobs, dateTimeLabel } from "../jobModel.js";
+import { runFailure } from "../runText.js";
 import { ASSESS_HASH, RUNS_HASH, SETTINGS_HASH, runHash } from "../routing.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "blocked", "cancelled", "interrupted"]);
@@ -42,6 +43,13 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 // succeeded run for the profile is loaded automatically (GET /api/runs,
 // newest first) -- so a job page survives a reload. A run page loads its
 // own run instead.
+//
+// uat-bug-012: every response is checked against the run the view is
+// showing NOW (shownRunId). Before this a slow load of run A (the newest
+// succeeded run, loaded automatically) could land after the operator had
+// opened run B's page, so B's page showed A's cards under B's name. A run
+// page also shows ONLY its run's postings (no on-demand cards), and a run
+// that did not succeed says where it failed (runText.runFailure).
 //
 // Still DROPPED from the mockup (no backing API): "New since last run".
 // Phase 2 fields (work_mode / pay / H-1B count, tailored resume) render
@@ -98,6 +106,13 @@ export default function FindJobsView({
   const pollTimer = useRef(null);
   const progressPollTimer = useRef(null);
   const boardRowsRef = useRef([]);
+  // The run this view shows, set in the same tick as setRunId: a response
+  // for any other run is dropped (uat-bug-012).
+  const shownRunId = useRef(null);
+  const showRun = useCallback((id) => {
+    shownRunId.current = id;
+    setRunId(id);
+  }, []);
 
   const stopPolling = useCallback(() => {
     if (pollTimer.current) {
@@ -126,7 +141,7 @@ export default function FindJobsView({
   useEffect(() => {
     stopPolling();
     stopProgressPolling();
-    setRunId(null);
+    showRun(null);
     setRunStatus(null);
     setProgress(null);
     boardRowsRef.current = [];
@@ -136,7 +151,7 @@ export default function FindJobsView({
     setResultsLoading(false);
     setRankScores([]);
     setQuickItems([]);
-  }, [profileId, stopPolling, stopProgressPolling]);
+  }, [profileId, stopPolling, stopProgressPolling, showRun]);
 
   // Q4a: the quick-assess store for this profile (job-page re-assessments,
   // "Assess this posting", "+ Assess a job", CLI). Loaded when the profile
@@ -192,6 +207,9 @@ export default function FindJobsView({
   const pollProgress = useCallback((id) => {
     getRunProgress(id)
       .then((snapshot) => {
+        if (shownRunId.current !== id) {
+          return;
+        }
         setProgress(snapshot);
         const nextRows = mergeRows(boardRowsRef.current, rowsFromProgress(snapshot));
         boardRowsRef.current = nextRows;
@@ -199,14 +217,16 @@ export default function FindJobsView({
         progressPollTimer.current = setTimeout(() => pollProgress(id), PROGRESS_POLL_INTERVAL_MS);
       })
       .catch(() => {
-        progressPollTimer.current = setTimeout(() => pollProgress(id), PROGRESS_POLL_INTERVAL_MS);
+        if (shownRunId.current === id) {
+          progressPollTimer.current = setTimeout(() => pollProgress(id), PROGRESS_POLL_INTERVAL_MS);
+        }
       });
   }, []);
 
   function loadRankScores(id) {
     postRank(id, {})
-      .then((response) => setRankScores(response.scores))
-      .catch(() => setRankScores([]));
+      .then((response) => shownRunId.current === id && setRankScores(response.scores))
+      .catch(() => shownRunId.current === id && setRankScores([]));
   }
 
   const loadResults = useCallback(
@@ -214,12 +234,18 @@ export default function FindJobsView({
       setResultsLoading(true);
       return getRunResults(id)
         .then((response) => {
+          if (shownRunId.current !== id) {
+            return;
+          }
           setResults(response.payload);
           setResultsLoading(false);
           loadRankScores(id);
           loadQuickItems();
         })
         .catch((error) => {
+          if (shownRunId.current !== id) {
+            return;
+          }
           setResultsLoading(false);
           setResultsError(error.message || String(error));
         });
@@ -232,6 +258,9 @@ export default function FindJobsView({
     (id) => {
       getRunStatus(id)
         .then((status) => {
+          if (shownRunId.current !== id) {
+            return;
+          }
           setRunStatus(status);
           if (TERMINAL_STATUSES.has(status.status)) {
             stopProgressPolling();
@@ -244,6 +273,9 @@ export default function FindJobsView({
           }
         })
         .catch((error) => {
+          if (shownRunId.current !== id) {
+            return;
+          }
           stopPolling();
           stopProgressPolling();
           setResultsError(error.message || String(error));
@@ -270,7 +302,8 @@ export default function FindJobsView({
       stopProgressPolling();
       setRunError(null);
       setResultsError(null);
-      setRunId(pastRunId);
+      showRun(pastRunId);
+      setRunStatus(null);
       boardRowsRef.current = [];
       setBoardRows([]);
       setProgress(null);
@@ -279,15 +312,21 @@ export default function FindJobsView({
       setResultsLoading(true);
       getRunStatus(pastRunId)
         .then((status) => {
+          if (shownRunId.current !== pastRunId) {
+            return undefined;
+          }
           setRunStatus(status);
           return loadResults(pastRunId);
         })
         .catch((error) => {
+          if (shownRunId.current !== pastRunId) {
+            return;
+          }
           setResultsLoading(false);
           setResultsError(error.message || String(error));
         });
     },
-    [stopPolling, stopProgressPolling, loadResults],
+    [stopPolling, stopProgressPolling, loadResults, showRun],
   );
 
   const runActive = Boolean(runId && runStatus && !TERMINAL_STATUSES.has(runStatus.status));
@@ -325,7 +364,7 @@ export default function FindJobsView({
       const body = buildRunRequest({ configDigest: config.config_digest, selectionCap, modelTarget });
       const response = await startRun(body);
       setDialogOpen(false);
-      setRunId(response.run_id);
+      showRun(response.run_id);
       setRunStatus({ run_id: response.run_id, status: response.status, node_receipts: response.node_receipts });
       setResults(null);
       setResultsError(null);
@@ -364,6 +403,9 @@ export default function FindJobsView({
 
   const jobs = useMemo(() => buildJobs({ rows, rankScores, quickItems, runCreatedAt }), [rows, rankScores, quickItems, runCreatedAt]);
   const onDemandCount = useMemo(() => jobs.filter((job) => job.status === "on_demand").length, [jobs]);
+  // A run page shows that run's postings only: an on-demand assessment
+  // belongs to no run (it stays on Jobs and keeps its own job page).
+  const runJobs = useMemo(() => jobs.filter((job) => job.status !== "on_demand"), [jobs]);
 
   if (!ownsRoute) {
     return null;
@@ -415,6 +457,9 @@ export default function FindJobsView({
   if (route.view === "run") {
     const shownRun = currentRun || (runId === routeRunId && runStatus ? { run_id: runId, created_at: null, counts: null, status: runStatus.status } : null);
     const crumb = shownRun && shownRun.created_at ? `run ${relativeTimeLabel(shownRun.created_at)}` : `run ${routeRunId}`;
+    const loaded = runId === routeRunId && runStatus && runStatus.run_id === routeRunId;
+    const failure = loaded ? runFailure(runStatus, results ? runJobs.length : null) : null;
+    const lastGood = runsState.runs.find((run) => run.status === "succeeded" && run.run_id !== routeRunId) || null;
     return (
       <div>
         <Breadcrumb crumbs={[{ label: "Runs", href: RUNS_HASH }, { label: crumb }]} />
@@ -448,10 +493,29 @@ export default function FindJobsView({
           )}
           {resultsLoading && <p className="muted">Loading run…</p>}
         </section>
-        {runId === routeRunId && runStatus && (
+        {failure && (
+          <div className="callout danger" data-role="run-failure">
+            <strong>{failure.line}</strong>
+            {failure.message && <div className="run-failure-message">{failure.message}</div>}
+            {lastGood && (
+              <div className="run-failure-next">
+                <a href={runHash(lastGood.run_id)}>Open the last successful run</a> ({relativeTimeLabel(lastGood.created_at)}).
+              </div>
+            )}
+          </div>
+        )}
+        {loaded && (
           <NodeStatusList status={runStatus.status} nodeReceipts={runStatus.node_receipts} progressSteps={progress?.steps} rotation={progress?.rotation} boards={progress?.boards} />
         )}
-        {runId === routeRunId && grid}
+        {loaded && resultsError && <div className="callout danger">Could not load results: {resultsError}</div>}
+        {loaded && (results || runActive) && !(failure && runJobs.length === 0) && (
+          <JobsGrid
+            jobs={runJobs}
+            visaRequired={visaRequired}
+            runLabel={runLabel}
+            emptyMessage={runActive ? "Waiting for the first postings…" : "This run found no postings."}
+          />
+        )}
       </div>
     );
   }

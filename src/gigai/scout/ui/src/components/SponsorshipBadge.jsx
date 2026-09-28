@@ -1,34 +1,26 @@
-import { sponsorshipLabel } from "../display.js";
-import { h1bLabel } from "../jobModel.js";
+import { sponsorshipChip } from "../jobModel.js";
 
 // `sponsorship` is a SponsorshipStatus value ("offered" | "not_offered" |
 // "unknown") or null/undefined when not derived; all three render, since an
-// operator filtering on sponsorship needs to see "unknown" as its own state
-// rather than a blank cell.
+// operator filtering on sponsorship needs to see a silent posting as its
+// own state rather than a blank cell.
 //
 // Q4b: `h1b` (rows[].h1b {approvals, fiscal_years}, the company catalog's
 // H-1B join added by Q4b-data) is appended ONLY when the posting itself is
-// silent ("unknown") and the count is a positive number -- "Unknown · 9 H-1B
-// approvals (FY2026)". A stated "Sponsors visas"/"No sponsorship" never
-// shows it; no record or zero approvals shows plain "Unknown", never a
+// silent and the count is a positive number. uat-batch1 (N9): the silent
+// state reads "Sponsorship not stated" ("Unknown · 32 H-1B approvals" read
+// as a contradiction: the posting is silent, the approvals are the
+// company's record), and the chip takes the positive tone when the company
+// has approvals. A stated "Sponsors visas"/"No sponsorship" never shows the
+// count; no record or zero approvals shows the plain label, never a
 // placeholder; `h1b.denials`, when present, goes in the tooltip only.
 // (The chip itself renders only when visa_sponsorship_required is true;
 // the callers gate that.)
 export default function SponsorshipBadge({ sponsorship, h1b }) {
-  const status = sponsorship || "unknown";
-  let label = sponsorshipLabel(sponsorship);
-  let title = status === "unknown" ? "The posting does not mention sponsorship" : "Stated in the posting";
-  const suffix = status === "unknown" ? h1bLabel(h1b) : null;
-  if (suffix) {
-    label = `${label} · ${suffix}`;
-    title = `${title}; H-1B approvals from the company catalog (USCIS)`;
-    if (typeof h1b.denials === "number") {
-      title = `${title}, ${h1b.denials} denial${h1b.denials === 1 ? "" : "s"} in the same period`;
-    }
-  }
+  const chip = sponsorshipChip(sponsorship, h1b);
   return (
-    <span className={`status-badge sponsorship-${status}`} title={title}>
-      {label}
+    <span className={`status-badge sponsorship-${chip.status}${chip.positive ? " h1b-positive" : ""}`} title={chip.title}>
+      {chip.label}
     </span>
   );
 }

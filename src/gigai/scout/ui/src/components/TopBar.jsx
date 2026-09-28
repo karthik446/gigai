@@ -1,17 +1,19 @@
-import { useEffect, useState } from "react";
 import ProfileSwitcher from "./ProfileSwitcher.jsx";
+import ThemeToggle from "./ThemeToggle.jsx";
 import { JOBS_HASH, NAV_VIEWS, SETTINGS_HASH, navViewFor, routeFor } from "../routing.js";
 
 // Q4a-nav: the one persistent top bar every page shows.
 //
-//   Scout | Jobs | Questions (N) | Applications | Runs | <profile ▾> | ⚙
+//   Scout | Jobs | Questions (N) | Applications | Runs | Dark mode | <profile ▾> | ⚙
 //
 // Every link is a plain <a href="#/…"> from routing.js's ROUTES (the single
 // route table), so back/forward work. The Questions badge is
 // usePendingQuestions' count (GET /api/assessments?verdict=pending_user_answers
-// minus GET /api/answers), never a client-side guess. Below 640px the links
-// collapse behind a "Menu" button (the profile switcher and the gear move
-// into the same sheet); the sheet closes on any navigation.
+// minus GET /api/answers), never a client-side guess.
+//
+// uat-batch1 (N1/N2): desktop only (a 13in+ laptop, operator decision
+// 2026-09-27), so the "Menu" button and its sheet are gone: one flex row.
+// The light/dark toggle sits on the right (ThemeToggle.jsx).
 function GearIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -22,15 +24,7 @@ function GearIcon() {
 }
 
 export default function TopBar({ currentView, questionsCount, profiles, selectedProfileId, onSelectProfile, profilesLoading, profilesError }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const activeNav = navViewFor(currentView);
-
-  // Any navigation (a link in the sheet, back/forward) closes the sheet.
-  useEffect(() => {
-    const close = () => setMenuOpen(false);
-    window.addEventListener("hashchange", close);
-    return () => window.removeEventListener("hashchange", close);
-  }, []);
 
   const links = NAV_VIEWS.map((view) => {
     const route = routeFor(view);
@@ -73,12 +67,11 @@ export default function TopBar({ currentView, questionsCount, profiles, selected
       data-nav="settings"
     >
       <GearIcon />
-      <span className="gear-label">Settings</span>
     </a>
   );
 
   return (
-    <header className="top-bar" data-menu-open={menuOpen ? "true" : "false"}>
+    <header className="top-bar">
       <div className="top-bar-row">
         <a href={JOBS_HASH} className="brand" aria-label="Scout home">
           Scout
@@ -87,29 +80,11 @@ export default function TopBar({ currentView, questionsCount, profiles, selected
           {links}
         </nav>
         <div className="top-right">
+          <ThemeToggle />
           {switcher}
           {gear}
         </div>
-        <button
-          type="button"
-          className="menu-toggle"
-          aria-expanded={menuOpen}
-          aria-controls="top-menu-sheet"
-          onClick={() => setMenuOpen((open) => !open)}
-        >
-          {menuOpen ? "Close" : "Menu"}
-          {!menuOpen && questionsCount > 0 && <span className="nav-badge">{questionsCount}</span>}
-        </button>
       </div>
-      {menuOpen && (
-        <div className="menu-sheet" id="top-menu-sheet">
-          <nav className="menu-links" aria-label="Main views (menu)">
-            {links}
-            {gear}
-          </nav>
-          <div className="menu-profile">{switcher}</div>
-        </div>
-      )}
     </header>
   );
 }

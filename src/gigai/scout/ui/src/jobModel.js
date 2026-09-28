@@ -21,7 +21,7 @@
 //   rows[].h1b          {approvals, fiscal_years}        -> h1bLabel, the
 //                       sponsorship chip's suffix when the posting is silent
 //                       (carried on the job as `job.h1b`, from boardRows)
-import { displayCompanyName, notAssessedReasonLabel } from "./display.js";
+import { displayCompanyName, notAssessedReasonLabel, sponsorshipLabel } from "./display.js";
 
 export const VERDICT_LABELS = {
   matched_above_threshold: "Matched",
@@ -44,25 +44,54 @@ export const VERDICT_ORDER = {
 };
 
 // RankScore.reasons / mismatch_flags are category ids (jev_contracts.py),
-// never prose; this is the plain-words table the mockup used for them.
+// never prose. uat-batch1 (O1): every id the Jev client can emit
+// (jev_client.py: _REASON_CRITERIA's keys for `reasons`, _MISMATCH_FLAGS
+// for `mismatch_flags`) has its words here; an id this table does not know
+// is humanized ("some_new_id" -> "Some new id"), never shown raw.
 export const JEV_REASON_TEXT = {
-  domain_match: "same technical domain",
-  seniority_match: "same level",
-  stack_match: "stack overlaps",
-  domain_mismatch: "different technical domain",
-  seniority_mismatch: "different level (junior/manager)",
-  location_mismatch: "location outside preferences",
+  title_match: "Title matches",
+  stack_match: "Stack matches",
+  seniority_match: "Level matches",
+  domain_match: "Domain matches",
+  domain_mismatch: "Different domain",
+  seniority_mismatch: "Different level",
+  location_mismatch: "Location outside your preferences",
+};
+
+export const JEV_FLAG_TEXT = {
+  domain: "Domain differs",
+  seniority: "Level differs",
+  stack: "Stack differs",
+  location: "Location differs",
+  sponsorship: "Sponsorship differs",
 };
 
 export const MODE_LABELS = { remote: "Remote", hybrid: "Hybrid", onsite: "On-site", on_site: "On-site" };
 
-export const CLASS_LABELS = { hard: "hard", askable: "askable", nice_to_have: "nice-to-have" };
+// uat-batch1 (N8): the requirement class and status in the operator's
+// words. The old one-word labels stay for the "badge" rendering (the
+// option the operator saw in UAT), kept for the side-by-side only.
+export const CLASS_LABELS = { hard: "Must-have", askable: "Can ask", nice_to_have: "Bonus" };
+export const CLASS_LABELS_SHORT = { hard: "hard", askable: "askable", nice_to_have: "nice-to-have" };
+export const STATUS_LABELS = { met: "Met", unmet: "Not met", unclear: "Unclear", partial: "Partial", gap: "Gap" };
 
 const CLASS_RANK = { hard: 0, askable: 1, nice_to_have: 2 };
 const STATUS_RANK = { unmet: 0, unclear: 1, met: 2 };
 
+export function humanizeId(id) {
+  const words = String(id === null || id === undefined ? "" : id)
+    .replace(/[_:\-.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
+}
+
 export function jevReasonText(id) {
-  return JEV_REASON_TEXT[id] || id;
+  return JEV_REASON_TEXT[id] || humanizeId(id);
+}
+
+export function jevFlagText(id) {
+  return JEV_FLAG_TEXT[id] || `${humanizeId(id)} differs`;
 }
 
 export function jevReasonsLine(rank) {
@@ -70,8 +99,71 @@ export function jevReasonsLine(rank) {
     return "";
   }
   const reasons = (rank.reasons || []).map(jevReasonText);
-  const flags = (rank.mismatch_flags || []).map((flag) => `flag: ${jevReasonText(flag)}`);
-  return reasons.concat(flags).join(" · ");
+  const flags = (rank.mismatch_flags || []).map(jevFlagText);
+  return reasons.concat(flags).filter(Boolean).join(" · ");
+}
+
+export function classLabel(requirementClass) {
+  return requirementClass ? CLASS_LABELS[requirementClass] || humanizeId(requirementClass) : "";
+}
+
+export function statusLabel(status) {
+  return STATUS_LABELS[status] || humanizeId(status);
+}
+
+// "Must-have: Met"; a row the prompt gave no class reads "Met".
+export function requirementStatusLabel(row) {
+  const name = classLabel(row && row.class);
+  const status = statusLabel(row && row.status);
+  return name ? `${name}: ${status}` : status;
+}
+
+// N8: the three renderings of the requirement table's status. "keyvalue"
+// ships; `?status=columns` / `?status=badge` in the address (before the #)
+// shows the others, for the operator's pick.
+export const STATUS_STYLES = ["keyvalue", "columns", "badge"];
+export const DEFAULT_STATUS_STYLE = "keyvalue";
+
+export function statusStyleFrom(search) {
+  const match = /[?&]status=([a-z]+)/.exec(typeof search === "string" ? search : "");
+  return match && STATUS_STYLES.includes(match[1]) ? match[1] : DEFAULT_STATUS_STYLE;
+}
+
+// uat-batch1 (N4): the job page shows a short excerpt of the posting, the
+// first paragraph or so; the rest is one click away (Open posting).
+// Paragraphs are taken whole until the excerpt reaches `target` characters;
+// past `limit` it is cut at the last sentence end (or word) before it.
+export function jdExcerpt(text, { target = 280, limit = 600 } = {}) {
+  if (typeof text !== "string") {
+    return null;
+  }
+  const paragraphs = text
+    .replace(/\r\n?/g, "\n")
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  if (paragraphs.length === 0) {
+    return null;
+  }
+  let excerpt = "";
+  let used = 0;
+  for (const paragraph of paragraphs) {
+    excerpt = excerpt ? `${excerpt}\n\n${paragraph}` : paragraph;
+    used += 1;
+    if (excerpt.length >= target) {
+      break;
+    }
+  }
+  let truncated = used < paragraphs.length;
+  if (excerpt.length > limit) {
+    const head = excerpt.slice(0, limit);
+    const sentence = Math.max(head.lastIndexOf(". "), head.lastIndexOf("! "), head.lastIndexOf("? "), head.lastIndexOf(".\n"));
+    const word = head.lastIndexOf(" ");
+    const cut = sentence >= limit / 2 ? sentence + 1 : word > 0 ? word : limit;
+    excerpt = `${head.slice(0, cut).trimEnd()} …`;
+    truncated = true;
+  }
+  return { text: excerpt, truncated };
 }
 
 // --- labels for dates / pay ---------------------------------------------------------
@@ -145,8 +237,8 @@ const PERIOD_LABELS = { year: "yr", month: "mo", week: "wk", day: "day", hour: "
 // "9 H-1B approvals (FY2026)" from rows[].h1b {approvals, fiscal_years}
 // (USCIS approvals, never "filings" -- coordinator msg_0f0cf5a89665); null
 // unless `approvals` is a positive number, so no record and zero approvals
-// both leave the chip a plain "Unknown". Several fiscal years read
-// "FY2024–2026"; none reads without the parenthesis.
+// both leave the chip a plain "Sponsorship not stated". Several fiscal
+// years read "FY2024–2026"; none reads without the parenthesis.
 export function h1bLabel(h1b) {
   if (!h1b || typeof h1b !== "object" || typeof h1b.approvals !== "number" || h1b.approvals <= 0) {
     return null;
@@ -158,6 +250,26 @@ export function h1bLabel(h1b) {
   }
   const span = years.length === 1 ? `FY${years[0]}` : `FY${years[0]}–${years[years.length - 1]}`;
   return `${count} (${span})`;
+}
+
+// The sponsorship chip's words (SponsorshipBadge renders them): the
+// posting's own statement, or "Sponsorship not stated" plus the company's
+// H-1B approvals when the posting is silent. `positive` (the chip's green
+// tone) is true only for a silent posting whose company has approvals.
+export function sponsorshipChip(sponsorship, h1b) {
+  const status = sponsorship || "unknown";
+  const silent = status === "unknown";
+  const approvals = silent ? h1bLabel(h1b) : null;
+  let label = sponsorshipLabel(status);
+  let title = silent ? "The posting does not mention sponsorship" : "Stated in the posting";
+  if (approvals) {
+    label = `${label} · ${approvals}`;
+    title = `${title}; H-1B approvals from the company catalog (USCIS)`;
+    if (typeof h1b.denials === "number") {
+      title = `${title}, ${h1b.denials} denial${h1b.denials === 1 ? "" : "s"} in the same period`;
+    }
+  }
+  return { status, label, title, positive: Boolean(approvals) };
 }
 
 export function workModeLabel(posting) {

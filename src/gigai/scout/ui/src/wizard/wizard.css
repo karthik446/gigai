@@ -2,14 +2,15 @@
    collides with styles.css (P9a's) or the existing components. Tokens the
    app stylesheet already defines (--panel, --border, --muted, --accent,
    --accent-contrast, --ok, --ok-bg, --warn, --warn-bg, --danger,
-   --danger-bg) are reused; the two the mockup adds are defined here. */
+   --danger-bg) are reused; the two the mockup adds follow the app's theme
+   tokens (uat-batch1 N2: light and dark). */
 
 .setup-wizard {
-  --wz-chip-bg: #eef0f4;
-  --wz-step-inactive: #d9dbe0;
+  --wz-chip-bg: var(--chip-bg);
+  --wz-step-inactive: var(--step-inactive);
 }
 
-/* Step indicator (mockup: 4 dots, labels hidden under 480px). */
+/* Step indicator (mockup: 4 dots). */
 .setup-wizard .wz-steps {
   display: flex;
   align-items: center;
@@ -63,12 +64,6 @@
 .setup-wizard .wz-step-line.done {
   background: var(--ok);
 }
-@media (max-width: 480px) {
-  .setup-wizard .wz-step-label {
-    display: none;
-  }
-}
-
 .setup-wizard h3 {
   font-size: 0.95rem;
   margin: 16px 0 8px;

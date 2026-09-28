@@ -1,63 +1,56 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, getAnswers, getApplications, postApplication, postAssess } from "../api.js";
 import AssessmentBody from "../components/AssessmentBody.jsx";
+import RequirementActions from "../components/RequirementActions.jsx";
 import JevBadge from "../components/JevBadge.jsx";
 import VerdictChip from "../components/VerdictChip.jsx";
 import SponsorshipBadge from "../components/SponsorshipBadge.jsx";
 import ProviderBadge from "../components/ProviderBadge.jsx";
 import QuickAssessChip from "../components/QuickAssessChip.jsx";
 import PrepPanel from "../components/PrepPanel.jsx";
-import TailoredResumePanel from "../components/TailoredResumePanel.jsx";
+import TailoredResumePanel, { useTailoredResume } from "../components/TailoredResumePanel.jsx";
+import { useAnswerDrafts } from "../answerDrafts.js";
+import { reassessGate, tailorGate } from "../answersModel.js";
 import { displayCompanyName, notAssessedReasonDetail, unchangedSinceLabel } from "../display.js";
-import {
-  VERDICT_LABELS,
-  ageLabel,
-  dateLabel,
-  dateTimeLabel,
-  jevReasonsLine,
-  notAssessedLine,
-  payLabel,
-  questionPromptIndex,
-  triggerLabel,
-  triggerQuestionId,
-  verdictHistoryFor,
-  workModeLabel,
-} from "../jobModel.js";
-import Breadcrumb from "../components/Breadcrumb.jsx";
+import { ageLabel, dateLabel, jdExcerpt, jevReasonsLine, notAssessedLine, payLabel, questionPromptIndex, statusStyleFrom, workModeLabel } from "../jobModel.js";
 import { JOBS_HASH } from "../routing.js";
 
 // Q4a: one posting's job page (#/jobs/<normalized_url>), per
 // mockups/cards-and-job-page.html with the operator amendment: the
-// requirement table is the SAME AssessmentBody the Quick assess and Pending
-// answers views render (Requirement | Resume evidence | Status), with the
-// class label and the unclear/unmet-first sort added there for every page,
-// and the questions block directly under it.
+// requirement table is the SAME AssessmentBody the Pending answers view
+// renders (Requirement | Resume evidence | Status), unclear/unmet rows first.
+//
+// uat-batch1 (operator UAT 2026-09-27: "great start, excellent details, but
+// too much info"): ONE full-width column.
+//   N3  a plain "← Jobs" link at the top (the breadcrumb is gone here)
+//   N4  a short excerpt of the posting, no expander: "Open posting" has
+//       the rest
+//   N5  each open question sits in the requirement row it settles; ONE
+//       "Re-assess" at the top of Requirements saves every filled box
+//       (answerDrafts.js) and re-assesses once
+//   N6  no right-hand column: the verdict history and the tailored-resume
+//       explainer are gone; "Re-assess" and "Tailor resume" are the two
+//       actions at the top of Requirements, and the tailored-resume panel
+//       opens under Requirements
+//   N7  both actions are gated (answersModel.js) and say why when off
 //
 // Data, all from existing routes:
 //   header/JD   the run's posting row (GET /api/runs/{id}/results ->
 //               rows[].posting; `text` is present when acquire fetched it)
 //   assessment  jobModel's latest-of(run's own, quick store) -- see buildJobs
-//   questions   POST /api/answers {question_id, answer, reassess:{job_identity}}
-//               -> `reassessed` (a full AssessResponse incl. history) replaces
-//               the quick item in place (onQuickUpdated), so verdict, table,
-//               questions and history all update without a reload. A posting
-//               assessed only by the run is not in the quick store yet, so
-//               that reassess 404s (reassess_not_found): the first answer
-//               then falls back to POST /api/assess {job_url} (AssessmentBody's
-//               onReassessUnavailable), after which the store entry exists
+//   answers     POST /api/answers {question_id, answer, reassess}; the
+//               `reassessed` AssessResponse replaces the quick item in place
+//               (onQuickUpdated), so the verdict, the table and its
+//               questions update without a reload. GET /api/answers fills
+//               the box of a question already answered for another posting
+//               (the prompt decides what it means, operator answer 5 --
+//               nothing here maps an answer to a status)
 //   assess      POST /api/assess {job:{job_url}} for a not-assessed row
 //   applied     GET/POST /api/applications (external_ref = normalized_url)
-//   answers     GET /api/answers: an already-recorded answer pre-fills its
-//               question's box (the prompt decides what it means, operator
-//               answer 5 -- nothing here maps an answer to a status)
-//   history     jobModel.verdictHistoryFor: the run's own entry + the quick
-//               store's history[] (Q4a's one backend addition)
+//   tailored    GET/POST /api/tailored-resumes (Q3), see TailoredResumePanel
 //
 // Q4b: work_mode / pay (posting) and h1b (the row, via job.h1b) render only
-// when present -- no placeholder chips (operator answer 3); the
-// tailored-resume panel (Q3's /api/tailored-resumes) sits in the right
-// column below the history: GET the latest stored one for this profile +
-// job on load, POST {job:{job_url}, resume:{profile_id}} on "Tailor resume".
+// when present -- no placeholder chips (operator answer 3).
 function MarkApplied({ normalizedUrl, applications, onRecorded }) {
   const [state, setState] = useState("idle"); // idle | saving | error
   const [error, setError] = useState(null);
@@ -97,73 +90,34 @@ function MarkApplied({ normalizedUrl, applications, onRecorded }) {
   );
 }
 
+function OpenPosting({ url, children }) {
+  return (
+    <a href={url} target="_blank" rel="noreferrer">
+      {children} ↗
+    </a>
+  );
+}
+
 function JobDescription({ posting }) {
-  const [expanded, setExpanded] = useState(false);
-  if (!posting.text) {
+  const excerpt = jdExcerpt(posting.text);
+  if (!excerpt) {
     return (
       <section className="panel">
         <h3>Job description</h3>
         <p className="muted">
-          The posting text was not captured for this row.{" "}
-          {posting.url && (
-            <a href={posting.url} target="_blank" rel="noreferrer">
-              Open the posting ↗
-            </a>
-          )}
+          The posting text was not captured for this row. {posting.url && <OpenPosting url={posting.url}>Open the posting</OpenPosting>}
         </p>
       </section>
     );
   }
-  const long = posting.text.length > 1200;
   return (
     <section className="panel">
       <h3>Job description</h3>
-      <div className={`jd-box${expanded || !long ? " expanded" : ""}`}>{posting.text}</div>
-      {long && (
-        <button type="button" className="button small secondary jd-toggle" onClick={() => setExpanded((value) => !value)}>
-          {expanded ? "Show less" : "Show full description"}
-        </button>
-      )}
-    </section>
-  );
-}
-
-function VerdictHistory({ job, promptFor }) {
-  const entries = verdictHistoryFor(job);
-  return (
-    <section className="panel">
-      <h3>Verdict history</h3>
-      {entries.length === 0 ? (
-        <p className="muted" style={{ fontSize: "0.85rem" }}>
-          No assessment yet.
+      <p className="jd-excerpt">{excerpt.text}</p>
+      {excerpt.truncated && (
+        <p className="muted jd-more">
+          This is the start of the posting. {posting.url && <OpenPosting url={posting.url}>Open posting for the rest</OpenPosting>}
         </p>
-      ) : (
-        <ul className="history">
-          {entries
-            .slice()
-            .reverse()
-            .map((entry, index) => (
-              <li key={`${entry.at || "unknown"}-${entry.trigger}-${index}`} className={entry.verdict || "no_verdict"}>
-                <div>
-                  <div>
-                    <strong>{entry.verdict ? VERDICT_LABELS[entry.verdict] || entry.verdict : "Assessed"}</strong>{" "}
-                    <span className="h-when" title={entry.at || undefined}>
-                      {dateTimeLabel(entry.at) || "this run"}
-                    </span>
-                  </div>
-                  <div className="h-trigger">
-                    {triggerLabel(entry.trigger, promptFor)}
-                    {triggerQuestionId(entry.trigger) && promptFor(triggerQuestionId(entry.trigger)) && (
-                      <>
-                        {" "}
-                        <code className="question-id">{triggerQuestionId(entry.trigger)}</code>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </li>
-            ))}
-        </ul>
       )}
     </section>
   );
@@ -207,9 +161,18 @@ function AssessNow({ posting, onAssessed }) {
   );
 }
 
+function BackToJobs() {
+  return (
+    <a className="back-link" href={JOBS_HASH}>
+      ← Jobs
+    </a>
+  );
+}
+
 export default function JobPage({ job, jobId, profileId, profileLabel, visaRequired, loading, onQuickUpdated, onApplicationsChanged }) {
   const [answers, setAnswers] = useState([]);
   const [applications, setApplications] = useState([]);
+  const [tailorError, setTailorError] = useState(null);
 
   const reloadApplications = useCallback(() => {
     getApplications()
@@ -228,16 +191,33 @@ export default function JobPage({ job, jobId, profileId, profileLabel, visaRequi
       .then((response) => setAnswers(response.answers || []))
       .catch(() => setAnswers([]));
     reloadApplications();
+    setTailorError(null);
   }, [reloadApplications, jobId]);
 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [jobId]);
 
+  const posting = job ? job.posting : null;
+  const assessment = job ? job.assessment : null;
+  const jobUrl = posting && posting.url ? posting.url : null;
+  const priorAnswers = useMemo(() => new Map(answers.map((answer) => [answer.question_id, answer])), [answers]);
+  const assessByUrl = useCallback(() => postAssess({ job: { job_url: jobUrl } }), [jobUrl]);
+
+  // Hooks run on every render, a missing job included (its state is empty).
+  const answerDrafts = useAnswerDrafts({
+    assessment,
+    jobIdentity: posting ? posting.normalized_url : null,
+    priorAnswers,
+    onAnswered: onQuickUpdated,
+    onReassessUnavailable: jobUrl ? assessByUrl : undefined,
+  });
+  const tailored = useTailoredResume({ jobIdentity: job ? job.id : null, jobUrl, profileId });
+
   if (!job) {
     return (
       <div>
-        <Breadcrumb crumbs={[{ label: "Jobs", href: JOBS_HASH }, { label: loading ? "Loading…" : "Job not found" }]} />
+        <BackToJobs />
         <section className="panel">
           <h2>{loading ? "Loading run…" : "Job not found"}</h2>
           {!loading && (
@@ -250,27 +230,47 @@ export default function JobPage({ job, jobId, profileId, profileLabel, visaRequi
     );
   }
 
-  const { posting, assessment } = job;
   const reasons = jevReasonsLine(job.rank);
   const mode = workModeLabel(posting);
   const pay = payLabel(posting.pay);
-  const priorAnswers = new Map(answers.map((answer) => [answer.question_id, answer]));
-  // A question is shown by its prompt wherever it appears (the history's
-  // "after you answered …", the tailored resume's answer refs); the id is
-  // secondary detail. Prompts come from the recorded answers and the
-  // assessment's own questions.
+  // A question is shown by its prompt wherever it appears (the tailored
+  // resume's answer refs); the id is secondary detail. Prompts come from
+  // the recorded answers and the assessments' own questions.
   const questionPrompts = questionPromptIndex({
     answers,
     assessment,
     assessments: [job.row && job.row.assessment, job.quick && job.quick.result],
   });
-  const promptFor = (id) => questionPrompts.get(id) || null;
 
-  const crumbTitle = [displayCompanyName(posting.company), posting.title].filter(Boolean).join(" · ") || "(untitled posting)";
+  const gate = tailorGate({
+    assessed: Boolean(assessment),
+    verdict: job.verdict,
+    states: answerDrafts.states,
+    hasUrl: Boolean(jobUrl),
+    hasProfile: Boolean(profileId),
+  });
+  // Tailoring reads the RECORDED answers, so an answer typed but not yet
+  // saved is saved first (no re-assessment); a failed save stops here.
+  const handleTailor = () => {
+    setTailorError(null);
+    answerDrafts
+      .saveUnsaved()
+      .then(() => tailored.tailor())
+      .catch((err) => setTailorError(err.message || String(err)));
+  };
+  const tailorAction = {
+    ...gate,
+    enabled: gate.enabled && !tailored.loadingStored,
+    label: tailored.tailoring ? "Tailoring…" : tailored.stored ? "Tailor again" : "Tailor resume",
+    helpName: "Tailor resume",
+    busy: tailored.tailoring,
+    onClick: handleTailor,
+  };
+  const actionsBusy = Boolean(answerDrafts.busy) || tailored.tailoring;
 
   return (
-    <div>
-      <Breadcrumb crumbs={[{ label: "Jobs", href: JOBS_HASH }, { label: crumbTitle }]} />
+    <div className="job-page">
+      <BackToJobs />
 
       <section className="panel">
         <div className="job-header">
@@ -325,44 +325,35 @@ export default function JobPage({ job, jobId, profileId, profileLabel, visaRequi
         </div>
       </section>
 
-      <div className="two-col">
-        <div>
-          <JobDescription posting={posting} />
-          <section className="panel">
-            <h3>Requirements</h3>
-            {assessment ? (
-              <>
-                {job.assessmentSource === "run" && job.quick === null && job.status !== "carried_forward" && (
-                  <p className="muted" style={{ fontSize: "0.82rem", margin: "0 0 8px" }}>
-                    From this run's assessment. Answering a question re-assesses this posting with all your answers.
-                  </p>
-                )}
-                <AssessmentBody
-                  assessment={assessment}
-                  jobIdentity={posting.normalized_url}
-                  onAnswered={onQuickUpdated}
-                  priorAnswers={priorAnswers}
-                  onReassessUnavailable={posting.url ? () => postAssess({ job: { job_url: posting.url } }) : undefined}
-                />
-              </>
-            ) : (
-              <p className="muted">Not assessed yet. The requirement table and questions appear once the posting is assessed.</p>
-            )}
-          </section>
-          {assessment && posting.url && <PrepPanel postingUrl={posting.url} profileId={profileId} />}
-        </div>
-        <div>
-          <VerdictHistory job={job} promptFor={promptFor} />
-          <TailoredResumePanel
-            jobIdentity={job.id}
-            jobUrl={posting.url || null}
-            profileId={profileId}
-            profileLabel={profileLabel}
-            company={displayCompanyName(posting.company)}
-            questionPrompts={questionPrompts}
+      <JobDescription posting={posting} />
+
+      <section className="panel">
+        <h3>Requirements</h3>
+        {assessment ? (
+          <AssessmentBody
+            assessment={assessment}
+            jobIdentity={posting.normalized_url}
+            controller={answerDrafts}
+            tailor={tailorAction}
+            showVerdict={false}
+            statusStyle={statusStyleFrom(window.location.search)}
           />
-        </div>
-      </div>
+        ) : (
+          <>
+            <RequirementActions
+              reassess={{ ...reassessGate({ assessed: false, states: [] }), label: "Re-assess", onClick: () => {} }}
+              tailor={tailorAction}
+              busy={actionsBusy}
+            />
+            <p className="muted">Not assessed yet. The requirement table and its questions appear once the posting is assessed.</p>
+          </>
+        )}
+        {tailorError && <div className="field-error">Could not save your answers before tailoring: {tailorError}</div>}
+      </section>
+
+      <TailoredResumePanel state={tailored} profileLabel={profileLabel} questionPrompts={questionPrompts} />
+
+      {assessment && posting.url && <PrepPanel postingUrl={posting.url} profileId={profileId} />}
     </div>
   );
 }

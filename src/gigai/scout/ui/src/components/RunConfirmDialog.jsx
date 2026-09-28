@@ -1,6 +1,30 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getWatchlist } from "./AddCompanyForm.jsx";
+import { companyBoardsLine, sourceLabel, watchlistSummary } from "../runText.js";
 
 const MODEL_TARGETS = ["ollama_local", "codex_cli", "openrouter_api"];
+
+// uat-batch1 (N12): the dialog names what a run reads in plain words, and
+// says how many company boards are on the watchlist and how many of them
+// came from the company catalog. The count is GET /api/watchlist's own
+// entry list (the route the "Add company" form already reads), fetched when
+// the dialog opens; nothing is added to the API for it.
+function useWatchlistSummary(enabled) {
+  const [state, setState] = useState({ summary: null, failed: false });
+  useEffect(() => {
+    if (!enabled) {
+      return undefined;
+    }
+    let current = true;
+    getWatchlist()
+      .then((response) => current && setState({ summary: watchlistSummary(response.entries), failed: false }))
+      .catch(() => current && setState({ summary: null, failed: true }));
+    return () => {
+      current = false;
+    };
+  }, [enabled]);
+  return state;
+}
 
 export default function RunConfirmDialog({ config, onConfirm, onCancel, submitting, error }) {
   const [selectionCap, setSelectionCap] = useState(config.default_assess_cap);
@@ -9,6 +33,8 @@ export default function RunConfirmDialog({ config, onConfirm, onCancel, submitti
   const activeSources = Object.entries(config.sources)
     .filter(([, enabled]) => enabled)
     .map(([name]) => name);
+  const atsEnabled = Boolean(config.sources.ats);
+  const watchlist = useWatchlistSummary(atsEnabled);
 
   function handleCapChange(event) {
     const value = Number(event.target.value);
@@ -23,13 +49,16 @@ export default function RunConfirmDialog({ config, onConfirm, onCancel, submitti
   const isHosted = modelTarget !== "ollama_local";
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="run-confirm-title">
       <div className="modal">
-        <h2>Confirm run workflow</h2>
+        <h2 id="run-confirm-title">Confirm run workflow</h2>
         <p>This will do exactly the following:</p>
         <ul>
           <li>
-            <strong>Sources:</strong> {activeSources.length ? activeSources.join(", ") : "none"}
+            <strong>Sources:</strong> {activeSources.length ? activeSources.map(sourceLabel).join("; ") : "none"}
+          </li>
+          <li data-role="company-boards">
+            <strong>Company boards:</strong> {companyBoardsLine({ atsEnabled, summary: watchlist.summary, failed: watchlist.failed })}
           </li>
           <li>
             <strong>Queries:</strong> {config.merged_queries.join(", ")}

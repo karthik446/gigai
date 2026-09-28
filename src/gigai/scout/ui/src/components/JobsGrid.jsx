@@ -22,7 +22,7 @@ const SPONSORSHIP_OPTIONS = [
   ["all", "All"],
   ["offered", "Sponsors visas"],
   ["not_offered", "No sponsorship"],
-  ["unknown", "Unknown"],
+  ["unknown", "Not stated"],
 ];
 const ASSESSED_OPTIONS = [
   ["all", "All"],

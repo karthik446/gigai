@@ -26,6 +26,11 @@ import { jobHash } from "../routing.js";
 // when Jev never scored it). Operator answer 3: work-mode/pay chips only
 // when the posting lists them (Q4b fields: posting.work_mode, posting.pay;
 // rows[].h1b goes on the sponsorship chip) -- no "not listed" chips.
+//
+// uat-batch1 (O1/O2): Jev's reasons read as words (jobModel.jevReasonsLine,
+// never the raw ids); the card is tighter -- the age joins the mode/pay
+// line instead of a row of its own, the title clamps to two lines -- and
+// every card in the grid has the same height (styles.css .card-grid).
 function RequirementSummary({ assessment }) {
   const { shown, more } = requirementSummary(assessment);
   if (shown.length === 0) {
@@ -72,27 +77,24 @@ export default function JobCard({ job, visaRequired }) {
   const dimmed = job.verdict === "not_a_match" || (job.rank && job.rank.fit === "no");
   const mode = workModeLabel(posting);
   const pay = payLabel(posting.pay);
+  const companyLine = [displayCompanyName(posting.company), posting.location].filter(Boolean).join(" · ");
 
   return (
     <a className={`job-card${dimmed ? " dimmed" : ""}`} href={jobHash(job.id)} data-job-id={job.id}>
       <div className="card-top">
         <div style={{ minWidth: 0 }}>
-          <div className="card-title">{posting.title || "(untitled posting)"}</div>
-          <div className="card-company">
-            <span>{displayCompanyName(posting.company)}</span>
-            {posting.location && (
-              <>
-                <span>·</span>
-                <span>{posting.location}</span>
-              </>
-            )}
-            {job.status === "on_demand" ? <QuickAssessChip fetchKind={job.quick && job.quick.job && job.quick.job.fetch_kind} /> : <ProviderBadge posting={posting} />}
+          <div className="card-title" title={posting.title || undefined}>
+            {posting.title || "(untitled posting)"}
+          </div>
+          <div className="card-company" title={companyLine}>
+            {companyLine}
           </div>
         </div>
         <JevBadge rank={job.rank} />
       </div>
 
-      <div className="card-chips">
+      <div className="card-meta">
+        {job.status === "on_demand" ? <QuickAssessChip fetchKind={job.quick && job.quick.job && job.quick.job.fetch_kind} /> : <ProviderBadge posting={posting} />}
         {mode && <span className="mode-chip">{mode}</span>}
         {pay && <span className="pay">{pay}</span>}
         <span className="card-age" title={posting.published_at || undefined}>

@@ -3,7 +3,7 @@ import { ApiError, getTailoredResumes, postTailoredResume } from "../api.js";
 import { dateTimeLabel } from "../jobModel.js";
 import { downloadName, latestStored, previewLines, previewStats, sourcesHover, sourceLabel, statsLine } from "../tailoredResumeModel.js";
 
-// Q4b-ui (v0.1.9): the tailored-resume panel on the job page's right column
+// Q4b-ui (v0.1.9): the tailored-resume panel on the job page
 // (mockups/cards-and-job-page.html, "Tailored resume"), over Q3's routes:
 //
 //   load     GET /api/tailored-resumes?profile_id=<selected>&job_identity=<job>
@@ -17,9 +17,16 @@ import { downloadName, latestStored, previewLines, previewStats, sourcesHover, s
 //            answer text) on hover and on click. Nothing is fabricated here.
 //   download a client-side Blob of the response's `markdown` verbatim
 //
+// uat-batch1 (N6): the right-hand column is gone, and with it this panel's
+// own button and explainer. "Tailor resume" is one of the two actions at
+// the top of Requirements (RequirementActions.jsx); the state both share is
+// useTailoredResume() below, and the panel renders under Requirements only
+// once there is something to show (a stored resume, a run in progress, an
+// error).
+//
 // A posting without a URL (a pasted-text quick assessment: the store never
-// serializes the text) cannot be tailored from here; a stored one for it
-// still shows.
+// serializes the text) cannot be tailored from here (answersModel.tailorGate
+// says so on the action); a stored one for it still shows.
 function saveMarkdown(response) {
   const blob = new Blob([response.markdown], { type: "text/markdown" });
   const url = URL.createObjectURL(blob);
@@ -154,8 +161,8 @@ function Preview({ response, profileLabel, promptFor }) {
   );
 }
 
-export default function TailoredResumePanel({ jobIdentity, jobUrl, profileId, profileLabel, company, questionPrompts }) {
-  const promptFor = (id) => (questionPrompts && questionPrompts.get(id)) || null;
+// The panel's state, shared with the "Tailor resume" action.
+export function useTailoredResume({ jobIdentity, jobUrl, profileId }) {
   const [stored, setStored] = useState(null);
   const [loadingStored, setLoadingStored] = useState(true);
   const [tailoring, setTailoring] = useState(false);
@@ -167,6 +174,7 @@ export default function TailoredResumePanel({ jobIdentity, jobUrl, profileId, pr
     const key = ++requestKey.current;
     setStored(null);
     setError(null);
+    setTailoring(false);
     setLoadingStored(true);
     if (!jobIdentity || !profileId) {
       setLoadingStored(false);
@@ -199,7 +207,7 @@ export default function TailoredResumePanel({ jobIdentity, jobUrl, profileId, pr
     return () => clearInterval(timer);
   }, [tailoring]);
 
-  const tailor = () => {
+  const tailor = useCallback(() => {
     if (!jobUrl || !profileId) {
       return;
     }
@@ -221,30 +229,32 @@ export default function TailoredResumePanel({ jobIdentity, jobUrl, profileId, pr
         setTailoring(false);
         setError(err instanceof ApiError ? err : { message: err.message || String(err) });
       });
-  };
+  }, [jobUrl, profileId]);
 
-  const canTailor = Boolean(jobUrl && profileId);
-  const buttonLabel = tailoring ? "Tailoring…" : stored ? "Tailor again" : `Tailor resume${company ? ` for ${company}` : ""}`;
+  return { stored, loadingStored, tailoring, elapsed, error, tailor, visible: Boolean(stored || tailoring || error) };
+}
+
+export default function TailoredResumePanel({ state, profileLabel, questionPrompts }) {
+  const promptFor = (id) => (questionPrompts && questionPrompts.get(id)) || null;
+  const { stored, tailoring, elapsed, error } = state;
+  const panel = useRef(null);
+
+  // The action sits above the requirement table; bring the panel it opens
+  // into view when a run starts.
+  useEffect(() => {
+    if (tailoring && panel.current && typeof panel.current.scrollIntoView === "function") {
+      panel.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [tailoring]);
+
+  if (!state.visible) {
+    return null;
+  }
 
   return (
-    <section className="panel tailored-resume" data-state={tailoring ? "tailoring" : stored ? "stored" : "idle"}>
-      <h3>Tailored resume</h3>
-      {!stored && !tailoring && (
-        <p className="muted" style={{ fontSize: "0.85rem", margin: "0 0 10px" }}>
-          Builds a markdown resume for this posting from your pinned resume and your recorded answers. Header, section and role headings
-          are copied verbatim; only the summary and bullets are rewritten, and every line shows its sources.
-        </p>
-      )}
+    <section className="panel tailored-resume" ref={panel} data-state={tailoring ? "tailoring" : stored ? "stored" : "idle"}>
       <div className="resume-toolbar">
-        {canTailor ? (
-          <button type="button" className="button small" disabled={tailoring || loadingStored} onClick={tailor}>
-            {buttonLabel}
-          </button>
-        ) : (
-          <span className="muted" style={{ fontSize: "0.82rem" }}>
-            This posting has no stored URL or text, so it cannot be tailored from here.
-          </span>
-        )}
+        <h3>Tailored resume</h3>
         {stored && !tailoring && (
           <button type="button" className="button small secondary" onClick={() => saveMarkdown(stored)}>
             Download .md
@@ -262,11 +272,6 @@ export default function TailoredResumePanel({ jobIdentity, jobUrl, profileId, pr
           <strong>{errorView(error).heading}.</strong> {errorView(error).body}
           {errorView(error).hint && <div className="muted" style={{ marginTop: 4, fontSize: "0.82rem" }}>{errorView(error).hint}</div>}
         </div>
-      )}
-      {loadingStored && !stored && (
-        <p className="muted" style={{ fontSize: "0.82rem", margin: 0 }}>
-          Checking for a stored tailored resume…
-        </p>
       )}
       {stored && <Preview key={stored.updated_at || stored.stored_path} response={stored} profileLabel={profileLabel} promptFor={promptFor} />}
     </section>
