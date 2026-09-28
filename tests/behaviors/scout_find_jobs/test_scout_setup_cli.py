@@ -348,7 +348,7 @@ def test_scout_resume_add_installs_scout_when_not_yet_installed(tmp_path: Path, 
     assert second_payload["record_created"] is False
 
 
-def test_scout_commands_resolve_a_bound_non_git_target_from_cwd(
+def test_scout_commands_from_a_bound_non_git_cwd_use_home_scout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``install``/``resume add``/``run``/``status``/``stop`` all work with no
@@ -358,6 +358,8 @@ def test_scout_commands_resolve_a_bound_non_git_target_from_cwd(
     --target . -> resume add -> run --no-browser -> status -> stop, entirely
     from inside the target directory (and, for `status`, a subfolder of it).
     """
+
+    # uat-bug-017: was "the bound cwd is the target"; every command now acts on <home>/scout.
 
     home, target = _setup_and_init(tmp_path, git=False)
     runner = CliRunner()
@@ -383,7 +385,8 @@ def test_scout_commands_resolve_a_bound_non_git_target_from_cwd(
     assert resume_payload["reference_created"] is True
 
     # Disable every live source so `run` never makes a network call.
-    config_path = target / "find-jobs.json"
+    assert not (target / "find-jobs.json").exists()
+    config_path = home / "scout" / "find-jobs.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
     config["sources"] = {"exa": False, "ats": False, "hiringcafe": False}
     config_path.write_text(json.dumps(config), encoding="utf-8")
@@ -397,7 +400,7 @@ def test_scout_commands_resolve_a_bound_non_git_target_from_cwd(
     assert run_payload["ok"] is True
 
     try:
-        # `status` from a subfolder of the target must resolve the same binding.
+        # `status` from a subfolder of the target must reach the same instance.
         subfolder = target / "nested"
         subfolder.mkdir()
         monkeypatch.chdir(subfolder)
@@ -416,10 +419,8 @@ def test_scout_install_from_an_unbound_non_git_cwd_creates_home_scout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """uat-bug-002: a non-Git cwd that was never `gigai init --target`-ed no
-    longer demands --target -- it falls through to creating and binding
-    `<home>/scout` (there's no *Scout* project registered yet: `_target` was
-    only `gigai init`-ed, never `scout install`-ed, so it doesn't count as an
-    existing Scout project either -- see the "exactly one" test below).
+    longer demands --target -- it creates and binds `<home>/scout`
+    (uat-bug-017: as it does from every cwd).
     """
 
     home, _target = _setup_and_init(tmp_path, git=False)

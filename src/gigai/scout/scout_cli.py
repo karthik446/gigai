@@ -41,14 +41,16 @@ def _resolved_target(
 ) -> Path:
     """Resolve the folder a Scout command should act on.
 
-    Delegates to the shared resolver (``--target`` -> a registered cwd
-    binding -> the one existing Scout project -> create ``<home>/scout``) so
-    every ``gigai scout ...`` command shares one resolution order instead of
+    Delegates to the shared resolver (``--target``, else ``<home>/scout``,
+    created when missing; the cwd never matters, uat-bug-017) so every
+    ``gigai scout ...`` command shares one resolution order instead of
     each re-deriving it. Unlike the old per-command helper this always
     returns a usable path; a genuinely unresolvable case raises
     ``ScoutTargetError``, which callers catch alongside their other target
     errors. When resolution creates ``<home>/scout``, prints which username
-    was used (plain text only -- ``--json`` output stays parseable).
+    was used, and the first time it sees a Scout project registered
+    elsewhere, a notice naming it (both plain text only -- ``--json`` output
+    stays parseable, and the notice waits for the next plain-text command).
     """
 
     def _announce(created: Path, resolved_username: str) -> None:
@@ -56,11 +58,15 @@ def _resolved_target(
             return
         click.echo(f"No Scout target found; created {created} (owner: {resolved_username}).")
 
+    def _notice(message: str) -> None:
+        click.echo(message, err=True)
+
     return resolve_scout_target(
         home_root=home_root,
         requested_target=target_value,
         requested_username=username,
         on_created=_announce,
+        notify=None if as_json else _notice,
     )
 
 

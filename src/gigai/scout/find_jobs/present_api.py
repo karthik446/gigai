@@ -116,9 +116,13 @@ def main(argv: list[str] | None = None) -> None:
         print("TEST SEAMS ACTIVE: results are fixture data", file=sys.stderr)
 
     from ...setup import default_home_root
+    from ..target_resolution import home_scout_target
 
-    target = Path(args.target).expanduser().resolve(strict=False) if args.target else None
     home_root = Path(args.home).expanduser().resolve(strict=False) if args.home else default_home_root()
+    # uat-bug-017: no --target means <home>/scout, as for every `gigai scout`
+    # command; the folder this was started from never matters.
+    target = Path(args.target) if args.target else home_scout_target(home_root)
+    target = target.expanduser().resolve(strict=False)
     bind = (API_BIND[0], args.port) if args.port is not None else API_BIND
     backend = ScoutFindJobsBackend(home_root=home_root, target=target)
     _run_forever(bind, backend=backend)

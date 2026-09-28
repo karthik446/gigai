@@ -122,13 +122,11 @@ gigai secrets add exa                         # store EXA_API_KEY locally — se
 gigai scout resume add ./resume.txt --json    # import + wrap your resume for find-jobs
 ```
 
-Every `gigai scout ...` command resolves its target in this order: an
-explicit `--target`; the current folder, if it's already a registered
-project; your one existing Scout project, reused from anywhere; otherwise a
-default target is created and bound at `<home>/scout` (`~/.gigai/scout` by
-default) the first time you run a Scout command. If more than one Scout
-project is ever registered, Scout commands ask you to pick one with
-`--target` instead of guessing.
+Scout always lives in `<home>/scout` (`~/.gigai/scout` by default): every
+`gigai scout ...` command uses it, whichever folder you run the command from,
+and creates it the first time. `--target <dir>` is the only way to use another
+folder. A Scout project you set up somewhere else with an earlier version is
+left untouched; Scout names it once and you open it with `--target <dir>`.
 
 `gigai scout install` writes a starter `<target_root>/find-jobs.json` the
 first time it runs (never overwrites an existing one). Edit it before
