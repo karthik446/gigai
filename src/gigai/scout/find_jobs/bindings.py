@@ -41,7 +41,7 @@ from .contracts import (
     NotAssessedRow,
     PresentInput,
 )
-from .market_acquisition import acquire_node
+from .market_acquisition import BOARDS_FROM_INDEX, acquire_node
 from ..projection import present_node
 from ..proposal_execution import assess_node
 from .watchlist import JournalWatchlistClient, list_active
@@ -844,6 +844,9 @@ def _register_nodes(
         watchlist=watchlist,
         home_root=home,
         target=root,
+        # N11-C: a search reads the company index `gigai scout sources
+        # update` wrote; it never fetches a board itself.
+        boards_from=BOARDS_FROM_INDEX,
     )
     assess = partial(_assess_bound, home_root=home, target=root, config=config)
     present = partial(_present_bound, home_root=home, target=root)

@@ -204,6 +204,25 @@ seen, changed or removed. It is a cache, not a record: it is safe to delete
 board responses already cached under `<home>/cache/scout/ats-boards/`.
 Nothing in it leaves the machine.
 
+**Find jobs reads that store; it does not check the boards itself.** A search
+takes your watchlist companies' stored postings, applies your titles, the
+publication window and the country rule, ranks them and assesses the top
+ones, with no board request, so it takes seconds, not minutes. Run **Update
+sources** first, and again whenever you want fresh postings:
+
+- nothing stored yet: the search says `Run Update sources` instead of
+  fetching;
+- the last update is more than a day old: the search still uses what is
+  stored and says the postings are out of date.
+
+The one exception: a company Exa discovers during a search that is not in
+the store yet is fetched then and added to the store, so its postings can be
+assessed in that same run. At most 20 such companies are fetched per search.
+The limit counts companies, not requests: one company can take more than one
+request (on Greenhouse, one for the list and one per posting whose title
+matches yours). Companies over the limit wait for the next **Update
+sources**.
+
 If a project has more than one installed, approved Gig, switch which one is
 active with:
 

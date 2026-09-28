@@ -135,7 +135,7 @@ def test_an_update_indexes_every_board_and_prints_the_operator_summary(tmp_path:
     assert result.summary == "3 companies with new postings: 5 new, 0 changed, 0 removed"
     snapshot = result.to_json()
     assert snapshot["update_id"].startswith("sources_update_")
-    assert snapshot["boards"] == {"total": 4, "done": 4, "fetched": 3, "cached": 0, "failed": 1, "skipped": 0}
+    assert snapshot["boards"] == {"total": 4, "done": 4, "checked": 4, "fetched": 3, "cached": 0, "failed": 1, "skipped": 0, "never_checked": 0}
     assert snapshot["companies"] == {"checked": 3, "indexed": 3, "updated": 0, "untouched": 0, "unreadable": 0, "with_new": 3, "with_changes": 3}
     assert snapshot["postings"] == {"new": 5, "changed": 0, "removed": 0, "live": 5}
     assert snapshot["remaining"] == 0 and snapshot["error"] is None
@@ -157,6 +157,13 @@ def test_an_update_indexes_every_board_and_prints_the_operator_summary(tmp_path:
     # The snapshot a status poll reads is the one the update returned.
     assert index.read_update_summary() == {**snapshot, "schema_version": "scout-sources-update:1"}
     assert seen[0]["status"] == "running" and seen[-1] == snapshot
+    # Before anything is asked the whole watchlist is the backlog; the first
+    # board that settles is published at once, so even an update that takes
+    # a second shows a bar that moves.
+    assert seen[0]["boards"]["checked"] == 0 and seen[0]["boards"]["never_checked"] == 4
+    moving = [item for item in seen if item["status"] == "running" and item["boards"]["checked"] >= 1]
+    assert moving, [item["boards"] for item in seen]
+    assert moving[0]["boards"]["checked"] == 1 and moving[0]["remaining"] == 3
     assert (tmp_path / "cache" / "scout" / "ats-boards" / "last-fetched.json").is_file()
 
 
@@ -172,7 +179,7 @@ def test_a_second_update_makes_one_conditional_request_per_board_and_changes_not
     assert result.status == STATUS_SUCCEEDED
     assert result.summary == "0 companies with new postings: 0 new, 0 changed, 0 removed"
     snapshot = result.to_json()
-    assert snapshot["boards"] == {"total": 4, "done": 4, "fetched": 0, "cached": 3, "failed": 1, "skipped": 0}
+    assert snapshot["boards"] == {"total": 4, "done": 4, "checked": 4, "fetched": 0, "cached": 3, "failed": 1, "skipped": 0, "never_checked": 0}
     assert snapshot["companies"]["untouched"] == 3 and snapshot["companies"]["updated"] == 0
     assert snapshot["postings"]["live"] == 5
     assert sorted(boards.requests) == [
@@ -229,6 +236,21 @@ def test_a_deleted_index_is_rebuilt_by_the_next_update_without_refetching_bodies
     assert sorted(index.keys()) == [("greenhouse", "acme"), ("greenhouse", "globex"), ("lever", "initech")]
     acme = index.read("greenhouse", "acme")
     assert acme is not None and acme.postings["11"].content_sha256 == content_hash(b"Software Engineer\nBuild 11.")
+
+
+def test_a_board_that_does_not_answer_was_checked_and_is_asked_once_per_update(tmp_path: Path) -> None:
+    boards = _Boards()
+
+    first = _update(tmp_path, boards).to_json()
+    boards.requests.clear()
+    second = _update(tmp_path, boards).to_json()
+
+    # A dead board is not backlog: it was asked and it rotates like a live
+    # one, one request per update, never more.
+    for snapshot in (first, second):
+        assert snapshot["boards"]["failed"] == 1 and snapshot["boards"]["never_checked"] == 0
+        assert snapshot["remaining"] == 0 and snapshot["status"] == STATUS_SUCCEEDED
+    assert [path for path, _etag in boards.requests].count("/v0/postings/dead") == 1
 
 
 def test_an_update_where_no_board_answers_fails(tmp_path: Path) -> None:
@@ -297,7 +319,9 @@ def test_a_budget_stop_is_partial_and_the_next_update_continues_where_it_stopped
     assert first.status == STATUS_PARTIAL
     assert first_ats.calls == ["b0", "b1", "b2", "b3"]
     snapshot = first.to_json()
-    assert snapshot["boards"] == {"total": 6, "done": 6, "fetched": 4, "cached": 0, "failed": 0, "skipped": 2}
+    # `checked` is what was asked; `done` also counts the two the budget
+    # skipped. Those two have never been asked by anything: the backlog.
+    assert snapshot["boards"] == {"total": 6, "done": 6, "checked": 4, "fetched": 4, "cached": 0, "failed": 0, "skipped": 2, "never_checked": 2}
     assert snapshot["remaining"] == 2
     assert snapshot["rotation"]["first"] == 1 and snapshot["rotation"]["last"] == 4
     assert sorted(slug for _ats, slug in index.keys()) == ["b0", "b1", "b2", "b3"]
@@ -307,6 +331,11 @@ def test_a_budget_stop_is_partial_and_the_next_update_continues_where_it_stopped
 
     # The two boards the budget left behind lead the next update.
     assert second_ats.calls[:2] == ["b4", "b5"]
+    # This update did not reach two OTHER boards (asked last time), so
+    # `remaining` is 2 again while the backlog is gone.
+    assert second.status == STATUS_PARTIAL
+    assert second.to_json()["remaining"] == 2 and second.to_json()["boards"]["never_checked"] == 0
+    assert second.to_json()["boards"]["checked"] == 4
     assert sorted(slug for _ats, slug in index.keys()) == ["b0", "b1", "b2", "b3", "b4", "b5"]
     assert second.to_json()["postings"]["new"] == 2
 
@@ -419,7 +448,7 @@ def test_cli_sources_update_refreshes_the_watchlist_and_prints_the_summary(tmp_p
     payload = json.loads(second.stdout)
     assert payload["status"] == "succeeded"
     assert payload["summary"] == "0 companies with new postings: 0 new, 0 changed, 0 removed"
-    assert payload["boards"] == {"total": 2, "done": 2, "fetched": 0, "cached": 2, "failed": 0, "skipped": 0}
+    assert payload["boards"] == {"total": 2, "done": 2, "checked": 2, "fetched": 0, "cached": 2, "failed": 0, "skipped": 0, "never_checked": 0}
     assert len(boards.requests) == 2
     assert_managed_workpad_clean(_workpad(home, target))
 
@@ -517,7 +546,7 @@ def test_api_update_sources_starts_in_the_background_and_reports_status(running_
     assert finished["schema_version"] == SOURCES_UPDATE_STATUS_SCHEMA
     update = finished["update"]
     assert update["update_id"] == body["update_id"] and update["status"] == "succeeded"
-    assert update["boards"] == {"total": 2, "done": 2, "fetched": 1, "cached": 0, "failed": 1, "skipped": 0}
+    assert update["boards"] == {"total": 2, "done": 2, "checked": 2, "fetched": 1, "cached": 0, "failed": 1, "skipped": 0, "never_checked": 0}
     assert update["summary"] == "1 company with new postings: 2 new, 0 changed, 0 removed"
     assert update["postings"] == {"new": 2, "changed": 0, "removed": 0, "live": 2}
     assert finished["index"]["status"] == "ready" and finished["index"]["needs_update"] is False

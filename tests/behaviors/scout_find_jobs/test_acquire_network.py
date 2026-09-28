@@ -29,7 +29,7 @@ from gigai.scout.find_jobs.contracts import (
     WatchlistFirstSeen,
 )
 from gigai.scout.find_jobs.exa_client import EXA_API_KEY_ENV_VAR, ExaClientError, ExaSearchClient
-from gigai.scout.find_jobs.market_acquisition import AcquireAllSourcesFailedError, acquire_node
+from gigai.scout.find_jobs.market_acquisition import BOARDS_FROM_FETCH, AcquireAllSourcesFailedError, acquire_node
 from gigai.scout.find_jobs.selection import normalize_title
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import initialize_target
@@ -175,7 +175,7 @@ def test_live_exa_auto_adds_watchlist(monkeypatch, tmp_path):
     monkeypatch.setattr("gigai.scout.find_jobs.market_acquisition.import_public_rows", lambda **_: status)
     watchlist = _Watchlist()
     out = acquire_node(_context(tmp_path, "acquire-002"), _input(), http_client=None,
-                       exa=_Exa([row]), ats=_ATS(), watchlist=watchlist)
+                       exa=_Exa([row]), ats=_ATS(), watchlist=watchlist, boards_from=BOARDS_FROM_FETCH)
     assert out.watchlist_refs == ("scout_watchlist:greenhouse:acme",)
     assert watchlist.added[0].first_seen.source_kind.value == "exa"
 
@@ -222,6 +222,7 @@ def test_b5_exa_fails_and_ats_watchlist_is_empty_still_raises(monkeypatch, tmp_p
             exa=_FailingExa(RuntimeError("exa transport exploded")),
             ats=_ATS(),  # returns () for any board -- but the watchlist is
             watchlist=_Watchlist(),  # empty, so list_board is never even called.
+            boards_from=BOARDS_FROM_FETCH,
         )
     assert exc_info.value.code == "acquire_all_sources_failed"
     assert "exa transport exploded" not in str(exc_info.value)
@@ -252,6 +253,7 @@ def test_exa_fails_ats_succeeds_returns_rows_and_failure(monkeypatch, tmp_path):
         exa=_FailingExa(RuntimeError("exa transport exploded")),
         ats=_ATS_ReturningRow(row),
         watchlist=watchlist,
+        boards_from=BOARDS_FROM_FETCH,
     )
     assert out.rows and out.rows[0].posting.normalized_url == row.normalized_url
     assert any(failure.source_kind is SourceKind.EXA for failure in out.failures)
@@ -290,6 +292,7 @@ def test_ats_row_wins_over_exa_row_same_normalized_url(monkeypatch, tmp_path):
     out = acquire_node(
         _context(tmp_path, "acquire-dedupe-1"), _input(config=_config(exa=True, ats=True)),
         http_client=None, exa=_Exa([exa_row]), ats=_ATS_ReturningRow(ats_row), watchlist=watchlist,
+        boards_from=BOARDS_FROM_FETCH,
     )
     assert len(out.rows) == 1
     winner = out.rows[0].posting
@@ -333,6 +336,7 @@ def test_ats_row_wins_over_exa_row_same_job_id_different_domain(monkeypatch, tmp
     out = acquire_node(
         _context(tmp_path, "acquire-dedupe-2"), _input(config=_config(exa=True, ats=True)),
         http_client=None, exa=_Exa([exa_row]), ats=_ATS_ReturningRow(ats_row), watchlist=watchlist,
+        boards_from=BOARDS_FROM_FETCH,
     )
     assert len(out.rows) == 1
     winner = out.rows[0].posting
@@ -539,6 +543,7 @@ def test_raw_ats_and_exa_responses_are_stored_gzip_with_index(monkeypatch, tmp_p
         out = acquire_node(
             context, _input(config=_config(exa=True, ats=True)),
             http_client=client, exa=ExaSearchClient(), ats=ATSBoardClients(), watchlist=watchlist,
+            boards_from=BOARDS_FROM_FETCH,
         )
     assert out  # sanity: the run completed
 
@@ -603,6 +608,7 @@ def test_raw_payload_cap_stops_storing_further_entries(monkeypatch, tmp_path):
         acquire_node(
             context, _input(config=_config(exa=False, ats=True)),
             http_client=client, exa=_Exa(()), ats=ATSBoardClients(), watchlist=watchlist,
+            boards_from=BOARDS_FROM_FETCH,
         )
 
     raw_root = workpad / "runs" / context.run_id / "raw"
@@ -690,6 +696,7 @@ def test_replay_uat_0181_evidence_run_country_filter(monkeypatch, tmp_path):
         before = acquire_node(
             _context(tmp_path, "acquire-replay-before"), _input(config=replace(_config(exa=False, ats=True))),
             http_client=client, exa=_Exa(()), ats=ATSBoardClients(), watchlist=watchlist,
+            boards_from=BOARDS_FROM_FETCH,
         )
     assert len(before.rows) == 11
 
@@ -697,6 +704,7 @@ def test_replay_uat_0181_evidence_run_country_filter(monkeypatch, tmp_path):
         after = acquire_node(
             _context(tmp_path, "acquire-replay-after"), _input(config=config),
             http_client=client, exa=_Exa(()), ats=ATSBoardClients(), watchlist=watchlist,
+            boards_from=BOARDS_FROM_FETCH,
         )
 
     kept_locations = {row.posting.location for row in after.rows}

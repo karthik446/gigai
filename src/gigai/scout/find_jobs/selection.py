@@ -24,7 +24,7 @@ contract/dataclass coupling beyond the narrow ``Candidate`` protocol below.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 import re
 from typing import Protocol
@@ -155,25 +155,48 @@ def _score_key(row: Candidate, scores: Mapping[str, float]) -> tuple[int, float]
     return (1, 0) if score is None else (0, -score)
 
 
-def _rank(rows: Sequence[Candidate], scores: Mapping[str, float]) -> list[Candidate]:
-    # Two stable passes: newest first, then (only when any row is scored)
-    # by score. Without scores the second pass is skipped, so the order is
-    # the date order this module has always used, ties in ``rows`` order.
+def _rank(
+    rows: Sequence[Candidate],
+    scores: Mapping[str, float],
+    imported_before: Collection[str] = (),
+) -> list[Candidate]:
+    # Stable passes, least significant first: newest first, then (only for
+    # the import cap) rows never imported before ahead of the ones that
+    # were, then (only when any row is scored) by score. Without scores and
+    # without ``imported_before`` the order is the date order this module
+    # has always used, ties in ``rows`` order.
     ordered = sorted(rows, key=_sort_key_newest_first, reverse=True)
+    if imported_before:
+        ordered.sort(key=lambda row: row.normalized_url in imported_before)
     if scores:
         ordered.sort(key=lambda row: _score_key(row, scores))
     return ordered
 
 
-def rank_rows(rows: Sequence[Candidate], rank_scores: Sequence[Score] = ()) -> list[Candidate]:
+def rank_rows(
+    rows: Sequence[Candidate],
+    rank_scores: Sequence[Score] = (),
+    *,
+    imported_before: Collection[str] = (),
+) -> list[Candidate]:
     """``rows`` best first: Jev score descending, then newest, then ``rows`` order.
 
     A row with no score (no entry, or an unscored entry) ranks after every
     scored row. With no scores at all this is newest first. Every row comes
     back; the caller slices what it needs.
+
+    ``imported_before`` (the import cap's rotation, orchestrator decision
+    2026-09-27): the ``normalized_url`` of every posting an earlier run
+    already imported. Between two rows the score does not separate -- the
+    same score, or no score at all -- the one never imported before goes
+    first, then the newest. So without scores, consecutive runs over more
+    rows than the cap import different slices until every row has had its
+    turn; with scores the Jev order stands and only its ties rotate. The
+    selection for assessment never passes it (acquire and assess's
+    recompute must rank alike).
     """
 
-    return _rank(rows, _scores_by_url(rank_scores))
+    return _rank(rows, _scores_by_url(rank_scores), imported_before)
 
 
 def select_for_assessment(

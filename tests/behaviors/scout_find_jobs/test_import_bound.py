@@ -54,7 +54,7 @@ from gigai.scout.find_jobs.contracts import (
     WatchlistFirstSeen,
 )
 from gigai.scout.find_jobs.jev_contracts import RankScore
-from gigai.scout.find_jobs.market_acquisition import AcquireLimits, acquire_node
+from gigai.scout.find_jobs.market_acquisition import BOARDS_FROM_FETCH, AcquireLimits, acquire_node
 from gigai.scout.find_jobs.progress import ProgressWriter, read_progress
 from tests.behaviors.scout_find_jobs.test_unchanged_reassess import _context, _managed_workpad
 
@@ -180,6 +180,7 @@ def _run(workpad: Path, project_id: str, gig_id: str, catalog: _LeverCatalog, *,
         return acquire_node(
             _context(workpad, project_id, gig_id, run_id, operation_key=f"acquire-{run_id}"), _input(_config()),
             http_client=client, exa=_Exa(), ats=ATSBoardClients(), watchlist=_Watchlist(boards), limits=_limits(),
+            boards_from=BOARDS_FROM_FETCH,
         )
 
 
@@ -354,6 +355,7 @@ def test_a_batch_identity_the_journal_refuses_fails_before_any_board_is_fetched(
             # an identity that does not start with a letter or digit.
             _context(workpad, project_id, gig_id, "run_01", operation_key="_acquire-run_01"), _input(_config()),
             http_client=None, exa=_Exa(), ats=ats, watchlist=_Watchlist([_board("co0"), _board("co1")]), limits=_limits(),
+            boards_from=BOARDS_FROM_FETCH,
         )
 
     assert excinfo.value.code == "acquisition_batch_invalid"
@@ -368,6 +370,7 @@ def test_a_batch_already_bound_to_other_rows_fails_before_any_board_is_fetched(t
     acquire_node(
         context, _input(_config()), http_client=None, exa=_Exa(), ats=first,
         watchlist=_Watchlist([_board("co0")]), limits=_limits(),
+        boards_from=BOARDS_FROM_FETCH,
     )
     assert first.calls == ["co0"]
 
@@ -376,6 +379,7 @@ def test_a_batch_already_bound_to_other_rows_fails_before_any_board_is_fetched(t
         acquire_node(
             context, _input(_config()), http_client=None, exa=_Exa(), ats=again,
             watchlist=_Watchlist([_board("co0")]), limits=_limits(),
+            boards_from=BOARDS_FROM_FETCH,
         )
 
     assert excinfo.value.code == "acquisition_input_conflict"

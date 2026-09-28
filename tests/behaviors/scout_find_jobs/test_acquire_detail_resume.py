@@ -32,7 +32,7 @@ import pytest
 
 from gigai.scout.find_jobs.ats_board_clients import ATSBoardClients
 from gigai.scout.find_jobs.contracts import ATSProvider
-from gigai.scout.find_jobs.market_acquisition import BUDGET_EXCEEDED_CODE, acquire_node
+from gigai.scout.find_jobs.market_acquisition import BOARDS_FROM_FETCH, BUDGET_EXCEEDED_CODE, acquire_node
 from gigai.scout.find_jobs.progress import read_progress
 
 from tests.behaviors.scout_find_jobs.test_acquire_rotation import _Clock, _index
@@ -131,6 +131,7 @@ def _run(substrate, boards, transport: _Transport, *, n: int, budget: float | No
             home_root=home,
             target=target,
             limits=_limits(concurrency=1, budget=budget),
+            boards_from=BOARDS_FROM_FETCH,
         )
 
 

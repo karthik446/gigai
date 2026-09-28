@@ -52,8 +52,10 @@ from .market_acquisition import AcquireLimits, _catalog_us_counts, _fetch_boards
 
 SOURCES_UPDATE_STATUS_SCHEMA = "scout-sources-update-status:1"
 #: How often the running snapshot is rewritten (it is also the liveness
-#: heartbeat another process reads before it starts a second update).
-SNAPSHOT_INTERVAL_SECONDS = 5.0
+#: heartbeat another process reads before it starts a second update). The
+#: first board that settles is written at once, so a short update still
+#: shows progress.
+SNAPSHOT_INTERVAL_SECONDS = 1.0
 #: A ``running`` snapshot not rewritten for this long belongs to a process
 #: that died: it reads as ``interrupted`` and no longer blocks a new update.
 HEARTBEAT_TIMEOUT_SECONDS = 300.0
@@ -259,7 +261,9 @@ class _Listener:
         self.counts = {"fetched": 0, "cached": 0, "failed": 0, "skipped": 0}
         self.requests = 0
         self.total = len(companies)
-        self.done = 0
+        self.done = 0  # boards settled: checked, or skipped by the budget
+        self.checked = 0  # boards that were asked (fetched, unchanged or did not answer)
+        self.never_checked: int | None = None
         self.rotation: dict[str, object] | None = None
         self.watchlist_seed: dict[str, object] | None = None
         self.state: dict[str, object] = {
@@ -302,9 +306,13 @@ class _Listener:
         self.done += 1
         self.counts[status] = self.counts.get(status, 0) + 1
         self.requests += requests
+        first = False
+        if status != "skipped":
+            first = self.checked == 0
+            self.checked += 1
         if status in ("fetched", "cached"):
             self.totals.add(self._refresh(provider, board_token))
-        self.publish()
+        self.publish(force=first)
 
     def boards_finished(self, summary: Mapping[str, object]) -> None:
         rotation = summary.get("rotation")
@@ -332,7 +340,13 @@ class _Listener:
             **self.state,
             "updated_at": index_stamp(),
             "elapsed_seconds": round(time.monotonic() - self._started, 3),
-            "boards": {"total": self.total, "done": self.done, **self.counts},
+            "boards": {
+                "total": self.total,
+                "done": self.done,
+                "checked": self.checked,
+                **self.counts,
+                "never_checked": self.never_checked,
+            },
             "companies": {
                 "checked": totals.companies,
                 "indexed": totals.indexed,
@@ -344,7 +358,15 @@ class _Listener:
             },
             "postings": {"new": totals.new, "changed": totals.changed, "removed": totals.removed, "live": totals.live},
             "requests": self.requests,
-            "remaining": self.counts.get("skipped", 0) if self.state["status"] != STATUS_RUNNING else max(0, self.total - self.done),
+            # What this update has not reached: while it runs, every board
+            # not asked yet; at the end, the boards the budget left. They
+            # lead the next update (`boards.never_checked` is the backlog
+            # that only ever shrinks).
+            "remaining": (
+                self.counts.get("skipped", 0)
+                if self.state["status"] != STATUS_RUNNING
+                else max(0, self.total - self.checked)
+            ),
             "rotation": self.rotation,
             "watchlist_seed": self.watchlist_seed,
             "summary": totals.summary_line(),
@@ -405,6 +427,7 @@ def update_sources(
     )
     if watchlist_seed is not None:
         listener.watchlist_seeded(watchlist_seed)
+    listener.never_checked = _never_checked(cache, boards)
     listener.publish(force=True)
     try:
         _rows, _failures, summary = _fetch_boards(
@@ -419,7 +442,8 @@ def update_sources(
             catalog_counts=catalog_counts,
         )
         listener.boards_finished(summary)
-        attempted = listener.done - listener.counts.get("skipped", 0)
+        listener.never_checked = _never_checked(cache, boards)
+        attempted = listener.checked
         if boards and attempted > 0 and listener.counts.get("failed", 0) == attempted:
             listener.state["status"] = STATUS_FAILED
             listener.state["error"] = {"code": "every_board_failed", "message": "no board could be fetched"}
@@ -436,6 +460,13 @@ def update_sources(
     listener.state["finished_at"] = index_stamp()
     final = listener.publish(force=True) or listener.snapshot()
     return SourcesUpdateResult(final)
+
+
+def _never_checked(cache: BoardCache, boards: Sequence[WatchlistEntry]) -> int:
+    """Watchlist boards no update or run has ever asked (no stamp in the rotation index)."""
+
+    stamped = cache.load_fetch_index().boards
+    return sum(1 for board in boards if f"{board.provider.value}:{board.board_token}" not in stamped)
 
 
 def run_sources_update(
@@ -508,7 +539,7 @@ def _blank_snapshot(update_id: str, status: str, *, error: Mapping[str, object] 
         "limits": None,
         "error": dict(error) if error is not None else None,
         "elapsed_seconds": 0.0,
-        "boards": {"total": 0, "done": 0, "fetched": 0, "cached": 0, "failed": 0, "skipped": 0},
+        "boards": {"total": 0, "done": 0, "checked": 0, "fetched": 0, "cached": 0, "failed": 0, "skipped": 0, "never_checked": None},
         "companies": {"checked": 0, "indexed": 0, "updated": 0, "untouched": 0, "unreadable": 0, "with_new": 0, "with_changes": 0},
         "postings": {"new": 0, "changed": 0, "removed": 0, "live": 0},
         "requests": 0,

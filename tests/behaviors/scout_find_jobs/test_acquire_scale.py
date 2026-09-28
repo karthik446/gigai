@@ -43,6 +43,7 @@ from gigai.scout.find_jobs.contracts import (
 )
 from gigai.scout.find_jobs.discovery.prefs import DiscoveryPrefs, save_prefs
 from gigai.scout.find_jobs.market_acquisition import (
+    BOARDS_FROM_FETCH,
     BUDGET_EXCEEDED_CODE,
     AcquireAllSourcesFailedError,
     AcquireLimits,
@@ -195,6 +196,7 @@ def test_concurrency_is_bounded_per_provider(monkeypatch: pytest.MonkeyPatch, tm
     out = acquire_node(
         _context(tmp_path), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=_Watchlist(boards),
         limits=_limits(concurrency=3),
+        boards_from=BOARDS_FROM_FETCH,
     )
     assert len(out.rows) == 18
     assert out.failures == ()
@@ -232,6 +234,7 @@ def test_requests_are_paced_per_provider(monkeypatch: pytest.MonkeyPatch, tmp_pa
     acquire_node(
         _context(tmp_path), _input(), http_client=client, exa=_Exa(), ats=ats, watchlist=_Watchlist(boards),
         limits=_limits(concurrency=4, interval=interval),
+        boards_from=BOARDS_FROM_FETCH,
     )
     starts = sorted(client.starts)
     assert len(starts) == 6
@@ -285,6 +288,7 @@ def test_second_run_reuses_the_board_cache_and_prefilters_titles(monkeypatch: py
         first = acquire_node(
             _real_context(home, target, workpad, gig_id, run_id="run_01"), _input(), http_client=client, exa=_Exa(), ats=ATSBoardClients(),
             watchlist=_Watchlist(boards), home_root=home, target=target, limits=limits,
+            boards_from=BOARDS_FROM_FETCH,
         )
     assert [row.posting.title for row in first.rows] == ["Software Engineer", "Senior Data Engineer"]
     assert first.rows[0].posting.text == "Build 11."
@@ -305,6 +309,7 @@ def test_second_run_reuses_the_board_cache_and_prefilters_titles(monkeypatch: py
         second = acquire_node(
             _real_context(home, target, workpad, gig_id, key="acquire-scale-2", run_id="run_02"), _input(), http_client=client, exa=_Exa(),
             ats=ATSBoardClients(), watchlist=_Watchlist(boards), home_root=home, target=target, limits=limits,
+            boards_from=BOARDS_FROM_FETCH,
         )
     # Same rows with identical digests (what the reuse rule keys on -- the
     # UNCHANGED outcome itself needs the sealed batch this test patches out),
@@ -383,6 +388,7 @@ def test_budget_stops_cleanly_records_skipped_boards_and_runs_user_boards_first(
     out = acquire_node(
         _context(tmp_path), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=_Watchlist(boards),
         limits=_limits(concurrency=1, budget=0.2),
+        boards_from=BOARDS_FROM_FETCH,
     )
     fetched = [token for _provider, token, _at in ats.calls]
     # The operator's own boards go first regardless of watchlist order; the
@@ -419,6 +425,7 @@ def test_a_budget_that_fetches_nothing_fails_the_acquire_like_any_dead_source(mo
         acquire_node(
             _context(tmp_path), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=_Watchlist(boards),
             limits=_limits(budget=0.000001),
+            boards_from=BOARDS_FROM_FETCH,
         )
     assert BUDGET_EXCEEDED_CODE in str(excinfo.value)
     assert ats.calls == []
@@ -434,6 +441,7 @@ def test_a_budget_skip_next_to_real_rows_does_not_fail_the_run(monkeypatch: pyte
     out = acquire_node(
         _context(tmp_path), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=_Watchlist(boards),
         limits=_limits(concurrency=1, budget=0.15),
+        boards_from=BOARDS_FROM_FETCH,
     )
     assert out.rows
     assert any(failure.code == BUDGET_EXCEEDED_CODE for failure in out.failures)
@@ -479,7 +487,7 @@ def test_acquire_seeds_the_watchlist_from_the_catalog_once_prefs_exist(monkeypat
     limits = _limits(concurrency=8)
 
     # No prefs saved yet: nothing is seeded, and the run says so.
-    acquire_node(_real_context(home, target, workpad, gig_id, run_id="run_01"), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=watchlist, home_root=home, target=target, limits=limits)
+    acquire_node(_real_context(home, target, workpad, gig_id, run_id="run_01"), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=watchlist, home_root=home, target=target, limits=limits, boards_from=BOARDS_FROM_FETCH)
     before = read_progress(workpad / "runs" / "run_01")
     assert before.watchlist_seed == {"status": "skipped", "reason": "prefs_missing"}
     assert list_active(home, target, gig_id) == ()
@@ -487,7 +495,7 @@ def test_acquire_seeds_the_watchlist_from_the_catalog_once_prefs_exist(monkeypat
 
     save_prefs(home_root=home, target=target, prefs=DiscoveryPrefs(countries=("US",), exclude_companies=("openai",)))
     catalog = load_company_catalog()
-    out = acquire_node(_real_context(home, target, workpad, gig_id, key="acquire-scale-2", run_id="run_02"), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=watchlist, home_root=home, target=target, limits=limits)
+    out = acquire_node(_real_context(home, target, workpad, gig_id, key="acquire-scale-2", run_id="run_02"), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=watchlist, home_root=home, target=target, limits=limits, boards_from=BOARDS_FROM_FETCH)
     assert out.failures == ()
     seeded = read_progress(workpad / "runs" / "run_02").watchlist_seed
     assert seeded is not None and seeded["status"] == "seeded"
@@ -505,7 +513,7 @@ def test_acquire_seeds_the_watchlist_from_the_catalog_once_prefs_exist(monkeypat
 
     # Third run: idempotent -- nothing added, everything already present.
     ats.calls.clear()
-    acquire_node(_real_context(home, target, workpad, gig_id, key="acquire-scale-3", run_id="run_03"), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=watchlist, home_root=home, target=target, limits=limits)
+    acquire_node(_real_context(home, target, workpad, gig_id, key="acquire-scale-3", run_id="run_03"), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=watchlist, home_root=home, target=target, limits=limits, boards_from=BOARDS_FROM_FETCH)
     again = read_progress(workpad / "runs" / "run_03").watchlist_seed
     assert again is not None and again["added"] == 0 and again["already_present"] == seeded["added"]
     assert again["receipt_path"] is None

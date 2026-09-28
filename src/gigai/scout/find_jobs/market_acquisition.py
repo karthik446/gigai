@@ -93,6 +93,22 @@ BUDGET_EXCEEDED_CODE = "time_budget_exceeded"
 # a run killed before its end still advances the rotation for the boards it
 # reached (the final flush at the end of the pass is unconditional).
 ROTATION_FLUSH_INTERVAL_SECONDS = 30.0
+# N11-C: where the ATS pass of a find-jobs run gets its watchlist rows.
+# ``index`` (the DEFAULT): the company index `gigai scout sources update`
+# wrote -- no board request at all. ``fetch``: the board fetch itself
+# (`_fetch_boards`, the engine of sources update), a pass of up to 20
+# minutes; only a caller that asks for it by name gets it, so a caller that
+# forgets the keyword reads the index and never brings the per-search fetch
+# back.
+BOARDS_FROM_FETCH = "fetch"
+BOARDS_FROM_INDEX = "index"
+SOURCES_UPDATE_REQUIRED_CODE = "sources_update_required"
+# Option E (orchestrator decision 2026-09-27): the ONE case where a search
+# asks a board: a company Exa discovered in this same run that is not in the
+# company index yet. At most this many such boards per run; each is written
+# to the index, so the next search needs nothing. The rest wait for the next
+# `gigai scout sources update` (counted, `boards.exa_new.waiting`).
+EXA_NEW_BOARD_FETCH_CAP = 20
 
 # Query parameter names ATS boards use to carry a job id when the posting is
 # served from a custom career-site domain rather than the board's own
@@ -546,6 +562,159 @@ def _catalog_us_counts() -> dict[tuple[str, str], int]:
         for record in catalog.records
         if record.us_posting_count is not None
     }
+
+
+def _read_index(
+    boards: Sequence[WatchlistEntry],
+    *,
+    home_root: Path | None,
+    config: FindJobsConfig,
+    progress: ProgressWriter | None,
+    started_at: float,
+) -> tuple[list[PostingRow], list[FailureRow], dict[str, object]]:
+    """N11-C: the watchlist's rows from the company index under ``home_root`` (no request).
+
+    Without a home there is no index to read: that is the empty index, and
+    the run says "Run Update sources" like any other search with nothing
+    stored.
+    """
+
+    from .company_index import CompanyIndex
+    from .index_search import read_indexed_boards
+
+    root = Path(home_root) if home_root is not None else None
+    index = CompanyIndex.for_home(root) if root is not None else CompanyIndex(Path(os.devnull) / "scout-companies")
+    cache = _board_cache(root) or BoardCache(Path(os.devnull) / "scout-ats-boards")
+    return read_indexed_boards(
+        boards,
+        index=index,
+        cache=cache,
+        config=config,
+        progress=progress,
+        started_at=started_at,
+        remember_search=root is not None,
+    )
+
+
+def _index_line(summary: Mapping[str, object]) -> str:
+    from .index_search import index_line
+
+    return index_line(dict(summary))
+
+
+def _fetch_exa_new_boards(
+    discovered: Sequence[PostingRow],
+    *,
+    batch_id: str,
+    home_root: Path | None,
+    ats: ATSBoardClient,
+    client: Any,
+    config: FindJobsConfig,
+    limits: AcquireLimits,
+) -> tuple[list[PostingRow], list[FailureRow], dict[str, object]]:
+    """Option E: fetch the boards of companies Exa just found that are not indexed yet.
+
+    Only boards named by this run's own Exa rows, only the ones with no
+    company index file, and at most :data:`EXA_NEW_BOARD_FETCH_CAP` of them
+    (in the order Exa returned them). The fetch is the ordinary one
+    (`_fetch_boards`: cache, pacing, rotation stamp); each board that
+    answered is then written to the company index. Returns ``(rows,
+    failures, exa_new)`` where ``exa_new`` is the block the progress and
+    the UI read: ``{"cap", "found", "fetched", "failed", "waiting",
+    "requests"}``.
+    """
+
+    from .company_index import CompanyIndex, refresh_company
+
+    exa_new: dict[str, object] = {
+        "cap": EXA_NEW_BOARD_FETCH_CAP,
+        "found": 0,
+        "fetched": 0,
+        "failed": 0,
+        "waiting": 0,
+        "requests": 0,
+    }
+    cache = _board_cache(home_root)
+    if home_root is None or cache is None:
+        return [], [], exa_new
+    index = CompanyIndex.for_home(Path(home_root))
+    wanted: dict[tuple[str, str], WatchlistEntry] = {}
+    for row in discovered:
+        if row.board_token is None:
+            continue
+        key = (row.provider.value, row.board_token)
+        if key in wanted or index.read(*key) is not None:
+            continue
+        wanted[key] = WatchlistEntry(
+            watchlist_id=f"scout_watchlist:{row.provider.value}:{row.board_token}",
+            provider=row.provider,
+            board_token=row.board_token,
+            company=row.company,
+            state="active",
+            first_seen=WatchlistFirstSeen(SourceKind.EXA, row.url, row.query_key, batch_id, _now()),
+        )
+    exa_new["found"] = len(wanted)
+    if not wanted:
+        return [], [], exa_new
+    page = list(wanted.values())[:EXA_NEW_BOARD_FETCH_CAP]
+    exa_new["waiting"] = len(wanted) - len(page)
+    counting = _CountingClient(client) if client is not None else None
+    fetched_rows, fetch_failures, summary = _fetch_boards(
+        page,
+        ats=ats,
+        client=counting,
+        config=config,
+        limits=limits,
+        cache=cache,
+        progress=None,
+        started_at=time.monotonic(),
+        catalog_counts=None,
+    )
+    for board in page:
+        try:
+            refresh_company(index, cache, ats=board.provider.value, slug=board.board_token, company=board.company)
+        except Exception as exc:  # noqa: BLE001 - the rows are already in hand; the next update indexes it
+            print(
+                f"scout acquire: could not index {board.provider.value}:{board.board_token} ({type(exc).__name__})",
+                file=sys.stderr,
+            )
+    exa_new["fetched"] = int(summary.get("fetched", 0) or 0) + int(summary.get("cached", 0) or 0)  # type: ignore[call-overload]
+    exa_new["failed"] = int(summary.get("failed", 0) or 0)  # type: ignore[call-overload]
+    exa_new["waiting"] = len(wanted) - len(page) + int(summary.get("skipped", 0) or 0)  # type: ignore[call-overload]
+    # Counted at the client, so a board that did not answer counts too.
+    exa_new["requests"] = counting.requests if counting is not None else 0
+    # The budget marker of this small pass is already counted as `waiting`.
+    failures = [failure for failure in fetch_failures if failure.code != BUDGET_EXCEEDED_CODE]
+    return fetched_rows, failures, exa_new
+
+
+class _CountingClient:
+    """Pass-through client that counts the requests it is asked to make."""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+        self._lock = threading.Lock()
+        self.requests = 0
+
+    def get(self, url: str, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            self.requests += 1
+        return self._client.get(url, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+
+def _with_exa_new(summary: Mapping[str, object], exa_new: Mapping[str, object], *, matched: int) -> dict[str, object]:
+    """The index read's summary plus what option E fetched (``requests`` is only ever that)."""
+
+    merged = dict(summary)
+    merged["exa_new"] = dict(exa_new)
+    merged["fetched"] = exa_new["fetched"]
+    merged["failed"] = exa_new["failed"]
+    merged["requests"] = exa_new["requests"]
+    merged["matched"] = int(merged.get("matched", 0) or 0) + matched  # type: ignore[call-overload]
+    return merged
 
 
 def _board_cache(home_root: Path | None) -> BoardCache | None:
@@ -1266,7 +1435,19 @@ def acquire_node(
     home_root: Path | None = None,
     target: Path | None = None,
     limits: AcquireLimits | None = None,
+    boards_from: str = BOARDS_FROM_INDEX,
 ) -> AcquireOutput:
+    """The acquire node of a find-jobs run.
+
+    ``boards_from`` says where the watchlist's rows come from. The default,
+    ``"index"``, reads the company index `gigai scout sources update` wrote
+    and asks no board (option E's new Exa companies aside). ``"fetch"``
+    fetches every watchlist board in this call and has to be asked for by
+    name.
+    """
+
+    if boards_from not in (BOARDS_FROM_FETCH, BOARDS_FROM_INDEX):
+        raise FindJobsContractError("invalid_value", "boards_from must be 'fetch' or 'index'")
     # B4: `progress.finish_step("acquire", ...)` must run on every exit path
     # (success or a raised AcquireAllSourcesFailedError/other exception), so
     # the real body is a nested function and this outer frame is the single
@@ -1286,6 +1467,7 @@ def acquire_node(
             target=target,
             progress=progress,
             limits=limits if limits is not None else AcquireLimits.from_environment(),
+            boards_from=boards_from,
         )
     except BaseException:
         if progress is not None:
@@ -1308,6 +1490,7 @@ def _acquire_node_body(
     target: Path | None,
     progress: ProgressWriter | None,
     limits: AcquireLimits,
+    boards_from: str = BOARDS_FROM_INDEX,
 ) -> AcquireOutput:
     started_at = time.monotonic()
     batch_id = _safe_batch_id(context.operation_key)
@@ -1320,6 +1503,7 @@ def _acquire_node_body(
     rows: list[PostingRow] = list(input.rows)
     watchlist_refs: list[str] = []
     source_outcomes: dict[str, bool] = {}
+    exa_discovered: tuple[PostingRow, ...] = ()
     recording_client = _RecordingHTTPClient(http_client, source_for_url=_source_from_url) if http_client is not None else None
     active_client = recording_client if recording_client is not None else http_client
 
@@ -1328,6 +1512,7 @@ def _acquire_node_body(
             exa_ok = False
             try:
                 discovered = tuple(exa.search(active_client, input.config, home_root=home_root))
+                exa_discovered = discovered
                 rows.extend(discovered)
                 for row in discovered:
                     ref = _watchlist_add(watchlist, row, query_key=row.query_key, batch_id=batch_id)
@@ -1351,6 +1536,37 @@ def _acquire_node_body(
                 boards = _watchlist_entries(watchlist)
                 if not boards:
                     ats_ok = True
+                elif boards_from == BOARDS_FROM_INDEX:
+                    # N11-C: the search reads the company index that
+                    # `gigai scout sources update` wrote and makes NO board
+                    # request (there is no client in that call). It returns
+                    # what the fetch below returns, so sealing, the reuse
+                    # rule, the import cap and the selection are untouched.
+                    board_rows, board_failures, board_summary = _read_index(
+                        boards, home_root=home_root, config=input.config, progress=progress, started_at=started_at
+                    )
+                    rows.extend(board_rows)
+                    failures.extend(board_failures)
+                    # Option E: the companies Exa found in THIS run that the
+                    # index does not hold yet are fetched now (at most
+                    # EXA_NEW_BOARD_FETCH_CAP), indexed, and their postings
+                    # join the run with their descriptions.
+                    new_rows, new_failures, exa_new = _fetch_exa_new_boards(
+                        exa_discovered,
+                        batch_id=batch_id,
+                        home_root=home_root,
+                        ats=ats,
+                        client=active_client,
+                        config=input.config,
+                        limits=limits,
+                    )
+                    rows.extend(new_rows)
+                    failures.extend(new_failures)
+                    board_summary = _with_exa_new(board_summary, exa_new, matched=len(new_rows))
+                    ats_ok = bool(board_summary.get("cached") or board_summary.get("fetched"))
+                    if progress is not None:
+                        progress.boards_finished(board_summary)
+                    print(_index_line(board_summary), file=sys.stderr)
                 else:
                     # Q2: per-provider worker pools, a per-provider request
                     # pacer, a per-board response cache (conditional GETs /
@@ -1409,6 +1625,11 @@ def _acquire_node_body(
         # failure, UNLESS the budget left every board unfetched -- then the
         # run genuinely produced nothing from ATS and must not seal an
         # empty batch as success.
+        # N11-C: a search with nothing stored to read says what to do about
+        # it, in words the UI can show as they are.
+        update_required = [failure for failure in failures if failure.code == SOURCES_UPDATE_REQUIRED_CODE]
+        if not rows and update_required and len(update_required) == len(failures):
+            raise AcquireAllSourcesFailedError(SOURCES_UPDATE_REQUIRED_CODE, update_required[0].message)
         if not rows and (
             any(failure.code != BUDGET_EXCEEDED_CODE for failure in failures)
             or (failures and not source_outcomes.get("ats", False))
@@ -1581,9 +1802,19 @@ def _acquire_node_body(
     # (`not_imported_count`), never a failure. A row left out is not
     # recorded as observed, so `_prior_observations` has no entry for it and
     # it is NEW again the next time it is seen.
+    #
+    # Rotation (orchestrator decision 2026-09-27): where the score does not
+    # separate two rows (the same score, or no Jev scores at all), the row
+    # no earlier run imported goes first, then the newest. "Imported before"
+    # is `previous`: the rows of this target's earlier sealed batches, which
+    # is exactly what an import recorded (the company index knows what a
+    # sources update saw, not what a run imported). So without Jev, runs
+    # over more rows than the cap take different slices until every row has
+    # had its turn.
     not_imported_count = max(0, len(rows) - IMPORT_ROW_CAP)
     if over_import_cap:
-        imported = {row.normalized_url for row in rank_rows(rows, rank_scores)[:IMPORT_ROW_CAP]}
+        ranked = rank_rows(rows, rank_scores, imported_before=frozenset(previous))
+        imported = {row.normalized_url for row in ranked[:IMPORT_ROW_CAP]}
         rows = [row for row in rows if row.normalized_url in imported]
         candidates = [row for row in candidates if row.normalized_url in imported]
         carried_forward = {url: prior for url, prior in carried_forward.items() if url in imported}

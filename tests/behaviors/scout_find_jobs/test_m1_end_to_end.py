@@ -188,6 +188,22 @@ def _poll_succeeded(client: httpx.Client, run_id: str) -> dict[str, object]:
     pytest.fail(f"run {run_id} did not succeed before timeout; last response={last_body!r}")
 
 
+def _update_sources(client: httpx.Client, board_url: str) -> dict[str, object]:
+    added = client.post("/api/watchlist", json={"url": board_url})
+    assert added.status_code in {200, 201}, added.text
+    started = client.post("/api/sources/update", json={})
+    assert started.status_code == 202, started.text
+    deadline = time.monotonic() + _POLL_DEADLINE_SECONDS
+    while time.monotonic() < deadline:
+        body = client.get("/api/sources/update").json()
+        if not body["running"]:
+            assert body["update"]["status"] == "succeeded", body
+            assert body["index"]["needs_update"] is False, body
+            return body
+        time.sleep(0.05)
+    pytest.fail("the sources update did not finish before the timeout")
+
+
 @pytest.mark.xfail(
     reason=(
         "0.1.8.1: the offline M1 end-to-end run regressed after the acquire/assess "
@@ -220,6 +236,11 @@ def test_m1_real_api_run_child_process_and_second_run_dedup(
             config_body = config_response.json()
             assert config_body["resume_preview"] is not None
             request_body = _run_request(config_body["config_digest"])
+
+            # N11-C: a search reads the company index and never fetches a
+            # board itself, so the company is watched and "Update sources"
+            # has run before the first search (what a user does).
+            _update_sources(client, "https://boards.greenhouse.io/acme")
 
             started = time.monotonic()
             response = client.post("/api/run", json=request_body)

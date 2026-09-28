@@ -106,7 +106,7 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
         update = first["update"]
         assert update["update_id"] == start_body["update_id"]
         assert update["status"] == "succeeded", update
-        assert update["boards"] == {"total": 2, "done": 2, "fetched": 1, "cached": 0, "failed": 1, "skipped": 0}
+        assert update["boards"] == {"total": 2, "done": 2, "checked": 2, "fetched": 1, "cached": 0, "failed": 1, "skipped": 0, "never_checked": 0}
         assert update["companies"]["checked"] == 1 and update["companies"]["indexed"] == 1
         assert update["postings"] == {"new": 1, "changed": 0, "removed": 0, "live": 1}
         assert update["summary"] == "1 company with new postings: 1 new, 0 changed, 0 removed"
@@ -137,7 +137,7 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
         assert again.json()["update_id"] != start_body["update_id"]
         second = _poll_until_settled(client)["update"]
         assert second["status"] == "succeeded", second
-        assert second["boards"] == {"total": 2, "done": 2, "fetched": 0, "cached": 1, "failed": 1, "skipped": 0}
+        assert second["boards"] == {"total": 2, "done": 2, "checked": 2, "fetched": 0, "cached": 1, "failed": 1, "skipped": 0, "never_checked": 0}
         assert second["companies"]["untouched"] == 1
         assert second["summary"] == "0 companies with new postings: 0 new, 0 changed, 0 removed"
         unchanged = json.loads((companies / "greenhouse:acme.json").read_text(encoding="utf-8"))

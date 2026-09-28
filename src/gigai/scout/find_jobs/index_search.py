@@ -238,11 +238,22 @@ def index_line(summary: dict[str, object]) -> str:
 
     state = summary.get("index")
     status = state.get("status") if isinstance(state, dict) else "unknown"
-    return (
+    line = (
         "scout acquire: read the company index ({status}): {cached} of {total} companies, "
         "{listed} postings stored, {matched} matched ({touched_since_last_search} new or changed since the last search), "
         "{requests} board requests, {elapsed_seconds}s"
     ).format(status=status, **summary)
+    exa_new = summary.get("exa_new")
+    if isinstance(exa_new, dict) and exa_new.get("found"):
+        noun = "company" if exa_new.get("fetched") == 1 else "companies"
+        # The cap counts companies (boards), not requests: one company can
+        # take several requests, which the line above counts.
+        line += f"; fetched {exa_new.get('fetched')} new {noun} found by Exa (cap {exa_new.get('cap')} companies per search)"
+        if exa_new.get("failed"):
+            line += f", {exa_new.get('failed')} did not answer"
+        if exa_new.get("waiting"):
+            line += f", {exa_new.get('waiting')} more wait for the next Update sources"
+    return line
 
 
 __all__ = [

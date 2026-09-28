@@ -38,6 +38,7 @@ from gigai.scout.find_jobs.ats_board_clients import (
 from gigai.scout.find_jobs.company_catalog import load_company_catalog
 from gigai.scout.find_jobs.contracts import ATSProvider
 from gigai.scout.find_jobs.market_acquisition import (
+    BOARDS_FROM_FETCH,
     BUDGET_EXCEEDED_CODE,
     _plan_rotation,
     _rotation_line,
@@ -127,6 +128,7 @@ def _run(substrate, boards, *, ats, n: int, budget: float | None = None, client=
         home_root=home,
         target=target,
         limits=_limits(concurrency=1, budget=budget),
+        boards_from=BOARDS_FROM_FETCH,
     )
 
 
@@ -374,7 +376,7 @@ def test_the_index_round_trips_and_a_corrupt_or_foreign_file_restarts_the_rotati
 def test_without_a_home_nothing_persists_and_the_order_is_user_first_then_provider_token(clock: _Clock, tmp_path: Path) -> None:
     boards = _catalog_boards("z", "a") + [_board(ATSProvider.LEVER, "mine")]
     ats = _ClockATS(clock)
-    acquire_node(_context(tmp_path), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=_Watchlist(boards), limits=_limits(concurrency=1))
+    acquire_node(_context(tmp_path), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=_Watchlist(boards), limits=_limits(concurrency=1), boards_from=BOARDS_FROM_FETCH)
     assert ats.calls[0] == "mine" and set(ats.calls[1:]) == {"a", "z"}
     assert not list(tmp_path.rglob("last-fetched.json"))
     rotation = read_progress(tmp_path / "runs" / "run_01").boards["rotation"]

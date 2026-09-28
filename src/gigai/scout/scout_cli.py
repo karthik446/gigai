@@ -1099,7 +1099,7 @@ def _sources_progress_line(snapshot: dict[str, object]) -> str:
     postings = postings if isinstance(postings, dict) else {}
     failed = f", {boards.get('failed')} failed" if boards.get("failed") else ""
     return (
-        f"Boards {boards.get('done', 0)} of {boards.get('total', 0)}{failed}: "
+        f"Boards {boards.get('checked', 0)} of {boards.get('total', 0)}{failed}: "
         f"{postings.get('new', 0)} new, {postings.get('changed', 0)} changed, {postings.get('removed', 0)} removed"
     )
 
@@ -1129,11 +1129,13 @@ def sources_update_command(
     ones you added), so an unchanged board costs almost nothing. New,
     changed and removed postings are recorded per company under
     <home>/cache/scout/companies/ (plain JSON; safe to delete, the next
-    update rebuilds it). If the time budget stops an update, run it again:
-    it continues with the boards it has not reached yet.
+    update rebuilds it). A find-jobs search reads that store and does not
+    check the boards itself. If the time budget stops an update, run it
+    again: it continues with the boards it has not reached yet.
     """
 
     from dataclasses import replace
+    import time
 
     from .find_jobs.market_acquisition import AcquireLimits
     from .find_jobs.sources_update import (
@@ -1150,9 +1152,14 @@ def sources_update_command(
     if budget_seconds is not None:
         limits = replace(limits, time_budget_seconds=budget_seconds if budget_seconds > 0 else None)
 
+    printed_at = [0.0]
+
     def _progress(snapshot: dict[str, object]) -> None:
-        if not as_json and snapshot.get("status") == "running":
-            click.echo(_sources_progress_line(snapshot))
+        # The snapshot is rewritten every second; a line every five is enough.
+        if as_json or snapshot.get("status") != "running" or time.monotonic() - printed_at[0] < 5.0:
+            return
+        printed_at[0] = time.monotonic()
+        click.echo(_sources_progress_line(snapshot))
 
     try:
         resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
@@ -1182,7 +1189,7 @@ def sources_update_command(
         assert isinstance(boards, dict)
         click.echo(result.summary)
         click.echo(
-            f"Checked {boards['done'] - boards['skipped']} of {boards['total']} boards "
+            f"Checked {boards['checked']} of {boards['total']} boards "
             f"({boards['cached']} unchanged, {boards['failed']} did not answer) in {snapshot['elapsed_seconds']:.0f}s."
         )
         if result.status == STATUS_PARTIAL:
