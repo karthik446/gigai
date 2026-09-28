@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING
 
 import click
 
-from ..canonical import canonical_json_bytes, digest_imported_bytes
-from ..private_records import PrivateRecordError, create_record, import_reference
+from ..canonical import canonical_json_bytes
+from ..private_records import PrivateRecordError
 from ..setup import default_home_root
 from ..workpad import WorkpadError
 from .find_jobs.contracts import FindJobsConfig, ModelTarget, SourceToggles
@@ -29,6 +29,7 @@ from .find_jobs.discovery import (
     run_discovery,
 )
 from .interview_prep import InterviewPrepError, build_prep
+from .resume_import import import_resume_file
 from .target_resolution import ScoutTargetError, _display_path, resolve_scout_target
 from .template import ScoutInstallError, install_scout
 
@@ -237,30 +238,14 @@ def resume_add_command(
         # run`) leaves the target in the same state `scout run` would.
         target_root = resolved_target.expanduser().resolve(strict=True)
         write_starter_find_jobs_config(target_root)
-        # Key by name + content digest (not name alone) so re-adding the
-        # SAME bytes under the same file name stays idempotent (identical
-        # key -> the existing receipt is reused) while re-adding EDITED
-        # bytes under the same file name creates a new resume revision
-        # instead of conflicting on a stale operation key (P0-4).
-        content_digest = digest_imported_bytes(file.read_bytes())
-        imported = import_reference(
+        # uat-bug-020: the import itself (reference + record, and their
+        # operation keys) is resume_import.import_resume_file, shared with
+        # the setup wizard's POST /api/resumes.
+        resume = import_resume_file(
             home_root=home_root,
             requested_target=resolved_target,
-            gig_id=gig_id,
-            kind="resume",
             source=file,
-            operation_key=f"scout-resume-add:{file.name}:{content_digest}",
-        )
-        record = create_record(
-            home_root=home_root,
-            requested_target=resolved_target,
             gig_id=gig_id,
-            kind="imported_reference",
-            content_family="g45_reference",
-            content_id=imported.item_id,
-            actor={"kind": "operator", "id": "local-user"},
-            origin="imported",
-            operation_key=f"scout-resume-record:{imported.item_id}",
         )
 
         attached_profile = _attach_resume_to_profile(
@@ -268,9 +253,9 @@ def resume_add_command(
             target_root=target_root,
             gig_id=gig_id,
             profile_id=profile_id,
-            record_id=record.record_id,
-            revision_id=record.revision_id,
-            content_sha256=str(imported.record["content_sha256"]),
+            record_id=resume.record_id,
+            revision_id=resume.revision_id,
+            content_sha256=resume.content_sha256,
         )
     except (ScoutTargetError, ScoutInstallError, PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_resume_add_failed")
@@ -280,11 +265,11 @@ def resume_add_command(
         "ok": True,
         "scout_installed": installed_scout,
         "gig_id": install_result.gig_id,
-        "reference_id": imported.item_id,
-        "reference_created": imported.created,
-        "record_id": record.record_id,
-        "revision_id": record.revision_id,
-        "record_created": record.created,
+        "reference_id": resume.reference_id,
+        "reference_created": resume.reference_created,
+        "record_id": resume.record_id,
+        "revision_id": resume.revision_id,
+        "record_created": resume.record_created,
         "profile_id": attached_profile.profile_id if attached_profile is not None else None,
     }
     if as_json:
@@ -293,7 +278,7 @@ def resume_add_command(
     if installed_scout:
         click.echo(f"Scout ({install_result.gig_id}) was installed, approved, and activated.")
     click.echo(
-        f"Resume reference {imported.item_id} and record {record.record_id} are ready. "
+        f"Resume reference {resume.reference_id} and record {resume.record_id} are ready. "
         "Next: `gigai scout run`."
     )
     if attached_profile is not None:

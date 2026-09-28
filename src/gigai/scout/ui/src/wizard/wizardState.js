@@ -1,7 +1,8 @@
 // P9b: pure helpers for the setup wizard -- no React, no fetch. Everything
 // here is a function of API responses (GET /api/setup, /api/config,
-// /api/profiles, POST /api/resume/extract) or of the wizard's own field
-// state, so the screens stay thin and the derivations are easy to read.
+// /api/profiles, /api/secrets/status, POST /api/resume/extract) or of the
+// wizard's own field state, so the screens stay thin and the derivations
+// are easy to read.
 
 export const MODEL_TARGETS = ["ollama_local", "codex_cli", "openrouter_api"];
 
@@ -21,9 +22,16 @@ export const WORK_MODES = [
   { value: "any", label: "Any" },
 ];
 
-export const STEPS = ["Resume", "Target", "Companies", "Discovery + finish"];
+// uat-bug-020 (A2): Discover is hidden in 0.1.9, so the last step is the
+// review alone: no discovery cadence, no budget.
+export const STEPS = ["Resume", "Target", "Companies", "Review"];
 
 export const JEV_PRIVACY_LINE = "Your resume is sent to Jev to rank postings.";
+
+// uat-bug-020: what Finish can store as a resume -- the formats and the
+// size `gigai scout resume add` accepts (resume_import.py).
+export const RESUME_FILE_PATTERN = /\.(txt|md|markdown)$/i;
+export const RESUME_MAX_BYTES = 1048576;
 
 // Q1 (v0.1.9): the rolling publication window (find-jobs.json
 // `max_age_days`; contracts.DEFAULT_MAX_AGE_DAYS / MAX_AGE_DAYS_MAXIMUM).
@@ -44,9 +52,15 @@ export function clampMaxAgeDays(value) {
 // The wizard's field state. `prefs` is GET /api/setup's saved prefs (200)
 // or the 404's `prefill`; `config` is GET /api/config's body (or null);
 // `selectedProfile` is the /api/profiles entry that is currently selected
-// (or null).
-export function initialFields({ prefs, config, selectedProfile }) {
+// (or null); `resumes` is existingResumes()' list.
+//
+// uat-bug-020 (A1): a resume that is already stored is the one the wizard
+// starts with ("Choose existing", the first of the list chosen), so a
+// resume added with `gigai scout resume add` is used without pasting it
+// again. With none stored the wizard starts on "Paste text".
+export function initialFields({ prefs, config, selectedProfile, resumes }) {
   const p = prefs || {};
+  const stored = Array.isArray(resumes) && resumes.length > 0 ? resumes[0] : null;
   const countries = Array.isArray(p.countries) && p.countries.length > 0 ? p.countries : ["US"];
   const configuredTarget = config && config.config && config.config.default_model_target;
   const configuredWindow = config && config.config ? config.config.max_age_days : null;
@@ -54,10 +68,12 @@ export function initialFields({ prefs, config, selectedProfile }) {
     // screen 1
     profileMode: selectedProfile ? "update" : "new",
     profileName: selectedProfile ? selectedProfile.label || "" : "",
-    resumeMode: "paste",
+    resumeMode: stored ? "existing" : "paste",
     resumeText: "",
     uploadName: null,
-    existingRef: null,
+    // The uploaded file's own bytes (base64), sent as they are on Finish.
+    uploadBase64: null,
+    existingRef: stored,
     modelTarget: MODEL_TARGETS.includes(configuredTarget) ? configuredTarget : "ollama_local",
     extraction: null,
     stack: [],
@@ -78,7 +94,8 @@ export function initialFields({ prefs, config, selectedProfile }) {
     // screen 3
     excludeCompanies: p.exclude_companies || [],
     watchCompanies: p.watch_companies || [],
-    // screen 4
+    // Not asked (A2: Discover is hidden in 0.1.9). PUT /api/setup still
+    // takes them, so the saved values, or the defaults, are sent as they are.
     cadenceDays: p.cadence_days ?? 7,
     budgetUsdPerSession: p.budget_usd_per_session ?? 0.5,
   };
@@ -101,6 +118,12 @@ function shortDate(iso) {
 // resume_created_at); the others can only be named by the profile that pins
 // them plus that profile's own updated_at (the profiles route never exposes
 // the reference's label -- see profiles.py's no-resume-bytes rule).
+//
+// uat-bug-020 (A1): with no profile selected, GET /api/config's
+// resume_preview is the newest stored resume -- the one `gigai scout resume
+// add` stored before any profile existed. No profile pins it, so it was
+// missing from this list and the wizard could not use it; it is listed
+// first, with `profileLabel: null`.
 export function existingResumes({ profiles, config }) {
   const preview = config && config.resume_preview;
   const seen = new Set();
@@ -138,6 +161,17 @@ export function existingResumes({ profiles, config }) {
       });
     }
   }
+  if (preview && preview.record_id && preview.revision_id && !seen.has(`${preview.record_id}/${preview.revision_id}`)) {
+    const added = shortDate(config.resume_created_at);
+    items.unshift({
+      key: `${preview.record_id}/${preview.revision_id}`,
+      record_id: preview.record_id,
+      revision_id: preview.revision_id,
+      name: config.resume_label || "Stored resume",
+      date: added ? `added ${added}` : null,
+      profileLabel: null,
+    });
+  }
   return items;
 }
 
@@ -166,29 +200,88 @@ export function screenIsComplete(step, fields) {
   if (step === 2) {
     return fields.titles.length > 0 && fields.countries.length > 0 && fields.maxAgeDays >= 1;
   }
-  if (step === 4) {
-    return fields.cadenceDays >= 1 && fields.budgetUsdPerSession > 0;
-  }
   return true;
 }
 
-// The bodies the Finish step sends. `existingPrefs` is GET /api/setup's
-// saved prefs (or null): the S23 fields this wizard no longer asks about
-// (company stage/size, industries, must-have/deal-breaker stack -- the
-// dropped questions 9/10) pass through unchanged so an edit never wipes
-// them; a first run sends them empty.
-export function profileBody(fields) {
+// A file's bytes as base64, for POST /api/resumes' `content_base64`.
+export function bytesToBase64(bytes) {
+  let binary = "";
+  const step = 0x8000;
+  for (let index = 0; index < bytes.length; index += step) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(index, index + step));
+  }
+  return btoa(binary);
+}
+
+// The bodies the Finish step sends (wizardFinish.js).
+//
+// uat-bug-020: POST /api/resumes' body -- the pasted text, or the uploaded
+// file's name and bytes. Null when an existing resume was chosen (nothing
+// to store).
+export function resumeBody(fields) {
+  if (fields.resumeMode === "existing") {
+    return null;
+  }
+  if (fields.resumeMode === "upload" && fields.uploadName && fields.uploadBase64) {
+    return { file_name: fields.uploadName, content_base64: fields.uploadBase64 };
+  }
+  return { text: fields.resumeText };
+}
+
+// `resumeRef` is the resume Finish just stored (POST /api/resumes'
+// `resume_ref`), or the existing one chosen on screen 1.
+export function profileBody(fields, resumeRef) {
   const body = {
     label: fields.profileName.trim(),
     titles: fields.titles,
     titles_to_avoid: fields.titlesToAvoid,
   };
-  if (fields.resumeMode === "existing" && fields.existingRef) {
-    body.resume_record_id = fields.existingRef.record_id;
-    body.resume_revision_id = fields.existingRef.revision_id;
+  const ref = resumeRef || (fields.resumeMode === "existing" ? fields.existingRef : null);
+  if (ref && ref.record_id && ref.revision_id) {
+    body.resume_record_id = ref.record_id;
+    body.resume_revision_id = ref.revision_id;
   }
   return body;
 }
+
+// Which profile Finish writes to: its id, or null to create one.
+//   1. "Update <selected>" on screen 1: that profile.
+//   2. A profile with this name and this resume already exists: that one.
+//      It is what an earlier Finish made (one that failed after the profile
+//      was saved), so pressing Finish again never makes a second copy.
+//   3. No profile was selected when the wizard opened, and one is now: the
+//      default profile the server makes once the first resume is stored
+//      (profile_records.ensure_default_profile). It becomes this profile.
+export function profileToUpdate({ fields, selectedAtLoad, profiles, selectedProfileId, resumeRef }) {
+  if (fields.profileMode === "update" && selectedAtLoad) {
+    return selectedAtLoad.profile_id;
+  }
+  const active = (profiles || []).filter((profile) => profile.state !== "archived");
+  const label = fields.profileName.trim();
+  const same = active.find(
+    (profile) =>
+      profile.label === label &&
+      resumeRef &&
+      profile.resume_ref &&
+      profile.resume_ref.record_id === resumeRef.record_id &&
+      profile.resume_ref.revision_id === resumeRef.revision_id,
+  );
+  if (same) {
+    return same.profile_id;
+  }
+  if (!selectedAtLoad) {
+    const selected = active.find((profile) => profile.profile_id === selectedProfileId);
+    if (selected && selected.origin === "migrated_default") {
+      return selected.profile_id;
+    }
+  }
+  return null;
+}
+
+// `existingPrefs` is GET /api/setup's saved prefs (or null): the S23 fields
+// this wizard no longer asks about (company stage/size, industries,
+// must-have/deal-breaker stack -- the dropped questions 9/10) pass through
+// unchanged so an edit never wipes them; a first run sends them empty.
 
 export function setupBody(fields, existingPrefs) {
   const prev = existingPrefs || {};
@@ -235,38 +328,49 @@ export function reviewRows(fields, resumes) {
     ["Posting age", `last ${clampMaxAgeDays(fields.maxAgeDays)} days`],
     ["Exclude companies", list(fields.excludeCompanies)],
     ["Always watch", list(fields.watchCompanies)],
-    ["Discovery cadence", `${fields.cadenceDays} days`],
-    ["Budget per run", `$${Number(fields.budgetUsdPerSession).toFixed(2)}`],
   ];
 }
 
-// The exact commands to run, as [{text, comment}] lines. `profileId` is the
-// saved profile's id (real once Finish succeeded, a placeholder before).
-// The secrets names are the ones `gigai secrets add` accepts
-// (secrets_catalog.py: openrouter / exa / jev); `--profile` is the real
-// `gigai scout resume add` flag and takes a profile ID.
-export function buildCommands({ modelTarget, resumeMode, uploadName, profileId }) {
-  const lines = [{ text: "uv tool install gigai", comment: "or: uv tool upgrade gigai" }];
-  if (modelTarget === "openrouter_api") {
-    lines.push({ text: "gigai secrets add openrouter", comment: null });
-  } else if (modelTarget === "ollama_local") {
-    lines.push({ text: "ollama serve", comment: "Ollama must be running with your configured model pulled" });
-  }
-  lines.push({ text: "gigai secrets add exa", comment: "optional: open-web discovery" });
-  lines.push({ text: "gigai secrets add jev", comment: `optional: pre-rank postings. ${JEV_PRIVACY_LINE}` });
-  lines.push({ text: "gigai scout install", comment: null });
-  if (resumeMode !== "existing") {
-    const file = uploadName ? `./${uploadName}` : "./resume.md";
-    const id = profileId || "<profile id, shown after Finish>";
+// uat-bug-020: what is still missing before a search, as [{id, text,
+// command, note}] lines -- one line per missing thing and nothing else.
+// `keys` is GET /api/secrets/status' `keys` ({service: true|false}), or
+// null when it could not be read: a key is named only when the server said
+// it is not set. The service names are the ones `gigai secrets add` accepts
+// (secrets_catalog.py); keys are added from the CLI only.
+//
+// Ollama: named only when it is the chosen model and nothing in this
+// session shows it running. An extraction that just answered through
+// `ollama_local` does show it, so the line is left out then.
+export function setupHints({ modelTarget, keys, extraction }) {
+  const unset = (service) => Boolean(keys) && keys[service] === false;
+  const lines = [];
+  if (modelTarget === "openrouter_api" && unset("openrouter")) {
     lines.push({
-      text: `gigai scout resume add ${file} --profile ${id}`,
-      comment: resumeMode === "paste" ? "save the pasted text to that file first" : null,
+      id: "openrouter",
+      text: "OpenRouter key not set",
+      command: "gigai secrets add openrouter",
+      note: "needed for the model you chose",
     });
   }
-  lines.push({ text: "gigai scout run", comment: null });
+  const ollamaAnswered = Boolean(extraction) && extraction.model_target === "ollama_local";
+  if (modelTarget === "ollama_local" && !ollamaAnswered) {
+    lines.push({
+      id: "ollama",
+      text: "Ollama must be running for the model you chose",
+      command: "ollama serve",
+      note: null,
+    });
+  }
+  if (unset("exa")) {
+    lines.push({ id: "exa", text: "Exa key not set", command: "gigai secrets add exa", note: "optional: finds companies on the open web" });
+  }
+  if (unset("jev")) {
+    lines.push({
+      id: "jev",
+      text: "Jev key not set",
+      command: "gigai secrets add jev",
+      note: `optional: pre-rank postings. ${JEV_PRIVACY_LINE}`,
+    });
+  }
   return lines;
-}
-
-export function commandsAsText(lines) {
-  return lines.map((line) => (line.comment ? `${line.text}   # ${line.comment}` : line.text)).join("\n");
 }

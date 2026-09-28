@@ -5,11 +5,15 @@ import {
   extractResume,
   getConfig,
   getProfiles,
+  getSecretsStatus,
   getSetup,
   putSetup,
+  selectProfile,
+  storeResume,
   updateProfile,
 } from "./wizardApi.js";
-import { existingResumes, initialFields, profileBody, screenIsComplete, setupBody } from "./wizardState.js";
+import { finishSetup } from "./wizardFinish.js";
+import { existingResumes, initialFields, screenIsComplete, setupHints } from "./wizardState.js";
 import StepIndicator from "./StepIndicator.jsx";
 import ResumeScreen from "./ResumeScreen.jsx";
 import TargetScreen from "./TargetScreen.jsx";
@@ -24,22 +28,27 @@ const TOTAL_STEPS = 4;
 //   1. Resume + profile  -> POST /api/resume/extract (stack / seniority / titles)
 //   2. Target            -> titles (seeded from 1), countries, work mode, visa
 //   3. Companies         -> exclude / always watch (catalog: S26, not in 0.1.9)
-//   4. Discovery + finish-> cadence, budget, review, then Finish saves:
-//        POST /api/profiles  (or PUT /api/profiles/{id} for the selected one)
+//   4. Review            -> the review table, what is still missing (an
+//      unset key, Ollama: wizardState.setupHints), then Finish
+//      (wizardFinish.js) stores the resume, saves the profile with it and
+//      the preferences (A2: no discovery cadence or budget is asked;
+//      Discover is hidden in 0.1.9):
+//        POST /api/resumes   (pasted text or the uploaded file; uat-bug-020)
+//        POST /api/profiles  (or PUT /api/profiles/{id})
+//        POST /api/profiles/selection (a first profile only)
 //        PUT  /api/setup
-//      and shows the exact `gigai` commands with the real profile id.
 //
-// `onDone(result)` fires when the operator presses Done after a successful
-// save; `result` is `{profile}` (the saved profile's public shape).
+// `onDone(result)` fires as soon as Finish has saved; `result` is
+// `{profile}` (the saved profile's public shape). The caller decides where
+// that leads: the first run opens Jobs, which says to run Update sources
+// while no company postings are stored; an edit returns to Settings.
 //
 // P9c: `onCancel` (optional) fires when the operator backs out before
 // saving -- nothing is submitted, and the caller decides where "back to
 // where the user came from" means (App.jsx's edit-preferences path closes
 // the wizard and returns to whichever tab was showing). Only rendered once
 // a save hasn't already succeeded (`!saved`), matching Back/Next's own
-// `Boolean(saved)` gating -- once Finish has saved, Cancel would be
-// confusing ("cancel" a save that already happened), so FinishScreen's own
-// Done button is the only way forward from there.
+// `Boolean(saved)` gating.
 export default function SetupWizard({ onDone, onCancel }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -47,6 +56,8 @@ export default function SetupWizard({ onDone, onCancel }) {
   const [profiles, setProfiles] = useState([]);
   const [selectedProfile, setSelectedProfile] = useState(null);
   const [config, setConfig] = useState(null);
+  // GET /api/secrets/status' `keys`, or null when it could not be read.
+  const [keys, setKeys] = useState(null);
   const [fields, setFields] = useState(null);
 
   const [step, setStep] = useState(1);
@@ -98,14 +109,29 @@ export default function SetupWizard({ onDone, onCancel }) {
         profileList = [];
         selected = null;
       }
+      let keyState = null;
+      try {
+        const response = await getSecretsStatus();
+        keyState = response.keys || null;
+      } catch {
+        keyState = null;
+      }
       if (cancelled) {
         return;
       }
       setExistingPrefs(savedPrefs);
       setConfig(configResponse);
+      setKeys(keyState);
       setProfiles(profileList);
       setSelectedProfile(selected);
-      setFields(initialFields({ prefs, config: configResponse, selectedProfile: selected }));
+      setFields(
+        initialFields({
+          prefs,
+          config: configResponse,
+          selectedProfile: selected,
+          resumes: existingResumes({ profiles: profileList, config: configResponse }),
+        }),
+      );
       setLoading(false);
     }
 
@@ -134,7 +160,14 @@ export default function SetupWizard({ onDone, onCancel }) {
             item.resume_ref.revision_id === fields.existingRef.revision_id,
         );
         if (!owner) {
-          throw new ApiError(0, "That resume is no longer attached to a profile. Reload and choose again.");
+          // A stored resume no profile uses yet (A1): the extraction reads
+          // a profile's resume or pasted text, so this one cannot be
+          // analysed before Finish. The titles are typed on the next screen.
+          throw new ApiError(
+            0,
+            "This resume is not part of a profile yet, so it cannot be analysed here. " +
+              "Add the job titles on the next screen, or paste the resume to analyse it.",
+          );
         }
         body.profile_id = owner.profile_id;
       } else {
@@ -182,26 +215,21 @@ export default function SetupWizard({ onDone, onCancel }) {
     setSaveError(null);
     setFieldErrors(null);
     try {
-      const body = profileBody(fields);
-      const profileResponse =
-        fields.profileMode === "update" && selectedProfile
-          ? await updateProfile(selectedProfile.profile_id, body)
-          : await createProfile(body);
-      const prefsResponse = await putSetup(setupBody(fields, existingPrefs));
-      setExistingPrefs(prefsResponse.prefs);
-      setSaved({ profile: profileResponse.profile });
+      const result = await finishSetup(
+        { fields, selectedProfile, existingPrefs },
+        { storeResume, getProfiles, createProfile, updateProfile, selectProfile, putSetup },
+      );
+      setExistingPrefs(result.prefs);
+      const done = { profile: result.profile };
+      setSaved(done);
+      if (onDone) {
+        onDone(done);
+      }
     } catch (error) {
       if (error instanceof ApiError && error.status === 400 && error.field_errors) {
         const errors = error.field_errors;
         setFieldErrors(errors);
-        if (errors.resume_record_id && /no default resume/i.test(errors.resume_record_id)) {
-          setSaveError(
-            "No resume is stored yet, so the profile cannot be created from pasted text alone. " +
-              "Save your resume as a file, run `gigai scout resume add <file>`, then run this wizard again.",
-          );
-        } else {
-          setSaveError(`Some fields were rejected: ${Object.values(errors).join(" ")}`);
-        }
+        setSaveError(`Some fields were rejected: ${Object.values(errors).join(" ")}`);
       } else {
         setSaveError(error.message || String(error));
       }
@@ -249,12 +277,11 @@ export default function SetupWizard({ onDone, onCancel }) {
       {step === 4 && (
         <FinishScreen
           fields={fields}
-          setField={setField}
           resumes={resumes}
+          hints={setupHints({ modelTarget: fields.modelTarget, keys, extraction: fields.extraction })}
           fieldErrors={fieldErrors}
           saveError={saveError}
           saved={saved}
-          onDone={() => onDone && onDone(saved)}
         />
       )}
 

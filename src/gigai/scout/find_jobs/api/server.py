@@ -1342,8 +1342,10 @@ def _make_handler(
     from .extract import ResumeExtractRoutesMixin
     from .profiles import ProfilesRoutesMixin
     from .rank import RankRoutesMixin
+    from .resumes import ResumesRoutesMixin
     from .runs import RunRoutesMixin
     from .runs_list import RunsListRoutesMixin
+    from .secrets_status import SecretsStatusRoutesMixin
     from .setup import SetupRoutesMixin
     from .sources import SourcesRoutesMixin
     from .static import StaticRoutesMixin
@@ -1362,6 +1364,8 @@ def _make_handler(
         AnswersRoutesMixin,
         ApplicationsRoutesMixin,
         ResumeExtractRoutesMixin,
+        ResumesRoutesMixin,
+        SecretsStatusRoutesMixin,
         TailoredResumesRoutesMixin,
         WatchlistRoutesMixin,
         SourcesRoutesMixin,
@@ -1559,6 +1563,9 @@ def _make_handler(
                     if path == "/api/sources/update":
                         self._handle_get_sources_update()
                         return
+                    if path == "/api/secrets/status":
+                        self._handle_get_secrets_status()
+                        return
                     run_id = _match_run_id(path, suffix="/results")
                     if run_id is not None:
                         self._handle_get_run_results(run_id)
@@ -1608,6 +1615,9 @@ def _make_handler(
                     return
                 if path == "/api/resume/extract":
                     self._handle_post_resume_extract()
+                    return
+                if path == "/api/resumes":
+                    self._handle_post_resumes()
                     return
                 if path == "/api/applications":
                     self._handle_post_applications()

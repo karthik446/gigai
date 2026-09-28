@@ -10,13 +10,17 @@
 //   GET  /api/profiles          find_jobs/api/profiles.py
 //   POST /api/profiles          find_jobs/api/profiles.py
 //   PUT  /api/profiles/{id}     find_jobs/api/profiles.py
+//   POST /api/profiles/selection find_jobs/api/profiles.py
 //   POST /api/resume/extract    find_jobs/api/extract.py (P9b, A3)
+//   POST /api/resumes           find_jobs/api/resumes.py (uat-bug-020)
+//   GET  /api/secrets/status    find_jobs/api/secrets_status.py (uat-bug-020)
 import { ApiError } from "../api.js";
 
 const STATUS_MESSAGES = {
   400: "The server rejected some fields. Check the messages next to them.",
   403: "This action was refused by the local server.",
   404: "That resource could not be found.",
+  413: "That resume is larger than 1 MB. Paste the relevant text instead.",
   415: "The server refused the request format. Reload and try again.",
   422: "The server rejected this request as invalid. Reload and try again.",
   502: "The model's answer could not be used. Try again or pick another model target.",
@@ -37,6 +41,10 @@ const CODES_WITH_OWN_MESSAGE = new Set([
   "profile_unavailable",
   "resume_unavailable",
   "resume_input_invalid",
+  "resume_invalid_utf8",
+  "resume_media_type_unsupported",
+  "resume_too_large",
+  "target_unavailable",
   "invalid_value",
 ]);
 
@@ -102,6 +110,24 @@ export function createProfile(fields) {
 
 export function updateProfile(profileId, fields) {
   return request("PUT", `/api/profiles/${encodeURIComponent(profileId)}`, fields);
+}
+
+export function selectProfile(profileId) {
+  return request("POST", "/api/profiles/selection", { profile_id: profileId });
+}
+
+// uat-bug-020: {text} | {file_name, content_base64} -> {resume_ref:
+// {record_id, revision_id, content_sha256}, label, created}. Stores the
+// resume on this machine the way `gigai scout resume add` does; storing the
+// same resume again answers 200 with the same ids.
+export function storeResume(fields) {
+  return request("POST", "/api/resumes", fields);
+}
+
+// uat-bug-020: {keys: {exa, jev, openrouter, openai: true|false}} -- whether
+// each API key is set, never a value.
+export function getSecretsStatus() {
+  return request("GET", "/api/secrets/status");
 }
 
 // A3: {resume_text | profile_id, model_target?} -> {stack, seniority,

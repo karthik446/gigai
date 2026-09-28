@@ -224,30 +224,16 @@
   color: var(--muted);
   width: 40%;
 }
-.setup-wizard .wz-copy-row {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+.setup-wizard .wz-hints {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.88rem;
 }
-.setup-wizard .wz-commands {
-  background: var(--wz-chip-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.82rem;
-  white-space: pre-wrap;
+.setup-wizard .wz-hints li {
+  margin-bottom: 6px;
   overflow-wrap: anywhere;
 }
-.setup-wizard .wz-command {
-  margin-bottom: 6px;
-}
-.setup-wizard .wz-command:last-child {
-  margin-bottom: 0;
-}
-.setup-wizard .wz-command .wz-comment {
+.setup-wizard .wz-hints .wz-hint-note {
   color: var(--muted);
 }
 .setup-wizard code {

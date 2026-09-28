@@ -1,7 +1,7 @@
 import { STEPS } from "./wizardState.js";
 
-// The 4-dot progress bar above every wizard screen (mockup: Resume → Target
-// → Companies → Discovery + finish; labels hide under 480px, see wizard.css).
+// The 4-dot progress bar above every wizard screen (Resume → Target →
+// Companies → Review; labels hide under 480px, see wizard.css).
 export default function StepIndicator({ step }) {
   return (
     <nav className="wz-steps" aria-label="Setup steps">

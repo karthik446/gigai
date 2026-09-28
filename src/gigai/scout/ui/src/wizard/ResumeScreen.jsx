@@ -1,14 +1,15 @@
 import { useRef, useState } from "react";
 import TagListInput from "../components/TagListInput.jsx";
-import { MODEL_TARGETS, MODEL_TARGET_HINTS } from "./wizardState.js";
-
-const TEXT_FILE_PATTERN = /\.(txt|md|markdown|text)$/i;
-const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
+import { MODEL_TARGETS, MODEL_TARGET_HINTS, RESUME_FILE_PATTERN, RESUME_MAX_BYTES, bytesToBase64 } from "./wizardState.js";
 
 // Screen 1 -- name the profile, supply a resume (paste / upload / choose an
 // existing one), pick the model that reads it, run the extraction, edit the
 // resulting chips. Everything shown comes from GET /api/profiles, GET
 // /api/config and POST /api/resume/extract (see wizardState.js).
+//
+// uat-bug-020: a pasted or uploaded resume is stored by Finish (POST
+// /api/resumes). An uploaded file is read here, in the browser; its own
+// bytes are what Finish sends, and its text is what the extraction reads.
 export default function ResumeScreen({
   fields,
   setField,
@@ -27,22 +28,35 @@ export default function ResumeScreen({
     if (!file) {
       return;
     }
-    if (!TEXT_FILE_PATTERN.test(file.name) && !(file.type && file.type.startsWith("text/"))) {
-      setUploadError("Plain text or Markdown only (.txt, .md). PDF/DOCX parsing is not available in this release.");
+    if (!RESUME_FILE_PATTERN.test(file.name)) {
+      setUploadError("Plain text or Markdown only (.txt, .md, .markdown). PDF/DOCX parsing is not available in this release.");
       return;
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setUploadError("That file is larger than 2 MB. Paste the relevant text instead.");
+    if (file.size > RESUME_MAX_BYTES) {
+      setUploadError("That file is larger than 1 MB. Paste the relevant text instead.");
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
-      setField("resumeText", String(reader.result || ""));
+      const bytes = new Uint8Array(reader.result);
+      let text;
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        setUploadError("That file is not UTF-8 text. Save it as plain text or Markdown and try again.");
+        return;
+      }
+      if (!text.trim()) {
+        setUploadError("That file is empty.");
+        return;
+      }
+      setField("resumeText", text);
       setField("uploadName", file.name);
+      setField("uploadBase64", bytesToBase64(bytes));
       setField("extraction", null);
     };
     reader.onerror = () => setUploadError("Could not read that file.");
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   }
 
   function setResumeMode(mode) {
@@ -144,12 +158,12 @@ export default function ResumeScreen({
             onChange={(event) => {
               setField("resumeText", event.target.value);
               setField("uploadName", null);
+              setField("uploadBase64", null);
               setField("extraction", null);
             }}
           />
           <small className="wz-hint">
-            Used for the extraction below. To attach it to the profile, save it as a file and run the{" "}
-            <code>gigai scout resume add</code> command shown at the end.
+            Used for the extraction below. Finish stores it on this machine as this profile's resume.
           </small>
         </div>
       )}
@@ -163,13 +177,13 @@ export default function ResumeScreen({
             id="wz-resume-file"
             ref={fileInput}
             type="file"
-            accept=".txt,.md,.markdown,text/plain,text/markdown"
+            accept=".txt,.md,.markdown"
             onChange={handleFile}
           />
           {fields.uploadName && (
             <small className="wz-hint">
-              Loaded {fields.uploadName} ({fields.resumeText.length} characters). The same file is what{" "}
-              <code>gigai scout resume add</code> attaches at the end.
+              Loaded {fields.uploadName} ({fields.resumeText.length} characters). Finish stores it on this machine as
+              this profile's resume.
             </small>
           )}
           {!fields.uploadName && <small className="wz-hint">Plain text or Markdown. Read in your browser only.</small>}
@@ -181,9 +195,7 @@ export default function ResumeScreen({
         <div className="form-group">
           <span className="form-label">Choose an existing resume</span>
           {resumes.length === 0 && (
-            <p className="muted">
-              No resume is stored yet. Paste or upload one, or run <code>gigai scout resume add &lt;file&gt;</code>.
-            </p>
+            <p className="muted">No resume is stored yet. Paste or upload one.</p>
           )}
           {resumes.map((item) => {
             const active = fields.existingRef && fields.existingRef.key === item.key;
