@@ -845,7 +845,12 @@ def test_one_cache_for_every_project_and_profile_keyed_by_the_resumes_text(cache
     assert len(jev.asked) == 4 and other.cache_hits == 0
 
 
-def test_a_score_in_the_earlier_per_project_cache_is_read_and_not_paid_for_again(cache_home) -> None:
+def test_an_earlier_per_project_cache_entry_is_no_longer_read(cache_home) -> None:
+    """uat-bug-021 decision d: the earlier per-project cache carries no
+    preferences digest, so it cannot be trusted to answer for a fresh key
+    that names one -- it is left on disk, untouched, and simply never a
+    hit any more. A row with such an entry costs one rescore."""
+
     home, _target = cache_home
     jev = _Jev()
     row = _posting(1)
@@ -862,9 +867,12 @@ def test_a_score_in_the_earlier_per_project_cache_is_read_and_not_paid_for_again
 
     report = _report([row], JevClient("k", jev.client()), cache_home)
 
-    assert jev.asked == [] and report.cache_hits == 1
-    assert (report.scores[0].score, report.scores[0].fit, report.scores[0].cached) == (86, "strong", True)
-    # It is in the shared cache from now on.
+    assert len(jev.asked) == 1 and report.cache_hits == 0  # not read: Jev was asked, once
+    assert report.scores[0].score == 89  # _Jev's own fresh answer (level 8 of 9), not the legacy 86
+    # The legacy file is untouched -- no migration, no deletion.
+    assert legacy.is_file()
+    assert json.loads(legacy.read_text())["score"] == 86
+    # The fresh score is now in the shared cache.
     assert len(list(jev_rank.cache_dir(home).glob("*.json"))) == 1
 
 
@@ -897,7 +905,8 @@ def test_reading_the_cache_never_asks_jev(cache_home) -> None:
     _report(rows[:2], JevClient("k", jev.client()), cache_home)
 
     scores = jev_rank.read_cached_scores(
-        rows, resume_text="resume", profile_id="p1", resume_revision_id="r1", home_root=home, target=target,
+        rows, resume_text="resume", prefs=jev_rank.RankPreferences(target_titles=("software engineer",)),
+        profile_id="p1", resume_revision_id="r1", home_root=home, target=target,
     )
 
     assert len(jev.asked) == 2

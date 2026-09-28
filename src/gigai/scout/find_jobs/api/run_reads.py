@@ -189,12 +189,24 @@ def stored_rank_scores(
     profile's resume, then from the run's own sealed scores when the run
     used that same profile and resume revision. A row with neither has no
     entry. Nothing here asks Jev.
+
+    The preferences slice used to READ the cache (uat-bug-021 decision d:
+    the cache key includes a preferences digest) is the profile's titles
+    with no countries/visa flag -- the same slice ``api/rank.py``'s
+    ``_cached``/``compute_rank_scores`` reads with, since this is the same
+    kind of page read. A row scored by the acquire run pass itself (which
+    sends the project's full ``find-jobs.json`` roles/countries/visa) is
+    still found through ``acquire.rank_scores`` below, unaffected by the
+    live cache read's own key.
     """
 
     profile = joins.profile
     if profile is None:
         return {}
     revision_id = profile.resume_ref.revision_id
+    from ..jev_rank import RankPreferences as _RankPreferences
+
+    prefs = _RankPreferences(target_titles=tuple(profile.titles), countries=(), visa_sponsorship_required=False)
     scores: dict[str, RankScore] = {}
     if joins.resume_text:
         try:
@@ -206,6 +218,7 @@ def stored_rank_scores(
                 cached = read_cached_scores(
                     rows,
                     resume_text=joins.resume_text,
+                    prefs=prefs,
                     profile_id=profile.profile_id,
                     resume_revision_id=revision_id,
                     home_root=home_root,

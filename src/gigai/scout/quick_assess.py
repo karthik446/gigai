@@ -387,7 +387,10 @@ def _jev_rank(
     home_root: Path,
     target: Path,
 ) -> tuple[RankScore | None, str | None]:
-    """``(rank_score, rank_skip_reason)`` for one quick-assessed job; exactly one is set.
+    """``(rank_score, rank_skip_reason)`` for one quick-assessed job; exactly
+    one is set, except with "Rank with Jev" off (``jev_budget.rank_enabled``):
+    then neither, and Jev is not asked. ``RANK_SKIP_REASONS`` is a stored
+    contract's enum, so "off" is not written into the assessment.
 
     One ``jev_rank.rank_postings`` call for one row: cache-first, under the
     cost cap, and fail open -- this never raises, so a Jev problem can never
@@ -401,9 +404,11 @@ def _jev_rank(
     """
 
     try:
-        from .find_jobs import bindings, jev_client, market_acquisition
+        from .find_jobs import bindings, jev_budget, jev_client, market_acquisition
         from .find_jobs.jev_rank import RankPreferences, rank_postings
 
+        if not jev_budget.rank_enabled(home_root):  # ui-pass: "Rank with Jev" is off: no call, no reason stored
+            return None, None
         if not jev_client.has_api_key(home_root=home_root):
             return None, "no_key"
         if resume.pinned is None:

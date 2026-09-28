@@ -14,20 +14,49 @@ day. Lines are appended (one short write each), so a run's child process
 and the server can both write; a line that cannot be read is skipped.
 
 Budget: ``daily_budget_usd(home_root)`` is the ONE place it is read:
-``GIGAI_JEV_DAILY_BUDGET_USD`` when set to a number that is not negative,
-else ``DEFAULT_DAILY_BUDGET_USD``. A setting stored with the preferences
-has its place here and nowhere else.
+``GIGAI_JEV_DAILY_BUDGET_USD`` when set to a number that is not negative
+(the environment wins, so an eval can run under its own cap), else the
+operator's setting, else ``DEFAULT_DAILY_BUDGET_USD``.
+
+On/off: ``rank_enabled(home_root)`` is the ONE place "Rank with Jev" is
+read (uat-bug-021 decision a). Off: a run's rank pass, a "Score with Jev"
+click and quick assess ask Jev nothing.
+
+Settings (ui-pass, orchestrator decision B): both live in ONE home-wide
+file, ``<home>/local/scout/jev-settings.json``, ``{"schema_version",
+"jev_daily_budget_usd", "jev_rank_enabled"}``, beside the home's other
+Scout state (``target_resolution.earlier_project_notice_marker``). Not a
+project's preferences: the ledger is the home's, so one budget holds
+against it. Not under ``cache/``: clearing a cache never resets the limit
+or turns ranking back on. A missing file is the defaults (on, $0.50); a
+file that cannot be read turns ranking OFF (a spend switch fails closed)
+and is logged by exception type. Written only by ``write_settings``
+(``PUT /api/jev/settings``, Settings).
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
 import json
+import logging
 import os
 from pathlib import Path
 
+from .discovery.storage import atomic_write
+
 DEFAULT_DAILY_BUDGET_USD = 0.50
 DAILY_BUDGET_ENV = "GIGAI_JEV_DAILY_BUDGET_USD"
+SETTINGS_SCHEMA_VERSION = "scout-jev-settings:1"
+
+_logger = logging.getLogger("gigai.scout.server")
+
+
+class JevSettingsError(ValueError):
+    """A settings value that cannot be stored; the message names the field only."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def format_usd(value: float) -> str:
@@ -48,18 +77,96 @@ def format_cost(value: float) -> str:
     return f"{value:.2f}"
 
 
-def daily_budget_usd(home_root: Path | None = None) -> float:
-    """The most Jev may cost in one day, in USD. ``home_root`` is where a stored setting would be read."""
+def settings_path(home_root: Path) -> Path:
+    return Path(home_root) / "local" / "scout" / "jev-settings.json"
+
+
+def _budget_value(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not value >= 0 or value == float("inf"):
+        raise JevSettingsError("invalid_value", "jev_daily_budget_usd must be a number, 0 or more")
+    return float(value)
+
+
+def _enabled_value(value: object) -> bool:
+    if type(value) is not bool:
+        raise JevSettingsError("wrong_type", "jev_rank_enabled must be true or false")
+    return value
+
+
+def read_settings(home_root: Path | None) -> dict[str, object]:
+    """``{"jev_daily_budget_usd": float, "jev_rank_enabled": bool}`` as stored, defaults filled in.
+
+    No home or no file: the defaults. A file that cannot be read (a
+    symlink, not JSON, a wrong value): ranking OFF, the default budget.
+    """
+
+    settings: dict[str, object] = {"jev_daily_budget_usd": DEFAULT_DAILY_BUDGET_USD, "jev_rank_enabled": True}
+    if home_root is None:
+        return settings
+    path = settings_path(home_root)
+    if not path.is_symlink() and not path.exists():
+        return settings
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise JevSettingsError("invalid_value", "the settings path is not a regular file")
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        if type(stored) is not dict or stored.get("schema_version") != SETTINGS_SCHEMA_VERSION:
+            raise JevSettingsError("bad_enum", "the settings file's schema_version is unsupported")
+        if "jev_daily_budget_usd" in stored:
+            settings["jev_daily_budget_usd"] = _budget_value(stored["jev_daily_budget_usd"])
+        if "jev_rank_enabled" in stored:
+            settings["jev_rank_enabled"] = _enabled_value(stored["jev_rank_enabled"])
+    except (OSError, ValueError) as exc:
+        _logger.warning("jev settings: %s could not be read (%s); Rank with Jev is off", path.name, type(exc).__name__)
+        return {"jev_daily_budget_usd": DEFAULT_DAILY_BUDGET_USD, "jev_rank_enabled": False}
+    return settings
+
+
+def write_settings(
+    home_root: Path, *, daily_budget_usd: object = None, rank_enabled: object = None
+) -> dict[str, object]:
+    """Store the settings given; one that is not given keeps its stored value. Returns what is stored."""
+
+    current = read_settings(home_root)
+    if daily_budget_usd is not None:
+        current["jev_daily_budget_usd"] = _budget_value(daily_budget_usd)
+    if rank_enabled is not None:
+        current["jev_rank_enabled"] = _enabled_value(rank_enabled)
+    path = settings_path(home_root)
+    if path.is_symlink():
+        raise JevSettingsError("invalid_value", "the settings path is a symlink")
+    encoded = json.dumps({"schema_version": SETTINGS_SCHEMA_VERSION, **current}, indent=2, sort_keys=True) + "\n"
+    atomic_write(path, encoded.encode("utf-8"))
+    return current
+
+
+def budget_env_override() -> float | None:
+    """``GIGAI_JEV_DAILY_BUDGET_USD`` when it is set to a number that is not negative, else ``None``."""
 
     raw = os.environ.get(DAILY_BUDGET_ENV)
     if raw:
         try:
             value = float(raw)
         except ValueError:
-            value = -1.0
+            return None
         if value >= 0:
             return value
-    return DEFAULT_DAILY_BUDGET_USD
+    return None
+
+
+def daily_budget_usd(home_root: Path | None = None) -> float:
+    """The most Jev may cost in one day, in USD: the environment, else the stored setting, else $0.50."""
+
+    override = budget_env_override()
+    if override is not None:
+        return override
+    return float(read_settings(home_root)["jev_daily_budget_usd"])  # type: ignore[arg-type]
+
+
+def rank_enabled(home_root: Path | None = None) -> bool:
+    """"Rank with Jev": true unless the operator turned it off (or the settings file is unreadable)."""
+
+    return bool(read_settings(home_root)["jev_rank_enabled"])
 
 
 def _today() -> date:
@@ -138,7 +245,14 @@ def usage(home_root: Path) -> dict[str, object]:
 __all__ = [
     "DAILY_BUDGET_ENV",
     "DEFAULT_DAILY_BUDGET_USD",
+    "JevSettingsError",
+    "SETTINGS_SCHEMA_VERSION",
+    "budget_env_override",
     "daily_budget_usd",
+    "rank_enabled",
+    "read_settings",
+    "settings_path",
+    "write_settings",
     "format_cost",
     "format_usd",
     "record_spend",

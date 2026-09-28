@@ -1207,7 +1207,8 @@ def _rank_candidates_with_status(
     """``(scores, status)``: what ``_rank_candidates`` returns, and why.
 
     Each precondition is checked in this order and names itself in the
-    status: ``no_candidates``, ``no_home``, ``no_key``, ``no_run_input``,
+    status: ``no_candidates``, ``no_home``, ``disabled`` ("Rank with Jev"
+    is off, ``jev_budget.rank_enabled``), ``no_key``, ``no_run_input``,
     ``no_resume``; then the pass itself (``jev_rank.RankStatus.from_report``:
     scored N of M, ``cost_cap_reached``, ``daily_budget_reached``,
     ``jev_error:<code>``); any other exception is
@@ -1217,6 +1218,7 @@ def _rank_candidates_with_status(
     asks a busy answer again ``jev_rank.RUN_RETRIES`` times.
     """
 
+    from . import jev_budget
     from .jev_client import JevClient, has_api_key, require_api_key
     from .jev_rank import (
         DEFAULT_COST_CAP_USD,
@@ -1234,6 +1236,8 @@ def _rank_candidates_with_status(
     if home_root is None:
         return (), RankStatus.skipped("no_home", total=total)
     try:
+        if not jev_budget.rank_enabled(home_root):  # ui-pass: "Rank with Jev" is off: no call
+            return (), RankStatus.skipped("disabled", total=total, home_root=home_root)
         if not has_api_key(home_root=home_root):
             return (), RankStatus.skipped("no_key", total=total, home_root=home_root)
         sealed = _read_sealed_run_input_for_rank(resolved.path, run_id)

@@ -302,9 +302,24 @@ export function getAnswers() {
 
 // P6: Jev pre-rank for one run's postings, against a profile (default: the
 // selected one). No key configured -> scores come back empty (fail open),
-// never an error.
+// never an error. uat-bug-021: `{}` only READS (the scores cached so far and
+// the pass's `rank_status`); `{start: true}` is the "Score with Jev" click,
+// the one call on a page that may spend (jevModel.createRankPass).
 export function postRank(runId, fields) {
   return request("POST", `/api/runs/${encodeURIComponent(runId)}/rank`, fields || {});
+}
+
+// ui-pass (uat-bug-021 decision a): the home's Jev settings, "Rank with Jev"
+// on/off and the daily budget, plus whether a Jev key is set and today's
+// usage (find_jobs/api/jev_settings.py): {jev_daily_budget_usd,
+// jev_rank_enabled, daily_budget_env, has_key, usage}. PUT takes either
+// setting alone; the other keeps its stored value.
+export function getJevSettings() {
+  return request("GET", "/api/jev/settings");
+}
+
+export function putJevSettings(fields) {
+  return request("PUT", "/api/jev/settings", fields);
 }
 
 // P9c: every find-jobs run for this target (newest first), with per-run

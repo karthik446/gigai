@@ -13,7 +13,7 @@ import { assessmentHash, jobHash } from "../routing.js";
 //
 // Every field comes from a real response (see jobModel.js's header):
 // title/company/location/provider/published_at from the posting row, the
-// Jev tile from POST /api/runs/{id}/rank, the verdict chip from the latest
+// Jev tile from the run's stored scores (and a "Score with Jev" pass), the verdict chip from the latest
 // assessment (run or quick store), the sponsorship chip from the
 // assessment's read falling back to the posting's (shown only when
 // find-jobs.json visa_sponsorship_required is true, operator amendment),
@@ -31,7 +31,8 @@ import { assessmentHash, jobHash } from "../routing.js";
 // uat-batch2 (uat-bug-016): a card on the Assessments page opens the same
 // job page under #/assessments/<id> (`from="assessments"`), so the top bar
 // and the page's back link stay on Assessments. A quick assessment with no
-// Jev score carries why (job.rankSkipReason) in the tile's tooltip.
+// Jev score carries why (job.rankSkipReason) in the tile's tooltip; a run
+// posting carries its run's reason (`jevSkipWords`, ui-pass).
 //
 // uat-bug-018: a job that has a tailored resume, or is applied or beyond,
 // says so in a second chip beside its verdict (StateChip; the verdict
@@ -88,7 +89,7 @@ function onDemandAge(job) {
   return at ? `assessed ${ageLabel(at)}` : "assessed on demand";
 }
 
-export default function JobCard({ job, visaRequired, from }) {
+export default function JobCard({ job, visaRequired, from, jevSkipWords }) {
   const { posting } = job;
   const dimmed = job.verdict === "not_a_match" || (job.rank && job.rank.fit === "no");
   const mode = workModeLabel(posting);
@@ -106,7 +107,7 @@ export default function JobCard({ job, visaRequired, from }) {
             {companyLine}
           </div>
         </div>
-        <JevBadge rank={job.rank} skipReason={job.rankSkipReason} />
+        <JevBadge rank={job.rank} skipReason={job.rankSkipReason} runSkipWords={jevSkipWords} />
       </div>
 
       <div className="card-meta">

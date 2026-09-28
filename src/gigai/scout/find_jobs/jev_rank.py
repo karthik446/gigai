@@ -10,12 +10,24 @@ rather than failing the caller.
 
 Cache (operator decision 2026-09-28): ONE cache under the home, shared by
 every project: ``<home>/cache/scout/jev/scores/<key>.json``, ``key =
-sha256((content_sha256, resume_sha256, JEV_PROMPT_VERSION, model))``, where
-``resume_sha256`` is the digest of the resume's TEXT. A posting scored
-against a resume is never paid for again, whichever project, profile or
-resume revision asks. An entry of the earlier per-project cache
+sha256((content_sha256, resume_sha256, prefs_digest, JEV_PROMPT_VERSION,
+model))``, where ``resume_sha256`` is the digest of the resume's TEXT and
+``prefs_digest`` (uat-bug-021 decision d, 2026-09-28) is the digest of
+exactly what ``_state_for`` sends Jev as ``state.preferences``: the target
+titles in the SAME order the caller passed them (never sorted -- Jev is
+sent ``list(prefs.target_titles)`` verbatim, so two callers whose titles
+differ only in order are asking Jev a different question and get a cache
+miss), the countries, and the visa flag. Two profiles that share one resume
+but differ in target titles, countries or the visa flag never share a
+score. A posting scored against a resume AND a preferences slice is never
+paid for again, whichever project, profile or resume revision asks the
+same slice. The earlier per-project cache
 (``<home>/scout/<project_id>/jev_cache/``, keyed by profile and resume
-revision) is still read when the shared cache has none, and copied over.
+revision, with no preferences digest at all) is no longer read: it cannot
+know the prefs a fresh key needs, so a fallback read from it would risk
+serving a score for the wrong preferences. Its files are left on disk
+untouched (no migration, no deletion); they are simply not hits any more,
+and the one-time rescore this costs is bounded by the per-pass cost cap.
 Only a *successful* score is cached (an error is never memoized, so a
 transient Jev outage doesn't permanently blank a posting's score).
 
@@ -146,14 +158,34 @@ def resume_digest(resume_text: str) -> str:
     return digest_imported_bytes(resume_text.encode("utf-8"))
 
 
+def prefs_digest(prefs: RankPreferences) -> str:
+    """The digest of exactly what ``_state_for`` sends Jev as preferences.
+
+    Title order is preserved, not sorted: ``_state_for`` sends
+    ``list(prefs.target_titles)`` verbatim, so this must mirror that or the
+    key would agree while the Jev request disagrees. The same preferences
+    in a different order therefore digest differently (a cache miss) --
+    correct, since Jev is asked a different question. Countries and the
+    visa flag are unordered/scalar, so their own order (or absence) is the
+    only thing that can vary a digest for them.
+    """
+
+    return _hex({
+        "target_titles": list(prefs.target_titles),
+        "countries": list(prefs.countries),
+        "visa_sponsorship_required": bool(prefs.visa_sponsorship_required),
+    })
+
+
 def _hex(payload: dict[str, object]) -> str:
     return canonical_json_digest(payload).split(":", 1)[1]  # "sha256:<hex>"
 
 
-def _cache_key(*, content_sha256: str, resume_sha256: str, model: str) -> str:
+def _cache_key(*, content_sha256: str, resume_sha256: str, prefs_sha256: str, model: str) -> str:
     return _hex({
         "content_sha256": content_sha256,
         "resume_sha256": resume_sha256,
+        "prefs_sha256": prefs_sha256,
         "prompt_version": JEV_PROMPT_VERSION,
         "model": model,
     })
@@ -162,6 +194,11 @@ def _cache_key(*, content_sha256: str, resume_sha256: str, model: str) -> str:
 def _legacy_cache_key(
     *, content_sha256: str, profile_id: str | None, resume_revision_id: str | None, model: str
 ) -> str:
+    """The earlier per-project cache's key (no preferences digest). Kept only
+    so a test can name a file in that format; nothing reads that cache any
+    more (uat-bug-021 decision d -- it cannot know the preferences a fresh
+    key needs, so it is never a hit)."""
+
     return _hex({
         "content_sha256": content_sha256,
         "profile_id": profile_id,
@@ -194,15 +231,6 @@ def cache_dir(home_root: Path) -> Path:
     return Path(home_root) / "cache" / "scout" / "jev" / "scores"
 
 
-def _legacy_cache_dir(home_root: Path, target: Path) -> Path | None:
-    """The earlier per-project cache, or ``None`` when ``target`` names no project."""
-
-    try:
-        return Path(home_root) / "scout" / project_id(home_root, target) / "jev_cache"
-    except Exception:  # noqa: BLE001 - a fallback read: an unbound target has no earlier cache
-        return None
-
-
 def _read_cache_file(path: Path) -> RankScore | None:
     if path.is_symlink() or not path.is_file():
         return None
@@ -218,35 +246,30 @@ def _write_cache(path: Path, score: RankScore) -> None:
 
 @dataclass(frozen=True)
 class _Cache:
-    """Where one pass reads and writes its scores."""
+    """Where one pass reads and writes its scores.
+
+    Keyed by content + resume text + preferences (uat-bug-021 decision d):
+    the earlier per-project cache (``<home>/scout/<project_id>/jev_cache/``)
+    is no longer read -- its entries carry no preferences digest, so there
+    is no way to know whether they were scored against the same
+    preferences a fresh key implies. Its files are left on disk; they are
+    simply never hits any more.
+    """
 
     shared: Path
-    legacy: Path | None
     resume_sha256: str
-    profile_id: str | None
-    resume_revision_id: str | None
+    prefs_sha256: str
     model: str
 
     def path(self, row: "PostingRow") -> Path:
-        key = _cache_key(content_sha256=_cache_digest(row), resume_sha256=self.resume_sha256, model=self.model)
+        key = _cache_key(
+            content_sha256=_cache_digest(row), resume_sha256=self.resume_sha256,
+            prefs_sha256=self.prefs_sha256, model=self.model,
+        )
         return self.shared / f"{key}.json"
 
     def read(self, row: "PostingRow") -> RankScore | None:
-        path = self.path(row)
-        found = _read_cache_file(path)
-        if found is None and self.legacy is not None:
-            legacy_key = _legacy_cache_key(
-                content_sha256=row.content_sha256 or digest_imported_bytes((row.text or "").encode("utf-8")),
-                profile_id=self.profile_id,
-                resume_revision_id=self.resume_revision_id,
-                model=self.model,
-            )
-            found = _read_cache_file(self.legacy / f"{legacy_key}.json")
-            if found is not None and found.score is not None:
-                try:
-                    _write_cache(path, found)
-                except OSError:
-                    pass
+        found = _read_cache_file(self.path(row))
         if found is None or found.score is None:
             return None
         # The cache is keyed by content, not URL: the same posting under
@@ -264,14 +287,12 @@ class _Cache:
 
 
 def _cache_for(
-    *, resume_text: str, profile_id: str | None, resume_revision_id: str | None, home_root: Path, target: Path, model: str
+    *, resume_text: str, prefs: RankPreferences, home_root: Path, target: Path, model: str
 ) -> _Cache:
     return _Cache(
         shared=cache_dir(home_root),
-        legacy=_legacy_cache_dir(home_root, target),
         resume_sha256=resume_digest(resume_text),
-        profile_id=profile_id,
-        resume_revision_id=resume_revision_id,
+        prefs_sha256=prefs_digest(prefs),
         model=model,
     )
 
@@ -331,6 +352,7 @@ def read_cached_scores(
     rows: "Sequence[PostingRow]",
     *,
     resume_text: str,
+    prefs: RankPreferences,
     profile_id: str | None,
     resume_revision_id: str | None,
     home_root: Path,
@@ -340,12 +362,15 @@ def read_cached_scores(
     """The scores already paid for, one entry per row; Jev is never asked.
 
     What a page reads: a row with no cached score is an unscored entry.
+    ``prefs`` must be the SAME preferences the pass that might have scored
+    these rows was given -- the cache key includes their digest (uat-bug-021
+    decision d), so a page reading with different preferences reads misses,
+    correctly: it would be showing a score for a question that was never
+    asked. ``profile_id``/``resume_revision_id`` are accepted for callers
+    that still have them at hand but no longer key the read.
     """
 
-    cache = _cache_for(
-        resume_text=resume_text, profile_id=profile_id, resume_revision_id=resume_revision_id,
-        home_root=home_root, target=target, model=model,
-    )
+    cache = _cache_for(resume_text=resume_text, prefs=prefs, home_root=home_root, target=target, model=model)
     return tuple(cache.read(row) or _unscored(row) for row in rows)
 
 
@@ -394,6 +419,7 @@ _SKIP_WORDS = {
     "no_run_input": "the run's input could not be read",
     "no_resume": "no resume",
     "not_requested": "not asked yet",
+    "disabled": "Rank with Jev is off",
 }
 
 
@@ -617,10 +643,7 @@ def rank_postings_report(
     """
 
     rows = tuple(rows)
-    cache = _cache_for(
-        resume_text=resume_text, profile_id=profile_id, resume_revision_id=resume_revision_id,
-        home_root=home_root, target=target, model=model,
-    )
+    cache = _cache_for(resume_text=resume_text, prefs=prefs, home_root=home_root, target=target, model=model)
     scores: list[RankScore | None] = [None] * len(rows)
     pending: list[tuple[int, "PostingRow"]] = []
     cache_hits = 0

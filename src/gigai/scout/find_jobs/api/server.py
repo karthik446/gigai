@@ -1363,8 +1363,9 @@ def _make_handler(
     from .config import ConfigRoutesMixin
     from .discover import DiscoverRoutesMixin
     from .extract import ResumeExtractRoutesMixin
+    from .jev_settings import JevSettingsRoutesMixin
     from .profiles import ProfilesRoutesMixin
-    from .rank import RankRoutesMixin
+    from .rank import JevUsageRoutesMixin, RankRoutesMixin
     from .resumes import ResumesRoutesMixin
     from .runs import RunRoutesMixin
     from .runs_list import RunsListRoutesMixin
@@ -1383,6 +1384,8 @@ def _make_handler(
         RunsListRoutesMixin,
         ProfilesRoutesMixin,
         RankRoutesMixin,
+        JevUsageRoutesMixin,
+        JevSettingsRoutesMixin,
         AssessRoutesMixin,
         AnswersRoutesMixin,
         ApplicationsRoutesMixin,
@@ -1589,6 +1592,12 @@ def _make_handler(
                     if path == "/api/secrets/status":
                         self._handle_get_secrets_status()
                         return
+                    if path == "/api/jev/usage":
+                        self._handle_get_jev_usage()
+                        return
+                    if path == "/api/jev/settings":
+                        self._handle_get_jev_settings()
+                        return
                     # run-reads-fast (uat-bug-022): with a query these two are
                     # the page-sized reads (``run_reads.py``); with none they
                     # answer what they always did.
@@ -1686,6 +1695,9 @@ def _make_handler(
             try:
                 if path == "/api/setup":
                     self._handle_put_setup()
+                    return
+                if path == "/api/jev/settings":
+                    self._handle_put_jev_settings()
                     return
                 profile_id = _match_profile_id(path, suffix="")
                 if profile_id is not None:

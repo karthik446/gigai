@@ -31,6 +31,32 @@ ephemeral pasted-resume runs under `ephemeral/`) and contain resume-derived
 text by design. Scout is one Gig among others GigAI can host; it gets no
 special runtime treatment.
 
+## Privacy and security
+
+**Jev ranking spends by default.** With a Jev key set (`gigai secrets add
+jev`) and "Rank with Jev" on (the default), every find-jobs search asks Jev
+to score its postings against your resume, whichever model target assesses
+them (the UI's run dialog says so): up to **$0.25 per run**, and all Jev
+calls of a day (runs, "Score with Jev" in the UI, quick assessments) stop at
+a **daily budget of $0.50** by default. A posting Jev already scored for the
+same resume and preferences is cached and costs nothing again. Opening a
+run in the UI never asks Jev; only a run, the "Score with Jev" button and a
+quick assessment do.
+
+**What is sent to Jev:** the first **2,000 characters of the selected
+profile's resume**, your target titles, countries and visa need, and each
+posting's company, title and location. A resume pasted into a single
+assessment is never sent to Jev.
+
+**Turning it off or down:** Settings → Jev ranking has "Rank with Jev:
+on/off" and the daily budget (0 stops every call), with today's spend. Both
+are stored for the whole GigAI home in `<home>/local/scout/jev-settings.json`
+(not under `cache/`, so clearing a cache never resets them). The environment
+variable `GIGAI_JEV_DAILY_BUDGET_USD` overrides the stored budget when set
+(the evals use it); `GIGAI_JEV_COST_CAP_USD` overrides the per-run cap.
+Every paid call is logged, amount only, in
+`<home>/cache/scout/jev/spend/<day>.jsonl`.
+
 ## Install
 
 Requires Python 3.11+.

@@ -454,9 +454,13 @@ def test_a_run_page_shows_only_its_own_run() -> None:
     # Every response handler checks the run the view shows NOW.
     # run-reads-fast: getRunResults takes an onPage callback now; every page
     # it hands over is checked the same way.
-    for call in ("getRunResults(id, {", "getRunProgress(id)", "getRunStatus(id)", "getRunStatus(pastRunId)", "postRank(id, {})"):
+    for call in ("getRunResults(id, {", "getRunProgress(id)", "getRunStatus(id)", "getRunStatus(pastRunId)"):
         start = view.index(call)
         assert "shownRunId.current" in view[start : start + 260], f"{call}: its response is not checked against the shown run"
+    # ui-pass: a page no longer POSTs /rank when a run opens; a "Score with
+    # Jev" pass's answers are checked the same way (jevModel.createRankPass).
+    start = view.index("createRankPass({")
+    assert "isCurrent: () => shownRunId.current === id," in view[start : start + 260]
     assert "setRunId(" not in view.replace("setRunId(id);", "", 1).replace("[runId, setRunId]", ""), "set the shown run through showRun() only"
     run_page = view[view.index('if (route.view === "run") {') :]
     run_page = run_page[: run_page.index("\n  return (\n    <div>\n      <JobsSummaryStrip")]

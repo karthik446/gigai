@@ -221,6 +221,7 @@ const RANK_SKIP_WORDS = {
   no_run_input: "the run's input could not be read",
   no_run_output: "the run's postings could not be read",
   not_requested: "not asked yet",
+  disabled: "Rank with Jev is off",
 };
 const RANK_STATES = ["scored", "skipped", "running"];
 

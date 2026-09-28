@@ -806,8 +806,10 @@ def _sealed(*, profile_id: str | None, revision_id: str, scores: tuple[RankScore
     )
 
 
-def _joins(*, resume_text: str | None = None) -> run_reads.RowJoins:
-    profile = SimpleNamespace(profile_id="profile_1", resume_ref=SimpleNamespace(record_id="record_1", revision_id="revision_1"))
+def _joins(*, resume_text: str | None = None, titles: tuple[str, ...] = ("Engineer",)) -> run_reads.RowJoins:
+    profile = SimpleNamespace(
+        profile_id="profile_1", resume_ref=SimpleNamespace(record_id="record_1", revision_id="revision_1"), titles=titles
+    )
     return run_reads.RowJoins(head="head", profile=profile, resume_text=resume_text, events=None)
 
 
@@ -830,19 +832,26 @@ def test_a_run_s_sealed_scores_count_only_for_the_resume_they_were_made_for(tmp_
 def test_a_cached_score_wins_over_the_sealed_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     rows = (_posting("a"), _posting("b"), _posting("c"))
     sealed = (_score(rows[0].normalized_url, 70), _score(rows[1].normalized_url, 30))
-    monkeypatch.setattr(
-        jev_rank,
-        "read_cached_scores",
-        lambda cached_rows, **_kwargs: (_score(rows[0].normalized_url, 95), _score(rows[1].normalized_url, None), _score(rows[2].normalized_url, None)),
-        raising=False,
-    )
+    joins = _joins(resume_text="a resume", titles=("Engineer", "Staff Engineer"))
+    asked: list[dict[str, object]] = []
+
+    def read_cached_scores(cached_rows, **kwargs):
+        asked.append(kwargs)
+        return (_score(rows[0].normalized_url, 95), _score(rows[1].normalized_url, None), _score(rows[2].normalized_url, None))
+
+    monkeypatch.setattr(jev_rank, "read_cached_scores", read_cached_scores, raising=False)
 
     found = run_reads.stored_rank_scores(
         rows, evidence=_sealed(profile_id="profile_1", revision_id="revision_1", scores=sealed),
-        joins=_joins(resume_text="a resume"), home_root=tmp_path, target=tmp_path,
+        joins=joins, home_root=tmp_path, target=tmp_path,
     )
 
     assert {url: item.score for url, item in found.items()} == {rows[0].normalized_url: 95, rows[1].normalized_url: 30}
+    # The read was actually reached with the reading profile's own titles as
+    # the preferences slice (uat-bug-021 decision d's cache key): a stub that
+    # ignored prefs would pass for the wrong reason.
+    [call] = asked
+    assert call["prefs"].target_titles == joins.profile.titles
 
 
 def test_a_score_cache_that_cannot_be_read_costs_the_scores_not_the_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

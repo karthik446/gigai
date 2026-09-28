@@ -1533,3 +1533,13 @@ table.data-table th {
 .job-state-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .job-state-row .chip-group-label { margin-bottom: 0; }
 .job-state-note { margin: 8px 0 0; }
+
+/* ui-pass (uat-bug-021): Settings' Jev panel and the run grid's
+   "Score with Jev" bar. */
+.jev-disclosure p { margin: 0 0 4px; }
+.jev-settings { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.jev-settings .jev-toggle { font-size: 0.9rem; color: var(--text); }
+.jev-budget-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.jev-budget-row input[type="number"] { width: 7rem; }
+.jev-settings p { margin: 0; }
+.jev-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 0.88rem; }

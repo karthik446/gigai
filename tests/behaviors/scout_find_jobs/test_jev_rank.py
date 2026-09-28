@@ -169,6 +169,206 @@ def test_different_content_sha_is_a_cache_miss(tmp_path: Path) -> None:
     assert len(calls) == 2
 
 
+# uat-bug-021 decision d: the cache key includes a digest of exactly what
+# Jev is sent as preferences (target titles in the order Jev receives them,
+# countries, the visa flag). Two profiles with one resume but different
+# preferences must never share scores; the same preferences must.
+
+
+def test_different_target_titles_is_a_cache_miss(tmp_path: Path) -> None:
+    home, target = tmp_path / "home", tmp_path / "target"
+    home.mkdir()
+    target.mkdir()
+    row = _row(1)
+    calls: list[str] = []
+    client = _client(_handler_factory(calls))
+
+    rank_postings(
+        (row,), client=client, resume_text="resume",
+        prefs=RankPreferences(target_titles=("SWE",), countries=("US",), visa_sponsorship_required=False),
+        profile_id="p1", resume_revision_id="r1", home_root=home, target=target,
+    )
+    rank_postings(
+        (row,), client=client, resume_text="resume",
+        prefs=RankPreferences(target_titles=("Staff Engineer",), countries=("US",), visa_sponsorship_required=False),
+        profile_id="p2", resume_revision_id="r1", home_root=home, target=target,
+    )
+
+    assert len(calls) == 2
+
+
+def test_different_countries_is_a_cache_miss(tmp_path: Path) -> None:
+    home, target = tmp_path / "home", tmp_path / "target"
+    home.mkdir()
+    target.mkdir()
+    row = _row(1)
+    calls: list[str] = []
+    client = _client(_handler_factory(calls))
+
+    rank_postings(
+        (row,), client=client, resume_text="resume",
+        prefs=RankPreferences(target_titles=("SWE",), countries=("US",), visa_sponsorship_required=False),
+        profile_id="p1", resume_revision_id="r1", home_root=home, target=target,
+    )
+    rank_postings(
+        (row,), client=client, resume_text="resume",
+        prefs=RankPreferences(target_titles=("SWE",), countries=("CA",), visa_sponsorship_required=False),
+        profile_id="p1", resume_revision_id="r1", home_root=home, target=target,
+    )
+
+    assert len(calls) == 2
+
+
+def test_different_visa_flag_is_a_cache_miss(tmp_path: Path) -> None:
+    home, target = tmp_path / "home", tmp_path / "target"
+    home.mkdir()
+    target.mkdir()
+    row = _row(1)
+    calls: list[str] = []
+    client = _client(_handler_factory(calls))
+
+    rank_postings(
+        (row,), client=client, resume_text="resume",
+        prefs=RankPreferences(target_titles=("SWE",), countries=("US",), visa_sponsorship_required=False),
+        profile_id="p1", resume_revision_id="r1", home_root=home, target=target,
+    )
+    rank_postings(
+        (row,), client=client, resume_text="resume",
+        prefs=RankPreferences(target_titles=("SWE",), countries=("US",), visa_sponsorship_required=True),
+        profile_id="p1", resume_revision_id="r1", home_root=home, target=target,
+    )
+
+    assert len(calls) == 2
+
+
+def test_identical_preferences_is_a_cache_hit(tmp_path: Path) -> None:
+    home, target = tmp_path / "home", tmp_path / "target"
+    home.mkdir()
+    target.mkdir()
+    row = _row(1)
+    calls: list[str] = []
+    client = _client(_handler_factory(calls))
+    prefs = RankPreferences(target_titles=("SWE", "Staff Engineer"), countries=("US", "CA"), visa_sponsorship_required=True)
+
+    rank_postings((row,), client=client, resume_text="resume", prefs=prefs, profile_id="p1", resume_revision_id="r1", home_root=home, target=target)
+    # A different profile, a different resume revision, but the SAME
+    # resume text and the SAME preferences slice: still a hit.
+    rank_postings((row,), client=client, resume_text="resume", prefs=prefs, profile_id="p2", resume_revision_id="r2", home_root=home, target=target)
+
+    assert len(calls) == 1
+
+
+def test_same_titles_in_a_different_order_is_a_cache_miss(tmp_path: Path) -> None:
+    """Jev is sent ``list(prefs.target_titles)`` verbatim (never sorted), so
+    a different order is a different question and must not share a score."""
+
+    home, target = tmp_path / "home", tmp_path / "target"
+    home.mkdir()
+    target.mkdir()
+    row = _row(1)
+    calls: list[str] = []
+    client = _client(_handler_factory(calls))
+
+    rank_postings(
+        (row,), client=client, resume_text="resume",
+        prefs=RankPreferences(target_titles=("SWE", "Staff Engineer"), countries=(), visa_sponsorship_required=False),
+        profile_id="p1", resume_revision_id="r1", home_root=home, target=target,
+    )
+    rank_postings(
+        (row,), client=client, resume_text="resume",
+        prefs=RankPreferences(target_titles=("Staff Engineer", "SWE"), countries=(), visa_sponsorship_required=False),
+        profile_id="p1", resume_revision_id="r1", home_root=home, target=target,
+    )
+
+    assert len(calls) == 2
+
+
+def test_read_cached_scores_uses_the_same_key_as_the_paying_pass(tmp_path: Path) -> None:
+    """The page reader (``read_cached_scores``) must key exactly like the
+    pass that paid for the score (``rank_postings``) -- same resume,
+    content and preferences finds the entry; different preferences misses
+    it, same as a second paying pass would."""
+
+    home, target = tmp_path / "home", tmp_path / "target"
+    home.mkdir()
+    target.mkdir()
+    row = _row(1)
+    calls: list[str] = []
+    client = _client(_handler_factory(calls))
+    prefs = RankPreferences(target_titles=("SWE",), countries=("US",), visa_sponsorship_required=False)
+
+    rank_postings((row,), client=client, resume_text="resume", prefs=prefs, profile_id="p1", resume_revision_id="r1", home_root=home, target=target)
+
+    from gigai.scout.find_jobs.jev_rank import read_cached_scores
+
+    hit = read_cached_scores(
+        (row,), resume_text="resume", prefs=prefs, profile_id="p9", resume_revision_id="r9", home_root=home, target=target,
+    )
+    assert hit[0].score is not None
+
+    miss = read_cached_scores(
+        (row,), resume_text="resume",
+        prefs=RankPreferences(target_titles=("Different Title",), countries=("US",), visa_sponsorship_required=False),
+        profile_id="p9", resume_revision_id="r9", home_root=home, target=target,
+    )
+    assert miss[0].score is None
+    assert len(calls) == 1  # read_cached_scores never asks Jev
+
+
+def test_an_old_format_cache_file_is_not_used_and_not_deleted(tmp_path: Path) -> None:
+    """An entry of the earlier per-project cache (no preferences digest,
+    keyed by profile id and resume revision) is simply not a hit any more:
+    it cannot know whether it was scored against these preferences. Its
+    file is left on disk untouched -- no migration, no deletion."""
+
+    from gigai.scout.find_jobs.jev_rank import _legacy_cache_key
+
+    home, target = tmp_path / "home", tmp_path / "target"
+    home.mkdir()
+    target.mkdir()
+    row = _row(1)
+    legacy_key = _legacy_cache_key(content_sha256=row.content_sha256, profile_id="p1", resume_revision_id="r1", model="jev-latest")
+    legacy_path = home / "scout" / "proj-test" / "jev_cache" / f"{legacy_key}.json"
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text(
+        '{"normalized_url": "%s", "content_sha256": "%s", "fit": "strong", "score": 90, '
+        '"reasons": [], "mismatch_flags": [], "hidden_by_default": false, "cost_usd": "0.0005", "cached": true}'
+        % (row.normalized_url, row.content_sha256)
+    )
+
+    calls: list[str] = []
+    client = _client(_handler_factory(calls))
+    scores, _cost, _capped = rank_postings(
+        (row,), client=client, resume_text="resume", prefs=_prefs(),
+        profile_id="p1", resume_revision_id="r1", home_root=home, target=target,
+    )
+
+    assert len(calls) == 1  # the old entry was not read: Jev was asked
+    assert scores[0].score == 89  # the fresh answer from _handler_factory (level 8 of 9), not the legacy 90
+    assert legacy_path.is_file()  # left on disk, untouched
+
+
+def test_one_prefs_slice_writes_exactly_one_cache_file(tmp_path: Path) -> None:
+    """Every score for one (content, resume, prefs, model) combination lands
+    in exactly one file under the shared cache dir -- confirms the key
+    function used by writers is the one this test suite exercises, not a
+    parallel path."""
+
+    home, target = tmp_path / "home", tmp_path / "target"
+    home.mkdir()
+    target.mkdir()
+    row = _row(1)
+    calls: list[str] = []
+    client = _client(_handler_factory(calls))
+
+    rank_postings((row,), client=client, resume_text="resume", prefs=_prefs(), profile_id="p1", resume_revision_id="r1", home_root=home, target=target)
+
+    from gigai.scout.find_jobs.jev_rank import cache_dir
+
+    files = list(cache_dir(home).glob("*.json"))
+    assert len(files) == 1
+
+
 def test_only_successful_scores_are_cached(tmp_path: Path) -> None:
     """A failed Jev call must never be memoized -- a transient outage should
     not permanently blank a posting's score for this resume."""
@@ -222,6 +422,13 @@ def test_cost_cap_stops_calling_and_marks_rest_unscored(tmp_path: Path) -> None:
 
 def test_default_cost_cap_is_a_quarter_dollar() -> None:
     assert DEFAULT_COST_CAP_USD == 0.25
+
+
+def test_disabled_is_a_known_skip_reason() -> None:
+    """"Rank with Jev" being off (``jev_budget.rank_enabled``) is a named
+    skip reason, not a bare code, wherever a ``RankStatus`` shows its words."""
+
+    assert jev_rank._SKIP_WORDS["disabled"] == "Rank with Jev is off"
 
 
 def test_order_by_rank_sorts_descending_by_score() -> None:

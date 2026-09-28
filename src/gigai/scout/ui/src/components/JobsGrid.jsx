@@ -78,7 +78,7 @@ function StateChips({ options, value, onChange }) {
   );
 }
 
-export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, from }) {
+export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, from, jevSkipWords }) {
   const assessments = from === "assessments";
   const noun = assessments ? "assessments" : "postings";
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -176,7 +176,7 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, f
         {visible.length === 0 ? (
           <div className="empty-state">{jobs.length === 0 ? emptyMessage || "No postings acquired yet." : `No ${noun} match these filters.`}</div>
         ) : (
-          visible.map((job) => <JobCard key={job.id} job={job} visaRequired={visaRequired} from={from} />)
+          visible.map((job) => <JobCard key={job.id} job={job} visaRequired={visaRequired} from={from} jevSkipWords={jevSkipWords} />)
         )}
       </div>
     </div>

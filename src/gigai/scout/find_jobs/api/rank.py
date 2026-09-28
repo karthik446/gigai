@@ -30,7 +30,9 @@ pass logs it once. Reasons here: ``error:<ExceptionType>`` (the project
 could not be resolved, or anything unexpected), ``no_run_output`` (the
 run's sealed postings could not be read), ``no_candidates`` (it has no
 postings), ``no_profile``, ``no_key``, ``no_resume``, ``not_requested``
-(unscored postings and no pass was asked for), and the pass's own
+(unscored postings and no pass was asked for), ``disabled`` ("Rank with
+Jev" is off, ``jev_budget.rank_enabled``: a click starts no pass and
+nothing asks Jev), and the pass's own
 ``cost_cap_reached`` / ``daily_budget_reached`` / ``jev_error:<code>``.
 
 ``GET /api/jev/usage`` (``JevUsageRoutesMixin``): today's Jev spend and the
@@ -69,7 +71,14 @@ _logger = logging.getLogger("gigai.scout.server")
 
 @dataclass(frozen=True)
 class _Resolved:
-    """What a ranking of one run needs: its postings, the profile, the resume."""
+    """What a ranking of one run needs: its postings, the profile, the resume.
+
+    ``prefs`` is the exact ``RankPreferences`` this route sends Jev (built
+    once, here, so the read path -- ``_cached``/``read_cached_scores`` --
+    and the write path -- ``rank_postings_report`` in ``_rank_run`` -- key
+    the cache identically; uat-bug-021 decision d, the cache key includes a
+    digest of these preferences).
+    """
 
     project_id: str
     rows: tuple
@@ -77,6 +86,7 @@ class _Resolved:
     resume_revision_id: str
     titles: tuple[str, ...]
     resume_text: str
+    prefs: RankPreferences
 
 
 def _skip(
@@ -153,13 +163,19 @@ def _resolve(
         resume_text = None
     if not resume_text:
         return _skip(run_id, "no_resume", home_root=home_root, total=total)
+    titles = tuple(profile.titles)
     return _Resolved(
         project_id=resolved.project_id,
         rows=rows,
         profile_id=profile.profile_id,
         resume_revision_id=profile.resume_ref.revision_id,
-        titles=tuple(profile.titles),
+        titles=titles,
         resume_text=resume_text,
+        # Matches the RankPreferences built for rank_postings_report in
+        # _rank_run below exactly: this route does not yet read
+        # find-jobs.json's countries/visa flag (a pre-existing gap, not
+        # this packet's target -- only the cache key changed here).
+        prefs=RankPreferences(target_titles=titles, countries=(), visa_sponsorship_required=False),
     )
 
 
@@ -167,6 +183,7 @@ def _cached(resolved: _Resolved, *, home_root, target, run_id: str) -> RankRespo
     scores = read_cached_scores(
         resolved.rows,
         resume_text=resolved.resume_text,
+        prefs=resolved.prefs,
         profile_id=resolved.profile_id,
         resume_revision_id=resolved.resume_revision_id,
         home_root=home_root,
@@ -238,6 +255,8 @@ def _rank_run(
         if not isinstance(found, _Resolved):
             return found
         total = len(found.rows)
+        if not jev_budget.rank_enabled(home_root):  # ui-pass: "Rank with Jev" is off
+            return _skip(run_id, "disabled", home_root=home_root, total=total)
         cap = cost_cap_usd if cost_cap_usd is not None else DEFAULT_COST_CAP_USD
         api_key = jev_client.require_api_key(home_root=home_root)
         http_client = _jev_http_client()
@@ -246,7 +265,7 @@ def _rank_run(
                 found.rows,
                 client=JevClient(api_key, http_client),
                 resume_text=found.resume_text,
-                prefs=RankPreferences(target_titles=found.titles, countries=(), visa_sponsorship_required=False),
+                prefs=found.prefs,
                 profile_id=found.profile_id,
                 resume_revision_id=found.resume_revision_id,
                 home_root=home_root,
@@ -337,9 +356,18 @@ def start_or_join_rank(
             spent, budget = jev_budget.spent_today_usd(home_root), jev_budget.daily_budget_usd(home_root)
             if cached.unscored == 0:
                 return cached, RankStatus("scored", scored, scored, None, cap, 0.0, None, spent, budget)
-            if not start:
+            enabled = jev_budget.rank_enabled(home_root)
+            if not start or not enabled:
+                # ui-pass: with "Rank with Jev" off a click starts no pass
+                # either; the unscored postings say why.
                 status = "scored" if scored else "skipped"
-                return cached, RankStatus(status, scored, len(cached.scores), "not_requested", cap, 0.0, None, spent, budget)
+                reason = "not_requested" if enabled else "disabled"
+                if start:
+                    log_rank_status(
+                        RankStatus(status, scored, len(cached.scores), reason, cap, 0.0, None, spent, budget),
+                        run_id=run_id, where="rank",
+                    )
+                return cached, RankStatus(status, scored, len(cached.scores), reason, cap, 0.0, None, spent, budget)
             current = _Pass()
             _PASSES[key] = current
 
