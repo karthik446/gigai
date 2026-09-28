@@ -22,16 +22,26 @@ On/off: ``rank_enabled(home_root)`` is the ONE place "Rank with Jev" is
 read (uat-bug-021 decision a). Off: a run's rank pass, a "Score with Jev"
 click and quick assess ask Jev nothing.
 
-Settings (ui-pass, orchestrator decision B): both live in ONE home-wide
-file, ``<home>/local/scout/jev-settings.json``, ``{"schema_version",
-"jev_daily_budget_usd", "jev_rank_enabled"}``, beside the home's other
-Scout state (``target_resolution.earlier_project_notice_marker``). Not a
-project's preferences: the ledger is the home's, so one budget holds
-against it. Not under ``cache/``: clearing a cache never resets the limit
-or turns ranking back on. A missing file is the defaults (on, $0.50); a
-file that cannot be read turns ranking OFF (a spend switch fails closed)
-and is logged by exception type. Written only by ``write_settings``
-(``PUT /api/jev/settings``, Settings).
+Per-run cap: ``run_cost_cap_usd(home_root)`` is the ONE place the per-run
+cap is read (jev-disclosure-fixes, TARGET 4): ``GIGAI_JEV_COST_CAP_USD``
+when set to a number that is not negative, else the operator's setting
+(``jev_run_cap_usd``), else ``jev_rank.DEFAULT_COST_CAP_USD`` ($0.25). Both
+the search's rank pass (``market_acquisition._rank_candidates``) and
+``POST /rank`` read it; a request's own ``cost_cap_usd`` may only LOWER it,
+never raise it above what the operator (or the environment) allows.
+
+Settings (ui-pass, orchestrator decision B): all three live in ONE
+home-wide file, ``<home>/local/scout/jev-settings.json``,
+``{"schema_version", "jev_daily_budget_usd", "jev_rank_enabled",
+"jev_run_cap_usd"}``, beside the home's other Scout state
+(``target_resolution.earlier_project_notice_marker``). Not a project's
+preferences: the ledger is the home's, so one budget holds against it. Not
+under ``cache/``: clearing a cache never resets the limit or turns ranking
+back on. A missing file, or a missing ``jev_run_cap_usd`` key in an older
+file, is the defaults (on, $0.50/day, $0.25/run); a file that cannot be
+read turns ranking OFF (a spend switch fails closed) and is logged by
+exception type. Written only by ``write_settings`` (``PUT
+/api/jev/settings``, Settings).
 """
 
 from __future__ import annotations
@@ -46,6 +56,7 @@ from .discovery.storage import atomic_write
 
 DEFAULT_DAILY_BUDGET_USD = 0.50
 DAILY_BUDGET_ENV = "GIGAI_JEV_DAILY_BUDGET_USD"
+RUN_COST_CAP_ENV = "GIGAI_JEV_COST_CAP_USD"
 SETTINGS_SCHEMA_VERSION = "scout-jev-settings:1"
 
 _logger = logging.getLogger("gigai.scout.server")
@@ -81,9 +92,9 @@ def settings_path(home_root: Path) -> Path:
     return Path(home_root) / "local" / "scout" / "jev-settings.json"
 
 
-def _budget_value(value: object) -> float:
+def _budget_value(value: object, *, field: str = "jev_daily_budget_usd") -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not value >= 0 or value == float("inf"):
-        raise JevSettingsError("invalid_value", "jev_daily_budget_usd must be a number, 0 or more")
+        raise JevSettingsError("invalid_value", f"{field} must be a number, 0 or more")
     return float(value)
 
 
@@ -93,14 +104,25 @@ def _enabled_value(value: object) -> bool:
     return value
 
 
+def _default_run_cap_usd() -> float:
+    from .jev_rank import DEFAULT_COST_CAP_USD
+
+    return DEFAULT_COST_CAP_USD
+
+
 def read_settings(home_root: Path | None) -> dict[str, object]:
-    """``{"jev_daily_budget_usd": float, "jev_rank_enabled": bool}`` as stored, defaults filled in.
+    """``{"jev_daily_budget_usd": float, "jev_rank_enabled": bool, "jev_run_cap_usd":
+    float}`` as stored, defaults filled in.
 
     No home or no file: the defaults. A file that cannot be read (a
-    symlink, not JSON, a wrong value): ranking OFF, the default budget.
+    symlink, not JSON, a wrong value): ranking OFF, the default budgets.
     """
 
-    settings: dict[str, object] = {"jev_daily_budget_usd": DEFAULT_DAILY_BUDGET_USD, "jev_rank_enabled": True}
+    settings: dict[str, object] = {
+        "jev_daily_budget_usd": DEFAULT_DAILY_BUDGET_USD,
+        "jev_rank_enabled": True,
+        "jev_run_cap_usd": _default_run_cap_usd(),
+    }
     if home_root is None:
         return settings
     path = settings_path(home_root)
@@ -116,14 +138,20 @@ def read_settings(home_root: Path | None) -> dict[str, object]:
             settings["jev_daily_budget_usd"] = _budget_value(stored["jev_daily_budget_usd"])
         if "jev_rank_enabled" in stored:
             settings["jev_rank_enabled"] = _enabled_value(stored["jev_rank_enabled"])
+        if "jev_run_cap_usd" in stored:
+            settings["jev_run_cap_usd"] = _budget_value(stored["jev_run_cap_usd"], field="jev_run_cap_usd")
     except (OSError, ValueError) as exc:
         _logger.warning("jev settings: %s could not be read (%s); Rank with Jev is off", path.name, type(exc).__name__)
-        return {"jev_daily_budget_usd": DEFAULT_DAILY_BUDGET_USD, "jev_rank_enabled": False}
+        return {
+            "jev_daily_budget_usd": DEFAULT_DAILY_BUDGET_USD,
+            "jev_rank_enabled": False,
+            "jev_run_cap_usd": _default_run_cap_usd(),
+        }
     return settings
 
 
 def write_settings(
-    home_root: Path, *, daily_budget_usd: object = None, rank_enabled: object = None
+    home_root: Path, *, daily_budget_usd: object = None, rank_enabled: object = None, run_cap_usd: object = None
 ) -> dict[str, object]:
     """Store the settings given; one that is not given keeps its stored value. Returns what is stored."""
 
@@ -132,6 +160,8 @@ def write_settings(
         current["jev_daily_budget_usd"] = _budget_value(daily_budget_usd)
     if rank_enabled is not None:
         current["jev_rank_enabled"] = _enabled_value(rank_enabled)
+    if run_cap_usd is not None:
+        current["jev_run_cap_usd"] = _budget_value(run_cap_usd, field="jev_run_cap_usd")
     path = settings_path(home_root)
     if path.is_symlink():
         raise JevSettingsError("invalid_value", "the settings path is a symlink")
@@ -167,6 +197,31 @@ def rank_enabled(home_root: Path | None = None) -> bool:
     """"Rank with Jev": true unless the operator turned it off (or the settings file is unreadable)."""
 
     return bool(read_settings(home_root)["jev_rank_enabled"])
+
+
+def run_cap_env_override() -> float | None:
+    """``GIGAI_JEV_COST_CAP_USD`` when it is set to a number that is not negative, else ``None``."""
+
+    raw = os.environ.get(RUN_COST_CAP_ENV)
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return None
+        if value >= 0:
+            return value
+    return None
+
+
+def run_cost_cap_usd(home_root: Path | None = None) -> float:
+    """The most one ranking pass may cost, in USD: the environment, else the stored
+    setting, else ``jev_rank.DEFAULT_COST_CAP_USD`` ($0.25). The ONE place both the
+    search's own rank pass and ``POST /rank`` read the per-run cap from."""
+
+    override = run_cap_env_override()
+    if override is not None:
+        return override
+    return float(read_settings(home_root)["jev_run_cap_usd"])  # type: ignore[arg-type]
 
 
 def _today() -> date:
@@ -245,12 +300,15 @@ def usage(home_root: Path) -> dict[str, object]:
 __all__ = [
     "DAILY_BUDGET_ENV",
     "DEFAULT_DAILY_BUDGET_USD",
+    "RUN_COST_CAP_ENV",
     "JevSettingsError",
     "SETTINGS_SCHEMA_VERSION",
     "budget_env_override",
     "daily_budget_usd",
     "rank_enabled",
     "read_settings",
+    "run_cap_env_override",
+    "run_cost_cap_usd",
     "settings_path",
     "write_settings",
     "format_cost",

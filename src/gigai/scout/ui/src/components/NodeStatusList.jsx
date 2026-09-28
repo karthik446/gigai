@@ -1,6 +1,6 @@
 import { relativeTimeLabel } from "../display.js";
 import { SETTINGS_HASH } from "../routing.js";
-import { notImportedLine, rankStatusLine, rankUsageLine, rotationLine, searchLines } from "../runText.js";
+import { notImportedLine, rankStatusLine, rotationLine, searchLines } from "../runText.js";
 
 const NODE_ORDER = ["acquire", "assess", "present"];
 
@@ -41,14 +41,17 @@ function stepLabel(receipt, progressStep) {
 //
 // `rankStatus` (GET /progress's rank_status, uat-bug-021): what Jev did for
 // this run, "Jev: scored 412 of 1,458 (cost $0.23, cost cap $0.25)" or
-// "Jev: skipped (no resume)", then the day's spend against the daily budget,
-// "Jev: $0.31 of $0.50 today"; no line until the ranking pass ended.
+// "Jev: skipped (no resume)"; no line until the ranking pass ended.
+//
+// jev-disclosure-fixes (finding 1): the day's spend against the daily
+// budget is the live bar's alone (FindJobsView's `jevBar`, always current);
+// this panel no longer repeats it from the run's own snapshot (stale the
+// moment another pass -- a click, another run -- spends after this one).
 export default function NodeStatusList({ status, nodeReceipts, progressSteps, rotation, boards, notImported, rankStatus }) {
   const search = searchLines(boards, relativeTimeLabel);
   const line = search ? null : rotationLine(rotation, boards);
   const leftOut = notImportedLine(notImported);
   const jev = rankStatusLine(rankStatus);
-  const jevUsage = jev ? rankUsageLine(rankStatus) : null;
   return (
     <section className="panel">
       <h2>Run status: {status}</h2>
@@ -92,11 +95,6 @@ export default function NodeStatusList({ status, nodeReceipts, progressSteps, ro
       {jev && (
         <p className="muted" data-role="rank-status" data-rank-status={rankStatus.status} style={{ margin: "0.35rem 0 0", fontSize: "0.88rem" }}>
           {jev}
-        </p>
-      )}
-      {jevUsage && (
-        <p className="muted" data-role="jev-usage" style={{ margin: "0.35rem 0 0", fontSize: "0.88rem" }}>
-          {jevUsage}
         </p>
       )}
     </section>

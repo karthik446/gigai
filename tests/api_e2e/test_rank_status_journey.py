@@ -170,8 +170,7 @@ def test_a_run_without_a_jev_key_says_why_it_has_no_scores(tmp_path: Path, monke
 
 def test_score_with_jev_answers_at_once_and_a_page_that_reads_never_spends(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GIGAI_JEV_DAILY_BUDGET_USD", raising=False)
-    # The run's own pass may make no call: nothing is scored by the run.
-    monkeypatch.setenv("GIGAI_JEV_COST_CAP_USD", "0")
+    monkeypatch.delenv("GIGAI_JEV_COST_CAP_USD", raising=False)
     home, target = setup_and_init(tmp_path)
     add_resume(home, target, tmp_path)
     write_offline_find_jobs_config(target, sources_live=True)
@@ -179,6 +178,12 @@ def test_score_with_jev_answers_at_once_and_a_page_that_reads_never_spends(tmp_p
     try:
         client = server.client
         workpad = resolve_workpad_path(home, target)
+        # jev-disclosure-fixes (TARGET 4): the run's own pass and POST /rank
+        # share ONE cap source (jev_budget.run_cost_cap_usd), so the run is
+        # capped to 0 the same way an operator would -- the stored setting,
+        # not a request field a click could no longer use to exceed it.
+        stored = client.put("/api/jev/settings", json={"jev_run_cap_usd": 0})
+        assert stored.status_code == 200, stored.text
         run_id = _run(client)
 
         progress = client.get(f"/api/runs/{run_id}/progress").json()
@@ -198,10 +203,28 @@ def test_score_with_jev_answers_at_once_and_a_page_that_reads_never_spends(tmp_p
         assert _ledger(home) == [], "a page that read the run was paid for"
         assert "scout rank: Jev: " not in _server_log(home)
 
+        # A click's own cost_cap_usd may only LOWER the cap in force (still
+        # $0 here), never raise it: this click still spends nothing.
+        blocked = client.post(f"/api/runs/{run_id}/rank", json={"start": True, "cost_cap_usd": "0.25"})
+        assert blocked.status_code == 200, blocked.text
+        blocked_body = blocked.json()
+        deadline = time.monotonic() + 30.0
+        while blocked_body["rank_status"]["status"] == "running":
+            assert time.monotonic() < deadline, blocked_body
+            time.sleep(0.05)
+            blocked_body = client.post(f"/api/runs/{run_id}/rank", json={}).json()
+        assert blocked_body["rank_status"]["reason"] == "cost_cap_reached"
+        assert blocked_body["rank_status"]["cost_cap_usd"] == "0.00"
+        assert _ledger(home) == [], "a request's cost_cap_usd raised the operator's cap"
+
+        # The operator raises the stored cap; NOW "Score with Jev" can spend.
+        raised_cap = client.put("/api/jev/settings", json={"jev_run_cap_usd": 0.25})
+        assert raised_cap.status_code == 200, raised_cap.text
+
         # -- "Score with Jev": answered at once, repeated until the pass ended ---
         first, first_latency = timed_request(
             "POST /api/runs/{run_id}/rank",
-            lambda: client.post(f"/api/runs/{run_id}/rank", json={"start": True, "cost_cap_usd": "0.25"}),
+            lambda: client.post(f"/api/runs/{run_id}/rank", json={"start": True}),
         )
         assert first.status_code == 200, first.text
         first_latency.assert_within_budget()
@@ -226,8 +249,12 @@ def test_score_with_jev_answers_at_once_and_a_page_that_reads_never_spends(tmp_p
         assert again["rank_status"]["line"] == f"Jev: scored {postings} of {postings} (cost $0.00)"
         assert len(_ledger(home)) == postings
 
+        # Two logged passes: the blocked click (cost cap $0, TARGET 4) and the
+        # one that actually scored, once the operator raised the stored cap.
         lines = [line for line in _server_log(home).splitlines() if "scout rank: Jev: " in line]
-        assert len(lines) == 1 and f"Jev: scored {postings} of {postings} (cost $" in lines[0]
+        assert len(lines) == 2
+        assert "Jev: skipped (cost cap $0.00 reached before any score)" in lines[0]
+        assert f"Jev: scored {postings} of {postings} (cost $" in lines[1]
     finally:
         stop_server(server)
 

@@ -1,5 +1,6 @@
 """ui-pass (uat-bug-021 decision a): "Rank with Jev: on/off" and the daily
-budget, through the real server.
+budget, through the real server. jev-disclosure-fixes (TARGET 4) added the
+per-run cap as a third home-wide setting.
 
 The real supervisor, a real find-jobs run in its child process, a stored
 resume, a Jev key and the fake Jev transport
@@ -7,16 +8,19 @@ resume, a Jev key and the fake Jev transport
 every call, so every Jev call is a line in the home's spend ledger: an empty
 ledger is zero Jev calls.
 
-1. ``GET /api/jev/settings`` answers the defaults (on, $0.50, key set) and
-   ``GET /api/jev/usage`` today's usage.
-2. ``PUT /api/jev/settings`` saves one setting and keeps the other; a bad
+1. ``GET /api/jev/settings`` answers the defaults (on, $0.50/day, $0.25/run,
+   key set) and ``GET /api/jev/usage`` today's usage.
+2. ``PUT /api/jev/settings`` saves one setting and keeps the others; a bad
    value or an unknown key is refused and changes nothing.
 3. With ranking OFF: a run records ``rank_status`` ``skipped: disabled``
    and asks Jev nothing; a "Score with Jev" click (``POST /rank {"start":
    true}``) starts no pass. Turned back ON, the same click scores every
    posting (so the fake Jev was there to be asked all along).
 4. A preferences save (``PUT /api/setup``, what the wizard sends) leaves
-   both settings as they were: they are not preferences.
+   all three settings as they were: they are not preferences.
+5. The per-run cap: the environment wins over the stored setting, and a
+   request's own ``cost_cap_usd`` may only LOWER the cap in force, never
+   raise it (``test_the_environment_run_cap_wins_and_a_request_may_only_lower_it``).
 """
 
 from __future__ import annotations
@@ -100,12 +104,18 @@ def test_rank_with_jev_off_asks_jev_nothing_and_the_settings_survive_a_preferenc
         assert settings.status_code == 200, settings.text
         settings_latency.assert_within_budget()
         body = settings.json()
-        assert {key: body[key] for key in ("jev_daily_budget_usd", "jev_rank_enabled", "daily_budget_env", "has_key")} == {
+        assert {
+            key: body[key]
+            for key in ("jev_daily_budget_usd", "jev_rank_enabled", "jev_run_cap_usd", "daily_budget_env", "run_cap_env", "has_key")
+        } == {
             "jev_daily_budget_usd": 0.5,
             "jev_rank_enabled": True,
+            "jev_run_cap_usd": 0.25,
             "daily_budget_env": None,
+            "run_cap_env": None,
             "has_key": True,
         }
+        assert body["run_cap_in_force"] == "0.25"
         usage, usage_latency = timed_request("GET /api/jev/usage", lambda: client.get("/api/jev/usage"))
         assert usage.status_code == 200, usage.text
         usage_latency.assert_within_budget()
@@ -135,7 +145,10 @@ def test_rank_with_jev_off_asks_jev_nothing_and_the_settings_survive_a_preferenc
             assert refused.status_code == 422, (bad, refused.text)
             assert refused.json()["error"]["code"] == code, refused.text
         stored = json.loads((home / "local" / "scout" / "jev-settings.json").read_text(encoding="utf-8"))
-        assert stored == {"schema_version": "scout-jev-settings:1", "jev_daily_budget_usd": 0.3, "jev_rank_enabled": False}
+        assert stored == {
+            "schema_version": "scout-jev-settings:1", "jev_daily_budget_usd": 0.3, "jev_rank_enabled": False,
+            "jev_run_cap_usd": 0.25,
+        }
 
         # -- 3. ranking off: the run and a click ask Jev nothing ------------------
         run_id = _run(client)
@@ -197,5 +210,59 @@ def test_the_environment_budget_wins_over_the_stored_one(tmp_path: Path, monkeyp
         assert body["jev_daily_budget_usd"] == 0.2 and body["daily_budget_env"] == "0.70"
         assert body["usage"]["daily_budget_usd"] == "0.70" and body["has_key"] is False
         assert client.get("/api/jev/usage").json()["line"] == "Jev: $0.00 of $0.70 today"
+    finally:
+        stop_server(server)
+
+
+def test_the_environment_run_cap_wins_and_a_request_may_only_lower_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GIGAI_JEV_COST_CAP_USD", raising=False)
+    monkeypatch.delenv("GIGAI_JEV_DAILY_BUDGET_USD", raising=False)
+    home, target = setup_and_init(tmp_path)
+    add_resume(home, target, tmp_path)
+    write_offline_find_jobs_config(target, sources_live=True)
+    server = start_server(home, target, monkeypatch=monkeypatch, test_jev=True)
+    try:
+        client = server.client
+
+        # The stored setting is the run cap in force with no environment set.
+        saved = client.put("/api/jev/settings", json={"jev_run_cap_usd": 0.1})
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["jev_run_cap_usd"] == 0.1 and saved.json()["run_cap_in_force"] == "0.10"
+        assert saved.json()["run_cap_env"] is None
+
+        run_id = _run(client)
+        progress = client.get(f"/api/runs/{run_id}/progress").json()
+        # 8 free at once, $0.0005 each: 8 calls cost $0.004, under $0.1, so
+        # every posting fits under the stored cap -- the acquire pass read
+        # jev_budget.run_cost_cap_usd, not the old fixed $0.25.
+        assert progress["rank_status"]["cost_cap_usd"] == "0.10"
+
+        # A request's own cost_cap_usd may LOWER the cap in force...
+        lowered = client.post(f"/api/runs/{run_id}/rank", json={"start": True, "cost_cap_usd": "0.01"})
+        assert lowered.status_code == 200, lowered.text
+        assert lowered.json()["rank_status"]["cost_cap_usd"] == "0.01"
+
+        # ...but never RAISE it above the stored/env cap.
+        raised = client.post(f"/api/runs/{run_id}/rank", json={"start": True, "cost_cap_usd": "5.00"})
+        assert raised.status_code == 200, raised.text
+        assert raised.json()["rank_status"]["cost_cap_usd"] in ("0.10", "0.01")  # never "5.00"
+    finally:
+        stop_server(server)
+
+
+def test_the_environment_run_cap_wins_over_the_stored_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIGAI_JEV_COST_CAP_USD", "0.02")
+    monkeypatch.delenv("JEV_API_KEY", raising=False)
+    home, target = setup_and_init(tmp_path)
+    server = start_server(home, target, monkeypatch=monkeypatch)
+    try:
+        client = server.client
+        saved = client.put("/api/jev/settings", json={"jev_run_cap_usd": 0.1})
+        assert saved.status_code == 200, saved.text
+        body = saved.json()
+        assert body["jev_run_cap_usd"] == 0.1 and body["run_cap_env"] == "0.02"
+        assert body["run_cap_in_force"] == "0.02"
     finally:
         stop_server(server)

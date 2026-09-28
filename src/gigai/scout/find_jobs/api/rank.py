@@ -38,6 +38,11 @@ nothing asks Jev), and the pass's own
 ``GET /api/jev/usage`` (``JevUsageRoutesMixin``): today's Jev spend and the
 daily budget, ``jev_budget.usage``. ``POST /rank`` answers the same block
 as ``usage``.
+
+Per-run cap (jev-disclosure-fixes, TARGET 4): ``_effective_cost_cap`` reads
+``jev_budget.run_cost_cap_usd(home_root)`` (env > the operator's setting >
+``jev_rank.DEFAULT_COST_CAP_USD``); a request's own ``cost_cap_usd`` may only
+LOWER that cap, never raise it above what the operator allows.
 """
 
 from __future__ import annotations
@@ -56,7 +61,6 @@ from .. import jev_budget
 from ..contracts import AcquireOutput, FindJobsContractError
 from ..jev_contracts import RankRequest, RankResponse
 from ..jev_rank import (
-    DEFAULT_COST_CAP_USD,
     RUN_CONCURRENCY,
     RUN_RETRIES,
     RankPreferences,
@@ -236,6 +240,18 @@ def rank_run(
     return response, status
 
 
+def _effective_cost_cap(home_root, requested: float | None) -> float:
+    """The per-run cap in force: ``jev_budget.run_cost_cap_usd`` (env > the
+    operator's setting > ``jev_rank.DEFAULT_COST_CAP_USD``), or ``requested``
+    when it is lower. A request's own ``cost_cap_usd`` may only LOWER the run
+    cap, never raise it (jev-disclosure-fixes, TARGET 4)."""
+
+    cap = jev_budget.run_cost_cap_usd(home_root)
+    if requested is not None and requested < cap:
+        return requested
+    return cap
+
+
 def _rank_run(
     *,
     home_root,
@@ -257,7 +273,7 @@ def _rank_run(
         total = len(found.rows)
         if not jev_budget.rank_enabled(home_root):  # ui-pass: "Rank with Jev" is off
             return _skip(run_id, "disabled", home_root=home_root, total=total)
-        cap = cost_cap_usd if cost_cap_usd is not None else DEFAULT_COST_CAP_USD
+        cap = _effective_cost_cap(home_root, cost_cap_usd)
         api_key = jev_client.require_api_key(home_root=home_root)
         http_client = _jev_http_client()
         try:
@@ -343,7 +359,7 @@ def start_or_join_rank(
             log_rank_status(resolved[1], run_id=run_id, where="rank")
         return resolved
     key = (str(Path(home_root)), resolved.project_id, run_id, resolved.profile_id, resolved.resume_revision_id)
-    cap = cost_cap_usd if cost_cap_usd is not None else DEFAULT_COST_CAP_USD
+    cap = _effective_cost_cap(home_root, cost_cap_usd)
 
     with _PASSES_LOCK:
         current = _PASSES.get(key)

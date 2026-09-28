@@ -21,8 +21,11 @@ Scout ships with GigAI and implements `find-jobs`, a job-search workflow:
   suggestions and open questions. Defaults to a local model target; hosted
   targets are only used when explicitly configured.
 - **Present** — a localhost API and a small web UI show acquired and assessed
-  postings. Nothing leaves the machine, and no hosted model is called,
-  without an explicit consent step in the UI first.
+  postings. Nothing about you leaves your machine except: the posting and
+  your resume go to the assessment model you chose; with a Jev key and
+  ranking on (the default), the first 2,000 characters of your profile
+  resume go to Jev to rank postings. See
+  [Privacy and security](#privacy-and-security).
 
 Everything Scout writes stays under your configured GigAI home and the bound
 project's workpad. Tailored resumes (`gigai scout resume tailor`, `POST
@@ -49,11 +52,16 @@ posting's company, title and location. A resume pasted into a single
 assessment is never sent to Jev.
 
 **Turning it off or down:** Settings → Jev ranking has "Rank with Jev:
-on/off" and the daily budget (0 stops every call), with today's spend. Both
-are stored for the whole GigAI home in `<home>/local/scout/jev-settings.json`
-(not under `cache/`, so clearing a cache never resets them). The environment
-variable `GIGAI_JEV_DAILY_BUDGET_USD` overrides the stored budget when set
-(the evals use it); `GIGAI_JEV_COST_CAP_USD` overrides the per-run cap.
+on/off", the daily budget, and the per-run cap (0 stops every call, or every
+pass), with today's spend. All three are stored for the whole GigAI home in
+`<home>/local/scout/jev-settings.json` (not under `cache/`, so clearing a
+cache never resets them). The per-run cap is one source of truth
+(`jev_budget.run_cost_cap_usd`): the environment variable
+`GIGAI_JEV_COST_CAP_USD` overrides it when set, else the stored setting,
+else $0.25 — the same precedence `GIGAI_JEV_DAILY_BUDGET_USD` has over the
+daily budget (the evals use both). A run's own rank pass and a "Score with
+Jev" click both obey it; a click's own request may only lower the cap in
+force, never raise it above what the operator (or the environment) allows.
 Every paid call is logged, amount only, in
 `<home>/cache/scout/jev/spend/<day>.jsonl`.
 

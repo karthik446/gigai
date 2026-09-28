@@ -1149,6 +1149,29 @@ def _rank_logger() -> logging.Logger:
     return logging.getLogger("gigai.scout.server")
 
 
+# jev-disclosure-fixes (TARGET 2): the CLI has no consent dialog, so the first
+# time a search's own rank pass is about to call Jev in this server process,
+# one INFO line names what it sends and how to turn it off. `--foreground`
+# wires this logger to the attached terminal's stderr; a backgrounded server
+# wires it to the run's log file instead (server.py:_configure_logging) --
+# either way this is the one call site, so one line covers both. Never
+# repeated in the same process; never reached when ranking is off or there
+# is no key (both are checked before this call); never includes resume text.
+_JEV_NOTICE_LOCK = threading.Lock()
+_jev_notice_given = False
+
+
+def _notice_jev_ranking_once() -> None:
+    global _jev_notice_given
+    with _JEV_NOTICE_LOCK:
+        if _jev_notice_given:
+            return
+        _jev_notice_given = True
+    _rank_logger().info(
+        "Jev: ranking with your profile resume (first 2,000 chars); turn off with Settings > Rank with Jev"
+    )
+
+
 def _jev_http_client() -> httpx.Client:
     """The transport ``_rank_candidates`` uses for its Jev calls.
 
@@ -1221,7 +1244,6 @@ def _rank_candidates_with_status(
     from . import jev_budget
     from .jev_client import JevClient, has_api_key, require_api_key
     from .jev_rank import (
-        DEFAULT_COST_CAP_USD,
         RUN_CONCURRENCY,
         RUN_RETRIES,
         RankPreferences,
@@ -1247,11 +1269,8 @@ def _rank_candidates_with_status(
         if not resume_text:
             return (), RankStatus.skipped("no_resume", total=total, home_root=home_root)
 
-        cost_cap_raw = os.environ.get("GIGAI_JEV_COST_CAP_USD")
-        try:
-            cost_cap = float(cost_cap_raw) if cost_cap_raw else DEFAULT_COST_CAP_USD
-        except ValueError:
-            cost_cap = DEFAULT_COST_CAP_USD
+        _notice_jev_ranking_once()
+        cost_cap = jev_budget.run_cost_cap_usd(home_root)
         ranked = _rank_order(candidates, config.roles)
         api_key = require_api_key(home_root=home_root)
         http_client = _jev_http_client()
@@ -1307,8 +1326,8 @@ def _rank_candidates(
     readable resume, a Jev failure) degrades to ``()`` or to unscored
     entries, which leaves the import and selection rankings in date order,
     exactly as before P6 (``selection.rank_rows`` with no scores). Cost cap:
-    ``GIGAI_JEV_COST_CAP_USD`` env var when set (plan section 8, answer 7),
-    else ``jev_rank.DEFAULT_COST_CAP_USD``.
+    ``jev_budget.run_cost_cap_usd(home_root)`` (env ``GIGAI_JEV_COST_CAP_USD``
+    when set, else the operator's setting, else ``jev_rank.DEFAULT_COST_CAP_USD``).
 
     uat-bug-021: failing open is never silent. What happened is a
     ``RankStatus`` (``scored N of M`` / ``skipped: <reason>``), written to

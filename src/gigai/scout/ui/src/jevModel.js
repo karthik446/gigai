@@ -10,10 +10,10 @@ import { rankSkipWords } from "./runText.js";
 // is the one thing on a page that may spend (createRankPass.start).
 //
 // `settings` is GET /api/jev/settings: {jev_daily_budget_usd,
-// jev_rank_enabled, daily_budget_env, has_key, usage}. `usage` is a
-// jev_budget.usage block ({spent_today_usd, daily_budget_usd,
-// budget_reached, line}), from POST /rank's answer when there
-// is a newer one than the settings'.
+// jev_rank_enabled, jev_run_cap_usd, daily_budget_env, run_cap_env,
+// run_cap_in_force, has_key, usage}. `usage` is a jev_budget.usage block
+// ({spent_today_usd, daily_budget_usd, budget_reached, line}), from POST
+// /rank's answer when there is a newer one than the settings'.
 
 // The defaults the disclosure states. The api-e2e test checks each against
 // the Python that enforces it (jev_rank.DEFAULT_COST_CAP_USD,
@@ -36,13 +36,21 @@ export function jevNoticeText(settings) {
   return jevRankingOn(settings) ? "Your resume is sent to Jev to rank postings." : null;
 }
 
+// The per-run cap as the disclosure states it: `run_cap_in_force`
+// (`GET /api/jev/settings`, jev_budget.run_cost_cap_usd formatted: env > the
+// settings file > the default), the same way the daily budget's "in force"
+// value already comes from `settings.usage.daily_budget_usd`.
+export function jevRunCapInForce(settings) {
+  return (settings && settings.run_cap_in_force) || JEV_RUN_COST_CAP_USD;
+}
+
 // The run dialog's consent callout: what this run sends to Jev and may
 // cost, only when it will (a key and ranking on); null otherwise.
 export function jevRunConsentLine(settings) {
   if (!jevRankingOn(settings)) {
     return null;
   }
-  return `Rank with Jev is on: the first ${JEV_RESUME_CHARS.toLocaleString("en-US")} characters of your resume go to Jev to score the postings, up to $${JEV_RUN_COST_CAP_USD} for this run (Settings → Jev ranking).`;
+  return `Rank with Jev is on: the first ${JEV_RESUME_CHARS.toLocaleString("en-US")} characters of your resume go to Jev to score the postings, up to $${jevRunCapInForce(settings)} for this run (Settings → Jev ranking).`;
 }
 
 // "Score with Jev" is offered only when a click could score something: a
@@ -137,14 +145,17 @@ export function createRankPass({ runId, postRank, onResponse, onError, isCurrent
   return { start, read, stop };
 }
 
-// The Settings disclosure (uat-bug-021 decision a), one sentence a line.
-// `budget` is the daily budget in force ("0.50"), when it is known.
-export function jevDisclosureLines(budget) {
+// The Settings disclosure (uat-bug-021 decision a; jev-disclosure-fixes
+// TARGET 4 added the per-run cap), one sentence a line. `budget` is the
+// daily budget in force ("0.50") and `runCap` the per-run cap in force
+// ("0.25"), each when known; both default to the stated defaults.
+export function jevDisclosureLines(budget, runCap) {
   const chars = JEV_RESUME_CHARS.toLocaleString("en-US");
+  const cap = runCap || JEV_RUN_COST_CAP_USD;
   return [
-    `With a Jev key and Rank with Jev on, a search spends by default: each run asks Jev to score its postings, up to $${JEV_RUN_COST_CAP_USD} a run.`,
+    `With a Jev key and Rank with Jev on, a search spends by default: each run asks Jev to score its postings, up to $${cap} a run${cap && cap !== JEV_RUN_COST_CAP_USD ? "" : " by default"}.`,
     `All Jev calls of a day (runs, Score with Jev, quick assessments) stop at the daily budget: $${budget || JEV_DEFAULT_DAILY_BUDGET_USD} a day${budget && budget !== JEV_DEFAULT_DAILY_BUDGET_USD ? "" : " by default"}. A posting Jev already scored is cached and costs nothing again.`,
     `Sent to Jev: the first ${chars} characters of the selected profile's resume, your target titles, countries and visa need, and each posting's company, title and location. A pasted resume is never sent to Jev.`,
-    `Turn Rank with Jev off to send nothing. Both settings are this GigAI home's, stored in ${JEV_SETTINGS_FILE}.`,
+    `Turn Rank with Jev off to send nothing. Both the per-run cap and the daily budget are this GigAI home's, stored in ${JEV_SETTINGS_FILE}.`,
   ];
 }

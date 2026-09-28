@@ -1,4 +1,5 @@
-"""ui-pass (uat-bug-021): what the pages do and say about Jev, run under node.
+"""ui-pass (uat-bug-021); jev-disclosure-fixes (TARGET 4) added the per-run
+cap. What the pages do and say about Jev, run under node.
 
 ``ui/src/jevModel.js`` is pure JavaScript (no React), so this test runs it
 under the system ``node`` the way ``test_ui_rank_status_model.py`` does (no
@@ -19,13 +20,16 @@ What is pinned:
 * the cards' "– Jev" tooltip says why, per reason, and never guesses;
 * "Your resume is sent to Jev to rank postings." only with a key and
   ranking on (fail-before: it was shown with no key, wizard finding 2);
-* the disclosure's numbers are the ones the Python enforces;
+* the disclosure's numbers are the ones the Python enforces, including the
+  per-run cap, which is now a per-settings value (``jevRunCapInForce``), not
+  the fixed ``JEV_RUN_COST_CAP_USD`` default;
 * the run page and the latest-run panel pass the run's ``rank_status`` to
   ``NodeStatusList``.
 """
 
 from __future__ import annotations
 
+import inspect
 import json
 import shutil
 import subprocess
@@ -98,9 +102,10 @@ const out = {{
   cardWordsNone: jev.jevCardSkipWords(null, null, null),
   lines: input.statuses.map((status) => runText.rankStatusLine(status)),
   merged: jev.mergeRankScores(input.stored, input.fresh),
-  disclosureDefault: jev.jevDisclosureLines("0.50"),
-  disclosureChanged: jev.jevDisclosureLines("0.10"),
-  disclosureUnknown: jev.jevDisclosureLines(null),
+  disclosureDefault: jev.jevDisclosureLines("0.50", "0.25"),
+  disclosureChanged: jev.jevDisclosureLines("0.10", "0.05"),
+  disclosureUnknown: jev.jevDisclosureLines(null, null),
+  runCapInForce: input.settings.map((settings) => jev.jevRunCapInForce(settings)),
   constants: {{
     cap: jev.JEV_RUN_COST_CAP_USD, budget: jev.JEV_DEFAULT_DAILY_BUDGET_USD,
     chars: jev.JEV_RESUME_CHARS, file: jev.JEV_SETTINGS_FILE,
@@ -122,10 +127,14 @@ SCORED_ALL = RankStatus("scored", 10, 10, None, 0.25, 0.005, None, 0.005, 0.5)
 USAGE_ROOM = {"spent_today_usd": "0.100000", "daily_budget_usd": "0.50", "budget_reached": False}
 USAGE_SPENT = {"spent_today_usd": "0.500000", "daily_budget_usd": "0.50", "budget_reached": True}
 SETTINGS = [
-    {"has_key": True, "jev_rank_enabled": True, "jev_daily_budget_usd": 0.5, "usage": USAGE_ROOM},
-    {"has_key": False, "jev_rank_enabled": True, "jev_daily_budget_usd": 0.5, "usage": USAGE_ROOM},
-    {"has_key": True, "jev_rank_enabled": False, "jev_daily_budget_usd": 0.5, "usage": USAGE_ROOM},
-    {"has_key": False, "jev_rank_enabled": False, "jev_daily_budget_usd": 0.5, "usage": USAGE_ROOM},
+    {"has_key": True, "jev_rank_enabled": True, "jev_daily_budget_usd": 0.5, "jev_run_cap_usd": 0.25,
+     "run_cap_in_force": "0.25", "usage": USAGE_ROOM},
+    {"has_key": False, "jev_rank_enabled": True, "jev_daily_budget_usd": 0.5, "jev_run_cap_usd": 0.25,
+     "run_cap_in_force": "0.25", "usage": USAGE_ROOM},
+    {"has_key": True, "jev_rank_enabled": False, "jev_daily_budget_usd": 0.5, "jev_run_cap_usd": 0.25,
+     "run_cap_in_force": "0.25", "usage": USAGE_ROOM},
+    {"has_key": False, "jev_rank_enabled": False, "jev_daily_budget_usd": 0.5, "jev_run_cap_usd": 0.25,
+     "run_cap_in_force": "0.25", "usage": USAGE_ROOM},
     None,
 ]
 ON = SETTINGS[0]
@@ -308,36 +317,105 @@ def test_the_disclosure_numbers_are_the_ones_the_code_enforces(out: dict, tmp_pa
     assert set(sent["posting"]) == {"company", "title", "location"}
     assert set(sent["preferences"]) == {"target_titles", "countries", "visa_sponsorship_required"}
 
+    # jev-disclosure-fixes (TARGET 4): the run cap is no longer a fixed
+    # constant -- jev.JEV_RUN_COST_CAP_USD is the DEFAULT the disclosure
+    # falls back to, which still equals jev_rank.DEFAULT_COST_CAP_USD; the
+    # cap actually "in force" is a per-settings value (jevRunCapInForce).
     assert out["constants"]["cap"] == jev_budget.format_usd(jev_rank.DEFAULT_COST_CAP_USD) == "0.25"
     assert out["constants"]["budget"] == jev_budget.format_usd(jev_budget.DEFAULT_DAILY_BUDGET_USD) == "0.50"
     relative = jev_budget.settings_path(Path("/H")).relative_to(Path("/H"))
     assert out["constants"]["file"] == f"<home>/{relative.as_posix()}"
+    # SETTINGS[4] is None: jevRunCapInForce falls back to the default.
+    assert out["runCapInForce"] == ["0.25", "0.25", "0.25", "0.25", out["constants"]["cap"]]
 
     text = " ".join(out["disclosureDefault"])
-    assert "up to $0.25 a run" in text and "$0.50 a day by default" in text
+    assert "up to $0.25 a run by default" in text and "$0.50 a day by default" in text
     assert "the first 2,000 characters of the selected profile's resume" in text
     assert "A posting Jev already scored is cached and costs nothing again." in text
     assert "A pasted resume is never sent to Jev." in text
     assert "<home>/local/scout/jev-settings.json" in text
-    assert "$0.10 a day." in " ".join(out["disclosureChanged"]) and "by default" not in out["disclosureChanged"][1]
+    changed = " ".join(out["disclosureChanged"])
+    assert "up to $0.05 a run." in changed and "$0.10 a day." in changed
+    assert "a run by default" not in changed and "a day by default" not in changed
     assert out["disclosureUnknown"] == out["disclosureDefault"]
 
     readme = (Path(static_module.__file__).resolve().parents[5] / "README.md").read_text(encoding="utf-8")
     section = readme.split("## Privacy and security", 1)[1].split("\n## ", 1)[0]
     for fact in ("**$0.25 per run**", "**daily budget of $0.50**", "**2,000 characters of the selected\nprofile's resume**",
-                 "`<home>/local/scout/jev-settings.json`", "`GIGAI_JEV_DAILY_BUDGET_USD`", "cached and costs nothing"):
+                 "`<home>/local/scout/jev-settings.json`", "`GIGAI_JEV_DAILY_BUDGET_USD`", "`GIGAI_JEV_COST_CAP_USD`",
+                 "cached and costs nothing"):
         assert fact in section, fact
 
 
-def test_settings_shows_the_toggle_the_budget_and_the_disclosure() -> None:
+def _readme_text() -> str:
+    return (Path(static_module.__file__).resolve().parents[5] / "README.md").read_text(encoding="utf-8")
+
+
+def test_the_readme_no_longer_claims_nothing_leaves_the_machine_without_consent() -> None:
+    """jev-disclosure-fixes (TARGET 1): the Scout intro sentence "Nothing
+    leaves the machine, and no hosted model is called, without an explicit
+    consent step in the UI first." was false the moment a rank pass could
+    call Jev without a UI consent step (a CLI-started search, or "Rank with
+    Jev" on by default). Fail-before: this exact sentence was in HEAD's
+    README (git show HEAD:README.md). It must not be in the tree now, and
+    the sentence that replaces it must state the two real exceptions,
+    matching the constants the Python enforces."""
+
+    readme = _readme_text()
+    assert "Nothing leaves the machine, and no hosted model is called" not in readme
+
+    intro = readme.split("## Scout, the first Gig", 1)[1].split("\n## ", 1)[0]
+    collapsed = " ".join(intro.split())
+    assert "Nothing about you leaves your machine except" in collapsed
+    assert "the posting and your resume go to the assessment model you chose" in collapsed
+    assert "the first 2,000 characters of your profile resume go to Jev to rank postings" in collapsed
+    assert "[Privacy and security]" in collapsed
+
+    # The 2,000-char figure matches what jev_rank actually sends (the resume
+    # slice at jev_rank.py's request-building call, asserted in
+    # test_the_disclosure_numbers_are_the_ones_the_code_enforces via the
+    # request; here we only pin that the source line's slice is still 2000).
+    source = inspect.getsource(jev_rank)
+    assert '"resume": resume_text[:2000]' in source
+
+
+def test_no_other_readme_claim_says_nothing_leaves_or_no_hosted_model() -> None:
+    """Every "nothing leaves"/"no hosted model" style claim left in the
+    README, grepped by hand at review time: each is checked here and is
+    true as written (a route, or a specific model target, not the general
+    Scout claim TARGET 1 fixed) -- so none needs the same rewrite.
+
+    * "Nothing in it leaves the machine." (Update sources' company cache):
+      true -- that cache is local-only storage, unrelated to ranking.
+    * "The resume stays on this machine: ... calls no model and no
+      network" (api/resumes.py docstring, not README, but the same claim
+      shape): true -- POST /api/resumes only stores bytes.
+    Neither of those is a Scout-wide "nothing leaves" claim, so this test
+    only pins that the ONE general claim (the intro sentence) was fixed,
+    and that no NEW general claim was introduced.
+    """
+
+    readme = _readme_text()
+    general_claims = [
+        line.strip() for line in readme.splitlines()
+        if ("leaves the machine" in line.lower() or "no hosted model is called" in line.lower())
+    ]
+    # The one survivor is Update sources' company-cache line, scoped to that
+    # cache file, not to Scout as a whole -- unaffected by Jev ranking.
+    assert general_claims == ["Nothing in it leaves the machine."]
+
+
+def test_settings_shows_the_toggle_the_budget_the_run_cap_and_the_disclosure() -> None:
     assert "<JevSettingsPanel />" in _source("views/SettingsView.jsx")
     panel = _source("components/JevSettingsPanel.jsx")
-    assert "jevDisclosureLines(inForce)" in panel
-    # Each control saves its own setting only; the other keeps its stored value.
+    assert "jevDisclosureLines(inForce, runCapInForce)" in panel
+    # Each control saves its own setting only; the others keep their stored value.
     assert "save({ jev_rank_enabled: event.target.checked }" in panel
     assert "save({ jev_daily_budget_usd: budgetValue }" in panel
-    assert 'type="number"' in panel and 'min="0"' in panel
+    assert "save({ jev_run_cap_usd: runCapValue }" in panel
+    assert panel.count('type="number"') == 2 and panel.count('min="0"') == 2
     assert "rankUsageLine(settings.usage)" in panel and 'data-role="jev-usage"' in panel
+    assert "jevRunCapInForce(settings)" in panel
     api = _source("api.js")
     assert 'request("GET", "/api/jev/settings")' in api and 'request("PUT", "/api/jev/settings", fields)' in api
 

@@ -12,10 +12,16 @@ What is pinned:
   server can record, ``rankStatusLine(status.to_json())`` equals
   ``jev_rank.RankStatus.line`` (the line in the server log);
 * so is the day's usage, from a ``rank_status`` and from the ``usage``
-  block of ``POST /rank`` / ``GET /api/jev/usage`` alike;
+  block of ``POST /rank`` / ``GET /api/jev/usage`` alike (``rankUsageLine``
+  itself; the live bar and the Settings panel use it -- jev-disclosure-fixes
+  finding 1);
 * no line for a run that has no ``rank_status`` (one sealed before it
   existed, or one whose ranking pass has not ended);
-* ``GET /progress`` serves the field and ``NodeStatusList`` shows it.
+* ``GET /progress`` serves the field and ``NodeStatusList`` shows the
+  status line, but jev-disclosure-fixes (finding 1) dropped ITS OWN usage
+  line: the run's own snapshot went stale the moment another pass (a click,
+  another run) spent after it, and the live bar already shows the current
+  figure, so ``NodeStatusList`` no longer calls ``rankUsageLine`` at all.
 """
 
 from __future__ import annotations
@@ -178,4 +184,7 @@ def test_the_progress_route_serves_it_and_the_status_panel_shows_it() -> None:
     assert '"rank_status": None if snapshot.rank_status is None else dict(snapshot.rank_status),' in server
     status_list = (UI_SRC / "components" / "NodeStatusList.jsx").read_text(encoding="utf-8")
     assert "rankStatusLine(rankStatus)" in status_list and 'data-role="rank-status"' in status_list
-    assert "rankUsageLine(rankStatus)" in status_list and 'data-role="jev-usage"' in status_list
+    # jev-disclosure-fixes (finding 1): the status panel's OWN usage line is
+    # gone; only the live bar (FindJobsView.jsx) and the Settings panel call
+    # rankUsageLine now.
+    assert "rankUsageLine" not in status_list and 'data-role="jev-usage"' not in status_list
