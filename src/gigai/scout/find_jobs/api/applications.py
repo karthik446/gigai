@@ -42,10 +42,9 @@ from datetime import UTC, datetime
 from http import HTTPStatus
 
 from ....application_events import EVENT_KINDS, ApplicationEventError, record_application
-from ....journal import run_with_journal_writer
 from ....workpad import resolve_workpad
 from ..contracts import normalize_url as _find_jobs_normalize_url
-from ...projection import projection_from_snapshot
+from ...projection import projection_from_snapshot, read_projection_snapshot
 from ...report_readers import default_reader_set
 
 _APPLICATION_ERROR_STATUS: dict[str, HTTPStatus] = {
@@ -101,17 +100,11 @@ class ApplicationsRoutesMixin:
         if resolved is None:
             return
 
-        def read(writer):
-            snapshot = writer.snapshot(("records/", "runs/", "run-plans/", "references/", "run-inputs/", "manifests/"))
-            return projection_from_snapshot(
-                snapshot=snapshot,
-                project_id=resolved.project_id,
-                gig_id=resolved.gig_id,
-                readers=default_reader_set(resolved),
-            )
-
-        projection = run_with_journal_writer(
-            workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=read,
+        projection = projection_from_snapshot(
+            snapshot=read_projection_snapshot(resolved),
+            project_id=resolved.project_id,
+            gig_id=resolved.gig_id,
+            readers=default_reader_set(resolved),
         )
         self._write_json(
             HTTPStatus.OK,

@@ -18,8 +18,8 @@ from typing import Any, Callable, Mapping
 from jsonschema import Draft202012Validator
 
 from .canonical import EntityPrefix, canonical_json_bytes, digest_imported_bytes, parse_json_bytes, validate_entity_id
-from .journal import JournalArtifact, JournalConflictError, JournalSnapshot, JournalTransition, run_with_journal_writer
-from .private_records import PrivateRecordError, rebuild_scout_projection
+from .journal import JournalArtifact, JournalConflictError, JournalSnapshot, JournalTransition, read_committed_snapshot, run_with_journal_writer
+from .private_records import RECORD_DIRECTORY_PATTERN, PrivateRecordError, rebuild_scout_projection
 from .validators import validate_serialized_contract
 from .workpad import ResolvedWorkpad, resolve_workpad, workpad_layout_version
 
@@ -226,6 +226,14 @@ def _sidecar(resolved: ResolvedWorkpad, snapshot: JournalSnapshot, revision: Map
     return _validate_content(parsed), data
 
 
+def _record_snapshot(resolved: ResolvedWorkpad) -> JournalSnapshot:
+    """The committed ``records/<record_id>/`` trees, read without the journal
+    writer lock. A record's revision chain and its sidecar both live there,
+    so a read needs nothing else: not the other families under ``records/``
+    and not ``references/`` or ``run-inputs/``."""
+    return read_committed_snapshot(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, child_prefixes=(("records/", RECORD_DIRECTORY_PATTERN),))
+
+
 def _existing_receipt(snapshot: JournalSnapshot, operation: str, key: str, payload_sha: str) -> dict[str, object] | None:
     path = _receipt_path(operation, key)
     if path not in snapshot.artifacts:
@@ -430,7 +438,7 @@ def _create_native_record(*, home_root: Path, requested_target: Path | None, con
         base = actual_scope["base"]
         assert isinstance(base, dict)
         # Confirm the pinned base is a committed exact revision before publication.
-        snapshot = run_with_journal_writer(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=lambda writer: writer.snapshot(("records/", "references/", "run-inputs/")))
+        snapshot = _record_snapshot(resolved)
         chain = _chain(resolved, snapshot, str(base["record_id"]))
         if not any(item.get("revision_id") == base["revision_id"] for item in chain):
             raise PrivateRecordError("native_record_scope_refused", "override base is not a committed revision")
@@ -496,7 +504,7 @@ def create_task_override(**kwargs: Any) -> NativeRecordResult:
 def _update_native_record(*, home_root: Path, requested_target: Path | None, record_id: str, parent_revision: str, content: Mapping[str, object], actor: Mapping[str, str], origin: str, operation_key: str, gig_id: str | None = None, uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4, tool_binding: Mapping[str, object] | None = None, before_tool_revalidation: Callable[[], None] | None = None) -> NativeRecordResult:
     resolved, actor_value = _resolved(home_root=home_root, requested_target=requested_target, gig_id=gig_id), _actor(actor)
     native = _validate_content(content)
-    snapshot = run_with_journal_writer(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=lambda writer: writer.snapshot(("records/", "references/", "run-inputs/")))
+    snapshot = _record_snapshot(resolved)
     chain = _chain(resolved, snapshot, record_id)
     parent = next((item for item in chain if item.get("revision_id") == parent_revision), None)
     if parent is None:
@@ -517,7 +525,7 @@ def update_native_record(*, home_root: Path, requested_target: Path | None, reco
 
 def _archive_native_record(*, home_root: Path, requested_target: Path | None, record_id: str, parent_revision: str, actor: Mapping[str, str], origin: str | None, operation_key: str, gig_id: str | None = None, uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4, tool_binding: Mapping[str, object] | None = None, before_tool_revalidation: Callable[[], None] | None = None) -> NativeRecordResult:
     resolved, actor_value = _resolved(home_root=home_root, requested_target=requested_target, gig_id=gig_id), _actor(actor)
-    snapshot = run_with_journal_writer(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=lambda writer: writer.snapshot(("records/", "references/", "run-inputs/")))
+    snapshot = _record_snapshot(resolved)
     chain = _chain(resolved, snapshot, record_id)
     parent = next((item for item in chain if item.get("revision_id") == parent_revision), None)
     if parent is None:
@@ -537,7 +545,7 @@ def archive_native_record(*, home_root: Path, requested_target: Path | None, rec
 
 def read_native_record(*, home_root: Path, requested_target: Path | None, record_id: str, revision_id: str | None = None, content: bool = False, gig_id: str | None = None) -> dict[str, object]:
     resolved = _resolved(home_root=home_root, requested_target=requested_target, gig_id=gig_id)
-    snapshot = run_with_journal_writer(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=lambda writer: writer.snapshot(("records/", "references/", "run-inputs/")))
+    snapshot = _record_snapshot(resolved)
     chain = _chain(resolved, snapshot, record_id)
     chosen = next((item for item in chain if item.get("revision_id") == revision_id), None) if revision_id else chain[-1]
     if chosen is None:
@@ -563,16 +571,26 @@ def _native_rows(resolved: ResolvedWorkpad, snapshot: JournalSnapshot, *, includ
     return result
 
 
-def list_native_records(*, home_root: Path, requested_target: Path | None, gig_id: str | None = None, include_archived: bool = False) -> list[dict[str, object]]:
+def list_native_records(*, home_root: Path, requested_target: Path | None, gig_id: str | None = None, include_archived: bool = False, content: bool = False) -> list[dict[str, object]]:
+    """Each record's current revision. ``content=True`` adds the exact
+    committed sidecar bytes (``read_native_record``'s ``content``) from the
+    same snapshot, so a caller that reads every record does one read, not
+    one per record."""
     resolved = _resolved(home_root=home_root, requested_target=requested_target, gig_id=gig_id)
-    snapshot = run_with_journal_writer(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=lambda writer: writer.snapshot(("records/", "references/", "run-inputs/")))
-    return [{"record_id": current["record_id"], "revision_id": current["revision_id"], "kind": current["kind"], "state": current["state"], "scope": sidecar["scope"], "created_at": current["created_at"]} for current, sidecar in _native_rows(resolved, snapshot, include_archived=include_archived)]
+    snapshot = _record_snapshot(resolved)
+    rows = []
+    for current, sidecar in _native_rows(resolved, snapshot, include_archived=include_archived):
+        row = {"record_id": current["record_id"], "revision_id": current["revision_id"], "kind": current["kind"], "state": current["state"], "scope": sidecar["scope"], "created_at": current["created_at"]}
+        if content:
+            row["content"] = _sidecar(resolved, snapshot, current)[1]
+        rows.append(row)
+    return rows
 
 
 def native_context(*, home_root: Path, requested_target: Path | None, gig_id: str | None = None) -> dict[str, object]:
     """Return the closed, payload-free context view for a fresh session."""
     resolved = _resolved(home_root=home_root, requested_target=requested_target, gig_id=gig_id)
-    snapshot = run_with_journal_writer(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=lambda writer: writer.snapshot(("records/", "references/", "run-inputs/")))
+    snapshot = _record_snapshot(resolved)
     native_rows = _native_rows(resolved, snapshot, include_archived=False)
     rows = [{"record_id": current["record_id"], "revision_id": current["revision_id"], "kind": current["kind"], "state": current["state"], "scope": sidecar["scope"], "created_at": current["created_at"]} for current, sidecar in native_rows]
     outstanding = []

@@ -128,7 +128,10 @@ def _read_content(*, home_root: Path, requested_target: Path | None, gig_id: str
         home_root=home_root, requested_target=requested_target, gig_id=gig_id,
         record_id=record_id, revision_id=revision_id, content=True,
     )
-    raw = full.get("content")
+    return _parsed_content(full.get("content"))
+
+
+def _parsed_content(raw: object) -> dict[str, object] | None:
     if not isinstance(raw, bytes):
         return None
     try:
@@ -150,12 +153,14 @@ def read_answers(*, home_root: Path, requested_target: Path | None, gig_id: str 
     the expected steady state)."""
 
     answers: dict[str, PriorAnswer] = {}
-    for row in list_native_records(home_root=home_root, requested_target=requested_target, gig_id=gig_id):
+    # One committed read for the listing AND every record's content: a
+    # separate read per record would repeat the whole snapshot each time.
+    for row in list_native_records(home_root=home_root, requested_target=requested_target, gig_id=gig_id, content=True):
         if row["kind"] != "experience_qa":
             continue
         record_id = str(row["record_id"])
         revision_id = str(row["revision_id"])
-        value = _read_content(home_root=home_root, requested_target=requested_target, gig_id=gig_id, record_id=record_id, revision_id=revision_id)
+        value = _parsed_content(row.get("content"))
         if value is None:
             continue
         payload = value.get("payload")

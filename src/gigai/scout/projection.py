@@ -19,7 +19,8 @@ from typing import Any, Protocol
 
 from ..application_events import ApplicationEventError, validate_application_links
 from ..canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes, parse_json_front_matter
-from ..journal import JournalArtifactMissingError, JournalSnapshot, read_committed_artifact, run_with_journal_writer
+from ..journal import JournalArtifactMissingError, JournalSnapshot, read_committed_artifact, read_committed_snapshot
+from ..private_records import RECORD_DIRECTORY_PATTERN
 from ..index import database_lock
 from .find_jobs.contracts import (
     AcquireOutput,
@@ -481,6 +482,42 @@ def read_cached_projection(*, workpad: Path) -> ScoutProjection:
         raise ScoutProjectionError("projection_cache_invalid", "Scout projection cache is malformed") from exc
 
 
+# journal-read-scope: every family a projection reader reads, named. The
+# private records themselves (``records/<record_id>/``) are selected by their
+# ID shape in ``read_projection_snapshot``. A family that is absent here (the
+# ATS watchlist, the operation receipts) is one no reader below reads, so its
+# size never costs a projection anything. A reader that starts reading a new
+# family must add it here.
+PROJECTION_SNAPSHOT_PREFIXES = (
+    "records/applications/",
+    "records/scout-documents/",
+    "records/scout-proposals/",
+    "records/scout-profiles/",
+    "records/scout-profile-selection/",
+    "runs/",
+    "run-plans/",
+    "references/",
+    "run-inputs/",
+    "manifests/",
+)
+
+
+def read_projection_snapshot(resolved: Any) -> JournalSnapshot:
+    """The committed evidence the projection reads, at one head, without the
+    journal writer lock (a projection is a read)."""
+
+    # Handoff text is journal metadata, not a standalone artifact and has
+    # no self-reference entry. Readers derive sequence from the immutable
+    # records below; excluding it avoids treating a handoff as a payload.
+    return read_committed_snapshot(
+        workpad=resolved.path,
+        project_id=resolved.project_id,
+        gig_id=resolved.gig_id,
+        prefixes=PROJECTION_SNAPSHOT_PREFIXES,
+        child_prefixes=(("records/", RECORD_DIRECTORY_PATTERN),),
+    )
+
+
 def rebuild_projection(*, resolved: Any, readers: ScoutReaderSet | None = None) -> ScoutProjection:
     """Build from authority and cache only the closed existing Scout rows."""
     if readers is None:
@@ -490,14 +527,9 @@ def rebuild_projection(*, resolved: Any, readers: ScoutReaderSet | None = None) 
         from .report_readers import default_reader_set
         readers = default_reader_set(resolved)
 
-    def read(writer):
-        # Handoff text is journal metadata, not a standalone artifact and has
-        # no self-reference entry. Readers derive sequence from the immutable
-        # records below; excluding it avoids treating a handoff as a payload.
-        snapshot = writer.snapshot(("records/", "runs/", "run-plans/", "references/", "run-inputs/", "manifests/"))
-        return projection_from_snapshot(snapshot=snapshot, project_id=resolved.project_id, gig_id=resolved.gig_id, readers=readers)
-
-    projection = run_with_journal_writer(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=read)
+    projection = projection_from_snapshot(
+        snapshot=read_projection_snapshot(resolved), project_id=resolved.project_id, gig_id=resolved.gig_id, readers=readers,
+    )
     # These rows are a cache only.  The integration owner must add the cursor
     # to the shared index inventory before release; this lane never treats it
     # as a source of truth.

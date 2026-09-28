@@ -1642,6 +1642,133 @@ def _capture_committed_snapshot(
     return JournalSnapshot(head, artifacts)
 
 
+def _snapshot_prefix_is_valid(prefix: object) -> bool:
+    return (
+        isinstance(prefix, str)
+        and prefix.endswith("/")
+        and not Path(prefix).is_absolute()
+        and ".." not in Path(prefix).parts
+    )
+
+
+def _committed_child_prefixes(
+    root: Path, head: str, child_prefixes: tuple[tuple[str, str], ...]
+) -> tuple[str, ...]:
+    """``<parent><child>/`` for each committed direct child directory of
+
+    ``parent`` whose name fully matches ``pattern``, at the pinned ``head``.
+    One non-recursive ``git ls-tree`` per parent: the cost is the number of
+    direct children, never the number of files beneath them.
+    """
+
+    resolved: list[str] = []
+    for item in child_prefixes:
+        if (
+            not isinstance(item, tuple)
+            or len(item) != 2
+            or not _snapshot_prefix_is_valid(item[0])
+            or not isinstance(item[1], str)
+        ):
+            raise JournalConflictError("journal snapshot prefixes are invalid")
+        parent, pattern = item
+        try:
+            compiled = re.compile(pattern)
+        except re.error as exc:
+            raise JournalConflictError("journal snapshot prefixes are invalid") from exc
+        # The trailing "/" on the pathspec lists the directory's entries
+        # instead of the directory itself; an absent parent lists nothing.
+        listing = _git_bytes(root, "ls-tree", "-z", head, "--", parent)
+        for record in listing.split(b"\0"):
+            if not record:
+                continue
+            entry, tab, raw_path = record.partition(b"\t")
+            fields = entry.decode("ascii", errors="strict").split(" ")
+            if len(fields) != 3 or not tab:
+                raise JournalConflictError("journal snapshot tree listing is invalid")
+            path = raw_path.decode("utf-8")
+            if fields[1] != "tree" or not path.startswith(parent):
+                continue
+            name = path[len(parent):]
+            if "/" not in name and compiled.fullmatch(name):
+                resolved.append(f"{parent}{name}/")
+    return tuple(resolved)
+
+
+def read_committed_snapshot(
+    *,
+    workpad: Path,
+    project_id: str,
+    gig_id: str,
+    prefixes: tuple[str, ...] = (),
+    child_prefixes: tuple[tuple[str, str], ...] = (),
+    lock_timeout_seconds: float = LOCK_TIMEOUT_SECONDS,
+) -> JournalSnapshot:
+    """A read-only committed snapshot that does not take the writer lock.
+
+    Same validation and the same ``_capture_committed_snapshot`` a
+    :class:`JournalWriter` runs under the lock, so a returned snapshot is
+    exactly what ``run_with_journal_writer(... writer.snapshot(prefixes))``
+    returns at the same head. Readers no longer queue behind each other (or
+    behind a writer) on the one exclusive lock.
+
+    ``child_prefixes`` is for a family whose members are direct child
+    directories of a shared parent: each ``(parent, pattern)`` adds
+    ``<parent><child>/`` for every committed child directory whose name fully
+    matches the regular expression ``pattern``, listed at the same head the
+    snapshot is captured at. A caller that needs ``records/record_<uuid>/``
+    names that family this way instead of snapshotting all of ``records/``.
+    Nothing selected at all returns an empty snapshot at the current head.
+
+    Why this is safe without the lock: every byte comes from Git objects at
+    one pinned head, and the capture still requires the working tree under
+    the requested prefixes to match that head exactly. A writer replaces
+    working files BEFORE it commits, so a read that overlaps a transition
+    touching these prefixes sees a differing or extra file and fails its
+    capture; a head that moved between the listing and the capture fails the
+    same way. Any such ``JournalConflictError`` is retried ONCE under the
+    writer lock, where no transition can be in flight. A lock-free read
+    therefore never returns a half-written transition, and every error a
+    caller sees comes from a locked, authoritative read.
+
+    It depends on one more thing: a committed Git object must not disappear
+    while a reader that pinned its head is still reading it. That holds
+    because every journal Git call that can write goes through ``_git``,
+    which passes ``_GIT_NO_AUTO_MAINTENANCE`` (``maintenance.auto=false``,
+    ``gc.auto=0``): no journal commit forks a background repack or prune.
+    Removing those flags would make this read unsafe; see
+    ``tests/behaviors/runtime_run_authority/test_journal_read_snapshot.py``.
+    """
+
+    _validate_ids(project_id, gig_id, None)
+    if type(prefixes) is not tuple or type(child_prefixes) is not tuple:
+        raise JournalConflictError("journal snapshot prefixes are invalid")
+    if not all(_snapshot_prefix_is_valid(prefix) for prefix in prefixes) or not (
+        prefixes or child_prefixes
+    ):
+        raise JournalConflictError("journal snapshot prefixes are invalid")
+    root = _validate_workpad(workpad, project_id, gig_id)
+    _require_mount_probes(root)
+
+    def capture() -> JournalSnapshot:
+        head = _head_commit(root)
+        assert head is not None
+        selected = tuple(
+            dict.fromkeys((*prefixes, *_committed_child_prefixes(root, head, child_prefixes)))
+        )
+        if not selected:
+            return JournalSnapshot(head, {})
+        snapshot = _capture_committed_snapshot(root, project_id, gig_id, selected)
+        if snapshot.head != head:
+            raise JournalConflictError("journal head moved during a snapshot read")
+        return snapshot
+
+    try:
+        return capture()
+    except JournalConflictError:
+        with _writer_lock(root / ".git" / LOCK_FILENAME, lock_timeout_seconds):
+            return capture()
+
+
 def _mount_identity(root: Path) -> tuple[int, int]:
     stat_result = root.stat()
     return stat_result.st_dev, stat_result.st_ino
@@ -1731,5 +1858,6 @@ __all__ = [
     "record_transition_chain",
     "reconcile_journal",
     "read_committed_artifact",
+    "read_committed_snapshot",
     "run_with_journal_writer",
 ]

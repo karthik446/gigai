@@ -57,7 +57,9 @@ import uuid
 from ..canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes
 from ..journal import (
     JournalArtifact,
+    JournalSnapshot,
     JournalTransition,
+    read_committed_snapshot,
     run_with_journal_writer,
 )
 from ..validators import validate_serialized_contract
@@ -445,6 +447,20 @@ def _resolve_newest_resume_for_gig(resolved: ResolvedWorkpad, *, home_root: Path
     return PinnedResume(record_id=record_id, revision_id=revision_id, content_sha256=digest)
 
 
+def _read_snapshot(
+    resolved: ResolvedWorkpad,
+    prefixes: tuple[str, ...] = (_PROFILES_ROOT, _SELECTION_ROOT),
+) -> JournalSnapshot:
+    """The committed profile records, read without the journal writer lock."""
+
+    return read_committed_snapshot(
+        workpad=resolved.path,
+        project_id=resolved.project_id,
+        gig_id=resolved.gig_id,
+        prefixes=prefixes,
+    )
+
+
 def ensure_default_profile(
     resolved: ResolvedWorkpad,
     *,
@@ -542,24 +558,17 @@ def ensure_default_profile(
     # makes, right next to this call).
     #
     # Fixed: check for an existing default profile in a SEPARATE, cheap
-    # writer acquisition first, and only resolve the resume (and re-open
-    # the writer for the actual create) when we're truly about to create
-    # one. The resume lookup CANNOT be moved inside the create operation's
-    # own writer callback below: `_resolve_newest_resume_for_gig` calls
-    # `private_records.list_imports`, which opens its OWN
-    # `run_with_journal_writer` -- nesting that inside an already-held
-    # writer lock deadlocks (the per-workpad lock is not reentrant).
-    def _check_existing(writer):
-        snapshot = writer.snapshot((_PROFILES_ROOT, _SELECTION_ROOT))
-        current = _current_profiles(snapshot.artifacts)
-        return _existing_default_profile(current)
-
-    existing = run_with_journal_writer(
-        workpad=resolved.path,
-        project_id=resolved.project_id,
-        gig_id=resolved.gig_id,
-        operation=_check_existing,
-    )
+    # read first, and only resolve the resume (and open the writer for the
+    # actual create) when we're truly about to create one. The resume
+    # lookup is deliberately NOT inside the create operation's own writer
+    # callback below: the per-workpad lock is not reentrant, so nothing
+    # that might itself need the writer lock may run while it is held.
+    #
+    # journal-read-scope: that existence check is a read, so it no longer
+    # takes the writer lock at all (`read_committed_snapshot`). Only a gig
+    # whose default profile is actually MISSING reaches the writer below,
+    # which checks again under the lock before it creates anything.
+    existing = _existing_default_profile(_current_profiles(_read_snapshot(resolved).artifacts))
     if existing is not None:
         return MigrationResult(profile_id=existing.profile_id, revision=existing.revision, created=False)
 
@@ -747,25 +756,23 @@ def selected_profile(
     for this gig) AND no selection already exists.
     """
 
-    ensure_default_profile(resolved, home_root=home_root, target=target, uuid_factory=uuid_factory)
-
-    def read(writer):
-        snapshot = writer.snapshot((_PROFILES_ROOT, _SELECTION_ROOT))
-        selection = _current_selection(snapshot.artifacts)
-        if selection is None:
-            return None
+    # journal-read-scope: one lock-free read answers the common case. The
+    # migration only ever adds a default profile that is missing, so a
+    # snapshot that already holds one needs no migration and no second read.
+    snapshot = _read_snapshot(resolved)
+    current = _current_profiles(snapshot.artifacts)
+    if _existing_default_profile(current) is None:
+        ensure_default_profile(resolved, home_root=home_root, target=target, uuid_factory=uuid_factory)
+        snapshot = _read_snapshot(resolved)
         current = _current_profiles(snapshot.artifacts)
-        record = current.get(selection.selected_profile_id)
-        if record is None:
-            raise ProfileRecordError("scout_profile_selection_dangling", "selected profile is not committed")
-        return record
 
-    return run_with_journal_writer(
-        workpad=resolved.path,
-        project_id=resolved.project_id,
-        gig_id=resolved.gig_id,
-        operation=read,
-    )
+    selection = _current_selection(snapshot.artifacts)
+    if selection is None:
+        return None
+    record = current.get(selection.selected_profile_id)
+    if record is None:
+        raise ProfileRecordError("scout_profile_selection_dangling", "selected profile is not committed")
+    return record
 
 
 def switch_selected_profile(
@@ -972,17 +979,8 @@ def write_profile(
 def list_profiles(resolved: ResolvedWorkpad) -> tuple[ProfileRecord, ...]:
     """Read every committed profile's CURRENT write in this gig, newest-created first."""
 
-    def read(writer):
-        snapshot = writer.snapshot((_PROFILES_ROOT,))
-        current = _current_profiles(snapshot.artifacts)
-        return tuple(sorted(current.values(), key=lambda item: (item.created_at, item.profile_id)))
-
-    return run_with_journal_writer(
-        workpad=resolved.path,
-        project_id=resolved.project_id,
-        gig_id=resolved.gig_id,
-        operation=read,
-    )
+    current = _current_profiles(_read_snapshot(resolved, (_PROFILES_ROOT,)).artifacts)
+    return tuple(sorted(current.values(), key=lambda item: (item.created_at, item.profile_id)))
 
 
 def retrieve_profile_revision(
@@ -1012,31 +1010,23 @@ def retrieve_profile_revision(
     if not _PROFILE_ID.fullmatch(profile_id):
         _fail("scout_profile_invalid", "profile_id is not a valid profile identity")
 
-    def read(writer):
-        snapshot = writer.snapshot((_PROFILES_ROOT,))
-        writes = _all_profile_writes(snapshot.artifacts).get(profile_id, [])
-        for record in reversed(writes):  # newest seq first
-            if record.revision != revision:
-                continue
-            recomputed = _content_digest(
-                titles=record.titles,
-                titles_to_avoid=record.titles_to_avoid,
-                queries=record.queries,
-                resume_ref=record.resume_ref,
-            )
-            if recomputed != content_digest or record.content_digest != content_digest:
-                continue
-            return record
-        _fail(
-            "scout_profile_revision_unavailable",
-            "no committed profile write matches the requested revision and content digest",
+    snapshot = _read_snapshot(resolved, (_PROFILES_ROOT,))
+    writes = _all_profile_writes(snapshot.artifacts).get(profile_id, [])
+    for record in reversed(writes):  # newest seq first
+        if record.revision != revision:
+            continue
+        recomputed = _content_digest(
+            titles=record.titles,
+            titles_to_avoid=record.titles_to_avoid,
+            queries=record.queries,
+            resume_ref=record.resume_ref,
         )
-
-    return run_with_journal_writer(
-        workpad=resolved.path,
-        project_id=resolved.project_id,
-        gig_id=resolved.gig_id,
-        operation=read,
+        if recomputed != content_digest or record.content_digest != content_digest:
+            continue
+        return record
+    _fail(
+        "scout_profile_revision_unavailable",
+        "no committed profile write matches the requested revision and content digest",
     )
 
 

@@ -12,8 +12,10 @@ from ...canonical import canonical_json_bytes, digest_imported_bytes, parse_json
 from ...journal import (
     JournalArtifact,
     JournalArtifactMissingError,
+    JournalSnapshot,
     JournalTransition,
     read_committed_artifact,
+    read_committed_snapshot,
     run_with_journal_writer,
 )
 from .contracts import (
@@ -58,8 +60,7 @@ def _ref(path: str, data: bytes) -> dict[str, object]:
     }
 
 
-def _snapshot_entries(writer: object) -> tuple[WatchlistEntry, ...]:
-    snapshot = writer.snapshot(("records/scout-watchlist/",))  # type: ignore[attr-defined]
+def _snapshot_entries(snapshot: JournalSnapshot) -> tuple[WatchlistEntry, ...]:
     entries: list[WatchlistEntry] = []
     for path, data in sorted(snapshot.artifacts.items()):
         if not path.endswith(".json"):
@@ -79,16 +80,15 @@ def list_active(
     """Return active entries from the authenticated journal snapshot."""
 
     resolved = _resolved(home_root, target, gig_id)
-
-    def read(writer: object) -> tuple[WatchlistEntry, ...]:
-        return tuple(item for item in _snapshot_entries(writer) if item.state == "active")
-
-    return run_with_journal_writer(
+    # A read: the committed watchlist records only, without the journal
+    # writer lock, so listing never queues behind (or blocks) another route.
+    snapshot = read_committed_snapshot(
         workpad=resolved.path,
         project_id=resolved.project_id,
         gig_id=resolved.gig_id,
-        operation=read,
+        prefixes=("records/scout-watchlist/",),
     )
+    return tuple(item for item in _snapshot_entries(snapshot) if item.state == "active")
 
 
 class JournalWatchlistClient:
