@@ -5,15 +5,20 @@
 // checks that every entry has a view in App.jsx and that the served bundle
 // carries every path. Add a route here first; nothing else invents a hash.
 //
-//   #/jobs               the card grid (home; also the empty hash)
+//   #/jobs               the card grid (home; also the empty hash): the
+//                        postings of a find-jobs run, nothing else
 //   #/jobs/<encoded id>  one posting's job page, keyed by its normalized_url
 //                        (or a quick assessment's job_identity)
+//   #/assessments        every on-demand assessment, newest first (uat-bug-016)
+//   #/assessments/<id>   the same job page, opened from Assessments (keyed by
+//                        the assessment's job_identity)
 //   #/questions          every open question across postings (pending answers)
 //   #/applications       the application pipeline + every recorded event
 //   #/runs               every find-jobs run for the selected profile
 //   #/runs/<run id>      one run: status, node receipts, its postings
 //   #/settings           preferences, resume, setup wizard, discover, add company
-//   #/assess             "+ Assess a job" (its result opens #/jobs/<id>)
+//   #/assess             "+ Assess a job", reached from Assessments (its
+//                        result opens #/assessments/<id>)
 //
 // Hash routes so the browser back/forward buttons work (every link is a
 // plain <a href="#/…">), the server never sees a client route (the packaged
@@ -24,6 +29,8 @@ import { useEffect, useState } from "react";
 export const ROUTES = [
   { view: "jobs", path: "#/jobs", label: "Jobs", pattern: /^#\/jobs\/?$/ },
   { view: "job", path: "#/jobs/", label: "Job", pattern: /^#\/jobs\/(.+)$/, param: "jobId" },
+  { view: "assessments", path: "#/assessments", label: "Assessments", pattern: /^#\/assessments\/?$/ },
+  { view: "assessment", path: "#/assessments/", label: "Assessment", pattern: /^#\/assessments\/(.+)$/, param: "jobId" },
   { view: "questions", path: "#/questions", label: "Questions", pattern: /^#\/questions\/?$/ },
   { view: "applications", path: "#/applications", label: "Applications", pattern: /^#\/applications\/?$/ },
   { view: "runs", path: "#/runs", label: "Runs", pattern: /^#\/runs\/?$/ },
@@ -34,9 +41,10 @@ export const ROUTES = [
 
 // The top bar's primary links, in order (the profile switcher and the
 // Settings gear are laid out separately by TopBar.jsx).
-export const NAV_VIEWS = ["jobs", "questions", "applications", "runs"];
+export const NAV_VIEWS = ["jobs", "assessments", "questions", "applications", "runs"];
 
 export const JOBS_HASH = "#/jobs";
+export const ASSESSMENTS_HASH = "#/assessments";
 export const QUESTIONS_HASH = "#/questions";
 export const APPLICATIONS_HASH = "#/applications";
 export const RUNS_HASH = "#/runs";
@@ -77,6 +85,13 @@ export function jobHash(jobId) {
   return `#/jobs/${encodeURIComponent(jobId)}`;
 }
 
+// uat-bug-016: the job page of an on-demand assessment, opened from
+// Assessments (the same JobPage; the hash only decides which top-bar tab is
+// current and where "←" goes back to).
+export function assessmentHash(jobId) {
+  return `#/assessments/${encodeURIComponent(jobId)}`;
+}
+
 export function runHash(runId) {
   return `#/runs/${encodeURIComponent(runId)}`;
 }
@@ -89,10 +104,14 @@ export function navigate(hash) {
 }
 
 // Which top-bar link is "current" for a route: a job page belongs to Jobs,
-// a run page to Runs, the assess form to Jobs (it is Jobs' own action).
+// a run page to Runs; an assessment's job page and the assess form belong
+// to Assessments (uat-bug-016: "+ Assess a job" lives there).
 export function navViewFor(view) {
-  if (view === "job" || view === "assess") {
+  if (view === "job") {
     return "jobs";
+  }
+  if (view === "assessment" || view === "assess") {
+    return "assessments";
   }
   if (view === "run") {
     return "runs";

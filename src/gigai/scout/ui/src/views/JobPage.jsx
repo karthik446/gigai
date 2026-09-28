@@ -13,7 +13,7 @@ import { useAnswerDrafts } from "../answerDrafts.js";
 import { reassessGate, tailorGate } from "../answersModel.js";
 import { displayCompanyName, notAssessedReasonDetail, unchangedSinceLabel } from "../display.js";
 import { ageLabel, dateLabel, jdExcerpt, jevReasonsLine, notAssessedLine, payLabel, questionPromptIndex, statusStyleFrom, workModeLabel } from "../jobModel.js";
-import { JOBS_HASH } from "../routing.js";
+import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 
 // Q4a: one posting's job page (#/jobs/<normalized_url>), per
 // mockups/cards-and-job-page.html with the operator amendment: the
@@ -33,6 +33,15 @@ import { JOBS_HASH } from "../routing.js";
 //       actions at the top of Requirements, and the tailored-resume panel
 //       opens under Requirements
 //   N7  both actions are gated (answersModel.js) and say why when off
+//
+// uat-batch2:
+//   uat-bug-016  opened from Assessments (#/assessments/<id>, `from`), the
+//                back link reads "← Assessments"
+//   uat-bug-014  a quick-assessed URL job shows its excerpt (the store's
+//                posting_text, jobModel.quickOnlyJob); a PASTED job says
+//                its text is never stored
+//   uat-bug-015  the Jev tile of a quick assessment shows its score, or
+//                says in words why it has none (job.rankSkipReason)
 //
 // Data, all from existing routes:
 //   header/JD   the run's posting row (GET /api/runs/{id}/results ->
@@ -98,14 +107,15 @@ function OpenPosting({ url, children }) {
   );
 }
 
-function JobDescription({ posting }) {
+function JobDescription({ posting, pasted }) {
   const excerpt = jdExcerpt(posting.text);
   if (!excerpt) {
     return (
       <section className="panel">
         <h3>Job description</h3>
-        <p className="muted">
-          The posting text was not captured for this row. {posting.url && <OpenPosting url={posting.url}>Open the posting</OpenPosting>}
+        <p className="muted" data-role="jd-missing">
+          {pasted ? "You pasted this posting's text. Pasted text is used for the assessment only and is never stored." : "The posting text was not captured for this row."}{" "}
+          {posting.url && <OpenPosting url={posting.url}>Open the posting</OpenPosting>}
         </p>
       </section>
     );
@@ -161,15 +171,19 @@ function AssessNow({ posting, onAssessed }) {
   );
 }
 
-function BackToJobs() {
-  return (
+function BackToList({ from }) {
+  return from === "assessments" ? (
+    <a className="back-link" href={ASSESSMENTS_HASH}>
+      ← Assessments
+    </a>
+  ) : (
     <a className="back-link" href={JOBS_HASH}>
       ← Jobs
     </a>
   );
 }
 
-export default function JobPage({ job, jobId, profileId, profileLabel, visaRequired, loading, onQuickUpdated, onApplicationsChanged }) {
+export default function JobPage({ job, jobId, from, profileId, profileLabel, visaRequired, loading, onQuickUpdated, onApplicationsChanged }) {
   const [answers, setAnswers] = useState([]);
   const [applications, setApplications] = useState([]);
   const [tailorError, setTailorError] = useState(null);
@@ -217,12 +231,13 @@ export default function JobPage({ job, jobId, profileId, profileLabel, visaRequi
   if (!job) {
     return (
       <div>
-        <BackToJobs />
+        <BackToList from={from} />
         <section className="panel">
-          <h2>{loading ? "Loading run…" : "Job not found"}</h2>
+          <h2>{loading ? (from === "assessments" ? "Loading assessment…" : "Loading run…") : "Job not found"}</h2>
           {!loading && (
             <p className="muted">
-              No posting with this address in the loaded run: <code>{jobId}</code>
+              {from === "assessments" ? "No assessment with this address for this profile: " : "No posting with this address in the loaded run: "}
+              <code>{jobId}</code>
             </p>
           )}
         </section>
@@ -270,7 +285,7 @@ export default function JobPage({ job, jobId, profileId, profileLabel, visaRequi
 
   return (
     <div className="job-page">
-      <BackToJobs />
+      <BackToList from={from} />
 
       <section className="panel">
         <div className="job-header">
@@ -283,6 +298,7 @@ export default function JobPage({ job, jobId, profileId, profileLabel, visaRequi
               {job.status === "on_demand" ? (
                 <span title={job.quick && job.quick.created_at ? job.quick.created_at : undefined}>
                   assessed on demand{job.quick && job.quick.created_at ? ` ${dateLabel(job.quick.created_at)}` : ""}
+                  {job.pastedResume ? " against a pasted resume" : ""}
                 </span>
               ) : (
                 <span title={posting.published_at || undefined}>
@@ -311,7 +327,7 @@ export default function JobPage({ job, jobId, profileId, profileLabel, visaRequi
             )}
           </div>
           <div className="header-side">
-            <JevBadge rank={job.rank} />
+            <JevBadge rank={job.rank} skipReason={job.rankSkipReason} showReason />
             {reasons && <div className="jev-reasons">{reasons}</div>}
           </div>
         </div>
@@ -325,7 +341,7 @@ export default function JobPage({ job, jobId, profileId, profileLabel, visaRequi
         </div>
       </section>
 
-      <JobDescription posting={posting} />
+      <JobDescription posting={posting} pasted={Boolean(job.quick && job.quick.job && job.quick.job.fetch_kind === "pasted" && job.status === "on_demand")} />
 
       <section className="panel">
         <h3>Requirements</h3>

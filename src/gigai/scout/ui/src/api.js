@@ -286,4 +286,18 @@ export function getTailoredResumes(params) {
   return request("GET", `/api/tailored-resumes${qs ? `?${qs}` : ""}`);
 }
 
+// uat-batch2 (N11-C): "Update sources" (find_jobs/api/sources.py). POST
+// starts a background update and answers 202 {update_id, status: "running"}
+// at once (409 sources_update_running while one runs, 404
+// target_unavailable with no target); GET is polled for its progress and
+// carries `index`, what the Jobs page needs to know about the stored
+// postings. `force` starts over a stuck update.
+export function startSourcesUpdate({ force = false } = {}) {
+  return request("POST", "/api/sources/update", force ? { force: true } : {});
+}
+
+export function getSourcesUpdate() {
+  return request("GET", "/api/sources/update");
+}
+
 export { ApiError };

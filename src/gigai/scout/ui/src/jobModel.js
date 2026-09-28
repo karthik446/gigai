@@ -103,6 +103,31 @@ export function jevReasonsLine(rank) {
   return reasons.concat(flags).filter(Boolean).join(" · ");
 }
 
+// uat-batch2 (uat-bug-015): why a quick assessment has no Jev score, in
+// words. The ids are AssessResponse.rank_skip_reason's
+// (assess_contracts.RANK_SKIP_REASONS; the static test reads them from the
+// Python module, so a new id fails the test until it has words here).
+export const JEV_SKIP_TEXT = {
+  no_key: "No Jev key",
+  ephemeral_resume: "Pasted resume: not sent to Jev",
+  no_title_or_company: "No title or company to score",
+  cost_cap: "Jev budget reached",
+  error: "Jev unavailable",
+};
+
+export function jevSkipText(reason) {
+  if (!reason) {
+    return "";
+  }
+  return JEV_SKIP_TEXT[reason] || humanizeId(reason);
+}
+
+// True when `rank` is a RankScore Jev really scored (a row past the cost
+// cap is a RankScore with fit/score null).
+export function isScored(rank) {
+  return Boolean(rank) && rank.fit !== null && rank.fit !== undefined;
+}
+
 export function classLabel(requirementClass) {
   return requirementClass ? CLASS_LABELS[requirementClass] || humanizeId(requirementClass) : "";
 }
@@ -304,14 +329,21 @@ export function buildJobs({ rows, rankScores, quickItems, runCreatedAt }) {
 
   const seen = new Set();
   const jobs = (rows || []).map((row) => {
-    const { posting } = row;
-    const url = posting.normalized_url;
+    const url = row.posting.normalized_url;
     seen.add(url);
     const quick = quickByUrl.get(url) || null;
+    // uat-batch2: a row acquire kept no text for shows the text its quick
+    // assessment fetched (posting_text), when there is one.
+    const quickText = quick && typeof quick.posting_text === "string" && quick.posting_text ? quick.posting_text : null;
+    const posting = !row.posting.text && quickText ? { ...row.posting, text: quickText } : row.posting;
     const runAt = row.status === "carried_forward" ? row.fromRunDate || runCreatedAt : runCreatedAt;
     const quickIsLatest = Boolean(quick) && (!row.assessment || !runAt || assessmentTime(quick) >= runAt);
     const assessment = quickIsLatest ? quick.result : row.assessment || null;
     const assessmentSource = assessment ? (quickIsLatest ? "quick" : "run") : null;
+    // The run's own Jev score first; a row the run never scored (past its
+    // cost cap) shows the score its quick assessment got, or why it has none.
+    const runRank = rankByUrl.get(url) || null;
+    const rank = isScored(runRank) ? runRank : (quick && quick.rank_score) || runRank;
     return {
       id: url,
       posting,
@@ -320,7 +352,8 @@ export function buildJobs({ rows, rankScores, quickItems, runCreatedAt }) {
       notAssessedReason: row.notAssessedReason || null,
       fromRunDate: row.fromRunDate || null,
       runCreatedAt: runCreatedAt || null,
-      rank: rankByUrl.get(url) || null,
+      rank,
+      rankSkipReason: isScored(rank) ? null : (quick && quick.rank_skip_reason) || null,
       quick,
       assessment,
       assessmentSource,
@@ -335,6 +368,8 @@ export function buildJobs({ rows, rankScores, quickItems, runCreatedAt }) {
   // job page (#/jobs/<job_identity>) is the same JobPage, so the store's
   // ResolvedJob (title / company / location / source_url, text never
   // serialized) stands in for the posting row. `row` is null for these.
+  // uat-bug-016: these are cards on Assessments, never on Jobs; they stay
+  // in this list so a job page finds them by id (runJobs() drops them).
   const onDemand = [];
   const seenQuick = new Set();
   (quickItems || []).forEach((item) => {
@@ -351,6 +386,62 @@ export function buildJobs({ rows, rankScores, quickItems, runCreatedAt }) {
   return jobs.concat(onDemand);
 }
 
+// uat-bug-016: Jobs and a run page list search (run) results only.
+export function runJobs(jobs) {
+  return (jobs || []).filter((job) => job.status !== "on_demand");
+}
+
+// The quick-assess store files an assessment under the resume it used: a
+// profile's id, or "ephemeral" for a resume pasted for that one call
+// (quick_assess.resume_key). GET /api/assessments?profile_id=ephemeral
+// lists the pasted-resume ones.
+export const PASTED_RESUME_KEY = "ephemeral";
+
+export function usedPastedResume(item) {
+  const resume = item && item.resume;
+  return Boolean(resume) && !resume.profile_id && !resume.pinned;
+}
+
+// uat-bug-016: the Assessments page. Every assessment in the quick-assess
+// store for the profile (GET /api/assessments?profile_id=…: "+ Assess a
+// job", `gigai scout assess`, and every assessment or re-assessment started
+// from a job page) plus the ones made against a pasted resume
+// (`pastedItems`, which belong to no profile), one card per job, newest
+// first. A job the loaded run also carries is that run's job (`jobs`, from
+// buildJobs: the same card Jobs shows); any other is the store's own
+// (quickOnlyJob). A pasted-resume assessment is always the store's own: it
+// never stands in for a run posting's verdict, which is the profile's.
+export function assessmentJobs(quickItems, jobs, pastedItems) {
+  const byId = new Map((jobs || []).map((job) => [job.id, job]));
+  const latest = new Map();
+  (quickItems || []).concat(pastedItems || []).forEach((item) => {
+    const identity = item && item.job && item.job.job_identity;
+    if (!identity) {
+      return;
+    }
+    const existing = latest.get(identity);
+    if (!existing || assessmentTime(item) > assessmentTime(existing)) {
+      latest.set(identity, item);
+    }
+  });
+  return [...latest.values()]
+    .sort((a, b) => assessmentTime(b).localeCompare(assessmentTime(a)))
+    .map((item) => (usedPastedResume(item) ? null : byId.get(item.job.job_identity) || byId.get(item.job.normalized_url)) || quickOnlyJob(item));
+}
+
+// When a job was last assessed on demand ("" when it never was).
+export function assessedAt(job) {
+  return job && job.quick ? assessmentTime(job.quick) : "";
+}
+
+export function sortByAssessedAt(jobs) {
+  return jobs.slice().sort((a, b) => assessedAt(b).localeCompare(assessedAt(a)));
+}
+
+// uat-batch2 (quick-assess-text-jev): `posting_text` is the full public
+// posting text (absent for a pasted job, whose text is never stored);
+// `rank_score` is the Jev score in the run's RankScore shape, and
+// `rank_skip_reason` says why there is none (never both).
 export function quickOnlyJob(item, rank = null) {
   const job = item.job || {};
   const posting = {
@@ -359,12 +450,13 @@ export function quickOnlyJob(item, rank = null) {
     location: job.location || "",
     url: job.source_url || null,
     normalized_url: job.normalized_url || job.job_identity,
-    text: null,
+    text: item.posting_text || null,
     published_at: null,
     provider: null,
     source_kind: job.fetch_kind === "pasted" ? "pasted text" : "on demand",
   };
   const assessment = item.result || null;
+  const ownRank = item.rank_score || rank || null;
   return {
     id: job.job_identity,
     posting,
@@ -373,7 +465,9 @@ export function quickOnlyJob(item, rank = null) {
     notAssessedReason: null,
     fromRunDate: null,
     runCreatedAt: null,
-    rank,
+    rank: ownRank,
+    rankSkipReason: isScored(ownRank) ? null : item.rank_skip_reason || null,
+    pastedResume: usedPastedResume(item),
     quick: item,
     assessment,
     assessmentSource: assessment ? "quick" : null,

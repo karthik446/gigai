@@ -8,8 +8,9 @@ the source with a regex, then asserts
 
 1. every route's ``view`` is rendered by ``ui/src/App.jsx`` -- either as a
    ``route.view === "<view>"`` branch or as one of the views
-   ``views/FindJobsView.jsx`` owns (``jobs`` / ``job`` / ``run``, checked
-   the same way there);
+   ``views/FindJobsView.jsx`` owns (``jobs`` / ``job`` / ``run``, and since
+   uat-bug-016 ``assessments`` / ``assessment``, checked the same way
+   there);
 2. the top bar's link set (``NAV_VIEWS``) only names views the table has;
 3. the packaged, served ``ui/dist`` bundle (``api/static.py``'s own
    ``_ui_dist_root``, i.e. what ``GET /`` and ``GET /assets/…`` hand to the
@@ -50,6 +51,10 @@ _FIND_JOBS_OWNED = re.compile(r'const ownsRoute = (?P<expr>[^;]+);')
 EXPECTED_ROUTES = {
     "jobs": "#/jobs",
     "job": "#/jobs/",
+    # uat-bug-016: on-demand assessments have their own page; its job page
+    # is the same JobPage under its own prefix.
+    "assessments": "#/assessments",
+    "assessment": "#/assessments/",
     "questions": "#/questions",
     "applications": "#/applications",
     "runs": "#/runs",
@@ -79,6 +84,22 @@ def _rendered_views() -> set[str]:
     return rendered
 
 
+def test_find_jobs_view_renders_every_route_it_owns() -> None:
+    """``ownsRoute`` only says the view draws SOMETHING for a route; each
+    owned route must also have its own branch (or be the fall-through grid,
+    ``jobs``), or it would silently render the Jobs grid."""
+
+    find_jobs = FIND_JOBS_VIEW_JSX.read_text(encoding="utf-8")
+    owned = _FIND_JOBS_OWNED.search(find_jobs)
+    assert owned is not None
+    owned_views = set(_APP_VIEW_BRANCH.findall(owned.group("expr")))
+    assert owned_views == {"jobs", "job", "run", "assessments", "assessment"}
+    body = find_jobs[owned.end() :]
+    branched = set(_APP_VIEW_BRANCH.findall(body))
+    missing = sorted(owned_views - branched - {"jobs"})
+    assert not missing, f"FindJobsView owns these routes but has no branch for them: {missing}"
+
+
 def test_route_table_is_the_expected_set() -> None:
     assert _route_table() == EXPECTED_ROUTES
 
@@ -96,7 +117,7 @@ def test_nav_views_are_routes() -> None:
     nav = _NAV_VIEWS.search(source)
     assert nav is not None, "routing.js must export NAV_VIEWS (the top bar's link order)"
     nav_views = re.findall(r'"([a-z]+)"', nav.group("body"))
-    assert nav_views == ["jobs", "questions", "applications", "runs"]
+    assert nav_views == ["jobs", "assessments", "questions", "applications", "runs"]
     assert all(view in routes for view in nav_views)
 
 

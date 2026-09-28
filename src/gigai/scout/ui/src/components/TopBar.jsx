@@ -4,7 +4,7 @@ import { JOBS_HASH, NAV_VIEWS, SETTINGS_HASH, navViewFor, routeFor } from "../ro
 
 // Q4a-nav: the one persistent top bar every page shows.
 //
-//   Scout | Jobs | Questions (N) | Applications | Runs | Dark mode | <profile ▾> | ⚙
+//   Scout | Jobs | Assessments | Questions (N) | Applications | Runs | Dark mode | <profile ▾> | ⚙
 //
 // Every link is a plain <a href="#/…"> from routing.js's ROUTES (the single
 // route table), so back/forward work. The Questions badge is

@@ -9,7 +9,7 @@ import PendingAnswersView from "./views/PendingAnswersView.jsx";
 import ApplicationsView from "./views/ApplicationsView.jsx";
 import RunsView from "./views/RunsView.jsx";
 import SettingsView from "./views/SettingsView.jsx";
-import { JOBS_HASH, SETTINGS_HASH, jobHash, navigate, routeFor, useHashRoute } from "./routing.js";
+import { JOBS_HASH, SETTINGS_HASH, assessmentHash, navViewFor, navigate, routeFor, useHashRoute } from "./routing.js";
 
 function useConfig() {
   const [state, setState] = useState({ loading: true, config: null, error: null });
@@ -23,7 +23,20 @@ function useConfig() {
 
   useEffect(reload, [reload]);
 
-  return { ...state, reload };
+  // uat-batch2: re-read without the "loading" state (which unmounts the
+  // views that wait for a config): the selected profile changed, and with
+  // it the resume and the config digest a run sends.
+  const refresh = useCallback(
+    () =>
+      getConfig()
+        .then((config) => setState({ loading: false, config, error: null }))
+        .catch(() => {
+          /* the config already shown stays; a run's own 409 reloads it */
+        }),
+    [],
+  );
+
+  return { ...state, reload, refresh };
 }
 
 // S2-B: GET /api/setup either returns saved prefs (200) or a 404
@@ -60,6 +73,8 @@ function useSetup() {
 //   jobs / job / run   FindJobsView (mounted on EVERY route so a live run
 //                      keeps polling and the grid's state survives; it
 //                      draws nothing on the other routes)
+//   assessments /      FindJobsView too (uat-bug-016): the on-demand
+//   assessment         assessments, newest first, and their job page
 //   questions          PendingAnswersView, fed by usePendingQuestions (the
 //                      same state as the top bar's badge)
 //   applications       ApplicationsView (GET /api/applications)
@@ -67,13 +82,17 @@ function useSetup() {
 //   settings           SettingsView (preferences + wizard launch, profiles,
 //                      discover, add company)
 //   assess             AssessView; its AssessResponse is handed to
-//                      FindJobsView and its job page opens (#/jobs/<id>)
+//                      FindJobsView and its job page opens
+//                      (#/assessments/<id>)
 //
 // The first-run interview (P9b's SetupWizard) still shows before anything
 // else when no prefs exist (CHANGE #2); editing prefs later renders the
 // same wizard in place of the app, from Settings.
 export default function App() {
-  const { loading: configLoading, config: configResponse, error: configError, reload: reloadConfig } = useConfig();
+  const { loading: configLoading, config: configResponse, error: configError, reload: reloadConfig, refresh: refreshConfig } = useConfig();
+  // True between a profile switch and the config re-read that follows it:
+  // the config shown is still the previous profile's.
+  const [configStale, setConfigStale] = useState(false);
   const setupState = useSetup();
   const profilesState = useProfiles();
   const route = useHashRoute();
@@ -98,32 +117,39 @@ export default function App() {
     }
   }, [route.known]);
 
-  // Each route names the tab; a job/run page keeps its section's name.
+  // Each route names the tab; a job/run page keeps its section's name
+  // (an assessment's job page reads "Assessments").
   useEffect(() => {
-    const entry = routeFor(route.view);
+    const entry = routeFor(route.view === "assessment" ? navViewFor(route.view) : route.view);
     document.title = entry && route.view !== "jobs" ? `Scout · ${entry.label}` : "Scout";
   }, [route.view]);
 
   // Every view starts at the top (a job page also does this on its own
   // when its id changes).
   useEffect(() => {
-    if (route.view !== "job") {
+    if (route.view !== "job" && route.view !== "assessment") {
       window.scrollTo(0, 0);
     }
   }, [route.view]);
 
   function handleSelectProfile(profileId) {
-    profilesState.switchTo(profileId).catch(() => {
-      /* surfaced via profilesState.error on the next reload; the switcher
-         itself stays on the previous selection rather than guessing. */
-    });
+    profilesState
+      .switchTo(profileId)
+      .then(() => {
+        setConfigStale(true);
+        return refreshConfig().finally(() => setConfigStale(false));
+      })
+      .catch(() => {
+        /* surfaced via profilesState.error on the next reload; the switcher
+           itself stays on the previous selection rather than guessing. */
+      });
   }
 
   const handleAssessed = useCallback(
     (response) => {
       setAssessedItem(response);
       questions.reload();
-      navigate(jobHash(response.job.job_identity));
+      navigate(assessmentHash(response.job.job_identity));
     },
     [questions.reload],
   );
@@ -207,11 +233,12 @@ export default function App() {
         )}
 
         {/* Mounted on every route (see the header comment); renders only
-            for jobs / job / run. */}
+            for jobs / job / run / assessments / assessment. */}
         {!configLoading && (
           <FindJobsView
             route={route}
             profile={selectedProfile}
+            profilesLoading={profilesState.loading}
             config={configResponse}
             reloadConfig={reloadConfig}
             runsState={runsState}
@@ -252,7 +279,13 @@ export default function App() {
         )}
 
         {route.view === "assess" && (
-          <AssessView profiles={profilesState.profiles} selectedProfileId={profilesState.selectedProfileId} onAssessed={handleAssessed} />
+          <AssessView
+            profiles={profilesState.profiles}
+            selectedProfileId={profilesState.selectedProfileId}
+            config={configStale ? null : configResponse}
+            configLoading={configLoading || configStale}
+            onAssessed={handleAssessed}
+          />
         )}
       </main>
     </div>

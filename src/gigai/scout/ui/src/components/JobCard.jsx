@@ -4,8 +4,8 @@ import SponsorshipBadge from "./SponsorshipBadge.jsx";
 import ProviderBadge from "./ProviderBadge.jsx";
 import QuickAssessChip from "./QuickAssessChip.jsx";
 import { displayCompanyName, unchangedSinceLabel } from "../display.js";
-import { ageLabel, jevReasonsLine, notAssessedLine, payLabel, requirementSummary, workModeLabel } from "../jobModel.js";
-import { jobHash } from "../routing.js";
+import { ageLabel, assessedAt, jevReasonsLine, notAssessedLine, payLabel, requirementSummary, workModeLabel } from "../jobModel.js";
+import { assessmentHash, jobHash } from "../routing.js";
 
 // Q4a: one hiring.cafe-style card per posting (mockups/cards-and-job-page.html).
 // A plain <a href="#/jobs/…"> so the browser back button returns to the grid.
@@ -26,6 +26,11 @@ import { jobHash } from "../routing.js";
 // when Jev never scored it). Operator answer 3: work-mode/pay chips only
 // when the posting lists them (Q4b fields: posting.work_mode, posting.pay;
 // rows[].h1b goes on the sponsorship chip) -- no "not listed" chips.
+//
+// uat-batch2 (uat-bug-016): a card on the Assessments page opens the same
+// job page under #/assessments/<id> (`from="assessments"`), so the top bar
+// and the page's back link stay on Assessments. A quick assessment with no
+// Jev score carries why (job.rankSkipReason) in the tile's tooltip.
 //
 // uat-batch1 (O1/O2): Jev's reasons read as words (jobModel.jevReasonsLine,
 // never the raw ids); the card is tighter -- the age joins the mode/pay
@@ -72,7 +77,13 @@ function UnassessedSummary({ job }) {
   );
 }
 
-export default function JobCard({ job, visaRequired }) {
+// "assessed today" / "assessed 3d ago", from the store's own timestamps.
+function onDemandAge(job) {
+  const at = assessedAt(job);
+  return at ? `assessed ${ageLabel(at)}` : "assessed on demand";
+}
+
+export default function JobCard({ job, visaRequired, from }) {
   const { posting } = job;
   const dimmed = job.verdict === "not_a_match" || (job.rank && job.rank.fit === "no");
   const mode = workModeLabel(posting);
@@ -80,7 +91,7 @@ export default function JobCard({ job, visaRequired }) {
   const companyLine = [displayCompanyName(posting.company), posting.location].filter(Boolean).join(" · ");
 
   return (
-    <a className={`job-card${dimmed ? " dimmed" : ""}`} href={jobHash(job.id)} data-job-id={job.id}>
+    <a className={`job-card${dimmed ? " dimmed" : ""}`} href={from === "assessments" ? assessmentHash(job.id) : jobHash(job.id)} data-job-id={job.id}>
       <div className="card-top">
         <div style={{ minWidth: 0 }}>
           <div className="card-title" title={posting.title || undefined}>
@@ -90,7 +101,7 @@ export default function JobCard({ job, visaRequired }) {
             {companyLine}
           </div>
         </div>
-        <JevBadge rank={job.rank} />
+        <JevBadge rank={job.rank} skipReason={job.rankSkipReason} />
       </div>
 
       <div className="card-meta">
@@ -98,7 +109,7 @@ export default function JobCard({ job, visaRequired }) {
         {mode && <span className="mode-chip">{mode}</span>}
         {pay && <span className="pay">{pay}</span>}
         <span className="card-age" title={posting.published_at || undefined}>
-          {job.status === "on_demand" ? "assessed on demand" : ageLabel(posting.published_at)}
+          {job.status === "on_demand" ? onDemandAge(job) : ageLabel(posting.published_at)}
         </span>
       </div>
 

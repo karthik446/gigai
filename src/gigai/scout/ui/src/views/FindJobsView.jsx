@@ -7,10 +7,13 @@ import JobsGrid from "../components/JobsGrid.jsx";
 import JobsSummaryStrip from "../components/JobsSummaryStrip.jsx";
 import Breadcrumb from "../components/Breadcrumb.jsx";
 import JobPage from "./JobPage.jsx";
+import AssessmentsView from "./AssessmentsView.jsx";
+import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
 import { relativeTimeLabel } from "../display.js";
-import { buildJobs, dateTimeLabel } from "../jobModel.js";
+import { PASTED_RESUME_KEY, assessmentJobs, buildJobs, dateTimeLabel, runJobs as onlyRunJobs, usedPastedResume } from "../jobModel.js";
 import { runFailure } from "../runText.js";
-import { ASSESS_HASH, RUNS_HASH, SETTINGS_HASH, runHash } from "../routing.js";
+import { indexNotice } from "../sourcesModel.js";
+import { ASSESSMENTS_HASH, RUNS_HASH, SETTINGS_HASH, runHash } from "../routing.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "blocked", "cancelled", "interrupted"]);
 const POLL_INTERVAL_MS = 2000;
@@ -30,14 +33,18 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 // Q4a-nav: this view stays MOUNTED for the whole app (App.jsx renders it
 // on every route; it draws nothing on the routes it does not own), so a
 // live run keeps polling while the operator reads Questions or Settings,
-// and the run/filters/cards survive every navigation. It owns three routes:
+// and the run/filters/cards survive every navigation. It owns five routes:
 //
 //   #/jobs        the grid: the Dashboard's summary strip, "Run find jobs"
-//                 (the consent dialog), "+ Assess a job", the past-run picker
+//                 (the consent dialog), the past-run picker. Search (run)
+//                 results only (uat-bug-016)
 //   #/jobs/<id>   one posting's JobPage, from the same job model
 //   #/runs/<id>   one run's page: "Runs › <run>", status + node receipts,
 //                 counts, and that run's grid (loaded via the same
 //                 GET /api/runs/{id}/results read as the picker)
+//   #/assessments       every on-demand assessment, newest first, and
+//                       "+ Assess a job" (uat-bug-016, AssessmentsView)
+//   #/assessments/<id>  the same JobPage, opened from Assessments
 //
 // When nothing is loaded yet (fresh load, a deep link), the newest
 // succeeded run for the profile is loaded automatically (GET /api/runs,
@@ -50,6 +57,11 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 // opened run B's page, so B's page showed A's cards under B's name. A run
 // page also shows ONLY its run's postings (no on-demand cards), and a run
 // that did not succeed says where it failed (runText.runFailure).
+//
+// uat-batch2: Jobs says when the stored company postings are missing or
+// out of date (GET /api/sources/update -> index.needs_update, N11-C) with a
+// link to Settings' "Update sources"; a run page says how many postings
+// matched but were not imported (progress.not_imported_count, uat-bug-011).
 //
 // Still DROPPED from the mockup (no backing API): "New since last run".
 // Phase 2 fields (work_mode / pay / H-1B count, tailored resume) render
@@ -80,6 +92,7 @@ function PastRunPicker({ runs, currentRunId, onSelect, disabled }) {
 export default function FindJobsView({
   route,
   profile,
+  profilesLoading,
   config,
   reloadConfig,
   runsState,
@@ -88,7 +101,7 @@ export default function FindJobsView({
   externalQuickItem,
 }) {
   const profileId = profile ? profile.profile_id : null;
-  const ownsRoute = route.view === "jobs" || route.view === "job" || route.view === "run";
+  const ownsRoute = route.view === "jobs" || route.view === "job" || route.view === "run" || route.view === "assessments" || route.view === "assessment";
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [runSubmitting, setRunSubmitting] = useState(false);
@@ -102,6 +115,16 @@ export default function FindJobsView({
   const [resultsLoading, setResultsLoading] = useState(false);
   const [rankScores, setRankScores] = useState([]);
   const [quickItems, setQuickItems] = useState([]);
+  // Assessments made against a PASTED resume: the store files them under no
+  // profile, so the profile's list never has them. Cards on Assessments
+  // only; they never touch a run posting's verdict (jobModel.assessmentJobs).
+  const [pastedItems, setPastedItems] = useState([]);
+  // True until the first read of the quick-assess store for this profile
+  // ends: an assessment's job page says "Loading…" meanwhile, not "not found".
+  const [quickLoading, setQuickLoading] = useState(true);
+  // N11-C: read while Jobs is the page shown (and polled while an update
+  // runs), so the message goes away once "Update sources" has run.
+  const sources = useSourcesStatus({ enabled: route.view === "jobs" });
 
   const pollTimer = useRef(null);
   const progressPollTimer = useRef(null);
@@ -151,6 +174,8 @@ export default function FindJobsView({
     setResultsLoading(false);
     setRankScores([]);
     setQuickItems([]);
+    setPastedItems([]);
+    setQuickLoading(true);
   }, [profileId, stopPolling, stopProgressPolling, showRun]);
 
   // Q4a: the quick-assess store for this profile (job-page re-assessments,
@@ -161,9 +186,13 @@ export default function FindJobsView({
     if (!profileId) {
       return;
     }
-    getAssessments({ profileId })
+    const pasted = getAssessments({ profileId: PASTED_RESUME_KEY })
+      .then((response) => setPastedItems(response.items || []))
+      .catch(() => setPastedItems([]));
+    const own = getAssessments({ profileId })
       .then((response) => setQuickItems(response.items || []))
       .catch(() => setQuickItems([]));
+    Promise.all([own, pasted]).finally(() => setQuickLoading(false));
   }, [profileId]);
 
   useEffect(loadQuickItems, [loadQuickItems]);
@@ -184,10 +213,15 @@ export default function FindJobsView({
       if (!item || !item.job) {
         return;
       }
-      setQuickItems((prev) => {
+      const merge = (prev) => {
         const rest = prev.filter((existing) => existing.job.job_identity !== item.job.job_identity);
         return [item, ...rest];
-      });
+      };
+      if (usedPastedResume(item)) {
+        setPastedItems(merge);
+      } else {
+        setQuickItems(merge);
+      }
       // The Questions badge counts open questions in this same store.
       if (questionsReload) {
         questionsReload();
@@ -197,7 +231,7 @@ export default function FindJobsView({
   );
 
   // Q4a-nav: an AssessResponse from "+ Assess a job" (App.jsx hands it
-  // over, then opens #/jobs/<job_identity>).
+  // over, then opens #/assessments/<job_identity>).
   useEffect(() => {
     if (externalQuickItem) {
       handleQuickUpdated(externalQuickItem);
@@ -316,6 +350,11 @@ export default function FindJobsView({
             return undefined;
           }
           setRunStatus(status);
+          // One read of the run's progress files: what a finished run's page
+          // says about its board pass and the postings it did not import.
+          getRunProgress(pastRunId)
+            .then((snapshot) => shownRunId.current === pastRunId && setProgress(snapshot))
+            .catch(() => {});
           return loadResults(pastRunId);
         })
         .catch((error) => {
@@ -402,13 +441,23 @@ export default function FindJobsView({
   const newestRun = runsState.runs[0] || null;
 
   const jobs = useMemo(() => buildJobs({ rows, rankScores, quickItems, runCreatedAt }), [rows, rankScores, quickItems, runCreatedAt]);
-  const onDemandCount = useMemo(() => jobs.filter((job) => job.status === "on_demand").length, [jobs]);
-  // A run page shows that run's postings only: an on-demand assessment
-  // belongs to no run (it stays on Jobs and keeps its own job page).
-  const runJobs = useMemo(() => jobs.filter((job) => job.status !== "on_demand"), [jobs]);
+  // Jobs and a run page show the run's postings only (uat-bug-016): an
+  // on-demand assessment belongs to no run; it is a card on Assessments.
+  const runJobs = useMemo(() => onlyRunJobs(jobs), [jobs]);
+  const assessed = useMemo(() => assessmentJobs(quickItems, jobs, pastedItems), [quickItems, jobs, pastedItems]);
 
   if (!ownsRoute) {
     return null;
+  }
+
+  if (!profile && profilesLoading) {
+    return (
+      <div className="panel">
+        <p className="muted" style={{ margin: 0 }}>
+          Loading profiles…
+        </p>
+      </div>
+    );
   }
 
   if (!profile) {
@@ -421,33 +470,44 @@ export default function FindJobsView({
     );
   }
 
-  if (route.view === "job") {
+  if (route.view === "job" || route.view === "assessment") {
     const jobId = route.params.jobId;
-    const job = jobs.find((candidate) => candidate.id === jobId) || null;
+    const fromAssessments = route.view === "assessment";
+    // An assessment's page reads the store first; both lists hold the same
+    // job object for a posting the loaded run also carries. A job page
+    // opened by its #/jobs/ address (the Questions page links so) still
+    // finds an assessment only the store has.
+    const pool = fromAssessments ? assessed.concat(jobs) : jobs.concat(assessed);
+    const job = pool.find((candidate) => candidate.id === jobId) || null;
     return (
       <JobPage
         job={job}
         jobId={jobId}
+        from={fromAssessments ? "assessments" : "jobs"}
         profileId={profile.profile_id}
         profileLabel={profile.label}
         visaRequired={visaRequired}
-        loading={resultsLoading || (runsState.loading && !runId)}
+        loading={fromAssessments ? quickLoading : resultsLoading || quickLoading || (runsState.loading && !runId)}
         onQuickUpdated={handleQuickUpdated}
         onApplicationsChanged={applicationsState.reload}
       />
     );
   }
 
+  if (route.view === "assessments") {
+    return <AssessmentsView jobs={assessed} loading={quickLoading} profileLabel={profile.label} visaRequired={visaRequired} />;
+  }
+
   const runLabel = currentRun ? `run ${relativeTimeLabel(currentRun.created_at)}` : runActive ? "run in progress" : "";
-  const gridLabel = onDemandCount > 0 ? `${runLabel}${runLabel ? " · " : ""}${onDemandCount} assessed on demand` : runLabel;
+  const notice = indexNotice(sources.status, { atsEnabled: Boolean(config && config.config && config.config.sources && config.config.sources.ats) });
   const grid = (
     <>
       {resultsError && <div className="callout danger">Could not load results: {resultsError}</div>}
-      {(results || runActive || onDemandCount > 0) && (
+      {(results || runActive) && (
         <JobsGrid
-          jobs={jobs}
+          jobs={runJobs}
           visaRequired={visaRequired}
-          runLabel={gridLabel}
+          runLabel={runLabel}
           emptyMessage={runActive ? "Waiting for the first postings…" : "This run found no postings."}
         />
       )}
@@ -505,7 +565,14 @@ export default function FindJobsView({
           </div>
         )}
         {loaded && (
-          <NodeStatusList status={runStatus.status} nodeReceipts={runStatus.node_receipts} progressSteps={progress?.steps} rotation={progress?.rotation} boards={progress?.boards} />
+          <NodeStatusList
+            status={runStatus.status}
+            nodeReceipts={runStatus.node_receipts}
+            progressSteps={progress?.steps}
+            rotation={progress?.rotation}
+            boards={progress?.boards}
+            notImported={progress?.not_imported_count}
+          />
         )}
         {loaded && resultsError && <div className="callout danger">Could not load results: {resultsError}</div>}
         {loaded && (results || runActive) && !(failure && runJobs.length === 0) && (
@@ -536,9 +603,6 @@ export default function FindJobsView({
             Jobs <span className="muted">{profile.label}</span>
           </h2>
           <div className="jobs-header-actions">
-            <a className="button secondary" href={ASSESS_HASH} data-action="assess">
-              + Assess a job
-            </a>
             <button className="button" onClick={openDialog} disabled={!canRun || runActive} data-action="run">
               {runActive ? "Run in progress…" : "Run find jobs"}
             </button>
@@ -561,17 +625,31 @@ export default function FindJobsView({
         <RunConfirmDialog config={config.config} onConfirm={handleConfirm} onCancel={closeDialog} submitting={runSubmitting} error={runError} />
       )}
 
+      {notice && (
+        <div className="callout info" data-role="index-notice" data-index-status={notice.status || undefined}>
+          {notice.message} {notice.running ? "An update is running now. " : ""}
+          <a href={SETTINGS_HASH}>{notice.running ? "See its progress in Settings" : "Open Settings to run Update sources"}</a>.
+        </div>
+      )}
+
       {runId && runStatus && (runActive || runStatus.status !== "succeeded") && (
-        <NodeStatusList status={runStatus.status} nodeReceipts={runStatus.node_receipts} progressSteps={progress?.steps} rotation={progress?.rotation} boards={progress?.boards} />
+        <NodeStatusList
+          status={runStatus.status}
+          nodeReceipts={runStatus.node_receipts}
+          progressSteps={progress?.steps}
+          rotation={progress?.rotation}
+          boards={progress?.boards}
+          notImported={progress?.not_imported_count}
+        />
       )}
 
       {grid}
 
-      {!results && !runActive && !resultsLoading && !runsState.loading && runsState.runs.length === 0 && onDemandCount === 0 && (
+      {!results && !runActive && !resultsLoading && !runsState.loading && runsState.runs.length === 0 && (
         <div className="panel">
           <p className="muted" style={{ margin: 0 }}>
-            No find-jobs run yet for this profile. Run one above to see its postings here, or assess a single posting with
-            "+ Assess a job".
+            No find-jobs run yet for this profile. Run one above to see its postings here, or assess a single posting under{" "}
+            <a href={ASSESSMENTS_HASH}>Assessments</a>.
           </p>
         </div>
       )}

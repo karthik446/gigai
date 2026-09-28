@@ -1,5 +1,6 @@
 import ConfigPanel from "../components/ConfigPanel.jsx";
 import AddCompanyForm from "../components/AddCompanyForm.jsx";
+import SourcesUpdatePanel from "../components/SourcesUpdatePanel.jsx";
 import ProfilesView from "./ProfilesView.jsx";
 
 export default function SettingsView({
@@ -16,6 +17,11 @@ export default function SettingsView({
 }) {
   return (
     <div>
+      {/* uat-batch2 (N11-C): "Update sources" is the one action on this page
+          the operator comes back for (the Jobs page links here for it), so
+          it is the first panel. */}
+      <SourcesUpdatePanel />
+
       <section className="panel" id="settings-preferences">
         <h2>Preferences</h2>
         <p className="muted">

@@ -1,24 +1,28 @@
 import { useEffect, useState } from "react";
-import { getWatchlist } from "./AddCompanyForm.jsx";
-import { companyBoardsLine, sourceLabel, watchlistSummary } from "../runText.js";
+import { getSourcesUpdate } from "../api.js";
+import { relativeTimeLabel } from "../display.js";
+import { indexedBoardsLine, sourceLabel } from "../runText.js";
+import { SETTINGS_HASH } from "../routing.js";
 
 const MODEL_TARGETS = ["ollama_local", "codex_cli", "openrouter_api"];
 
-// uat-batch1 (N12): the dialog names what a run reads in plain words, and
-// says how many company boards are on the watchlist and how many of them
-// came from the company catalog. The count is GET /api/watchlist's own
-// entry list (the route the "Add company" form already reads), fetched when
-// the dialog opens; nothing is added to the API for it.
-function useWatchlistSummary(enabled) {
-  const [state, setState] = useState({ summary: null, failed: false });
+// uat-batch1 (N12): the dialog names what a run reads in plain words.
+// uat-batch2: the "Company boards" line is how many company boards are
+// stored (indexed) on this machine and when they were last updated, from
+// GET /api/sources/update's `index` block, read when the dialog opens. It
+// replaces batch 1's count of GET /api/watchlist's entries (4.5 MB / 1.8 s
+// at catalog size). With nothing stored, or stored postings out of date,
+// the line says to update sources first and links to Settings.
+function useStoredIndex(enabled) {
+  const [state, setState] = useState({ index: null, failed: false });
   useEffect(() => {
     if (!enabled) {
       return undefined;
     }
     let current = true;
-    getWatchlist()
-      .then((response) => current && setState({ summary: watchlistSummary(response.entries), failed: false }))
-      .catch(() => current && setState({ summary: null, failed: true }));
+    getSourcesUpdate()
+      .then((response) => current && setState({ index: (response && response.index) || null, failed: !(response && response.index) }))
+      .catch(() => current && setState({ index: null, failed: true }));
     return () => {
       current = false;
     };
@@ -34,7 +38,13 @@ export default function RunConfirmDialog({ config, onConfirm, onCancel, submitti
     .filter(([, enabled]) => enabled)
     .map(([name]) => name);
   const atsEnabled = Boolean(config.sources.ats);
-  const watchlist = useWatchlistSummary(atsEnabled);
+  const stored = useStoredIndex(atsEnabled);
+  const boards = indexedBoardsLine({
+    atsEnabled,
+    index: stored.index,
+    failed: stored.failed,
+    lastUpdated: stored.index && stored.index.last_checked_at ? relativeTimeLabel(stored.index.last_checked_at) : "",
+  });
 
   function handleCapChange(event) {
     const value = Number(event.target.value);
@@ -58,7 +68,12 @@ export default function RunConfirmDialog({ config, onConfirm, onCancel, submitti
             <strong>Sources:</strong> {activeSources.length ? activeSources.map(sourceLabel).join("; ") : "none"}
           </li>
           <li data-role="company-boards">
-            <strong>Company boards:</strong> {companyBoardsLine({ atsEnabled, summary: watchlist.summary, failed: watchlist.failed })}
+            <strong>Company boards:</strong> {boards.line}{" "}
+            {boards.needsUpdate && (
+              <a href={SETTINGS_HASH} onClick={onCancel}>
+                Open Settings
+              </a>
+            )}
           </li>
           <li>
             <strong>Queries:</strong> {config.merged_queries.join(", ")}

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import JobCard from "./JobCard.jsx";
 import { displayCompanyName } from "../display.js";
-import { EMPTY_FILTERS, filterJobs, hasActiveFilter, sortJobs } from "../jobModel.js";
+import { EMPTY_FILTERS, filterJobs, hasActiveFilter, sortByAssessedAt, sortJobs } from "../jobModel.js";
 
 // Q4a: the card grid that replaces the Find-jobs postings list
 // (FindJobsPostingsBoard.jsx), per mockups/cards-and-job-page.html.
@@ -11,6 +11,11 @@ import { EMPTY_FILTERS, filterJobs, hasActiveFilter, sortJobs } from "../jobMode
 // requirements), and "show postings Jev hides by default"
 // (RankScore.hidden_by_default). Sort: verdict group, then Jev score
 // (operator answer 1; jobModel.sortJobs).
+//
+// uat-batch2 (uat-bug-016): the Assessments page is this same grid with
+// `from="assessments"`: newest assessment first (jobModel.sortByAssessedAt),
+// and nothing hidden by Jev (the operator asked for each of these
+// assessments; hiding one because Jev scored it low would lose it).
 const FIT_OPTIONS = [
   ["all", "All"],
   ["strong", "Strong"],
@@ -52,20 +57,26 @@ function ChipGroup({ label, options, value, onChange }) {
   );
 }
 
-export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage }) {
+export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, from }) {
+  const assessments = from === "assessments";
+  const noun = assessments ? "assessments" : "postings";
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const setFilter = (key, value) => setFilters((prev) => ({ ...prev, [key]: value }));
   // The sponsorship filter exists only alongside the chip (operator
   // amendment); when the config turns it off, any stale selection resets.
-  const effectiveFilters = visaRequired ? filters : { ...filters, sponsorship: "all" };
+  const shownFilters = visaRequired ? filters : { ...filters, sponsorship: "all" };
+  const effectiveFilters = assessments ? { ...shownFilters, showHidden: true } : shownFilters;
 
   const companies = useMemo(() => {
     const set = new Set(jobs.map((job) => job.posting.company).filter(Boolean));
     return [...set].sort((a, b) => displayCompanyName(a).localeCompare(displayCompanyName(b)));
   }, [jobs]);
 
-  const visible = useMemo(() => sortJobs(filterJobs(jobs, effectiveFilters)), [jobs, effectiveFilters]);
-  const hiddenCount = useMemo(() => jobs.filter((job) => job.rank && job.rank.hidden_by_default).length, [jobs]);
+  const visible = useMemo(() => {
+    const matching = filterJobs(jobs, effectiveFilters);
+    return assessments ? sortByAssessedAt(matching) : sortJobs(matching);
+  }, [jobs, effectiveFilters, assessments]);
+  const hiddenCount = useMemo(() => (assessments ? 0 : jobs.filter((job) => job.rank && job.rank.hidden_by_default).length), [jobs, assessments]);
 
   return (
     <div>
@@ -112,8 +123,8 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage })
           </div>
           <div className="result-count">
             <span>
-              {visible.length} of {jobs.length} postings
-              {runLabel ? ` · ${runLabel}` : ""} · sorted by verdict, then Jev score
+              {visible.length} of {jobs.length} {noun}
+              {runLabel ? ` · ${runLabel}` : ""} · {assessments ? "newest first" : "sorted by verdict, then Jev score"}
               {!filters.showHidden && hiddenCount > 0 ? ` · ${hiddenCount} hidden by Jev` : ""}
               {hasActiveFilter(effectiveFilters) && (
                 <>
@@ -124,19 +135,21 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage })
                 </>
               )}
             </span>
-            <label className="filter-toggle">
-              <input type="checkbox" checked={filters.showHidden} onChange={(event) => setFilter("showHidden", event.target.checked)} />{" "}
-              Show postings Jev hides by default
-            </label>
+            {!assessments && (
+              <label className="filter-toggle">
+                <input type="checkbox" checked={filters.showHidden} onChange={(event) => setFilter("showHidden", event.target.checked)} />{" "}
+                Show postings Jev hides by default
+              </label>
+            )}
           </div>
         </div>
       </section>
 
       <div className="card-grid">
         {visible.length === 0 ? (
-          <div className="empty-state">{jobs.length === 0 ? emptyMessage || "No postings acquired yet." : "No postings match these filters."}</div>
+          <div className="empty-state">{jobs.length === 0 ? emptyMessage || "No postings acquired yet." : `No ${noun} match these filters.`}</div>
         ) : (
-          visible.map((job) => <JobCard key={job.id} job={job} visaRequired={visaRequired} />)
+          visible.map((job) => <JobCard key={job.id} job={job} visaRequired={visaRequired} from={from} />)
         )}
       </div>
     </div>

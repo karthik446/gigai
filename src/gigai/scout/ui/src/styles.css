@@ -1480,3 +1480,56 @@ table.data-table th {
 .run-failure-message { margin-top: 4px; overflow-wrap: anywhere; }
 .run-failure-next { margin-top: 6px; }
 .run-failure-next a { color: inherit; font-weight: 600; }
+
+/* uat-batch2 (N11-C): Settings' "Update sources" and the Jobs page's
+   message about the stored company postings. */
+.callout.success {
+  background: var(--ok-bg);
+  color: var(--ok);
+  border: 1px solid var(--ok);
+}
+.callout[data-role="index-notice"] a { color: inherit; font-weight: 600; }
+.sources-state { margin: 0 0 10px; font-size: 0.9rem; }
+.sources-line { margin: 0 0 10px; font-size: 0.85rem; }
+.sources-detail,
+.sources-next { margin-top: 4px; }
+.sources-next { font-weight: 600; }
+.sources-stuck { font-size: 0.85rem; }
+.progress-bar-track.indeterminate .progress-bar-fill {
+  width: 35%;
+  border-radius: 999px;
+  animation: progress-slide 1.4s ease-in-out infinite;
+}
+@keyframes progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(290%); }
+}
+
+/* uat-batch2 (uat-bug-013): the Assess page says which profile and resume
+   it assesses against; another profile or a pasted resume is a secondary
+   choice under it. */
+.assess-against {
+  display: flex;
+  align-items: baseline;
+  gap: 6px 12px;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+}
+.assess-against strong { font-weight: 600; }
+.assess-against .link-button { font-size: 0.85rem; }
+.assess-other {
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+  margin-bottom: 12px;
+}
+
+/* uat-batch2 (uat-bug-011): postings a run matched but did not import;
+   N11-C part 2: what a search read from the stored company postings. */
+.not-imported-line,
+.search-line { margin: 0.35rem 0 0; font-size: 0.88rem; }
+.search-line:first-of-type { margin-top: 0.5rem; }

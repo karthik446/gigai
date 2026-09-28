@@ -24,7 +24,8 @@ What is pinned, by UAT item:
 * N9  ``Sponsorship not stated · N H-1B approvals (FY2026)``, plain
   ``Sponsorship not stated`` without approvals, positive tone only with them.
 * N12 the rotation line never says ``?`` or ``unknown``; the run-confirm
-  dialog's company-board line counts the watchlist and its catalog share.
+  dialog names its sources in words (its company-board line is pinned in
+  ``test_ui_uat_batch2_model.py`` since uat-batch2 changed what it counts).
 * N2  the theme choice survives a storage that throws; both token sets exist.
 * uat-bug-012  a run page names where a run failed; a response for a run the
   view no longer shows is dropped; a run page lists that run's postings only.
@@ -44,7 +45,6 @@ import pytest
 
 from gigai.scout.find_jobs import jev_client
 from gigai.scout.find_jobs.api import static as static_module
-from gigai.scout.find_jobs.watchlist import OPERATOR_ADDED_QUERY_KEY
 
 UI_SRC = Path(static_module.__file__).resolve().parents[2] / "ui" / "src"
 JOB_MODEL_JS = UI_SRC / "jobModel.js"
@@ -95,8 +95,6 @@ process.stdout.write(JSON.stringify({
   statusStyles: input.searches.map((search) => jobModel.statusStyleFrom(search)),
   chips: input.chips.map(([sponsorship, h1b]) => jobModel.sponsorshipChip(sponsorship, h1b)),
   rotation: input.rotations.map(([rotation, boards]) => runText.rotationLine(rotation, boards)),
-  watchlist: runText.watchlistSummary(input.watchlist),
-  boards: input.boardLines.map((item) => runText.companyBoardsLine(item)),
   sources: input.sourceNames.map((name) => runText.sourceLabel(name)),
   failures: input.failures.map(([status, postings]) => runText.runFailure(status, postings)),
   theme: {
@@ -216,22 +214,6 @@ def _payload() -> dict:
             [{"total": 10370, "first": 1, "last": None, "page_size": None, "runs_per_rotation": None}, None],
             [None, None],
             [{"first": 1}, {"status": "running"}],
-        ],
-        "watchlist": [
-            {"watchlist_id": "a", "first_seen": {"query_key": "catalog:2026-09-25"}},
-            {"watchlist_id": "b", "first_seen": {"query_key": "catalog:2026-09-25"}},
-            {"watchlist_id": "c", "first_seen": {"query_key": OPERATOR_ADDED_QUERY_KEY}},
-            {"watchlist_id": "d", "first_seen": {"query_key": "software engineer"}},  # an Exa search found it
-            {"watchlist_id": "e", "first_seen": {"query_key": "discovery:abc"}},
-            {"watchlist_id": "f"},
-        ],
-        "boardLines": [
-            {"atsEnabled": True, "summary": {"total": 10370, "catalog": 10360, "found": 8, "added": 2}, "failed": False},
-            {"atsEnabled": True, "summary": {"total": 1, "catalog": 0, "found": 0, "added": 1}, "failed": False},
-            {"atsEnabled": True, "summary": {"total": 0, "catalog": 0, "found": 0, "added": 0}, "failed": False},
-            {"atsEnabled": True, "summary": None, "failed": False},
-            {"atsEnabled": True, "summary": None, "failed": True},
-            {"atsEnabled": False, "summary": None, "failed": False},
         ],
         "sourceNames": ["exa", "ats", "hiringcafe", "something_else"],
         "failures": [
@@ -438,17 +420,7 @@ def test_the_rotation_line_never_says_unknown(out: dict) -> None:
             assert "?" not in line and "unknown" not in line.lower() and "null" not in line and "undefined" not in line, line
 
 
-def test_the_run_dialog_counts_the_company_boards(out: dict) -> None:
-    assert out["watchlist"] == {"total": 6, "catalog": 2, "added": 1, "found": 3}
-    full, one, none, loading, failed, off = out["boards"]
-    assert full.startswith("10,370 company boards on your watchlist (10,360 from the company catalog, 8 found by your searches, 2 added by you).")
-    assert one.startswith("1 company board on your watchlist (1 added by you).")
-    assert none.startswith("No boards on your watchlist yet.") and "company catalog" in none
-    assert loading == "Counting the boards on your watchlist…"
-    assert "could not be loaded" in failed
-    assert off.startswith("Not checked")
-    for line in out["boards"]:
-        assert "?" not in line and "unknown" not in line.lower(), line
+def test_the_run_dialog_names_its_sources_in_words(out: dict) -> None:
     assert out["sources"] == ["Exa web search", "Company job boards (Greenhouse, Lever, Ashby)", "hiring.cafe", "something_else"]
 
 

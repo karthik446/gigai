@@ -1,5 +1,5 @@
 import AssessmentBody from "../components/AssessmentBody.jsx";
-import { jobHash } from "../routing.js";
+import { assessmentHash } from "../routing.js";
 
 // P3/P9 → Q4a-nav: Questions (#/questions). The list is DERIVED (operator
 // decision 3, plan section 8): every stored quick assessment with verdict
@@ -10,6 +10,11 @@ import { jobHash } from "../routing.js";
 // Answering a question re-assesses in place (AssessmentBody's own answer
 // box) and the card's verdict updates from the response; the server's own
 // verdict is what removes a fully-resolved card, not a client-side guess.
+//
+// uat-batch2 (uat-bug-016): every card here is an assessment in the
+// quick-assess store, so its heading opens the job page under Assessments
+// (#/assessments/<id>), where that assessment is a card; the page itself is
+// unchanged.
 export default function PendingAnswersView({ pending }) {
   const { loading, error, cards, count, reload } = pending;
 
@@ -31,7 +36,7 @@ export default function PendingAnswersView({ pending }) {
         {cards.map(({ item, result }) => (
           <div className="posting-card" key={item.job.job_identity}>
             <div className="posting-card-heading">
-              <a href={jobHash(item.job.job_identity)}>
+              <a href={assessmentHash(item.job.job_identity)}>
                 {item.job.title || "(pasted text)"} {item.job.company ? `· ${item.job.company}` : ""}
               </a>
             </div>
