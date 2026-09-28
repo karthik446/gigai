@@ -4,10 +4,14 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import time as real_time
 import uuid
 
+from click.testing import CliRunner
 import pytest
 
+from gigai import target_binding
+from gigai.cli import cli
 from gigai.project_binding import (
     BINDING_SCHEMA_VERSION,
     MalformedProjectBindingError,
@@ -29,8 +33,12 @@ from gigai.registry import (
 )
 from gigai.setup import build_config, run_setup
 from gigai.target_binding import (
+    INIT_LOCK_OWNER,
+    INIT_LOCK_TIMEOUT_SECONDS,
     ConflictingBindingError,
+    InitLockUnavailableError,
     TargetIdentityChangedError,
+    TargetInitLock,
     TargetPermissionError,
     TrackedBindingError,
     assert_target_identity_stable,
@@ -425,3 +433,138 @@ def test_abandoned_git_init_lock_is_recovered_and_cleaned(tmp_path: Path) -> Non
     assert result.binding_created is True
     assert not lock.exists()
     assert not tuple((target / ".git").glob(".gigai-init.lock.abandoned-*"))
+
+
+class _FakeClock:
+    """Stands in for ``target_binding.time``: sleeping advances the clock."""
+
+    def __init__(self, *, release: Path | None = None, release_at: float = 0.0) -> None:
+        self.elapsed = 0.0
+        self._release = release
+        self._release_at = release_at
+        self._epoch = real_time.time()
+
+    def monotonic(self) -> float:
+        return self.elapsed
+
+    def time(self) -> float:
+        return self._epoch + self.elapsed
+
+    def sleep(self, seconds: float) -> None:
+        self.elapsed += seconds
+        if self._release is not None and self.elapsed >= self._release_at:
+            (self._release / INIT_LOCK_OWNER).unlink()
+            self._release.rmdir()
+            self._release = None
+
+
+def _live_owner() -> str:
+    return f"{os.getpid()} live-owner-token\n"
+
+
+def _held_lock(lock: Path, owner: str) -> Path:
+    lock.mkdir(mode=0o700)
+    (lock / INIT_LOCK_OWNER).write_text(owner, encoding="ascii")
+    return lock
+
+
+def test_init_lock_waiter_outlasts_the_base_timeout_while_the_owner_is_alive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    lock = _held_lock(tmp_path / "default-init.lock", _live_owner())
+    clock = _FakeClock(release=lock, release_at=INIT_LOCK_TIMEOUT_SECONDS + 5.0)
+    monkeypatch.setattr(target_binding, "time", clock)
+
+    with TargetInitLock(lock):
+        acquired_at = clock.elapsed
+        assert (lock / INIT_LOCK_OWNER).read_text(encoding="ascii") != _live_owner()
+
+    assert acquired_at >= INIT_LOCK_TIMEOUT_SECONDS + 5.0
+    assert not lock.exists()
+    assert capsys.readouterr().err == (
+        f"Another gigai init is running (pid {os.getpid()}); waiting…\n"
+    )
+
+
+def test_init_lock_waiter_gives_up_on_a_live_owner_at_the_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = _held_lock(tmp_path / "default-init.lock", _live_owner())
+    clock = _FakeClock()
+    monkeypatch.setattr(target_binding, "time", clock)
+
+    with pytest.raises(InitLockUnavailableError, match="is unavailable"):
+        with TargetInitLock(lock, live_owner_timeout=30.0):
+            raise AssertionError("a lock its live owner never released was acquired")
+
+    assert 30.0 <= clock.elapsed < 30.1
+    assert (lock / INIT_LOCK_OWNER).read_text(encoding="ascii") == _live_owner()
+
+
+def test_init_lock_with_a_dead_owner_is_recovered_without_waiting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    lock = _held_lock(tmp_path / "default-init.lock", "99999999 dead-process-token\n")
+    clock = _FakeClock()
+    monkeypatch.setattr(target_binding, "time", clock)
+
+    with TargetInitLock(lock):
+        acquired_at = clock.elapsed
+
+    assert acquired_at < 0.1
+    assert not lock.exists()
+    assert not tuple(tmp_path.glob(".default-init.lock.abandoned-*"))
+    assert capsys.readouterr().err == ""
+
+
+def test_init_lock_with_an_unreadable_owner_times_out_at_the_base_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = _held_lock(tmp_path / "default-init.lock", _live_owner())
+    (lock / INIT_LOCK_OWNER).write_bytes(b"\xff not ascii\n")
+    clock = _FakeClock()
+    monkeypatch.setattr(target_binding, "time", clock)
+
+    with pytest.raises(InitLockUnavailableError, match="is unavailable"):
+        with TargetInitLock(lock):
+            raise AssertionError("a lock with an unreadable owner was acquired")
+
+    assert INIT_LOCK_TIMEOUT_SECONDS <= clock.elapsed < INIT_LOCK_TIMEOUT_SECONDS + 0.1
+
+
+def test_second_init_waits_out_a_running_init_that_holds_the_lock_past_ten_seconds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = _configured_home(tmp_path)
+    target = tmp_path / "target"
+    _git_repository(target)
+    argv = [
+        "init",
+        "--home",
+        os.fspath(home),
+        "--target",
+        os.fspath(target),
+        "--username",
+        "synthetic-user",
+        "--json",
+    ]
+    first = CliRunner().invoke(cli, argv)
+    assert first.exit_code == 0, first.output
+    # A second init arrives while another live init still holds the lock, and
+    # that init needs 15 s: longer than the base timeout.
+    lock = _held_lock(target / ".gigai" / "locks" / "default-init.lock", _live_owner())
+    clock = _FakeClock(release=lock, release_at=INIT_LOCK_TIMEOUT_SECONDS + 5.0)
+    monkeypatch.setattr(target_binding, "time", clock)
+
+    second = CliRunner().invoke(cli, argv)
+
+    assert second.exit_code == 0, second.output
+    assert "init_lock_unavailable" not in second.output
+    assert clock.elapsed >= INIT_LOCK_TIMEOUT_SECONDS + 5.0
+    assert second.stderr.count("Another gigai init is running") == 1
+    assert f"(pid {os.getpid()}); waiting…" in second.stderr
+    assert not lock.exists()

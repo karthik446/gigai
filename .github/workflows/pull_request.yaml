@@ -230,4 +230,5 @@ jobs:
           --env GIGAI_AUDIT_HOME=/audit/home
           --env GIGAI_AUDIT_TARGET=/audit/target
           --env GIGAI_AUDIT_WORKPAD=/audit/workpad
+          --env GIGAI_TEST_LATENCY_SCALE=3
           gigai-debian-offline:${{ github.sha }}
