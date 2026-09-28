@@ -118,6 +118,23 @@ def _write_starter_find_jobs_config(target_root: Path) -> bool:
 DEFAULT_PORT = API_BIND[1]
 HEALTH_TIMEOUT_SECONDS = 15.0
 STOP_TIMEOUT_SECONDS = 5.0
+# The test suite's CI latency scale (tests/support/latency.py). Read here
+# because the health wait runs inside the product, where a test-side bound
+# cannot reach it; it can only widen the wait, never shorten it.
+LATENCY_SCALE_ENV = "GIGAI_TEST_LATENCY_SCALE"
+
+
+def _health_timeout_seconds() -> float:
+    """``HEALTH_TIMEOUT_SECONDS``, widened by ``GIGAI_TEST_LATENCY_SCALE``."""
+
+    try:
+        scale = float(os.environ.get(LATENCY_SCALE_ENV, "1.0"))
+    except ValueError:
+        scale = 1.0
+    # ``not scale >= 1.0`` also rejects NaN, which compares false to everything.
+    if not scale >= 1.0 or scale == float("inf"):
+        scale = 1.0
+    return HEALTH_TIMEOUT_SECONDS * scale
 
 
 class ScoutRunError(RuntimeError):
@@ -514,7 +531,8 @@ def start(
         build_id=_installed_build_id(),
     )
 
-    deadline = time.monotonic() + HEALTH_TIMEOUT_SECONDS
+    health_timeout = _health_timeout_seconds()
+    deadline = time.monotonic() + health_timeout
     healthy = False
     while time.monotonic() < deadline:
         if not _process_is_alive(process.pid):
@@ -529,7 +547,7 @@ def start(
         tail = _tail(log_path)
         raise ScoutRunError(
             "scout_run_health_check_failed",
-            f"Scout's API did not become healthy within {HEALTH_TIMEOUT_SECONDS:.0f}s. "
+            f"Scout's API did not become healthy within {health_timeout:.0f}s. "
             f"Log: {log_path}\n--- last lines ---\n{tail}",
         )
 

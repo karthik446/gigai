@@ -43,6 +43,7 @@ from click.testing import CliRunner
 
 from gigai.cli import cli
 from gigai.scout import run_supervisor
+from tests.support.latency import latency_bound
 
 # The inert-unless-set test seams bindings.py exposes for the real-backend
 # M1/uat-bug-005 tests. Setting HTTP+MODEL makes a real find-jobs run fully
@@ -55,8 +56,12 @@ TEST_JEV_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_JEV"
 # Generous per-journey wait budgets. A find-jobs run against the fixture
 # transports finishes in well under a second; these are loose enough to
 # survive heavy parallel CPU contention without being a real UAT clock.
+# Both are hang guards, widened by GIGAI_TEST_LATENCY_SCALE on shared CI
+# runners (tests/support/latency.py), as is the supervisor's own health wait
+# inside ``run_supervisor.start``.
 POLL_DEADLINE_SECONDS = 30.0
 POLL_INTERVAL_SECONDS = 0.05
+CLIENT_TIMEOUT_SECONDS = 20.0
 
 
 def free_port() -> int:
@@ -287,7 +292,7 @@ def start_server(
         allow_test_seams=(test_http or test_model or test_jev),
     )
     base_url = result.state.url
-    client = httpx.Client(base_url=base_url, timeout=20.0)
+    client = httpx.Client(base_url=base_url, timeout=latency_bound(CLIENT_TIMEOUT_SECONDS))
     return RunningServer(
         home=home,
         target=target,
@@ -326,7 +331,7 @@ def _process_is_alive(pid: int) -> bool:
 def poll_until_terminal(client: httpx.Client, run_id: str, *, deadline_seconds: float = POLL_DEADLINE_SECONDS) -> dict[str, object]:
     """Poll ``GET /api/runs/{run_id}`` the way the UI does, until terminal."""
 
-    deadline = time.monotonic() + deadline_seconds
+    deadline = time.monotonic() + latency_bound(deadline_seconds)
     last_body: object = None
     while time.monotonic() < deadline:
         response = client.get(f"/api/runs/{run_id}")

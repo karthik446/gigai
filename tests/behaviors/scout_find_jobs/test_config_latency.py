@@ -66,12 +66,17 @@ already-migrated/cold-cache bound below is tightened back to its original
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from dataclasses import dataclass
+import statistics
 import subprocess
 import time
 from pathlib import Path
+from typing import Iterator
 
 import pytest
 
+from gigai import journal as journal_module
 from gigai.canonical import canonical_json_bytes
 from gigai.config import Endpoint, ModelTarget as ConfigModelTarget, Profile
 from gigai.default_init import initialize_defaults
@@ -82,6 +87,7 @@ from gigai.scout.find_jobs.present_api import ScoutFindJobsBackend
 from gigai.scout.template import scout_candidate_inventory
 from gigai.setup import build_config, run_setup
 from gigai.workpad import resolve_workpad, select_active_workpad
+from tests.support.latency import latency_bound
 
 # uat-bug-008's original bound, for an ALREADY-migrated gig with a cold
 # (fresh-process) cache -- the normal path an operator hits on every Scout
@@ -94,6 +100,17 @@ from gigai.workpad import resolve_workpad, select_active_workpad
 # journal writer acquisition this packet adds no longer pays the probe
 # subprocess after the first one per process, so there is no longer a
 # structural reason for this bound to be wider than uat-bug-008's own.
+#
+# server-health-fast: these three numbers bound the time a call spends
+# OUTSIDE launching processes (see ``_assert_in_process_time``), scaled by
+# ``latency_bound()`` for CI. The whole-call clock was the wrong thing to
+# bound: on this fixture the call's elapsed time is almost entirely git
+# process launches (145 launches in 1.07s cold, 42 in 0.27s warm on the
+# reference Mac), and what one launch costs is a property of the machine
+# (5.5ms there; two to three times that on the macOS CI runner, which
+# measured 1.678s / 4.807s / 0.665s against the old 1.0s / 2.0s / 0.3s).
+# How MANY processes a call launches is a property of the code, so that is
+# what the count bounds below assert.
 _COLD_TIMING_BOUND_SECONDS = 1.0
 
 # F1-b1-r1: a SEPARATE, wider bound for the RARE case this bound above does
@@ -105,6 +122,31 @@ _COLD_TIMING_BOUND_SECONDS = 1.0
 # would have warmed. Coordinator decision: accept this as a legitimate,
 # one-time-per-gig cost rather than engineer around it.
 _FIRST_MIGRATION_TIMING_BOUND_SECONDS = 2.0
+
+# uat-bug-008's other bound: a repeat call against an unchanged workpad must
+# hit run.py's per-journal-head cache.
+_WARM_TIMING_BOUND_SECONDS = 0.3
+
+# Git launches made while a journal snapshot is being captured
+# (``journal._capture_committed_snapshot``, the one place both
+# ``JournalWriter.snapshot`` and ``journal.read_committed_snapshot`` read
+# committed history). Proves the batched read (uat-bug-008) is what runs:
+# the per-artifact replay it replaced launched thousands on a comparable
+# fixture. Measured on this fixture (2 resume imports + 25 run-input
+# commits): 4-5 captures / 20-25 launches already-migrated, 9-10 captures /
+# 41-44 launches for the first-ever migrating call.
+_SNAPSHOT_SUBPROCESS_BOUND_ALREADY_MIGRATED = 60
+_SNAPSHOT_SUBPROCESS_BOUND_FIRST_MIGRATION = 90
+
+# Every process the call launches, from any module. Measured on this
+# fixture, identical run to run and on Python 3.11, 3.12 and 3.13: 145-154
+# already-migrated cold, 252-278 first-ever, 42 on a warm repeat (all git;
+# most are the workpad validation ``resolve_workpad`` repeats on each of its
+# calls). The bounds leave room for a legitimate extra resolution, not for
+# another copy of the whole path.
+_PROCESS_LAUNCH_BOUND_ALREADY_MIGRATED = 200
+_PROCESS_LAUNCH_BOUND_FIRST_MIGRATION = 350
+_PROCESS_LAUNCH_BOUND_WARM = 60
 
 _ENDPOINTS = (Endpoint("local-test", "ollama_local", base_url="http://127.0.0.1:11434"),)
 _MODEL_TARGETS = (
@@ -245,20 +287,101 @@ def _clear_process_caches() -> None:
     server_module._profile_resume_details_cache.clear()
 
 
+@dataclass
+class CallCost:
+    """What one measured call cost, in counts and in seconds."""
+
+    snapshot_captures: int = 0
+    snapshot_process_launches: int = 0
+    process_launches: int = 0
+    elapsed_seconds: float = 0.0
+
+
+@contextmanager
+def _measure_call() -> Iterator[CallCost]:
+    """Count the journal snapshot captures and process launches in the body,
+
+    and time it. ``subprocess.Popen.__init__`` is the one place every
+    ``subprocess`` launch passes through, whichever module makes it;
+    ``journal._capture_committed_snapshot`` is the one place committed
+    history is read. Both are patched process-wide for the body only and
+    restored in ``finally``; the measured calls are single-threaded.
+    """
+
+    cost = CallCost()
+    original_snapshot = journal_module._capture_committed_snapshot
+    original_popen_init = subprocess.Popen.__init__
+    capturing = 0
+
+    def counting_popen_init(self, *args, **kwargs):
+        cost.process_launches += 1
+        if capturing > 0:
+            cost.snapshot_process_launches += 1
+        return original_popen_init(self, *args, **kwargs)
+
+    def counting_snapshot(*args, **kwargs):
+        nonlocal capturing
+        cost.snapshot_captures += 1
+        capturing += 1
+        try:
+            return original_snapshot(*args, **kwargs)
+        finally:
+            capturing -= 1
+
+    journal_module._capture_committed_snapshot = counting_snapshot
+    subprocess.Popen.__init__ = counting_popen_init
+    started = time.monotonic()
+    try:
+        yield cost
+    finally:
+        cost.elapsed_seconds = time.monotonic() - started
+        journal_module._capture_committed_snapshot = original_snapshot
+        subprocess.Popen.__init__ = original_popen_init
+
+
+def _git_launch_seconds(repository: Path, *, samples: int = 15) -> float:
+    """What launching one git process costs on this machine, right now."""
+
+    timings = []
+    for _ in range(samples):
+        started = time.monotonic()
+        subprocess.run(
+            ["git", "-C", str(repository), "rev-parse", "HEAD"], check=True, capture_output=True
+        )
+        timings.append(time.monotonic() - started)
+    return statistics.median(timings)
+
+
+def _assert_in_process_time(cost: CallCost, *, launch_seconds: float, bound_seconds: float, what: str) -> None:
+    """The call's elapsed time, less what its process launches cost on this
+
+    machine, must be under ``bound_seconds`` (scaled for CI). Catches what a
+    launch count cannot: a lock wait, a sleep, or a slow in-process loop.
+    """
+
+    launching = cost.process_launches * launch_seconds
+    in_process = cost.elapsed_seconds - launching
+    bound = latency_bound(bound_seconds)
+    assert in_process < bound, (
+        f"{what} took {cost.elapsed_seconds:.3f}s, of which {launching:.3f}s is "
+        f"{cost.process_launches} process launches at {launch_seconds * 1000:.1f}ms each; "
+        f"the remaining {in_process:.3f}s is expected < {bound}s"
+    )
+
+
 def test_get_config_resolves_the_resume_in_well_under_a_second(
     operator_shaped_workpad: tuple[Path, Path, str],
 ) -> None:
-    """The exact calls ``_handle_get_config`` makes must be fast even cold,
+    """The exact calls ``_handle_get_config`` makes must be cheap even cold,
 
     on an ALREADY-migrated gig (a default profile already exists from an
     earlier call -- the normal path an operator hits on every Scout server
     start, since the gig migrated once, long ago). Only the in-memory
     caches are cold here, never the on-disk migration state.
 
-    Fails on the pre-fix code (``git show HEAD:src/gigai/run.py`` /
-    ``git show HEAD:src/gigai/journal.py`` swapped in): that version takes
-    low double-digit seconds on this fixture (see the worker report's
-    baseline profile), far past this bound.
+    The pre-uat-bug-008 code replayed the entire committed journal per
+    artifact, thousands of git launches on this fixture; both count bounds
+    fail on it.
     """
 
     home, target, _gig_id = operator_shaped_workpad
@@ -269,15 +392,28 @@ def test_get_config_resolves_the_resume_in_well_under_a_second(
     backend.read_config()
     backend.resume_details()
     _clear_process_caches()
+    launch_seconds = _git_launch_seconds(target)
 
-    started = time.monotonic()
-    config, _config_bytes = backend.read_config()
-    resume_result = backend.resume_details()
-    elapsed = time.monotonic() - started
+    with _measure_call() as cost:
+        config, _config_bytes = backend.read_config()
+        resume_result = backend.resume_details()
 
-    assert elapsed < _COLD_TIMING_BOUND_SECONDS, (
-        f"GET /api/config's resume resolution took {elapsed:.3f}s, "
-        f"expected < {_COLD_TIMING_BOUND_SECONDS}s"
+    assert cost.snapshot_process_launches < _SNAPSHOT_SUBPROCESS_BOUND_ALREADY_MIGRATED, (
+        f"an already-migrated cold GET /api/config launched "
+        f"{cost.snapshot_process_launches} git processes across "
+        f"{cost.snapshot_captures} journal snapshot capture(s), expected < "
+        f"{_SNAPSHOT_SUBPROCESS_BOUND_ALREADY_MIGRATED} -- looks like a "
+        "regression back to the pre-uat-bug-008 per-artifact replay"
+    )
+    assert cost.process_launches < _PROCESS_LAUNCH_BOUND_ALREADY_MIGRATED, (
+        f"an already-migrated cold GET /api/config launched {cost.process_launches} "
+        f"processes, expected < {_PROCESS_LAUNCH_BOUND_ALREADY_MIGRATED}"
+    )
+    _assert_in_process_time(
+        cost,
+        launch_seconds=launch_seconds,
+        bound_seconds=_COLD_TIMING_BOUND_SECONDS,
+        what="an already-migrated cold GET /api/config",
     )
     assert config is not None
     assert resume_result is not None
@@ -300,15 +436,27 @@ def test_first_ever_config_call_on_an_unmigrated_gig(
 
     home, target, _gig_id = operator_shaped_workpad
     backend = ScoutFindJobsBackend(home_root=home, target=target)
+    launch_seconds = _git_launch_seconds(target)
 
-    started = time.monotonic()
-    config, _config_bytes = backend.read_config()
-    resume_result = backend.resume_details()
-    elapsed = time.monotonic() - started
+    with _measure_call() as cost:
+        config, _config_bytes = backend.read_config()
+        resume_result = backend.resume_details()
 
-    assert elapsed < _FIRST_MIGRATION_TIMING_BOUND_SECONDS, (
-        f"the first-ever /api/config call (including migration) took "
-        f"{elapsed:.3f}s, expected < {_FIRST_MIGRATION_TIMING_BOUND_SECONDS}s"
+    assert cost.snapshot_process_launches < _SNAPSHOT_SUBPROCESS_BOUND_FIRST_MIGRATION, (
+        f"the first-ever /api/config call launched "
+        f"{cost.snapshot_process_launches} git processes across "
+        f"{cost.snapshot_captures} journal snapshot capture(s), expected < "
+        f"{_SNAPSHOT_SUBPROCESS_BOUND_FIRST_MIGRATION}"
+    )
+    assert cost.process_launches < _PROCESS_LAUNCH_BOUND_FIRST_MIGRATION, (
+        f"the first-ever /api/config call launched {cost.process_launches} "
+        f"processes, expected < {_PROCESS_LAUNCH_BOUND_FIRST_MIGRATION}"
+    )
+    _assert_in_process_time(
+        cost,
+        launch_seconds=launch_seconds,
+        bound_seconds=_FIRST_MIGRATION_TIMING_BOUND_SECONDS,
+        what="the first-ever /api/config call (including migration)",
     )
     assert config is not None
     assert resume_result is not None
@@ -323,9 +471,8 @@ def test_second_config_call_on_the_same_head_does_not_replay_the_journal(
     (and ``_handle_get_config`` itself used to resolve the resume twice per
     request, via ``resume_preview()`` + ``resume_metadata()``). A repeat
     call against an unchanged workpad must hit ``run.py``'s per-journal-head
-    cache, not repeat the expensive resolution -- proven here as a
-    call-count-shaped assertion (a tight timing bound on the *second* call)
-    rather than only the generous end-to-end bound above.
+    cache, not repeat the expensive resolution: it reads no committed
+    history at all, so it captures exactly zero journal snapshots.
     """
 
     home, target, _gig_id = operator_shaped_workpad
@@ -333,19 +480,27 @@ def test_second_config_call_on_the_same_head_does_not_replay_the_journal(
 
     backend.read_config()
     backend.resume_details()  # warms the per-journal-head cache
+    launch_seconds = _git_launch_seconds(target)
 
-    started = time.monotonic()
-    backend.read_config()
-    backend.resume_details()
-    elapsed = time.monotonic() - started
+    with _measure_call() as cost:
+        backend.read_config()
+        backend.resume_details()
 
-    # A cache hit is two orders of magnitude faster than a cold resolution
-    # on this fixture (~0.08s vs ~0.9s measured without instrumentation);
-    # 0.3s leaves headroom for CI contention while still catching a
-    # regression back to "resolves on every call."
-    assert elapsed < 0.3, (
-        f"a repeat /api/config call took {elapsed:.3f}s; expected a cache "
-        "hit (the journal did not change) well under the cold-call bound"
+    assert cost.snapshot_captures == 0 and cost.snapshot_process_launches == 0, (
+        f"a repeat /api/config call on an unchanged workpad captured "
+        f"{cost.snapshot_captures} journal snapshot(s) "
+        f"({cost.snapshot_process_launches} git processes); expected 0 -- the "
+        "journal did not change, so this must be a pure cache hit"
+    )
+    assert cost.process_launches < _PROCESS_LAUNCH_BOUND_WARM, (
+        f"a repeat /api/config call launched {cost.process_launches} "
+        f"processes, expected < {_PROCESS_LAUNCH_BOUND_WARM}"
+    )
+    _assert_in_process_time(
+        cost,
+        launch_seconds=launch_seconds,
+        bound_seconds=_WARM_TIMING_BOUND_SECONDS,
+        what="a repeat /api/config call",
     )
 
 

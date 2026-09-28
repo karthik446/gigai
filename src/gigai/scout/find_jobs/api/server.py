@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
 from typing import Callable, Protocol
 from urllib.parse import urlsplit
 
@@ -1652,6 +1653,25 @@ def _make_handler(
     return Handler
 
 
+class _ScoutHTTPServer(ThreadingHTTPServer):
+    """A ``ThreadingHTTPServer`` that binds without a reverse-DNS lookup.
+
+    Stock ``HTTPServer.server_bind`` sets ``server_name`` to
+    ``socket.getfqdn(host)`` after ``bind()`` and before ``listen()``, so the
+    port refuses every connection, ``/api/health`` included, for as long as
+    the host's resolver takes. On GitHub's macOS runners that lookup of
+    ``127.0.0.1`` blocks for more than 30 s, longer than ``gigai scout run``
+    waits for the server to become healthy. Nothing here reads
+    ``server_name`` (stdlib only uses it for CGI), so it is the bound host.
+    """
+
+    def server_bind(self) -> None:
+        TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
+
+
 def serve(
     *,
     backend: Backend | None = None,
@@ -1671,7 +1691,7 @@ def serve(
         backend = NotWiredBackend()
     _configure_logging()
     handler = _make_handler(backend, run_start_timeout_seconds=run_start_timeout_seconds)
-    server = ThreadingHTTPServer(bind, handler)
+    server = _ScoutHTTPServer(bind, handler)
     server.daemon_threads = True
     host, port = server.server_address[0], server.server_address[1]
     # "project id" here is the target root path -- the closest thing this

@@ -13,6 +13,7 @@ import json
 import os
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from click.testing import CliRunner
 
 from gigai.cli import cli
 from gigai.scout import run_supervisor
+from tests.support.latency import latency_bound
 
 
 def _free_port() -> int:
@@ -609,3 +611,114 @@ def test_no_orphan_process_left_after_health_failure(bound_project, monkeypatch)
 
     assert started_pids, "expected the supervisor to have started a child"
     assert _wait_until_gone(started_pids[0])
+
+
+# server-health-fast: on GitHub's macOS runners ``socket.getfqdn("127.0.0.1")``
+# blocks for more than 30 s. Stock ``HTTPServer.server_bind`` makes that lookup
+# after ``bind()`` and before ``listen()``, so the supervised server refused
+# every health probe for longer than the supervisor waits. The two tests below
+# inject a slow lookup the same way, in-process and in the real child.
+_SLOW_LOOKUP_SECONDS = 60.0
+
+
+def test_serve_binds_and_answers_health_while_the_reverse_dns_lookup_is_blocked(monkeypatch) -> None:
+    from gigai.scout.find_jobs.present_api import serve
+
+    lookups: list[str] = []
+    release = threading.Event()
+
+    def _blocked_getfqdn(name: str = "") -> str:
+        lookups.append(name)
+        release.wait(_SLOW_LOOKUP_SECONDS)
+        return name
+
+    monkeypatch.setattr(socket, "getfqdn", _blocked_getfqdn)
+
+    servers: list[object] = []
+    starter = threading.Thread(target=lambda: servers.append(serve(bind=("127.0.0.1", 0))), daemon=True)
+    starter.start()
+    try:
+        starter.join(latency_bound(5.0))
+        assert servers, "serve() did not return while the reverse-DNS lookup was blocked"
+        server = servers[0]
+        loop = threading.Thread(target=server.serve_forever, daemon=True)
+        loop.start()
+        try:
+            port = server.server_address[1]
+            response = httpx.get(f"http://127.0.0.1:{port}/api/health", timeout=latency_bound(5.0))
+            assert response.status_code == 200
+            assert response.json() == {"status": "ok"}
+        finally:
+            server.shutdown()
+            server.server_close()
+        assert lookups == [], "the server must not make a reverse-DNS lookup to bind"
+    finally:
+        release.set()
+        starter.join(5.0)
+        for leftover in servers:
+            leftover.server_close()
+
+
+def test_run_is_healthy_when_the_childs_reverse_dns_lookup_is_slow(stop_after, tmp_path, monkeypatch) -> None:
+    home, target = stop_after
+    port = _free_port()
+
+    # ``site`` imports ``sitecustomize`` at interpreter start, so this reaches
+    # the real supervised child (a fresh ``python -m ...present_api``), which
+    # no in-process monkeypatch can.
+    injected = tmp_path / "slow-lookup"
+    injected.mkdir()
+    (injected / "sitecustomize.py").write_text(
+        "import socket\n"
+        "import time\n"
+        "\n"
+        "\n"
+        "def _slow_getfqdn(name=''):\n"
+        f"    time.sleep({_SLOW_LOOKUP_SECONDS})\n"
+        "    return name\n"
+        "\n"
+        "\n"
+        "socket.getfqdn = _slow_getfqdn\n"
+    )
+    existing = os.environ.get("PYTHONPATH")
+    monkeypatch.setenv("PYTHONPATH", str(injected) if not existing else f"{injected}{os.pathsep}{existing}")
+
+    run_payload = _run_cli(home, target, "run", "--port", str(port), "--no-browser")
+    assert run_payload["ok"] is True
+    assert run_payload["reused"] is False
+
+    response = httpx.get(f"http://127.0.0.1:{port}/api/health", timeout=latency_bound(5.0))
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("raw_scale", "expected_seconds"),
+    [
+        (None, 15.0),
+        ("3", 45.0),
+        ("1.5", 22.5),
+        # The scale only ever widens the wait: anything that would shorten
+        # it, or is not a finite number, leaves the product default.
+        ("0.1", 15.0),
+        ("0", 15.0),
+        ("-2", 15.0),
+        ("nan", 15.0),
+        ("inf", 15.0),
+        ("not-a-number", 15.0),
+        ("", 15.0),
+    ],
+)
+def test_health_wait_is_widened_only_by_the_test_latency_scale(monkeypatch, raw_scale, expected_seconds) -> None:
+    if raw_scale is None:
+        monkeypatch.delenv(run_supervisor.LATENCY_SCALE_ENV, raising=False)
+    else:
+        monkeypatch.setenv(run_supervisor.LATENCY_SCALE_ENV, raw_scale)
+
+    assert run_supervisor.HEALTH_TIMEOUT_SECONDS == 15.0
+    assert run_supervisor._health_timeout_seconds() == expected_seconds
+
+
+def test_health_wait_scale_is_the_test_suites_own_latency_scale() -> None:
+    from tests.support.latency import LATENCY_SCALE_ENV
+
+    assert run_supervisor.LATENCY_SCALE_ENV == LATENCY_SCALE_ENV
