@@ -1,0 +1,196 @@
+{
+  "src/gigai/scout/acquisition_records.py": [
+    "_load_status:1",
+    "_load_status:2",
+    "read_public_rows_file:1"
+  ],
+  "src/gigai/scout/assessment_core.py": [
+    "invoke_json_once:1"
+  ],
+  "src/gigai/scout/data/gig.py": [
+    "_owning_workpad:1",
+    "_owning_workpad:2",
+    "_run:1",
+    "_run:2",
+    "_run:3",
+    "main:1"
+  ],
+  "src/gigai/scout/document_records.py": [
+    "_existing_revision:1",
+    "_validate_tailor_provenance:1",
+    "read_document_revision:1",
+    "read_final_selection:1",
+    "record_final_selection.operation:1"
+  ],
+  "src/gigai/scout/documents.py": [
+    "validate_generated_bundle:1"
+  ],
+  "src/gigai/scout/documents_cli.py": [
+    "_selector:1"
+  ],
+  "src/gigai/scout/experience_answers.py": [
+    "_parsed_content:1"
+  ],
+  "src/gigai/scout/find_jobs/api/server.py": [
+    "ScoutFindJobsBackend._active_profile_titles_union:1",
+    "ScoutFindJobsBackend._active_profile_titles_union:2",
+    "ScoutFindJobsBackend._resume_display_metadata:1",
+    "ScoutFindJobsBackend._resume_display_metadata:2",
+    "ScoutFindJobsBackend._update_find_jobs_config:1",
+    "ScoutFindJobsBackend.resume_details:1",
+    "ScoutFindJobsBackend.start_discovery:1",
+    "ScoutFindJobsBackend.start_discovery._run:1"
+  ],
+  "src/gigai/scout/find_jobs/discovery/storage.py": [
+    "atomic_write:1"
+  ],
+  "src/gigai/scout/find_jobs/job_input.py": [
+    "_host_of:1"
+  ],
+  "src/gigai/scout/find_jobs/market_acquisition.py": [
+    "_acquire_node_body:1",
+    "_acquire_node_body:2",
+    "_default_profile_id:1",
+    "acquire_node:1"
+  ],
+  "src/gigai/scout/find_jobs/resume_input.py": [
+    "read_config_preferences:1",
+    "resume_for_profile:1"
+  ],
+  "src/gigai/scout/find_jobs/watchlist.py": [
+    "JournalWatchlistClient.add_to_watchlist.publish:1",
+    "_snapshot_entries:1"
+  ],
+  "src/gigai/scout/inputs.py": [
+    "resolve_external_input:1",
+    "resolve_external_input:2",
+    "revalidate_external_input:1",
+    "revalidate_external_input:2"
+  ],
+  "src/gigai/scout/interview_prep/posting.py": [
+    "_default_profile_id:1"
+  ],
+  "src/gigai/scout/interview_prep/resume.py": [
+    "_has_real_find_jobs_config:1",
+    "current_resume:1",
+    "current_resume:2"
+  ],
+  "src/gigai/scout/interview_records.py": [
+    "_authenticate_ref:1",
+    "_resolved:1"
+  ],
+  "src/gigai/scout/materialization.py": [
+    "_validate_existing_inventory:1"
+  ],
+  "src/gigai/scout/posting_inputs.py": [
+    "_identity:1",
+    "_record:1",
+    "_resolve:1",
+    "hydrate_discovery_posting_input_snapshot:1",
+    "resolve_discovery_posting_input:1"
+  ],
+  "src/gigai/scout/profile_records.py": [
+    "_resolve_newest_resume_for_gig:1",
+    "ensure_default_profile:1"
+  ],
+  "src/gigai/scout/projection.py": [
+    "_rows:1"
+  ],
+  "src/gigai/scout/proposal_execution.py": [
+    "_assess_node_body:1",
+    "_committed_run_bytes:1",
+    "_host_result:1",
+    "_private_source:1",
+    "_publish_invocation_attempt:1",
+    "_publish_result:1",
+    "_publish_result.operation:1",
+    "_require_active_goal:1",
+    "_terminal_goal_handoff_exists:1",
+    "_terminal_goal_handoff_exists:2",
+    "_validate_active_goal_bytes:1",
+    "assess_node:1",
+    "execute_local_proposal:1",
+    "execute_local_proposal:2",
+    "read_proposal_invocation_attempts:1",
+    "read_proposal_invocation_attempts:2",
+    "read_proposal_invocation_attempts:3",
+    "read_proposal_invocation_attempts:4",
+    "read_proposal_invocation_attempts:5"
+  ],
+  "src/gigai/scout/proposal_records.py": [
+    "_redeem_pinned_record:1",
+    "_redeem_pinned_record:2",
+    "_validate_record:1",
+    "read_proposal_revision:1",
+    "read_proposal_revision:2",
+    "record_proposal_revision:1",
+    "record_proposal_revision:2"
+  ],
+  "src/gigai/scout/proposals.py": [
+    "ProposalSource.__post_init__:1",
+    "_entity:1",
+    "_mapping:1",
+    "parse_assessment_proposal:1",
+    "render_proposal_markdown:1",
+    "render_proposal_markdown:2",
+    "validate_and_bind_proposal:1",
+    "validate_and_bind_proposal:2",
+    "validate_proposal_output:1",
+    "validate_proposal_output:2"
+  ],
+  "src/gigai/scout/quick_assess.py": [
+    "_ObservedPort.invoke:1",
+    "_config_location:1",
+    "_default_model_target:1",
+    "_read_stored:1",
+    "_resolve_workpad:1",
+    "list_quick_assessments:1",
+    "run_quick_assessment:1"
+  ],
+  "src/gigai/scout/report_readers.py": [
+    "_document_rows:1",
+    "_document_rows:2",
+    "_opportunity_rows:1",
+    "_proposal_rows:1",
+    "_receipt_rows:1",
+    "_run_rows:1",
+    "_run_rows:2"
+  ],
+  "src/gigai/scout/research_inputs.py": [
+    "_identity:1",
+    "_output:1",
+    "_record:1",
+    "_record:2",
+    "hydrate_research_input_snapshot:1",
+    "resolve_research_input:1",
+    "revalidate_research_input:1"
+  ],
+  "src/gigai/scout/research_v3.py": [
+    "validate_research_domain:1"
+  ],
+  "src/gigai/scout/tailor_cli.py": [
+    "_selection:1",
+    "validate_bundle_command:1"
+  ],
+  "src/gigai/scout/tailor_execution.py": [
+    "execute_tailor:1",
+    "execute_tailor:2"
+  ],
+  "src/gigai/scout/tailor_selection.py": [
+    "build_local_tailor_invocation:1",
+    "build_tailoring_request:1",
+    "hydrate_discovery_posting_source:1",
+    "hydrate_g45_source:1",
+    "hydrate_saved_proposal:1"
+  ],
+  "src/gigai/scout/tailored_resume.py": [
+    "_read_stored:1",
+    "_stored_matrix:1",
+    "list_tailored_resumes:1",
+    "run_tailored_resume:1"
+  ],
+  "src/gigai/scout/tools.py": [
+    "invoke_approved_tool_entry:1",
+    "invoke_approved_tool_entry:2"
+  ]
+}
