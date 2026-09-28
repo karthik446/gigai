@@ -2,15 +2,21 @@ import { useMemo, useState } from "react";
 import JobCard from "./JobCard.jsx";
 import { displayCompanyName } from "../display.js";
 import { EMPTY_FILTERS, filterJobs, hasActiveFilter, sortByAssessedAt, sortJobs } from "../jobModel.js";
+import { stateOptions } from "../jobStateModel.js";
 
 // Q4a: the card grid that replaces the Find-jobs postings list
 // (FindJobsPostingsBoard.jsx), per mockups/cards-and-job-page.html.
 // Filters are client-side over the job model: Jev fit (incl. unscored),
 // sponsorship (only when find-jobs.json visa_sponsorship_required is true),
-// assessed (by verdict group), company, search (title/company/location/
-// requirements), and "show postings Jev hides by default"
-// (RankScore.hidden_by_default). Sort: verdict group, then Jev score
-// (operator answer 1; jobModel.sortJobs).
+// state, company, search (title/company/location/requirements), and "show
+// postings Jev hides by default" (RankScore.hidden_by_default). Sort:
+// verdict group, then Jev score (operator answer 1; jobModel.sortJobs).
+//
+// uat-bug-018: the "State" chips filter by the job's derived state
+// (job.state, jobStateModel.js) and each says how many jobs are in it,
+// counted over the jobs every OTHER filter leaves, so a chip's number is
+// what clicking it shows. Only the states some job is in have a chip. They
+// took the place of the "Assessed" chips (the verdicts are states).
 //
 // uat-batch2 (uat-bug-016): the Assessments page is this same grid with
 // `from="assessments"`: newest assessment first (jobModel.sortByAssessedAt),
@@ -29,13 +35,6 @@ const SPONSORSHIP_OPTIONS = [
   ["not_offered", "No sponsorship"],
   ["unknown", "Not stated"],
 ];
-const ASSESSED_OPTIONS = [
-  ["all", "All"],
-  ["matched_above_threshold", "Matched"],
-  ["pending_user_answers", "Needs your answers"],
-  ["not_a_match", "Not a match"],
-  ["not_assessed", "Not assessed"],
-];
 
 function ChipGroup({ label, options, value, onChange }) {
   return (
@@ -50,6 +49,28 @@ function ChipGroup({ label, options, value, onChange }) {
             onClick={() => onChange(optionValue)}
           >
             {optionLabel}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StateChips({ options, value, onChange }) {
+  return (
+    <div className="filter-group" data-role="state-filter">
+      <div className="chip-group-label">State</div>
+      <div className="chip-list">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={`chip${value === option.value ? " active" : ""}`}
+            aria-pressed={value === option.value}
+            data-state={option.value}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label} <span className="chip-count">{option.count}</span>
           </button>
         ))}
       </div>
@@ -77,6 +98,10 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, f
     return assessments ? sortByAssessedAt(matching) : sortJobs(matching);
   }, [jobs, effectiveFilters, assessments]);
   const hiddenCount = useMemo(() => (assessments ? 0 : jobs.filter((job) => job.rank && job.rank.hidden_by_default).length), [jobs, assessments]);
+  const states = useMemo(
+    () => stateOptions(filterJobs(jobs, { ...effectiveFilters, state: "all" }), effectiveFilters.state),
+    [jobs, effectiveFilters],
+  );
 
   return (
     <div>
@@ -119,7 +144,9 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, f
                 onChange={(value) => setFilter("sponsorship", value)}
               />
             )}
-            <ChipGroup label="Assessed" options={ASSESSED_OPTIONS} value={filters.assessed} onChange={(value) => setFilter("assessed", value)} />
+          </div>
+          <div className="filter-row">
+            <StateChips options={states} value={filters.state} onChange={(value) => setFilter("state", value)} />
           </div>
           <div className="result-count">
             <span>

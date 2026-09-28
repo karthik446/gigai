@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, getConfig, getSetup } from "./api.js";
-import { useApplications, usePendingQuestions, useProfiles, useRuns } from "./hooks.js";
+import { useApplications, useProfiles, useRuns } from "./hooks.js";
 import SetupWizard from "./wizard/index.js";
 import TopBar from "./components/TopBar.jsx";
 import FindJobsView from "./views/FindJobsView.jsx";
 import AssessView from "./views/AssessView.jsx";
-import PendingAnswersView from "./views/PendingAnswersView.jsx";
 import ApplicationsView from "./views/ApplicationsView.jsx";
 import RunsView from "./views/RunsView.jsx";
 import SettingsView from "./views/SettingsView.jsx";
@@ -75,10 +74,8 @@ function useSetup() {
 //                      draws nothing on the other routes)
 //   assessments /      FindJobsView too (uat-bug-016): the on-demand
 //   assessment         assessments, newest first, and their job page
-//   questions          PendingAnswersView, fed by usePendingQuestions (the
-//                      same state as the top bar's badge); each link opens
-//                      where its posting lives (uat-batch2-r1)
-//   applications       ApplicationsView (GET /api/applications)
+//   applications       ApplicationsView: the jobs that are applied or
+//                      beyond (GET /api/applications, uat-bug-018)
 //   runs               RunsView (GET /api/runs?profile_id=…)
 //   settings           SettingsView (preferences + wizard launch, profiles,
 //                      discover, add company)
@@ -86,6 +83,10 @@ function useSetup() {
 //                      FindJobsView and its job page opens
 //                      (#/assessments/<id>; #/jobs/<id> when the address
 //                      assessed is a run posting's)
+//
+// uat-bug-018: there is no Questions view. "Needs your answers" is a job
+// state; FindJobsView counts the jobs in it for Jobs and for Assessments
+// (`needAnswers`) and the top bar shows the two counts.
 //
 // The first-run interview (P9b's SetupWizard) still shows before anything
 // else when no prefs exist (CHANGE #2); editing prefs later renders the
@@ -98,7 +99,6 @@ export default function App() {
   const setupState = useSetup();
   const profilesState = useProfiles();
   const route = useHashRoute();
-  const questions = usePendingQuestions();
   const runsState = useRuns(profilesState.selectedProfileId);
   const applicationsState = useApplications();
 
@@ -109,6 +109,8 @@ export default function App() {
   // fills it). An assessment of one of them lives under Jobs; any other
   // under Assessments (routing.postingHash).
   const [runPostingIds, setRunPostingIds] = useState(() => new Set());
+  // uat-bug-018: how many jobs need the operator's answers, per list.
+  const [needAnswers, setNeedAnswers] = useState({ jobs: 0, assessments: 0 });
 
   // S2-B: `gigai scout run` opens this UI; if no discovery prefs exist yet,
   // the interview shows first, ahead of every other view (CHANGE #2).
@@ -154,10 +156,9 @@ export default function App() {
   const handleAssessed = useCallback(
     (response) => {
       setAssessedItem(response);
-      questions.reload();
       navigate(postingHash(response, runPostingIds));
     },
-    [questions.reload, runPostingIds],
+    [runPostingIds],
   );
 
   const wizardDone = () => {
@@ -218,7 +219,7 @@ export default function App() {
     <div className="app">
       <TopBar
         currentView={route.view}
-        questionsCount={questions.count}
+        needAnswers={needAnswers}
         profiles={profilesState.profiles}
         selectedProfileId={profilesState.selectedProfileId}
         onSelectProfile={handleSelectProfile}
@@ -249,14 +250,12 @@ export default function App() {
             reloadConfig={reloadConfig}
             runsState={runsState}
             applicationsState={applicationsState}
-            questions={questions}
             externalQuickItem={assessedItem}
             runPostingIds={runPostingIds}
             onRunPostingIds={setRunPostingIds}
+            onNeedAnswers={setNeedAnswers}
           />
         )}
-
-        {route.view === "questions" && <PendingAnswersView pending={questions} runPostingIds={runPostingIds} />}
 
         {route.view === "applications" && (
           <ApplicationsView

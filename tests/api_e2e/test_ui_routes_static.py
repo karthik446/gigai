@@ -55,7 +55,8 @@ EXPECTED_ROUTES = {
     # is the same JobPage under its own prefix.
     "assessments": "#/assessments",
     "assessment": "#/assessments/",
-    "questions": "#/questions",
+    # uat-bug-018: no "questions" route. "Needs your answers" is a job state
+    # (a filter chip and a count on Jobs and on Assessments).
     "applications": "#/applications",
     "runs": "#/runs",
     "run": "#/runs/",
@@ -117,8 +118,22 @@ def test_nav_views_are_routes() -> None:
     nav = _NAV_VIEWS.search(source)
     assert nav is not None, "routing.js must export NAV_VIEWS (the top bar's link order)"
     nav_views = re.findall(r'"([a-z]+)"', nav.group("body"))
-    assert nav_views == ["jobs", "assessments", "questions", "applications", "runs"]
+    assert nav_views == ["jobs", "assessments", "applications", "runs"]
     assert all(view in routes for view in nav_views)
+
+
+def test_the_questions_page_is_gone() -> None:
+    """uat-bug-018: the Questions tab (route, link, view, hook) is removed."""
+
+    routing = ROUTING_JS.read_text(encoding="utf-8")
+    assert "questions" not in _route_table()
+    assert "QUESTIONS_HASH" not in routing and '"#/questions"' not in routing
+    app = APP_JSX.read_text(encoding="utf-8")
+    assert "PendingAnswersView" not in app and "usePendingQuestions" not in app
+    assert not (UI_SRC / "views" / "PendingAnswersView.jsx").exists()
+    assert "usePendingQuestions" not in (UI_SRC / "hooks.js").read_text(encoding="utf-8")
+    for path in sorted(UI_SRC.rglob("*.js*")):
+        assert "QUESTIONS_HASH" not in path.read_text(encoding="utf-8"), f"{path.name} still links to the Questions page"
 
 
 def _served_bundle_text() -> str:

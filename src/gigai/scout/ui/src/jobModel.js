@@ -68,11 +68,8 @@ export const JEV_FLAG_TEXT = {
 
 export const MODE_LABELS = { remote: "Remote", hybrid: "Hybrid", onsite: "On-site", on_site: "On-site" };
 
-// uat-batch1 (N8): the requirement class and status in the operator's
-// words. The old one-word labels stay for the "badge" rendering (the
-// option the operator saw in UAT), kept for the side-by-side only.
+// uat-batch1 (N8): the requirement class and status in the operator's words.
 export const CLASS_LABELS = { hard: "Must-have", askable: "Can ask", nice_to_have: "Bonus" };
-export const CLASS_LABELS_SHORT = { hard: "hard", askable: "askable", nice_to_have: "nice-to-have" };
 export const STATUS_LABELS = { met: "Met", unmet: "Not met", unclear: "Unclear", partial: "Partial", gap: "Gap" };
 
 const CLASS_RANK = { hard: 0, askable: 1, nice_to_have: 2 };
@@ -141,17 +138,6 @@ export function requirementStatusLabel(row) {
   const name = classLabel(row && row.class);
   const status = statusLabel(row && row.status);
   return name ? `${name}: ${status}` : status;
-}
-
-// N8: the three renderings of the requirement table's status. "keyvalue"
-// ships; `?status=columns` / `?status=badge` in the address (before the #)
-// shows the others, for the operator's pick.
-export const STATUS_STYLES = ["keyvalue", "columns", "badge"];
-export const DEFAULT_STATUS_STYLE = "keyvalue";
-
-export function statusStyleFrom(search) {
-  const match = /[?&]status=([a-z]+)/.exec(typeof search === "string" ? search : "");
-  return match && STATUS_STYLES.includes(match[1]) ? match[1] : DEFAULT_STATUS_STYLE;
 }
 
 // uat-batch1 (N4): the job page shows a short excerpt of the posting, the
@@ -700,10 +686,20 @@ export function sortJobs(jobs) {
   });
 }
 
-export const EMPTY_FILTERS = { search: "", company: "", fit: "all", sponsorship: "all", assessed: "all", showHidden: false };
+// uat-bug-018: `state` filters by the job's derived state (job.state.state,
+// jobStateModel.withJobStates); it took the place of the grid's "Assessed"
+// chips. `assessed` (by verdict) is still honoured for a caller that sets it.
+export const EMPTY_FILTERS = { search: "", company: "", fit: "all", sponsorship: "all", assessed: "all", state: "all", showHidden: false };
 
 export function hasActiveFilter(filters) {
-  return Boolean(filters.search || filters.company || filters.fit !== "all" || filters.sponsorship !== "all" || filters.assessed !== "all");
+  return Boolean(
+    filters.search ||
+      filters.company ||
+      filters.fit !== "all" ||
+      filters.sponsorship !== "all" ||
+      filters.assessed !== "all" ||
+      (filters.state && filters.state !== "all"),
+  );
 }
 
 export function jobMatchesFilters(job, filters) {
@@ -727,6 +723,9 @@ export function jobMatchesFilters(job, filters) {
     if (verdict !== filters.assessed) {
       return false;
     }
+  }
+  if (filters.state && filters.state !== "all" && (job.state ? job.state.state : "not_assessed") !== filters.state) {
+    return false;
   }
   if (filters.search) {
     const needle = filters.search.toLowerCase();

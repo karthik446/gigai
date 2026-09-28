@@ -3,6 +3,7 @@ import VerdictChip from "./VerdictChip.jsx";
 import SponsorshipBadge from "./SponsorshipBadge.jsx";
 import ProviderBadge from "./ProviderBadge.jsx";
 import QuickAssessChip from "./QuickAssessChip.jsx";
+import StateChip from "./StateChip.jsx";
 import { displayCompanyName, unchangedSinceLabel } from "../display.js";
 import { ageLabel, assessedAt, jevReasonsLine, notAssessedLine, payLabel, requirementSummary, workModeLabel } from "../jobModel.js";
 import { assessmentHash, jobHash } from "../routing.js";
@@ -31,6 +32,10 @@ import { assessmentHash, jobHash } from "../routing.js";
 // job page under #/assessments/<id> (`from="assessments"`), so the top bar
 // and the page's back link stay on Assessments. A quick assessment with no
 // Jev score carries why (job.rankSkipReason) in the tile's tooltip.
+//
+// uat-bug-018: a job that has a tailored resume, or is applied or beyond,
+// says so in a second chip beside its verdict (StateChip; the verdict
+// states are the verdict chip itself).
 //
 // uat-batch1 (O1/O2): Jev's reasons read as words (jobModel.jevReasonsLine,
 // never the raw ids); the card is tighter -- the age joins the mode/pay
@@ -115,6 +120,7 @@ export default function JobCard({ job, visaRequired, from }) {
 
       <div className="card-chips">
         <VerdictChip verdict={job.verdict} assessment={job.assessment} />
+        <StateChip state={job.state} />
         {visaRequired && <SponsorshipBadge sponsorship={job.sponsorship} h1b={job.h1b} />}
         {job.status === "carried_forward" && <span className="tag">{unchangedSinceLabel(job.fromRunDate)}</span>}
       </div>

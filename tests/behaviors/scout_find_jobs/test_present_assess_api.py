@@ -270,6 +270,10 @@ def test_url_posting_text_and_jev_score_are_served_and_listed(running_server, ol
     listed = client.get("/api/assessments").json()["items"]
     assert len(listed) == 1
     assert listed[0]["posting_text"] == body["posting_text"] and listed[0]["rank_score"] == body["rank_score"]
+    # uat-bug-018: the list adds the derived ``job_state`` to the served
+    # item; the stored file never carries it.
+    job_state = listed[0].pop("job_state")
+    assert job_state == {"state": "matched", "since": body["created_at"], "next_events": ["applied"]}
     assert listed[0] == json.loads(Path(body["stored_path"]).read_text(encoding="utf-8"))
 
 

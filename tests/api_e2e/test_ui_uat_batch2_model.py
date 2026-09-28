@@ -36,11 +36,13 @@ What is pinned, by item:
   page's text; ``rank_score`` is its Jev tile; every ``rank_skip_reason``
   the backend can emit (``assess_contracts.RANK_SKIP_REASONS``, read from
   the Python module itself) has words.
-* N11-C  "Update sources": the progress bar is ``boards.done`` of
-  ``boards.total`` and indeterminate while the total is 0; the result line
-  is the server's summary; ``partial`` says "Run again to continue" and what
-  is left; ``failed`` shows the server's message; Jobs shows
-  ``index.message`` only when ``index.needs_update``.
+* N11-C  "Update sources": the progress bar is ``boards.checked`` of
+  ``boards.total`` (``done`` minus ``skipped`` from a server that does not
+  say ``checked``) and indeterminate while the total is 0; the result line
+  is the server's summary; ``partial`` says how many boards have never been
+  checked, "Run again to continue" and what is left; ``failed`` shows the
+  server's message; Jobs shows ``index.message`` only when
+  ``index.needs_update``.
 * uat-bug-011  "N more matched, not imported this run", only above 0.
 * N11-C part 2  a run that read the company index says what it read, what
   it fetched for the companies Exa found, how many wait for the next Update
@@ -150,6 +152,8 @@ process.stdout.write(JSON.stringify({
   sortedNewest: jobModel.sortByAssessedAt(jobModel.assessmentJobs(input.build.quickItems, jobs).slice().reverse()).map((job) => job.id),
   progress: input.updates.map((update) => sources.sourcesProgress(update)),
   results: input.updates.map((update) => sources.sourcesResult(update)),
+  checkedProgress: input.checkedUpdates.map((update) => sources.sourcesProgress(update)),
+  checkedResults: input.checkedUpdates.map((update) => sources.sourcesResult(update)),
   running: input.statuses.map((status) => sources.isRunning(status)),
   notices: input.statuses.map((status) => sources.indexNotice(status)),
   noticeAtsOff: sources.indexNotice(input.statuses[0], { atsEnabled: false }),
@@ -448,6 +452,18 @@ def _payload() -> dict:
             _update("interrupted"),
             _update("succeeded", summary="", boards={"total": 0, "done": 0}),
         ],
+        # The boards block as the server writes it now: `checked` is what was
+        # asked, `done` also counts what the budget skipped, `never_checked`
+        # is the backlog no update has reached yet.
+        "checkedUpdates": [
+            _update("running", boards={"total": 10370, "done": 5000, "checked": 2074, "fetched": 300, "cached": 1770, "failed": 4, "skipped": 2926, "never_checked": None}),
+            _update("partial", boards={"total": 10370, "done": 10370, "checked": 2140, "fetched": 310, "cached": 1822, "failed": 8, "skipped": 8230, "never_checked": 6100}, remaining=8230),
+            _update("partial", boards={"total": 10370, "done": 10370, "checked": 2140, "failed": 0, "skipped": 8230, "never_checked": 1}, remaining=8230),
+            _update("partial", boards={"total": 10370, "done": 10370, "checked": 2140, "failed": 0, "skipped": 8230, "never_checked": 0}, remaining=8230),
+            _update("partial", boards={"total": 10370, "done": 10370, "checked": 2140, "failed": 0, "skipped": 8230, "never_checked": None}, remaining=8230),
+            _update("succeeded", boards={"total": 10370, "done": 10370, "checked": 10370, "failed": 0, "skipped": 0, "never_checked": 0}, remaining=0),
+            _update("running", boards={"total": 10, "done": 4, "checked": 99, "failed": 0, "skipped": 0}),
+        ],
         "statuses": [
             {"running": False, "update": None, "index": _index("empty")},
             {"running": True, "update": _update("running"), "index": _index("stale")},
@@ -726,12 +742,9 @@ def test_a_questions_link_opens_where_its_posting_lives(out: dict) -> None:
     assert out["lives"]["linksFromArray"] == ["jobs", "jobs", "assessments", "assessments", "jobs"]
 
 
-def test_the_questions_page_and_the_assess_flow_use_the_one_rule() -> None:
-    questions = (UI_SRC / "views" / "PendingAnswersView.jsx").read_text(encoding="utf-8")
-    assert "href={postingHash(item, runPostingIds)}" in questions
-    assert "assessmentHash" not in questions and "jobHash" not in questions
+def test_the_assess_flow_uses_the_one_rule() -> None:
+    # uat-bug-018 removed the Questions page, the rule's other caller.
     app = (UI_SRC / "App.jsx").read_text(encoding="utf-8")
-    assert "<PendingAnswersView pending={questions} runPostingIds={runPostingIds} />" in app
     assert "runPostingIds={runPostingIds}" in app and "onRunPostingIds={setRunPostingIds}" in app
     # The #/assess flow ends on the job page, under the list its posting is on.
     assert "navigate(postingHash(response, runPostingIds))" in app
@@ -842,7 +855,9 @@ def test_a_pasted_resume_assessment_is_a_card_on_assessments(out: dict) -> None:
     assert _by_id(out["built"], ACME)["verdict"] == "pending_user_answers"
     view = (UI_SRC / "views" / "FindJobsView.jsx").read_text(encoding="utf-8")
     assert "getAssessments({ profileId: PASTED_RESUME_KEY })" in view
-    merge = view[view.index("const jobs = useMemo(() => buildJobs(") :][:200]
+    merge = view[view.index("const jobs = useMemo(") :]
+    merge = merge[: merge.index(");") + 2]
+    assert "buildJobs({ rows, rankScores, quickItems, runCreatedAt })" in merge
     assert "pastedItems" not in merge, "a pasted-resume assessment must not reach the run rows' merge"
 
 
@@ -941,13 +956,33 @@ def test_the_model_knows_every_update_status_the_backend_has() -> None:
         assert f'"{status}"' in model, f"sourcesModel.js has no case for {status!r}"
 
 
-def test_the_progress_bar_is_done_of_total_and_indeterminate_at_zero(out: dict) -> None:
+def test_the_progress_bar_is_checked_of_total_and_indeterminate_at_zero(out: dict) -> None:
     none, running, listing, one, *ended = out["progress"]
     assert none is None
-    assert running == {"determinate": True, "percent": 21, "line": "2,140 of 10,370 company boards checked, 8 did not answer."}
+    # A server that does not say `checked`: `done` minus `skipped`.
+    assert running == {"determinate": True, "percent": 21, "line": "Checked 2,140 of 10,370 company boards; 8 did not answer."}
     assert listing == {"determinate": False, "percent": None, "line": "Listing the company boards to check…"}
-    assert one == {"determinate": True, "percent": 100, "line": "1 of 1 company board checked."}
+    assert one == {"determinate": True, "percent": 100, "line": "Checked 1 of 1 company board."}
     assert ended == [None] * 6  # nothing to draw once the update ended
+
+    running_checked, *_ended, clamped = out["checkedProgress"]
+    # `done` (5,000) counts the boards the budget skipped; the bar follows `checked`.
+    assert running_checked == {"determinate": True, "percent": 20, "line": "Checked 2,074 of 10,370 company boards; 4 did not answer."}
+    assert clamped == {"determinate": True, "percent": 100, "line": "Checked 10 of 10 company boards."}
+
+
+def test_a_partial_update_says_how_many_boards_were_never_checked(out: dict) -> None:
+    _running, backlog, one, none_left, unknown, succeeded, _clamped = out["checkedResults"]
+    assert backlog["detail"] == "Checked 2,140 of 10,370 company boards; 8 did not answer."
+    assert backlog["backlog"] == "6,100 company boards have never been checked yet."
+    assert backlog["next"] == "Run again to continue: 8,230 company boards are left."
+    assert one["backlog"] == "1 company board has never been checked yet."
+    assert none_left["backlog"] == "" and unknown["backlog"] == ""
+    # Only a partial update has a backlog line.
+    assert "backlog" not in succeeded
+    assert succeeded["detail"] == "Checked 10,370 of 10,370 company boards."
+    panel = (UI_SRC / "components" / "SourcesUpdatePanel.jsx").read_text(encoding="utf-8")
+    assert 'data-role="sources-backlog"' in panel and "{result.backlog}" in panel
 
 
 def test_the_result_line_is_the_servers_summary(out: dict) -> None:

@@ -6,8 +6,9 @@
 //   running  an update is live: the button is off, the GET is polled
 //   update   null (no update ever ran here), or the running / the last one:
 //            status running | succeeded | partial | failed | interrupted,
-//            boards {total, done, fetched, cached, failed, skipped},
-//            summary (already worded), error {code, message}, remaining
+//            boards {total, done, checked, fetched, cached, failed,
+//            skipped, never_checked}, summary (already worded),
+//            error {code, message}, remaining
 //   index    what the Jobs page needs: status ready | empty | stale,
 //            needs_update, message (ready to show), companies_indexed,
 //            last_checked_at
@@ -31,7 +32,18 @@ export function isRunning(status) {
   return Boolean(status && (status.running || (status.update && status.update.status === "running")));
 }
 
-// The progress bar while an update runs: `boards.done` of `boards.total`.
+// How many boards the update really asked: `boards.checked`. A server from
+// before that field reports `boards.done` only, which also counts the
+// boards its time budget skipped (`boards.skipped`); those were not checked.
+export function boardsChecked(boards) {
+  const total = count(boards && boards.total);
+  const value = boards || {};
+  const checked =
+    typeof value.checked === "number" && Number.isFinite(value.checked) ? count(value.checked) : Math.max(0, count(value.done) - count(value.skipped));
+  return Math.min(checked, total);
+}
+
+// The progress bar while an update runs: `boards.checked` of `boards.total`.
 // `total` is 0 for the first seconds (the watchlist is being listed), which
 // is an indeterminate bar, never "0 of 0". Null when nothing is running.
 export function sourcesProgress(update) {
@@ -43,30 +55,37 @@ export function sourcesProgress(update) {
   if (total === 0) {
     return { determinate: false, percent: null, line: "Listing the company boards to check…" };
   }
-  const done = Math.min(count(boards.done), total);
+  const checked = boardsChecked(boards);
   const failed = count(boards.failed);
-  const percent = Math.round((done / total) * 100);
-  const line = `${formatCount(done)} of ${formatCount(total)} ${boardsNoun(total)} checked${failed ? `, ${formatCount(failed)} did not answer` : ""}.`;
+  const percent = Math.round((checked / total) * 100);
+  const line = `Checked ${formatCount(checked)} of ${formatCount(total)} ${boardsNoun(total)}${failed ? `; ${formatCount(failed)} did not answer` : ""}.`;
   return { determinate: true, percent, line };
 }
 
-// `boards.done` counts every board the update settled, the ones its time
-// budget skipped included (`boards.skipped`); those were not checked.
 function checkedLine(update) {
   const boards = update.boards || {};
   const total = count(boards.total);
   if (total === 0) {
     return "";
   }
-  const done = Math.max(0, Math.min(count(boards.done), total) - count(boards.skipped));
   const failed = count(boards.failed);
-  return `Checked ${formatCount(done)} of ${formatCount(total)} ${boardsNoun(total)}${failed ? `; ${formatCount(failed)} did not answer` : ""}.`;
+  return `Checked ${formatCount(boardsChecked(boards))} of ${formatCount(total)} ${boardsNoun(total)}${failed ? `; ${formatCount(failed)} did not answer` : ""}.`;
+}
+
+// The real backlog after an update that ran out of time: the boards no
+// update has ever checked (`boards.never_checked`). "" when there is none,
+// or when the server does not say.
+function neverCheckedLine(update) {
+  const never = count(update.boards && update.boards.never_checked);
+  return never ? `${formatCount(never)} ${boardsNoun(never)} ${never === 1 ? "has" : "have"} never been checked yet.` : "";
 }
 
 // What the last update came to, once it is no longer running:
-//   {tone, line, detail, next}  tone is ok | warn | danger
-// `line` is the server's own summary; `next` says what to do about a
-// partial / interrupted update. Null while one runs or when none ever ran.
+//   {tone, line, detail, backlog, next}  tone is ok | warn | danger
+// `line` is the server's own summary; `backlog` (a partial update only)
+// says how many boards have never been checked; `next` says what to do
+// about a partial / interrupted update. Null while one runs or when none
+// ever ran.
 export function sourcesResult(update) {
   if (!update || update.status === "running") {
     return null;
@@ -83,6 +102,7 @@ export function sourcesResult(update) {
       tone: "warn",
       line: summary || "The update ran out of time before it reached every board.",
       detail: checked,
+      backlog: neverCheckedLine(update),
       next: `Run again to continue: ${left}.`,
     };
   }

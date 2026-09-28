@@ -12,7 +12,7 @@ import { ApiError } from "../api.js";
 // api.js's ApiError class so `instanceof ApiError` holds across modules.
 //
 // Routes (find_jobs/api/watchlist.py):
-//   GET  /api/watchlist        -> {entries: [WatchlistEntry, ...]} newest first
+//   GET  /api/watchlist?limit=N -> {entries: [the N newest], total}
 //   POST /api/watchlist {url}  -> 201 {created: true, entry} on a first add,
 //                                 200 {created: false, entry} for a board
 //                                 already watched (idempotent), 422 for any
@@ -54,8 +54,23 @@ async function request(method, path, body) {
   return payload;
 }
 
+// The watchlist holds one entry per company board: about 10,000 once the
+// company catalog is seeded, megabytes as a full list. This form shows the
+// count and the newest few, so it asks for one page (journal-read-scope).
+export const WATCHLIST_SHOWN = 25;
+
 export function getWatchlist() {
-  return request("GET", "/api/watchlist");
+  return request("GET", `/api/watchlist?limit=${WATCHLIST_SHOWN}`);
+}
+
+// "Watching 10,371 boards", and what the list under it is when it is not
+// all of them.
+export function watchingLines(total, shown) {
+  const count = typeof total === "number" && total >= 0 ? total : shown;
+  return {
+    heading: `Watching ${count.toLocaleString("en-US")} board${count === 1 ? "" : "s"}`,
+    note: count > shown ? `The ${shown} added most recently:` : "",
+  };
 }
 
 export function addCompany(url) {
@@ -74,14 +89,21 @@ export default function AddCompanyForm({ compact = false, onAdded }) {
   const [notice, setNotice] = useState(null);
   const [error, setError] = useState(null);
   const [entries, setEntries] = useState(null);
+  const [total, setTotal] = useState(null);
 
   const reload = useCallback(() => {
     if (compact) {
       return;
     }
     getWatchlist()
-      .then((response) => setEntries(response.entries || []))
-      .catch(() => setEntries([]));
+      .then((response) => {
+        setEntries(response.entries || []);
+        setTotal(typeof response.total === "number" ? response.total : null);
+      })
+      .catch(() => {
+        setEntries([]);
+        setTotal(null);
+      });
   }, [compact]);
 
   useEffect(reload, [reload]);
@@ -146,8 +168,11 @@ export default function AddCompanyForm({ compact = false, onAdded }) {
       {notice && <div className="callout ok" style={{ marginTop: 12 }}>{notice}</div>}
       {!compact && entries !== null && (
         <div style={{ marginTop: 12 }}>
-          <div className="form-label">Watching {entries.length} board{entries.length === 1 ? "" : "s"}</div>
+          <div className="form-label" data-role="watching-count">
+            {watchingLines(total, entries.length).heading}
+          </div>
           {entries.length === 0 && <p className="muted">Nothing yet. The first find-jobs run adds the boards Exa discovers.</p>}
+          {watchingLines(total, entries.length).note && <p className="muted small">{watchingLines(total, entries.length).note}</p>}
           {entries.length > 0 && (
             <ul className="add-company-list">
               {entries.map((entry) => (

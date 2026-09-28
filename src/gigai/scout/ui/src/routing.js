@@ -12,8 +12,7 @@
 //   #/assessments        every on-demand assessment, newest first (uat-bug-016)
 //   #/assessments/<id>   the same job page, opened from Assessments (keyed by
 //                        the assessment's job_identity)
-//   #/questions          every open question across postings (pending answers)
-//   #/applications       the application pipeline + every recorded event
+//   #/applications       every job that is applied or beyond (uat-bug-018)
 //   #/runs               every find-jobs run for the selected profile
 //   #/runs/<run id>      one run: status, node receipts, its postings
 //   #/settings           preferences, resume, setup wizard, discover, add company
@@ -24,6 +23,11 @@
 // plain <a href="#/…">), the server never sees a client route (the packaged
 // UI is static files under api/static.py, no catch-all), and a deep link or
 // a reload lands on the same view. An unknown hash falls back to the grid.
+//
+// uat-bug-018: there is no Questions page. "Needs your answers" is a job
+// state: a filter chip on Jobs and on Assessments, and the count beside
+// those two links. An old #/questions link is an unknown hash: it lands on
+// Jobs.
 import { useEffect, useState } from "react";
 import { postingHome } from "./jobModel.js";
 
@@ -32,7 +36,6 @@ export const ROUTES = [
   { view: "job", path: "#/jobs/", label: "Job", pattern: /^#\/jobs\/(.+)$/, param: "jobId" },
   { view: "assessments", path: "#/assessments", label: "Assessments", pattern: /^#\/assessments\/?$/ },
   { view: "assessment", path: "#/assessments/", label: "Assessment", pattern: /^#\/assessments\/(.+)$/, param: "jobId" },
-  { view: "questions", path: "#/questions", label: "Questions", pattern: /^#\/questions\/?$/ },
   { view: "applications", path: "#/applications", label: "Applications", pattern: /^#\/applications\/?$/ },
   { view: "runs", path: "#/runs", label: "Runs", pattern: /^#\/runs\/?$/ },
   { view: "run", path: "#/runs/", label: "Run", pattern: /^#\/runs\/(.+)$/, param: "runId" },
@@ -42,11 +45,10 @@ export const ROUTES = [
 
 // The top bar's primary links, in order (the profile switcher and the
 // Settings gear are laid out separately by TopBar.jsx).
-export const NAV_VIEWS = ["jobs", "assessments", "questions", "applications", "runs"];
+export const NAV_VIEWS = ["jobs", "assessments", "applications", "runs"];
 
 export const JOBS_HASH = "#/jobs";
 export const ASSESSMENTS_HASH = "#/assessments";
-export const QUESTIONS_HASH = "#/questions";
 export const APPLICATIONS_HASH = "#/applications";
 export const RUNS_HASH = "#/runs";
 export const SETTINGS_HASH = "#/settings";

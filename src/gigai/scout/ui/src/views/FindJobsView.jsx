@@ -11,6 +11,7 @@ import AssessmentsView from "./AssessmentsView.jsx";
 import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
 import { relativeTimeLabel } from "../display.js";
 import { PASTED_RESUME_KEY, addRunPostings, assessmentJobs, buildJobs, dateTimeLabel, runJobs as onlyRunJobs, usedPastedResume } from "../jobModel.js";
+import { needAnswersCount, withJobStates } from "../jobStateModel.js";
 import { runFailure } from "../runText.js";
 import { indexNotice } from "../sourcesModel.js";
 import { ASSESSMENTS_HASH, RUNS_HASH, SETTINGS_HASH, runHash } from "../routing.js";
@@ -31,9 +32,15 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 // Assessments; a run posting's assessment, however it was started, is on
 // its Jobs card only (uat-batch2-r1, jobModel.postingHome).
 //
+// uat-bug-018: every job carries its derived state (job.state, from
+// jobStateModel.withJobStates over the served `job_state`s, the
+// applications list and the tailored resumes made on this page). The grids
+// filter on it, and the number of jobs that need the operator's answers
+// goes up to the top bar (`onNeedAnswers`), per list.
+//
 // Q4a-nav: this view stays MOUNTED for the whole app (App.jsx renders it
 // on every route; it draws nothing on the routes it does not own), so a
-// live run keeps polling while the operator reads Questions or Settings,
+// live run keeps polling while the operator reads Applications or Settings,
 // and the run/filters/cards survive every navigation. It owns five routes:
 //
 //   #/jobs        the grid: the Dashboard's summary strip, "Run find jobs"
@@ -99,10 +106,10 @@ export default function FindJobsView({
   reloadConfig,
   runsState,
   applicationsState,
-  questions,
   externalQuickItem,
   runPostingIds,
   onRunPostingIds,
+  onNeedAnswers,
 }) {
   const profileId = profile ? profile.profile_id : null;
   const ownsRoute = route.view === "jobs" || route.view === "job" || route.view === "run" || route.view === "assessments" || route.view === "assessment";
@@ -126,6 +133,12 @@ export default function FindJobsView({
   // True until the first read of the quick-assess store for this profile
   // ends: an assessment's job page says "Loading…" meanwhile, not "not found".
   const [quickLoading, setQuickLoading] = useState(true);
+  // uat-bug-018: the jobs a tailored resume was made for on this page since
+  // the lists were read (their served state does not say "tailored" yet).
+  const [tailoredIds, setTailoredIds] = useState(() => new Set());
+  const handleTailored = useCallback((jobId) => {
+    setTailoredIds((known) => (known.has(jobId) ? known : new Set(known).add(jobId)));
+  }, []);
   // N11-C: read while Jobs is the page shown (and polled while an update
   // runs), so the message goes away once "Update sources" has run.
   const sources = useSourcesStatus({ enabled: route.view === "jobs" });
@@ -180,6 +193,7 @@ export default function FindJobsView({
     setQuickItems([]);
     setPastedItems([]);
     setQuickLoading(true);
+    setTailoredIds(new Set());
     onRunPostingIds(new Set());
   }, [profileId, stopPolling, stopProgressPolling, showRun, onRunPostingIds]);
 
@@ -202,17 +216,16 @@ export default function FindJobsView({
 
   useEffect(loadQuickItems, [loadQuickItems]);
 
-  // Q4a-nav: this view stays mounted while the operator answers on
-  // Questions (or assesses elsewhere), so re-read the store each time one
-  // of its own routes comes back into view -- a cheap GET, and the only way
-  // a card/job page reflects an answer given on another page.
+  // Q4a-nav: this view stays mounted while the operator assesses
+  // elsewhere, so re-read the store each time one of its own routes comes
+  // back into view -- a cheap GET, and the only way a card/job page
+  // reflects an assessment made on another page.
   useEffect(() => {
     if (ownsRoute) {
       loadQuickItems();
     }
   }, [route.view, ownsRoute, loadQuickItems]);
 
-  const questionsReload = questions ? questions.reload : null;
   const handleQuickUpdated = useCallback(
     (item) => {
       if (!item || !item.job) {
@@ -227,12 +240,8 @@ export default function FindJobsView({
       } else {
         setQuickItems(merge);
       }
-      // The Questions badge counts open questions in this same store.
-      if (questionsReload) {
-        questionsReload();
-      }
     },
-    [questionsReload],
+    [],
   );
 
   // Q4a-nav: an AssessResponse from "+ Assess a job" (App.jsx hands it
@@ -445,17 +454,31 @@ export default function FindJobsView({
   const runCreatedAt = currentRun ? currentRun.created_at : null;
   const newestRun = runsState.runs[0] || null;
 
-  const jobs = useMemo(() => buildJobs({ rows, rankScores, quickItems, runCreatedAt }), [rows, rankScores, quickItems, runCreatedAt]);
+  const applications = applicationsState.applications;
+  const jobs = useMemo(
+    () => withJobStates(buildJobs({ rows, rankScores, quickItems, runCreatedAt }), applications, tailoredIds),
+    [rows, rankScores, quickItems, runCreatedAt, applications, tailoredIds],
+  );
   // Jobs and a run page show the run's postings only (uat-bug-016): an
   // on-demand assessment belongs to no run; it is a card on Assessments.
   const runJobs = useMemo(() => onlyRunJobs(jobs), [jobs]);
   // uat-batch2-r1: the postings of every run loaded for this profile since
-  // the page was opened (App.jsx holds the set: Questions reads it too).
-  // An assessment of one of them is that posting's, under Jobs.
+  // the page was opened (App.jsx holds the set). An assessment of one of
+  // them is that posting's, under Jobs.
   useEffect(() => {
     onRunPostingIds((known) => addRunPostings(known, rows));
   }, [rows, onRunPostingIds]);
-  const assessed = useMemo(() => assessmentJobs(quickItems, jobs, pastedItems, runPostingIds), [quickItems, jobs, pastedItems, runPostingIds]);
+  const assessed = useMemo(
+    () => withJobStates(assessmentJobs(quickItems, jobs, pastedItems, runPostingIds), applications, tailoredIds),
+    [quickItems, jobs, pastedItems, runPostingIds, applications, tailoredIds],
+  );
+  const jobsWaiting = useMemo(() => needAnswersCount(runJobs), [runJobs]);
+  const assessmentsWaiting = useMemo(() => needAnswersCount(assessed), [assessed]);
+  useEffect(() => {
+    if (onNeedAnswers) {
+      onNeedAnswers({ jobs: jobsWaiting, assessments: assessmentsWaiting });
+    }
+  }, [jobsWaiting, assessmentsWaiting, onNeedAnswers]);
 
   if (!ownsRoute) {
     return null;
@@ -501,6 +524,7 @@ export default function FindJobsView({
         loading={fromAssessments ? quickLoading : resultsLoading || quickLoading || (runsState.loading && !runId)}
         onQuickUpdated={handleQuickUpdated}
         onApplicationsChanged={applicationsState.reload}
+        onTailored={handleTailored}
       />
     );
   }
@@ -603,7 +627,7 @@ export default function FindJobsView({
       <JobsSummaryStrip
         lastRun={newestRun}
         runsLoading={runsState.loading}
-        questionsCount={questions ? questions.count : null}
+        needAnswersCount={results || runActive ? jobsWaiting : null}
         applications={applicationsState.applications}
         applicationsLoading={applicationsState.loading}
       />

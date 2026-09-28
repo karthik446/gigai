@@ -17,16 +17,25 @@ stored is ``quick_assess._origin_for``'s rule.  Every error is
 ``{"error": {"code", "message"}}``; ``_ERROR_STATUS`` maps each code
 ``quick_assess`` can raise to its status, and an unmapped code still gets a
 safe 409 rather than a 500.
+
+uat-bug-018: each ``GET /api/assessments`` item carries an additive
+``job_state`` ``{state, since, next_events}`` (``job_state.py``): the job's
+state for the resume the item was assessed with, where the item itself is
+the latest assessment. Added to the served JSON only; the stored file and
+``AssessResponse`` are untouched. A failure to derive it leaves the items
+as they were.
 """
 
 from __future__ import annotations
 
 from http import HTTPStatus
+import logging
 from urllib.parse import parse_qs, urlsplit
 
 from ...quick_assess import QuickAssessError, list_quick_assessments, run_quick_assessment
 from ..assess_contracts import AssessRequest, AssessmentsListResponse
 from ..contracts import FindJobsContractError, Verdict
+from ..job_state import JobStateSources
 
 _ERROR_STATUS: dict[str, HTTPStatus] = {
     # request shape / inputs
@@ -53,6 +62,9 @@ _ERROR_STATUS: dict[str, HTTPStatus] = {
     "assess_timeout": HTTPStatus.GATEWAY_TIMEOUT,
     "model_output_invalid": HTTPStatus.BAD_GATEWAY,
 }
+
+
+_logger = logging.getLogger("gigai.scout.server")
 
 
 def _status_for(code: str) -> HTTPStatus:
@@ -106,7 +118,28 @@ class AssessRoutesMixin:
         except QuickAssessError as exc:
             self._error(_status_for(exc.code), exc.code, str(exc))
             return
-        self._write_json(HTTPStatus.OK, AssessmentsListResponse(items).to_json())
+        body = AssessmentsListResponse(items).to_json()
+        try:
+            self._attach_assessment_job_states(target, items, body)
+        except Exception:  # noqa: BLE001 - display-only enrichment must never break the list
+            _logger.exception("job state skipped for the assessments list")
+        self._write_json(HTTPStatus.OK, body)
+
+    def _attach_assessment_job_states(self, target, items, body: dict[str, object]) -> None:
+        served = body.get("items")
+        if not items or not isinstance(served, list) or len(served) != len(items):
+            return
+        from ....workpad import resolve_workpad
+
+        backend = self._backend
+        resolved = resolve_workpad(
+            home_root=backend.home_root, requested_target=target, gig_id=None, allow_semantic_state=True
+        )
+        sources = JobStateSources(home_root=backend.home_root, target=target, resolved=resolved)
+        for item, row in zip(items, served):
+            if isinstance(row, dict):
+                state = sources.state_for(item.job.job_identity, profile_id=item.resume.profile_id, quick=item)
+                row["job_state"] = state.to_json()
 
 
 __all__ = ["AssessRoutesMixin"]

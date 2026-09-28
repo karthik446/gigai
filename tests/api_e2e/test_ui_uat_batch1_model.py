@@ -92,7 +92,6 @@ process.stdout.write(JSON.stringify({
   placed: { rows: Object.fromEntries([...placed.rows].map(([k, v]) => [k, v.map((q) => q.question_id)])), unplaced: placed.unplaced.map((q) => q.question_id) },
   excerpts: input.texts.map((text) => jobModel.jdExcerpt(text)),
   statusLabels: input.rows.map((row) => jobModel.requirementStatusLabel(row)),
-  statusStyles: input.searches.map((search) => jobModel.statusStyleFrom(search)),
   chips: input.chips.map(([sponsorship, h1b]) => jobModel.sponsorshipChip(sponsorship, h1b)),
   rotation: input.rotations.map(([rotation, boards]) => runText.rotationLine(rotation, boards)),
   sources: input.sourceNames.map((name) => runText.sourceLabel(name)),
@@ -184,7 +183,6 @@ def _payload() -> dict:
             {"status": "met"},
             {"class": "some_new_class", "status": "partial"},
         ],
-        "searches": ["", "?status=columns", "?x=1&status=badge", "?status=nonsense", "?status=keyvalue", None],
         "chips": [
             ["unknown", {"approvals": 32, "fiscal_years": [2026]}],
             ["unknown", {"approvals": 32, "fiscal_years": [2026], "denials": 2}],
@@ -382,7 +380,22 @@ def test_the_job_description_is_a_short_excerpt(out: dict) -> None:
 
 def test_status_reads_class_then_status(out: dict) -> None:
     assert out["statusLabels"] == ["Must-have: Met", "Can ask: Unclear", "Bonus: Met", "Must-have: Not met", "Met", "Some new class: Partial"]
-    assert out["statusStyles"] == ["keyvalue", "columns", "badge", "keyvalue", "keyvalue", "keyvalue"]
+
+
+def test_the_status_rendering_is_option_a_only() -> None:
+    """N8, operator decision: one chip, "Must-have: Met". The two other
+    renderings and the ``?status=`` switch that showed them are deleted."""
+
+    model = (UI_SRC / "jobModel.js").read_text(encoding="utf-8")
+    for name in ("statusStyleFrom", "STATUS_STYLES", "DEFAULT_STATUS_STYLE", "CLASS_LABELS_SHORT"):
+        assert name not in model, f"jobModel.js still has {name}"
+    body = (UI_SRC / "components" / "AssessmentBody.jsx").read_text(encoding="utf-8")
+    assert "statusStyle" not in body and "data-status-style" not in body
+    assert '"columns"' not in body and '"badge"' not in body
+    assert "<span className={`status-badge ${row.status}`}>{requirementStatusLabel(row)}</span>" in body
+    assert "<th>Status</th>" in body and "<th>Type</th>" not in body
+    page = (UI_SRC / "views" / "JobPage.jsx").read_text(encoding="utf-8")
+    assert "statusStyle" not in page and "window.location.search" not in page
 
 
 def test_the_sponsorship_chip(out: dict) -> None:

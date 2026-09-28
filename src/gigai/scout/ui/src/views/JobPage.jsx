@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ApiError, getAnswers, getApplications, postApplication, postAssess } from "../api.js";
+import { ApiError, getAnswers, postApplication, postAssess } from "../api.js";
 import AssessmentBody from "../components/AssessmentBody.jsx";
 import RequirementActions from "../components/RequirementActions.jsx";
 import JevBadge from "../components/JevBadge.jsx";
@@ -7,6 +7,7 @@ import VerdictChip from "../components/VerdictChip.jsx";
 import SponsorshipBadge from "../components/SponsorshipBadge.jsx";
 import ProviderBadge from "../components/ProviderBadge.jsx";
 import QuickAssessChip from "../components/QuickAssessChip.jsx";
+import StateChip from "../components/StateChip.jsx";
 import PrepPanel from "../components/PrepPanel.jsx";
 import TailoredResumePanel, { useTailoredResume } from "../components/TailoredResumePanel.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
@@ -22,10 +23,10 @@ import {
   notAssessedLine,
   payLabel,
   questionPromptIndex,
-  statusStyleFrom,
   storedOrigin,
   workModeLabel,
 } from "../jobModel.js";
+import { eventActionLabel, jobStateFor } from "../jobStateModel.js";
 import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 
 // Q4a: one posting's job page (#/jobs/<normalized_url>), per
@@ -70,47 +71,70 @@ import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 //   assess      POST /api/assess {job:{job_url}, origin} for a not-assessed
 //               row; `origin` is "job_page" for a run's posting
 //               (jobModel.assessOriginFor), so the result stays under Jobs
-//   applied     GET/POST /api/applications (external_ref = normalized_url)
+//   state       uat-bug-018: the job's derived state (job.state,
+//               jobStateModel.js) and a button for each event that may
+//               follow it: "Mark applied", then "Interview scheduled",
+//               "Offer received", "Rejected", "Withdrawn". Each is a POST
+//               /api/applications {job_identity, event_kind}; the server
+//               decides what may follow (a 409 says why not, in words).
+//               `job_identity` is the job's id, so a pasted posting can be
+//               applied to as well
 //   tailored    GET/POST /api/tailored-resumes (Q3), see TailoredResumePanel
 //
 // Q4b: work_mode / pay (posting) and h1b (the row, via job.h1b) render only
 // when present -- no placeholder chips (operator answer 3).
-function MarkApplied({ normalizedUrl, applications, onRecorded }) {
-  const [state, setState] = useState("idle"); // idle | saving | error
+function JobStateActions({ jobId, state, pasted, onRecorded }) {
+  const [saving, setSaving] = useState(null); // the event kind being recorded
   const [error, setError] = useState(null);
-  const applied = (applications || []).find((item) => item.external_ref === normalizedUrl && item.event_kind === "applied");
-  if (applied) {
-    const when = dateLabel(applied.occurred_at);
-    return <span className="status-badge sponsorship-offered">Marked applied{when ? ` ${when}` : ""}</span>;
-  }
+
+  useEffect(() => {
+    setSaving(null);
+    setError(null);
+  }, [jobId]);
+
+  const record = (eventKind) => {
+    setSaving(eventKind);
+    setError(null);
+    postApplication({ job_identity: jobId, event_kind: eventKind })
+      .then(() => {
+        setSaving(null);
+        onRecorded();
+      })
+      .catch((err) => {
+        setSaving(null);
+        setError(err.message || String(err));
+      });
+  };
+
   return (
-    <span>
-      <button
-        type="button"
-        className="button small secondary"
-        disabled={state === "saving"}
-        onClick={() => {
-          setState("saving");
-          setError(null);
-          postApplication({ normalized_url: normalizedUrl, event_kind: "applied" })
-            .then(() => {
-              setState("idle");
-              onRecorded();
-            })
-            .catch((err) => {
-              setState("idle");
-              setError(err.message || String(err));
-            });
-        }}
-      >
-        {state === "saving" ? "Marking…" : "Mark applied"}
-      </button>
+    <div className="job-state" data-role="job-state" data-state={state.state}>
+      <div className="job-state-row">
+        <span className="chip-group-label">State</span>
+        <StateChip state={state} always showSince />
+        {state.nextEvents.map((eventKind) => (
+          <button
+            key={eventKind}
+            type="button"
+            className="button small secondary"
+            disabled={saving !== null}
+            data-event={eventKind}
+            onClick={() => record(eventKind)}
+          >
+            {saving === eventKind ? "Saving…" : eventActionLabel(eventKind)}
+          </button>
+        ))}
+      </div>
       {error && (
-        <span className="muted" style={{ marginLeft: 6, fontSize: "0.8rem" }}>
+        <div className="field-error" data-role="job-state-error">
           {error}
-        </span>
+        </div>
       )}
-    </span>
+      {pasted && (
+        <p className="muted small job-state-note">
+          You pasted this posting's text. If you paste an edited version later, Scout treats it as a new job with a state of its own.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -198,30 +222,33 @@ function BackToList({ from }) {
   );
 }
 
-export default function JobPage({ job, jobId, from, profileId, profileLabel, visaRequired, loading, onQuickUpdated, onApplicationsChanged }) {
+export default function JobPage({
+  job,
+  jobId,
+  from,
+  profileId,
+  profileLabel,
+  visaRequired,
+  loading,
+  onQuickUpdated,
+  onApplicationsChanged,
+  onTailored,
+}) {
   const [answers, setAnswers] = useState([]);
-  const [applications, setApplications] = useState([]);
   const [tailorError, setTailorError] = useState(null);
 
-  const reloadApplications = useCallback(() => {
-    getApplications()
-      .then((response) => setApplications(response.applications || []))
-      .catch(() => setApplications([]));
-  }, []);
   const handleApplicationRecorded = useCallback(() => {
-    reloadApplications();
     if (onApplicationsChanged) {
       onApplicationsChanged();
     }
-  }, [reloadApplications, onApplicationsChanged]);
+  }, [onApplicationsChanged]);
 
   useEffect(() => {
     getAnswers()
       .then((response) => setAnswers(response.answers || []))
       .catch(() => setAnswers([]));
-    reloadApplications();
     setTailorError(null);
-  }, [reloadApplications, jobId]);
+  }, [jobId]);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -243,6 +270,15 @@ export default function JobPage({ job, jobId, from, profileId, profileLabel, vis
     onReassessUnavailable: jobUrl ? assessByUrl : undefined,
   });
   const tailored = useTailoredResume({ jobIdentity: job ? job.id : null, jobUrl, profileId });
+
+  // uat-bug-018: a tailored resume stored for this job makes its state
+  // "Resume tailored" at once, on this page and on its card.
+  const tailoredJobId = job && tailored.stored ? job.id : null;
+  useEffect(() => {
+    if (tailoredJobId && onTailored) {
+      onTailored(tailoredJobId);
+    }
+  }, [tailoredJobId, onTailored]);
 
   if (!job) {
     return (
@@ -298,6 +334,8 @@ export default function JobPage({ job, jobId, from, profileId, profileLabel, vis
     onClick: handleTailor,
   };
   const actionsBusy = Boolean(answerDrafts.busy) || tailored.tailoring;
+  const pasted = Boolean(job.quick && job.quick.job && job.quick.job.fetch_kind === "pasted" && job.status === "on_demand");
+  const state = job.state || jobStateFor(job, null, tailoredJobId ? [tailoredJobId] : null);
 
   return (
     <div className="job-page">
@@ -354,11 +392,11 @@ export default function JobPage({ job, jobId, from, profileId, profileLabel, vis
               Open posting ↗
             </a>
           )}
-          {posting.url && <MarkApplied normalizedUrl={posting.normalized_url} applications={applications} onRecorded={handleApplicationRecorded} />}
         </div>
+        <JobStateActions jobId={job.id} state={state} pasted={pasted} onRecorded={handleApplicationRecorded} />
       </section>
 
-      <JobDescription posting={posting} pasted={Boolean(job.quick && job.quick.job && job.quick.job.fetch_kind === "pasted" && job.status === "on_demand")} />
+      <JobDescription posting={posting} pasted={pasted} />
 
       <section className="panel">
         <h3>Requirements</h3>
@@ -369,7 +407,6 @@ export default function JobPage({ job, jobId, from, profileId, profileLabel, vis
             controller={answerDrafts}
             tailor={tailorAction}
             showVerdict={false}
-            statusStyle={statusStyleFrom(window.location.search)}
           />
         ) : (
           <>

@@ -11,6 +11,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 from ..contracts import ATSProvider, FindJobsContractError, RunRequest
+from ..job_state import AssessmentFact, JobStateSources
 from .server import ConfigMissingError, _RunBoundaryError, _logger
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
@@ -64,6 +65,63 @@ def attach_h1b(rows: list[object], index: dict[tuple[ATSProvider, str], CompanyH
         aggregate = index.get((provider, token.lower()))
         if aggregate is not None:
             row["h1b"] = aggregate.to_json()
+
+
+def _verdict_of(result: object) -> str | None:
+    verdict = result.get("verdict") if isinstance(result, dict) else None
+    return verdict if isinstance(verdict, str) else None
+
+
+def run_assessment_facts(body: dict[str, object], run_started_at: str | None) -> dict[str, AssessmentFact]:
+    """This run's assessment of each posting, by ``normalized_url``.
+
+    The same choice ``boardRows.js`` makes for a card: the run's own
+    assessment, else the earlier one the run carried forward (dated by the
+    run it came from, or this run when that is unknown).
+    """
+
+    facts: dict[str, AssessmentFact] = {}
+    for entry in body.get("carried_forward_assessments") or ():
+        if not isinstance(entry, dict) or not isinstance(entry.get("normalized_url"), str):
+            continue
+        from_run_date = entry.get("from_run_date")
+        at = from_run_date if isinstance(from_run_date, str) and from_run_date else run_started_at
+        facts[entry["normalized_url"]] = AssessmentFact(at=at, verdict=_verdict_of(entry.get("result")))
+    payload = body.get("payload")
+    for entry in (payload.get("assessments") if isinstance(payload, dict) else None) or ():
+        posting = entry.get("posting") if isinstance(entry, dict) else None
+        if isinstance(posting, dict) and isinstance(posting.get("normalized_url"), str):
+            facts[posting["normalized_url"]] = AssessmentFact(at=run_started_at, verdict=_verdict_of(entry))
+    return facts
+
+
+def attach_job_states(
+    body: dict[str, object],
+    *,
+    sources: JobStateSources,
+    profile_id: str | None,
+    run_started_at: str | None,
+) -> None:
+    """uat-bug-018: add ``job_state`` to each results row.
+
+    ``rows[].job_state`` is ``{state, since, next_events}`` for the row's
+    posting and the resume identity ``profile_id`` (``job_state.py`` has the
+    states and their precedence). Added to the served JSON only, next to the
+    sealed ``posting``/``outcome`` pair, like ``rows[].h1b``.
+    """
+
+    payload = body.get("payload")
+    rows = payload.get("rows") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return
+    facts = run_assessment_facts(body, run_started_at)
+    for row in rows:
+        posting = row.get("posting") if isinstance(row, dict) else None
+        identity = posting.get("normalized_url") if isinstance(posting, dict) else None
+        if not isinstance(identity, str) or not identity:
+            continue
+        state = sources.state_for(identity, profile_id=profile_id, run_assessment=facts.get(identity))
+        row["job_state"] = state.to_json()
 
 
 class RunRoutesMixin:
@@ -249,7 +307,47 @@ class RunRoutesMixin:
                 attach_h1b(payload_json["rows"], _catalog_h1b_index())
         except Exception:  # noqa: BLE001 - display-only enrichment must never break /results
             _logger.exception("H-1B join skipped for run %s", run_id)
+        # uat-bug-018: ``rows[].job_state``, derived from the application
+        # events, the tailored-resume store and the latest assessment (this
+        # run's, or the quick store's when it is newer) for the gig's
+        # selected profile. The events read takes no journal writer lock.
+        try:
+            self._attach_results_job_states(run_id, body)
+        except Exception:  # noqa: BLE001 - display-only enrichment must never break /results
+            _logger.exception("job state skipped for run %s", run_id)
         self._write_json(HTTPStatus.OK, body)
+
+    def _attach_results_job_states(self, run_id: str, body: dict[str, object]) -> None:
+        from ....canonical import parse_json_bytes
+        from ....workpad import resolve_workpad
+        from ...profile_records import ProfileRecordError, selected_profile
+
+        backend = self._backend
+        target = getattr(backend, "target", None)
+        if target is None:
+            return
+        resolved = resolve_workpad(
+            home_root=backend.home_root, requested_target=target, gig_id=None, allow_semantic_state=True
+        )
+        try:
+            selection = selected_profile(resolved, home_root=backend.home_root, target=target)
+        except ProfileRecordError:
+            selection = None
+        if selection is None:
+            return  # no resume identity to read the stores for
+        run_started_at: str | None = None
+        try:
+            details = parse_json_bytes((resolved.path / "runs" / run_id / "run-details.json").read_bytes())
+            if isinstance(details, dict) and isinstance(details.get("started_at"), str):
+                run_started_at = details["started_at"]
+        except (OSError, ValueError):
+            run_started_at = None
+        attach_job_states(
+            body,
+            sources=JobStateSources(home_root=backend.home_root, target=target, resolved=resolved),
+            profile_id=selection.profile_id,
+            run_started_at=run_started_at,
+        )
 
     def _handle_get_run_progress(self, run_id: str) -> None:
         try:

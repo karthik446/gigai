@@ -2,7 +2,7 @@ import MatrixBadge from "./MatrixBadge.jsx";
 import RequirementActions from "./RequirementActions.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { placeQuestions } from "../answersModel.js";
-import { CLASS_LABELS_SHORT, DEFAULT_STATUS_STYLE, classLabel, requirementStatusLabel, sortMatrixRows, statusLabel } from "../jobModel.js";
+import { requirementStatusLabel, sortMatrixRows } from "../jobModel.js";
 
 // One open question, inside the requirement row it settles (uat-batch1 N5):
 // the question's own words and an answer box. The id is a normalized token
@@ -32,39 +32,11 @@ function QuestionBox({ question, state, value, onChange, disabled }) {
   );
 }
 
-// uat-batch1 (N8): the three renderings of a row's class + status.
-//   keyvalue  one chip, "Must-have: Met" (ships)
-//   columns   two columns, Type | Status
-//   badge     the status chip with the class beside it ("met  hard"), what
-//             the operator saw in UAT
-function StatusCells({ row, statusStyle }) {
+// uat-batch1 (N8, operator decision: option A): a row's class and status
+// are one chip, "Must-have: Met" / "Can ask: Unclear" / "Bonus: Met".
+function StatusCells({ row }) {
   if (!row) {
-    return statusStyle === "columns" ? (
-      <>
-        <td className="muted">–</td>
-        <td className="muted">–</td>
-      </>
-    ) : (
-      <td className="muted">–</td>
-    );
-  }
-  if (statusStyle === "columns") {
-    return (
-      <>
-        <td className="req-type">{classLabel(row.class) || <span className="muted">–</span>}</td>
-        <td>
-          <span className={`status-badge ${row.status}`}>{statusLabel(row.status)}</span>
-        </td>
-      </>
-    );
-  }
-  if (statusStyle === "badge") {
-    return (
-      <td>
-        <MatrixBadge status={row.status} />
-        {row.class && <span className="req-class">{CLASS_LABELS_SHORT[row.class] || row.class}</span>}
-      </td>
-    );
+    return <td className="muted">–</td>;
   }
   return (
     <td>
@@ -104,7 +76,6 @@ export default function AssessmentBody({
   controller,
   tailor,
   showVerdict = true,
-  statusStyle = DEFAULT_STATUS_STYLE,
 }) {
   const own = useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable });
   const answers = controller || own;
@@ -149,19 +120,12 @@ export default function AssessmentBody({
         />
       )}
 
-      <table className="matrix-table" data-status-style={statusStyle}>
+      <table className="matrix-table">
         <thead>
           <tr>
             <th>Requirement</th>
             <th>Resume evidence</th>
-            {statusStyle === "columns" ? (
-              <>
-                <th>Type</th>
-                <th>Status</th>
-              </>
-            ) : (
-              <th>Status</th>
-            )}
+            <th>Status</th>
           </tr>
         </thead>
         <tbody>
@@ -182,7 +146,7 @@ export default function AssessmentBody({
                   )}
                   {boxes(questions)}
                 </td>
-                <StatusCells row={row} statusStyle={statusStyle} />
+                <StatusCells row={row} />
               </tr>
             );
           })}
@@ -191,7 +155,7 @@ export default function AssessmentBody({
             <tr key={`question-${question.question_id}`} className="has-question">
               <td>{question.requirement || <span className="muted">Other question</span>}</td>
               <td>{boxes([question])}</td>
-              <StatusCells row={null} statusStyle={statusStyle} />
+              <StatusCells row={null} />
             </tr>
           ))}
         </tbody>

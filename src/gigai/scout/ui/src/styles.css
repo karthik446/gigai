@@ -739,32 +739,6 @@ table.matrix-table td {
   margin-top: 2px;
 }
 
-.pipeline-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 10px 0;
-}
-
-.pipeline-stage {
-  flex: 1;
-  min-width: 100px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
-  text-align: center;
-}
-
-.pipeline-stage .stage-count {
-  font-size: 1.3rem;
-  font-weight: 700;
-}
-
-.pipeline-stage .stage-label {
-  font-size: 0.75rem;
-  color: var(--muted);
-}
-
 .action-item {
   display: flex;
   justify-content: space-between;
@@ -1108,13 +1082,11 @@ table.data-table th {
 .matrix-table tr.has-question > td { background: var(--warn-bg); }
 .matrix-table tr.has-question > td:first-child { box-shadow: inset 3px 0 0 var(--warn); font-weight: 600; }
 .matrix-table ul { margin: 0; padding-left: 18px; }
-.matrix-table .req-type { white-space: nowrap; }
 .matrix-table .status-badge { white-space: nowrap; }
 .row-question { margin-top: 8px; max-width: 640px; }
 .row-question label { display: block; font-weight: 600; color: var(--text); margin-bottom: 4px; }
 .row-question .text-input { background: var(--panel); }
 
-.req-class { margin-left: 6px; font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
 .question-requirement { font-size: 0.8rem; margin-top: 2px; }
 .question-prior { font-size: 0.78rem; margin: 4px 0 0; }
 .reassess-progress { display: inline-flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--muted); }
@@ -1533,3 +1505,31 @@ table.data-table th {
 .not-imported-line,
 .search-line { margin: 0.35rem 0 0; font-size: 0.88rem; }
 .search-line:first-of-type { margin-top: 0.5rem; }
+
+/* uat-bug-018: a job's state. The filter chips carry a count; the state
+   chip says a job's state past its verdict (tailored, applied and beyond);
+   the job page's state row holds the chip and the next events' buttons. */
+.chip-count { margin-left: 4px; font-size: 0.75rem; font-weight: 700; opacity: 0.75; }
+.state-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.74rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+  background: var(--chip-bg);
+  color: var(--muted);
+}
+.state-chip.state-tailored,
+.state-chip.state-applied,
+.state-chip.state-interview_scheduled { background: var(--info-bg); color: var(--info); }
+.state-chip.state-matched,
+.state-chip.state-offer_received { background: var(--ok-bg); color: var(--ok); }
+.state-chip.state-needs_answers { background: var(--warn-bg); color: var(--warn); }
+.state-chip.state-not_a_match,
+.state-chip.state-rejected { background: var(--danger-bg); color: var(--danger); }
+.job-state { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.job-state-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.job-state-row .chip-group-label { margin-bottom: 0; }
+.job-state-note { margin: 8px 0 0; }

@@ -1,15 +1,17 @@
 import ProfileSwitcher from "./ProfileSwitcher.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
+import { needAnswersLabel } from "../jobStateModel.js";
 import { JOBS_HASH, NAV_VIEWS, SETTINGS_HASH, navViewFor, routeFor } from "../routing.js";
 
 // Q4a-nav: the one persistent top bar every page shows.
 //
-//   Scout | Jobs | Assessments | Questions (N) | Applications | Runs | Dark mode | <profile ▾> | ⚙
+//   Scout | Jobs (N) | Assessments (N) | Applications | Runs | Dark mode | <profile ▾> | ⚙
 //
 // Every link is a plain <a href="#/…"> from routing.js's ROUTES (the single
-// route table), so back/forward work. The Questions badge is
-// usePendingQuestions' count (GET /api/assessments?verdict=pending_user_answers
-// minus GET /api/answers), never a client-side guess.
+// route table), so back/forward work. uat-bug-018: the count beside Jobs
+// and Assessments is how many of that list's jobs are in the state "Needs
+// your answers" (`needAnswers` {jobs, assessments}, counted by FindJobsView
+// over the same jobs its grids show); the Questions link is gone.
 //
 // uat-batch1 (N1/N2): desktop only (a 13in+ laptop, operator decision
 // 2026-09-27), so the "Menu" button and its sheet are gone: one flex row.
@@ -23,12 +25,13 @@ function GearIcon() {
   );
 }
 
-export default function TopBar({ currentView, questionsCount, profiles, selectedProfileId, onSelectProfile, profilesLoading, profilesError }) {
+export default function TopBar({ currentView, needAnswers, profiles, selectedProfileId, onSelectProfile, profilesLoading, profilesError }) {
   const activeNav = navViewFor(currentView);
 
   const links = NAV_VIEWS.map((view) => {
     const route = routeFor(view);
-    const badge = view === "questions" && questionsCount > 0 ? questionsCount : null;
+    const waiting = needAnswers && (view === "jobs" || view === "assessments") ? needAnswers[view] : 0;
+    const badge = waiting > 0 ? waiting : null;
     return (
       <a
         key={view}
@@ -39,7 +42,7 @@ export default function TopBar({ currentView, questionsCount, profiles, selected
       >
         {route.label}
         {badge !== null && (
-          <span className="nav-badge" aria-label={`${badge} open question${badge === 1 ? "" : "s"}`}>
+          <span className="nav-badge" data-role="need-answers" title={needAnswersLabel(badge)} aria-label={needAnswersLabel(badge)}>
             {badge}
           </span>
         )}

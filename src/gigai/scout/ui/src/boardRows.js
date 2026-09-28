@@ -56,6 +56,9 @@ export function rowsFromResults(payload) {
       // Q4b: rows[].h1b {approvals, fiscal_years} (the company catalog's
       // H-1B join, Q4b-data) -- null when the row does not carry it.
       h1b: row.h1b || null,
+      // uat-bug-018: rows[].job_state {state, since, next_events}, the
+      // server's derived state (jobStateModel.js) -- null on a live row.
+      jobState: row.job_state || null,
     };
   });
 }

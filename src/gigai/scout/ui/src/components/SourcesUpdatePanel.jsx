@@ -73,10 +73,11 @@ function ProgressBar({ progress }) {
 }
 
 // uat-batch2 (N11-C): Settings' "Update sources". One button; while an
-// update runs it is off and the bar follows boards.done / boards.total
+// update runs it is off and the bar follows boards.checked / boards.total
 // (indeterminate while total is still 0). When it ends the line is the
-// server's own summary; a partial update says "Run again to continue" and
-// how many boards are left, a failed one shows the server's error message.
+// server's own summary; a partial update says how many boards have never
+// been checked, "Run again to continue" and how many boards are left; a
+// failed one shows the server's error message.
 export default function SourcesUpdatePanel() {
   const { status, unavailable, read } = useSourcesStatus();
   const [starting, setStarting] = useState(false);
@@ -143,6 +144,11 @@ export default function SourcesUpdatePanel() {
         <div className={`callout ${result.tone === "ok" ? "success" : result.tone === "danger" ? "danger" : "warn"}`} data-role="sources-result">
           <strong>{result.line}</strong>
           {result.detail && <div className="sources-detail">{result.detail}</div>}
+          {result.backlog && (
+            <div className="sources-detail" data-role="sources-backlog">
+              {result.backlog}
+            </div>
+          )}
           {result.next && <div className="sources-next">{result.next}</div>}
         </div>
       )}
