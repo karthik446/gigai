@@ -27,7 +27,14 @@ Storage: ``<home>/scout/<project_id>/quick_assess/<profile_id|ephemeral>/
 wins, ``created_at`` kept from the first write (the same plain atomic-write
 JSON shape ``interview_prep/storage.py`` uses; operator answer 2: re-
 assessments live here, never in ``runs/*/outputs``).  The stored file is the
-``AssessResponse`` JSON: it never contains resume text or the full job text.
+``AssessResponse`` JSON: it never contains resume text or PASTED job text.
+The text fetched from a public posting URL is stored with it as
+``posting_text`` (uat-bug-014), so the job page has the posting to show.
+
+Jev (uat-bug-015): when a Jev key exists the posting also gets ONE Jev score
+through ``jev_rank.rank_postings`` -- the same cache, cost cap and fail-open
+contract find-jobs uses -- stored as ``rank_score``; when there is none,
+``rank_skip_reason`` says why.  See ``_jev_rank``.
 
 Timeouts (operator answer 1): the call is synchronous.  An adapter timeout
 (the codex CLI's 120 s default, the local Ollama transport's own timeout)
@@ -44,9 +51,10 @@ fake model call (the fixture ``MockTransport`` has no socket to time out).
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -65,9 +73,11 @@ from .assessment_core import assess_once
 from .experience_answers import read_answers
 from .find_jobs.assess_contracts import (
     AssessmentBody,
+    AssessPreferences,
     AssessRequest,
     AssessResponse,
     ResolvedJob,
+    ResolvedResume,
     VerdictHistoryEntry,
 )
 from .find_jobs.contracts import (
@@ -79,6 +89,7 @@ from .find_jobs.contracts import (
     UsageBlock,
 )
 from .find_jobs.discovery.storage import atomic_write, project_id
+from .find_jobs.jev_contracts import RankScore
 from .find_jobs.job_input import job_fetch_client, resolve_job
 from .find_jobs.resume_input import resolve_preferences, resolve_profile, resolve_resume, resume_for_profile
 
@@ -92,6 +103,10 @@ _SAFE_RESUME_KEY = re.compile(r"\A[A-Za-z0-9_-]+\Z")
 _PRODUCER_CALLABLE = "scout.assess"
 _PRODUCER_VERSION = "1"
 _PRODUCER_ACTOR = "scout-assess"
+
+_JEV_COST_CAP_ENV = "GIGAI_JEV_COST_CAP_USD"
+
+_logger = logging.getLogger("gigai.scout.server")
 
 #: Exception types that mean "the model call ran out of time" when found
 #: anywhere in a raised adapter error's cause chain.
@@ -301,6 +316,105 @@ def _history_with(previous: AssessResponse | None, entry: VerdictHistoryEntry) -
         )
     entries.append(entry)
     return tuple(entries)
+
+
+# --- Jev score (uat-bug-015) ----------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _JevPosting:
+    """The slice of a posting row ``jev_rank.rank_postings`` reads.
+
+    A quick-assessed job is not an acquired ``PostingRow`` (a pasted one has
+    no URL or provider), so it is handed to ``rank_postings`` as this
+    instead; ``normalized_url`` is the ``job_identity``.
+    """
+
+    normalized_url: str
+    content_sha256: str
+    company: str
+    title: str
+    location: str
+    text: str | None = None
+
+
+def _jev_cost_cap_usd() -> float:
+    """``GIGAI_JEV_COST_CAP_USD`` when set, else the default (the acquire node's own rule)."""
+
+    from .find_jobs.jev_rank import DEFAULT_COST_CAP_USD
+
+    raw = os.environ.get(_JEV_COST_CAP_ENV)
+    try:
+        return float(raw) if raw else DEFAULT_COST_CAP_USD
+    except ValueError:
+        return DEFAULT_COST_CAP_USD
+
+
+def _jev_rank(
+    job: ResolvedJob,
+    resume: ResolvedResume,
+    preferences: AssessPreferences,
+    *,
+    home_root: Path,
+    target: Path,
+) -> tuple[RankScore | None, str | None]:
+    """``(rank_score, rank_skip_reason)`` for one quick-assessed job; exactly one is set.
+
+    One ``jev_rank.rank_postings`` call for one row: cache-first, under the
+    cost cap, and fail open -- this never raises, so a Jev problem can never
+    fail the assessment. The cache key is find-jobs' own (``profile_id`` +
+    the pinned resume's ``revision_id``).
+
+    Operator decision (2026-09-27): only PROFILE resumes -- the ones
+    find-jobs already sends to Jev -- are scored. A pasted (ephemeral)
+    resume goes to the chosen assessment model and nowhere else, so it is
+    skipped here with ``"ephemeral_resume"``.
+    """
+
+    try:
+        from .find_jobs import bindings, jev_client, market_acquisition
+        from .find_jobs.jev_rank import RankPreferences, rank_postings
+
+        if not jev_client.has_api_key(home_root=home_root):
+            return None, "no_key"
+        if resume.pinned is None:
+            return None, "ephemeral_resume"
+        if not job.title.strip() and not job.company.strip():
+            return None, "no_title_or_company"
+        # Inert unless GIGAI_SCOUT_FIND_JOBS_TEST_JEV=1 (same reason as
+        # ``_resolve_binding``'s model seam: a server that never started a
+        # run has not installed it yet).
+        bindings._patch_test_jev_transport()
+        http_client = market_acquisition._jev_http_client()
+        try:
+            scores, _total_cost, capped = rank_postings(
+                (_JevPosting(job.job_identity, job.text_sha256, job.company, job.title, job.location, job.text),),  # type: ignore[arg-type]
+                client=jev_client.JevClient(jev_client.require_api_key(home_root=home_root), http_client),
+                resume_text=resume.text,
+                prefs=RankPreferences(
+                    target_titles=tuple(preferences.titles or ()),
+                    countries=tuple(preferences.countries or ()),
+                    visa_sponsorship_required=bool(preferences.visa_sponsorship_required),
+                ),
+                profile_id=resume.profile_id,
+                resume_revision_id=resume.pinned.revision_id,
+                home_root=home_root,
+                target=target,
+                cost_cap_usd=_jev_cost_cap_usd(),
+            )
+        finally:
+            http_client.close()
+        score = scores[0]
+        if score.score is None:
+            return None, "cost_cap" if capped else "error"
+        # A cache hit is keyed by content, not URL: the same posting text
+        # assessed under another URL must still carry THIS job's identity.
+        if score.normalized_url != job.job_identity:
+            score = replace(score, normalized_url=job.job_identity)
+        return score, None
+    except Exception as exc:  # noqa: BLE001 - fail open: Jev never fails an assessment
+        _logger.warning("jev quick-assess score skipped: %s", type(exc).__name__)
+        return None, "error"
 
 
 # --- the assessment ----------------------------------------------------------------
@@ -523,6 +637,7 @@ def run_quick_assessment(
     if trigger is None:
         trigger = TRIGGER_ASSESS if previous is None else TRIGGER_REASSESS
     history = _history_with(previous, VerdictHistoryEntry(at=assessed_at, verdict=body.verdict, trigger=trigger))
+    rank_score, rank_skip_reason = _jev_rank(job, resume, preferences, home_root=home_root, target=target)
     response = AssessResponse(
         job=job,
         resume=resume,
@@ -535,6 +650,9 @@ def run_quick_assessment(
         stored_path=os.fspath(path),
         updated_at=assessed_at,
         history=history,
+        posting_text=None if job.fetch_kind == "pasted" else job.text,
+        rank_score=rank_score,
+        rank_skip_reason=rank_skip_reason,
     )
     atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
     return response

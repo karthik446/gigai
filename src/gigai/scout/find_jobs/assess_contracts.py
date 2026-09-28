@@ -38,11 +38,20 @@ from .contracts import (
     _string,
     _strings,
 )
+from .jev_contracts import RankScore
 
 #: ``ResolvedJob.fetch_kind`` values, in the order ``resolve_job`` tries them.
 FETCH_KINDS: tuple[str, ...] = ("pasted", "ats_single", "ats_board", "generic")
 
 _TEXT_IDENTITY_PREFIX = "text:"
+
+#: ``AssessResponse.rank_skip_reason`` values (uat-bug-015): why a quick
+#: assessment carries no Jev score.  ``no_key``: no Jev key is configured;
+#: ``ephemeral_resume``: the resume was pasted for this call (only profile
+#: resumes are sent to Jev); ``no_title_or_company``: the job names neither,
+#: so Jev has nothing to score; ``cost_cap``: the Jev cost cap was already
+#: spent; ``error``: the Jev call failed (the assessment itself is unaffected).
+RANK_SKIP_REASONS: tuple[str, ...] = ("no_key", "ephemeral_resume", "no_title_or_company", "cost_cap", "error")
 
 
 def _optional_strings(value: object, name: str) -> tuple[str, ...] | None:
@@ -450,10 +459,11 @@ class AssessResponse(_Contract):
     """One quick assessment: what was assessed (identities only), the effective
     preferences, the model's answer, and where it is stored.
 
-    Never carries resume text or full job text: ``job`` is serialized WITHOUT
-    its ``text`` field (``text_sha256`` stays), and ``ResolvedResume`` never
-    serializes its text at all.  ``from_json`` therefore yields an empty
-    ``job.text``.
+    Never carries resume text, and never PASTED job text: ``job`` is
+    serialized WITHOUT its ``text`` field (``text_sha256`` stays), and
+    ``ResolvedResume`` never serializes its text at all.  ``from_json``
+    therefore yields an empty ``job.text``.  The one posting text it does
+    carry is ``posting_text``: the text fetched from a PUBLIC posting URL.
     """
 
     schema_version: ClassVar[str] = "scout-assess-response:1"
@@ -480,6 +490,19 @@ class AssessResponse(_Contract):
     # a stored file written before this field still round-trips
     # byte-identically; ``from_json`` reads a missing key as ``()``.
     history: tuple[VerdictHistoryEntry, ...] = ()
+    # uat-bug-014 (v0.1.9, additive): the full text fetched from the PUBLIC
+    # posting URL (what a run row carries as ``posting.text``), so the job
+    # page can show its excerpt. ``None`` for pasted job text (never echoed
+    # or stored) and for a file written before this field. Omitted from JSON
+    # when ``None``.
+    posting_text: str | None = None
+    # uat-bug-015 (v0.1.9, additive): this posting's Jev score in the shape
+    # run results carry in ``rank_scores`` (``normalized_url`` is the
+    # ``job_identity``), or why there is none (:data:`RANK_SKIP_REASONS`).
+    # At most one of the two is set; both are ``None`` for a file written
+    # before these fields. Each is omitted from JSON when ``None``.
+    rank_score: RankScore | None = None
+    rank_skip_reason: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -488,6 +511,12 @@ class AssessResponse(_Contract):
             or self.preferences.countries is None
         ):
             _fail("invalid_value", "assess_response.preferences must carry the effective values, never None")
+        if self.posting_text is not None and self.job.fetch_kind == "pasted":
+            _fail("invalid_value", "assess_response.posting_text is never set for pasted job text")
+        if self.rank_skip_reason is not None and self.rank_skip_reason not in RANK_SKIP_REASONS:
+            _fail("bad_enum", "assess_response.rank_skip_reason has an unsupported value")
+        if self.rank_score is not None and self.rank_skip_reason is not None:
+            _fail("invalid_value", "assess_response carries a rank_score or a rank_skip_reason, never both")
 
     def to_json(self) -> dict[str, object]:
         job = self.job.to_json()
@@ -508,6 +537,12 @@ class AssessResponse(_Contract):
             value["updated_at"] = self.updated_at
         if self.history:
             value["history"] = [entry.to_json() for entry in self.history]
+        if self.posting_text is not None:
+            value["posting_text"] = self.posting_text
+        if self.rank_score is not None:
+            value["rank_score"] = self.rank_score.to_json()
+        if self.rank_skip_reason is not None:
+            value["rank_skip_reason"] = self.rank_skip_reason
         return value
 
     @classmethod
@@ -518,7 +553,7 @@ class AssessResponse(_Contract):
                 "schema_version", "job", "resume", "preferences", "result", "producer", "usage",
                 "instructions_digest", "created_at", "stored_path",
             ),
-            ("updated_at", "history"),
+            ("updated_at", "history", "posting_text", "rank_score", "rank_skip_reason"),
             "assess_response",
         )
         if value["schema_version"] != cls.schema_version:
@@ -536,6 +571,17 @@ class AssessResponse(_Contract):
             if type(value["history"]) is not list:
                 _fail("wrong_type", "assess_response.history must be an array")
             history = tuple(VerdictHistoryEntry.from_json(item) for item in value["history"])
+        posting_text = (
+            _string(value["posting_text"], "assess_response.posting_text", nonempty=False)
+            if "posting_text" in value
+            else None
+        )
+        rank_score = RankScore.from_json(value["rank_score"]) if "rank_score" in value else None
+        rank_skip_reason = (
+            _string(value["rank_skip_reason"], "assess_response.rank_skip_reason")
+            if "rank_skip_reason" in value
+            else None
+        )
         return cls(
             job=ResolvedJob.from_json({**job, "text": ""}),
             resume=ResolvedResume.from_json(value["resume"]),
@@ -548,6 +594,9 @@ class AssessResponse(_Contract):
             stored_path=_string(value["stored_path"], "stored_path"),
             updated_at=updated_at,
             history=history,
+            posting_text=posting_text,
+            rank_score=rank_score,
+            rank_skip_reason=rank_skip_reason,
         )
 
 
@@ -573,6 +622,7 @@ class AssessmentsListResponse(_Contract):
 
 __all__ = [
     "FETCH_KINDS",
+    "RANK_SKIP_REASONS",
     "AssessJobInput",
     "AssessPreferences",
     "AssessRequest",

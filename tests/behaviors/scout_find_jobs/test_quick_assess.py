@@ -141,6 +141,15 @@ def fx(tmp_path: Path) -> ProfileFixtureGig:
     return build_gig_with_resume(tmp_path, resume_text=_RESUME)
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_jev_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """uat-bug-015: quick assess scores with Jev when a key exists; an
+    exported ``JEV_API_KEY`` must never turn these tests into live Jev calls
+    (the Jev path has its own file, ``test_quick_assess_jev.py``)."""
+
+    monkeypatch.delenv("JEV_API_KEY", raising=False)
+
+
 def _install(monkeypatch: pytest.MonkeyPatch, outputs: list[object], **port_kwargs) -> tuple[_ScriptedBinding, list[str]]:
     """Patch the C1 seam; return the binding and the adapter-target names it was asked for."""
 
@@ -391,6 +400,67 @@ def test_job_url_uses_the_fixture_transport_and_fetch_failure_is_typed(fx: Profi
     with pytest.raises(QuickAssessError) as excinfo:
         _run(fx, AssessRequest(job=AssessJobInput(job_url="https://nowhere.example.test/jobs/1")))
     assert excinfo.value.code == "job_fetch_failed"
+
+
+def test_fetched_public_posting_text_is_stored_with_the_result(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """uat-bug-014: the text fetched from a public posting URL is stored and
+    listed (the job page's description); ``job.text`` is still never serialized."""
+
+    monkeypatch.setenv("GIGAI_SCOUT_FIND_JOBS_TEST_HTTP", "1")
+    _install(monkeypatch, [_GOOD_MATCH])
+
+    response = _run(fx, AssessRequest(job=AssessJobInput(job_url="https://boards.greenhouse.io/acme/jobs/101")))
+
+    assert response.job.fetch_kind == "ats_single"
+    assert response.posting_text == response.job.text == "Build reliable Python services."
+    payload = json.loads(Path(response.stored_path).read_text(encoding="utf-8"))
+    assert payload == response.to_json()
+    assert payload["posting_text"] == "Build reliable Python services."
+    assert "text" not in payload["job"] and payload["job"]["text_sha256"] == response.job.text_sha256
+    # The resume is still never stored.
+    assert _RESUME.decode("utf-8").splitlines()[2] not in json.dumps(payload)
+
+    listed = list_quick_assessments(fx.home_root, fx.target)
+    assert [item.posting_text for item in listed] == ["Build reliable Python services."]
+    assert listed[0].to_json() == payload
+    found = quick_assess.find_quick_assessment_by_job_identity(fx.home_root, fx.target, response.job.job_identity)
+    assert found is not None and found.posting_text == "Build reliable Python services."
+
+
+def test_pasted_posting_text_is_still_never_stored(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, [_GOOD_MATCH])
+
+    response = _run(fx, _pasted())
+
+    assert response.posting_text is None
+    payload = json.loads(Path(response.stored_path).read_text(encoding="utf-8"))
+    assert "posting_text" not in payload and "posting_text" not in response.to_json()
+    assert _POSTING not in json.dumps(payload)
+
+
+def test_stored_result_written_before_the_text_and_jev_fields_still_loads(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A quick-assess file from before uat-bug-014/015 has none of
+    ``posting_text``/``rank_score``/``rank_skip_reason``: it lists, reads back
+    with all three ``None``, and re-serializes byte-identically."""
+
+    monkeypatch.setenv("GIGAI_SCOUT_FIND_JOBS_TEST_HTTP", "1")
+    _install(monkeypatch, [_GOOD_MATCH])
+    response = _run(fx, AssessRequest(job=AssessJobInput(job_url="https://boards.greenhouse.io/acme/jobs/101")))
+    stored = Path(response.stored_path)
+    old = {
+        key: value
+        for key, value in json.loads(stored.read_text(encoding="utf-8")).items()
+        if key not in {"posting_text", "rank_score", "rank_skip_reason"}
+    }
+    old_bytes = json.dumps(old, indent=2, sort_keys=True).encode("utf-8")
+    stored.write_bytes(old_bytes)
+
+    listed = list_quick_assessments(fx.home_root, fx.target)
+
+    assert len(listed) == 1
+    assert (listed[0].posting_text, listed[0].rank_score, listed[0].rank_skip_reason) == (None, None, None)
+    assert listed[0].result == response.result and listed[0].job.job_identity == response.job.job_identity
+    assert json.dumps(listed[0].to_json(), indent=2, sort_keys=True).encode("utf-8") == old_bytes
 
 
 def test_empty_pasted_job_text_is_job_text_unavailable(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
