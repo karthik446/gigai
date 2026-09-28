@@ -26,7 +26,12 @@ from urllib.parse import parse_qsl, urlsplit
 import httpx
 
 from ...canonical import canonical_json_bytes, digest_imported_bytes
-from ..acquisition_records import import_public_rows
+from ..acquisition_records import (
+    MAX_PUBLIC_IMPORT_ROWS,
+    import_public_rows,
+    preflight_public_import,
+    public_row_refusal,
+)
 from .ats_board_clients import BoardCache, BoardFetchIndex, BoardFetchStats
 from .contracts import (
     ATSBoardClient,
@@ -58,14 +63,20 @@ from .contracts import (
     parse_board_url,
 )
 from .filters import exclusion_reason, location_mismatch_detail
-from .jev_rank import order_by_rank
 from .progress import ProgressWriter
-from .selection import select_for_assessment
+from .selection import rank_rows, select_for_assessment
 from ...workpad import ResolvedWorkpad, resolve_workpad
 
 # U26: cap on the total size of raw provider responses stored per run, so a
 # very large/unbounded response set can't fill the workpad disk unbounded.
 RAW_PAYLOAD_CAP_BYTES = 20 * 1024 * 1024
+
+# uat-bug-011: the most postings one run imports (and so seals, shows and
+# selects from). Below the journal's own bound, which is checked here, when
+# the module loads, rather than at the end of a run.
+IMPORT_ROW_CAP = 500
+if IMPORT_ROW_CAP > MAX_PUBLIC_IMPORT_ROWS:  # pragma: no cover - a constant mismatch
+    raise RuntimeError("IMPORT_ROW_CAP exceeds the public import journal bound")
 
 # Q2 (acquire at scale): the knobs for the ATS board fetch pass. Env vars so
 # an operator can tune a run without a config-contract change (the same
@@ -973,8 +984,8 @@ def _rank_candidates(
 
     Never raises -- every precondition (no key, no sealed run input, no
     readable resume, a Jev transport failure) degrades to ``()``, which
-    leaves ``candidates``' selection order exactly as it was before P6
-    (``order_by_rank`` is a no-op on an empty ``scores`` tuple). Cost cap:
+    leaves the import and selection rankings in date order, exactly as
+    before P6 (``selection.rank_rows`` with no scores). Cost cap:
     ``GIGAI_JEV_COST_CAP_USD`` env var when set (plan section 8, answer 7),
     else ``jev_rank.DEFAULT_COST_CAP_USD``.
     """
@@ -1300,6 +1311,11 @@ def _acquire_node_body(
 ) -> AcquireOutput:
     started_at = time.monotonic()
     batch_id = _safe_batch_id(context.operation_key)
+    # uat-bug-011: what the journal import can refuse without seeing the rows
+    # (the workpad, the batch identity, a batch already bound) is refused
+    # here, before any source is fetched, not after a 19-minute board pass.
+    resolved = _resolved(context, home_root, target)
+    preflight_public_import(resolved=resolved, batch_id=batch_id)
     failures: list[FailureRow] = []
     rows: list[PostingRow] = list(input.rows)
     watchlist_refs: list[str] = []
@@ -1439,8 +1455,31 @@ def _acquire_node_body(
         kept_rows.append(row)
     rows = kept_rows
 
+    # uat-bug-011: the journal checks every row's shape (bounded text, a
+    # well-formed digest) and refuses the whole batch over one bad row.
+    # Check each row now and leave a refused one out as a failure row: one
+    # posting is lost, not the run.
+    public_rows: dict[str, dict[str, object]] = {}
+    shaped_rows: list[PostingRow] = []
+    for row in rows:
+        public = _public_row(row)
+        refusal = public_row_refusal(public)
+        if refusal is not None:
+            failures.append(
+                FailureRow(
+                    row.source_kind,
+                    row.query_key or "acquire",
+                    row.url if 0 < len(row.url) <= 4096 else None,
+                    refusal.code,
+                    "posting left out: the public import refuses its shape",
+                )
+            )
+            continue
+        public_rows[row.normalized_url] = public
+        shaped_rows.append(row)
+    rows = shaped_rows
+
     current = {row.normalized_url: _digest(row) for row in rows}
-    resolved = _resolved(context, home_root, target)
     previous = _prior_observations(resolved.path, batch_id)
     url_diff = diff_url_sets(previous, current)
     added = {item.url for item in url_diff.added}
@@ -1471,9 +1510,10 @@ def _acquire_node_body(
     current_resume_revision_id = None if current_identity is None else current_identity.resume_revision_id
     current_profile_id = None if current_identity is None else current_identity.profile_id
     prior_assessments = _prior_assessments(resolved.path, context.run_id, default_profile_id=default_profile_id)
-    results: list[PostingRowResult] = []
+    outcomes: dict[str, RowOutcome] = {}
     candidates: list[PostingRow] = []
     carried_forward: dict[str, _PriorAssessment] = {}
+    over_import_cap = len(rows) > IMPORT_ROW_CAP
     for row in rows:
         if row.normalized_url in added:
             outcome = RowOutcome.NEW
@@ -1481,7 +1521,7 @@ def _acquire_node_body(
             outcome = RowOutcome.EDITED
         else:
             outcome = RowOutcome.UNCHANGED
-        results.append(PostingRowResult(row, outcome))
+        outcomes[row.normalized_url] = outcome
         is_candidate = outcome in {RowOutcome.NEW, RowOutcome.EDITED}
         if outcome is RowOutcome.UNCHANGED:
             prior = prior_assessments.get(row.normalized_url)
@@ -1503,24 +1543,24 @@ def _acquire_node_body(
                 carried_forward[row.normalized_url] = prior
             else:
                 is_candidate = True
-        if progress is not None:
+        if progress is not None and not over_import_cap:
             # B4: one line per posting kept after the B1 filter, appended as
             # acquire produces it -- this is what lets a card render before
-            # the whole run (or even the whole acquire step) finishes.
+            # the whole run (or even the whole acquire step) finishes. Over
+            # the import cap, which rows the run keeps is only known once
+            # they are ranked; their lines are written below.
             progress.posting_acquired(row.to_json(), outcome=outcome.value)
         if input.selection_rule is SelectionRule.NEW_OR_EDITED_ROLE_MATCH and is_candidate:
             candidates.append(row)
 
-    # P6: Jev pre-rank orders `candidates` before B2's diversity selection
-    # picks from them, so a strong-fit posting wins a company-cap tie over a
-    # weak one. Fails open by design (no key, no resume, any Jev error) --
-    # `_rank_candidates` never raises; an empty `rank_scores` leaves
-    # `candidates` in its original (pre-P6) order, so a run with no Jev key
-    # behaves exactly as it did before this packet. `rank_scores` is sealed
-    # onto `AcquireOutput` below (additive) so assess's own twin recompute
-    # (`proposal_execution.py`'s eligible_postings ordering) can reuse the
-    # SAME scores rather than re-calling Jev -- the two orderings can never
-    # disagree, and a re-assess never re-spends.
+    # P6: Jev pre-rank scores `candidates`. Fails open by design (no key, no
+    # resume, any Jev error) -- `_rank_candidates` never raises; an empty
+    # `rank_scores` leaves every ranking below in date order, so a run with
+    # no Jev key behaves exactly as it did before P6. `rank_scores` is
+    # sealed onto `AcquireOutput` below (additive) so assess's own twin
+    # recompute (`proposal_execution.py`) reuses the SAME scores rather than
+    # re-calling Jev -- the two selections can never disagree, and a
+    # re-assess never re-spends.
     rank_scores = _rank_candidates(
         candidates,
         resolved=resolved,
@@ -1530,18 +1570,51 @@ def _acquire_node_body(
         resume_revision_id=current_resume_revision_id,
         home_root=home_root,
     )
-    candidates = list(order_by_rank(tuple(candidates), rank_scores))
+
+    # uat-bug-011 (P0, UAT N14): a full-catalog run matched 7,426 postings,
+    # more than 512 of them passed every filter above, and the journal
+    # import refused the whole batch at the very end. The run's row set is
+    # now bounded here: the best `IMPORT_ROW_CAP` rows (`rank_rows`: Jev
+    # score, then newest -- the same ranking the selection below uses) are
+    # the run. The sealed rows, the progress postings, the selection and the
+    # journal import all see exactly those rows; the rest are a count
+    # (`not_imported_count`), never a failure. A row left out is not
+    # recorded as observed, so `_prior_observations` has no entry for it and
+    # it is NEW again the next time it is seen.
+    not_imported_count = max(0, len(rows) - IMPORT_ROW_CAP)
+    if over_import_cap:
+        imported = {row.normalized_url for row in rank_rows(rows, rank_scores)[:IMPORT_ROW_CAP]}
+        rows = [row for row in rows if row.normalized_url in imported]
+        candidates = [row for row in candidates if row.normalized_url in imported]
+        carried_forward = {url: prior for url, prior in carried_forward.items() if url in imported}
+        rank_scores = tuple(score for score in rank_scores if score.normalized_url in imported)
+        # `removed` stays as diffed against everything that matched: a
+        # posting left out of the import is still live, not removed.
+        url_diff = URLSetDiff(
+            added=tuple(item for item in url_diff.added if item.url in imported),
+            removed=url_diff.removed,
+            unchanged=tuple(item for item in url_diff.unchanged if item.url in imported),
+            edited=tuple(item for item in url_diff.edited if item.url in imported),
+        )
+
+    results = [PostingRowResult(row, outcomes[row.normalized_url]) for row in rows]
+    if progress is not None and over_import_cap:
+        for result in results:
+            progress.posting_acquired(result.posting.to_json(), outcome=result.outcome.value)
 
     # B2 (0.1.8.1 live UAT): the naive first-N-in-batch-order walk let one
     # board's postings fill the entire selection (a run saw 5/5 picks from
     # ClickHouse alone, 3 sharing a title). `select_for_assessment` (a pure,
     # independently-tested module) replaces that walk: dedupe near-identical
     # postings, cap how many one company can contribute, then round-robin
-    # fill the remaining cap across companies -- deterministic regardless of
-    # `candidates`' order, so re-running on the same batch is a no-op. P6's
-    # rank ordering above only breaks *ties* within what this still selects
-    # -- the dedupe/company-cap/diversity rules themselves are unchanged.
-    selection = select_for_assessment(candidates, cap=input.selection_cap)
+    # fill the remaining cap across companies.
+    #
+    # uat-bug-010 (UAT N13): the scores are passed in. Sorting `candidates`
+    # by score before this call did nothing, because every step inside
+    # re-sorts by date; the assess cap went to the newest postings, not the
+    # best Jev fits. `candidates` stays in `rows` order, the order assess's
+    # recompute reads the sealed rows back in.
+    selection = select_for_assessment(candidates, cap=input.selection_cap, rank_scores=rank_scores)
     # `select_for_assessment` returns the same `PostingRow` objects it was
     # given (see selection.py's `ordered_selected`); the narrower `Candidate`
     # protocol is only its own input/output typing, so cast back for the
@@ -1565,9 +1638,18 @@ def _acquire_node_body(
         # B4: the run's assess cap plus how many candidates it applies to
         # (operator: show "assessing 5 of 42 matches, cap 5"), known as soon
         # as acquire finishes selecting -- well before assess starts.
-        progress.cap_known(cap=input.selection_cap, candidate_count=len(candidates))
+        progress.cap_known(
+            cap=input.selection_cap, candidate_count=len(candidates), not_imported_count=not_imported_count
+        )
 
-    status = import_public_rows(resolved=resolved, batch_id=batch_id, rows=[_public_row(row) for row in rows] or [{
+    if not_imported_count:
+        print(
+            f"scout acquire: {len(rows)} postings imported; {not_imported_count} more matched, "
+            f"not imported this run (import cap {IMPORT_ROW_CAP})",
+            file=sys.stderr,
+        )
+
+    status = import_public_rows(resolved=resolved, batch_id=batch_id, rows=[public_rows[row.normalized_url] for row in rows] or [{
         "opportunity_id": "empty", "snapshot_id": digest_imported_bytes(b"empty")[:32], "source_kind": "agent_discovered", "title": "empty", "employer": "empty", "url": "https://example.invalid/empty", "acquisition_state": "excluded", "excluded_reason": "no_rows",
     }])
     if recording_client is not None:
@@ -1593,6 +1675,7 @@ def _acquire_node_body(
             for url, prior in sorted(carried_forward.items())
         ),
         rank_scores=rank_scores,
+        not_imported_count=not_imported_count,
     )
 
 
@@ -1601,6 +1684,7 @@ __all__ = [
     "ATS_CONCURRENCY_ENV",
     "ATS_MIN_INTERVAL_ENV",
     "BUDGET_EXCEEDED_CODE",
+    "IMPORT_ROW_CAP",
     "AcquireLimits",
     "acquire_node",
 ]

@@ -365,23 +365,25 @@ def _assess_node_body(
         # overrides the sealed selection authority above -- only the
         # provisional OVER_CAP labels just added are refined.
         #
-        # P6: acquire orders its own `candidates` by the SEALED
-        # `AcquireOutput.rank_scores` before calling `select_for_assessment`
-        # (market_acquisition.py); this twin recompute must reproduce that
-        # exact order from the same sealed scores, never re-rank by calling
-        # Jev again, or the two selections (and their duplicate/over_cap
-        # labels) could disagree. `_read_rank_scores` degrades to `()` for a
-        # run with no Jev key/pre-P6 run, in which case `_order_by_rank_scores`
-        # is a no-op and this list is in its original (pre-P6) order, exactly
-        # as before this packet.
-        selected_postings_as_rows = [
-            posting for posting, _outcome in acquire_rows if posting.normalized_url in selected_by_url
+        # P6 / uat-bug-010: acquire passes the SEALED
+        # `AcquireOutput.rank_scores` into `select_for_assessment`
+        # (market_acquisition.py); this twin recompute passes the same
+        # sealed scores, never re-ranking by calling Jev again, and its rows
+        # in the same order (the sealed acquire rows' own order, which is
+        # the order acquire's candidates were in), so the one shared
+        # function returns the identical selection and the identical
+        # duplicate/over_cap labels. `_read_rank_scores` degrades to `()` for
+        # a run with no Jev key/pre-P6 run: date order, as before P6.
+        eligible_urls = {posting.normalized_url for posting in eligible_postings}
+        candidates_in_acquire_order = [
+            posting
+            for posting, _outcome in acquire_rows
+            if posting.normalized_url in selected_by_url or posting.normalized_url in eligible_urls
         ]
-        rank_scores = _read_rank_scores(root, input.acquire_batch_ref)
-        ordered_eligible = _order_by_rank_scores(list(eligible_postings), rank_scores)
         recomputed = select_for_assessment(
-            [*selected_postings_as_rows, *ordered_eligible],
+            candidates_in_acquire_order,
             cap=input.selection_cap,
+            rank_scores=_read_rank_scores(root, input.acquire_batch_ref),
         )
         drop_reason_by_url = {
             url: (NotAssessedReason.DUPLICATE if reason == "duplicate" else NotAssessedReason.OVER_CAP)
@@ -698,9 +700,9 @@ def _read_rank_scores(root: Path, batch_ref: str) -> tuple:
     """P6: the sealed ``AcquireOutput.rank_scores`` from this run's acquire batch.
 
     Assess re-runs ``select_for_assessment`` over the eligible set for its
-    own not-assessed labeling (see the ordering call below); it must sort
-    that set by the SAME scores acquire itself used, or the twin recompute
-    could disagree with acquire's own selection. Reads the exact same
+    own not-assessed labeling; it must rank that set by the SAME scores
+    acquire itself used, or the twin recompute could disagree with
+    acquire's own selection. Reads the exact same
     ``batch_ref`` file ``_read_acquire_rows`` reads, one key over
     (``rank_scores``) -- degrades to ``()`` for any run sealed before P6, a
     run with no Jev key, or a malformed/missing file (never raises: an
@@ -726,29 +728,6 @@ def _read_rank_scores(root: Path, batch_ref: str) -> tuple:
         except (ValueError, TypeError):
             continue
     return tuple(result)
-
-
-def _order_by_rank_scores(rows: list, rank_scores: tuple) -> list:
-    """Stable sort ``rows`` (objects with ``.normalized_url``) by ``rank_scores``.
-
-    Mirrors ``jev_rank.order_by_rank`` exactly (unscored/no-score rows last,
-    stable otherwise) but takes plain ``PostingRow`` objects rather than
-    requiring the whole ``jev_rank`` module's cache/HTTP machinery -- assess
-    only ever needs to reproduce acquire's ordering from already-sealed
-    scores, never to call Jev itself.
-    """
-
-    if not rank_scores:
-        return rows
-    by_url = {item.normalized_url: item for item in rank_scores}
-
-    def sort_key(row: object) -> tuple[int, int]:
-        score = by_url.get(getattr(row, "normalized_url", None))
-        if score is None or score.score is None:
-            return (1, 0)
-        return (0, -score.score)
-
-    return sorted(rows, key=sort_key)
 
 
 def _posting_text_bytes(posting: object) -> bytes | None:

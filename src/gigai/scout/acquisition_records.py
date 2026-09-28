@@ -43,6 +43,9 @@ _SOURCE_KEYS = frozenset({
 })
 _MAX_ROWS = 512
 _MAX_TEXT = 4096
+# uat-bug-011: the journal bound, readable by a caller that has to size its
+# batch under it (find-jobs acquire caps a run's import below this).
+MAX_PUBLIC_IMPORT_ROWS = _MAX_ROWS
 
 
 class ScoutAcquisitionError(ValueError):
@@ -268,6 +271,58 @@ def _validate_rows(rows: Sequence[Mapping[str, object]]) -> tuple[dict[str, obje
             raise AssertionError("unreachable") from exc
         normalized.append(value)
     return tuple(normalized)
+
+
+def public_row_refusal(row: Mapping[str, object]) -> ScoutAcquisitionError | None:
+    """The refusal ``import_public_rows`` would raise for this one row, or ``None``.
+
+    uat-bug-011: one row the journal refuses used to fail the whole batch at
+    the very end of a run. A caller checks each row with this as soon as it
+    has it and leaves a refused row out, so the batch it imports is one the
+    journal accepts.
+    """
+
+    try:
+        _validate_rows((row,))
+    except ScoutAcquisitionError as exc:
+        return exc
+    return None
+
+
+def preflight_public_import(*, resolved: ResolvedWorkpad, batch_id: str) -> None:
+    """Raise now what ``import_public_rows`` can decide without the rows.
+
+    uat-bug-011: a caller that spends minutes acquiring rows calls this
+    first, so a batch the journal will refuse costs nothing. Checked: the
+    batch identity, the workpad scope, the acquisition tree's path safety,
+    and a batch identity already bound to rows. Every re-import of a bound,
+    non-empty batch is refused as ``acquisition_input_conflict`` (each
+    acquired row carries its own capture time, so the bytes always differ);
+    the one re-import that can still succeed is the empty batch's
+    placeholder, which is left to ``import_public_rows``.
+    """
+
+    _validate_batch_id(batch_id)
+    if not isinstance(resolved, ResolvedWorkpad):
+        _fail("acquisition_scope_invalid", "resolved workpad is invalid")
+    _guard_acquisition_tree(resolved.path, batch_id)
+    existing = resolved.path / _input_path(batch_id)
+    if not existing.is_file():
+        return
+    try:
+        value = parse_json_bytes(existing.read_bytes())
+    except (OSError, ValueError):
+        _fail("acquisition_input_conflict", "batch identity is already bound to unreadable input bytes")
+        raise AssertionError("unreachable")
+    rows = value.get("rows") if isinstance(value, dict) else None
+    placeholder = (
+        isinstance(rows, list)
+        and len(rows) == 1
+        and isinstance(rows[0], dict)
+        and rows[0].get("excluded_reason") == "no_rows"
+    )
+    if not placeholder:
+        _fail("acquisition_input_conflict", "batch identity is already bound to different input bytes")
 
 
 def _input_payload(batch_id: str, resolved: ResolvedWorkpad, rows: tuple[dict[str, object], ...]) -> bytes:
@@ -568,7 +623,9 @@ persist_public_acquisition_progress = import_public_rows
 
 
 __all__ = [
+    "MAX_PUBLIC_IMPORT_ROWS",
     "PublicAcquisitionStatus", "ScoutAcquisitionError", "import_public_rows",
+    "preflight_public_import", "public_row_refusal",
     "read_public_acquisition_status", "resume_public_acquisition",
     "start_public_acquisition", "status_public_acquisition",
     "resume_public_import", "read_public_import_status", "run_public_import",

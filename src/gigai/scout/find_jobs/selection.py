@@ -7,6 +7,15 @@ row and a target cap, it dedupes near-identical postings, caps how many one
 company can contribute, and fills the remaining cap round-robin across
 companies so no single board can dominate the selection.
 
+uat-bug-010 (UAT N13): the Jev pre-rank has to reach that selection. The
+caller used to sort its rows by score and hand them over, and every step
+here then re-sorted by date, so the assess cap went to the newest postings
+rather than the best fits. The scores are now an input (``rank_scores``):
+``rank_rows`` is the one ordering (Jev score, then newest) shared by the
+per-company cap and company visiting order below and by acquire's import
+bound (uat-bug-011), so the rows a run imports and the rows it assesses are
+ranked the same way.
+
 Deliberately isolated here, mirroring ``filters.py``'s own reasoning, so
 whichever node wires this in (today: ``market_acquisition.py``'s selection
 loop) calls the same pure logic the tests exercise directly -- no I/O, no
@@ -15,7 +24,7 @@ contract/dataclass coupling beyond the narrow ``Candidate`` protocol below.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import re
 from typing import Protocol
@@ -50,6 +59,21 @@ class Candidate(Protocol):
 
     @property
     def published_at(self) -> str | None: ...
+
+
+class Score(Protocol):
+    """The narrow read-only shape this module needs from a Jev rank score.
+
+    ``jev_contracts.RankScore`` satisfies this structurally. ``score`` is
+    ``None`` for a row Jev never scored (past the cost cap, or a failed
+    call); such a row ranks with the rows that have no score entry at all.
+    """
+
+    @property
+    def normalized_url(self) -> str: ...
+
+    @property
+    def score(self) -> int | None: ...
 
 
 DropReason = str  # "duplicate" | "company_cap" | "over_cap"
@@ -114,11 +138,50 @@ def _sort_key_newest_first(row: Candidate) -> str:
     return published if isinstance(published, str) and published else ""
 
 
+def _scores_by_url(rank_scores: Sequence[Score]) -> Mapping[str, float]:
+    """``normalized_url -> score`` for the rows Jev actually scored."""
+
+    scores: dict[str, float] = {}
+    for item in rank_scores:
+        score = item.score
+        if isinstance(score, (int, float)) and not isinstance(score, bool):
+            scores[item.normalized_url] = score
+    return scores
+
+
+def _score_key(row: Candidate, scores: Mapping[str, float]) -> tuple[int, float]:
+    # Ascending: scored rows first, best score first; unscored rows last.
+    score = scores.get(row.normalized_url)
+    return (1, 0) if score is None else (0, -score)
+
+
+def _rank(rows: Sequence[Candidate], scores: Mapping[str, float]) -> list[Candidate]:
+    # Two stable passes: newest first, then (only when any row is scored)
+    # by score. Without scores the second pass is skipped, so the order is
+    # the date order this module has always used, ties in ``rows`` order.
+    ordered = sorted(rows, key=_sort_key_newest_first, reverse=True)
+    if scores:
+        ordered.sort(key=lambda row: _score_key(row, scores))
+    return ordered
+
+
+def rank_rows(rows: Sequence[Candidate], rank_scores: Sequence[Score] = ()) -> list[Candidate]:
+    """``rows`` best first: Jev score descending, then newest, then ``rows`` order.
+
+    A row with no score (no entry, or an unscored entry) ranks after every
+    scored row. With no scores at all this is newest first. Every row comes
+    back; the caller slices what it needs.
+    """
+
+    return _rank(rows, _scores_by_url(rank_scores))
+
+
 def select_for_assessment(
     rows: Sequence[Candidate],
     *,
     cap: int,
     per_company: int = DEFAULT_PER_COMPANY_CAP,
+    rank_scores: Sequence[Score] = (),
 ) -> SelectionResult:
     """Pick up to ``cap`` diverse candidates from ``rows``.
 
@@ -127,22 +190,28 @@ def select_for_assessment(
     1. Dedupe same company + normalized title (+ same-country locations):
        within each duplicate group, keep only the newest (by
        ``published_at``); every other member of the group is dropped as
-       ``"duplicate"``.
+       ``"duplicate"``. Scores play no part: near-identical postings score
+       alike, and the newest is the one still open.
     2. Per-company cap: among the deduped survivors, keep at most
-       ``per_company`` per company (newest first); the rest are dropped as
-       ``"company_cap"``.
+       ``per_company`` per company, best ranked first (``rank_rows``: Jev
+       score, then newest); the rest are dropped as ``"company_cap"``.
     3. Round-robin fill: companies are visited in a fixed order (by each
-       company's newest surviving row, newest first, ties broken by company
-       name) and one row is taken per company per pass until ``cap`` is
-       reached or every survivor has been taken. Anything left over once
-       ``cap`` is reached is dropped as ``"over_cap"``.
+       company's best score, best first; then by its newest surviving row,
+       newest first; then by company name) and one row is taken per company
+       per pass until ``cap`` is reached or every survivor has been taken.
+       Anything left over once ``cap`` is reached is dropped as
+       ``"over_cap"``.
+
+    ``rank_scores`` is optional. With none (or none that carry a score) the
+    ranking is by date alone, exactly as before uat-bug-010.
 
     ``rows`` with ``cap <= 0`` selects nothing (every row is ``"over_cap"``).
-    Order within ``rows`` never matters to the result; only ``published_at``
-    and company identity do, so re-running on a reordered but identical batch
-    is a no-op.
+    Order within ``rows`` only breaks a tie between rows with the same score
+    and the same ``published_at``, so two callers that must agree (acquire's
+    selection and assess's recompute) pass their rows in the same order.
     """
 
+    scores = _scores_by_url(rank_scores)
     dropped: dict[str, DropReason] = {}
 
     groups: dict[tuple[str, str, frozenset[str]], list[Candidate]] = {}
@@ -162,7 +231,7 @@ def select_for_assessment(
 
     capped_by_company: dict[str, list[Candidate]] = {}
     for company, members in by_company.items():
-        ordered = sorted(members, key=_sort_key_newest_first, reverse=True)
+        ordered = _rank(members, scores)
         capped_by_company[company] = ordered[:per_company]
         for loser in ordered[per_company:]:
             dropped[loser.normalized_url] = "company_cap"
@@ -171,9 +240,16 @@ def select_for_assessment(
     # row decides its place (newest company first), ties broken by the
     # normalized company name ascending -- sort ascending by (name) first,
     # then stably sort by newest-first descending, so a reverse sort on the
-    # timestamp never also flips the name tiebreak.
+    # timestamp never also flips the name tiebreak. With scores, one more
+    # stable pass puts the company with the best score first: a company's
+    # first row is its best ranked one.
     company_order = sorted(capped_by_company)
-    company_order.sort(key=lambda name: _sort_key_newest_first(capped_by_company[name][0]), reverse=True)
+    company_order.sort(
+        key=lambda name: max(_sort_key_newest_first(row) for row in capped_by_company[name]),
+        reverse=True,
+    )
+    if scores:
+        company_order.sort(key=lambda name: _score_key(capped_by_company[name][0], scores))
 
     selected: list[Candidate] = []
     cap = max(cap, 0)
@@ -207,7 +283,9 @@ def select_for_assessment(
 __all__ = [
     "Candidate",
     "DEFAULT_PER_COMPANY_CAP",
+    "Score",
     "SelectionResult",
     "normalize_title",
+    "rank_rows",
     "select_for_assessment",
 ]

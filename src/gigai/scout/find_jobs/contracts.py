@@ -1233,6 +1233,12 @@ class AcquireOutput(_Contract):
     # this module -- imported by ``jev_contracts.py`` itself -- never forms
     # an import cycle.
     rank_scores: tuple["RankScore", ...] = ()
+    # uat-bug-011: additive/optional -- how many postings matched every
+    # filter but were left out of this run's import (acquire imports at most
+    # its import cap, best ranked first). They are not in ``rows`` and were
+    # not recorded as observed. Omitted from JSON at 0, so every acquire
+    # output with nothing left out is byte-identical to before.
+    not_imported_count: int = 0
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {
@@ -1253,6 +1259,8 @@ class AcquireOutput(_Contract):
             value["carried_forward_assessments"] = [item.to_json() for item in self.carried_forward_assessments]
         if self.rank_scores:
             value["rank_scores"] = [item.to_json() for item in self.rank_scores]
+        if self.not_imported_count:
+            value["not_imported_count"] = self.not_imported_count
         return value
 
     @classmethod
@@ -1260,7 +1268,7 @@ class AcquireOutput(_Contract):
         value = _object_with_optional(
             obj,
             ("schema_version", "batch_id", "batch_ref", "progress_ref", "progress_status", "rows", "failures", "url_set_diff", "watchlist_refs", "selected_postings"),
-            ("dropped_counts", "carried_forward_assessments", "rank_scores"),
+            ("dropped_counts", "carried_forward_assessments", "rank_scores", "not_imported_count"),
             "acquire_output",
         )
         if value["schema_version"] != cls.schema_version:
@@ -1284,6 +1292,9 @@ class AcquireOutput(_Contract):
             from .jev_contracts import RankScore
 
             rank_scores = tuple(RankScore.from_json(item) for item in value["rank_scores"])
+        not_imported_count = 0
+        if "not_imported_count" in value:
+            not_imported_count = _integer(value["not_imported_count"], "acquire_output.not_imported_count", minimum=0)
         return cls(
             _string(value["batch_id"], "batch_id"),
             _string(value["batch_ref"], "batch_ref"),
@@ -1297,6 +1308,7 @@ class AcquireOutput(_Contract):
             dropped_counts,
             carried_forward_assessments,
             rank_scores,
+            not_imported_count,
         )
 
 

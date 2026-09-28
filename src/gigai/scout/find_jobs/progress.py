@@ -22,9 +22,13 @@ Layout, all under ``runs/<run_id>/progress/``:
   one ``"not_assessed"`` line per row acquire/assess decided not to assess,
   carrying its reason, so the UI can show "why" before the sealed
   ``outputs/assess.json`` exists at all.
-- ``cap.json``: ``{"cap": <int>, "candidate_count": <int>}``, written once
-  acquire knows the selection cap and how many candidates it saw. Optional;
-  absent until acquire has that information.
+- ``cap.json``: ``{"cap": <int>, "candidate_count": <int>,
+  "not_imported_count": <int>}``, written once acquire knows the selection
+  cap and how many candidates it saw. Optional; absent until acquire has
+  that information. ``not_imported_count`` (uat-bug-011) is how many
+  postings matched every filter but were left out of this run's import
+  ("N more matched, not imported this run"); a file written before the key
+  existed reads as 0.
 - ``boards.json`` (Q2): ``{"total": <int>, "budget_seconds": <float>|null,
   "status": "running"|"done", ...totals}``; written once acquire has planned
   its ATS board fetches, replaced with the totals (requests, cache hits,
@@ -288,9 +292,12 @@ class ProgressWriter:
             )
         )
 
-    def cap_known(self, *, cap: int, candidate_count: int) -> None:
+    def cap_known(self, *, cap: int, candidate_count: int, not_imported_count: int = 0) -> None:
         self._guard(
-            lambda: _replace_json(self._dir / _CAP_FILENAME, {"cap": cap, "candidate_count": candidate_count})
+            lambda: _replace_json(
+                self._dir / _CAP_FILENAME,
+                {"cap": cap, "candidate_count": candidate_count, "not_imported_count": not_imported_count},
+            )
         )
 
     # -- Q2: per-board progress + the seeding record ------------------------
@@ -363,6 +370,8 @@ class ProgressSnapshot:
     # Q2: additive, defaulted so every existing constructor call still works.
     boards: dict[str, object] = field(default_factory=dict)
     watchlist_seed: dict[str, object] | None = None
+    # uat-bug-011: additive, 0 until acquire writes it (and for older runs).
+    not_imported_count: int = 0
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -374,6 +383,7 @@ class ProgressSnapshot:
             "not_assessed_counts": self.not_assessed_counts,
             "boards": self.boards,
             "watchlist_seed": self.watchlist_seed,
+            "not_imported_count": self.not_imported_count,
         }
 
 
@@ -434,13 +444,17 @@ def read_progress(run_root: Path) -> ProgressSnapshot:
     cap_payload = _read_json(directory / _CAP_FILENAME)
     cap = None
     candidate_count = None
+    not_imported_count = 0
     if isinstance(cap_payload, dict):
         raw_cap = cap_payload.get("cap")
         raw_candidates = cap_payload.get("candidate_count")
+        raw_not_imported = cap_payload.get("not_imported_count")
         if isinstance(raw_cap, int):
             cap = raw_cap
         if isinstance(raw_candidates, int):
             candidate_count = raw_candidates
+        if isinstance(raw_not_imported, int) and not isinstance(raw_not_imported, bool) and raw_not_imported > 0:
+            not_imported_count = raw_not_imported
 
     return ProgressSnapshot(
         steps=steps,
@@ -451,6 +465,7 @@ def read_progress(run_root: Path) -> ProgressSnapshot:
         not_assessed_counts=not_assessed_counts,
         boards=_read_boards(directory),
         watchlist_seed=_read_watchlist_seed(directory),
+        not_imported_count=not_imported_count,
     )
 
 
