@@ -2,18 +2,27 @@
 titles out of one resume, for the setup wizard's first screen.
 
 Body: exactly one of ``resume_text`` (pasted or uploaded text, used for
-this call only -- never imported, never journaled, never echoed back) or
+this call only -- never imported, never journaled, never echoed back),
 ``profile_id`` (a committed scout profile's pinned resume, read through the
-same digest-verifying reader ``POST /api/assess`` uses, ``resume_input``).
-Optional ``model_target`` (the sealed ``ModelTarget`` enum) overrides
-``find-jobs.json``'s ``default_model_target``.
+same digest-verifying reader ``POST /api/assess`` uses, ``resume_input``) or
+``resume_ref`` (``{"record_id", "revision_id"}``, optionally with
+``content_sha256``: a resume stored on this machine that no profile has to
+use yet -- the one ``gigai scout resume add`` or ``POST /api/resumes``
+stored; its text is read here, from this gig's own records, the way ``POST
+/api/profiles`` reads the same ids). Optional ``model_target`` (the sealed
+``ModelTarget`` enum) overrides ``find-jobs.json``'s
+``default_model_target``.
+
+Privacy is the same for all three: the resume's text goes to the model
+target of this call and nowhere else, and is never logged or returned.
 
 Response: ``{"stack": [...], "seniority": "<short label>" | null,
 "titles": [...], "extractor": "model", "model_target": "<enum>",
 "resolved_target": "<configured target name>", "resume": {"profile_id",
 "content_sha256"}}``.  Never the resume text: only what was extracted plus
-the resume's digest.  The server log line names the source kind and the
-target, never a byte of the resume.
+the resume's digest (``profile_id`` is ``null`` for pasted text and for a
+``resume_ref``).  The server log line names the source kind (``profile``,
+``pasted`` or ``stored``) and the target, never a byte of the resume.
 
 Model resolution mirrors ``quick_assess._resolve_binding`` (C1/C11): the
 adapter kind maps to a configured target through
@@ -43,17 +52,20 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
 from typing import Mapping
 
 from ....adapters.factory import AdapterFactoryError
 from ....adapters.port import ModelInvocationError
+from ....canonical import digest_imported_bytes
 from ....config import GigAIConfig, load_config
 from ....model_targets import ModelTargetResolutionError
+from ....private_records import PrivateRecordError, read_record
 from ....workpad import resolve_workpad
 from ...quick_assess import _default_model_target, _ObservedBinding, _ObservedPort, _seam_deadline_seconds
-from ..assess_contracts import AssessResumeInput
+from ..assess_contracts import AssessResumeInput, ResolvedResume
 from ..contracts import FindJobsContractError, ModelTarget
 from ..resume_input import resolve_resume
 
@@ -103,28 +115,64 @@ def _status_for(code: str) -> HTTPStatus:
     return _ERROR_STATUS.get(code, HTTPStatus.CONFLICT)
 
 
+@dataclass(frozen=True)
+class StoredResumeRef:
+    """A resume stored on this machine, by its record and revision id.
+
+    ``content_sha256`` is optional; when the caller sends it the stored
+    text must have that digest (``resume_digest_mismatch`` otherwise).
+    """
+
+    record_id: str
+    revision_id: str
+    content_sha256: str | None = None
+
+
 # --- request parsing ---------------------------------------------------------------
 
 
-def parse_request(body: object) -> tuple[AssessResumeInput, ModelTarget | None]:
+def _parse_resume_ref(value: object) -> StoredResumeRef:
+    if not isinstance(value, Mapping):
+        raise ResumeExtractError("wrong_type", "resume_ref must be a JSON object")
+    unknown = set(value) - {"record_id", "revision_id", "content_sha256"}
+    if unknown:
+        raise ResumeExtractError("unknown_key", f"unknown resume_ref field(s): {sorted(unknown)}")
+    ids: list[str] = []
+    for key in ("record_id", "revision_id"):
+        item = value.get(key)
+        if not isinstance(item, str) or not item.strip():
+            raise ResumeExtractError("resume_input_invalid", f"resume_ref.{key} must be a non-empty string")
+        ids.append(item)
+    digest = value.get("content_sha256")
+    if digest is not None and (not isinstance(digest, str) or not digest):
+        raise ResumeExtractError("resume_input_invalid", "resume_ref.content_sha256 must be a non-empty string or null")
+    return StoredResumeRef(record_id=ids[0], revision_id=ids[1], content_sha256=digest)
+
+
+def parse_request(body: object) -> tuple[AssessResumeInput | StoredResumeRef, ModelTarget | None]:
     """``(resume input, model target override)`` from a JSON body.
 
-    Exactly one of ``resume_text`` / ``profile_id`` is required (neither is a
-    422 here, unlike ``/api/assess`` where "neither" means the selected
-    profile: the wizard always knows which resume it is holding).
+    Exactly one of ``resume_text`` / ``profile_id`` / ``resume_ref`` is
+    required (none is a 422 here, unlike ``/api/assess`` where "neither"
+    means the selected profile: the wizard always knows which resume it is
+    holding). A ``resume_ref`` comes back as a ``StoredResumeRef``.
     """
 
     if not isinstance(body, Mapping):
         raise ResumeExtractError("wrong_type", "request body must be a JSON object")
-    unknown = set(body) - {"resume_text", "profile_id", "model_target"}
+    unknown = set(body) - {"resume_text", "profile_id", "resume_ref", "model_target"}
     if unknown:
         raise ResumeExtractError("unknown_key", f"unknown field(s): {sorted(unknown)}")
     try:
         resume = AssessResumeInput.from_json({key: body[key] for key in ("resume_text", "profile_id") if key in body})
     except FindJobsContractError as exc:
         raise ResumeExtractError(exc.code, str(exc)) from exc
-    if resume.profile_id is None and resume.resume_text is None:
-        raise ResumeExtractError("resume_input_invalid", "pass exactly one of resume_text or profile_id")
+    stored = _parse_resume_ref(body["resume_ref"]) if body.get("resume_ref") is not None else None
+    given = (resume.resume_text is not None) + (resume.profile_id is not None) + (stored is not None)
+    if given != 1:
+        raise ResumeExtractError(
+            "resume_input_invalid", "pass exactly one of resume_text, profile_id or resume_ref"
+        )
     if resume.resume_text is not None and not resume.resume_text.strip():
         raise ResumeExtractError("resume_input_invalid", "resume_text is empty")
     model_target: ModelTarget | None = None
@@ -133,7 +181,46 @@ def parse_request(body: object) -> tuple[AssessResumeInput, ModelTarget | None]:
         if not isinstance(raw, str) or raw not in {item.value for item in ModelTarget}:
             raise ResumeExtractError("bad_enum", "model_target is not a known model target")
         model_target = ModelTarget(raw)
-    return resume, model_target
+    return (stored if stored is not None else resume), model_target
+
+
+# --- a stored resume -------------------------------------------------------------------
+
+
+def read_stored_resume(ref: StoredResumeRef, *, home_root: Path, target: Path, gig_id: str) -> ResolvedResume:
+    """``ref``'s text, read from this gig's own records (no network, no model).
+
+    The same read ``POST /api/profiles`` does for ``resume_record_id`` /
+    ``resume_revision_id``, so what can be pinned on a profile can be
+    analysed before it is. Raises ``ResumeExtractError``:
+    ``resume_unavailable`` when the record or revision is not committed in
+    this gig or has no readable text, ``resume_digest_mismatch`` when the
+    caller named a digest and the stored text has another.
+    """
+
+    try:
+        record = read_record(
+            home_root=home_root,
+            requested_target=target,
+            record_id=ref.record_id,
+            revision_id=ref.revision_id,
+            content=True,
+            gig_id=gig_id,
+        )
+    except PrivateRecordError as exc:
+        raise ResumeExtractError("resume_unavailable", "that stored resume is unavailable") from exc
+    content = record.get("content")
+    if not isinstance(content, bytes) or not content.strip():
+        raise ResumeExtractError("resume_unavailable", "that stored resume has no readable text")
+    digest = digest_imported_bytes(content)
+    if ref.content_sha256 is not None and ref.content_sha256 != digest:
+        raise ResumeExtractError("resume_digest_mismatch", "that stored resume is not the one named")
+    return ResolvedResume(
+        profile_id=None,
+        pinned=None,
+        content_sha256=digest,
+        text=content.decode("utf-8", errors="replace"),
+    )
 
 
 # --- the prompt and its answer -------------------------------------------------------
@@ -305,7 +392,8 @@ class ResumeExtractRoutesMixin:
             return
         home_root = backend.home_root
 
-        if resume_input.is_ephemeral:
+        stored_ref = resume_input if isinstance(resume_input, StoredResumeRef) else None
+        if stored_ref is None and resume_input.is_ephemeral:
             resolved_gig = None
         else:
             try:
@@ -315,15 +403,19 @@ class ResumeExtractRoutesMixin:
             except Exception:  # noqa: BLE001 - no bound gig: a typed 404, never a 500
                 self._error(
                     HTTPStatus.NOT_FOUND,
-                    "profile_unavailable",
+                    "resume_unavailable" if stored_ref is not None else "profile_unavailable",
                     "no Scout gig is available for this folder; run `gigai scout install` or pass resume_text",
                 )
                 return
         try:
-            resume = resolve_resume(resume_input, resolved=resolved_gig, home_root=home_root, target=target)  # type: ignore[arg-type]  # ephemeral never reads the gig
-        except FindJobsContractError as exc:
+            if stored_ref is not None:
+                resume = read_stored_resume(stored_ref, home_root=home_root, target=target, gig_id=resolved_gig.gig_id)
+            else:
+                resume = resolve_resume(resume_input, resolved=resolved_gig, home_root=home_root, target=target)  # type: ignore[arg-type]  # ephemeral never reads the gig
+        except (FindJobsContractError, ResumeExtractError) as exc:
             self._error(_status_for(exc.code), exc.code, str(exc))
             return
+        source = "stored" if stored_ref is not None else ("profile" if resume.profile_id else "pasted")
 
         model_target = override or _default_model_target(target)
         try:
@@ -338,7 +430,7 @@ class ResumeExtractRoutesMixin:
         except ResumeExtractError as exc:
             _logger.info(
                 "resume extraction failed: source=%s target=%s code=%s",
-                "profile" if resume.profile_id else "pasted",
+                source,
                 model_target.value,
                 exc.code,
             )
@@ -348,7 +440,7 @@ class ResumeExtractRoutesMixin:
         # Counts and the target only -- never a stack item, title, or resume byte.
         _logger.info(
             "resume extraction: source=%s target=%s resolved=%s stack=%d titles=%d",
-            "profile" if resume.profile_id else "pasted",
+            source,
             model_target.value,
             resolved_target,
             len(stack),
@@ -375,8 +467,10 @@ __all__ = [
     "ResumeExtractError",
     "ResumeExtractRoutesMixin",
     "SCHEMA_VERSION",
+    "StoredResumeRef",
     "extract_with_model",
     "parse_extraction",
     "parse_request",
+    "read_stored_resume",
     "render_prompt",
 ]

@@ -13,7 +13,12 @@
 //                                   first profile is the selected one; with
 //                                   one already selected, a new profile is
 //                                   not (screen 1 says so)
-//   5. PUT  /api/setup              the preferences
+//   5. PUT  /api/setup              the preferences, with `profile_id`: the
+//                                   profile step 3 saved. The titles go to
+//                                   that profile only (uat-bug-024: without
+//                                   it they went to the SELECTED profile,
+//                                   so "Create a new profile" overwrote the
+//                                   selected profile's titles)
 //
 // Pressing Finish again after a failure at any step repeats the steps
 // without making a second resume (the server stores a resume once per
@@ -48,6 +53,6 @@ export async function finishSetup({ fields, selectedProfile, existingPrefs }, ap
     selectedProfileId = selection.selected_profile_id;
   }
 
-  const prefsResponse = await api.putSetup(setupBody(fields, existingPrefs));
+  const prefsResponse = await api.putSetup({ ...setupBody(fields, existingPrefs), profile_id: profile.profile_id });
   return { profile, selectedProfileId, resumeRef, prefs: prefsResponse.prefs };
 }

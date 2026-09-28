@@ -1021,7 +1021,7 @@ class ScoutFindJobsBackend:
         prefs = discovery.load_prefs(home_root=self.home_root, target=self._target_root())
         return prefs.to_json() if prefs is not None else None
 
-    def write_setup(self, prefs_fields: dict[str, object]) -> dict[str, object]:
+    def write_setup(self, prefs_fields: dict[str, object], *, profile_id: str | None = None) -> dict[str, object]:
         """Save discovery prefs, then reconcile ``roles``/``titles_to_avoid`` to the union.
 
         S25 F1-b2 (operator decision, spike Q5): discovery prefs stay ONE
@@ -1033,6 +1033,11 @@ class ScoutFindJobsBackend:
         SELECTED profile first (F1-b1); the union is assembled after that
         write lands, so it always reflects the just-saved titles alongside
         every other active profile's.
+
+        uat-bug-024: ``profile_id`` names the profile that gets this save's
+        titles instead of the selected one (the wizard passes the profile it
+        just created or updated); ``None`` is the selected profile, as
+        before.
 
         Order: `roles`/`titles_to_avoid` from `prefs_fields` are written
         verbatim into `discovery/prefs.json` first (matching every other
@@ -1049,7 +1054,7 @@ class ScoutFindJobsBackend:
         # `_update_find_jobs_config` below.
         prefs = discovery.DiscoveryPrefs(**{key: value for key, value in prefs_fields.items() if key != "max_age_days"})
         discovery.save_prefs(home_root=self.home_root, target=self._target_root(), prefs=prefs)
-        self._update_find_jobs_config(prefs_fields)
+        self._update_find_jobs_config(prefs_fields, profile_id=profile_id)
 
         union_titles, union_titles_to_avoid = self._active_profile_titles_union()
         if union_titles is not None:
@@ -1103,8 +1108,14 @@ class ScoutFindJobsBackend:
                     titles_to_avoid.append(title)
         return (tuple(titles), tuple(titles_to_avoid))
 
-    def _update_find_jobs_config(self, prefs_fields: dict[str, object]) -> None:
+    def _update_find_jobs_config(self, prefs_fields: dict[str, object], *, profile_id: str | None = None) -> None:
         """Apply the setup answers onto the SELECTED profile + ``find-jobs.json``.
+
+        uat-bug-024: with ``profile_id`` the answers go onto THAT profile and
+        the selected one is neither read nor written (the wizard's "Create a
+        new profile" used to overwrite the selected profile's titles with
+        the new profile's). A ``profile_id`` that is not committed in this
+        gig raises ``ProfileRecordError`` (``scout_profile_unavailable``).
 
         S25 F1-b (coordinator decision): ``roles``/``titles_to_avoid`` (->
         ``titles``/``titles_to_avoid``) and ``merged_queries`` (mirrored from
@@ -1164,7 +1175,16 @@ class ScoutFindJobsBackend:
             resolved = self._resolved_gig()
         except Exception:
             resolved = None
-        if resolved is not None:
+        if profile_id is not None:
+            if resolved is not None:
+                profile = next(
+                    (item for item in profile_records.list_profiles(resolved) if item.profile_id == profile_id), None
+                )
+            if profile is None:
+                raise profile_records.ProfileRecordError(
+                    "scout_profile_unavailable", "profile is not committed in this gig"
+                )
+        elif resolved is not None:
             profile = profile_records.selected_profile(
                 resolved, home_root=self.home_root, target=self._target_root()
             )

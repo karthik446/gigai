@@ -13,7 +13,7 @@ import {
   updateProfile,
 } from "./wizardApi.js";
 import { finishSetup } from "./wizardFinish.js";
-import { existingResumes, initialFields, screenIsComplete, setupHints } from "./wizardState.js";
+import { existingResumes, extractBody, initialFields, screenIsComplete, setupHints } from "./wizardState.js";
 import StepIndicator from "./StepIndicator.jsx";
 import ResumeScreen from "./ResumeScreen.jsx";
 import TargetScreen from "./TargetScreen.jsx";
@@ -149,31 +149,8 @@ export default function SetupWizard({ onDone, onCancel }) {
     setExtracting(true);
     setExtractError(null);
     try {
-      const body = { model_target: fields.modelTarget };
-      if (fields.resumeMode === "existing") {
-        // The chosen resume belongs to a profile; the route reads that
-        // profile's pinned resume by profile id (never the raw record).
-        const owner = profiles.find(
-          (item) =>
-            item.resume_ref &&
-            item.resume_ref.record_id === fields.existingRef.record_id &&
-            item.resume_ref.revision_id === fields.existingRef.revision_id,
-        );
-        if (!owner) {
-          // A stored resume no profile uses yet (A1): the extraction reads
-          // a profile's resume or pasted text, so this one cannot be
-          // analysed before Finish. The titles are typed on the next screen.
-          throw new ApiError(
-            0,
-            "This resume is not part of a profile yet, so it cannot be analysed here. " +
-              "Add the job titles on the next screen, or paste the resume to analyse it.",
-          );
-        }
-        body.profile_id = owner.profile_id;
-      } else {
-        body.resume_text = fields.resumeText;
-      }
-      const result = await extractResume(body);
+      // A stored resume no profile uses yet (A1) is sent as `resume_ref`.
+      const result = await extractResume(extractBody(fields, profiles));
       setFields((prev) => ({
         ...prev,
         extraction: result,

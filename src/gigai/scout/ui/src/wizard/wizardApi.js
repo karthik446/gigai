@@ -130,7 +130,7 @@ export function getSecretsStatus() {
   return request("GET", "/api/secrets/status");
 }
 
-// A3: {resume_text | profile_id, model_target?} -> {stack, seniority,
+// A3: {resume_text | profile_id | resume_ref, model_target?} -> {stack, seniority,
 // titles, extractor, model_target, resolved_target, resume}. Synchronous on
 // the server (the handler blocks for the model call); a 504 extract_timeout
 // arrives as an ApiError like every other code.

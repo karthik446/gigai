@@ -139,7 +139,8 @@ def _finish(
         selection = client.post("/api/profiles/selection", json={"profile_id": profile["profile_id"]})
         assert selection.status_code == 200, selection.text
 
-    prefs = client.put("/api/setup", json=_setup_body(titles))
+    # uat-bug-024: with the profile this Finish saved.
+    prefs = client.put("/api/setup", json={**_setup_body(titles), "profile_id": profile["profile_id"]})
     assert prefs.status_code == 200, prefs.text
     return {"stored": stored, "profile": profile, "resume_ref": ref}
 

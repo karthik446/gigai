@@ -7,7 +7,9 @@ find-jobs' resume resolution reads. The function body is the sequence
 ``scout_cli.resume_add_command`` used to carry inline, moved here unchanged
 (same operation keys, same actor, same origin), so a resume stored from the
 wizard and the same file added from the CLI are one reference and one
-record.
+record. uat-bug-023: a file name an operation key cannot carry ("My
+Resume.md") is named in the key by ``operation_key_name``; the label stored
+with the reference is the file's own name.
 
 Idempotent by content: the reference import reuses the receipt for the same
 operation key, and otherwise the reference already committed for the same
@@ -43,7 +45,10 @@ PASTED_RESUME_FILE_NAME = "pasted-resume.txt"
 # An operation key is at most 160 characters of [A-Za-z0-9._:-]
 # (private_records._receipt_path); "scout-resume-add:" + name + ":" + the
 # digest leaves 71 for the name.
+_MAX_KEY_NAME_CHARS = 71
 _MAX_STEM_CHARS = 60
+_NAME_TAG_CHARS = 12
+_NOT_KEY_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 class ResumeImportError(ValueError):
@@ -83,6 +88,11 @@ def import_resume_file(
     # key -> the existing receipt is reused) while re-adding EDITED
     # bytes under the same file name creates a new resume revision
     # instead of conflicting on a stale operation key (P0-4).
+    #
+    # uat-bug-023: the name in the key is operation_key_name(): a name with
+    # a space or a non-ASCII letter ("My Resume.md") is not an operation
+    # key. The stored label is still the file's own name (import_reference
+    # takes it from ``source``).
     content_digest = digest_imported_bytes(source.read_bytes())
     imported = import_reference(
         home_root=home_root,
@@ -90,7 +100,7 @@ def import_resume_file(
         gig_id=gig_id,
         kind="resume",
         source=source,
-        operation_key=f"scout-resume-add:{source.name}:{content_digest}",
+        operation_key=f"scout-resume-add:{operation_key_name(source.name)}:{content_digest}",
     )
     record = create_record(
         home_root=home_root,
@@ -114,6 +124,41 @@ def import_resume_file(
     )
 
 
+def reduce_file_name(file_name: str) -> str:
+    """``file_name``'s base name in ``[A-Za-z0-9._-]``, the one reduction.
+
+    Every run of other characters in the stem becomes one ``-``; the suffix
+    is kept, in lower case. A name with no usable stem becomes ``resume``.
+    ``safe_resume_file_name`` (the name ``POST /api/resumes`` imports under)
+    and ``operation_key_name`` (the name in the operation key) both reduce a
+    name through this function.
+    """
+
+    base = file_name.replace("\\", "/").rsplit("/", 1)[-1].strip()
+    suffix = Path(base).suffix
+    stem = _NOT_KEY_SAFE.sub("-", base[: len(base) - len(suffix)]).strip("-.")
+    suffix = _NOT_KEY_SAFE.sub("-", suffix.lower())
+    return f"{stem[:_MAX_STEM_CHARS].rstrip('-.') or 'resume'}{suffix}"
+
+
+def operation_key_name(file_name: str) -> str:
+    """The part of the import's operation key that names the file (uat-bug-023).
+
+    A name an operation key can carry is returned as it is, so the keys
+    written before this function existed are still the keys. Any other name
+    is reduced (``reduce_file_name``) and followed by 12 hex characters of
+    the name's own digest: the stored label is the file's own name and is
+    part of what the receipt seals, and the same key with another label is
+    refused (``private_operation_conflict``), so two names never share a key.
+    """
+
+    if file_name and len(file_name) <= _MAX_KEY_NAME_CHARS and not _NOT_KEY_SAFE.search(file_name):
+        return file_name
+    tag = digest_imported_bytes(file_name.encode("utf-8")).removeprefix("sha256:")[:_NAME_TAG_CHARS]
+    reduced = reduce_file_name(file_name)[: _MAX_KEY_NAME_CHARS - _NAME_TAG_CHARS - 1].rstrip("-.")
+    return f"{reduced}-{tag}"
+
+
 def safe_resume_file_name(file_name: str) -> str:
     """A file name the import path accepts, from whatever the browser sent.
 
@@ -124,14 +169,12 @@ def safe_resume_file_name(file_name: str) -> str:
     """
 
     base = file_name.replace("\\", "/").rsplit("/", 1)[-1].strip()
-    suffix = Path(base).suffix.lower()
-    if suffix not in RESUME_SUFFIXES:
+    if Path(base).suffix.lower() not in RESUME_SUFFIXES:
         raise ResumeImportError(
             "resume_media_type_unsupported",
             "the resume must be plain text or Markdown (.txt, .md, .markdown)",
         )
-    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", base[: -len(suffix)]).strip("-.")
-    return f"{stem[:_MAX_STEM_CHARS].rstrip('-.') or 'resume'}{suffix}"
+    return reduce_file_name(base)
 
 
 def import_resume_bytes(
@@ -169,5 +212,7 @@ __all__ = [
     "ResumeImportError",
     "import_resume_bytes",
     "import_resume_file",
+    "operation_key_name",
+    "reduce_file_name",
     "safe_resume_file_name",
 ]

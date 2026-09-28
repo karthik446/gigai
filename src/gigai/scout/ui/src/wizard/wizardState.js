@@ -203,6 +203,37 @@ export function screenIsComplete(step, fields) {
   return true;
 }
 
+// POST /api/resume/extract's body for the resume on screen 1.
+//   pasted / uploaded:        its text (`resume_text`)
+//   existing, used by a profile: that profile (`profile_id`); the route
+//                              reads the profile's pinned resume
+//   existing, used by none:   the stored resume itself (`resume_ref`). This
+//                              is the resume `gigai scout resume add` stored
+//                              before any profile existed (A1); the route
+//                              reads its text on this machine.
+// The text goes only to the chosen model (`model_target`) in all three.
+export function extractBody(fields, profiles) {
+  const body = { model_target: fields.modelTarget };
+  if (fields.resumeMode !== "existing") {
+    body.resume_text = fields.resumeText;
+    return body;
+  }
+  const ref = fields.existingRef;
+  const owner = (profiles || []).find(
+    (item) =>
+      item.resume_ref &&
+      ref &&
+      item.resume_ref.record_id === ref.record_id &&
+      item.resume_ref.revision_id === ref.revision_id,
+  );
+  if (owner) {
+    body.profile_id = owner.profile_id;
+  } else {
+    body.resume_ref = { record_id: ref.record_id, revision_id: ref.revision_id };
+  }
+  return body;
+}
+
 // A file's bytes as base64, for POST /api/resumes' `content_base64`.
 export function bytesToBase64(bytes) {
   let binary = "";
