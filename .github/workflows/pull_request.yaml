@@ -73,36 +73,65 @@ jobs:
       - id: matrix
         env:
           PROFILE: ${{ inputs.profile || 'pr' }}
+          # ci-shard-suite: every OS x Python entry below runs as this many
+          # source-tests jobs. The only place the number is written: each
+          # job's name and GIGAI_TEST_SHARDS read it back from the matrix.
+          SHARDS: "4"
         run: |
           case "${PROFILE}" in
             pr)
-              include='[{"os":"ubuntu-24.04","python":"3.11"}]'
+              entries='[{"os":"ubuntu-24.04","python":"3.11"}]'
               ;;
             release)
               # Operator: everyone uses macOS, so that's the one to test at
               # release; the broad matrix runs nightly / post-release instead.
-              include='[{"os":"macos-latest","python":"3.12"},{"os":"ubuntu-24.04","python":"3.12"}]'
+              entries='[{"os":"macos-latest","python":"3.12"},{"os":"ubuntu-24.04","python":"3.12"}]'
               ;;
             full)
-              include='[{"os":"ubuntu-24.04","python":"3.11"},{"os":"ubuntu-24.04","python":"3.12"},{"os":"ubuntu-24.04","python":"3.13"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.12"},{"os":"macos-latest","python":"3.13"}]'
+              entries='[{"os":"ubuntu-24.04","python":"3.11"},{"os":"ubuntu-24.04","python":"3.12"},{"os":"ubuntu-24.04","python":"3.13"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.12"},{"os":"macos-latest","python":"3.13"}]'
               ;;
             *)
               echo "unknown profile: ${PROFILE}" >&2
               exit 1
               ;;
           esac
+          # The runner's own python3, as in the changes job: no checkout here.
+          include="$(ENTRIES="${entries}" python3 -c '
+          import json, os
+          shards = int(os.environ["SHARDS"])
+          include = [
+              {**entry, "shard": shard, "shards": shards}
+              for entry in json.loads(os.environ["ENTRIES"])
+              for shard in range(1, shards + 1)
+          ]
+          print(json.dumps(include, separators=(",", ":")))
+          ')"
           echo "include=${include}" >> "${GITHUB_OUTPUT}"
 
   source-tests:
     needs: source-matrix
-    name: All tests (source) (Python ${{ matrix.python }} on ${{ matrix.os }})
+    name: All tests (source) (Python ${{ matrix.python }} on ${{ matrix.os }}, shard ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ${{ matrix.os }}
     # measured 2026-09-23: ubuntu 16.4m, macOS >20m (20 killed the v0.1.8 release).
     # measured 2026-09-28 (run 36389735708, 'full' profile on b9b4c02): all three
     # macOS jobs were cancelled by the 45-minute timeout at ~78% with zero
     # failures, so macOS needs ~60m; ubuntu finished green inside 45.
+    # ci-shard-suite: those are whole-suite times. Each job now runs one of
+    # 4 shards, so this limit is loose on purpose until the first sharded runs
+    # are measured; it then drops to 30 per shard.
     timeout-minutes: ${{ contains(matrix.os, 'macos') && 75 || 45 }}
     env:
+      # ci-shard-suite: tests/conftest.py keeps only the test files whose
+      # path hashes into this shard (tests/support/sharding.py); xdist then
+      # runs inside the shard exactly as it did for the whole suite. Both
+      # unset, as in a developer's own `make test-source`, runs everything.
+      GIGAI_TEST_SHARDS: ${{ matrix.shards }}
+      GIGAI_TEST_SHARD: ${{ matrix.shard }}
+      # ci-shard-suite, measurement only: print each shard's 60 slowest
+      # tests, so shard time can be read per file from the job log. Nothing
+      # else in the source lane passes --durations (`make test-source` runs
+      # pytest with the xdist options alone); selection and xdist are as before.
+      PYTEST_ADDOPTS: "--durations=60"
       TEST_XDIST_WORKERS: auto
       # ubuntu-24.04 runners are 4 vCPU; macos-latest runners are 3 vCPU.
       # _xdist_options() clamps to min(requested, max, os.cpu_count()) anyway,
@@ -131,7 +160,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - run: uv sync --locked --extra test --python "${{ matrix.python }}"
-      - name: Full source suite
+      - name: Source suite (shard ${{ matrix.shard }}/${{ matrix.shards }})
         run: make test-source
 
   behavior:
