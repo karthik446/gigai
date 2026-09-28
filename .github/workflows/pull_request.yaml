@@ -97,7 +97,11 @@ jobs:
     needs: source-matrix
     name: All tests (source) (Python ${{ matrix.python }} on ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45  # measured 2026-09-23: ubuntu 16.4m, macOS >20m (20 killed the v0.1.8 release)
+    # measured 2026-09-23: ubuntu 16.4m, macOS >20m (20 killed the v0.1.8 release).
+    # measured 2026-09-28 (run 36389735708, 'full' profile on b9b4c02): all three
+    # macOS jobs were cancelled by the 45-minute timeout at ~78% with zero
+    # failures, so macOS needs ~60m; ubuntu finished green inside 45.
+    timeout-minutes: ${{ contains(matrix.os, 'macos') && 75 || 45 }}
     env:
       TEST_XDIST_WORKERS: auto
       # ubuntu-24.04 runners are 4 vCPU; macos-latest runners are 3 vCPU.
