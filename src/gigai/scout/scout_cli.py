@@ -1078,4 +1078,137 @@ def watchlist_add_command(url: str, target_value: Path | None, home_value: Path 
     click.echo(f"{verb} {entry.company} ({entry.provider.value} board '{entry.board_token}').")
 
 
+# --- N11-C (v0.1.9): `gigai scout sources update|status` -------------------
+
+
+@scout_group.group("sources")
+def sources_group() -> None:
+    """Refresh the company boards Scout searches (stored on this machine)."""
+
+
+def _sources_progress_line(snapshot: dict[str, object]) -> str:
+    boards = snapshot.get("boards")
+    postings = snapshot.get("postings")
+    boards = boards if isinstance(boards, dict) else {}
+    postings = postings if isinstance(postings, dict) else {}
+    failed = f", {boards.get('failed')} failed" if boards.get("failed") else ""
+    return (
+        f"Boards {boards.get('done', 0)} of {boards.get('total', 0)}{failed}: "
+        f"{postings.get('new', 0)} new, {postings.get('changed', 0)} changed, {postings.get('removed', 0)} removed"
+    )
+
+
+@sources_group.command("update")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option(
+    "--budget-seconds",
+    "budget_seconds",
+    type=click.FloatRange(min=0),
+    default=None,
+    help="Stop after this many seconds (0 = no limit). Default: GIGAI_SCOUT_ACQUIRE_BUDGET_SECONDS, else 1200.",
+)
+@click.option("--force", is_flag=True, help="Start even when another update looks like it is still running.")
+@click.option("--json", "as_json", is_flag=True)
+def sources_update_command(
+    target_value: Path | None,
+    home_value: Path | None,
+    budget_seconds: float | None,
+    force: bool,
+    as_json: bool,
+) -> None:
+    """Check every company board on the watchlist and store what changed.
+
+    One polite conditional request per board (catalog companies and the
+    ones you added), so an unchanged board costs almost nothing. New,
+    changed and removed postings are recorded per company under
+    <home>/cache/scout/companies/ (plain JSON; safe to delete, the next
+    update rebuilds it). If the time budget stops an update, run it again:
+    it continues with the boards it has not reached yet.
+    """
+
+    from dataclasses import replace
+
+    from .find_jobs.market_acquisition import AcquireLimits
+    from .find_jobs.sources_update import (
+        STATUS_FAILED,
+        STATUS_PARTIAL,
+        SourcesUpdateError,
+        default_http_client,
+        load_effective_config,
+        run_sources_update,
+    )
+
+    home_root = home_value or default_home_root()
+    limits = AcquireLimits.from_environment()
+    if budget_seconds is not None:
+        limits = replace(limits, time_budget_seconds=budget_seconds if budget_seconds > 0 else None)
+
+    def _progress(snapshot: dict[str, object]) -> None:
+        if not as_json and snapshot.get("status") == "running":
+            click.echo(_sources_progress_line(snapshot))
+
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        target = resolved_target.expanduser().resolve(strict=True)
+        client = default_http_client()
+        try:
+            result = run_sources_update(
+                home_root=home_root,
+                target=target,
+                client=client,
+                config=load_effective_config(home_root, target),
+                limits=limits,
+                on_progress=_progress,
+                force=force,
+            )
+        finally:
+            client.close()
+    except (SourcesUpdateError, ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_sources_update_failed")
+        return
+
+    snapshot = result.to_json()
+    if as_json:
+        _emit(snapshot, True, "")
+    else:
+        boards = snapshot["boards"]
+        assert isinstance(boards, dict)
+        click.echo(result.summary)
+        click.echo(
+            f"Checked {boards['done'] - boards['skipped']} of {boards['total']} boards "
+            f"({boards['cached']} unchanged, {boards['failed']} did not answer) in {snapshot['elapsed_seconds']:.0f}s."
+        )
+        if result.status == STATUS_PARTIAL:
+            click.echo(f"{snapshot['remaining']} boards are left: run `gigai scout sources update` again to continue.")
+    if result.status == STATUS_FAILED:
+        raise click.exceptions.Exit(1)
+
+
+@sources_group.command("status")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def sources_status_command(home_value: Path | None, as_json: bool) -> None:
+    """Show the last sources update and whether a search can use the stored postings."""
+
+    from .find_jobs.sources_update import read_status
+
+    status = read_status(home_value or default_home_root())
+    if as_json:
+        _emit(status, True, "")
+        return
+    update = status["update"]
+    index = status["index"]
+    assert isinstance(index, dict)
+    if isinstance(update, dict):
+        click.echo(f"Last update {update['status']} ({update.get('finished_at') or update.get('updated_at')}): {update['summary']}")
+        if update["status"] == "running":
+            click.echo(_sources_progress_line(update))
+    else:
+        click.echo("No sources update has run yet.")
+    click.echo(f"Stored companies: {index['companies_indexed']} ({index['status']}).")
+    if index["message"]:
+        click.echo(str(index["message"]))
+
+
 __all__ = ["scout_group", "write_starter_find_jobs_config", "STARTER_FIND_JOBS_CONFIG"]

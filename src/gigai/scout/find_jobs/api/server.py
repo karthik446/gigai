@@ -976,6 +976,10 @@ class ScoutFindJobsBackend:
             "boards": dict(snapshot.boards),
             "watchlist_seed": None if snapshot.watchlist_seed is None else dict(snapshot.watchlist_seed),
             "rotation": dict(rotation) if isinstance(rotation, dict) else None,
+            # uat-bug-011: postings that matched every filter but were left
+            # out of this run's import ("N more matched, not imported this
+            # run"); 0 until acquire writes cap.json, and for older runs.
+            "not_imported_count": snapshot.not_imported_count,
         }
 
     def _sealed_selection_cap(self, run_id: str) -> int | None:
@@ -1340,6 +1344,7 @@ def _make_handler(
     from .runs import RunRoutesMixin
     from .runs_list import RunsListRoutesMixin
     from .setup import SetupRoutesMixin
+    from .sources import SourcesRoutesMixin
     from .static import StaticRoutesMixin
     from .tailored_resumes import TailoredResumesRoutesMixin
     from .watchlist import WatchlistRoutesMixin
@@ -1358,6 +1363,7 @@ def _make_handler(
         ResumeExtractRoutesMixin,
         TailoredResumesRoutesMixin,
         WatchlistRoutesMixin,
+        SourcesRoutesMixin,
         StaticRoutesMixin,
         BaseHTTPRequestHandler,
     ):
@@ -1549,6 +1555,9 @@ def _make_handler(
                     if path == "/api/watchlist":
                         self._handle_get_watchlist()
                         return
+                    if path == "/api/sources/update":
+                        self._handle_get_sources_update()
+                        return
                     run_id = _match_run_id(path, suffix="/results")
                     if run_id is not None:
                         self._handle_get_run_results(run_id)
@@ -1604,6 +1613,9 @@ def _make_handler(
                     return
                 if path == "/api/watchlist":
                     self._handle_post_watchlist()
+                    return
+                if path == "/api/sources/update":
+                    self._handle_post_sources_update()
                     return
                 profile_id = _match_profile_id(path, suffix="/archive")
                 if profile_id is not None:

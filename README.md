@@ -174,6 +174,38 @@ instead (Ctrl-C stops it), `--no-browser` to skip opening a tab, and `--port`
 if 8765 is taken. Logs live at `<home>/logs/scout-<project_id>.log`; run
 state at `<home>/run/scout/<project_id>.json`.
 
+### Scout: update sources
+
+Checking the company boards is its own step, separate from searching:
+
+```bash
+gigai scout sources update          # check every company board on the watchlist
+gigai scout sources status --json   # the last update, and whether the stored postings are current
+```
+
+`gigai scout sources update` (the UI's **Update sources**, `POST
+/api/sources/update`) makes one polite conditional request per board on your
+watchlist: the catalog companies your setup admits plus the ones you added.
+An unchanged board costs one small request and changes nothing. It prints
+what it found, e.g. `120 companies with new postings: 412 new, 95 changed,
+230 removed`. An update stops at its time budget (20 minutes by default;
+`--budget-seconds 0` for no limit) and the next one continues with the boards
+it has not reached yet, so the first update over the full catalog takes a few
+passes and later ones a single short pass.
+
+What it learns is stored on this machine only, one plain JSON file per
+company:
+
+```
+<home>/cache/scout/companies/<ats>:<slug>.json
+```
+
+Each file lists the company's postings with when each was first seen, last
+seen, changed or removed. It is a cache, not a record: it is safe to delete
+(one file or the whole folder), and the next update rebuilds it from the
+board responses already cached under `<home>/cache/scout/ats-boards/`.
+Nothing in it leaves the machine.
+
 If a project has more than one installed, approved Gig, switch which one is
 active with:
 
