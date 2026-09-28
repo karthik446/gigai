@@ -94,8 +94,8 @@ export function assessmentHash(jobId) {
 }
 
 // uat-batch2-r1: a link to a stored assessment opens where its posting
-// lives: a run posting's under Jobs, an on-demand one's under Assessments
-// (jobModel.postingHome; `runPostingIds` is App.jsx's).
+// lives: a job page's under Jobs, an on-demand one's under Assessments
+// (jobModel.postingHome: the item's `origin`, else `runPostingIds`, App.jsx's).
 export function postingHash(item, runPostingIds) {
   const identity = item.job.job_identity;
   return postingHome(item, runPostingIds) === "jobs" ? jobHash(identity) : assessmentHash(identity);

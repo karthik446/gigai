@@ -15,11 +15,17 @@ What is pinned, by item:
   opens ``#/assessments/<id>`` and that page goes back to Assessments.
 * uat-ui-batch2-r1 (N21, orchestrator decisions 1 and 5)  Assessments is on
   demand ONLY: a run posting assessed or re-assessed from its job page stays
-  under Jobs and is never a card on Assessments too. The store item has no
-  origin field, so the rule is the job's identity against the postings of
+  under Jobs and is never a card on Assessments too. For a store item with
+  no ``origin`` the rule is the job's identity against the postings of
   the runs the app has loaded (``jobModel.isRunPosting``); a pasted resume
   or a pasted posting text is always on demand. A question's link opens
   where its posting lives (``routing.postingHash``).
+* assess-origin-field  a store item's ``origin`` decides first:
+  ``quick_assess`` is listed under Assessments (also when a later run finds
+  the same posting), ``job_page`` never is (also when its run is not
+  loaded). An item without one, or with a value this UI does not know, uses
+  the rule above. The Assess page sends ``quick_assess``; the job page sends
+  ``job_page`` for a run's posting.
 * (found in the hand-check) an assessment made against a PASTED resume is
   filed under no profile; it is a card on Assessments all the same, and it
   never replaces a run posting's own verdict.
@@ -57,7 +63,7 @@ import pytest
 
 from gigai.scout.find_jobs import sources_update
 from gigai.scout.find_jobs.api import static as static_module
-from gigai.scout.find_jobs.assess_contracts import RANK_SKIP_REASONS
+from gigai.scout.find_jobs.assess_contracts import ASSESS_ORIGINS, ORIGIN_JOB_PAGE, ORIGIN_QUICK_ASSESS, RANK_SKIP_REASONS
 
 UI_SRC = Path(static_module.__file__).resolve().parents[2] / "ui" / "src"
 JOB_MODEL_JS = UI_SRC / "jobModel.js"
@@ -107,7 +113,28 @@ const link = (item, ids) => {
   return { id: item.job.job_identity, home: jobModel.postingHome(item, ids), hash, view: route.view, jobId: route.params.jobId, nav: routing.navViewFor(route.view) };
 };
 
+// assess-origin-field: the store items say where they were started.
+const origin = input.origin;
+const originJobs = jobModel.buildJobs(origin.build);
+const originKnown = jobModel.addRunPostings(new Set(), origin.build.rows);
+const originCard = (job) => ({ ...card(job), hasRow: Boolean(job.row), pastedResume: Boolean(job.pastedResume) });
+
 process.stdout.write(JSON.stringify({
+  origin: {
+    constants: [jobModel.ORIGIN_QUICK_ASSESS, jobModel.ORIGIN_JOB_PAGE],
+    stored: origin.build.quickItems.map((item) => jobModel.storedOrigin(item)),
+    storedNone: [jobModel.storedOrigin(null), jobModel.storedOrigin(undefined), jobModel.storedOrigin({})],
+    runJobs: jobModel.runJobs(originJobs).map(originCard),
+    assessments: jobModel.assessmentJobs(origin.build.quickItems, originJobs, origin.pastedItems, originKnown).map(originCard),
+    afterReload: jobModel.assessmentJobs(origin.build.quickItems, [], origin.pastedItems, new Set()).map(originCard),
+    olderRunOpened: jobModel.assessmentJobs(origin.build.quickItems, originJobs, origin.pastedItems, jobModel.addRunPostings(originKnown, origin.olderRunRows)).map((job) => job.id),
+    links: origin.build.quickItems.concat(origin.pastedItems).map((item) => link(item, originKnown)),
+    linksAfterReload: origin.build.quickItems.concat(origin.pastedItems).map((item) => link(item, new Set())),
+    sends: originJobs.map((job) => ({ id: job.id, hasRow: Boolean(job.row), origin: jobModel.assessOriginFor(job) })),
+    sendsForCards: jobModel.assessmentJobs(origin.build.quickItems, originJobs, origin.pastedItems, originKnown).map((job) => ({ id: job.id, origin: jobModel.assessOriginFor(job) })),
+    sendsNotAssessed: jobModel.assessOriginFor(jobModel.buildJobs({ rows: origin.build.rows, rankScores: [], quickItems: [], runCreatedAt: origin.build.runCreatedAt })[1]),
+    sendsNoJob: [jobModel.assessOriginFor(null), jobModel.assessOriginFor(undefined)],
+  },
   skipText: Object.fromEntries(input.skipReasons.map((id) => [id, jobModel.jevSkipText(id)])),
   skipNone: [jobModel.jevSkipText(null), jobModel.jevSkipText(undefined), jobModel.jevSkipText("")],
   quickOnly: input.quickItems.map((item) => card(jobModel.quickOnlyJob(item))),
@@ -264,6 +291,51 @@ def _lives() -> dict:
     }
 
 
+OLD_ADDRESS = "https://careers.example.test/jobs/9"
+NEW_ORIGIN_ADDRESS = "https://careers.example.test/jobs/10"
+
+
+def _origin() -> dict:
+    """assess-origin-field: one profile's store, written by the new backend.
+
+    The loaded run (2026-09-28) carries KONG and GLOBEX. ACME is a posting
+    of an OLDER run, which is not loaded. Every item but two says where it
+    was started.
+    """
+
+    return {
+        "olderRunRows": [_row(ACME, text="Acme builds rockets."), _row(INITECH, text="Initech builds TPS tooling.")],
+        "build": {
+            "rows": [
+                _row(KONG, text=POSTING_TEXT, assessment={"verdict": "not_a_match", "matrix": [], "structured_questions": []}),
+                _row(GLOBEX, text="Globex runs logistics software."),
+            ],
+            "rankScores": [{**RANK_89, "fit": "maybe", "score": 55}],
+            "runCreatedAt": "2026-09-28T00:00:00Z",
+            "quickItems": [
+                # 0 ACME: "Assess this posting" on the job page of an older run's posting.
+                _quick(ACME, at="2026-09-27T09:00:00Z", verdict="pending_user_answers", origin="job_page"),
+                # 1 KONG: "+ Assess a job" on the 26th; the run of the 28th found the same posting.
+                _quick(KONG, at="2026-09-26T09:00:00Z", origin="quick_assess"),
+                # 2 GLOBEX: "Assess this posting" on the loaded run's job page.
+                _quick(GLOBEX, at="2026-09-28T10:00:00Z", verdict="pending_user_answers", origin="job_page"),
+                # 3 "+ Assess a job" with pasted text.
+                _quick(PASTED, at="2026-09-25T08:00:00Z", verdict="pending_user_answers", fetch_kind="pasted", origin="quick_assess"),
+                # 4 INITECH: stored before the field; a posting of the older run.
+                _quick(INITECH, at="2026-09-24T08:00:00Z", verdict="pending_user_answers"),
+                # 5 stored before the field; no run carries it.
+                _quick(OLD_ADDRESS, at="2026-09-23T08:00:00Z"),
+                # 6 a value this UI does not know: read as no origin.
+                _quick(NEW_ORIGIN_ADDRESS, at="2026-09-22T08:00:00Z", origin="somewhere_new"),
+            ],
+        },
+        "pastedItems": [
+            # GLOBEX's address on the Assess page, against a pasted resume.
+            _quick(GLOBEX, at="2026-09-28T11:00:00Z", verdict="not_a_match", resume=PASTED_RESUME, rank_skip_reason="ephemeral_resume", origin="quick_assess"),
+        ],
+    }
+
+
 def _update(status: str, **fields: object) -> dict:
     base = {
         "update_id": "sources_update_1",
@@ -346,6 +418,7 @@ def _payload() -> dict:
     return {
         "now": NOW,
         "lives": _lives(),
+        "origin": _origin(),
         "skipReasons": list(RANK_SKIP_REASONS) + ["some_new_reason"],
         "quickItems": quick_items,
         "pastedItems": [
@@ -665,6 +738,91 @@ def test_the_questions_page_and_the_assess_flow_use_the_one_rule() -> None:
     routing = ROUTING_JS.read_text(encoding="utf-8")
     rule = routing[routing.index("export function postingHash") :][:260]
     assert 'postingHome(item, runPostingIds) === "jobs" ? jobHash(identity) : assessmentHash(identity)' in rule
+
+
+# --- assess-origin-field: the store item says where it was started ---------------------
+
+
+def test_the_ui_knows_the_origins_the_backend_writes(out: dict) -> None:
+    assert out["origin"]["constants"] == [ORIGIN_QUICK_ASSESS, ORIGIN_JOB_PAGE]
+    assert sorted(out["origin"]["constants"]) == sorted(ASSESS_ORIGINS)
+    assert out["origin"]["stored"] == ["job_page", "quick_assess", "job_page", "quick_assess", None, None, None]
+    assert out["origin"]["storedNone"] == [None, None, None]
+
+
+def test_a_job_page_assessment_is_not_listed_after_a_reload_that_loads_another_run(out: dict) -> None:
+    origin = out["origin"]
+    # ACME is a posting of an older run; the app has loaded the newest run only.
+    assert ACME not in [card["id"] for card in origin["runJobs"]]
+    assert ACME not in [card["id"] for card in origin["assessments"]]
+    # GLOBEX's job-page assessment is not a card either; the GLOBEX card
+    # here is the pasted-resume one from the Assess page.
+    globex = [card for card in origin["assessments"] if card["id"] == GLOBEX]
+    assert [(card["pastedResume"], card["verdict"]) for card in globex] == [(True, "not_a_match")]
+    # The same right after a reload, before any run is loaded.
+    listed = [card["id"] for card in origin["afterReload"]]
+    assert ACME not in listed
+    assert [(card["pastedResume"], card["verdict"]) for card in origin["afterReload"] if card["id"] == GLOBEX] == [(True, "not_a_match")]
+
+
+def test_a_quick_assessment_stays_under_assessments_when_a_later_run_finds_the_posting(out: dict) -> None:
+    origin = out["origin"]
+    card = _by_id(origin["assessments"], KONG)
+    # The card is the store's own: the verdict of the quick assessment, not
+    # the later run's; the run's card lends its Jev score only.
+    assert card["status"] == "on_demand" and card["hasRow"] is False
+    assert card["verdict"] == "matched_above_threshold" and card["assessedAt"] == "2026-09-26T09:00:00Z"
+    assert card["rank"]["score"] == 55
+    # The run's posting is a card on Jobs too, with the run's own verdict.
+    on_jobs = _by_id(origin["runJobs"], KONG)
+    assert on_jobs["hasRow"] is True and on_jobs["verdict"] == "not_a_match"
+    assert [card["id"] for card in origin["assessments"]] == [GLOBEX, KONG, PASTED, INITECH, OLD_ADDRESS, NEW_ORIGIN_ADDRESS]
+    assert [card["assessedAt"] for card in origin["assessments"]] == sorted((card["assessedAt"] for card in origin["assessments"]), reverse=True)
+
+
+def test_an_item_stored_before_the_origin_field_uses_the_loaded_runs_rule(out: dict) -> None:
+    origin = out["origin"]
+    # No loaded run carries INITECH: listed. Once its run has been opened: not.
+    assert INITECH in [card["id"] for card in origin["assessments"]]
+    assert INITECH not in origin["olderRunOpened"]
+    # ACME says job_page, so opening its run changes nothing for it.
+    assert origin["olderRunOpened"] == [GLOBEX, KONG, PASTED, OLD_ADDRESS, NEW_ORIGIN_ADDRESS]
+    # An address no run carries, and a value this UI does not know: listed.
+    assert OLD_ADDRESS in [card["id"] for card in origin["afterReload"]]
+    assert NEW_ORIGIN_ADDRESS in [card["id"] for card in origin["afterReload"]]
+
+
+def test_a_questions_link_uses_the_same_test(out: dict) -> None:
+    origin = out["origin"]
+    expected = ["jobs", "assessments", "jobs", "assessments", "assessments", "assessments", "assessments", "assessments"]
+    assert [link["home"] for link in origin["links"]] == expected
+    # The items that say where they were started do not depend on the loaded runs.
+    assert [link["home"] for link in origin["linksAfterReload"]] == expected
+    acme, kong = origin["linksAfterReload"][0], origin["linksAfterReload"][1]
+    assert acme["view"] == "job" and acme["nav"] == "jobs" and acme["jobId"] == ACME
+    assert kong["view"] == "assessment" and kong["nav"] == "assessments" and kong["jobId"] == KONG
+
+
+def test_the_pages_send_where_the_assessment_was_started(out: dict) -> None:
+    origin = out["origin"]
+    sends = {item["id"]: item for item in origin["sends"]}
+    # A run's posting: the job page's, unless its store item says otherwise.
+    assert sends[GLOBEX] == {"id": GLOBEX, "hasRow": True, "origin": "job_page"}
+    assert sends[KONG] == {"id": KONG, "hasRow": True, "origin": "quick_assess"}
+    assert origin["sendsNotAssessed"] == "job_page"
+    # A page with no run row keeps what its store item says; with no origin it is on demand.
+    assert sends[ACME] == {"id": ACME, "hasRow": False, "origin": "job_page"}
+    assert sends[PASTED]["origin"] == "quick_assess" and sends[OLD_ADDRESS]["origin"] == "quick_assess"
+    assert {item["origin"] for item in origin["sendsForCards"]} == {"quick_assess"}
+    assert origin["sendsNoJob"] == ["quick_assess", "quick_assess"]
+    assess = (UI_SRC / "views" / "AssessView.jsx").read_text(encoding="utf-8")
+    assert "postAssess({ job, resume, origin: ORIGIN_QUICK_ASSESS })" in assess
+    page = (UI_SRC / "views" / "JobPage.jsx").read_text(encoding="utf-8")
+    assert "const assessOrigin = assessOriginFor(job);" in page
+    assert "postAssess({ job: { job_url: jobUrl }, origin: assessOrigin })" in page
+    assert "postAssess({ job: { job_url: posting.url }, origin })" in page
+    assert "<AssessNow posting={posting} origin={assessOrigin} onAssessed={onQuickUpdated} />" in page
+    assert page.count("postAssess(") == 2, "a new POST /api/assess on the job page must say its origin"
 
 
 def test_a_pasted_resume_assessment_is_a_card_on_assessments(out: dict) -> None:

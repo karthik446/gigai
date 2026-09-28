@@ -807,6 +807,7 @@ def _read_text_option(value: str, *, flag: str) -> str:
 @click.option("--title", "title", help="Job title override (pasted text has none).")
 @click.option("--company", "company", help="Company override (pasted text has none).")
 @click.option("--model-target", "model_target", type=click.Choice([item.value for item in ModelTarget]), help="Adapter kind to assess with (default: find-jobs.json's default_model_target).")
+@click.option("--origin", "origin", type=click.Choice(["quick_assess", "job_page"]), default="quick_assess", show_default=True, help="Where this assessment was started; the UI lists quick_assess ones under Assessments.")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
@@ -820,6 +821,7 @@ def assess_command(
     title: str | None,
     company: str | None,
     model_target: str | None,
+    origin: str,
     target_value: Path | None,
     home_value: Path | None,
     as_json: bool,
@@ -866,6 +868,7 @@ def assess_command(
             resume=AssessResumeInput(profile_id=profile_id or None, resume_text=resume_text or None),
             preferences=None if visa is None else AssessPreferences(visa_sponsorship_required=visa),
             model_target=None if model_target is None else ModelTarget(model_target),
+            origin=origin,
         )
     except FindJobsContractError as exc:
         _fail(exc, as_json=as_json, fallback="invalid_value")

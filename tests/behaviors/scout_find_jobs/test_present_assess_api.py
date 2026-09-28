@@ -186,6 +186,8 @@ def test_post_assess_then_get_assessments(running_server, ollama_config, monkeyp
     assert body["producer"]["callable"] == "scout.assess" and body["producer"]["model_target"] == "ollama_local"
     assert body["usage"]["input_tokens"] == 1
     assert Path(body["stored_path"]).is_file()
+    # assess-origin-field: a bare POST is a quick assessment.
+    assert body["origin"] == "quick_assess"
     # Never the resume or job text on the wire.
     assert "six years" not in response.text.replace('"six years"', "")  # the model's evidence quote is allowed
     assert _POSTING not in response.text and "Fixture Resume" not in response.text
@@ -283,6 +285,69 @@ def test_without_a_jev_key_the_response_has_no_score_and_says_why(running_server
     assert body["result"]["verdict"] == "matched_above_threshold"
     assert "rank_score" not in body and body["rank_skip_reason"] == "no_key"
     assert body["posting_text"] == "Build reliable Python services."
+
+
+def test_the_origin_the_caller_sends_is_stored_served_and_kept(running_server, ollama_config, monkeypatch: pytest.MonkeyPatch) -> None:
+    """assess-origin-field: the job page says ``job_page``; the response, the
+    list and the stored file carry it, and a re-assessment after an answer
+    (``POST /api/answers``) or a POST that names no origin leaves it alone."""
+
+    client, fx, _port = running_server
+    monkeypatch.setenv("GIGAI_SCOUT_FIND_JOBS_TEST_HTTP", "1")
+    _install_model(monkeypatch, [_PENDING, _MATCH, _MATCH, _MATCH])
+    job_url = "https://boards.greenhouse.io/acme/jobs/101"
+
+    response = client.post("/api/assess", json={"job": {"job_url": job_url}, "origin": "job_page"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["origin"] == "job_page"
+    assert json.loads(Path(body["stored_path"]).read_text(encoding="utf-8"))["origin"] == "job_page"
+    listed = client.get("/api/assessments").json()["items"]
+    assert [item["origin"] for item in listed] == ["job_page"]
+
+    answered = client.post(
+        "/api/answers",
+        json={"question_id": "cloud:gcp", "answer": "Yes, two years.", "reassess": {"job_identity": body["job"]["job_identity"]}},
+    )
+    assert answered.status_code == 201, answered.text
+    reassessed = answered.json()["reassessed"]
+    assert reassessed["stored_path"] == body["stored_path"] and reassessed["origin"] == "job_page"
+
+    bare = client.post("/api/assess", json={"job": {"job_url": job_url}})
+    assert bare.status_code == 200, bare.text
+    assert bare.json()["stored_path"] == body["stored_path"] and bare.json()["origin"] == "job_page"
+
+    # "+ Assess a job" with the same address: the caller's origin is stored.
+    quick = client.post("/api/assess", json={"job": {"job_url": job_url}, "origin": "quick_assess"})
+    assert quick.status_code == 200, quick.text
+    assert quick.json()["stored_path"] == body["stored_path"] and quick.json()["origin"] == "quick_assess"
+    assert [item["origin"] for item in client.get("/api/assessments").json()["items"]] == ["quick_assess"]
+
+
+def test_a_stored_item_without_an_origin_is_served_without_one(running_server, ollama_config, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, fx, _port = running_server
+    _install_model(monkeypatch, [_MATCH])
+    body = client.post("/api/assess", json={"job": {"job_text": _POSTING}}).json()
+    stored = Path(body["stored_path"])
+    old = {key: value for key, value in json.loads(stored.read_text(encoding="utf-8")).items() if key != "origin"}
+    stored.write_text(json.dumps(old, indent=2, sort_keys=True), encoding="utf-8")
+
+    listed = client.get("/api/assessments").json()["items"]
+
+    # Every stored key is served as it is, and no origin is invented (the
+    # route may add served-only keys of its own, so this is not an equality).
+    assert len(listed) == 1 and "origin" not in listed[0]
+    assert {key: listed[0][key] for key in old} == old
+
+
+def test_an_unknown_origin_is_422_before_any_model_call(running_server, ollama_config, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, _fx, _port = running_server
+    binding = _install_model(monkeypatch, [_MATCH])
+
+    _assert_error(client.post("/api/assess", json={"job": {"job_text": _POSTING}, "origin": "run"}), status=422, code="bad_enum")
+    _assert_error(client.post("/api/assess", json={"job": {"job_text": _POSTING}, "origin": 7}), status=422, code="wrong_type")
+    assert binding.port.prompts == []
+    assert client.get("/api/assessments").json()["items"] == []
 
 
 def test_get_assessments_is_empty_before_any_assessment(running_server) -> None:

@@ -12,7 +12,20 @@ import TailoredResumePanel, { useTailoredResume } from "../components/TailoredRe
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { reassessGate, tailorGate } from "../answersModel.js";
 import { displayCompanyName, notAssessedReasonDetail, unchangedSinceLabel } from "../display.js";
-import { ageLabel, dateLabel, jdExcerpt, jevReasonsLine, notAssessedLine, payLabel, questionPromptIndex, statusStyleFrom, workModeLabel } from "../jobModel.js";
+import {
+  ORIGIN_JOB_PAGE,
+  ageLabel,
+  assessOriginFor,
+  dateLabel,
+  jdExcerpt,
+  jevReasonsLine,
+  notAssessedLine,
+  payLabel,
+  questionPromptIndex,
+  statusStyleFrom,
+  storedOrigin,
+  workModeLabel,
+} from "../jobModel.js";
 import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 
 // Q4a: one posting's job page (#/jobs/<normalized_url>), per
@@ -54,7 +67,9 @@ import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 //               the box of a question already answered for another posting
 //               (the prompt decides what it means, operator answer 5 --
 //               nothing here maps an answer to a status)
-//   assess      POST /api/assess {job:{job_url}} for a not-assessed row
+//   assess      POST /api/assess {job:{job_url}, origin} for a not-assessed
+//               row; `origin` is "job_page" for a run's posting
+//               (jobModel.assessOriginFor), so the result stays under Jobs
 //   applied     GET/POST /api/applications (external_ref = normalized_url)
 //   tailored    GET/POST /api/tailored-resumes (Q3), see TailoredResumePanel
 //
@@ -133,7 +148,7 @@ function JobDescription({ posting, pasted }) {
   );
 }
 
-function AssessNow({ posting, onAssessed }) {
+function AssessNow({ posting, origin, onAssessed }) {
   const [state, setState] = useState("idle");
   const [error, setError] = useState(null);
   if (!posting.url) {
@@ -149,7 +164,7 @@ function AssessNow({ posting, onAssessed }) {
         onClick={() => {
           setState("saving");
           setError(null);
-          postAssess({ job: { job_url: posting.url } })
+          postAssess({ job: { job_url: posting.url }, origin })
             .then((response) => {
               setState("idle");
               onAssessed(response);
@@ -216,7 +231,8 @@ export default function JobPage({ job, jobId, from, profileId, profileLabel, vis
   const assessment = job ? job.assessment : null;
   const jobUrl = posting && posting.url ? posting.url : null;
   const priorAnswers = useMemo(() => new Map(answers.map((answer) => [answer.question_id, answer])), [answers]);
-  const assessByUrl = useCallback(() => postAssess({ job: { job_url: jobUrl } }), [jobUrl]);
+  const assessOrigin = assessOriginFor(job);
+  const assessByUrl = useCallback(() => postAssess({ job: { job_url: jobUrl }, origin: assessOrigin }), [jobUrl, assessOrigin]);
 
   // Hooks run on every render, a missing job included (its state is empty).
   const answerDrafts = useAnswerDrafts({
@@ -297,7 +313,8 @@ export default function JobPage({ job, jobId, from, profileId, profileLabel, vis
               {job.status === "on_demand" ? <QuickAssessChip fetchKind={job.quick && job.quick.job && job.quick.job.fetch_kind} /> : <ProviderBadge posting={posting} />}
               {job.status === "on_demand" ? (
                 <span title={job.quick && job.quick.created_at ? job.quick.created_at : undefined}>
-                  assessed on demand{job.quick && job.quick.created_at ? ` ${dateLabel(job.quick.created_at)}` : ""}
+                  {storedOrigin(job.quick) === ORIGIN_JOB_PAGE ? "assessed from its job page" : "assessed on demand"}
+                  {job.quick && job.quick.created_at ? ` ${dateLabel(job.quick.created_at)}` : ""}
                   {job.pastedResume ? " against a pasted resume" : ""}
                 </span>
               ) : (
@@ -322,7 +339,7 @@ export default function JobPage({ job, jobId, from, profileId, profileLabel, vis
             {!assessment && (
               <div className="callout info" style={{ margin: "12px 0 0" }} title={job.notAssessedReason ? notAssessedReasonDetail(job.notAssessedReason) : undefined}>
                 {notAssessedLine(job)}.
-                {job.status !== "assessing" && job.status !== "acquired" && <AssessNow posting={posting} onAssessed={onQuickUpdated} />}
+                {job.status !== "assessing" && job.status !== "acquired" && <AssessNow posting={posting} origin={assessOrigin} onAssessed={onQuickUpdated} />}
               </div>
             )}
           </div>

@@ -53,6 +53,15 @@ _TEXT_IDENTITY_PREFIX = "text:"
 #: spent; ``error``: the Jev call failed (the assessment itself is unaffected).
 RANK_SKIP_REASONS: tuple[str, ...] = ("no_key", "ephemeral_resume", "no_title_or_company", "cost_cap", "error")
 
+#: ``AssessRequest.origin`` / ``AssessResponse.origin`` values: where the
+#: operator started the assessment.  ``quick_assess``: on demand ("+ Assess a
+#: job", ``gigai scout assess``, a bare ``POST /api/assess``); ``job_page``:
+#: from the job page of a posting a find-jobs run found.  The UI lists only
+#: the first kind under Assessments.
+ORIGIN_QUICK_ASSESS = "quick_assess"
+ORIGIN_JOB_PAGE = "job_page"
+ASSESS_ORIGINS: tuple[str, ...] = (ORIGIN_QUICK_ASSESS, ORIGIN_JOB_PAGE)
+
 
 def _optional_strings(value: object, name: str) -> tuple[str, ...] | None:
     if value is None:
@@ -380,38 +389,54 @@ class AssessmentBody(_Contract):
 @dataclass(frozen=True)
 class AssessRequest(_Contract):
     """``POST /api/assess`` body.  ``resume`` defaults to "the selected profile";
-    ``preferences``/``model_target`` default to the target's ``find-jobs.json``."""
+    ``preferences``/``model_target`` default to the target's ``find-jobs.json``.
+
+    ``origin`` (additive, one of :data:`ASSESS_ORIGINS`) says where the
+    operator started this assessment; ``None`` means the caller did not say
+    (``quick_assess.run_quick_assessment`` decides what is stored).  Omitted
+    from JSON when ``None``.
+    """
 
     schema_version: ClassVar[str] = "scout-assess-request:1"
     job: AssessJobInput
     resume: AssessResumeInput = field(default_factory=AssessResumeInput)
     preferences: AssessPreferences | None = None
     model_target: ModelTarget | None = None
+    origin: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.origin is not None and self.origin not in ASSESS_ORIGINS:
+            _fail("bad_enum", "assess_request.origin has an unsupported value")
 
     def to_json(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "schema_version": self.schema_version,
             "job": self.job.to_json(),
             "resume": self.resume.to_json(),
             "preferences": None if self.preferences is None else self.preferences.to_json(),
             "model_target": None if self.model_target is None else _json_enum(self.model_target),
         }
+        if self.origin is not None:
+            value["origin"] = self.origin
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "AssessRequest":
         value = _object_with_optional(
-            obj, ("job",), ("schema_version", "resume", "preferences", "model_target"), "assess_request"
+            obj, ("job",), ("schema_version", "resume", "preferences", "model_target", "origin"), "assess_request"
         )
         if "schema_version" in value and value["schema_version"] != cls.schema_version:
             _fail("bad_enum", "assess_request.schema_version is unsupported")
         resume = value.get("resume")
         preferences = value.get("preferences")
         model_target = value.get("model_target")
+        origin = value.get("origin")
         return cls(
             job=AssessJobInput.from_json(value["job"]),
             resume=AssessResumeInput() if resume is None else AssessResumeInput.from_json(resume),
             preferences=None if preferences is None else AssessPreferences.from_json(preferences),
             model_target=None if model_target is None else _enum(model_target, ModelTarget, "assess_request.model_target"),
+            origin=None if origin is None else _string(origin, "assess_request.origin"),
         )
 
 
@@ -503,6 +528,11 @@ class AssessResponse(_Contract):
     # before these fields. Each is omitted from JSON when ``None``.
     rank_score: RankScore | None = None
     rank_skip_reason: str | None = None
+    # assess-origin-field (v0.1.9, additive): where the operator started
+    # this assessment (:data:`ASSESS_ORIGINS`). ``None`` for a file written
+    # before this field; the UI then decides from the job's identity and the
+    # runs it has loaded. Omitted from JSON when ``None``.
+    origin: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -517,6 +547,8 @@ class AssessResponse(_Contract):
             _fail("bad_enum", "assess_response.rank_skip_reason has an unsupported value")
         if self.rank_score is not None and self.rank_skip_reason is not None:
             _fail("invalid_value", "assess_response carries a rank_score or a rank_skip_reason, never both")
+        if self.origin is not None and self.origin not in ASSESS_ORIGINS:
+            _fail("bad_enum", "assess_response.origin has an unsupported value")
 
     def to_json(self) -> dict[str, object]:
         job = self.job.to_json()
@@ -543,6 +575,8 @@ class AssessResponse(_Contract):
             value["rank_score"] = self.rank_score.to_json()
         if self.rank_skip_reason is not None:
             value["rank_skip_reason"] = self.rank_skip_reason
+        if self.origin is not None:
+            value["origin"] = self.origin
         return value
 
     @classmethod
@@ -553,7 +587,7 @@ class AssessResponse(_Contract):
                 "schema_version", "job", "resume", "preferences", "result", "producer", "usage",
                 "instructions_digest", "created_at", "stored_path",
             ),
-            ("updated_at", "history", "posting_text", "rank_score", "rank_skip_reason"),
+            ("updated_at", "history", "posting_text", "rank_score", "rank_skip_reason", "origin"),
             "assess_response",
         )
         if value["schema_version"] != cls.schema_version:
@@ -582,6 +616,7 @@ class AssessResponse(_Contract):
             if "rank_skip_reason" in value
             else None
         )
+        origin = _string(value["origin"], "assess_response.origin") if "origin" in value else None
         return cls(
             job=ResolvedJob.from_json({**job, "text": ""}),
             resume=ResolvedResume.from_json(value["resume"]),
@@ -597,6 +632,7 @@ class AssessResponse(_Contract):
             posting_text=posting_text,
             rank_score=rank_score,
             rank_skip_reason=rank_skip_reason,
+            origin=origin,
         )
 
 
@@ -621,7 +657,10 @@ class AssessmentsListResponse(_Contract):
 
 
 __all__ = [
+    "ASSESS_ORIGINS",
     "FETCH_KINDS",
+    "ORIGIN_JOB_PAGE",
+    "ORIGIN_QUICK_ASSESS",
     "RANK_SKIP_REASONS",
     "AssessJobInput",
     "AssessPreferences",

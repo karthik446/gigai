@@ -9,7 +9,8 @@ import { ASSESS_HASH } from "../routing.js";
 //
 // uat-batch2-r1: on demand ONLY. A posting a search found stays under Jobs
 // when it is assessed or re-assessed from its job page; it is never a card
-// here too.
+// here too. assess-origin-field: the store item's `origin` says which it is
+// ("quick_assess" is listed here); see jobModel.isRunPosting.
 //
 // `jobs` is jobModel.assessmentJobs() over the quick-assess store
 // (GET /api/assessments?profile_id=…), built by FindJobsView, which owns

@@ -9,6 +9,11 @@ the one new server-side piece -- the verdict history APPENDS on every
 assess/re-assess (operator answer 4) -- through those same routes, with the
 same fixture model ``test_answers_journey.py`` uses (pending with a
 ``cloud:gcp`` question until the prior answer reaches the prompt).
+
+assess-origin-field: the job page's requests say ``origin: "job_page"``; the
+stored item carries it through every re-assessment, so the UI never lists
+it under Assessments. A run-only posting's first re-assessment is the job
+page's too.
 """
 
 from __future__ import annotations
@@ -43,11 +48,12 @@ def test_verdict_history_grows_on_every_reassess(tmp_path: Path, monkeypatch: py
         # "Assess this posting" on a not-assessed card: POST /api/assess by URL.
         first, first_latency = timed_request(
             "POST /api/assess (job page: assess this posting)",
-            lambda: client.post("/api/assess", json={"job": {"job_url": _JOB_URL}}),
+            lambda: client.post("/api/assess", json={"job": {"job_url": _JOB_URL}, "origin": "job_page"}),
         )
         assert first.status_code == 200, first.text
         f = first.json()
         assert f["result"]["verdict"] == "pending_user_answers"
+        assert f["origin"] == "job_page"
         assert f["history"] == [{"at": f["created_at"], "verdict": "pending_user_answers", "trigger": "assess"}]
         job_identity = f["job"]["job_identity"]
         first_latency.assert_within_budget()
@@ -68,6 +74,7 @@ def test_verdict_history_grows_on_every_reassess(tmp_path: Path, monkeypatch: py
         assert r["history"][0] == f["history"][0]
         assert r["history"][1] == {"at": r["updated_at"], "verdict": "matched_above_threshold", "trigger": "answer:cloud:gcp"}
         assert r["history"][1]["at"] >= r["history"][0]["at"]
+        assert r["origin"] == "job_page"  # an answer never moves the posting to Assessments
         answered_latency.assert_within_budget()
 
         # Assessing the same job again with no new answer: a third entry, "reassess".
@@ -77,12 +84,14 @@ def test_verdict_history_grows_on_every_reassess(tmp_path: Path, monkeypatch: py
         assert a["stored_path"] == f["stored_path"]
         assert [entry["trigger"] for entry in a["history"]] == ["assess", "answer:cloud:gcp", "reassess"]
         assert a["history"][:2] == r["history"]
+        assert a["origin"] == "job_page"  # this POST names no origin: the stored one stays
 
         # The job page reads the history back from GET /api/assessments.
         assessments = client.get("/api/assessments")
         assert assessments.status_code == 200, assessments.text
         item = next(item for item in assessments.json()["items"] if item["job"]["job_identity"] == job_identity)
         assert item["history"] == a["history"]
+        assert item["origin"] == "job_page"
         assert item["job"]["normalized_url"] == job_identity  # the card <-> assessment join key
 
         # "Mark applied" then the badge: POST, then GET shows the event for this URL.
@@ -150,6 +159,7 @@ def test_save_and_reassess_on_a_posting_only_a_run_assessed(tmp_path: Path, monk
         assert "updated_at" not in r
         assert r["history"] == [{"at": r["created_at"], "verdict": "matched_above_threshold", "trigger": "answer:cloud:gcp"}]
         assert r["resume"]["profile_id"] is not None  # scored against the run's profile resume, not ephemeral
+        assert r["origin"] == "job_page"  # a run's posting: its first store entry is the job page's
         answered_latency.assert_within_budget()
 
         # The job page reads it back from the store, joined on the same identity.
@@ -158,12 +168,14 @@ def test_save_and_reassess_on_a_posting_only_a_run_assessed(tmp_path: Path, monk
         item = next(item for item in after.json()["items"] if item["job"]["job_identity"] == job_identity)
         assert item["history"] == r["history"]
         assert item["stored_path"] == r["stored_path"]
+        assert item["origin"] == "job_page"
 
         # The recorded answer is there too, and a second answer re-assesses through the store entry.
         assert [a["question_id"] for a in client.get("/api/answers").json()["answers"]] == ["cloud:gcp"]
         again = client.post("/api/answers", json={"question_id": "years:python", "answer": "Six.", "reassess": {"job_identity": job_identity}})
         assert again.status_code == 201, again.text
         assert [entry["trigger"] for entry in again.json()["reassessed"]["history"]] == ["answer:cloud:gcp", "answer:years:python"]
+        assert again.json()["reassessed"]["origin"] == "job_page"
 
         # An identity no run or store knows is still a 404.
         unknown = client.post(

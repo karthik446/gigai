@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { ApiError, postAssess } from "../api.js";
 import Breadcrumb from "../components/Breadcrumb.jsx";
 import { assessPrivacyNote, assessResume, assessingAgainst, canAssess, otherProfiles } from "../assessModel.js";
+import { ORIGIN_QUICK_ASSESS } from "../jobModel.js";
 import { ASSESSMENTS_HASH } from "../routing.js";
 
 // P5/P9 → Q4a-nav: "+ Assess a job" (#/assess). POST /api/assess -- URL or
 // pasted text, a profile or a pasted resume. Synchronous (operator decision
 // 1): the request blocks for the model call; a 504 assess_timeout is shown
-// plainly, not retried.
+// plainly, not retried. The request says `origin: "quick_assess"`, which is
+// what lists the result under Assessments (assess-origin-field).
 //
 // The result is not rendered here: `onAssessed(response)` hands the
 // AssessResponse to the app, which merges it into the job model and opens
@@ -63,7 +65,7 @@ export default function AssessView({ profiles, selectedProfileId, config, config
     try {
       const job = jobMode === "url" ? { job_url: jobUrl.trim() } : { job_text: jobText };
       const resume = assessResume({ mode, activeProfileId: selectedProfileId, otherProfileId, resumeText });
-      const result = await postAssess({ job, resume });
+      const result = await postAssess({ job, resume, origin: ORIGIN_QUICK_ASSESS });
       onAssessed(result);
     } catch (err) {
       if (err instanceof ApiError && err.status === 504) {

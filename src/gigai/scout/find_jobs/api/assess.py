@@ -11,7 +11,9 @@ returns the ``AssessResponse``; an adapter timeout comes back as a typed
 Handler's existing loopback + CSRF guards before dispatch (C8).
 
 Responses never carry resume text or the full job text (``AssessResponse``
-serializes ``text_sha256`` only).  Every error is
+serializes ``text_sha256`` only).  The request's optional ``origin``
+(``quick_assess`` | ``job_page``) is passed through as it came; what is
+stored is ``quick_assess._origin_for``'s rule.  Every error is
 ``{"error": {"code", "message"}}``; ``_ERROR_STATUS`` maps each code
 ``quick_assess`` can raise to its status, and an unmapped code still gets a
 safe 409 rather than a 500.

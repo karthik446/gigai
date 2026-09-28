@@ -89,6 +89,8 @@ def test_assess_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         # no Jev key -> no score, and the response says why.
         assert a["posting_text"] == "Build reliable Python services."
         assert "rank_score" not in a and a["rank_skip_reason"] == "no_key"
+        # assess-origin-field: a POST that names no origin is a quick assessment.
+        assert a["origin"] == "quick_assess"
         single_latency.assert_within_budget()
 
         # (b) job_text + resume_text -> 200, and no new private record.
@@ -96,12 +98,17 @@ def test_assess_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
             "POST /api/assess (job_text+resume_text)",
             lambda: client.post(
                 "/api/assess",
-                json={"job": {"job_text": _POSTING}, "resume": {"resume_text": "Pasted resume: Python services for six years."}},
+                json={
+                    "job": {"job_text": _POSTING},
+                    "resume": {"resume_text": "Pasted resume: Python services for six years."},
+                    "origin": "quick_assess",  # what the Assess page sends
+                },
             ),
         )
         assert pasted.status_code == 200, pasted.text
         b = pasted.json()
         assert b["job"]["fetch_kind"] == "pasted" and b["resume"]["profile_id"] is None
+        assert b["origin"] == "quick_assess"
         assert "Pasted resume" not in pasted.text and _POSTING not in pasted.text
         assert "posting_text" not in b and "rank_score" not in b
         imports_after = list_imports(home_root=home, requested_target=target, family="reference", gig_id=gig_id)

@@ -14,8 +14,9 @@ import { postingHash } from "../routing.js";
 // uat-batch2-r1: a question's heading opens where its posting lives: a run
 // posting's job page under Jobs (#/jobs/<id>), an on-demand assessment's
 // under Assessments (#/assessments/<id>). routing.postingHash decides, from
-// the postings of the runs loaded so far (`runPostingIds`, App.jsx); the
-// page itself is the same one.
+// the item's own `origin` (assess-origin-field), or for an item stored
+// before that field from the postings of the runs loaded so far
+// (`runPostingIds`, App.jsx); the page itself is the same one.
 export default function PendingAnswersView({ pending, runPostingIds }) {
   const { loading, error, cards, count, reload } = pending;
 

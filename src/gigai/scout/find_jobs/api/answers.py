@@ -34,6 +34,11 @@ sealed ``outputs/acquire.json`` acquired that posting: its URL/title/company
 the posting and lands the result in the store with the ``answer:<id>``
 trigger -- so the page's history reads "Re-assessed after you answered ...".
 ``reassess_not_found`` (404) stays for an identity no run or store knows.
+
+Origin (assess-origin-field): a re-assessment keeps the stored item's
+``origin`` (the request names none, so ``quick_assess._origin_for`` leaves it
+as it is); the run-only posting above has no stored item yet and its first
+one is the job page's, so that request says ``job_page``.
 """
 
 from __future__ import annotations
@@ -51,7 +56,7 @@ from ...quick_assess import (
     find_quick_assessment_by_job_identity,
     run_quick_assessment,
 )
-from ..assess_contracts import AssessJobInput, AssessRequest, AssessResumeInput
+from ..assess_contracts import ORIGIN_JOB_PAGE, AssessJobInput, AssessRequest, AssessResumeInput
 
 _ANSWER_ERROR_STATUS: dict[str, HTTPStatus] = {
     "answer_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -216,6 +221,7 @@ class AnswersRoutesMixin:
             request = AssessRequest(
                 job=AssessJobInput(job_url=posting.url, title=posting.title or None, company=posting.company or None),
                 resume=AssessResumeInput(profile_id=profile_id),
+                origin=ORIGIN_JOB_PAGE,
             )
         else:
             if previous.job.source_url is None:

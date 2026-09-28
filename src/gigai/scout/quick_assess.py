@@ -36,6 +36,9 @@ through ``jev_rank.rank_postings`` -- the same cache, cost cap and fail-open
 contract find-jobs uses -- stored as ``rank_score``; when there is none,
 ``rank_skip_reason`` says why.  See ``_jev_rank``.
 
+Origin (assess-origin-field): the stored item says where the operator
+started it, ``quick_assess`` or ``job_page``.  See ``_origin_for``.
+
 Timeouts (operator answer 1): the call is synchronous.  An adapter timeout
 (the codex CLI's 120 s default, the local Ollama transport's own timeout)
 surfaces as a ``ModelInvocationError`` raised FROM ``subprocess.
@@ -72,6 +75,7 @@ from .assessment_core import PriorAnswer as CorePriorAnswer
 from .assessment_core import assess_once
 from .experience_answers import read_answers
 from .find_jobs.assess_contracts import (
+    ORIGIN_QUICK_ASSESS,
     AssessmentBody,
     AssessPreferences,
     AssessRequest,
@@ -316,6 +320,31 @@ def _history_with(previous: AssessResponse | None, entry: VerdictHistoryEntry) -
         )
     entries.append(entry)
     return tuple(entries)
+
+
+# --- origin (assess-origin-field) -----------------------------------------------------
+
+
+def _origin_for(request: AssessRequest, previous: AssessResponse | None) -> str | None:
+    """The ``origin`` to store for this assessment.
+
+    - The request names one: that is stored (the job page sends
+      ``job_page``; "+ Assess a job" and ``gigai scout assess`` send
+      ``quick_assess``).
+    - The request names none and the job was assessed before: the stored
+      origin stays as it is, ``None`` included.  This is every
+      re-assessment after an answer (``POST /api/answers``, ``gigai scout
+      answer --reassess``): answering never moves a posting between the
+      UI's lists, and a file written before this field stays without one.
+    - The request names none and the job is new: ``quick_assess`` (a bare
+      ``POST /api/assess``).
+    """
+
+    if request.origin is not None:
+        return request.origin
+    if previous is not None:
+        return previous.origin
+    return ORIGIN_QUICK_ASSESS
 
 
 # --- Jev score (uat-bug-015) ----------------------------------------------------------
@@ -653,6 +682,7 @@ def run_quick_assessment(
         posting_text=None if job.fetch_kind == "pasted" else job.text,
         rank_score=rank_score,
         rank_skip_reason=rank_skip_reason,
+        origin=_origin_for(request, previous),
     )
     atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
     return response
