@@ -106,7 +106,13 @@ def test_cache_miss_then_hit_makes_no_second_call(tmp_path: Path) -> None:
     assert scores2[0].fit == "strong"
 
 
-def test_different_profile_id_is_a_cache_miss(tmp_path: Path) -> None:
+# uat-bug-021 (operator decision 2026-09-28): the cache is keyed by the
+# resume's TEXT, not by the profile or the resume revision that carries it,
+# so the same resume is never paid for twice. The next three tests read
+# "a different profile id / resume revision is a cache miss" before.
+
+
+def test_a_different_profile_with_the_same_resume_is_a_cache_hit(tmp_path: Path) -> None:
     home, target = tmp_path / "home", tmp_path / "target"
     home.mkdir()
     target.mkdir()
@@ -117,10 +123,10 @@ def test_different_profile_id_is_a_cache_miss(tmp_path: Path) -> None:
     rank_postings((row,), client=client, resume_text="resume", prefs=_prefs(), profile_id="p1", resume_revision_id="r1", home_root=home, target=target)
     rank_postings((row,), client=client, resume_text="resume", prefs=_prefs(), profile_id="p2", resume_revision_id="r1", home_root=home, target=target)
 
-    assert len(calls) == 2  # distinct profile_id -> distinct cache key
+    assert len(calls) == 1
 
 
-def test_different_resume_revision_is_a_cache_miss(tmp_path: Path) -> None:
+def test_a_different_revision_of_the_same_resume_text_is_a_cache_hit(tmp_path: Path) -> None:
     home, target = tmp_path / "home", tmp_path / "target"
     home.mkdir()
     target.mkdir()
@@ -130,6 +136,20 @@ def test_different_resume_revision_is_a_cache_miss(tmp_path: Path) -> None:
 
     rank_postings((row,), client=client, resume_text="resume", prefs=_prefs(), profile_id="p1", resume_revision_id="r1", home_root=home, target=target)
     rank_postings((row,), client=client, resume_text="resume", prefs=_prefs(), profile_id="p1", resume_revision_id="r2", home_root=home, target=target)
+
+    assert len(calls) == 1
+
+
+def test_a_different_resume_text_is_a_cache_miss(tmp_path: Path) -> None:
+    home, target = tmp_path / "home", tmp_path / "target"
+    home.mkdir()
+    target.mkdir()
+    row = _row(1)
+    calls: list[str] = []
+    client = _client(_handler_factory(calls))
+
+    rank_postings((row,), client=client, resume_text="resume", prefs=_prefs(), profile_id="p1", resume_revision_id="r1", home_root=home, target=target)
+    rank_postings((row,), client=client, resume_text="another resume", prefs=_prefs(), profile_id="p1", resume_revision_id="r1", home_root=home, target=target)
 
     assert len(calls) == 2
 

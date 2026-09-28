@@ -177,6 +177,12 @@ def jev(monkeypatch: pytest.MonkeyPatch) -> _FakeJev:
     return fake
 
 
+def _jev_cache_dir(fx: ProfileFixtureGig) -> Path:
+    from gigai.scout.find_jobs.jev_rank import cache_dir
+
+    return cache_dir(fx.home_root)
+
+
 def _add_key(fx: ProfileFixtureGig) -> None:
     secrets_store.set(JEV_API_KEY_ENV_VAR, "fixture-jev-key", home_root=fx.home_root)
 
@@ -245,9 +251,9 @@ def test_reassessment_reads_the_jev_cache_and_makes_no_second_call(fx: ProfileFi
     assert first.rank_score.cached is False and second.rank_score.cached is True
     assert (second.rank_score.fit, second.rank_score.score) == (first.rank_score.fit, first.rank_score.score)
     assert second.stored_path == first.stored_path and _stored(second)["rank_score"]["cached"] is True
-    # The cache is find-jobs' own directory, next to quick_assess/.
-    cache_dir = Path(first.stored_path).parents[2] / "jev_cache"
-    assert len(list(cache_dir.glob("*.json"))) == 1
+    # The cache is find-jobs' own: one for every project, under the home
+    # (uat-bug-021, operator decision 2026-09-28; it was per project).
+    assert len(list(_jev_cache_dir(fx).glob("*.json"))) == 1
 
 
 def test_cache_hit_for_the_same_text_under_another_url_carries_this_jobs_identity(
@@ -261,7 +267,7 @@ def test_cache_hit_for_the_same_text_under_another_url_carries_this_jobs_identit
     first = _run(fx, AssessRequest(job=AssessJobInput(job_url=_JOB_URL)))
     assert first.rank_score is not None and len(jev.requests) == 1
     # Re-key the one cached score to another URL, as a second URL with identical text would have written it.
-    cache_file = next((Path(first.stored_path).parents[2] / "jev_cache").glob("*.json"))
+    cache_file = next(_jev_cache_dir(fx).glob("*.json"))
     cached = json.loads(cache_file.read_text(encoding="utf-8"))
     cached["normalized_url"] = "https://boards.greenhouse.io/acme/jobs/999"
     cache_file.write_text(json.dumps(cached), encoding="utf-8")
@@ -298,7 +304,7 @@ def test_no_key_means_no_jev_call_and_an_unchanged_assessment(fx: ProfileFixture
     assert response.rank_score is None and response.rank_skip_reason == "no_key"
     payload = _stored(response)
     assert "rank_score" not in payload and payload["rank_skip_reason"] == "no_key"
-    assert not (Path(response.stored_path).parents[2] / "jev_cache").exists()
+    assert not _jev_cache_dir(fx).exists()
 
 
 def test_key_from_the_environment_is_used_like_find_jobs(fx: ProfileFixtureGig, jev: _FakeJev, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -379,7 +385,7 @@ def test_ephemeral_resume_is_never_sent_to_jev(fx: ProfileFixtureGig, jev: _Fake
     assert response.result.verdict is Verdict.MATCHED_ABOVE_THRESHOLD
     assert response.rank_score is None and response.rank_skip_reason == "ephemeral_resume"
     assert secret not in Path(response.stored_path).read_text(encoding="utf-8")
-    assert not (Path(response.stored_path).parents[2] / "jev_cache").exists()
+    assert not _jev_cache_dir(fx).exists()
 
 
 # --- the production test seam ---------------------------------------------------------------------

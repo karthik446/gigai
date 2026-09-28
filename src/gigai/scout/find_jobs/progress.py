@@ -29,6 +29,14 @@ Layout, all under ``runs/<run_id>/progress/``:
   postings matched every filter but were left out of this run's import
   ("N more matched, not imported this run"); a file written before the key
   existed reads as 0.
+- ``rank.json`` (uat-bug-021): what Jev did for this run's candidates,
+  ``jev_rank.RankStatus.to_json()``: ``{"status": "scored"|"skipped",
+  "scored": <int>, "total": <int>, "reason": <str>|null, "cost_cap_usd":
+  <str>|null, "cost_usd": <str>, "throttled": <str>|null,
+  "spent_today_usd": <str>|null, "daily_budget_usd": <str>|null, "text":
+  "scored N of M" | "skipped: <reason>", "line": "Jev: ...", "usage_line":
+  "Jev: $0.31 of $0.50 today"|null}``. Written once, when acquire's
+  ranking pass ends; absent for a run sealed before it existed.
 - ``boards.json`` (Q2): ``{"total": <int>, "budget_seconds": <float>|null,
   "status": "running"|"done", ...totals}``; written once acquire has planned
   its ATS board fetches, replaced with the totals (requests, cache hits,
@@ -80,6 +88,7 @@ _STEPS_FILENAME = "steps.json"
 _ACQUIRE_FILENAME = "acquire.jsonl"
 _ASSESS_FILENAME = "assess.jsonl"
 _CAP_FILENAME = "cap.json"
+_RANK_FILENAME = "rank.json"
 # Q2 (acquire at scale): per-board progress + the watchlist seeding record.
 _BOARDS_FILENAME = "boards.jsonl"
 _BOARDS_SUMMARY_FILENAME = "boards.json"
@@ -300,6 +309,11 @@ class ProgressWriter:
             )
         )
 
+    def rank_status(self, payload: Mapping[str, object]) -> None:
+        """Replace ``rank.json`` with what Jev did for this run (uat-bug-021)."""
+
+        self._guard(lambda: _replace_json(self._dir / _RANK_FILENAME, dict(payload)))
+
     # -- Q2: per-board progress + the seeding record ------------------------
 
     def watchlist_seeded(self, payload: Mapping[str, object]) -> None:
@@ -372,6 +386,8 @@ class ProgressSnapshot:
     watchlist_seed: dict[str, object] | None = None
     # uat-bug-011: additive, 0 until acquire writes it (and for older runs).
     not_imported_count: int = 0
+    # uat-bug-021: additive, None until acquire's ranking pass ends (and for older runs).
+    rank_status: dict[str, object] | None = None
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -384,6 +400,7 @@ class ProgressSnapshot:
             "boards": self.boards,
             "watchlist_seed": self.watchlist_seed,
             "not_imported_count": self.not_imported_count,
+            "rank_status": self.rank_status,
         }
 
 
@@ -466,7 +483,13 @@ def read_progress(run_root: Path) -> ProgressSnapshot:
         boards=_read_boards(directory),
         watchlist_seed=_read_watchlist_seed(directory),
         not_imported_count=not_imported_count,
+        rank_status=_read_rank_status(directory),
     )
+
+
+def _read_rank_status(directory: Path) -> dict[str, object] | None:
+    payload = _read_json(directory / _RANK_FILENAME)
+    return dict(payload) if isinstance(payload, dict) else None
 
 
 def _read_watchlist_seed(directory: Path) -> dict[str, object] | None:

@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import gzip
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -20,7 +21,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qsl, urlsplit
 
 import httpx
@@ -64,8 +65,11 @@ from .contracts import (
 )
 from .filters import exclusion_reason, location_mismatch_detail
 from .progress import ProgressWriter
-from .selection import rank_rows, select_for_assessment
+from .selection import normalize_title, rank_rows, select_for_assessment
 from ...workpad import ResolvedWorkpad, resolve_workpad
+
+if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
+    from .jev_rank import RankStatus
 
 # U26: cap on the total size of raw provider responses stored per run, so a
 # very large/unbounded response set can't fill the workpad disk unbounded.
@@ -1106,25 +1110,43 @@ def _read_resume_text_for_rank(
     whole acquire step. Never verifies the digest match `_read_pinned_resume`
     enforces; a stale/rotated resume at rank time just means a slightly-stale
     score, corrected the moment the real assess call re-derives the matrix.
+
+    uat-bug-021 root cause, two defects, both swallowed by the bare
+    ``except`` that was here, so every run since P6 ranked nothing:
+
+    1. the import read ``from ..private_records`` (``gigai.scout``, where
+       no such module exists) and raised ``ModuleNotFoundError`` on every
+       call; the module is ``gigai.private_records``;
+    2. the lookup was given ``resolved.path``, the WORKPAD, as its target,
+       which ``resolve_workpad`` refuses ("target is not bound to a GigAI
+       project"). The target is ``resolved.target_root``.
+
+    The exception's type is logged; its message may name a path, so it is not.
     """
 
     try:
-        from ..private_records import read_record
+        from ...private_records import read_record
 
         value = read_record(
             home_root=home_root,
-            requested_target=resolved.path,
+            requested_target=resolved.target_root,
             record_id=sealed.pinned_resume.record_id,  # type: ignore[attr-defined]
             revision_id=sealed.pinned_resume.revision_id,  # type: ignore[attr-defined]
             content=True,
             gig_id=resolved.gig_id,
         )
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - ranking never fails acquire; the type is logged
+        _rank_logger().warning("jev rank: the run's resume could not be read: %s", type(exc).__name__)
         return None
     content = value.get("content")
     if not isinstance(content, bytes):
+        _rank_logger().warning("jev rank: the run's resume record has no content")
         return None
     return content.decode("utf-8", errors="replace")
+
+
+def _rank_logger() -> logging.Logger:
+    return logging.getLogger("gigai.scout.server")
 
 
 def _jev_http_client() -> httpx.Client:
@@ -1139,6 +1161,131 @@ def _jev_http_client() -> httpx.Client:
     return httpx.Client(timeout=30.0)
 
 
+def _title_tier(row: PostingRow, roles: Sequence[str]) -> int:
+    title = normalize_title(row.title or "")
+    wanted = [normalize_title(str(role)) for role in roles if str(role).strip()]
+    if title in wanted:
+        return 0
+    if any(role and role in title for role in wanted):
+        return 1
+    return 2
+
+
+def _rank_order(candidates: Sequence[PostingRow], roles: Sequence[str]) -> list[PostingRow]:
+    """The candidates Jev is asked about, the most promising first.
+
+    uat-bug-021: the cost cap can end a pass before every candidate was
+    asked, so the order decides which ones get a score. Every candidate
+    already passed the country, location, date-window and role filters (B1,
+    in ``_acquire_node_body``). Left out here are the near-identical
+    postings the selection drops as ``duplicate`` (same company, title and
+    country: the newest is kept, by ``select_for_assessment``'s own rule).
+
+    Order: a title that IS one of the target roles, then a title that
+    contains one, then the rest (the role matched the company or location
+    text); inside each, the newest first; ties in ``candidates`` order.
+    """
+
+    everything = len(candidates)
+    dropped = select_for_assessment(candidates, cap=everything, per_company=everything).dropped
+    kept = [row for row in candidates if dropped.get(row.normalized_url) != "duplicate"]
+    kept.sort(key=lambda row: row.published_at or "", reverse=True)
+    kept.sort(key=lambda row: _title_tier(row, roles))
+    return kept
+
+
+def _rank_candidates_with_status(
+    candidates: Sequence[PostingRow],
+    *,
+    resolved: ResolvedWorkpad,
+    run_id: str,
+    config: FindJobsConfig,
+    profile_id: str | None,
+    resume_revision_id: str | None,
+    home_root: Path | None,
+) -> tuple[tuple, "RankStatus"]:
+    """``(scores, status)``: what ``_rank_candidates`` returns, and why.
+
+    Each precondition is checked in this order and names itself in the
+    status: ``no_candidates``, ``no_home``, ``no_key``, ``no_run_input``,
+    ``no_resume``; then the pass itself (``jev_rank.RankStatus.from_report``:
+    scored N of M, ``cost_cap_reached``, ``daily_budget_reached``,
+    ``jev_error:<code>``); any other exception is
+    ``error:<ExceptionType>``.
+
+    The pass asks Jev ``jev_rank.RUN_CONCURRENCY`` postings at a time and
+    asks a busy answer again ``jev_rank.RUN_RETRIES`` times.
+    """
+
+    from .jev_client import JevClient, has_api_key, require_api_key
+    from .jev_rank import (
+        DEFAULT_COST_CAP_USD,
+        RUN_CONCURRENCY,
+        RUN_RETRIES,
+        RankPreferences,
+        RankStatus,
+        rank_postings_report,
+        unscored,
+    )
+
+    total = len(candidates)
+    if not candidates:
+        return (), RankStatus.skipped("no_candidates", home_root=home_root)
+    if home_root is None:
+        return (), RankStatus.skipped("no_home", total=total)
+    try:
+        if not has_api_key(home_root=home_root):
+            return (), RankStatus.skipped("no_key", total=total, home_root=home_root)
+        sealed = _read_sealed_run_input_for_rank(resolved.path, run_id)
+        if sealed is None:
+            return (), RankStatus.skipped("no_run_input", total=total, home_root=home_root)
+        resume_text = _read_resume_text_for_rank(resolved, sealed, home_root=home_root)
+        if not resume_text:
+            return (), RankStatus.skipped("no_resume", total=total, home_root=home_root)
+
+        cost_cap_raw = os.environ.get("GIGAI_JEV_COST_CAP_USD")
+        try:
+            cost_cap = float(cost_cap_raw) if cost_cap_raw else DEFAULT_COST_CAP_USD
+        except ValueError:
+            cost_cap = DEFAULT_COST_CAP_USD
+        ranked = _rank_order(candidates, config.roles)
+        api_key = require_api_key(home_root=home_root)
+        http_client = _jev_http_client()
+        try:
+            report = rank_postings_report(
+                ranked,
+                client=JevClient(api_key, http_client),
+                resume_text=resume_text,
+                prefs=RankPreferences(
+                    target_titles=tuple(config.roles),
+                    countries=tuple(config.countries),
+                    visa_sponsorship_required=bool(config.visa_sponsorship_required),
+                ),
+                profile_id=profile_id,
+                resume_revision_id=resume_revision_id,
+                home_root=home_root,
+                # The TARGET (the same one POST /rank and quick assess
+                # pass) names the project whose earlier cache is still
+                # read: given the workpad path this lookup was refused too.
+                target=resolved.target_root,
+                cost_cap_usd=cost_cap,
+                concurrency=RUN_CONCURRENCY,
+                retries=RUN_RETRIES,
+                where="acquire",
+                run_id=run_id,
+            )
+        finally:
+            http_client.close()
+        # One entry per candidate, in the candidates' own order (the order
+        # the sealed rows are read back in): a duplicate Jev was not asked
+        # about is an unscored entry.
+        by_url = {score.normalized_url: score for score in report.scores}
+        scores = tuple(by_url.get(row.normalized_url) or unscored(row) for row in candidates)
+        return scores, RankStatus.from_report(report, cost_cap_usd=cost_cap)
+    except Exception as exc:  # noqa: BLE001 - ranking never fails acquire; the type is recorded and logged
+        return (), RankStatus.skipped(f"error:{type(exc).__name__}", total=total, home_root=home_root)
+
+
 def _rank_candidates(
     candidates: list[PostingRow],
     *,
@@ -1148,60 +1295,39 @@ def _rank_candidates(
     profile_id: str | None,
     resume_revision_id: str | None,
     home_root: Path | None,
+    progress: ProgressWriter | None = None,
 ) -> tuple:
     """P6: score ``candidates`` with Jev, or return ``()`` (fail open).
 
     Never raises -- every precondition (no key, no sealed run input, no
-    readable resume, a Jev transport failure) degrades to ``()``, which
-    leaves the import and selection rankings in date order, exactly as
-    before P6 (``selection.rank_rows`` with no scores). Cost cap:
+    readable resume, a Jev failure) degrades to ``()`` or to unscored
+    entries, which leaves the import and selection rankings in date order,
+    exactly as before P6 (``selection.rank_rows`` with no scores). Cost cap:
     ``GIGAI_JEV_COST_CAP_USD`` env var when set (plan section 8, answer 7),
     else ``jev_rank.DEFAULT_COST_CAP_USD``.
+
+    uat-bug-021: failing open is never silent. What happened is a
+    ``RankStatus`` (``scored N of M`` / ``skipped: <reason>``), written to
+    the run's progress (``progress/rank.json``, served by ``GET
+    /progress`` as ``rank_status``) and logged once: INFO when every
+    candidate asked was scored, WARNING otherwise.
     """
 
-    if not candidates or home_root is None:
-        return ()
-    from .jev_client import JevClient, JevClientError, has_api_key, require_api_key
+    from .jev_rank import log_rank_status
 
-    if not has_api_key(home_root=home_root):
-        return ()
-    sealed = _read_sealed_run_input_for_rank(resolved.path, run_id)
-    if sealed is None:
-        return ()
-    resume_text = _read_resume_text_for_rank(resolved, sealed, home_root=home_root)
-    if not resume_text:
-        return ()
-    from .jev_rank import DEFAULT_COST_CAP_USD, RankPreferences, rank_postings
-
-    cost_cap_raw = os.environ.get("GIGAI_JEV_COST_CAP_USD")
-    try:
-        cost_cap = float(cost_cap_raw) if cost_cap_raw else DEFAULT_COST_CAP_USD
-    except ValueError:
-        cost_cap = DEFAULT_COST_CAP_USD
-    try:
-        api_key = require_api_key(home_root=home_root)
-        client = JevClient(api_key, _jev_http_client())
-        prefs = RankPreferences(
-            target_titles=tuple(config.roles),
-            countries=tuple(config.countries),
-            visa_sponsorship_required=bool(config.visa_sponsorship_required),
-        )
-        scores, _total_cost, _capped = rank_postings(
-            tuple(candidates),
-            client=client,
-            resume_text=resume_text,
-            prefs=prefs,
-            profile_id=profile_id,
-            resume_revision_id=resume_revision_id,
-            home_root=home_root,
-            target=resolved.path,
-            cost_cap_usd=cost_cap,
-        )
-        return scores
-    except JevClientError:
-        return ()
-    except Exception:
-        return ()
+    scores, status = _rank_candidates_with_status(
+        candidates,
+        resolved=resolved,
+        run_id=run_id,
+        config=config,
+        profile_id=profile_id,
+        resume_revision_id=resume_revision_id,
+        home_root=home_root,
+    )
+    log_rank_status(status, run_id=run_id, where="acquire")
+    if progress is not None:
+        progress.rank_status(status.to_json())
+    return scores
 
 
 @dataclass(frozen=True)
@@ -1777,7 +1903,8 @@ def _acquire_node_body(
     # P6: Jev pre-rank scores `candidates`. Fails open by design (no key, no
     # resume, any Jev error) -- `_rank_candidates` never raises; an empty
     # `rank_scores` leaves every ranking below in date order, so a run with
-    # no Jev key behaves exactly as it did before P6. `rank_scores` is
+    # no Jev key behaves exactly as it did before P6. What it did is on the
+    # run's progress and in the log (uat-bug-021). `rank_scores` is
     # sealed onto `AcquireOutput` below (additive) so assess's own twin
     # recompute (`proposal_execution.py`) reuses the SAME scores rather than
     # re-calling Jev -- the two selections can never disagree, and a
@@ -1790,6 +1917,7 @@ def _acquire_node_body(
         profile_id=current_profile_id,
         resume_revision_id=current_resume_revision_id,
         home_root=home_root,
+        progress=progress,
     )
 
     # uat-bug-011 (P0, UAT N14): a full-catalog run matched 7,426 postings,

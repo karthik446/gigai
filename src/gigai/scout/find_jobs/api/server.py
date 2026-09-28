@@ -981,6 +981,9 @@ class ScoutFindJobsBackend:
             # out of this run's import ("N more matched, not imported this
             # run"); 0 until acquire writes cap.json, and for older runs.
             "not_imported_count": snapshot.not_imported_count,
+            # uat-bug-021: what Jev did for this run ("scored N of M" /
+            # "skipped: <reason>"); null until acquire's ranking pass ends.
+            "rank_status": None if snapshot.rank_status is None else dict(snapshot.rank_status),
         }
 
     def _sealed_selection_cap(self, run_id: str) -> int | None:

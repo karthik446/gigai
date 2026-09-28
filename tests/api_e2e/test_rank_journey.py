@@ -61,7 +61,11 @@ def test_run_rank_results_carries_scores(tmp_path: Path, monkeypatch: pytest.Mon
         first_score = rank_body["scores"][0]
         assert first_score["fit"] in {"strong", "maybe", "no"}
         assert isinstance(first_score["score"], int)
-        assert first_score["cached"] is False
+        # uat-bug-021: the RUN scored this posting and cached the score, so
+        # the first /rank is already a cache hit. (This read `cached is
+        # False` while the run's own ranking pass silently never ran.)
+        assert first_score["cached"] is True
+        assert rank_body["total_cost_usd"] == "0.000000"
         rank_latency.assert_within_budget()
 
         # -- rerun proves the cache: 0 new calls, 0 cost ----------------

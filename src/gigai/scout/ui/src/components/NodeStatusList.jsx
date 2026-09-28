@@ -1,6 +1,6 @@
 import { relativeTimeLabel } from "../display.js";
 import { SETTINGS_HASH } from "../routing.js";
-import { notImportedLine, rotationLine, searchLines } from "../runText.js";
+import { notImportedLine, rankStatusLine, rankUsageLine, rotationLine, searchLines } from "../runText.js";
 
 const NODE_ORDER = ["acquire", "assess", "present"];
 
@@ -38,10 +38,17 @@ function stepLabel(receipt, progressStep) {
 // "index") has no rotation; it says what it read, what it fetched for the
 // companies Exa found, how many wait, and when the stored postings need an
 // update, each with a link to Settings where that helps (runText.searchLines).
-export default function NodeStatusList({ status, nodeReceipts, progressSteps, rotation, boards, notImported }) {
+//
+// `rankStatus` (GET /progress's rank_status, uat-bug-021): what Jev did for
+// this run, "Jev: scored 412 of 1,458 (cost $0.23, cost cap $0.25)" or
+// "Jev: skipped (no resume)", then the day's spend against the daily budget,
+// "Jev: $0.31 of $0.50 today"; no line until the ranking pass ended.
+export default function NodeStatusList({ status, nodeReceipts, progressSteps, rotation, boards, notImported, rankStatus }) {
   const search = searchLines(boards, relativeTimeLabel);
   const line = search ? null : rotationLine(rotation, boards);
   const leftOut = notImportedLine(notImported);
+  const jev = rankStatusLine(rankStatus);
+  const jevUsage = jev ? rankUsageLine(rankStatus) : null;
   return (
     <section className="panel">
       <h2>Run status: {status}</h2>
@@ -80,6 +87,16 @@ export default function NodeStatusList({ status, nodeReceipts, progressSteps, ro
       {leftOut && (
         <p className="muted not-imported-line" data-role="not-imported" title="They matched every filter. A run imports a bounded number of postings: the best Jev fit first, the newest first when Jev did not score them.">
           {leftOut}
+        </p>
+      )}
+      {jev && (
+        <p className="muted" data-role="rank-status" data-rank-status={rankStatus.status} style={{ margin: "0.35rem 0 0", fontSize: "0.88rem" }}>
+          {jev}
+        </p>
+      )}
+      {jevUsage && (
+        <p className="muted" data-role="jev-usage" style={{ margin: "0.35rem 0 0", fontSize: "0.88rem" }}>
+          {jevUsage}
         </p>
       )}
     </section>
