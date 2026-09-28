@@ -9,7 +9,7 @@ import PendingAnswersView from "./views/PendingAnswersView.jsx";
 import ApplicationsView from "./views/ApplicationsView.jsx";
 import RunsView from "./views/RunsView.jsx";
 import SettingsView from "./views/SettingsView.jsx";
-import { JOBS_HASH, SETTINGS_HASH, assessmentHash, navViewFor, navigate, routeFor, useHashRoute } from "./routing.js";
+import { JOBS_HASH, SETTINGS_HASH, navViewFor, navigate, postingHash, routeFor, useHashRoute } from "./routing.js";
 
 function useConfig() {
   const [state, setState] = useState({ loading: true, config: null, error: null });
@@ -76,14 +76,16 @@ function useSetup() {
 //   assessments /      FindJobsView too (uat-bug-016): the on-demand
 //   assessment         assessments, newest first, and their job page
 //   questions          PendingAnswersView, fed by usePendingQuestions (the
-//                      same state as the top bar's badge)
+//                      same state as the top bar's badge); each link opens
+//                      where its posting lives (uat-batch2-r1)
 //   applications       ApplicationsView (GET /api/applications)
 //   runs               RunsView (GET /api/runs?profile_id=…)
 //   settings           SettingsView (preferences + wizard launch, profiles,
 //                      discover, add company)
 //   assess             AssessView; its AssessResponse is handed to
 //                      FindJobsView and its job page opens
-//                      (#/assessments/<id>)
+//                      (#/assessments/<id>; #/jobs/<id> when the address
+//                      assessed is a run posting's)
 //
 // The first-run interview (P9b's SetupWizard) still shows before anything
 // else when no prefs exist (CHANGE #2); editing prefs later renders the
@@ -103,6 +105,10 @@ export default function App() {
   const [editingSetup, setEditingSetup] = useState(false);
   // The last "+ Assess a job" response, handed to FindJobsView's job model.
   const [assessedItem, setAssessedItem] = useState(null);
+  // uat-batch2-r1: the postings of the runs loaded so far (FindJobsView
+  // fills it). An assessment of one of them lives under Jobs; any other
+  // under Assessments (routing.postingHash).
+  const [runPostingIds, setRunPostingIds] = useState(() => new Set());
 
   // S2-B: `gigai scout run` opens this UI; if no discovery prefs exist yet,
   // the interview shows first, ahead of every other view (CHANGE #2).
@@ -149,9 +155,9 @@ export default function App() {
     (response) => {
       setAssessedItem(response);
       questions.reload();
-      navigate(assessmentHash(response.job.job_identity));
+      navigate(postingHash(response, runPostingIds));
     },
-    [questions.reload],
+    [questions.reload, runPostingIds],
   );
 
   const wizardDone = () => {
@@ -245,10 +251,12 @@ export default function App() {
             applicationsState={applicationsState}
             questions={questions}
             externalQuickItem={assessedItem}
+            runPostingIds={runPostingIds}
+            onRunPostingIds={setRunPostingIds}
           />
         )}
 
-        {route.view === "questions" && <PendingAnswersView pending={questions} />}
+        {route.view === "questions" && <PendingAnswersView pending={questions} runPostingIds={runPostingIds} />}
 
         {route.view === "applications" && (
           <ApplicationsView

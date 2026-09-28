@@ -13,6 +13,13 @@ What is pinned, by item:
   per job, newest first; Jobs and a run page list run postings only;
   "+ Assess a job" is on Assessments, not on Jobs; a card on Assessments
   opens ``#/assessments/<id>`` and that page goes back to Assessments.
+* uat-ui-batch2-r1 (N21, orchestrator decisions 1 and 5)  Assessments is on
+  demand ONLY: a run posting assessed or re-assessed from its job page stays
+  under Jobs and is never a card on Assessments too. The store item has no
+  origin field, so the rule is the job's identity against the postings of
+  the runs the app has loaded (``jobModel.isRunPosting``); a pasted resume
+  or a pasted posting text is always on demand. A question's link opens
+  where its posting lives (``routing.postingHash``).
 * (found in the hand-check) an assessment made against a PASTED resume is
   filed under no profile; it is a card on Assessments all the same, and it
   never replaces a run posting's own verdict.
@@ -57,6 +64,9 @@ JOB_MODEL_JS = UI_SRC / "jobModel.js"
 SOURCES_MODEL_JS = UI_SRC / "sourcesModel.js"
 ASSESS_MODEL_JS = UI_SRC / "assessModel.js"
 RUN_TEXT_JS = UI_SRC / "runText.js"
+ROUTING_JS = UI_SRC / "routing.js"
+REACT_IMPORT = 'import { useEffect, useState } from "react";'
+JOB_MODEL_IMPORT = 'from "./jobModel.js";'
 
 RAW_ID = re.compile(r"[a-z]+_[a-z_]+")
 
@@ -67,6 +77,7 @@ import * as jobModel from {job_model_url};
 import * as sources from {sources_url};
 import * as assess from {assess_url};
 import * as runText from {run_text_url};
+import * as routing from {routing_url};
 const input = JSON.parse(process.argv[1]);
 
 const card = (job) => ({
@@ -83,6 +94,18 @@ const card = (job) => ({
 });
 const jobs = jobModel.buildJobs(input.build);
 const now = new Date(input.now).getTime();
+
+// uat-ui-batch2-r1: what FindJobsView does as runs load, then what the
+// pages read.
+const lives = input.lives;
+const livesJobs = jobModel.buildJobs(lives.build);
+const afterFirst = jobModel.addRunPostings(new Set(), lives.earlierRunRows);
+const known = jobModel.addRunPostings(afterFirst, lives.build.rows);
+const link = (item, ids) => {
+  const hash = routing.postingHash(item, ids);
+  const route = routing.parseHash(hash);
+  return { id: item.job.job_identity, home: jobModel.postingHome(item, ids), hash, view: route.view, jobId: route.params.jobId, nav: routing.navViewFor(route.view) };
+};
 
 process.stdout.write(JSON.stringify({
   skipText: Object.fromEntries(input.skipReasons.map((id) => [id, jobModel.jevSkipText(id)])),
@@ -115,6 +138,20 @@ process.stdout.write(JSON.stringify({
   boardLines: input.boardLines.map((item) => runText.indexedBoardsLine(item)),
   searches: input.searches.map((boards) => runText.searchLines(boards, (iso) => input.timeLabels[iso] || "")),
   searchNoLabels: runText.searchLines(input.searches[0]),
+  lives: {
+    known: [...known].sort(),
+    sameSetWhenNothingNew: jobModel.addRunPostings(known, lives.build.rows) === known,
+    firstSetUntouched: [...afterFirst].sort(),
+    fromArray: [...jobModel.addRunPostings(lives.earlierRunRows.map((row) => row.posting.normalized_url), [])].sort(),
+    runJobs: jobModel.runJobs(livesJobs).map((job) => job.id),
+    assessments: jobModel.assessmentJobs(lives.build.quickItems, livesJobs, lives.pastedItems, known).map(card),
+    loadedRunOnly: jobModel.assessmentJobs(lives.build.quickItems, livesJobs, lives.pastedItems).map((job) => job.id),
+    noRunLoaded: jobModel.assessmentJobs(lives.build.quickItems, [], lives.pastedItems, []).map((job) => job.id),
+    links: lives.build.quickItems.concat(lives.pastedItems).map((item) => link(item, known)),
+    linksNoRunLoaded: lives.build.quickItems.map((item) => link(item, new Set())),
+    linksFromArray: lives.build.quickItems.map((item) => link(item, [...known]).home),
+    linksNoIds: lives.build.quickItems.map((item) => link(item, undefined).home),
+  },
 }));
 """
 
@@ -122,6 +159,7 @@ ACME = "https://boards.greenhouse.io/acme/jobs/101"
 KONG = "https://jobs.ashbyhq.com/kong/1"
 GLOBEX = "https://jobs.lever.co/globex/7"
 PASTED = "text:3f9a"
+INITECH = "https://boards.greenhouse.io/initech/jobs/55?gh_src=a b"
 
 SHA = "sha256:" + "a" * 64
 RANK_89 = {
@@ -171,6 +209,58 @@ def _row(url: str, *, text: str | None, assessment: dict | None = None) -> dict:
         "posting": {"title": "Platform Engineer", "company": "acme", "location": "Denver, CO", "url": url, "normalized_url": url, "text": text, "published_at": "2026-09-20T00:00:00Z"},
         "status": "assessed" if assessment else "not_assessed",
         "assessment": assessment,
+    }
+
+
+def _history(*entries: tuple[str, str, str]) -> list[dict]:
+    return [{"at": at, "verdict": verdict, "trigger": trigger} for at, verdict, trigger in entries]
+
+
+def _lives() -> dict:
+    """uat-ui-batch2-r1: one profile's store, and the runs the app loaded.
+
+    The loaded run carries ACME and GLOBEX; a run loaded earlier in the same
+    session carried INITECH. KONG and the pasted text were never in a run.
+    """
+
+    return {
+        "earlierRunRows": [_row(INITECH, text="Initech builds TPS tooling.")],
+        "build": {
+            "rows": [
+                _row(ACME, text="Acme builds rockets.", assessment={"verdict": "pending_user_answers", "matrix": [], "structured_questions": []}),
+                _row(GLOBEX, text="Globex runs logistics software."),
+            ],
+            "rankScores": [],
+            "runCreatedAt": "2026-09-24T00:00:00Z",
+            "quickItems": [
+                # ACME: the run assessed it; the operator answered a question on
+                # its job page, then pressed Re-assess. The store's first entry
+                # says "assess", exactly as a Quick assess does.
+                _quick(
+                    ACME,
+                    at="2026-09-28T10:00:00Z",
+                    created_at="2026-09-27T09:00:00Z",
+                    verdict="pending_user_answers",
+                    history=_history(
+                        ("2026-09-27T09:00:00Z", "pending_user_answers", "assess"),
+                        ("2026-09-27T09:05:00Z", "pending_user_answers", "answer:years_python"),
+                        ("2026-09-28T10:00:00Z", "pending_user_answers", "reassess"),
+                    ),
+                ),
+                # GLOBEX: the run did not assess it; "Assess this posting" on its job page.
+                _quick(GLOBEX, at="2026-09-27T12:00:00Z", history=_history(("2026-09-27T12:00:00Z", "matched_above_threshold", "assess"))),
+                # KONG: "+ Assess a job" with its address.
+                _quick(KONG, at="2026-09-28T09:00:00Z", verdict="pending_user_answers", history=_history(("2026-09-28T09:00:00Z", "pending_user_answers", "assess"))),
+                # "+ Assess a job" with pasted text.
+                _quick(PASTED, at="2026-09-26T08:00:00Z", verdict="pending_user_answers", fetch_kind="pasted"),
+                # INITECH: re-assessed from its job page while its run was shown.
+                _quick(INITECH, at="2026-09-25T08:00:00Z", verdict="pending_user_answers"),
+            ],
+        },
+        "pastedItems": [
+            # GLOBEX's address on the Assess page, against a pasted resume.
+            _quick(GLOBEX, at="2026-09-28T11:00:00Z", verdict="pending_user_answers", resume=PASTED_RESUME, rank_skip_reason="ephemeral_resume"),
+        ],
     }
 
 
@@ -255,6 +345,7 @@ def _payload() -> dict:
     ]
     return {
         "now": NOW,
+        "lives": _lives(),
         "skipReasons": list(RANK_SKIP_REASONS) + ["some_new_reason"],
         "quickItems": quick_items,
         "pastedItems": [
@@ -359,8 +450,22 @@ def _payload() -> dict:
     }
 
 
+def _routing_without_react(directory: Path) -> Path:
+    """``routing.js`` as node can load it: its own code, with the React import
+    (used by ``useHashRoute`` only) left out and ``./jobModel.js`` named by
+    its real address. Everything the test calls is the file's own text."""
+
+    source = ROUTING_JS.read_text(encoding="utf-8")
+    assert source.count(REACT_IMPORT) == 1 and source.count(JOB_MODEL_IMPORT) == 1, "routing.js's imports changed: update this test"
+    source = source.replace(REACT_IMPORT, "const useEffect = () => {}, useState = () => [];")
+    source = source.replace(JOB_MODEL_IMPORT, f"from {json.dumps(JOB_MODEL_JS.resolve().as_uri())};")
+    path = directory / "routing.mjs"
+    path.write_text(source, encoding="utf-8")
+    return path
+
+
 @pytest.fixture(scope="module")
-def out() -> dict:
+def out(tmp_path_factory: pytest.TempPathFactory) -> dict:
     node = shutil.which("node")
     if node is None:
         pytest.skip("node not found on PATH; uat-ui-batch2 UI model checks not run")
@@ -370,6 +475,7 @@ def out() -> dict:
         ("{sources_url}", SOURCES_MODEL_JS),
         ("{assess_url}", ASSESS_MODEL_JS),
         ("{run_text_url}", RUN_TEXT_JS),
+        ("{routing_url}", _routing_without_react(tmp_path_factory.mktemp("routing"))),
     ):
         script = script.replace(name, json.dumps(path.resolve().as_uri()))
     completed = subprocess.run(
@@ -460,21 +566,105 @@ def test_jobs_lists_run_postings_only(out: dict) -> None:
 
 def test_assessments_is_every_on_demand_assessment_newest_first(out: dict) -> None:
     cards = out["assessments"]
-    assert [card["id"] for card in cards] == [KONG, ACME, PASTED, GLOBEX]
+    # ACME and GLOBEX are postings of the loaded run: cards on Jobs only (r1).
+    assert [card["id"] for card in cards] == [KONG, PASTED]
     assert [card["assessedAt"] for card in cards] == sorted((card["assessedAt"] for card in cards), reverse=True)
     # One card per job: KONG's older not_a_match entry is not a second card.
     assert _by_id(cards, KONG)["verdict"] == "matched_above_threshold"
-    # A job the loaded run also carries is that run's job (the card Jobs shows).
-    assert _by_id(cards, ACME)["status"] != "on_demand" and _by_id(cards, GLOBEX)["rank"]["score"] == 12
-    assert _by_id(cards, KONG)["status"] == "on_demand"
-    assert out["sortedNewest"] == [KONG, ACME, PASTED, GLOBEX]
+    assert all(card["status"] == "on_demand" for card in cards)
+    assert out["sortedNewest"] == [KONG, PASTED]
 
 
 def test_assessments_does_not_need_a_loaded_run(out: dict) -> None:
+    # No run known (none yet, or none loaded): nothing in the store can be a
+    # run posting's, so every stored assessment is listed.
     cards = out["assessmentsAlone"]
     assert [card["id"] for card in cards] == [KONG, ACME, PASTED, GLOBEX]
     assert all(card["status"] == "on_demand" for card in cards)
     assert out["assessmentsEmpty"] == [[], []]
+
+
+# --- uat-ui-batch2-r1: Assessments is on demand only; links open where the posting lives ---
+
+
+def test_a_run_posting_reassessed_from_its_job_page_is_not_listed_under_assessments(out: dict) -> None:
+    lives = out["lives"]
+    listed = [card["id"] for card in lives["assessments"]]
+    # ACME (an answer, then Re-assess) and GLOBEX's profile entry ("Assess this
+    # posting") are in the store, and neither is a card on Assessments...
+    assert ACME not in listed
+    assert not any(card["id"] == GLOBEX and card["verdict"] == "matched_above_threshold" for card in lives["assessments"])
+    # ...they are the run's cards on Jobs, where ACME's history has grown.
+    assert lives["runJobs"] == [ACME, GLOBEX]
+    view = (UI_SRC / "views" / "FindJobsView.jsx").read_text(encoding="utf-8")
+    assert "assessmentJobs(quickItems, jobs, pastedItems, runPostingIds)" in view
+
+
+def test_a_quick_assessment_is_listed_under_assessments(out: dict) -> None:
+    cards = out["lives"]["assessments"]
+    # "+ Assess a job" by address (KONG) and by pasted text; newest first.
+    assert [card["id"] for card in cards] == [GLOBEX, KONG, PASTED]
+    assert all(card["status"] == "on_demand" for card in cards)
+    assert KONG not in out["lives"]["runJobs"] and PASTED not in out["lives"]["runJobs"]
+    # A pasted resume is only ever sent by the Assess page: GLOBEX's address
+    # assessed against one is on demand, though a run carries that posting.
+    globex = _by_id(cards, GLOBEX)
+    assert globex["verdict"] == "pending_user_answers" and globex["rankSkipReason"] == "ephemeral_resume"
+
+
+def test_a_posting_of_a_run_loaded_earlier_stays_under_jobs(out: dict) -> None:
+    lives = out["lives"]
+    assert lives["known"] == sorted([ACME, GLOBEX, INITECH])
+    assert INITECH not in [card["id"] for card in lives["assessments"]]
+    # Without the set, the rule still holds for the run that is loaded...
+    assert lives["loadedRunOnly"] == [GLOBEX, KONG, PASTED, INITECH]
+    # ...and with no run at all every stored assessment is listed (the pasted-resume GLOBEX is the newest of its two).
+    assert lives["noRunLoaded"] == [GLOBEX, ACME, KONG, PASTED, INITECH]
+    # The set only grows, a run's set is never edited in place, and a state
+    # setter given nothing new gets the same object back (no re-render).
+    assert lives["firstSetUntouched"] == [INITECH] and lives["fromArray"] == [INITECH]
+    assert lives["sameSetWhenNothingNew"] is True
+    view = (UI_SRC / "views" / "FindJobsView.jsx").read_text(encoding="utf-8")
+    assert "onRunPostingIds((known) => addRunPostings(known, rows))" in view
+    reset = view[view.index("// Reset run state when the selected profile changes") :][:900]
+    assert "onRunPostingIds(new Set())" in reset, "another profile's runs are not this profile's postings"
+
+
+def test_a_questions_link_opens_where_its_posting_lives(out: dict) -> None:
+    from urllib.parse import quote
+
+    links = {(link["id"], link["hash"].split("/")[1]): link for link in out["lives"]["links"]}
+    for run_posting in (ACME, GLOBEX, INITECH):
+        link = links[(run_posting, "jobs")]
+        assert link["hash"] == "#/jobs/" + quote(run_posting, safe="!'()*-._~")
+        assert link["home"] == "jobs" and link["view"] == "job" and link["nav"] == "jobs"
+        assert link["jobId"] == run_posting  # the address round-trips through the router
+    for on_demand in (KONG, PASTED):
+        link = links[(on_demand, "assessments")]
+        assert link["hash"] == "#/assessments/" + quote(on_demand, safe="!'()*-._~")
+        assert link["home"] == "assessments" and link["view"] == "assessment" and link["nav"] == "assessments"
+        assert link["jobId"] == on_demand
+    # GLOBEX against a pasted resume: that assessment is a card on Assessments.
+    assert links[(GLOBEX, "assessments")]["view"] == "assessment"
+    assert len(links) == 6
+    # Before any run is loaded nothing is known to be a run posting.
+    assert {link["home"] for link in out["lives"]["linksNoRunLoaded"]} == {"assessments"}
+    assert out["lives"]["linksNoIds"] == ["assessments"] * 5
+    assert out["lives"]["linksFromArray"] == ["jobs", "jobs", "assessments", "assessments", "jobs"]
+
+
+def test_the_questions_page_and_the_assess_flow_use_the_one_rule() -> None:
+    questions = (UI_SRC / "views" / "PendingAnswersView.jsx").read_text(encoding="utf-8")
+    assert "href={postingHash(item, runPostingIds)}" in questions
+    assert "assessmentHash" not in questions and "jobHash" not in questions
+    app = (UI_SRC / "App.jsx").read_text(encoding="utf-8")
+    assert "<PendingAnswersView pending={questions} runPostingIds={runPostingIds} />" in app
+    assert "runPostingIds={runPostingIds}" in app and "onRunPostingIds={setRunPostingIds}" in app
+    # The #/assess flow ends on the job page, under the list its posting is on.
+    assert "navigate(postingHash(response, runPostingIds))" in app
+    routing = ROUTING_JS.read_text(encoding="utf-8")
+    rule = routing[routing.index("export function postingHash") :][:260]
+    assert 'postingHome(item, runPostingIds) === "jobs" ? jobHash(identity) : assessmentHash(identity)' in rule
 
 
 def test_a_pasted_resume_assessment_is_a_card_on_assessments(out: dict) -> None:
@@ -483,7 +673,8 @@ def test_a_pasted_resume_assessment_is_a_card_on_assessments(out: dict) -> None:
     assert out["pastedKey"] == quick_assess.EPHEMERAL_RESUME_KEY == quick_assess.resume_key(None)
     assert out["usedPasted"] == [True, True, False, False, False, False]
     cards = out["withPasted"]
-    assert [card["id"] for card in cards] == [ACME, KONG, PASTED, GLOBEX, "text:77aa"]
+    # GLOBEX and the profile's own ACME entry are the loaded run's (r1).
+    assert [card["id"] for card in cards] == [ACME, KONG, PASTED, "text:77aa"]
     acme = _by_id(cards, ACME)
     # The newest assessment of ACME used a pasted resume: the card is the
     # store's own, never the run posting's card with that verdict on it.
@@ -517,11 +708,6 @@ def test_an_assessment_card_opens_its_page_under_assessments() -> None:
     assert 'href={from === "assessments" ? assessmentHash(job.id) : jobHash(job.id)}' in card
     page = (UI_SRC / "views" / "JobPage.jsx").read_text(encoding="utf-8")
     assert "← Assessments" in page and "← Jobs" in page
-    app = (UI_SRC / "App.jsx").read_text(encoding="utf-8")
-    assert "navigate(assessmentHash(response.job.job_identity))" in app  # the #/assess flow ends on the job page
-    # Questions lists assessments from the same store: its links open there too.
-    questions = (UI_SRC / "views" / "PendingAnswersView.jsx").read_text(encoding="utf-8")
-    assert "href={assessmentHash(item.job.job_identity)}" in questions and "jobHash" not in questions
     routing = (UI_SRC / "routing.js").read_text(encoding="utf-8")
     nav = routing[routing.index("export function navViewFor") :]
     assert 'view === "assessment" || view === "assess"' in nav and 'return "assessments";' in nav

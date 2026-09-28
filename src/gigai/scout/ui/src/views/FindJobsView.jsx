@@ -10,7 +10,7 @@ import JobPage from "./JobPage.jsx";
 import AssessmentsView from "./AssessmentsView.jsx";
 import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
 import { relativeTimeLabel } from "../display.js";
-import { PASTED_RESUME_KEY, assessmentJobs, buildJobs, dateTimeLabel, runJobs as onlyRunJobs, usedPastedResume } from "../jobModel.js";
+import { PASTED_RESUME_KEY, addRunPostings, assessmentJobs, buildJobs, dateTimeLabel, runJobs as onlyRunJobs, usedPastedResume } from "../jobModel.js";
 import { runFailure } from "../runText.js";
 import { indexNotice } from "../sourcesModel.js";
 import { ASSESSMENTS_HASH, RUNS_HASH, SETTINGS_HASH, runHash } from "../routing.js";
@@ -27,8 +27,9 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 // the run's rows + assessments, the Jev rank scores, and the quick-assess
 // store (GET /api/assessments?profile_id=…) where every job-page
 // re-assessment and every "+ Assess a job" lands -- a card's verdict chip
-// is always the latest of the two, and an on-demand assessment no run
-// carries is a card of its own.
+// is always the latest of the two. An on-demand assessment is a card on
+// Assessments; a run posting's assessment, however it was started, is on
+// its Jobs card only (uat-batch2-r1, jobModel.postingHome).
 //
 // Q4a-nav: this view stays MOUNTED for the whole app (App.jsx renders it
 // on every route; it draws nothing on the routes it does not own), so a
@@ -42,8 +43,9 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 //   #/runs/<id>   one run's page: "Runs › <run>", status + node receipts,
 //                 counts, and that run's grid (loaded via the same
 //                 GET /api/runs/{id}/results read as the picker)
-//   #/assessments       every on-demand assessment, newest first, and
-//                       "+ Assess a job" (uat-bug-016, AssessmentsView)
+//   #/assessments       the on-demand assessments, newest first, and
+//                       "+ Assess a job" (uat-bug-016, AssessmentsView);
+//                       never a run posting (uat-batch2-r1)
 //   #/assessments/<id>  the same JobPage, opened from Assessments
 //
 // When nothing is loaded yet (fresh load, a deep link), the newest
@@ -99,6 +101,8 @@ export default function FindJobsView({
   applicationsState,
   questions,
   externalQuickItem,
+  runPostingIds,
+  onRunPostingIds,
 }) {
   const profileId = profile ? profile.profile_id : null;
   const ownsRoute = route.view === "jobs" || route.view === "job" || route.view === "run" || route.view === "assessments" || route.view === "assessment";
@@ -176,7 +180,8 @@ export default function FindJobsView({
     setQuickItems([]);
     setPastedItems([]);
     setQuickLoading(true);
-  }, [profileId, stopPolling, stopProgressPolling, showRun]);
+    onRunPostingIds(new Set());
+  }, [profileId, stopPolling, stopProgressPolling, showRun, onRunPostingIds]);
 
   // Q4a: the quick-assess store for this profile (job-page re-assessments,
   // "Assess this posting", "+ Assess a job", CLI). Loaded when the profile
@@ -434,7 +439,7 @@ export default function FindJobsView({
 
   const hasResume = Boolean(config && config.resume_preview);
   const canRun = Boolean(config) && hasResume;
-  const rows = results ? rowsFromResults(results) : boardRows;
+  const rows = useMemo(() => (results ? rowsFromResults(results) : boardRows), [results, boardRows]);
   const visaRequired = Boolean(config && config.config && config.config.visa_sponsorship_required);
   const currentRun = runsState.runs.find((run) => run.run_id === runId) || null;
   const runCreatedAt = currentRun ? currentRun.created_at : null;
@@ -444,7 +449,13 @@ export default function FindJobsView({
   // Jobs and a run page show the run's postings only (uat-bug-016): an
   // on-demand assessment belongs to no run; it is a card on Assessments.
   const runJobs = useMemo(() => onlyRunJobs(jobs), [jobs]);
-  const assessed = useMemo(() => assessmentJobs(quickItems, jobs, pastedItems), [quickItems, jobs, pastedItems]);
+  // uat-batch2-r1: the postings of every run loaded for this profile since
+  // the page was opened (App.jsx holds the set: Questions reads it too).
+  // An assessment of one of them is that posting's, under Jobs.
+  useEffect(() => {
+    onRunPostingIds((known) => addRunPostings(known, rows));
+  }, [rows, onRunPostingIds]);
+  const assessed = useMemo(() => assessmentJobs(quickItems, jobs, pastedItems, runPostingIds), [quickItems, jobs, pastedItems, runPostingIds]);
 
   if (!ownsRoute) {
     return null;
@@ -473,10 +484,10 @@ export default function FindJobsView({
   if (route.view === "job" || route.view === "assessment") {
     const jobId = route.params.jobId;
     const fromAssessments = route.view === "assessment";
-    // An assessment's page reads the store first; both lists hold the same
-    // job object for a posting the loaded run also carries. A job page
-    // opened by its #/jobs/ address (the Questions page links so) still
-    // finds an assessment only the store has.
+    // An assessment's page reads the on-demand list first (a pasted-resume
+    // assessment of a run posting's address is found there, not the run's
+    // card). Either address still opens any job: an old link to a posting
+    // that has since moved to the other list keeps working.
     const pool = fromAssessments ? assessed.concat(jobs) : jobs.concat(assessed);
     const job = pool.find((candidate) => candidate.id === jobId) || null;
     return (

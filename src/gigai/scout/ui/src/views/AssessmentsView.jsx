@@ -7,9 +7,13 @@ import { ASSESS_HASH } from "../routing.js";
 // (#/assessments/<id>). "+ Assess a job" lives here; Jobs shows search
 // (run) results only.
 //
+// uat-batch2-r1: on demand ONLY. A posting a search found stays under Jobs
+// when it is assessed or re-assessed from its job page; it is never a card
+// here too.
+//
 // `jobs` is jobModel.assessmentJobs() over the quick-assess store
 // (GET /api/assessments?profile_id=…), built by FindJobsView, which owns
-// the store's state so a job page's re-assessment shows here at once.
+// the store's state so a new assessment shows here at once.
 export default function AssessmentsView({ jobs, loading, profileLabel, visaRequired }) {
   return (
     <div>
@@ -26,8 +30,8 @@ export default function AssessmentsView({ jobs, loading, profileLabel, visaRequi
         </div>
         <div className="jobs-header-meta">
           <p className="muted" style={{ margin: 0 }}>
-            Every posting you assessed yourself, newest first: "+ Assess a job", and any posting you assessed or re-assessed from its job
-            page.
+            Postings you assessed on demand with "+ Assess a job", newest first. A posting a search found stays under Jobs, with every
+            assessment you run from its page.
           </p>
         </div>
       </section>

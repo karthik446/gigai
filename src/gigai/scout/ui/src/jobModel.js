@@ -368,8 +368,9 @@ export function buildJobs({ rows, rankScores, quickItems, runCreatedAt }) {
   // job page (#/jobs/<job_identity>) is the same JobPage, so the store's
   // ResolvedJob (title / company / location / source_url, text never
   // serialized) stands in for the posting row. `row` is null for these.
-  // uat-bug-016: these are cards on Assessments, never on Jobs; they stay
-  // in this list so a job page finds them by id (runJobs() drops them).
+  // uat-bug-016: these are never cards on Jobs (runJobs() drops them); they
+  // stay in this list so a job page finds them by id. Which of them are
+  // cards on Assessments is assessmentJobs()'s rule.
   const onDemand = [];
   const seenQuick = new Set();
   (quickItems || []).forEach((item) => {
@@ -402,21 +403,79 @@ export function usedPastedResume(item) {
   return Boolean(resume) && !resume.profile_id && !resume.pinned;
 }
 
-// uat-bug-016: the Assessments page. Every assessment in the quick-assess
-// store for the profile (GET /api/assessments?profile_id=…: "+ Assess a
-// job", `gigai scout assess`, and every assessment or re-assessment started
-// from a job page) plus the ones made against a pasted resume
-// (`pastedItems`, which belong to no profile), one card per job, newest
-// first. A job the loaded run also carries is that run's job (`jobs`, from
-// buildJobs: the same card Jobs shows); any other is the store's own
-// (quickOnlyJob). A pasted-resume assessment is always the store's own: it
-// never stands in for a run posting's verdict, which is the profile's.
-export function assessmentJobs(quickItems, jobs, pastedItems) {
+// --- where a posting lives (uat-batch2-r1, operator N21) -----------------------------
+//
+// Jobs = search results, Assessments = on-demand only. The quick-assess
+// store holds both kinds: "+ Assess a job" / `gigai scout assess`, and every
+// assessment started from a run posting's job page ("Assess this posting",
+// Re-assess, an answer). An item carries NO field that says which: its
+// history's first trigger is "assess" either way. What it does carry is the
+// job's identity and the resume it used, so the rule is:
+//
+//   a store item is a RUN POSTING's (it lives under Jobs) when it used a
+//   profile's resume AND its job identity is a posting of a find-jobs run
+//   the app has loaded for this profile; anything else is on demand.
+//
+// So a pasted resume and a pasted posting text are always on demand (a job
+// page sends neither), and a posting assessed on demand that a run later
+// finds becomes that run's posting: one card, under Jobs.
+//
+// `runPostingIds` is the postings' normalized_url of every run loaded since
+// the page was opened (FindJobsView adds each run's rows): the newest
+// successful run always, plus any run the operator opened.
+export function addRunPostings(known, rows) {
+  let next = known instanceof Set ? known : new Set(known || []);
+  const start = next;
+  (rows || []).forEach((row) => {
+    const id = row && row.posting && row.posting.normalized_url;
+    if (id && !next.has(id)) {
+      if (next === start) {
+        next = new Set(start);
+      }
+      next.add(id);
+    }
+  });
+  return next; // the SAME set when nothing was added, so a state setter is a no-op
+}
+
+function idSet(ids) {
+  return ids instanceof Set ? ids : new Set(ids || []);
+}
+
+export function isRunPosting(item, runPostingIds) {
+  const job = item && item.job;
+  if (!job || usedPastedResume(item)) {
+    return false;
+  }
+  const ids = idSet(runPostingIds);
+  return ids.has(job.job_identity) || (Boolean(job.normalized_url) && ids.has(job.normalized_url));
+}
+
+// "jobs" | "assessments": the list a store item's posting is a card on, and
+// so where a link to it opens (#/jobs/<id> or #/assessments/<id>).
+export function postingHome(item, runPostingIds) {
+  return isRunPosting(item, runPostingIds) ? "jobs" : "assessments";
+}
+
+// uat-bug-016 → uat-batch2-r1: the Assessments page. The ON-DEMAND
+// assessments in the quick-assess store for the profile
+// (GET /api/assessments?profile_id=…) plus the ones made against a pasted
+// resume (`pastedItems`, which belong to no profile), one card per job,
+// newest first. A run posting's assessment is never listed, however it was
+// started: that posting is a card on Jobs and its history grows there (see
+// the rule above; the run rows in `jobs` count as run postings too, so the
+// loaded run needs no `runPostingIds`). Every card is the store's own
+// (quickOnlyJob); a pasted-resume assessment of a run posting's address is
+// one too, and never stands in for that posting's verdict, which is the
+// profile's.
+export function assessmentJobs(quickItems, jobs, pastedItems, runPostingIds) {
   const byId = new Map((jobs || []).map((job) => [job.id, job]));
+  const runIds = new Set(idSet(runPostingIds));
+  (jobs || []).forEach((job) => job.row && runIds.add(job.id));
   const latest = new Map();
   (quickItems || []).concat(pastedItems || []).forEach((item) => {
     const identity = item && item.job && item.job.job_identity;
-    if (!identity) {
+    if (!identity || isRunPosting(item, runIds)) {
       return;
     }
     const existing = latest.get(identity);

@@ -1,5 +1,5 @@
 import AssessmentBody from "../components/AssessmentBody.jsx";
-import { assessmentHash } from "../routing.js";
+import { postingHash } from "../routing.js";
 
 // P3/P9 → Q4a-nav: Questions (#/questions). The list is DERIVED (operator
 // decision 3, plan section 8): every stored quick assessment with verdict
@@ -11,11 +11,12 @@ import { assessmentHash } from "../routing.js";
 // box) and the card's verdict updates from the response; the server's own
 // verdict is what removes a fully-resolved card, not a client-side guess.
 //
-// uat-batch2 (uat-bug-016): every card here is an assessment in the
-// quick-assess store, so its heading opens the job page under Assessments
-// (#/assessments/<id>), where that assessment is a card; the page itself is
-// unchanged.
-export default function PendingAnswersView({ pending }) {
+// uat-batch2-r1: a question's heading opens where its posting lives: a run
+// posting's job page under Jobs (#/jobs/<id>), an on-demand assessment's
+// under Assessments (#/assessments/<id>). routing.postingHash decides, from
+// the postings of the runs loaded so far (`runPostingIds`, App.jsx); the
+// page itself is the same one.
+export default function PendingAnswersView({ pending, runPostingIds }) {
   const { loading, error, cards, count, reload } = pending;
 
   return (
@@ -36,7 +37,7 @@ export default function PendingAnswersView({ pending }) {
         {cards.map(({ item, result }) => (
           <div className="posting-card" key={item.job.job_identity}>
             <div className="posting-card-heading">
-              <a href={assessmentHash(item.job.job_identity)}>
+              <a href={postingHash(item, runPostingIds)}>
                 {item.job.title || "(pasted text)"} {item.job.company ? `· ${item.job.company}` : ""}
               </a>
             </div>

@@ -25,6 +25,7 @@
 // UI is static files under api/static.py, no catch-all), and a deep link or
 // a reload lands on the same view. An unknown hash falls back to the grid.
 import { useEffect, useState } from "react";
+import { postingHome } from "./jobModel.js";
 
 export const ROUTES = [
   { view: "jobs", path: "#/jobs", label: "Jobs", pattern: /^#\/jobs\/?$/ },
@@ -90,6 +91,14 @@ export function jobHash(jobId) {
 // current and where "←" goes back to).
 export function assessmentHash(jobId) {
   return `#/assessments/${encodeURIComponent(jobId)}`;
+}
+
+// uat-batch2-r1: a link to a stored assessment opens where its posting
+// lives: a run posting's under Jobs, an on-demand one's under Assessments
+// (jobModel.postingHome; `runPostingIds` is App.jsx's).
+export function postingHash(item, runPostingIds) {
+  const identity = item.job.job_identity;
+  return postingHome(item, runPostingIds) === "jobs" ? jobHash(identity) : assessmentHash(identity);
 }
 
 export function runHash(runId) {
