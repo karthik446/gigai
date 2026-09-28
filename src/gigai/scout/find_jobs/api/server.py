@@ -35,11 +35,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from socketserver import TCPServer
 from typing import Callable, Protocol
 from urllib.parse import urlsplit
 
 from ....canonical import canonical_json_bytes, parse_json_bytes
+from ....http_server import NoLookupThreadingHTTPServer
 from ....run import ResumeDetails, RunError
 from ..contracts import (
     API_BIND,
@@ -1653,23 +1653,13 @@ def _make_handler(
     return Handler
 
 
-class _ScoutHTTPServer(ThreadingHTTPServer):
-    """A ``ThreadingHTTPServer`` that binds without a reverse-DNS lookup.
+class _ScoutHTTPServer(NoLookupThreadingHTTPServer):
+    """Scout's server: binds without a reverse-DNS lookup (see ``gigai.http_server``).
 
-    Stock ``HTTPServer.server_bind`` sets ``server_name`` to
-    ``socket.getfqdn(host)`` after ``bind()`` and before ``listen()``, so the
-    port refuses every connection, ``/api/health`` included, for as long as
-    the host's resolver takes. On GitHub's macOS runners that lookup of
-    ``127.0.0.1`` blocks for more than 30 s, longer than ``gigai scout run``
-    waits for the server to become healthy. Nothing here reads
-    ``server_name`` (stdlib only uses it for CGI), so it is the bound host.
+    With the stock bind the port refuses every connection, ``/api/health``
+    included, until the lookup returns; on GitHub's macOS runners that is
+    longer than ``gigai scout run`` waits for the server to become healthy.
     """
-
-    def server_bind(self) -> None:
-        TCPServer.server_bind(self)
-        host, port = self.server_address[:2]
-        self.server_name = host
-        self.server_port = port
 
 
 def serve(

@@ -127,6 +127,7 @@ LATENCY_SCALE_ENV = "GIGAI_TEST_LATENCY_SCALE"
 def _health_timeout_seconds() -> float:
     """``HEALTH_TIMEOUT_SECONDS``, widened by ``GIGAI_TEST_LATENCY_SCALE``."""
 
+    # GIGAI_TEST_LATENCY_SCALE only ever WIDENS the 15 s health wait (never shortens it).
     try:
         scale = float(os.environ.get(LATENCY_SCALE_ENV, "1.0"))
     except ValueError:
