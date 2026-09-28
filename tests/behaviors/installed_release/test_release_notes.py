@@ -7,9 +7,22 @@ import pytest
 from tools import release_notes
 
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _read_real_changelog() -> str:
+    # The Debian offline image copies the source and test trees but neither
+    # CHANGELOG.md nor .git (containers/debian-offline/Dockerfile,
+    # .dockerignore). A checkout has .git, so a missing changelog there still
+    # fails rather than skips.
+    changelog_path = REPO_ROOT / "CHANGELOG.md"
+    if not changelog_path.is_file() and not (REPO_ROOT / ".git").exists():
+        pytest.skip("CHANGELOG.md is excluded from the offline container build context")
+    return changelog_path.read_text(encoding="utf-8")
+
+
 def test_extracts_0_1_8_section_from_the_real_changelog() -> None:
-    changelog_path = Path(__file__).resolve().parents[3] / "CHANGELOG.md"
-    changelog = changelog_path.read_text(encoding="utf-8")
+    changelog = _read_real_changelog()
 
     notes = release_notes.extract_release_notes(changelog, "0.1.8")
 

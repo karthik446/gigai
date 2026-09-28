@@ -544,7 +544,13 @@ jobs:
 
 
 def _workflow_files() -> list[Path]:
+    # The Debian offline image copies the source and test trees but neither
+    # .github/ nor .git (containers/debian-offline/Dockerfile, .dockerignore).
+    # A checkout has .git, so missing workflows there still fail rather than
+    # skip.
     workflows_dir = REPO_ROOT / ".github" / "workflows"
+    if not workflows_dir.is_dir() and not (REPO_ROOT / ".git").exists():
+        pytest.skip(".github/workflows is excluded from the offline container build context")
     return sorted(
         p for p in workflows_dir.iterdir() if p.suffix in {".yml", ".yaml"}
     )
