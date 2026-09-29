@@ -3,6 +3,7 @@ import TagListInput from "../components/TagListInput.jsx";
 import { archiveProfile, createProfile, updateProfile } from "../api.js";
 import { useRuns } from "../hooks.js";
 import { relativeTimeLabel } from "../display.js";
+import { modelTargetLabel } from "../modelTargets.js";
 
 // P9/P9c (F3): Profiles.
 //
@@ -301,7 +302,7 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
             </div>
             <div className="field">
               <div className="label">Model target</div>
-              <div className="value">{config.default_model_target}</div>
+              <div className="value" title={config.default_model_target}>{modelTargetLabel(config.default_model_target)}</div>
             </div>
           </div>
         </section>

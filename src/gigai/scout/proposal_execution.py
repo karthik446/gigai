@@ -77,6 +77,7 @@ from ..model_execution import (
     SelectedReference,
 )
 from ..adapters.factory import AdapterFactoryError, resolve_model_adapter
+from ..adapters.port import ModelInvocationError
 from ..validators import validate_goal_graph, validate_serialized_contract
 from ..validators import validate_model_invocation
 
@@ -195,10 +196,10 @@ def _assess_node_body(
     if context.model_target != input.model_target:
         raise ScoutProposalExecutionError("model_target_mismatch", "sealed model target differs from node context")
     model_target = input.model_target.value
-    if model_target not in {"ollama_local", "codex_cli", "openrouter_api"}:
+    if model_target not in {"ollama_local", "codex_cli", "openrouter_api", "claude_cli"}:
         raise ScoutProposalExecutionError("model_target_invalid", "unsupported model target")
     # U2 (0.1.8.1 UAT): the sealed enum value (ollama_local/codex_cli/
-    # openrouter_api) is an *adapter kind*, never a configured target's own
+    # openrouter_api/claude_cli) is an *adapter kind*, never a configured target's own
     # name -- ``gigai setup`` names its targets "codex-default",
     # "claude-default", etc, so ``resolve_model_adapter(config, "codex_cli")``
     # (a literal lookup by name) always failed. Resolve the adapter kind
@@ -209,9 +210,10 @@ def _assess_node_body(
     adapter_target = _resolve_configured_target_name_for_adapter(config, model_target)
     try:
         binding = resolve_model_adapter(config, adapter_target, home_root=home_root)
-    except (AdapterFactoryError, ModelTargetResolutionError, KeyError) as exc:
+    except (AdapterFactoryError, ModelTargetResolutionError, KeyError, ModelInvocationError) as exc:
         # Missing credentials and unknown targets are setup errors, not a row
-        # level model outage: callers must see them loudly.
+        # level model outage: callers must see them loudly. uat-bug-035: so
+        # is a CLI target whose executable is not on PATH (claude, codex).
         raise ScoutProposalExecutionError("model_target_unavailable", "sealed model target or credential is unavailable") from exc
 
     root = Path(target) if isinstance(target, Path) else Path(context.workpad_path)
@@ -509,7 +511,7 @@ def _resolve_configured_target_name_for_adapter(config: GigAIConfig, adapter_kin
     """The name of the configured, enabled target whose endpoint uses ``adapter_kind``.
 
     U2 (0.1.8.1 UAT): the sealed model-target enum (``ollama_local`` /
-    ``codex_cli`` / ``openrouter_api``) names an *adapter kind*, not a
+    ``codex_cli`` / ``openrouter_api`` / ``claude_cli``) names an *adapter kind*, not a
     configured target -- ``gigai setup`` always names its targets
     ``"<provider>-default"`` (``codex-default``, ``claude-default``, ...).
     This maps through the operator's own configuration rather than a
@@ -602,7 +604,7 @@ def _assess_prompt(
 
 def assess_invocation_policy(model_target: str, input: object) -> InvocationPolicy:
     """Build the explicit local/hosted policy for one assess input."""
-    if model_target not in {"ollama_local", "codex_cli", "openrouter_api"}:
+    if model_target not in {"ollama_local", "codex_cli", "openrouter_api", "claude_cli"}:
         raise ScoutProposalExecutionError("model_target_invalid", "unsupported model target")
     selected = getattr(input, "selected_postings", ())
     pinned = getattr(input, "pinned_resume", None)

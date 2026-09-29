@@ -66,6 +66,7 @@ import threading
 import httpx
 
 from ..adapters.factory import AdapterFactoryError
+from ..adapters.port import ModelInvocationError
 from ..canonical import digest_imported_bytes, parse_json_bytes
 from ..config import GigAIConfig, load_config
 from ..model_targets import ModelTargetResolutionError
@@ -490,6 +491,9 @@ def _resolve_binding(config: GigAIConfig, model_target: ModelTarget, *, home_roo
         ModelTargetResolutionError,
         proposal_execution.ScoutProposalExecutionError,
         KeyError,
+        # uat-bug-035: a CLI target whose executable is not on PATH
+        # ("claude executable is not available on PATH"; codex the same).
+        ModelInvocationError,
     ) as exc:
         raise QuickAssessError("model_target_unavailable", str(exc) or "the configured model target or credential is unavailable") from exc
     return _ObservedBinding(binding, _ObservedPort(binding.port, _seam_deadline_seconds()))

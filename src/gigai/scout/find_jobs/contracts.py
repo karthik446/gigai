@@ -59,6 +59,8 @@ class ModelTarget(StrEnum):
     OLLAMA_LOCAL = "ollama_local"
     CODEX_CLI = "codex_cli"
     OPENROUTER_API = "openrouter_api"
+    # uat-bug-035 (operator decision): the Claude Code CLI, like codex_cli.
+    CLAUDE_CLI = "claude_cli"
 
 
 class SourceKind(StrEnum):

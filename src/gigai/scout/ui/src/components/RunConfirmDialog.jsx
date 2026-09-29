@@ -3,8 +3,7 @@ import { getSourcesUpdate } from "../api.js";
 import { relativeTimeLabel } from "../display.js";
 import { indexedBoardsLine, sourceLabel } from "../runText.js";
 import { SETTINGS_HASH } from "../routing.js";
-
-const MODEL_TARGETS = ["ollama_local", "codex_cli", "openrouter_api"];
+import { MODEL_TARGETS, MODEL_TARGET_HINTS, modelTargetLabel } from "../modelTargets.js";
 
 // uat-batch1 (N12): the dialog names what a run reads in plain words.
 // uat-batch2: the "Company boards" line is how many company boards are
@@ -104,10 +103,11 @@ export default function RunConfirmDialog({ config, onConfirm, onCancel, submitti
           <select id="model-target" value={modelTarget} onChange={(event) => setModelTarget(event.target.value)}>
             {MODEL_TARGETS.map((target) => (
               <option key={target} value={target}>
-                {target}
+                {modelTargetLabel(target)}
               </option>
             ))}
           </select>
+          {MODEL_TARGET_HINTS[modelTarget] && <small className="muted">{MODEL_TARGET_HINTS[modelTarget]}</small>}
         </div>
 
         <div className="callout warn">

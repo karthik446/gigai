@@ -126,12 +126,13 @@ def predict_categories(
     keeps today's default resolver (env, then the default home).
     """
 
-    if model_target not in {"ollama_local", "codex_cli", "openrouter_api"}:
+    if model_target not in {"ollama_local", "codex_cli", "openrouter_api", "claude_cli"}:
         raise CategoryPredictionError("category_model_target_invalid", f"unsupported model target {model_target!r}")
     try:
         adapter_target = _resolve_configured_target_name_for_adapter(config, model_target)
         binding = resolve_model_adapter(config, adapter_target, home_root=home_root)
-    except (AdapterFactoryError, ModelTargetResolutionError, ScoutProposalExecutionError) as exc:
+    except (AdapterFactoryError, ModelTargetResolutionError, ScoutProposalExecutionError, ModelInvocationError) as exc:
+        # uat-bug-035: ModelInvocationError is a CLI target not on PATH.
         raise CategoryPredictionError("category_model_unavailable", str(exc)) from exc
     try:
         prompt = _prompt(title=title, company=company, posting_text=posting_text, resume_text=resume_text, company_claims=company_claims)

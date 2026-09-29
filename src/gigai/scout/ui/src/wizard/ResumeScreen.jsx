@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import TagListInput from "../components/TagListInput.jsx";
-import { MODEL_TARGETS, MODEL_TARGET_HINTS, RESUME_FILE_PATTERN, RESUME_MAX_BYTES, bytesToBase64 } from "./wizardState.js";
+import { MODEL_TARGETS, MODEL_TARGET_HINTS, RESUME_FILE_PATTERN, RESUME_MAX_BYTES, bytesToBase64, modelTargetLabel } from "./wizardState.js";
 
 // Screen 1 -- name the profile, supply a resume (paste / upload / choose an
 // existing one), pick the model that reads it, run the extraction, edit the
@@ -233,7 +233,7 @@ export default function ResumeScreen({
         >
           {MODEL_TARGETS.map((target) => (
             <option key={target} value={target}>
-              {target}
+              {modelTargetLabel(target)}
             </option>
           ))}
         </select>
@@ -251,7 +251,7 @@ export default function ResumeScreen({
 
       {extracting && (
         <div className="wz-progress" role="status">
-          <p className="muted">Extracting stack, seniority and titles with {fields.modelTarget}…</p>
+          <p className="muted">Extracting stack, seniority and titles with {modelTargetLabel(fields.modelTarget)}…</p>
           <div className="wz-progress-track">
             <div className="wz-progress-fill" />
           </div>

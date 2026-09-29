@@ -79,6 +79,10 @@ mechanics here. Those belong in the internal changelog.
 - **One-command Scout.** `gigai scout install`, `gigai scout run`, `stop` and
   `status`, `gigai gig use`, and `gigai secrets add|list|rm` (stores API keys
   locally; the Exa key is read from there).
+- **Claude as a model target.** Scout can rank and assess with Claude (the
+  `claude` CLI on your PATH), offered as "Claude (claude CLI)" wherever a
+  model target is chosen; Codex or Claude is the one model target Scout
+  needs. Assessments run Claude Code's default model.
 
 #### Changed
 

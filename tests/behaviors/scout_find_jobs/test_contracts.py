@@ -687,7 +687,8 @@ def test_effect_sets_and_model_target_are_frozen() -> None:
     assert ASSESS_EFFECTS == ACQUIRE_EFFECTS
     assert ASSESS_LOCAL_EFFECTS == {"write_workpad"}
     assert PRESENT_EFFECTS == {"write_workpad"}
-    assert set(ModelTarget) == {ModelTarget.OLLAMA_LOCAL, ModelTarget.CODEX_CLI, ModelTarget.OPENROUTER_API}
+    # uat-bug-035 (operator decision): claude_cli joined the sealed enum.
+    assert set(ModelTarget) == {ModelTarget.OLLAMA_LOCAL, ModelTarget.CODEX_CLI, ModelTarget.OPENROUTER_API, ModelTarget.CLAUDE_CLI}
     assert not hasattr(RowOutcome, "PENDING")
 
 

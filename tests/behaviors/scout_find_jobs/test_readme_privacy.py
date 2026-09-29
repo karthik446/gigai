@@ -42,7 +42,8 @@ def test_the_ranking_copy_is_honest_about_the_order() -> None:
 
 
 def test_the_named_model_targets_are_the_ones_scout_can_select() -> None:
-    assert {target.value for target in ModelTarget} == {"ollama_local", "codex_cli", "openrouter_api"}
+    # uat-bug-035: claude_cli joined the sealed enum.
+    assert {target.value for target in ModelTarget} == {"ollama_local", "codex_cli", "openrouter_api", "claude_cli"}
     privacy = _privacy()
     for target in ModelTarget:
         assert f"`{target.value}`" in privacy
@@ -122,10 +123,26 @@ def test_the_pasted_resume_and_status_claims_are_the_decided_wording() -> None:
 
 def test_the_readme_says_exa_is_optional_and_off_for_a_new_setup() -> None:
     text = _flat(_text())
-    assert "You only need one model target (`ollama_local`, `codex_cli` or `openrouter_api`) to start" in text
+    # uat-bug-035 (operator decision): one model target is required, Codex or Claude.
+    assert (
+        "You need one model target to start: Codex (`codex_cli`) or Claude (`claude_cli`); "
+        "`ollama_local` and `openrouter_api` are optional alternatives."
+    ) in text
     assert "Exa is an optional extra, off for a new setup" in text
     assert "Also search the open web with Exa (needs an Exa key)" in text
     assert "gigai secrets add exa" in text
-    assert "claude_cli" not in text
     privacy = _privacy()
     assert "Exa, only if enabled in your sources" in privacy
+
+
+def test_the_readme_names_claude_as_a_required_choice_and_says_where_it_sends() -> None:
+    """uat-bug-035: Codex or Claude is the one required target; Claude's traffic goes to Anthropic."""
+
+    text = _flat(_text())
+    install = _flat(_text().split("## Install", 1)[1].split("\n## ", 1)[0])
+    assert "Scout also needs one model target: Codex (`codex_cli`, the `codex` CLI) or Claude (`claude_cli`, the `claude` CLI)" in install
+    privacy = _privacy()
+    assert "`claude_cli` (the Claude Code CLI sends it to Anthropic)" in privacy
+    assert "`codex_cli` (the Codex CLI sends it to OpenAI)" in privacy
+    assert "`default_model_target` accepts `ollama_local`, `codex_cli`, `claude_cli`, or `openrouter_api`" in text
+    assert "which ignores `--model`, so assessments run Claude Code's default model" in text

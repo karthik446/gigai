@@ -59,7 +59,7 @@ def test_local_assess_policy_is_offline_and_disallows_network():
     assert policy.offline is True
 
 
-@pytest.mark.parametrize("target", ["codex_cli", "openrouter_api"])
+@pytest.mark.parametrize("target", ["codex_cli", "openrouter_api", "claude_cli"])
 def test_hosted_assess_policy_allows_network_and_is_not_offline(target):
     policy = assess_invocation_policy(target, _input())
     assert policy.local_allowed is False
@@ -147,8 +147,17 @@ class _ScriptedBinding:
         return SimpleNamespace(prompt=prompt, role=role)
 
 
-def _assess_fixture(tmp_path: Path) -> tuple[dict, Path]:
-    """A resolved workpad + a pinned resume, ready for a direct assess_node call."""
+def _assess_fixture(
+    tmp_path: Path,
+    *,
+    extra_endpoints: tuple[Endpoint, ...] = (),
+    extra_model_targets: tuple[ConfigModelTarget, ...] = (),
+) -> tuple[dict, Path]:
+    """A resolved workpad + a pinned resume, ready for a direct assess_node call.
+
+    ``extra_endpoints``/``extra_model_targets`` (uat-bug-035) are configured
+    too, e.g. a ``claude_cli`` endpoint and its ``claude-default`` target.
+    """
     home = tmp_path / "home"
     target = tmp_path / "target"
     target.mkdir()
@@ -165,6 +174,7 @@ def _assess_fixture(tmp_path: Path) -> tuple[dict, Path]:
             endpoints=(
                 Endpoint(name="offline", adapter="deterministic"),
                 Endpoint(name="ollama", adapter="ollama_local", base_url="http://127.0.0.1:11434"),
+                *extra_endpoints,
             ),
             model_targets=(
                 ConfigModelTarget(
@@ -182,6 +192,7 @@ def _assess_fixture(tmp_path: Path) -> tuple[dict, Path]:
                     max_output_tokens=512,
                     model_digest="sha256:" + "c" * 64,
                 ),
+                *extra_model_targets,
             ),
         )
     )

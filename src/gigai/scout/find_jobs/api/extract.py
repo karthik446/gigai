@@ -311,6 +311,9 @@ def _resolve_binding(config: GigAIConfig, model_target: ModelTarget, *, home_roo
         ModelTargetResolutionError,
         proposal_execution.ScoutProposalExecutionError,
         KeyError,
+        # uat-bug-035: a CLI target whose executable is not on PATH
+        # ("claude executable is not available on PATH"; codex the same).
+        ModelInvocationError,
     ) as exc:
         raise ResumeExtractError(
             "model_target_unavailable", str(exc) or "the configured model target or credential is unavailable"

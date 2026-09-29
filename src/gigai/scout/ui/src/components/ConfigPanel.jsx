@@ -1,3 +1,4 @@
+import { modelTargetLabel } from "../modelTargets.js";
 import { resumeDisplayLabel, resumeIdsTooltip } from "../display.js";
 
 // Q1 (rolling window): exactly one publication cutoff rule
@@ -82,7 +83,7 @@ export default function ConfigPanel({ config, resumePreview, resumeLabel, resume
         </div>
         <div className="field">
           <div className="label">Default model target</div>
-          <div className="value">{config.default_model_target}</div>
+          <div className="value" title={config.default_model_target}>{modelTargetLabel(config.default_model_target)}</div>
         </div>
       </div>
       <div className="field-row">

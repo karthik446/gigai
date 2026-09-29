@@ -43,7 +43,7 @@ special runtime treatment.
 ## Privacy and security
 
 **Scout has no service of its own.** Ranking and assessment both run on
-the model target you configured (`ollama_local`, `codex_cli` or
+the model target you configured (`ollama_local`, `codex_cli`, `claude_cli` or
 `openrouter_api`, whichever the search's `default_model_target` names). There
 is no ranking service, no extra key, and no extra third party for ranking
 or assessment. What your machine sends to the model target is exactly:
@@ -61,8 +61,11 @@ or assessment. What your machine sends to the model target is exactly:
   posting being assessed. A pasted resume is used for that assessment only: its full text is never saved and never sent anywhere but your assessment model; the stored result keeps short evidence quotes on your machine.
 - **With a local Ollama target nothing leaves the machine.** Scout only
   talks to Ollama on a numeric loopback address (`127.0.0.1`).
-- With `codex_cli` or `openrouter_api`, that provider sees what is listed
-  above under its own terms.
+- With `codex_cli` (the Codex CLI sends it to OpenAI), `claude_cli` (the
+  Claude Code CLI sends it to Anthropic) or `openrouter_api`, that provider
+  sees what is listed above under its own terms. The two CLIs add their own
+  instructions to each call; for an assessment the Claude Code CLI also loads
+  your own Claude Code settings, as any `claude -p` call does.
 
 Ranking scores are cached on disk under `<home>/cache/scout/rank/scores/`
 (a score, up to two short reasons and any blockers per posting, no resume
@@ -88,7 +91,10 @@ postings past that bound stay unranked and keep date order.
 
 ## Install
 
-Requires Python 3.11+.
+Requires Python 3.11+. Scout also needs one model target: Codex (`codex_cli`,
+the `codex` CLI) or Claude (`claude_cli`, the `claude` CLI) on your `PATH`.
+A local Ollama model (`ollama_local`) or an OpenRouter key (`openrouter_api`)
+are optional alternatives.
 
 ```bash
 uv tool install gigai
@@ -138,14 +144,24 @@ secret value. Run `gigai setup --help` for the full reference, including
 Ollama loopback endpoints and per-target reasoning-effort options.
 
 Scout's find-jobs resolves a sealed model target (`ollama_local`, `codex_cli`,
-`openrouter_api`) to whichever enabled configured target uses that adapter —
-`gigai setup`'s auto-named target (e.g. `codex-default`) just works, no
+`claude_cli`, `openrouter_api`) to whichever enabled configured target uses that adapter —
+`gigai setup`'s auto-named target (e.g. `codex-default` or `claude-default`) just works, no
 special naming needed. If you followed an older 0.1.8.x version of this
 README and already have a target literally named `codex_cli` (or
 `ollama_local`/`openrouter_api`), that still resolves correctly too. Only
 having *two* enabled targets on the same adapter with neither named exactly
 the sealed value is an error — disable or remove one (`gigai setup` or edit
 `config.toml`).
+
+With `claude_cli`, `gigai setup` finds `claude` on your `PATH` the way it
+finds `codex`, and names the target `claude-default`. Ranking calls
+`claude -p` in a lean mode (a one-line system prompt; no settings, MCP
+servers, slash commands or tools) and passes the target's model. An
+assessment calls it in Claude Code's plan mode, which ignores `--model`, so
+assessments run Claude Code's default model whatever the target names.
+Without `claude` on your `PATH`, ranking is skipped (`model_target_unavailable:
+claude executable is not available on PATH`, the same as for a missing
+`codex`) and assessments fail with `model_target_unavailable`.
 
 `gigai setup`'s auto-created targets default to a 4096-token output
 allowance, enough headroom for a real assessment's JSON output (5-12
@@ -213,8 +229,10 @@ board's own field when it has one, else it is read from the location text
 and labelled as derived. A posting whose location says nothing usable (for
 example just "United States") is kept and labelled rather than dropped.
 Without a `work_mode`, the answer saved in setup is used, else Any.
-`default_model_target` accepts `ollama_local`, `codex_cli`, or
-`openrouter_api`. `hiringcafe` is defined in the schema but not a live source
+`default_model_target` accepts `ollama_local`, `codex_cli`, `claude_cli`, or
+`openrouter_api`. A new setup starts on `ollama_local`: set `codex_cli` or
+`claude_cli` here to use Codex or Claude by default (the run dialog can also
+pick the target for one run). `hiringcafe` is defined in the schema but not a live source
 in this release; leave it `false`. `countries` is a list of ISO-3166 alpha-2
 codes to filter postings by; a posting whose location resolves to a
 region-only label (e.g. `AMER`, `EMEA`) with no specific country never
@@ -310,8 +328,9 @@ so this is only needed when switching between Gigs.
 
 ### Exa search
 
-You only need one model target (`ollama_local`, `codex_cli` or
-`openrouter_api`) to start. Exa is an optional extra, off for a new setup.
+You need one model target to start: Codex (`codex_cli`) or Claude
+(`claude_cli`); `ollama_local` and `openrouter_api` are optional alternatives.
+Exa is an optional extra, off for a new setup.
 To turn it on, store a key with the command below, then tick **Also search the
 open web with Exa (needs an Exa key)** in Settings.
 

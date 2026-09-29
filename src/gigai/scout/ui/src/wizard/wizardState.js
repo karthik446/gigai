@@ -4,16 +4,10 @@
 // wizard's own field state, so the screens stay thin and the derivations
 // are easy to read.
 
-export const MODEL_TARGETS = ["ollama_local", "codex_cli", "openrouter_api"];
-
-// One line per sealed ModelTarget (find_jobs/contracts.py). Same privacy
-// posture as assess: the resume goes only to the chosen model, never to
-// web search.
-export const MODEL_TARGET_HINTS = {
-  ollama_local: "Runs locally through Ollama. Nothing leaves this machine.",
-  codex_cli: "Uses the Codex CLI, which sends your resume to OpenAI.",
-  openrouter_api: "Sends your resume to OpenRouter's API (the model you configured there).",
-};
+// uat-bug-035: the targets, their labels and hints live in ../modelTargets.js
+// (the run dialog offers the same list); re-exported for the wizard.
+export { MODEL_TARGETS, MODEL_TARGET_HINTS, MODEL_TARGET_LABELS, modelTargetLabel } from "../modelTargets.js";
+import { MODEL_TARGETS } from "../modelTargets.js";
 
 // uat-bug-028: each mode is a filter (find-jobs.json `work_mode`, applied
 // by the index search before ranking); `hint` says what it keeps.
