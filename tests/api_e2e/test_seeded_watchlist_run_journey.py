@@ -60,8 +60,11 @@ def test_run_over_a_seeded_watchlist_passes_the_existing_journeys(tmp_path: Path
     try:
         client = server.client
 
-        # setup: the prefs the seeding filters by (US only, no excludes).
-        setup_response = client.put("/api/setup", json=_SETUP_BODY)
+        # setup: the prefs the seeding filters by (US only, no excludes). Work
+        # mode Any: every fixture posting is "Denver, CO" (a plain city), which
+        # uat-bug-028 correctly drops for a Remote-only operator; this journey
+        # is about the seeded watchlist, not the work-mode filter.
+        setup_response = client.put("/api/setup", json={**_SETUP_BODY, "work_mode": "any"})
         assert setup_response.status_code == 200, setup_response.text
         assert setup_response.json()["prefs"]["countries"] == ["US"]
         assert list_active(home, target) == (), "seeding must not happen at setup time"
