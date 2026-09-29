@@ -21,6 +21,7 @@ import threading
 from gigai.adapters.port import InvocationRequest, InvocationResult, NormalizedUsage
 from gigai.scout.find_jobs.contracts import AcquireOutput, ModelTarget
 from gigai.scout.find_jobs.market_acquisition import IMPORT_ROW_CAP
+from gigai.scout.find_jobs import progress as progress_module
 from gigai.scout.find_jobs.progress import ProgressWriter, rank_tier, read_progress
 from tests.behaviors.scout_find_jobs.test_run_rank_step import (  # noqa: F401 - `substrate` is a fixture
     _acquire,
@@ -90,7 +91,7 @@ def test_an_over_cap_run_fills_the_grid_by_rank_while_it_ranks_then_keeps_the_to
         # The first batch lands: the grid shows its 50 postings, ranked, best first.
         first = _wait_for_ranked(run_dir, 50)
         assert (first.rank["ranked"], first.rank["total"]) == (50, MATCHED)
-        assert len(first.postings) == 50, "the grid is empty while the pass runs"
+        assert len(first.postings) == 50, "the grid is empty while the pass runs"  # ordered writes: see the interleaving tests
         assert all(isinstance(item["rank"]["score"], int) for item in first.postings)
         scores = [item["rank"]["score"] for item in first.postings]
         assert scores == sorted(scores, reverse=True)
@@ -167,3 +168,80 @@ def test_an_unreadable_imported_file_leaves_the_lines_as_they_are(tmp_path: Path
     assert _urls(read_progress(tmp_path).postings) == ["u0", "u1"]
     (tmp_path / "progress" / "imported.json").write_text(json.dumps({"normalized_urls": [["u0"], "u1"]}))
     assert _urls(read_progress(tmp_path).postings) == ["u1"]
+
+
+def _promise_holds(snapshot) -> bool:
+    """`ranked N` implies the grid already has at least N postings (each ranked row's line is written first)."""
+    ranked = 0 if snapshot.rank is None else snapshot.rank["ranked"]
+    return len(snapshot.postings) >= ranked
+
+
+def test_every_write_of_an_over_cap_pass_keeps_ranked_n_backed_by_n_postings(substrate: dict, monkeypatch) -> None:
+    """Deterministic window check: read_progress after EVERY progress write of the pass (no threads, no timing).
+
+    Fails when the batch's rank.jsonl line lands before its posting lines.
+    """
+    install_rank_port(monkeypatch, _ReleasedPort())
+    run_dir = _run_dir(substrate)
+    seen: list[tuple[str, int, int]] = []
+
+    def spy(name: str, original):
+        def wrapper(self, *args, **kwargs):
+            result = original(self, *args, **kwargs)
+            snapshot = read_progress(run_dir)
+            seen.append((name, 0 if snapshot.rank is None else snapshot.rank["ranked"], len(snapshot.postings)))
+            return result
+
+        return wrapper
+
+    monkeypatch.setattr(ProgressWriter, "rank_batch", spy("rank_batch", ProgressWriter.rank_batch))
+    monkeypatch.setattr(ProgressWriter, "postings_acquired", spy("postings_acquired", ProgressWriter.postings_acquired))
+    _acquire(substrate, [_posting(n) for n in range(IMPORT_ROW_CAP + 60)], cap=5)
+    # (asserted here, not in the spy: an exception inside a batch hook is swallowed by the pass)
+    assert any(name == "rank_batch" and ranked > 0 for name, ranked, _ in seen), "no batch was observed"
+    broken = [(name, ranked, postings) for name, ranked, postings in seen if postings < ranked]
+    assert not broken, f"ranked N while the grid had fewer than N postings: {broken[:3]}"
+
+
+class _ReleasedPort(_StagedPort):
+    def __init__(self) -> None:
+        super().__init__()
+        for _ in range(1000):
+            self.tokens.release()
+
+
+def test_a_read_that_straddles_a_batch_never_sees_ranked_n_without_its_postings(tmp_path: Path, monkeypatch) -> None:
+    """Force the interleaving: a whole batch lands between read_progress's reads of its two files."""
+    writer = ProgressWriter(tmp_path)
+    urls = [f"u{n}" for n in range(3)]
+    fired: list[bool] = []
+
+    def land_a_batch() -> None:
+        if fired:
+            return
+        fired.append(True)
+        writer.postings_acquired([({"normalized_url": url, "title": url}, "new") for url in urls])
+        writer.rank_batch({
+            "batch_id": "b1", "ranked": 3, "total": 3,
+            "postings": [{"normalized_url": url, "score": 50, "reasons": [], "blockers": [], "demoted": False} for url in urls],
+        })
+
+    original_jsonl = progress_module._read_jsonl
+    original_rank = progress_module.read_rank
+
+    def read_jsonl(path):
+        result = original_jsonl(path)
+        if path.name == "acquire.jsonl":
+            land_a_batch()  # the batch lands right after the acquire file was read
+        return result
+
+    def read_rank(directory):
+        result = original_rank(directory)
+        land_a_batch()  # ... or right after the rank file was read
+        return result
+
+    monkeypatch.setattr(progress_module, "_read_jsonl", read_jsonl)
+    monkeypatch.setattr(progress_module, "read_rank", read_rank)
+    snapshot = read_progress(tmp_path)
+    assert fired
+    assert _promise_holds(snapshot), (snapshot.rank, len(snapshot.postings))

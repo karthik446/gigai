@@ -490,6 +490,10 @@ def read_progress(run_root: Path) -> ProgressSnapshot:
     steps_raw = _read_json(directory / _STEPS_FILENAME)
     steps = {k: v for k, v in steps_raw.items() if isinstance(v, dict)} if isinstance(steps_raw, dict) else {}
 
+    # rank.jsonl BEFORE acquire.jsonl: a batch's posting lines are written before
+    # its rank line (rank_run.RankStreamer), so "ranked N" seen here means those
+    # postings are already in the acquire file read next.
+    rank = read_rank(directory)
     postings = _imported_only(_read_jsonl(directory / _ACQUIRE_FILENAME), _read_json(directory / _IMPORTED_FILENAME))
 
     assess_events = _read_jsonl(directory / _ASSESS_FILENAME)
@@ -549,7 +553,6 @@ def read_progress(run_root: Path) -> ProgressSnapshot:
         if isinstance(raw_not_imported, int) and not isinstance(raw_not_imported, bool) and raw_not_imported > 0:
             not_imported_count = raw_not_imported
 
-    rank = read_rank(directory)
     if rank is not None:
         postings = _with_rank(postings, rank)
 
