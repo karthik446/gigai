@@ -9,7 +9,7 @@ import { downloadName, latestStored, previewLines, previewStats, sourcesHover, s
 //   load     GET /api/tailored-resumes?profile_id=<selected>&job_identity=<job>
 //            -> the latest stored one, shown with "Tailor again"
 //   tailor   POST /api/tailored-resumes {job:{job_url}, resume:{profile_id}}
-//            (~20-30 s: one model call, one retry on a rejected draft)
+//            (one model call, one retry on a rejected draft; Codex ~25 s, up to ~45 s)
 //   errors   422 (server message), 502 model_output_invalid (the draft failed
 //            a guard; the message names the line), 504 tailor_timeout
 //   preview  tailoredResumeModel.previewLines(result): every content line is
@@ -168,12 +168,14 @@ export function useTailoredResume({ jobIdentity, jobUrl, profileId }) {
   const [tailoring, setTailoring] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState(null);
+  const [outcome, setOutcome] = useState(null); // uat-bug-043: "done" | "error" after a run, for the status by the button
   const requestKey = useRef(0);
 
   useEffect(() => {
     const key = ++requestKey.current;
     setStored(null);
     setError(null);
+    setOutcome(null);
     setTailoring(false);
     setLoadingStored(true);
     if (!jobIdentity || !profileId) {
@@ -214,12 +216,14 @@ export function useTailoredResume({ jobIdentity, jobUrl, profileId }) {
     const key = requestKey.current;
     setTailoring(true);
     setError(null);
+    setOutcome(null);
     postTailoredResume({ job: { job_url: jobUrl }, resume: { profile_id: profileId } })
       .then((response) => {
         if (requestKey.current !== key) {
           return;
         }
         setStored(response);
+        setOutcome("done");
         setTailoring(false);
       })
       .catch((err) => {
@@ -227,11 +231,12 @@ export function useTailoredResume({ jobIdentity, jobUrl, profileId }) {
           return;
         }
         setTailoring(false);
+        setOutcome("error");
         setError(err instanceof ApiError ? err : { message: err.message || String(err) });
       });
   }, [jobUrl, profileId]);
 
-  return { stored, loadingStored, tailoring, elapsed, error, tailor, visible: Boolean(stored || tailoring || error) };
+  return { stored, loadingStored, tailoring, elapsed, error, outcome, tailor, visible: Boolean(stored || tailoring || error) };
 }
 
 export default function TailoredResumePanel({ state, profileLabel, questionPrompts }) {
@@ -239,12 +244,15 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
   const { stored, tailoring, elapsed, error } = state;
   const panel = useRef(null);
 
-  // The action sits above the requirement table; bring the panel it opens
-  // into view when a run starts.
+  // uat-bug-043: the action sits above the requirement table and its status
+  // sits by the button; when a run finishes (result or error) bring the panel
+  // into view.
+  const wasTailoring = useRef(false);
   useEffect(() => {
-    if (tailoring && panel.current && typeof panel.current.scrollIntoView === "function") {
-      panel.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (wasTailoring.current && !tailoring && panel.current && typeof panel.current.scrollIntoView === "function") {
+      panel.current.scrollIntoView({ block: "start", behavior: "smooth" });
     }
+    wasTailoring.current = tailoring;
   }, [tailoring]);
 
   if (!state.visible) {
@@ -252,7 +260,7 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
   }
 
   return (
-    <section className="panel tailored-resume" ref={panel} data-state={tailoring ? "tailoring" : stored ? "stored" : "idle"}>
+    <section className="panel tailored-resume" id="tailored-resume" ref={panel} data-state={tailoring ? "tailoring" : stored ? "stored" : "idle"}>
       <div className="resume-toolbar">
         <h3>Tailored resume</h3>
         {stored && !tailoring && (
@@ -261,12 +269,6 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
           </button>
         )}
       </div>
-      {tailoring && (
-        <div className="tailor-progress" role="status">
-          <span className="spinner" aria-hidden="true" />
-          Tailoring your resume for this posting… this usually takes 20–30 seconds ({elapsed}s).
-        </div>
-      )}
       {error && (
         <div className="callout danger tailor-error" role="alert">
           <strong>{errorView(error).heading}.</strong> {errorView(error).body}

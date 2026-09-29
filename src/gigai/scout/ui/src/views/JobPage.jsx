@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ApiError, getAnswers, getRunPosting, postApplication, postAssess } from "../api.js";
+import { ApiError, getAnswers, getConfig, getRunPosting, postApplication, postAssess } from "../api.js";
 import { REQUIREMENTS_UNREADABLE_TEXT, isRequirementsUnreadable } from "../rankModel.js";
 import AssessmentBody from "../components/AssessmentBody.jsx";
 import RequirementActions from "../components/RequirementActions.jsx";
@@ -27,6 +27,7 @@ import {
   workModeLabel,
 } from "../jobModel.js";
 import { eventActionLabel, jobStateFor } from "../jobStateModel.js";
+import { modelTargetLabel } from "../modelTargets.js";
 import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 
 // Q4a: one posting's job page (#/jobs/<normalized_url>), per
@@ -238,6 +239,31 @@ function BackToList({ from }) {
   );
 }
 
+// uat-bug-043: the tailoring status shown next to the Tailor resume button.
+// No promised duration: Codex tailoring measured mean 24-27 s, p95 30-42 s,
+// max 42 s, and a rejected draft retries once (research/evals/
+// 2026-09-29-tailor-confirm*.md), so "20-30 seconds" was too tight. The
+// model is the config's default target (the tailor route's own default).
+function tailorStatusFor(tailored, modelName) {
+  const jump = () => {
+    const panel = document.getElementById("tailored-resume");
+    if (panel && typeof panel.scrollIntoView === "function") {
+      panel.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+  };
+  if (tailored.tailoring) {
+    const who = modelName ? `with ${modelName}` : "your resume";
+    return { phase: "running", text: `Tailoring ${who}… ${tailored.elapsed}s` };
+  }
+  if (tailored.outcome === "done") {
+    return { phase: "done", text: "Done: see Tailored resume below.", onJump: jump };
+  }
+  if (tailored.outcome === "error") {
+    return { phase: "error", text: "Tailoring failed: see the message below.", onJump: jump };
+  }
+  return null;
+}
+
 export default function JobPage({
   job,
   jobId,
@@ -253,6 +279,16 @@ export default function JobPage({
 }) {
   const [answers, setAnswers] = useState([]);
   const [tailorError, setTailorError] = useState(null);
+  const [modelName, setModelName] = useState(null);
+  useEffect(() => {
+    let current = true;
+    getConfig()
+      .then((config) => current && config && config.default_model_target && setModelName(modelTargetLabel(config.default_model_target).replace(/\s*\(.*\)$/, "")))
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, []);
   // run-reads-fast (uat-bug-022): a run's rows come without their posting
   // text (the grid does not show it). This page reads its own posting,
   // text included, from GET /api/runs/{run_id}/posting.
@@ -362,7 +398,9 @@ export default function JobPage({
       .then(() => tailored.tailor())
       .catch((err) => setTailorError(err.message || String(err)));
   };
+  const tailorStatus = tailorStatusFor(tailored, modelName);
   const tailorAction = {
+    status: tailorStatus,
     ...gate,
     enabled: gate.enabled && !tailored.loadingStored,
     label: tailored.tailoring ? "Tailoring…" : tailored.stored ? "Tailor again" : "Tailor resume",

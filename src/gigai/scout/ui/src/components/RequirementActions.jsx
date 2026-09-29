@@ -25,6 +25,24 @@ function Action({ action, name, primary, busy }) {
   );
 }
 
+// uat-bug-043: the tailoring status sits next to the button, where the
+// click happened (the panel it fills is below the requirement table, off
+// screen). `status` is {phase: "running"|"done"|"error", text, onJump}; a
+// finished run offers a jump to the panel instead of moving the page.
+function TailorStatus({ status }) {
+  return (
+    <span className={`tailor-status ${status.phase}`} role="status" data-tailor-status={status.phase}>
+      {status.phase === "running" && <span className="spinner" aria-hidden="true" />}
+      {status.text}
+      {status.phase !== "running" && status.onJump && (
+        <button type="button" className="link-button" data-action="tailor-jump" onClick={status.onJump}>
+          {status.phase === "done" ? "Jump to it" : "See the error"}
+        </button>
+      )}
+    </span>
+  );
+}
+
 function Help({ action, name }) {
   return (
     <li id={`${name}-help`} className={action.enabled ? "on" : "off"} data-help={name}>
@@ -41,6 +59,7 @@ export default function RequirementActions({ reassess, tailor, busy, error }) {
       <div className="req-actions-buttons">
         <Action action={reassess} name="reassess" primary busy={busy} />
         {tailor && <Action action={tailor} name="tailor" busy={busy} />}
+        {tailor && tailor.status && <TailorStatus status={tailor.status} />}
         {reassess.busy && (
           <span className="reassess-progress" role="status">
             <span className="spinner" aria-hidden="true" /> Re-assessing with your answers…

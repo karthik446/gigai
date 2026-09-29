@@ -72,7 +72,7 @@ function StatusCells({ row }) {
 // uat-bug-027: `questionsFirst` (the job page) supersedes N5's boxes inside
 // the table. The open questions get their own section at the top (the task,
 // with the same Re-assess / Tailor actions and the same drafts); the table
-// below it is the reference, collapsed, and carries no answer boxes. No open
+// below it is the reference, always open (uat-bug-045), and carries no answer boxes. No open
 // questions, no questions section. Other callers keep the N5 layout.
 export default function AssessmentBody({
   assessment,
@@ -200,14 +200,10 @@ export default function AssessmentBody({
         ) : (
           actions && <section className="panel">{actions}</section>
         )}
-        <section className="panel">
-          <details className="requirements-details" data-role="requirements-details">
-            <summary>
-              <h3 style={{ display: "inline" }}>Requirements ({assessment.matrix ? assessment.matrix.length : 0})</h3>
-            </summary>
-            {table(false)}
-            {suggestions}
-          </details>
+        <section className="panel" data-role="requirements-section">
+          <h3>Requirements ({assessment.matrix ? assessment.matrix.length : 0})</h3>
+          {table(false)}
+          {suggestions}
           {!hasQuestions && assessment.questions && assessment.questions.length > 0 && (
             <>
               <div className="label">Questions</div>
