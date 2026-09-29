@@ -30,7 +30,7 @@ def test_the_readme_names_no_jev_service() -> None:
 def test_the_intro_no_longer_claims_a_second_service_sees_your_resume() -> None:
     intro = _flat(_text().split("## Scout, the first Gig", 1)[1].split("\n## ", 1)[0])
     assert "Nothing about you leaves your machine except" not in intro
-    assert "exactly what the model target you chose sees" in intro
+    assert "What your model target sees is exactly what leaves your machine for ranking and assessment" in intro
     assert "[Privacy and security](#privacy-and-security)" in intro
 
 
@@ -93,3 +93,28 @@ def test_the_rank_score_cache_path_and_contents_match_the_readme() -> None:
 
 def test_the_bounded_call_count_is_stated_and_exists() -> None:
     assert RUN_MAX_CALLS > 0 and "bounded number of ranking calls" in _privacy()
+
+
+def test_the_privacy_section_lists_the_other_network_traffic() -> None:
+    privacy = _privacy()
+    assert "Network traffic besides your model." in privacy
+    assert "Job boards (Greenhouse, Lever, Ashby) get plain public requests" in privacy and "see your IP address" in privacy
+    assert "Exa, only if enabled in your sources, receives the search query (your target roles), a start date, a country code and your Exa key" in privacy
+    assert "The setup interview itself makes no network request" in privacy
+    assert "Discover companies button, only if an OpenAI key is set" in privacy
+    assert "and nothing else" not in privacy
+
+
+def test_the_pasted_resume_and_status_claims_are_the_decided_wording() -> None:
+    privacy = _privacy()
+    assert (
+        "A pasted resume is used for that assessment only: its full text is never saved and never sent anywhere but "
+        "your assessment model; the stored result keeps short evidence quotes on your machine."
+    ) in privacy
+    assert "is used once, and is never saved" not in privacy
+    status = _flat(_text().split("## Status", 1)[1].split("\n## ", 1)[0])
+    assert (
+        "0.1.9 is an alpha: it has been through hands-on testing by the maintainer "
+        "(two UAT rounds, 2026-09-27 and 2026-09-29); expect rough edges."
+    ) in status
+    assert "not yet had a live-provider" not in status

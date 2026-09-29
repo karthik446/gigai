@@ -4,7 +4,9 @@ SCOPE-ADD-3 C1: a re-rank is a durable run record of the ``rank`` kind
 (``rank_records``: ``runs/rank_<uuid>/``, journal-committed details and
 ``outputs/rank.json``, run-local progress), no longer a daemon thread in a
 process-local dict. The run's own model target (the
-local CLI, ``codex_cli`` by default) ranks the run's sealed postings
+``model_target`` sealed in the run's input: the target the run was started
+with, which the UI offers from find-jobs.json's ``default_model_target``, else
+``ollama_local``) ranks the run's sealed postings
 against the given or selected profile's resume and the run's sealed
 preferences; the sealed run is never rewritten.
 

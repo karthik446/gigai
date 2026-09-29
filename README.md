@@ -28,8 +28,9 @@ Scout ships with GigAI and implements `find-jobs`, a job-search workflow:
   postings, in the background, while you browse. Defaults to a local model
   target; hosted targets are only used when explicitly configured.
 - **Present** — a localhost API and a small web UI show acquired and assessed
-  postings. What leaves your machine is exactly what the model target you
-  chose sees, and nothing else: see
+  postings. What your model target sees is
+  exactly what leaves your machine for ranking and assessment; the other
+  network traffic is listed in
   [Privacy and security](#privacy-and-security).
 
 Everything Scout writes stays under your configured GigAI home and the bound
@@ -44,8 +45,8 @@ special runtime treatment.
 **Scout has no service of its own.** Ranking and assessment both run on
 the model target you configured (`ollama_local`, `codex_cli` or
 `openrouter_api`, whichever the search's `default_model_target` names). There
-is no ranking service, no extra key, and no extra third party. What leaves
-your machine is exactly what that target sees:
+is no ranking service, no extra key, and no extra third party for ranking
+or assessment. What your machine sends to the model target is exactly:
 
 - **Ranking** sends the target, one batch at a time, one short line per
   posting (title, company, location and countries, seniority level, minimum
@@ -57,8 +58,7 @@ your machine is exactly what that target sees:
   ranking (they are stripped from the digest). The full resume and the
   full posting text are not sent for ranking.
 - **Assessment** sends the posting text and your resume, as before, for each
-  posting being assessed. A resume pasted into a single quick assessment goes
-  only to the assessment model, is used once, and is never saved.
+  posting being assessed. A pasted resume is used for that assessment only: its full text is never saved and never sent anywhere but your assessment model; the stored result keeps short evidence quotes on your machine.
 - **With a local Ollama target nothing leaves the machine.** Scout only
   talks to Ollama on a numeric loopback address (`127.0.0.1`).
 - With `codex_cli` or `openrouter_api`, that provider sees what is listed
@@ -66,10 +66,25 @@ your machine is exactly what that target sees:
 
 Ranking scores are cached on disk under `<home>/cache/scout/rank/scores/`
 (a score, up to two short reasons and any blockers per posting, no resume
-text); the cache is safe to delete. Job boards are read with keyless public
-requests: nothing about you is sent to them. What ranking costs is whatever your
+text); the cache is safe to delete. What ranking costs is whatever your
 model target charges; a run makes a bounded number of ranking calls, and
 postings past that bound stay unranked and keep date order.
+
+**Network traffic besides your model.** Scout makes these other requests:
+
+- Job boards (Greenhouse, Lever, Ashby) get plain public requests without a
+  key or login and see your IP address; nothing else about you is sent.
+- Exa, only if enabled in your sources, receives the search query (your
+  target roles), a start date, a country code and your Exa key.
+- The setup interview itself makes no network request; it saves your answers
+  on your machine. The separate Discover companies button, only if an OpenAI
+  key is set, sends OpenAI a search query built from your setup answers
+  (roles, countries, work mode and city, whether you need sponsorship, titles
+  and industries to avoid or prefer, company stage, stack, and the names of
+  companies to exclude) with your OpenAI key. It also downloads a public US
+  Department of Labor H-1B data file and sends public requests to guessed
+  board addresses.
+- Nothing else.
 
 ## Install
 
@@ -364,9 +379,7 @@ makes no live provider calls, and takes a couple of minutes.
 
 This is v0.1.9. Scout's `find-jobs` workflow is implemented and covered by
 the test suite above, including a deterministic end-to-end path from
-acquisition through the present API. It has not yet had a live-provider or
-human user-acceptance pass; treat what's proven by tests as proven, and
-everything else as unverified until it has been.
+acquisition through the present API. 0.1.9 is an alpha: it has been through hands-on testing by the maintainer (two UAT rounds, 2026-09-27 and 2026-09-29); expect rough edges.
 
 ## License
 
