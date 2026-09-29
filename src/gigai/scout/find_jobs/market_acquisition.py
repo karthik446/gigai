@@ -64,6 +64,7 @@ from .contracts import (
     parse_board_url,
 )
 from .filters import exclusion_reason, location_mismatch_detail
+from .work_mode import work_mode_fit
 from .progress import ProgressWriter
 from .selection import normalize_title, rank_rows, select_for_assessment
 from ...workpad import ResolvedWorkpad, resolve_workpad
@@ -1819,6 +1820,10 @@ def _acquire_node_body(
             reason = location_mismatch_detail(row, input.config) or reason
         if reason is None and not _role_match(row, input.config.roles):
             reason = NotAssessedReason.ROLE_MISMATCH
+        # uat-bug-028: the config's work mode + area, for every source's
+        # rows (the index search already applied it to the rows it read).
+        if reason is None and not work_mode_fit(row, input.config).passes:
+            reason = NotAssessedReason.WORK_MODE_MISMATCH
         if reason is not None:
             drop_counts[reason] = drop_counts.get(reason, 0) + 1
             continue

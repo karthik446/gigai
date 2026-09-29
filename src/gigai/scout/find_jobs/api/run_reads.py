@@ -49,6 +49,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from ..contracts import PostingRow, RowOutcome, Verdict
 from ..jev_contracts import RankScore
+from ..work_mode import work_mode_fit
 from .server import _logger
 
 RESULTS_PAGE_LIMIT_MAX = 500
@@ -264,6 +265,8 @@ class RunView:
             item.normalized_url: item for item in (acquire.carried_forward_assessments if acquire is not None else ())
         }
         self.scores = scores
+        run_input = getattr(evidence, "run_input", None)
+        self.config = run_input.config if run_input is not None else None
         rows = acquire.rows if acquire is not None else ()
         self.rows = tuple(sorted(rows, key=self._sort_key))
 
@@ -293,11 +296,17 @@ class RunView:
     def row_json(self, row, *, text: bool) -> dict[str, object]:
         posting = row.posting.to_json()
         score = self.scores.get(row.posting.normalized_url)
-        return {
+        value: dict[str, object] = {
             "posting": posting if text else grid_posting(posting),
             "outcome": row.outcome.value,
             "rank_score": score.to_json() if score is not None else None,
         }
+        # uat-bug-028: why the posting passed the run's work mode + area
+        # (the card's line). Beside the posting, never in it: a mode read
+        # from the location text is `source: "derived"`, not a board field.
+        if self.config is not None:
+            value["work_mode_fit"] = work_mode_fit(row.posting, self.config).to_json()
+        return value
 
 
 def results_page(view: RunView, *, limit: int, offset: int) -> dict[str, object]:

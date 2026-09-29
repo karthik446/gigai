@@ -88,6 +88,7 @@ const NOT_ASSESSED_REASON_LABELS = {
   sponsorship_excluded: "Filtered: sponsorship",
   model_output_invalid: "Model output invalid",
   published_too_old: "Older than your time window",
+  work_mode_mismatch: "Filtered: work mode or area",
 };
 
 // The longer, original sentence form -- kept for a detail/tooltip line
@@ -106,6 +107,7 @@ const NOT_ASSESSED_REASON_DETAILS = {
   sponsorship_excluded: "Posting does not offer visa sponsorship, which this config requires.",
   model_output_invalid: "The model's answer for this posting could not be parsed.",
   published_too_old: "Published before the configured time window (max_age_days, or the fixed published_after date when set).",
+  work_mode_mismatch: "The posting's work mode or area is outside your work mode and city/area preference.",
 };
 
 export function notAssessedReasonLabel(reason) {

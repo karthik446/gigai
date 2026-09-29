@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from http import HTTPStatus
 
-from ..contracts import MAX_AGE_DAYS_MAXIMUM, FindJobsConfig, FindJobsContractError, SourceToggles
+from ..contracts import MAX_AGE_DAYS_MAXIMUM, FindJobsConfig, FindJobsContractError, SourceToggles, is_location_placeholder
 from .config import _prefs_prefill_from_config
 from .server import (
     ConfigMissingError,
@@ -76,6 +76,16 @@ def _setup_work_mode(body: dict[str, object], errors: dict[str, str]) -> str:
         errors["work_mode"] = f"work_mode must be one of {', '.join(_WORK_MODES)}"
         return "any"
     return value
+
+
+def _setup_city(body: dict[str, object], errors: dict[str, str]) -> str | None:
+    """uat-bug-028: the optional area; the starter placeholder text is refused."""
+
+    city = _setup_field_optional_string(body, "city", errors)
+    if city is not None and is_location_placeholder(city):
+        errors["city"] = "city is still the starter placeholder: enter a city or area, or leave it empty"
+        return None
+    return city.strip() if city is not None and city.strip() else None
 
 
 def _setup_cadence_days(body: dict[str, object], errors: dict[str, str]) -> int:
@@ -178,7 +188,7 @@ def _validate_setup_body(body: object) -> dict[str, object]:
     titles_to_avoid = _setup_field_string_list(body, "titles_to_avoid", errors)
     countries = _setup_countries(body, errors)
     work_mode = _setup_work_mode(body, errors)
-    city = _setup_field_optional_string(body, "city", errors)
+    city = _setup_city(body, errors)
     visa_sponsorship_required = _setup_field_bool(body, "visa_sponsorship_required", errors, default=False)
     exclude_companies = _setup_field_string_list(body, "exclude_companies", errors)
     watch_companies = _setup_field_string_list(body, "watch_companies", errors)
@@ -264,6 +274,11 @@ class SetupRoutesMixin:
             self._error(HTTPStatus.SERVICE_UNAVAILABLE, "discovery_unavailable", str(exc))
             return
         if prefs_json is not None:
+            # uat-bug-028: prefs saved before this fix can hold the starter
+            # placeholder as the city (it was pre-filled from find-jobs.json);
+            # it reads as no city, like find-jobs.json's own location.
+            if isinstance(prefs_json, dict) and is_location_placeholder(prefs_json.get("city")):
+                prefs_json = {**prefs_json, "city": None}
             self._write_json(
                 HTTPStatus.OK,
                 {"schema_version": "scout-find-jobs-setup-response:1", "prefs": prefs_json},

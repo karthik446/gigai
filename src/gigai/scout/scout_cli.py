@@ -78,7 +78,10 @@ def _resolved_target(
 STARTER_FIND_JOBS_CONFIG = FindJobsConfig(
     roles=("REPLACE_WITH_YOUR_ROLE (e.g. software engineer)",),
     merged_queries=("REPLACE_WITH_YOUR_ROLE (e.g. software engineer)",),
-    location="REPLACE_WITH_YOUR_LOCATION (e.g. Denver, CO, or null for any)",
+    # uat-bug-028: no location (no area preference) rather than placeholder
+    # text: an area is set in the setup wizard, and the placeholder is
+    # refused on save (and read as no location in an older file).
+    location=None,
     remote=True,
     published_after=None,
     sources=SourceToggles(exa=True, ats=True, hiringcafe=False),

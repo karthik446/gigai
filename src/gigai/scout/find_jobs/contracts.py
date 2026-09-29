@@ -199,6 +199,35 @@ class WorkMode(StrEnum):
     ONSITE = "onsite"
 
 
+class WorkModePreference(StrEnum):
+    """uat-bug-028: the work mode the operator asked for (``find-jobs.json`` ``work_mode``).
+
+    Not :class:`WorkMode` (what a posting's board states): this one has
+    ``any``, and it drives the index search's work-mode/area filter
+    (``work_mode.work_mode_fit``). Remote-only keeps remote postings;
+    Hybrid keeps remote plus hybrid postings in the area; Onsite keeps
+    remote, hybrid and on-site postings in the area; Any keeps everything
+    in the countries.
+    """
+
+    REMOTE = "remote"
+    HYBRID = "hybrid"
+    ONSITE = "onsite"
+    ANY = "any"
+
+
+# uat-bug-028: the starter find-jobs.json's location text
+# (`scout_cli.STARTER_FIND_JOBS_CONFIG` wrote it before this fix). It is read
+# as "no location" and can never be saved again (PUT /api/setup refuses it).
+LOCATION_PLACEHOLDER_PREFIX = "REPLACE_WITH_YOUR_LOCATION"
+
+
+def is_location_placeholder(value: object) -> bool:
+    """``True`` for the starter placeholder text, however it was padded."""
+
+    return isinstance(value, str) and value.strip().upper().startswith(LOCATION_PLACEHOLDER_PREFIX)
+
+
 class PayPeriod(StrEnum):
     """The interval a :class:`PostingPay` range is quoted per (Q4b-data)."""
 
@@ -239,6 +268,11 @@ class NotAssessedReason(StrEnum):
     # posting could still slip through or be missed unpredictably). A row
     # with NO `published_at` at all is never given this reason (kept).
     PUBLISHED_TOO_OLD = "published_too_old"
+    # uat-bug-028: the posting's work mode or area is outside the config's
+    # `work_mode`/`location` (`work_mode.work_mode_fit`). Used only as
+    # AcquireOutput.dropped_counts' bucket; `exclusion_reason` never
+    # returns it.
+    WORK_MODE_MISMATCH = "work_mode_mismatch"
 
 
 class _Contract:
@@ -475,6 +509,18 @@ class FindJobsConfig(_Contract):
 
     The setup wizard writes the rolling form (and clears ``published_after``
     when it does); a hand-edited fixed date keeps working unchanged.
+
+    uat-bug-028: ``work_mode`` (remote|hybrid|onsite|any) is an additive
+    optional key, omitted from ``to_json`` at its ``None`` default so an
+    existing file's digest is unchanged. A config without it is Any
+    (``effective_work_mode``): ``remote`` alone is never a filter, since the
+    old wizard saved ``remote: true`` for Any as well as Remote-only. The
+    server fills a missing ``work_mode`` from the setup's saved answer
+    (``effective_config.with_saved_work_mode``) before the config is read
+    or sealed; every setup save writes it. ``location`` is the operator's optional area
+    ("Denver, CO"); the starter placeholder text is read as ``None``
+    (``is_location_placeholder``) -- a read-time migration, the file itself
+    is never rewritten here.
     """
 
     schema_version: ClassVar[str] = "find-jobs-config:1"
@@ -489,6 +535,13 @@ class FindJobsConfig(_Contract):
     countries: tuple[str, ...] = ()
     visa_sponsorship_required: bool = False
     max_age_days: int | None = None
+    work_mode: WorkModePreference | None = None
+
+    @property
+    def effective_work_mode(self) -> WorkModePreference:
+        """``work_mode``, else Any: an older file's ``remote`` flag never filters."""
+
+        return self.work_mode if self.work_mode is not None else WorkModePreference.ANY
 
     @property
     def source_toggles(self) -> SourceToggles:
@@ -528,6 +581,9 @@ class FindJobsConfig(_Contract):
         # set, so a config that never set it digests exactly as before.
         if self.max_age_days is not None:
             value["max_age_days"] = self.max_age_days
+        # uat-bug-028: same additive rule -- absent until a save sets it.
+        if self.work_mode is not None:
+            value["work_mode"] = _json_enum(self.work_mode)
         return value
 
     @classmethod
@@ -535,7 +591,7 @@ class FindJobsConfig(_Contract):
         value = _object_with_optional(
             obj,
             ("schema_version", "roles", "merged_queries", "location", "remote", "published_after", "sources", "default_assess_cap", "default_model_target"),
-            ("countries", "visa_sponsorship_required", "max_age_days"),
+            ("countries", "visa_sponsorship_required", "max_age_days", "work_mode"),
             "find_jobs_config",
         )
         if value["schema_version"] != cls.schema_version:
@@ -547,10 +603,18 @@ class FindJobsConfig(_Contract):
             if value.get("max_age_days") is None
             else _integer(value["max_age_days"], "max_age_days", minimum=1, maximum=MAX_AGE_DAYS_MAXIMUM)
         )
+        work_mode = (
+            None
+            if value.get("work_mode") is None
+            else _enum(value["work_mode"], WorkModePreference, "find_jobs_config.work_mode")
+        )
+        location = _optional_string(value["location"], "location")
+        if is_location_placeholder(location):
+            location = None
         return cls(
             _strings(value["roles"], "roles"),
             _strings(value["merged_queries"], "merged_queries"),
-            _optional_string(value["location"], "location"),
+            location,
             _bool(value["remote"], "remote"),
             _optional_string(value["published_after"], "published_after"),
             SourceToggles.from_json(value["sources"]),
@@ -559,6 +623,7 @@ class FindJobsConfig(_Contract):
             countries,
             visa_sponsorship_required,
             max_age_days,
+            work_mode,  # type: ignore[arg-type]
         )
 
 
@@ -2312,13 +2377,13 @@ __all__ = [
     "ASSESS_CAPABILITY", "ASSESS_CAPABILITY_ID", "ASSESS_DECLARED_EFFECTS", "ASSESS_EFFECTS", "ASSESS_LOCAL_EFFECTS",
     "API_BIND", "ATSBoardClient", "ATSProvider", "AcquireInput", "AcquireNodeCallable", "AcquireOutput", "ExaSearchClient",
     "AggregateStatus", "ArtifactRef", "AssessmentQuestion", "AssessmentResult", "AssessInput", "AssessNodeCallable", "AssessOutput", "ConsentActor", "ConfigRequest", "ConfigResponse",
-    "DEFAULT_MAX_AGE_DAYS", "DropCount", "MAX_AGE_DAYS_MAXIMUM",
+    "DEFAULT_MAX_AGE_DAYS", "DropCount", "LOCATION_PLACEHOLDER_PREFIX", "MAX_AGE_DAYS_MAXIMUM", "is_location_placeholder",
     "EditedURL", "FindJobsConfig", "FindJobsContractError", "FailureRow", "FindJobsRunInput", "FindJobsConfig", "GoalError", "GoalStatus", "MatrixStatus", "ModelTarget", "NodeContext",
     "NodeFailure", "NodeReceipt", "NodeReceiptFixture", "NodeReceiptStatus", "NodeStatus", "NodeCallable", "NormalizedPostingRow", "NormalizedPublicPostingRow", "NotAssessedReason",
     "NotAssessedRow", "PRESENT_CAPABILITY", "PRESENT_CAPABILITY_ID", "PRESENT_DECLARED_EFFECTS", "PRESENT_EFFECTS", "PresentInput",
     "PayPeriod", "PresentNodeCallable", "PresentOutput", "PresentPayload", "PinnedResume", "PostingPay", "PostingRow", "PostingRowResult", "Producer", "ProfileRef", "ROUTES",
     "ProgressStatus", "RequirementClass", "RequirementMatrixRow", "RowOutcome", "RouteSpec", "RunLookupRequest", "RunRequest", "RunResponse", "RunResultsResponse", "RunStatusResponse",
     "SelectedPosting", "SelectionReason", "SelectionReasonCode", "SelectionRule", "SourceKind", "SourceToggles", "SponsorshipStatus", "UIConsentEnvelope", "URLChangeDetectionClient", "URLObservation", "URLSetDiff", "Verdict",
-    "UsageBlock", "WatchlistClient", "WatchlistEntry", "WatchlistFixture", "WatchlistFirstSeen", "WorkMode", "aggregate_status", "content_hash",
+    "UsageBlock", "WatchlistClient", "WatchlistEntry", "WatchlistFixture", "WatchlistFirstSeen", "WorkMode", "WorkModePreference", "aggregate_status", "content_hash",
     "diff_url_sets", "normalize_url", "parse_board_url",
 ]

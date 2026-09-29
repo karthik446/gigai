@@ -220,7 +220,9 @@ def test_get_setup_prefs_missing_returns_404_with_prefill(running_server) -> Non
     assert prefill["roles"] == ["staff backend"]
     assert prefill["countries"] == ["US"]
     assert prefill["city"] == "Denver, CO"
-    assert prefill["work_mode"] == "remote"
+    # uat-bug-028: a config with no work_mode is Any -- its `remote: true`
+    # alone never meant Remote-only (the old wizard saved it for Any too).
+    assert prefill["work_mode"] == "any"
     assert prefill["visa_sponsorship_required"] is True
 
 

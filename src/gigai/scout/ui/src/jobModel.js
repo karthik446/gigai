@@ -21,6 +21,10 @@
 //   rows[].h1b          {approvals, fiscal_years}        -> h1bLabel, the
 //                       sponsorship chip's suffix when the posting is silent
 //                       (carried on the job as `job.h1b`, from boardRows)
+//   rows[].work_mode_fit {mode, source, preference, area, in_area}
+//                       -> whyPassedLine (uat-bug-028), carried as
+//                       `job.workModeFit`; `source: "derived"` is a mode read
+//                       from the location text, never the board's field
 import { displayCompanyName, notAssessedReasonLabel, sponsorshipLabel } from "./display.js";
 
 export const VERDICT_LABELS = {
@@ -288,6 +292,50 @@ export function workModeLabel(posting) {
   return mode ? MODE_LABELS[mode] || mode : null;
 }
 
+// uat-bug-028: the card's mode chip. The board's own field first; else a
+// mode the run read from the location text ("Remote - United States" on a
+// Greenhouse posting), marked `derived` so it is never shown as the board's.
+// null for a plain city or an unknown mode (the why-passed line says those).
+export function workModeChip(job) {
+  const board = workModeLabel(job && job.posting);
+  if (board) {
+    return { label: board, derived: false, title: "Stated by the job board" };
+  }
+  const fit = job && job.workModeFit;
+  if (fit && fit.source === "derived" && MODE_LABELS[fit.mode]) {
+    return { label: MODE_LABELS[fit.mode], derived: true, title: "Read from the posting's location text; the board does not say" };
+  }
+  return null;
+}
+
+// uat-bug-028: why a posting passed the run's work mode + area, in words:
+// "Remote (from location text)", "Hybrid · Denver", "Work mode not stated".
+// null when the run asked for Any (nothing was filtered on it) or the row
+// carries no fit (a live row, an older run's results).
+const FIT_MODE_TEXT = {
+  remote: "Remote",
+  hybrid: "Hybrid",
+  onsite: "On-site",
+  in_person: "Hybrid or on-site (not stated)",
+};
+
+export function whyPassedLine(fit) {
+  if (!fit || fit.preference === "any" || !fit.mode) {
+    return null;
+  }
+  if (fit.mode === "unknown") {
+    return "Work mode not stated";
+  }
+  let line = FIT_MODE_TEXT[fit.mode] || humanizeId(fit.mode);
+  if (fit.area) {
+    line += fit.in_area === true ? ` · ${fit.area}` : " · area not stated";
+  }
+  if (fit.source === "derived" && fit.mode !== "in_person") {
+    line += " (from location text)";
+  }
+  return line;
+}
+
 // --- the merge ------------------------------------------------------------------
 
 function assessmentTime(item) {
@@ -346,6 +394,7 @@ export function buildJobs({ rows, rankScores, quickItems, runCreatedAt }) {
       verdict: effectiveVerdict(assessment),
       sponsorship: (assessment && assessment.sponsorship) || posting.sponsorship || "unknown",
       h1b: row.h1b || null,
+      workModeFit: row.workModeFit || null,
     };
   });
 

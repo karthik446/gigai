@@ -59,6 +59,10 @@ export function rowsFromResults(payload) {
       // uat-bug-018: rows[].job_state {state, since, next_events}, the
       // server's derived state (jobStateModel.js) -- null on a live row.
       jobState: row.job_state || null,
+      // uat-bug-028: rows[].work_mode_fit {mode, source, preference, area,
+      // in_area, passes} -- why the posting passed the run's work mode +
+      // area (jobModel.whyPassedLine); null on a live row.
+      workModeFit: row.work_mode_fit || null,
     };
   });
 }

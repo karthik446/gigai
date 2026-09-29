@@ -13,7 +13,12 @@ selection after it are untouched; only where the rows come from changes:
    have their board body opened;
 3. the postings that remain are read back as the acquire-shaped
    ``PostingRow`` (description included) from the board cache
-   ``gigai scout sources update`` filled.
+   ``gigai scout sources update`` filled;
+4. uat-bug-028: those rows are filtered on the config's work mode + area
+   (``work_mode.work_mode_fit``). This needs the cached row, since the
+   board's own ``work_mode`` field lives there and not in the index. It is
+   still before ranking and the import cap; ``work_mode_filtered_out`` in
+   the summary counts what it dropped.
 
 There is no HTTP client in this module. When nothing is indexed the pass
 returns no rows and one ``sources_update_required`` failure; when the index
@@ -52,6 +57,7 @@ from .company_index import (
 )
 from .contracts import ATSProvider, FailureRow, FindJobsConfig, PostingRow, SourceKind, WatchlistEntry, normalize_url
 from .filters import country_match, published_too_old
+from .work_mode import work_mode_fit
 
 SOURCES_UPDATE_REQUIRED_CODE = "sources_update_required"
 _LAST_SEARCH_FILENAME = "last-search.json"
@@ -150,6 +156,7 @@ def read_indexed_boards(
     rows: list[PostingRow] = []
     entries: list[CompanyIndexEntry | None] = []
     listed = matched = prefiltered_out = filtered_out = without_text = not_cached = touched = 0
+    work_mode_filtered_out = 0
     companies_read = companies_matched = 0
     for board in ordered:
         ats, slug = board.provider.value, board.board_token
@@ -161,6 +168,7 @@ def read_indexed_boards(
         if entry is not None:
             companies_read += 1
             wanted: list[str] = []
+            fresh: set[str] = set()
             for posting in entry.live():
                 live_count += 1
                 if not matches_roles(posting.title, config.roles):
@@ -171,13 +179,16 @@ def read_indexed_boards(
                     continue
                 wanted.append(posting.posting_id)
                 if since is None or posting.touched_at > since:
-                    touched += 1
+                    fresh.add(posting.posting_id)
             listed += live_count
             if wanted:
                 found = cached_posting_rows(cache, ats, slug, wanted)
-                board_rows = list(found.rows.values())
-                without_text += len(found.without_text)
+                kept = {posting_id: row for posting_id, row in found.rows.items() if work_mode_fit(row, config).passes}
+                board_rows = list(kept.values())
+                work_mode_filtered_out += len(found.rows) - len(kept)
+                without_text += sum(1 for posting_id in found.without_text if posting_id in kept)
                 not_cached += len(found.missing)
+                touched += len(fresh - (found.rows.keys() - kept.keys()))
                 if board_rows:
                     companies_matched += 1
         rows.extend(board_rows)
@@ -217,6 +228,7 @@ def read_indexed_boards(
         "listed": listed,
         "prefiltered_out": prefiltered_out,
         "filtered_out": filtered_out,
+        "work_mode_filtered_out": work_mode_filtered_out,
         "detail_fetched": 0,
         "detail_cached": matched - without_text,
         "matched": matched,

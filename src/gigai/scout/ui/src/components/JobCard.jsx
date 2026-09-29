@@ -5,7 +5,7 @@ import ProviderBadge from "./ProviderBadge.jsx";
 import QuickAssessChip from "./QuickAssessChip.jsx";
 import StateChip from "./StateChip.jsx";
 import { displayCompanyName, unchangedSinceLabel } from "../display.js";
-import { ageLabel, assessedAt, jevReasonsLine, notAssessedLine, payLabel, requirementSummary, workModeLabel } from "../jobModel.js";
+import { ageLabel, assessedAt, jevReasonsLine, notAssessedLine, payLabel, requirementSummary, whyPassedLine, workModeChip } from "../jobModel.js";
 import { assessmentHash, jobHash } from "../routing.js";
 
 // Q4a: one hiring.cafe-style card per posting (mockups/cards-and-job-page.html).
@@ -27,6 +27,9 @@ import { assessmentHash, jobHash } from "../routing.js";
 // when Jev never scored it). Operator answer 3: work-mode/pay chips only
 // when the posting lists them (Q4b fields: posting.work_mode, posting.pay;
 // rows[].h1b goes on the sponsorship chip) -- no "not listed" chips.
+// uat-bug-028: the mode chip also shows a mode read from the location text
+// (workModeChip, marked derived), and a line under the company says why the
+// posting passed the run's work mode + area (whyPassedLine).
 //
 // uat-batch2 (uat-bug-016): a card on the Assessments page opens the same
 // job page under #/assessments/<id> (`from="assessments"`), so the top bar
@@ -92,7 +95,8 @@ function onDemandAge(job) {
 export default function JobCard({ job, visaRequired, from, jevSkipWords }) {
   const { posting } = job;
   const dimmed = job.verdict === "not_a_match" || (job.rank && job.rank.fit === "no");
-  const mode = workModeLabel(posting);
+  const mode = workModeChip(job);
+  const whyPassed = whyPassedLine(job.workModeFit);
   const pay = payLabel(posting.pay);
   const companyLine = [displayCompanyName(posting.company), posting.location].filter(Boolean).join(" · ");
 
@@ -106,13 +110,22 @@ export default function JobCard({ job, visaRequired, from, jevSkipWords }) {
           <div className="card-company" title={companyLine}>
             {companyLine}
           </div>
+          {whyPassed && (
+            <div className="card-company card-why-passed" title="Why this posting passed your work mode and city/area">
+              {whyPassed}
+            </div>
+          )}
         </div>
         <JevBadge rank={job.rank} skipReason={job.rankSkipReason} runSkipWords={jevSkipWords} />
       </div>
 
       <div className="card-meta">
         {job.status === "on_demand" ? <QuickAssessChip fetchKind={job.quick && job.quick.job && job.quick.job.fetch_kind} /> : <ProviderBadge posting={posting} />}
-        {mode && <span className="mode-chip">{mode}</span>}
+        {mode && (
+          <span className="mode-chip" title={mode.title} data-derived={mode.derived ? "true" : undefined}>
+            {mode.label}
+          </span>
+        )}
         {pay && <span className="pay">{pay}</span>}
         <span className="card-age" title={posting.published_at || undefined}>
           {job.status === "on_demand" ? onDemandAge(job) : ageLabel(posting.published_at)}

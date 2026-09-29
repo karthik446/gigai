@@ -23,7 +23,9 @@ def _prefs_prefill_from_config(config: FindJobsConfig) -> dict[str, object]:
     the rest default the same way ``_validate_setup_body`` would.
     """
 
-    work_mode = "remote" if config.remote else ("any" if config.location is None else "onsite")
+    # uat-bug-028: the stored work mode (or what an older file's `remote`
+    # meant); `location` is already None for the starter placeholder.
+    work_mode = config.effective_work_mode.value
     return {
         "roles": list(config.roles),
         "titles_to_avoid": [],

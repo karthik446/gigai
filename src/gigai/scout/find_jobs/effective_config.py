@@ -30,9 +30,10 @@ back by ``gigai.run`` or any other core module.
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from ..profile_records import ProfileRecord
-from .contracts import FindJobsConfig
+from .contracts import FindJobsConfig, WorkModePreference
 
 
 def overlay_selected_profile(config: FindJobsConfig, profile: ProfileRecord | None) -> FindJobsConfig:
@@ -58,4 +59,36 @@ def overlay_selected_profile(config: FindJobsConfig, profile: ProfileRecord | No
     return replace(config, roles=profile.titles, merged_queries=profile.queries)
 
 
-__all__ = ["overlay_selected_profile"]
+def saved_work_mode(*, home_root: Path, target: Path) -> WorkModePreference | None:
+    """uat-bug-028: the work mode the setup interview saved (``discovery/prefs.json``).
+
+    That file has always kept the real four-way answer, while an older
+    ``find-jobs.json`` only has ``remote`` (``true`` for Any as well as
+    Remote-only). ``None`` when nothing was saved or it cannot be read.
+    """
+
+    try:
+        from .discovery import load_prefs
+
+        prefs = load_prefs(home_root=Path(home_root), target=Path(target))
+        value = getattr(prefs, "work_mode", None)
+        return WorkModePreference(value) if value else None
+    except Exception:  # noqa: BLE001 - no saved answer is the Any default, never a failed read
+        return None
+
+
+def with_saved_work_mode(config: FindJobsConfig, work_mode: WorkModePreference | None) -> FindJobsConfig:
+    """``config`` with the saved ``work_mode`` when the file has none of its own.
+
+    A ``work_mode`` in ``find-jobs.json`` always wins; with neither, the
+    config stays Any (``FindJobsConfig.effective_work_mode``). Applied by
+    ``read_config`` and ``start_run`` alike, so the digest the UI saw is the
+    one the run seals.
+    """
+
+    if config.work_mode is not None or work_mode is None:
+        return config
+    return replace(config, work_mode=work_mode)
+
+
+__all__ = ["overlay_selected_profile", "saved_work_mode", "with_saved_work_mode"]

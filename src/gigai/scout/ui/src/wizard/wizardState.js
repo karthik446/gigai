@@ -15,12 +15,43 @@ export const MODEL_TARGET_HINTS = {
   openrouter_api: "Sends your resume to OpenRouter's API (the model you configured there).",
 };
 
+// uat-bug-028: each mode is a filter (find-jobs.json `work_mode`, applied
+// by the index search before ranking); `hint` says what it keeps.
 export const WORK_MODES = [
-  { value: "remote", label: "Remote-only" },
-  { value: "hybrid", label: "Hybrid" },
-  { value: "onsite", label: "Onsite" },
-  { value: "any", label: "Any" },
+  { value: "remote", label: "Remote-only", hint: "Only remote postings." },
+  { value: "hybrid", label: "Hybrid", hint: "Remote postings, plus hybrid ones in your city or area." },
+  { value: "onsite", label: "Onsite", hint: "Remote postings, plus hybrid and on-site ones in your city or area." },
+  { value: "any", label: "Any", hint: "Every posting in your countries." },
 ];
+
+// uat-bug-028: the starter find-jobs.json's location text
+// (contracts.LOCATION_PLACEHOLDER_PREFIX). An older save could carry it as
+// the city; the wizard starts empty instead (the server refuses to save it).
+export const LOCATION_PLACEHOLDER_PREFIX = "REPLACE_WITH_YOUR_LOCATION";
+
+export function isLocationPlaceholder(value) {
+  return typeof value === "string" && value.trim().toUpperCase().startsWith(LOCATION_PLACEHOLDER_PREFIX);
+}
+
+// Only Hybrid and Onsite filter on a city/area (Remote-only and Any ignore it).
+export function usesArea(workMode) {
+  return workMode === "hybrid" || workMode === "onsite";
+}
+
+// The saved work mode: the prefs' own, else find-jobs.json's `work_mode`,
+// else Any. An older file's `remote` flag alone says nothing: the old
+// wizard saved `remote: true` for Any as well as Remote-only.
+export function initialWorkMode(prefs, config) {
+  const valid = (value) => WORK_MODES.some((mode) => mode.value === value);
+  if (prefs && valid(prefs.work_mode)) {
+    return prefs.work_mode;
+  }
+  const stored = config && config.config;
+  if (stored && valid(stored.work_mode)) {
+    return stored.work_mode;
+  }
+  return "any";
+}
 
 // uat-bug-020 (A2): Discover is hidden in 0.1.9, so the last step is the
 // review alone: no discovery cadence, no budget.
@@ -87,8 +118,8 @@ export function initialFields({ prefs, config, selectedProfile, resumes }) {
         ? selectedProfile.titles_to_avoid
         : p.titles_to_avoid || [],
     countries,
-    workMode: p.work_mode || "any",
-    city: p.city || "",
+    workMode: initialWorkMode(prefs, config),
+    city: typeof p.city === "string" && !isLocationPlaceholder(p.city) ? p.city : "",
     visaSponsorshipRequired: Boolean(p.visa_sponsorship_required),
     maxAgeDays: Number.isInteger(configuredWindow) && configuredWindow >= 1 ? clampMaxAgeDays(configuredWindow) : DEFAULT_MAX_AGE_DAYS,
     // screen 3
@@ -321,7 +352,7 @@ export function setupBody(fields, existingPrefs) {
     titles_to_avoid: fields.titlesToAvoid,
     countries: fields.countries,
     work_mode: fields.workMode,
-    city: fields.workMode === "remote" ? null : fields.city.trim() || null,
+    city: usesArea(fields.workMode) ? fields.city.trim() || null : null,
     visa_sponsorship_required: fields.visaSponsorshipRequired,
     exclude_companies: fields.excludeCompanies,
     watch_companies: fields.watchCompanies,
@@ -341,7 +372,7 @@ export function reviewRows(fields, resumes) {
   const workMode = WORK_MODES.find((mode) => mode.value === fields.workMode);
   const workModeText =
     (workMode ? workMode.label : fields.workMode) +
-    (fields.workMode !== "remote" && fields.city.trim() ? ` · ${fields.city.trim()}` : "");
+    (usesArea(fields.workMode) && fields.city.trim() ? ` · ${fields.city.trim()}` : "");
   const extractor = fields.extraction
     ? `${fields.extraction.extractor} (${fields.extraction.resolved_target || fields.extraction.model_target})`
     : "not run";

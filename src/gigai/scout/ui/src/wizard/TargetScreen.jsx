@@ -1,13 +1,14 @@
 import TagListInput from "../components/TagListInput.jsx";
 import CountryPicker from "../components/CountryPicker.jsx";
-import { MAX_AGE_DAYS_MAXIMUM, WORK_MODES, clampMaxAgeDays } from "./wizardState.js";
+import { MAX_AGE_DAYS_MAXIMUM, WORK_MODES, clampMaxAgeDays, usesArea } from "./wizardState.js";
 
 // Screen 2 -- what to look for. Titles are pre-filled from screen 1's
 // suggested titles on the first visit (SetupWizard copies them once); no
 // question numbering (the mockup drops it).
 export default function TargetScreen({ fields, setField, fieldErrors }) {
   const errors = fieldErrors || {};
-  const showCity = fields.workMode !== "remote";
+  const showCity = usesArea(fields.workMode);
+  const modeHint = (WORK_MODES.find((mode) => mode.value === fields.workMode) || {}).hint;
   return (
     <section className="panel">
       <h2>Target</h2>
@@ -61,6 +62,7 @@ export default function TargetScreen({ fields, setField, fieldErrors }) {
             </button>
           ))}
         </div>
+        {modeHint && <small className="wz-hint">{modeHint}</small>}
         {errors.work_mode && <div className="field-error">{errors.work_mode}</div>}
       </div>
 
@@ -77,6 +79,10 @@ export default function TargetScreen({ fields, setField, fieldErrors }) {
             placeholder="Denver, CO"
             onChange={(event) => setField("city", event.target.value)}
           />
+          <small className="wz-hint">
+            Optional. Nearby cities count (Denver, CO also finds Boulder and Aurora); a city Scout does not know
+            matches its whole state. Empty means no area preference.
+          </small>
           {errors.city && <div className="field-error">{errors.city}</div>}
         </div>
       )}

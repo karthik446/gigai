@@ -52,6 +52,7 @@ from ..contracts import (
     RunResultsResponse,
     RunStatusResponse,
     SourceToggles,
+    WorkModePreference,
 )
 from .common import (
     RUN_START_TIMEOUT_SECONDS,
@@ -520,7 +521,7 @@ class ScoutFindJobsBackend:
         """
 
         from ....canonical import parse_json_bytes
-        from ..effective_config import overlay_selected_profile
+        from ..effective_config import overlay_selected_profile, saved_work_mode, with_saved_work_mode
 
         path = self._target_root() / "find-jobs.json"
         if path.is_symlink() or not path.is_file():
@@ -533,6 +534,8 @@ class ScoutFindJobsBackend:
             raise FindJobsContractError("invalid_value", "find-jobs.json is not valid JSON") from exc
         profile = self._selected_profile()
         config = overlay_selected_profile(shared_config, profile)
+        # uat-bug-028: a file with no work_mode takes the setup's saved one.
+        config = with_saved_work_mode(config, saved_work_mode(home_root=self.home_root, target=self._target_root()))
         return config, canonical_json_bytes(config.to_json())
 
     def resume_preview(self) -> PinnedResume | None:
@@ -695,7 +698,7 @@ class ScoutFindJobsBackend:
         from .... import run
         from ....canonical import canonical_json_bytes
         from ..bindings import register_find_jobs_nodes
-        from ..effective_config import overlay_selected_profile
+        from ..effective_config import overlay_selected_profile, saved_work_mode, with_saved_work_mode
 
         target = self._target_root()
         # This call binds the parent (for the launch hook) and causes the
@@ -716,6 +719,7 @@ class ScoutFindJobsBackend:
             raise ConfigMissingError(path)
         shared_config = FindJobsConfig.from_json(parse_json_bytes(path.read_bytes()))
         effective_config = overlay_selected_profile(shared_config, profile)
+        effective_config = with_saved_work_mode(effective_config, saved_work_mode(home_root=self.home_root, target=target))
         effective_config_bytes = canonical_json_bytes(effective_config.to_json())
 
         profile_ref = (
@@ -1129,9 +1133,9 @@ class ScoutFindJobsBackend:
         shared ``find-jobs.json``'s ``roles``/``merged_queries`` once a
         profile exists, so acquire's post-migration precedence test (profile
         titles win over the shared file) stays true after a setup-interview
-        save too. ``location`` (from ``city``), ``remote`` (derived from
-        ``work_mode``), ``countries``, and ``visa_sponsorship_required``
-        still go to the shared file, unchanged from before F1-b; every other
+        save too. ``location`` (from ``city``), ``work_mode``, ``remote``
+        (derived from ``work_mode``), ``countries``, and
+        ``visa_sponsorship_required`` still go to the shared file; every other
         ``FindJobsConfig`` field (``published_after``, ``sources``,
         ``default_assess_cap``, ``default_model_target``) is read from the
         existing file and kept unchanged.
@@ -1145,6 +1149,13 @@ class ScoutFindJobsBackend:
         (``filters.published_cutoff``'s rule: a fixed date, when set,
         always wins -- so the wizard has to clear it to switch forms).
 
+        uat-bug-028: ``work_mode`` is stored as asked (remote/hybrid/onsite/
+        any) -- it used to collapse into ``remote``, losing Hybrid and
+        Onsite -- and ``remote`` is kept in step (``true`` only for
+        Remote-only), so an older reader of the file sees the same meaning.
+        ``city`` is already checked (never the starter placeholder,
+        ``_validate_setup_body``); Remote-only ignores it (``work_mode``).
+
         No profile exists yet (no committed resume for this gig, so
         ``ensure_default_profile`` no-ops) -- the interview is allowed to run
         before a target has ever been configured, and before any resume is
@@ -1156,8 +1167,8 @@ class ScoutFindJobsBackend:
         path = self._target_root() / "find-jobs.json"
         roles: tuple[str, ...] = tuple(prefs_fields["roles"])  # type: ignore[arg-type]
         titles_to_avoid: tuple[str, ...] = tuple(prefs_fields.get("titles_to_avoid", ()))  # type: ignore[arg-type]
-        work_mode = prefs_fields["work_mode"]
-        remote = work_mode in ("remote", "any")
+        work_mode = WorkModePreference(str(prefs_fields["work_mode"]))
+        remote = work_mode is WorkModePreference.REMOTE
         city: str | None = prefs_fields["city"]  # type: ignore[assignment]
         countries: tuple[str, ...] = tuple(prefs_fields["countries"])  # type: ignore[arg-type]
         visa_sponsorship_required = bool(prefs_fields["visa_sponsorship_required"])
@@ -1213,6 +1224,7 @@ class ScoutFindJobsBackend:
                 countries=countries,
                 visa_sponsorship_required=visa_sponsorship_required,
                 max_age_days=max_age_days_sent,
+                work_mode=work_mode,
             )
         else:
             existing = FindJobsConfig.from_json(parse_json_bytes(path.read_bytes()))
@@ -1228,6 +1240,7 @@ class ScoutFindJobsBackend:
                 countries=countries,
                 visa_sponsorship_required=visa_sponsorship_required,
                 max_age_days=max_age_days_sent if window_sent else existing.max_age_days,
+                work_mode=work_mode,
             )
         _atomic_write_json(path, config.to_json())
 
