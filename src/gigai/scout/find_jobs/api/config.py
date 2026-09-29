@@ -46,7 +46,40 @@ def _prefs_prefill_from_config(config: FindJobsConfig) -> dict[str, object]:
 
 
 class ConfigRoutesMixin:
-    """``Handler`` mixin: ``GET /api/config``."""
+    """``Handler`` mixin: ``GET /api/config`` and ``PUT /api/config/sources``."""
+
+    def _handle_put_config_sources(self) -> None:
+        """uat-bug-033: ``PUT /api/config/sources {"exa": bool}`` -- the optional Exa source on/off.
+
+        Nothing else in ``find-jobs.json`` changes. Turning Exa on without a
+        key is allowed and saves (the UI shows the key hint); a run then
+        reports Exa as failed, exactly as before.
+        """
+
+        body = self._read_json_body()
+        if body is None:
+            return
+        if not isinstance(body, dict) or set(body) != {"exa"} or not isinstance(body["exa"], bool):
+            self._error(
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                "wrong_type",
+                'body must be {"exa": true|false}',
+            )
+            return
+        try:
+            self._backend.set_exa_source(body["exa"])
+        except ConfigMissingError as exc:
+            self._error(
+                HTTPStatus.NOT_FOUND,
+                "config_missing",
+                f"{exc.path} does not exist yet. Complete the setup wizard first.",
+            )
+            return
+        except FindJobsContractError as exc:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, exc.code, str(exc))
+            return
+        self._write_json(HTTPStatus.OK, {"sources": {"exa": body["exa"]}})
+
 
     def _handle_get_config(self) -> None:
         try:

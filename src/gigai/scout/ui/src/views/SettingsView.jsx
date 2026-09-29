@@ -1,6 +1,7 @@
 import ConfigPanel from "../components/ConfigPanel.jsx";
 import AddCompanyForm from "../components/AddCompanyForm.jsx";
 import SourcesUpdatePanel from "../components/SourcesUpdatePanel.jsx";
+import ExaSourceToggle from "../components/ExaSourceToggle.jsx";
 import ProfilesView from "./ProfilesView.jsx";
 
 export default function SettingsView({
@@ -53,6 +54,8 @@ export default function SettingsView({
           {!prefs && <span className="muted">Preferences are saved by the setup wizard.</span>}
         </div>
       </section>
+
+      {config && <ExaSourceToggle config={config.config} reloadConfig={reloadConfig} />}
 
       <div id="settings-profiles">
         <ProfilesView

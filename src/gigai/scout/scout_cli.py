@@ -75,6 +75,11 @@ def _resolved_target(
     )
 
 
+# uat-bug-033: required: one model target; optional: Exa. A NEW starter config
+# writes sources.exa = false (the bundled company list and board index are the
+# source); Exa is an extra the operator turns on in Settings. An EXISTING
+# find-jobs.json keeps whatever it saved: `sources.exa` is a required key of
+# the contract (never defaulted on read), so no old file changes meaning.
 STARTER_FIND_JOBS_CONFIG = FindJobsConfig(
     roles=("REPLACE_WITH_YOUR_ROLE (e.g. software engineer)",),
     merged_queries=("REPLACE_WITH_YOUR_ROLE (e.g. software engineer)",),
@@ -84,7 +89,7 @@ STARTER_FIND_JOBS_CONFIG = FindJobsConfig(
     location=None,
     remote=True,
     published_after=None,
-    sources=SourceToggles(exa=True, ats=True, hiringcafe=False),
+    sources=SourceToggles(exa=False, ats=True, hiringcafe=False),
 )
 
 

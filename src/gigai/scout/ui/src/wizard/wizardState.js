@@ -401,7 +401,7 @@ export function reviewRows(fields, resumes) {
 // Ollama: named only when it is the chosen model and nothing in this
 // session shows it running. An extraction that just answered through
 // `ollama_local` does show it, so the line is left out then.
-export function setupHints({ modelTarget, keys, extraction }) {
+export function setupHints({ modelTarget, keys, extraction, exaEnabled = false }) {
   const unset = (service) => Boolean(keys) && keys[service] === false;
   const lines = [];
   if (modelTarget === "openrouter_api" && unset("openrouter")) {
@@ -421,7 +421,9 @@ export function setupHints({ modelTarget, keys, extraction }) {
       note: null,
     });
   }
-  if (unset("exa")) {
+  // uat-bug-033: Exa is an optional extra, off unless the saved config turns
+  // it on: its key is named only then.
+  if (exaEnabled && unset("exa")) {
     lines.push({ id: "exa", text: "Exa key not set", command: "gigai secrets add exa", note: "optional: finds companies on the open web" });
   }
   return lines;

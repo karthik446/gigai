@@ -292,6 +292,17 @@ export function putSetup(prefsFields) {
   return request("PUT", "/api/setup", prefsFields);
 }
 
+// uat-bug-033: {exa: bool} -> {sources: {exa}}. Only the optional Exa source
+// changes in find-jobs.json.
+export function putConfigSources(fields) {
+  return request("PUT", "/api/config/sources", fields);
+}
+
+// {keys: {exa, openrouter, openai: true|false}}: whether each key is set.
+export function getSecretsStatus() {
+  return request("GET", "/api/secrets/status");
+}
+
 export function startDiscovery() {
   return request("POST", "/api/discover", {});
 }

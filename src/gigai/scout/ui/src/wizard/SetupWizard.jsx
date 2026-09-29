@@ -255,7 +255,12 @@ export default function SetupWizard({ onDone, onCancel }) {
         <FinishScreen
           fields={fields}
           resumes={resumes}
-          hints={setupHints({ modelTarget: fields.modelTarget, keys, extraction: fields.extraction })}
+          hints={setupHints({
+            modelTarget: fields.modelTarget,
+            keys,
+            extraction: fields.extraction,
+            exaEnabled: Boolean(config && config.config && config.config.sources && config.config.sources.exa),
+          })}
           fieldErrors={fieldErrors}
           saveError={saveError}
           saved={saved}

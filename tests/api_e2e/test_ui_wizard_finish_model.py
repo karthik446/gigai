@@ -232,10 +232,14 @@ def _fixture() -> dict:
             "ollamaAfterAnotherModel": {"modelTarget": "ollama_local", "keys": ALL_SET, "extraction": {"model_target": "codex_cli"}},
             # SCOPE-ADD-3: an older server still answers a `jev` key; the
             # wizard never names it (Jev is gone from the product).
-            "staleJevUnset": {"modelTarget": "codex_cli", "keys": {**NONE_SET, "jev": False}, "extraction": None},
-            "exaUnset": {"modelTarget": "codex_cli", "keys": {**ALL_SET, "exa": False}, "extraction": None},
-            "nothingSet": {"modelTarget": "openrouter_api", "keys": NONE_SET, "extraction": None},
-            "nothingSetCodex": {"modelTarget": "codex_cli", "keys": NONE_SET, "extraction": None},
+            "staleJevUnset": {"modelTarget": "codex_cli", "keys": {**NONE_SET, "jev": False}, "extraction": None, "exaEnabled": True},
+            "exaUnset": {"modelTarget": "codex_cli", "keys": {**ALL_SET, "exa": False}, "extraction": None, "exaEnabled": True},
+            # uat-bug-033: Exa is optional and off by default: its key is
+            # never named unless the saved config turns Exa on.
+            "exaUnsetExaOff": {"modelTarget": "codex_cli", "keys": {**ALL_SET, "exa": False}, "extraction": None},
+            "exaUnsetExaOffExplicit": {"modelTarget": "codex_cli", "keys": NONE_SET, "extraction": None, "exaEnabled": False},
+            "nothingSet": {"modelTarget": "openrouter_api", "keys": NONE_SET, "extraction": None, "exaEnabled": True},
+            "nothingSetCodex": {"modelTarget": "codex_cli", "keys": NONE_SET, "extraction": None, "exaEnabled": True},
             "keysUnknown": {"modelTarget": "codex_cli", "keys": None, "extraction": None},
             "keysUnknownOllama": {"modelTarget": "ollama_local", "keys": None, "extraction": None},
         },
@@ -321,6 +325,14 @@ def test_a_key_is_named_only_when_it_is_not_set(out: dict) -> None:
     assert out["hints"]["staleJevUnset"] == ["exa"]
     # The key state could not be read: nothing is claimed to be missing.
     assert out["hints"]["keysUnknown"] == []
+
+
+def test_the_exa_key_is_never_named_while_exa_is_off(out: dict) -> None:
+    """uat-bug-033: a model target is the only requirement; the wizard never
+    asks for an Exa key unless the saved config has Exa on."""
+
+    assert out["hints"]["exaUnsetExaOff"] == []
+    assert out["hints"]["exaUnsetExaOffExplicit"] == []
 
 
 def test_ollama_is_named_only_when_it_is_the_chosen_model(out: dict) -> None:

@@ -1119,6 +1119,22 @@ class ScoutFindJobsBackend:
                     titles_to_avoid.append(title)
         return (tuple(titles), tuple(titles_to_avoid))
 
+    def set_exa_source(self, enabled: bool) -> None:
+        """uat-bug-033: turn the optional Exa source on or off in ``find-jobs.json``.
+
+        Only ``sources.exa`` changes; every other field is written back as
+        read. ``ConfigMissingError`` when there is no file yet.
+        """
+
+        from dataclasses import replace
+
+        path = self._target_root() / "find-jobs.json"
+        if path.is_symlink() or not path.is_file():
+            raise ConfigMissingError(path)
+        existing = FindJobsConfig.from_json(parse_json_bytes(path.read_bytes()))
+        config = replace(existing, sources=replace(existing.sources, exa=enabled))
+        _atomic_write_json(path, config.to_json())
+
     def _update_find_jobs_config(self, prefs_fields: dict[str, object], *, profile_id: str | None = None) -> None:
         """Apply the setup answers onto the SELECTED profile + ``find-jobs.json``.
 
@@ -1222,7 +1238,9 @@ class ScoutFindJobsBackend:
                 location=city,
                 remote=remote,
                 published_after=None,
-                sources=SourceToggles(exa=True, ats=True, hiringcafe=False),
+                # uat-bug-033: a NEW config starts with Exa off (an existing
+                # file's saved value is kept by the else branch below).
+                sources=SourceToggles(exa=False, ats=True, hiringcafe=False),
                 default_assess_cap=10,
                 default_model_target=ModelTarget.OLLAMA_LOCAL,
                 countries=countries,
@@ -1703,6 +1721,9 @@ def _make_handler(
             try:
                 if path == "/api/setup":
                     self._handle_put_setup()
+                    return
+                if path == "/api/config/sources":
+                    self._handle_put_config_sources()
                     return
                 profile_id = _match_profile_id(path, suffix="")
                 if profile_id is not None:

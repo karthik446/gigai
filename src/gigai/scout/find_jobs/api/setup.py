@@ -299,7 +299,7 @@ class SetupRoutesMixin:
                     location=None,
                     remote=True,
                     published_after=None,
-                    sources=SourceToggles(exa=True, ats=True, hiringcafe=False),
+                    sources=SourceToggles(exa=False, ats=True, hiringcafe=False),
                 )
             )
         self._error_with_extra(

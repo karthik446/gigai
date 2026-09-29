@@ -171,7 +171,7 @@ export default function AddCompanyForm({ compact = false, onAdded }) {
           <div className="form-label" data-role="watching-count">
             {watchingLines(total, entries.length).heading}
           </div>
-          {entries.length === 0 && <p className="muted">Nothing yet. The first find-jobs run adds the boards Exa discovers.</p>}
+          {entries.length === 0 && <p className="muted">Nothing yet. Update sources loads the bundled company list.</p>}
           {watchingLines(total, entries.length).note && <p className="muted small">{watchingLines(total, entries.length).note}</p>}
           {entries.length > 0 && (
             <ul className="add-company-list">
