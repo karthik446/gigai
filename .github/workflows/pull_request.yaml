@@ -117,9 +117,12 @@ jobs:
     # macOS jobs were cancelled by the 45-minute timeout at ~78% with zero
     # failures, so macOS needs ~60m; ubuntu finished green inside 45.
     # ci-shard-suite: those are whole-suite times. Each job now runs one of
-    # 4 shards, so this limit is loose on purpose until the first sharded runs
-    # are measured; it then drops to 30 per shard.
-    timeout-minutes: ${{ contains(matrix.os, 'macos') && 75 || 45 }}
+    # 4 shards. uat-bug-037, measured per shard on run 36591142550 ('full'
+    # profile on 07c0234): macOS max 25.4m (3.13 shard 4), ubuntu max 10.5m
+    # (3.12 shard 4). Each limit is the smallest multiple of 5 that is at
+    # least twice its OS's slowest shard: macOS 55 (2 x 25.4 = 50.8), ubuntu
+    # 25 (2 x 10.5 = 21).
+    timeout-minutes: ${{ contains(matrix.os, 'macos') && 55 || 25 }}
     env:
       # ci-shard-suite: tests/conftest.py keeps only the test files whose
       # path hashes into this shard (tests/support/sharding.py); xdist then
@@ -143,7 +146,13 @@ jobs:
       # regression. tests/support/latency.py scales any bound built with
       # latency_bound() by this factor; it stays 1.0 (no change) everywhere
       # this var is unset, including a developer's own `make test-source`.
-      GIGAI_TEST_LATENCY_SCALE: "3"
+      # uat-bug-037: macOS runners get 7. A cold GET /api/config is 147 git
+      # launches (tests/behaviors/scout_find_jobs/test_config_latency.py
+      # counts them), and a launch there costs several times what it does on
+      # ubuntu: run 36591142550 measured 3.007s against the 3.0s bound
+      # (1.0s x 3). 7 is the smallest whole scale with 2x headroom over
+      # that (2 x 3.007 = 6.01s). ubuntu stays 3.
+      GIGAI_TEST_LATENCY_SCALE: ${{ contains(matrix.os, 'macos') && '7' || '3' }}
     strategy:
       fail-fast: false
       matrix:

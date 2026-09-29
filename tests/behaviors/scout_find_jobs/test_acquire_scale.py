@@ -141,13 +141,52 @@ class _Exa:
         return ()
 
 
-class _FakeATS:
-    """``fetch_board`` fake: sleeps ``delay`` per board, tracks concurrency per provider."""
+class _VirtualClock:
+    """A ``time`` stand-in for ``market_acquisition`` whose ``monotonic`` moves only when told.
 
-    def __init__(self, delay: float = 0.0, *, rows_per_board: int = 1, request_client: bool = False):
+    The run-time budget is wall-clock (``time.monotonic`` against a deadline
+    taken when ``acquire_node`` starts). A real ``sleep(0.12)`` against a
+    0.2 s budget passed locally but overran on a loaded macOS runner (run
+    36591142550: one fetch took 0.2-0.27 s, so the second user board was
+    budget-skipped). With this clock a board costs exactly its ``delay`` and
+    nothing else moves time, so which boards fit the budget is arithmetic.
+    Everything but ``monotonic`` is the real ``time`` module.
+    """
+
+    def __init__(self) -> None:
+        self._now = 0.0
+        self._lock = threading.Lock()
+
+    def monotonic(self) -> float:
+        with self._lock:
+            return self._now
+
+    def advance(self, seconds: float) -> None:
+        with self._lock:
+            self._now += seconds
+
+    def __getattr__(self, name: str):
+        return getattr(time, name)
+
+
+def _virtual_clock(monkeypatch: pytest.MonkeyPatch) -> _VirtualClock:
+    clock = _VirtualClock()
+    monkeypatch.setattr("gigai.scout.find_jobs.market_acquisition.time", clock)
+    return clock
+
+
+class _FakeATS:
+    """``fetch_board`` fake: sleeps ``delay`` per board, tracks concurrency per provider.
+
+    With a ``clock`` (``_virtual_clock``) a board advances that clock by
+    ``delay`` instead of sleeping.
+    """
+
+    def __init__(self, delay: float = 0.0, *, rows_per_board: int = 1, request_client: bool = False, clock: _VirtualClock | None = None):
         self.delay = delay
         self.rows_per_board = rows_per_board
         self.request_client = request_client
+        self.clock = clock
         self.lock = threading.Lock()
         self.active: dict[str, int] = {}
         self.max_active: dict[str, int] = {}
@@ -157,11 +196,13 @@ class _FakeATS:
         with self.lock:
             self.active[provider] = self.active.get(provider, 0) + 1
             self.max_active[provider] = max(self.max_active.get(provider, 0), self.active[provider])
-            self.calls.append((provider, board_token, time.monotonic()))
+            self.calls.append((provider, board_token, (self.clock or time).monotonic()))
         try:
             if self.request_client and client is not None:
                 client.get(f"https://api.example/{provider}/{board_token}")
-            if self.delay:
+            if self.delay and self.clock is not None:
+                self.clock.advance(self.delay)
+            elif self.delay:
                 time.sleep(self.delay)
         finally:
             with self.lock:
@@ -384,7 +425,10 @@ def test_budget_stops_cleanly_records_skipped_boards_and_runs_user_boards_first(
         _board(ATSProvider.GREENHOUSE, "cat-c", catalog=True),
         _board(ATSProvider.GREENHOUSE, "mine-y"),
     ]
-    ats = _FakeATS(delay=0.12)
+    # One worker, 0.12 s per board on a virtual clock, a 0.2 s budget: board 1
+    # starts at 0.0, board 2 at 0.12 (both inside the budget), board 3 would
+    # start at 0.24 (past it) -- so exactly the two user boards run.
+    ats = _FakeATS(delay=0.12, clock=_virtual_clock(monkeypatch))
     out = acquire_node(
         _context(tmp_path), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=_Watchlist(boards),
         limits=_limits(concurrency=1, budget=0.2),
@@ -393,7 +437,7 @@ def test_budget_stops_cleanly_records_skipped_boards_and_runs_user_boards_first(
     fetched = [token for _provider, token, _at in ats.calls]
     # The operator's own boards go first regardless of watchlist order; the
     # catalog boards are what the budget cuts.
-    assert fetched[:2] == ["mine-y", "mine-z"]
+    assert fetched == ["mine-y", "mine-z"]
     assert len(fetched) < 5, "the budget never triggered"
     assert {row.posting.board_token for row in out.rows} == set(fetched)
     skipped_rows = [failure for failure in out.failures if failure.code == BUDGET_EXCEEDED_CODE]
@@ -437,7 +481,7 @@ def test_a_budget_skip_next_to_real_rows_does_not_fail_the_run(monkeypatch: pyte
 
     _patch_import(monkeypatch)
     boards = [_board(ATSProvider.GREENHOUSE, f"g{i}") for i in range(4)]
-    ats = _FakeATS(delay=0.1)
+    ats = _FakeATS(delay=0.1, clock=_virtual_clock(monkeypatch))
     out = acquire_node(
         _context(tmp_path), _input(), http_client=None, exa=_Exa(), ats=ats, watchlist=_Watchlist(boards),
         limits=_limits(concurrency=1, budget=0.15),
