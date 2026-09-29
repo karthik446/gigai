@@ -451,6 +451,46 @@ def _jev_rank(
         return None, "error"
 
 
+# --- unreadable-posting guard (uat-bug-029) -------------------------------------------
+
+#: What the operator is told when the posting text carries no requirements.
+POSTING_UNREADABLE_MESSAGE = "Couldn't read this posting's requirements"
+
+# Words that mark a requirements-like section or bullet in real posting text.
+_REQUIREMENT_CUES = re.compile(
+    r"requirements?|qualifications?|what you(?:'|\u2019)?ll need|what you need|you have|you(?:'|\u2019)?ve|"
+    r"must[- ]have|nice[- ]to[- ]have|preferred|minimum|proficien|experience (?:with|in)|"
+    r"\d+\+?\s*years?|years? of|skills?\b|responsibilities|you will|you(?:'|\u2019)ll|about the role|who you are",
+    re.IGNORECASE,
+)
+_NO_STATED_REQUIREMENTS = "no stated requirements"
+
+
+def _has_requirement_cue(text: str) -> bool:
+    return _REQUIREMENT_CUES.search(text) is not None
+
+
+def _has_real_requirement(body: AssessmentBody) -> bool:
+    return any(row.requirement.strip().lower().rstrip(".") != _NO_STATED_REQUIREMENTS for row in body.matrix)
+
+
+def posting_requirements_unreadable(text: str, body: AssessmentBody) -> bool:
+    """True when this answer must NOT be presented as an assessment.
+
+    The rule needs BOTH: the posting text has no requirement-like cue
+    (no "requirements"/"qualifications"/"you have"/"N years"/"skills"/...
+    anywhere) AND the model found no real requirement (an empty matrix, or
+    only "No stated requirements").  Either alone is not enough: a real
+    posting without headings that yields real rows stays assessed, and a
+    posting with requirement wording whose model answer is "No stated
+    requirements" stays the legitimate requirement-free path.  Residual
+    false positive: a genuinely requirement-free posting that also uses none
+    of the cue words (a one-line "we are hiring" blurb) is refused.
+    """
+
+    return not _has_requirement_cue(text) and not _has_real_requirement(body)
+
+
 # --- the assessment ----------------------------------------------------------------
 
 
@@ -562,7 +602,7 @@ def run_quick_assessment(
     ``job_fetch_failed``, ``profile_not_found``, ``profile_unavailable``,
     ``resume_unavailable``, ``resume_digest_mismatch``, ``model_target_unavailable``,
     ``model_unavailable``, ``model_denied``, ``assess_timeout``, ``model_output_invalid``,
-    ``target_unavailable``.
+    ``posting_requirements_unreadable``, ``target_unavailable``.
     """
 
     home_root = Path(home_root)
@@ -571,7 +611,7 @@ def run_quick_assessment(
     # 1. Job text (public data; network only for a URL).
     try:
         with job_fetch_client() as client:
-            job = resolve_job(request.job, client=client)
+            job = resolve_job(request.job, client=client, home_root=home_root)
     except FindJobsContractError as exc:
         raise QuickAssessError(exc.code, str(exc)) from exc
     job = _apply_job_overrides(job, request)
@@ -661,6 +701,9 @@ def run_quick_assessment(
 
     body = attempt.parsed
     assert isinstance(body, AssessmentBody)
+    if posting_requirements_unreadable(job.text, body):
+        # Nothing is stored: the job stays "not assessed", never Matched.
+        raise QuickAssessError("posting_requirements_unreadable", POSTING_UNREADABLE_MESSAGE)
     from .proposal_execution import _usage_block
 
     usage = _usage_block([attempt.usage] if attempt.usage is not None else [], UsageBlock)

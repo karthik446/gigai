@@ -382,3 +382,72 @@ def test_bindings_fixture_routes_serve_the_three_p4_shapes(monkeypatch: pytest.M
     assert shell.status_code == 200 and len(html_to_text(shell.text)) < MIN_POSTING_TEXT_CHARS
     assert [job["id"] for job in board["jobs"]] == ["101"]
     assert bindings._test_http_enabled() is True
+
+
+# --- uat-bug-029: a gh_jid company URL resolves through the Greenhouse job API ----------------
+
+_NEX_URL = "https://www.nexhealth.com/careers/open-positions?gh_jid=5993376004"
+_NEX_JOB_JSON = {
+    "id": 5993376004,
+    "title": "Senior Software Engineer, Remote",
+    "company_name": "NexHealth",
+    "location": {"name": "Remote"},
+    "content": "&lt;p&gt;Requirements:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;5+ years of backend engineering.&lt;/li&gt;&lt;/ul&gt;",
+}
+
+
+def _write_index(home, *, slug="nexhealth", posting_id="5993376004") -> None:
+    from gigai.scout.find_jobs.company_index import CompanyIndex, CompanyIndexEntry, IndexedPosting
+
+    posting = IndexedPosting(posting_id, "Senior Software Engineer, Remote", "Remote", _NEX_URL, None, None, "2026-09-28T00:00:00Z", "2026-09-28T00:00:00Z")
+    CompanyIndex.for_home(home).write(
+        CompanyIndexEntry("NexHealth", "greenhouse", slug, None, None, None, {posting_id: posting})
+    )
+
+
+def _nex_client(seen: list[str], *, status: int = 200) -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.url.host}{request.url.path}")
+        if request.url.host == "boards-api.greenhouse.io" and request.url.path == "/v1/boards/nexhealth/jobs/5993376004":
+            return httpx.Response(status, json=_NEX_JOB_JSON)
+        return httpx.Response(200, text="<html><body>Jobs at NexHealth ABELDent AdvancedMD</body></html>")
+
+    return httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+
+
+def test_gh_jid_company_url_resolves_to_the_greenhouse_api_not_the_careers_page(tmp_path) -> None:
+    _write_index(tmp_path)
+    seen: list[str] = []
+    with _nex_client(seen) as client:
+        resolved = resolve_job(AssessJobInput(job_url=_NEX_URL), client=client, home_root=tmp_path)
+
+    assert seen == ["boards-api.greenhouse.io/v1/boards/nexhealth/jobs/5993376004"]
+    assert resolved.fetch_kind == "ats_single"
+    assert resolved.title == "Senior Software Engineer, Remote" and resolved.company == "NexHealth"
+    assert "5+ years of backend engineering" in resolved.text
+    assert resolved.job_identity == normalize_url(_NEX_URL)
+
+
+def test_gh_jid_for_param_names_the_board_without_the_index(tmp_path) -> None:
+    seen: list[str] = []
+    with _nex_client(seen) as client:
+        resolved = resolve_job(AssessJobInput(job_url=_NEX_URL + "&for=nexhealth"), client=client, home_root=tmp_path)
+    assert seen == ["boards-api.greenhouse.io/v1/boards/nexhealth/jobs/5993376004"]
+    assert resolved.fetch_kind == "ats_single"
+
+
+def test_gh_jid_api_failure_never_falls_back_to_scraping_the_careers_page(tmp_path) -> None:
+    _write_index(tmp_path)
+    seen: list[str] = []
+    with _nex_client(seen, status=404) as client, pytest.raises(FindJobsContractError) as excinfo:
+        resolve_job(AssessJobInput(job_url=_NEX_URL), client=client, home_root=tmp_path)
+    assert excinfo.value.code == "job_fetch_failed"
+    assert seen == ["boards-api.greenhouse.io/v1/boards/nexhealth/jobs/5993376004"]
+
+
+def test_gh_jid_url_of_an_unindexed_company_keeps_the_page_fetch(tmp_path) -> None:
+    _write_index(tmp_path, posting_id="1")  # slug matches the host but the index does not list this job
+    seen: list[str] = []
+    with _nex_client(seen) as client, pytest.raises(FindJobsContractError):
+        resolve_job(AssessJobInput(job_url=_NEX_URL), client=client, home_root=tmp_path)
+    assert seen == ["www.nexhealth.com/careers/open-positions"]

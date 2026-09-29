@@ -47,6 +47,7 @@ _ERROR_STATUS: dict[str, HTTPStatus] = {
     "missing_key": HTTPStatus.UNPROCESSABLE_ENTITY,
     "bad_enum": HTTPStatus.UNPROCESSABLE_ENTITY,
     "job_text_unavailable": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "posting_requirements_unreadable": HTTPStatus.UNPROCESSABLE_ENTITY,
     # upstream job fetch
     "job_fetch_failed": HTTPStatus.BAD_GATEWAY,
     # resume / profile / project lookups

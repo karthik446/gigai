@@ -29,8 +29,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import html as _html_entities
 import json
+from pathlib import Path
 import re
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qsl, urlsplit
 
 from ...canonical import digest_imported_bytes
 from .assess_contracts import AssessJobInput, ResolvedJob, text_identity
@@ -43,6 +45,7 @@ from .contracts import (
     normalize_url,
     parse_board_url,
 )
+from .company_index import CompanyIndex
 from .market_acquisition import job_id_from_url
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
@@ -118,13 +121,19 @@ def job_fetch_client() -> "httpx.Client":
     )
 
 
-def resolve_job(job: AssessJobInput, *, client: "httpx.Client") -> ResolvedJob:
+def resolve_job(job: AssessJobInput, *, client: "httpx.Client", home_root: Path | None = None) -> ResolvedJob:
     """Resolve ``job`` to its plain text and identity; see the module docstring.
 
     Raises ``FindJobsContractError`` with code ``job_text_unavailable`` (the
     URL was reached but carries no posting text), ``job_fetch_failed`` (every
     fetch attempt failed), or ``normalize_url``'s own ``invalid_value`` for a
     malformed URL.
+
+    uat-bug-029: a company careers URL that carries ``gh_jid`` (a Greenhouse
+    board embedded in the company's own site) is resolved to that board's job
+    API, never scraped; see ``_embedded_greenhouse_token``.  ``home_root``
+    is where the company index is read from; without it only an explicit
+    ``for=<token>`` on the URL identifies the board.
     """
 
     if job.job_text is not None:
@@ -137,6 +146,19 @@ def resolve_job(job: AssessJobInput, *, client: "httpx.Client") -> ResolvedJob:
     if job_id is None and board is not None and board[0] == "greenhouse":
         job_id = _greenhouse_path_job_id(url)
     failures: list[str] = []
+
+    if board is None and _has_gh_jid(url):
+        token = _embedded_greenhouse_token(url, home_root)
+        if token is not None:
+            try:
+                return _greenhouse_single_job(client, token, _gh_jid(url), source_url=url, normalized_url=normalized)
+            except _FetchFailure as exc:
+                # Never fall back to the careers page: it is the page whose
+                # scrape produced the junk text this branch exists to avoid.
+                raise FindJobsContractError(
+                    "job_fetch_failed",
+                    f"fetching the job failed: greenhouse single-job endpoint ({exc}); pass --job-text with the posting text instead",
+                ) from None
 
     if board is not None and board[0] == "greenhouse" and job_id is not None:
         try:
@@ -182,6 +204,59 @@ def resolve_job(job: AssessJobInput, *, client: "httpx.Client") -> ResolvedJob:
         "job_fetch_failed",
         "fetching the job failed: " + "; ".join(failures) + "; pass --job-text with the posting text instead",
     )
+
+
+def _query_of(url: str) -> dict[str, str]:
+    try:
+        return dict(parse_qsl(urlsplit(url).query))
+    except ValueError:
+        return {}
+
+
+def _gh_jid(url: str) -> str:
+    return _query_of(url).get("gh_jid", "")
+
+
+def _has_gh_jid(url: str) -> bool:
+    return _gh_jid(url).isdigit()
+
+
+def _alnum(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", value.lower())
+
+
+def _embedded_greenhouse_token(url: str, home_root: Path | None) -> str | None:
+    """The Greenhouse board token behind a company-site ``gh_jid`` URL.
+
+    1. ``?for=<token>`` on the URL (Greenhouse's own embed parameter), else
+    2. the company index: a greenhouse company whose slug equals a label of
+       the URL's host (``www.nexhealth.com`` -> ``nexhealth``) AND whose
+       index lists a live posting with this job id.  Both must hold, so a
+       lookalike slug can never claim another company's posting.
+
+    Only filenames are listed to pick candidates (the index can hold
+    thousands of companies); a company whose slug is unrelated to its site's
+    domain is not found and the caller falls back to the page fetch.
+    """
+
+    token = _query_of(url).get("for")
+    if token:
+        return token
+    if home_root is None:
+        return None
+    host = _host_of(url)
+    labels = {_alnum(label) for label in host.split(".") if label}
+    labels.discard("")
+    index = CompanyIndex.for_home(home_root)
+    job_id = _gh_jid(url)
+    for ats, slug in index.keys():
+        if ats != "greenhouse" or _alnum(slug) not in labels:
+            continue
+        entry = index.read(ats, slug)
+        posting = None if entry is None else entry.postings.get(job_id)
+        if posting is not None and not posting.removed:
+            return slug
+    return None
 
 
 def _pasted(text: str) -> ResolvedJob:

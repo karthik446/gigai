@@ -569,3 +569,43 @@ def test_seam_deadline_is_read_only_when_the_model_seam_is_on(fx: ProfileFixture
     with pytest.raises(QuickAssessError) as excinfo:
         _run(fx, _pasted())
     assert excinfo.value.code == "assess_timeout"
+
+
+# --- uat-bug-029: junk posting text is never Matched ---------------------------------------
+
+_NEXHEALTH_JUNK = (Path(__file__).resolve().parents[2] / "fixtures" / "scout" / "nexhealth_junk_posting.txt").read_text(
+    encoding="utf-8"
+)
+_NO_STATED = json.dumps(
+    {
+        "verdict": "matched_above_threshold",
+        "matrix": [{"requirement": "No stated requirements", "class": "nice_to_have", "status": "met", "resume_evidence": []}],
+        "suggestions": [],
+        "questions": [],
+        "not_a_match_reason": None,
+    }
+)
+
+
+def test_nexhealth_junk_text_is_not_assessed_and_never_matched(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The exact scraped NexHealth text, with the model answering as it did in the UAT
+    ("No stated requirements", MATCHED): the end result is no assessment at all."""
+
+    _install(monkeypatch, [_NO_STATED])
+
+    with pytest.raises(QuickAssessError) as excinfo:
+        _run(fx, AssessRequest(job=AssessJobInput(job_text=_NEXHEALTH_JUNK)))
+
+    assert excinfo.value.code == "posting_requirements_unreadable"
+    assert str(excinfo.value) == "Couldn't read this posting's requirements"
+    assert list_quick_assessments(fx.home_root, fx.target) == ()  # nothing stored, so never Matched
+
+
+def test_requirement_free_wording_with_real_requirements_or_cues_stays_assessed(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Real posting with requirements: unchanged.
+    _install(monkeypatch, [_GOOD_MATCH])
+    assert _run(fx, _pasted()).result.verdict is Verdict.MATCHED_ABOVE_THRESHOLD
+    # A real posting that has requirement wording but states none of substance: the legitimate path.
+    _install(monkeypatch, [_NO_STATED])
+    response = _run(fx, AssessRequest(job=AssessJobInput(job_text="You will help our team ship. There are no formal qualifications.")))
+    assert response.result.verdict is Verdict.MATCHED_ABOVE_THRESHOLD
