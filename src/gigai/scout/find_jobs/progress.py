@@ -16,6 +16,16 @@ Layout, all under ``runs/<run_id>/progress/``:
 - ``acquire.jsonl``: one JSON line per posting kept after the B1 acquire
   filter, appended as each source/board finishes. Each line is a full
   ``PostingRow.to_json()`` plus ``{"outcome": "new"|"edited"|"unchanged"}``.
+  Over the import cap (uat-bug-031) a posting's line is appended when its
+  ranking batch lands instead (each posting at most once), so the grid
+  fills in rank order while the pass runs; the rest are appended once the
+  cap has picked the run's rows.
+- ``imported.json`` (uat-bug-031): ``{"cap": <int>, "normalized_urls":
+  [...]}``, written once, only by a run over the import cap, when the cap
+  has picked its rows (in the sealed rows' order). ``read_progress`` then
+  serves only those postings' lines, in that order, so a posting ranked
+  and shown mid-run but left out of the import drops out of ``postings``.
+  Absent for a run at or under the cap, and for an older run.
 - ``assess.jsonl``: one JSON line per assessment lifecycle event, appended as
   it happens: a ``"started"`` line when a posting is handed to the model, and
   a ``"finished"`` line (with ``"ok": true/false``) when it resolves. Also
@@ -86,7 +96,7 @@ scheduler).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
@@ -101,6 +111,7 @@ _ASSESS_FILENAME = "assess.jsonl"
 _CAP_FILENAME = "cap.json"
 _RANK_FILENAME = "rank.json"
 _RANK_LINES_FILENAME = "rank.jsonl"
+_IMPORTED_FILENAME = "imported.json"
 # Q2 (acquire at scale): per-board progress + the watchlist seeding record.
 _BOARDS_FILENAME = "boards.jsonl"
 _BOARDS_SUMMARY_FILENAME = "boards.json"
@@ -136,6 +147,15 @@ def _append_line(path: Path, record: Mapping[str, object]) -> None:
     line = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
     with path.open("a", encoding="utf-8") as handle:
         handle.write(line + "\n")
+
+
+def _append_lines(path: Path, records: Sequence[Mapping[str, object]]) -> None:
+    """Append several JSON lines to ``path`` in one write (uat-bug-031: a landed batch's postings)."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = "".join(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n" for record in records)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(text)
 
 
 def _replace_json(path: Path, payload: Mapping[str, object]) -> None:
@@ -276,6 +296,19 @@ class ProgressWriter:
 
         record = {**posting_json, "outcome": outcome}
         self._guard(lambda: _append_line(self._dir / _ACQUIRE_FILENAME, record))
+
+    def postings_acquired(self, postings: Sequence[tuple[Mapping[str, object], str]]) -> None:
+        """Append several ``(posting_json, outcome)`` lines in one write (uat-bug-031: one landed batch)."""
+
+        records = [{**posting_json, "outcome": outcome} for posting_json, outcome in postings]
+        if records:
+            self._guard(lambda: _append_lines(self._dir / _ACQUIRE_FILENAME, records))
+
+    def import_capped(self, *, cap: int, normalized_urls: Sequence[str]) -> None:
+        """Write ``imported.json``: the rows an over-cap run imports, in the sealed rows' order (uat-bug-031)."""
+
+        payload = {"cap": cap, "normalized_urls": list(normalized_urls)}
+        self._guard(lambda: _replace_json(self._dir / _IMPORTED_FILENAME, payload))
 
     def assessment_started(self, normalized_url: str) -> None:
         self._guard(
@@ -457,7 +490,7 @@ def read_progress(run_root: Path) -> ProgressSnapshot:
     steps_raw = _read_json(directory / _STEPS_FILENAME)
     steps = {k: v for k, v in steps_raw.items() if isinstance(v, dict)} if isinstance(steps_raw, dict) else {}
 
-    postings = _read_jsonl(directory / _ACQUIRE_FILENAME)
+    postings = _imported_only(_read_jsonl(directory / _ACQUIRE_FILENAME), _read_json(directory / _IMPORTED_FILENAME))
 
     assess_events = _read_jsonl(directory / _ASSESS_FILENAME)
     # Fold the assess.jsonl event log into one entry per posting: the latest
@@ -534,6 +567,23 @@ def read_progress(run_root: Path) -> ProgressSnapshot:
         rank=None if rank is None else {key: value for key, value in rank.items() if key != "scores"},
         assess_counts=_assess_counts(assess_events, selected_count, steps.get("assess")),
     )
+
+
+def _imported_only(postings: list[dict[str, object]], imported: object) -> list[dict[str, object]]:
+    """uat-bug-031: once an over-cap run's cap has picked its rows, only those, in ``imported.json``'s order.
+
+    Mid-run (no ``imported.json`` yet) the lines are served as they are,
+    in the order their batches landed. ``read_progress`` then orders them
+    by rank either way.
+    """
+
+    urls = imported.get("normalized_urls") if isinstance(imported, dict) else None
+    if not isinstance(urls, list):
+        return postings
+    by_url: dict[object, dict[str, object]] = {}
+    for posting in postings:
+        by_url.setdefault(posting.get("normalized_url"), posting)
+    return [by_url[url] for url in urls if isinstance(url, str) and url in by_url]
 
 
 def _live_rank_status(status: dict[str, object] | None, rank: Mapping[str, object] | None) -> dict[str, object] | None:

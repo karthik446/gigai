@@ -239,6 +239,11 @@ class RankStreamer:
     exists, ``cancel`` is set, so no further model call starts. A pass
     started by another process (a server restarted mid-pass is a new
     process) is cancelled by creating that file.
+
+    ``on_landed`` (uat-bug-031) gets each landed batch's ``normalized_url``s
+    right after its ``rank.jsonl`` line: a run over the import cap writes
+    those postings' progress lines then. It never stops the pass: an
+    exception from it is logged and the pass goes on.
     """
 
     def __init__(
@@ -249,8 +254,10 @@ class RankStreamer:
         cancel: threading.Event,
         cancel_path: Path | None = None,
         on_update: Callable[[int], None] | None = None,
+        on_landed: Callable[[tuple[str, ...]], None] | None = None,
     ) -> None:
         self._progress = progress
+        self._on_landed = on_landed
         self._total = total
         self._cancel = cancel
         self._cancel_path = cancel_path
@@ -288,6 +295,11 @@ class RankStreamer:
                 "total": self._total,
                 "postings": [posting_line(item) for item in batch.postings],
             })
+        if self._on_landed is not None:
+            try:
+                self._on_landed(tuple(item.normalized_url for item in batch.postings))
+            except Exception:  # noqa: BLE001 - a progress write never stops the ranking pass
+                _logger.warning("rank: writing batch %s's posting lines failed", batch.batch_id, exc_info=True)
         if self._on_update is not None:
             self._on_update(len(self._ranked))
         if self._cancel_path is not None and self._cancel_path.exists():

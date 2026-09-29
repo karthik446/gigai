@@ -1174,6 +1174,42 @@ def _rank_order(rows: Sequence[PostingRow], roles: Sequence[str]) -> list[Postin
     return ordered
 
 
+class _OverCapPostingLines:
+    """uat-bug-031: over the import cap, each posting's progress line is written as its rank batch lands.
+
+    A run at or under the cap writes every line up front and ``rank``
+    attaches to it as batches land. Over the cap, which rows the run keeps
+    is only known after ranking, and writing every matched row up front
+    would show rows that are later dropped. So the lines follow the ranked
+    batches (``read_progress`` orders them by rank: the grid fills and
+    re-orders while the pass runs), and :meth:`finish` writes the imported
+    rows no batch reached (a pass that failed open or was cut short) and
+    then ``imported.json``, which narrows ``postings`` to the imported
+    rows. A line is appended at most once per posting and once per batch
+    (one write), never rewritten: 1,458 matched rows are 1,458 lines at most.
+    """
+
+    def __init__(self, progress: ProgressWriter, rows: Sequence[PostingRow], outcomes: Mapping[str, RowOutcome]) -> None:
+        self._progress = progress
+        self._rows = {row.normalized_url: row for row in rows}
+        self._outcomes = outcomes
+        self._written: set[str] = set()
+
+    def landed(self, normalized_urls: Sequence[str]) -> None:
+        lines = []
+        for url in normalized_urls:
+            row = self._rows.get(url)
+            if row is None or url in self._written:
+                continue
+            self._written.add(url)
+            lines.append((row.to_json(), self._outcomes[url].value))
+        self._progress.postings_acquired(lines)
+
+    def finish(self, imported: Sequence[PostingRow]) -> None:
+        self.landed([row.normalized_url for row in imported])
+        self._progress.import_capped(cap=IMPORT_ROW_CAP, normalized_urls=[row.normalized_url for row in imported])
+
+
 @dataclass(frozen=True)
 class _RankStep:
     """What the run's ranking step did: the pass (``None`` when skipped before it) and why."""
@@ -1191,6 +1227,7 @@ def _rank_rows_with_status(
     model_target: object,
     home_root: Path | None,
     progress: ProgressWriter | None,
+    on_landed: Callable[[tuple[str, ...]], None] | None = None,
 ) -> _RankStep:
     """SCOPE-ADD-3 C1: rank ``rows`` with the run's own model target, streamed to ``progress/rank.jsonl``.
 
@@ -1217,7 +1254,7 @@ def _rank_rows_with_status(
         return _RankStep(None, "no_resume")
     try:
         cancel = threading.Event()
-        streamer = rank_run.RankStreamer(progress, total=len(rows), cancel=cancel)
+        streamer = rank_run.RankStreamer(progress, total=len(rows), cancel=cancel, on_landed=on_landed)
         result = rank_run.run_pass(
             _rank_order(rows, config.roles),
             resume_text=resume_text,
@@ -1242,6 +1279,7 @@ def _rank_candidates(
     model_target: object = None,
     home_root: Path | None,
     progress: ProgressWriter | None = None,
+    on_landed: Callable[[tuple[str, ...]], None] | None = None,
     **_unused: object,
 ) -> tuple:
     """SCOPE-ADD-3 C1: the run's ranking step. One ``RankScore`` per row of ``rows``, or ``()``.
@@ -1270,6 +1308,7 @@ def _rank_candidates(
         model_target=model_target if model_target is not None else config.default_model_target,
         home_root=home_root,
         progress=progress,
+        on_landed=on_landed,
     )
     result = step.result
     status = rank_run.status_json(result, total=len(rows), reason=step.reason)
@@ -1865,7 +1904,8 @@ def _acquire_node_body(
             # acquire produces it -- this is what lets a card render before
             # the whole run (or even the whole acquire step) finishes. Over
             # the import cap, which rows the run keeps is only known once
-            # they are ranked; their lines are written below.
+            # they are ranked; their lines follow the ranked batches
+            # (`_OverCapPostingLines`, uat-bug-031).
             progress.posting_acquired(row.to_json(), outcome=outcome.value)
         if input.selection_rule is SelectionRule.NEW_OR_EDITED_ROLE_MATCH and is_candidate:
             candidates.append(row)
@@ -1880,6 +1920,7 @@ def _acquire_node_body(
     # `rank_scores` is sealed onto `AcquireOutput` below so assess's own twin
     # recompute (`proposal_execution.py`) reuses the SAME scores rather than
     # re-ranking -- the two selections can never disagree.
+    posting_lines = _OverCapPostingLines(progress, rows, outcomes) if progress is not None and over_import_cap else None
     rank_scores = _rank_candidates(
         rows,
         resolved=resolved,
@@ -1888,6 +1929,7 @@ def _acquire_node_body(
         model_target=context.model_target,
         home_root=home_root,
         progress=progress,
+        on_landed=None if posting_lines is None else posting_lines.landed,
     )
 
     # uat-bug-011 (P0, UAT N14): a full-catalog run matched 7,426 postings,
@@ -1928,9 +1970,10 @@ def _acquire_node_body(
         )
 
     results = [PostingRowResult(row, outcomes[row.normalized_url]) for row in rows]
-    if progress is not None and over_import_cap:
-        for result in results:
-            progress.posting_acquired(result.posting.to_json(), outcome=result.outcome.value)
+    if posting_lines is not None:
+        # uat-bug-031: the imported rows no batch reached, then
+        # `imported.json`: `/progress` serves exactly the imported rows.
+        posting_lines.finish(rows)
 
     # B2 (0.1.8.1 live UAT): the naive first-N-in-batch-order walk let one
     # board's postings fill the entire selection (a run saw 5/5 picks from
