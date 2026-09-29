@@ -30,6 +30,51 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.9 (in progress)
+
+#### Added
+
+- **Ranking on your own model.** Find-jobs now ranks every posting that
+  passes your filters with the model target you already use, as a step of the
+  run. Results stream into the grid as batches finish, with live progress
+  ("Ranked 350 of 1,458"), and the run's 500-posting import keeps the
+  best-ranked postings instead of the newest. The order is "likely fits
+  first, likely no-matches last"; postings with a hard blocker (no
+  sponsorship, citizenship, clearance) move down and are never hidden. If
+  ranking cannot run, the search falls back to date order and still assesses.
+- **Re-rank** from a run is its own record, so you can see, resume or cancel
+  it, and it does not appear in your run list.
+- **Work mode and location filters.** Choose Remote, Hybrid + an area,
+  Onsite + an area, or Any. The mode comes from the job board's own field
+  when there is one, else from the location text (labelled as derived);
+  postings whose mode cannot be told are kept and labelled.
+- **Assess button** on run postings that were not assessed, on the job page.
+- **Questions first** on the job page: your open questions sit at the top,
+  with the requirements table collapsed below.
+- **Per-skill requirement rows.** A requirement that lists several skills in
+  one bullet is split into one row and one question per skill (alternatives
+  such as "Java, C++ or Go" stay one row).
+
+#### Changed
+
+- Assessing a job by URL reads a company-careers link's text from the job
+  board's own posting (Greenhouse `gh_jid` links), and a page whose text has
+  no readable requirements is now reported as "couldn't read this posting's
+  requirements" instead of being called a match.
+- Tailored resumes resolve board postings the same way.
+- What Scout sends to a model is now stated in the README: ranking sends
+  one-line posting digests and a compact resume digest; assessment sends the
+  posting and your resume; with a local Ollama target nothing leaves the
+  machine.
+
+#### Removed
+
+- **Jev ranking** — its settings, budget, usage and the "Score with Jev"
+  actions are gone, and nothing calls Jev any more. `gigai secrets add jev`
+  now fails because `jev` is no longer a known service. A Jev key you
+  stored earlier stays on disk, untouched and unused, and so does any old
+  Jev score cache.
+
 ### 0.1.8.1
 
 - Assess now sends the model the real posting text and a real assessment

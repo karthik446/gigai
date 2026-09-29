@@ -20,11 +20,19 @@ Scout ships with GigAI and implements `find-jobs`, a job-search workflow:
 - **Assess** — build a requirements-by-resume matrix for each posting, with
   suggestions and open questions. Defaults to a local model target; hosted
   targets are only used when explicitly configured.
+- **Rank** — every posting that passes your filters (titles, location, the
+  publication window, visa sponsorship, work mode) is ranked by the model
+  target you already use, and results stream in as batches finish. The order
+  is honest but coarse: *likely fits first, likely no-matches last*. It
+  pre-filters hard blockers (a no-sponsorship or citizenship line, a
+  clearance requirement) by moving those postings down, never by hiding
+  them. It does not claim to put the best match first.
+- **Assess** — build a requirements-by-resume matrix for the top-ranked
+  postings, in the background, while you browse. Defaults to a local model
+  target; hosted targets are only used when explicitly configured.
 - **Present** — a localhost API and a small web UI show acquired and assessed
-  postings. Nothing about you leaves your machine except: the posting and
-  your resume go to the assessment model you chose; with a Jev key and
-  ranking on (the default), the first 2,000 characters of your profile
-  resume go to Jev to rank postings. See
+  postings. What leaves your machine is exactly what the model target you
+  chose sees, and nothing else: see
   [Privacy and security](#privacy-and-security).
 
 Everything Scout writes stays under your configured GigAI home and the bound
@@ -36,34 +44,34 @@ special runtime treatment.
 
 ## Privacy and security
 
-**Jev ranking spends by default.** With a Jev key set (`gigai secrets add
-jev`) and "Rank with Jev" on (the default), every find-jobs search asks Jev
-to score its postings against your resume, whichever model target assesses
-them (the UI's run dialog says so): up to **$0.25 per run**, and all Jev
-calls of a day (runs, "Score with Jev" in the UI, quick assessments) stop at
-a **daily budget of $0.50** by default. A posting Jev already scored for the
-same resume and preferences is cached and costs nothing again. Opening a
-run in the UI never asks Jev; only a run, the "Score with Jev" button and a
-quick assessment do.
+**Scout has no service of its own.** Ranking and assessment both run on
+the model target you configured (`ollama_local`, `codex_cli` or
+`openrouter_api`, whichever the search's `default_model_target` names). There
+is no ranking service, no extra key, and no extra third party. What leaves
+your machine is exactly what that target sees:
 
-**What is sent to Jev:** the first **2,000 characters of the selected
-profile's resume**, your target titles, countries and visa need, and each
-posting's company, title and location. A resume pasted into a single
-assessment is never sent to Jev.
+- **Ranking** sends the target, one batch at a time, one short line per
+  posting (title, company, location and countries, seniority level, minimum
+  years, the skills found in the posting's requirements section, and hints
+  like "no sponsorship" or "clearance") plus a **compact digest of your
+  resume**: your target titles, countries, visa need and location, the
+  skills found in your resume, an experience-years figure, and up to 300
+  characters copied from the start of your resume. The full resume and the
+  full posting text are not sent for ranking.
+- **Assessment** sends the posting text and your resume, as before, for each
+  posting being assessed. A resume pasted into a single quick assessment goes
+  only to the assessment model, is used once, and is never saved.
+- **With a local Ollama target nothing leaves the machine.** Scout only
+  talks to Ollama on a numeric loopback address (`127.0.0.1`).
+- With `codex_cli` or `openrouter_api`, that provider sees what is listed
+  above under its own terms.
 
-**Turning it off or down:** Settings → Jev ranking has "Rank with Jev:
-on/off", the daily budget, and the per-run cap (0 stops every call, or every
-pass), with today's spend. All three are stored for the whole GigAI home in
-`<home>/local/scout/jev-settings.json` (not under `cache/`, so clearing a
-cache never resets them). The per-run cap is one source of truth
-(`jev_budget.run_cost_cap_usd`): the environment variable
-`GIGAI_JEV_COST_CAP_USD` overrides it when set, else the stored setting,
-else $0.25 — the same precedence `GIGAI_JEV_DAILY_BUDGET_USD` has over the
-daily budget (the evals use both). A run's own rank pass and a "Score with
-Jev" click both obey it; a click's own request may only lower the cap in
-force, never raise it above what the operator (or the environment) allows.
-Every paid call is logged, amount only, in
-`<home>/cache/scout/jev/spend/<day>.jsonl`.
+Ranking scores are cached on disk under `<home>/cache/scout/rank/scores/`
+(a score, up to two short reasons and any blockers per posting, no resume
+text); the cache is safe to delete. Job boards are read with keyless public
+requests: nothing about you is sent to them. What ranking costs is whatever your
+model target charges; a run makes a bounded number of ranking calls, and
+postings past that bound stay unranked and keep date order.
 
 ## Install
 
@@ -172,7 +180,8 @@ starting Scout:
   "roles": ["software engineer", "data engineer"],
   "merged_queries": ["software engineer OR data engineer"],
   "location": "Denver, CO",
-  "remote": true,
+  "work_mode": "hybrid",
+  "remote": false,
   "published_after": "2026-09-15T00:00:00Z",
   "sources": { "exa": true, "ats": true, "hiringcafe": false },
   "default_assess_cap": 10,
@@ -182,6 +191,15 @@ starting Scout:
 }
 ```
 
+`work_mode` is `remote`, `hybrid`, `onsite` or `any`, and it is a real
+filter: **Remote** keeps remote postings (and any whose mode can't be told); **Hybrid** with an area (your
+`location`, e.g. "Denver, CO") keeps remote and hybrid postings in that
+area; **Onsite** with an area also keeps on-site ones there; **Any** keeps
+everything the other filters allow. A posting's mode comes from the job
+board's own field when it has one, else it is read from the location text
+and labelled as derived. A posting whose location says nothing usable (for
+example just "United States") is kept and labelled rather than dropped.
+Without a `work_mode`, the answer saved in setup is used, else Any.
 `default_model_target` accepts `ollama_local`, `codex_cli`, or
 `openrouter_api`. `hiringcafe` is defined in the schema but not a live source
 in this release; leave it `false`. `countries` is a list of ISO-3166 alpha-2
@@ -240,8 +258,9 @@ Nothing in it leaves the machine.
 
 **Find jobs reads that store; it does not check the boards itself.** A search
 takes your watchlist companies' stored postings, applies your titles, the
-publication window and the country rule, ranks them and assesses the top
-ones, with no board request, so it takes seconds, not minutes. Run **Update
+publication window, the country rule and your work-mode preference, ranks
+every posting that passes, and assesses the top ones in the background, with
+no board request, so it takes seconds, not minutes. Run **Update
 sources** first, and again whenever you want fresh postings:
 
 - nothing stored yet: the search says `Run Update sources` instead of
