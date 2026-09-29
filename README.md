@@ -17,9 +17,6 @@ Scout ships with GigAI and implements `find-jobs`, a job-search workflow:
 - **Acquire** — pull public postings from Exa search and the
   Greenhouse/Lever/Ashby applicant-tracking boards through an auto-managed
   watchlist.
-- **Assess** — build a requirements-by-resume matrix for each posting, with
-  suggestions and open questions. Defaults to a local model target; hosted
-  targets are only used when explicitly configured.
 - **Rank** — every posting that passes your filters (titles, location, the
   publication window, visa sponsorship, work mode) is ranked by the model
   target you already use, and results stream in as batches finish. The order
@@ -365,7 +362,7 @@ makes no live provider calls, and takes a couple of minutes.
 
 ## Status
 
-This is v0.1.8.1. Scout's `find-jobs` workflow is implemented and covered by
+This is v0.1.9. Scout's `find-jobs` workflow is implemented and covered by
 the test suite above, including a deterministic end-to-end path from
 acquisition through the present API. It has not yet had a live-provider or
 human user-acceptance pass; treat what's proven by tests as proven, and

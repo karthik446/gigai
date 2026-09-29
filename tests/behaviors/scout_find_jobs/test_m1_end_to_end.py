@@ -204,14 +204,6 @@ def _update_sources(client: httpx.Client, board_url: str) -> dict[str, object]:
     pytest.fail("the sources update did not finish before the timeout")
 
 
-@pytest.mark.xfail(
-    reason=(
-        "0.1.8.1: the offline M1 end-to-end run regressed after the acquire/assess "
-        "changes (API: Server disconnected without sending a response). Operator "
-        "decision: ship 0.1.8.1 and handle it in v0.1.9."
-    ),
-    strict=False,
-)
 def test_m1_real_api_run_child_process_and_second_run_dedup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

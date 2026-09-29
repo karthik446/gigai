@@ -30,20 +30,21 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
-### 0.1.9 (in progress)
+### 0.1.9
 
 #### Added
 
-- **Ranking on your own model.** Find-jobs now ranks every posting that
-  passes your filters with the model target you already use, as a step of the
-  run. Results stream into the grid as batches finish, with live progress
-  ("Ranked 350 of 1,458"), and the run's 500-posting import keeps the
-  best-ranked postings instead of the newest. The order is "likely fits
-  first, likely no-matches last"; postings with a hard blocker (no
-  sponsorship, citizenship, clearance) move down and are never hidden. If
-  ranking cannot run, the search falls back to date order and still assesses.
-- **Re-rank** from a run is its own record, so you can see, resume or cancel
-  it, and it does not appear in your run list.
+- **Ranking on your own model.** Find-jobs ranks the postings that pass your
+  filters with the model target you already use, as a step of the run (up to
+  a per-run limit on model calls; postings past it keep date order). Results
+  stream into the grid as batches finish, with live progress ("Ranked 350 of
+  1,458"), and the run's 500-posting import keeps the best-ranked postings
+  instead of the newest. The order is "likely fits first, likely no-matches
+  last"; postings with a hard blocker (no sponsorship, citizenship,
+  clearance) move down and are never hidden. If ranking cannot run, the
+  search falls back to date order and still assesses.
+- **Rank / Re-rank** a run from its page. A re-rank is its own record, so you
+  can see, resume or cancel it, and it does not appear in your run list.
 - **Work mode and location filters.** Choose Remote, Hybrid + an area,
   Onsite + an area, or Any. The mode comes from the job board's own field
   when there is one, else from the location text (labelled as derived);
@@ -51,9 +52,33 @@ mechanics here. Those belong in the internal changelog.
 - **Assess button** on run postings that were not assessed, on the job page.
 - **Questions first** on the job page: your open questions sit at the top,
   with the requirements table collapsed below.
-- **Per-skill requirement rows.** A requirement that lists several skills in
-  one bullet is split into one row and one question per skill (alternatives
-  such as "Java, C++ or Go" stay one row).
+- **Per-skill requirement rows.** A requirement that joins unrelated skills
+  in one bullet is split into one row and one question per skill; related
+  stacks ("Java + Spring Boot") and alternatives ("Python or Kotlin") stay
+  one row.
+- **Pages of results.** The jobs grid loads a run's postings a page at a
+  time, about 50 cards per page.
+- **Work mode, pay and H-1B chips** on job cards and the job page; a posting
+  that does not state sponsorship says "Sponsorship not stated".
+- **Every job has one state**, and **Applications** shows the jobs you have
+  applied to and beyond. **Assessments** lists the assessments you ran on
+  demand. The app has a top bar with a page for each, and breadcrumbs.
+- **Company index and Update sources.** `gigai scout sources update` (or
+  **Update sources** in Settings) stores every watchlist company's postings
+  locally, so a search reads the store in seconds instead of fetching boards.
+  Only companies Exa newly finds during a search are fetched then, at most 20
+  per search. Acquire rotates through the shipped company catalog, least
+  recently fetched first.
+- **Profiles.** Keep several resumes and preferences as profiles; runs,
+  assessment, discovery, interview prep and the CLI use the selected one.
+  `gigai scout resume add` stores a resume; `gigai scout resume tailor` (and
+  the job page) produce a tailored resume for a posting.
+- **Setup and discovery.** A setup interview in the Scout UI, a Discover
+  panel and `gigai scout discover` propose companies to watch. `gigai scout
+  prep <posting-url>` prepares interview material for a posting.
+- **One-command Scout.** `gigai scout install`, `gigai scout run`, `stop` and
+  `status`, `gigai gig use`, and `gigai secrets add|list|rm` (stores API keys
+  locally; the Exa key is read from there).
 
 #### Changed
 
@@ -62,9 +87,19 @@ mechanics here. Those belong in the internal changelog.
   no readable requirements is now reported as "couldn't read this posting's
   requirements" instead of being called a match.
 - Tailored resumes resolve board postings the same way.
+- Scout always lives in `<home>/scout`, whichever folder you run it from.
+- The setup wizard stores your resume itself and finishes without the CLI; a
+  new profile never rewrites the selected one; `resume add` accepts any file
+  name.
+- `gigai scout run` stops an older project's Scout server that holds the
+  port, and restarts a server left running old code.
+- Run pages open in a fraction of a second, and the grid renders from the
+  first page.
+- The local Scout API rejects cross-site write requests.
 - What Scout sends to a model is now stated in the README: ranking sends
-  one-line posting digests and a compact resume digest (digest-v3: titles, skills, domain and years, no header or contact details); assessment sends the
-  posting and your resume; with a local Ollama target nothing leaves the
+  one-line posting digests and a compact resume digest (digest-v3: titles,
+  skills, domain and years, no header or contact details); assessment sends
+  the posting and your resume; with a local Ollama target nothing leaves the
   machine.
 
 #### Removed
