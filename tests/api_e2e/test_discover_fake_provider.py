@@ -58,6 +58,7 @@ from tests.api_e2e.harness import (
     start_server,
     stop_server,
 )
+from tests.support.latency import latency_bound
 
 _SETUP_BODY = {
     "roles": ["software engineer"],
@@ -133,7 +134,7 @@ def test_discover_with_no_provider_key_configured_completes_with_zero_boards(
         # poll latest until it reports a finished result.
         import time
 
-        deadline = time.monotonic() + 30.0
+        deadline = time.monotonic() + latency_bound(30.0)
         latest_body: dict[str, object] = {}
         while time.monotonic() < deadline:
             latest_response = client.get("/api/discover/latest")

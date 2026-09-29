@@ -43,6 +43,7 @@ from tests.api_e2e.harness import (
     stop_server,
     write_offline_find_jobs_config,
 )
+from tests.support.latency import latency_bound
 
 JEV_CALL_USD = 0.0005  # bindings._test_jev_handler
 
@@ -174,7 +175,7 @@ def test_rank_with_jev_off_asks_jev_nothing_and_the_settings_survive_a_preferenc
         on = client.put("/api/jev/settings", json={"jev_rank_enabled": True})
         assert on.status_code == 200 and on.json()["jev_rank_enabled"] is True and on.json()["jev_daily_budget_usd"] == 0.3
         answer = client.post(f"/api/runs/{run_id}/rank", json={"start": True}).json()
-        deadline = time.monotonic() + 30.0
+        deadline = time.monotonic() + latency_bound(30.0)
         while answer["rank_status"]["status"] == "running":
             assert time.monotonic() < deadline, answer
             time.sleep(0.05)

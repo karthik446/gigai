@@ -43,6 +43,7 @@ from tests.api_e2e.harness import (
     stop_server,
     write_offline_find_jobs_config,
 )
+from tests.support.latency import latency_bound
 
 RESUME_WORDS = "Python service experience"
 JEV_KEY = "api-e2e-test-jev-key"
@@ -208,7 +209,7 @@ def test_score_with_jev_answers_at_once_and_a_page_that_reads_never_spends(tmp_p
         blocked = client.post(f"/api/runs/{run_id}/rank", json={"start": True, "cost_cap_usd": "0.25"})
         assert blocked.status_code == 200, blocked.text
         blocked_body = blocked.json()
-        deadline = time.monotonic() + 30.0
+        deadline = time.monotonic() + latency_bound(30.0)
         while blocked_body["rank_status"]["status"] == "running":
             assert time.monotonic() < deadline, blocked_body
             time.sleep(0.05)
@@ -231,7 +232,7 @@ def test_score_with_jev_answers_at_once_and_a_page_that_reads_never_spends(tmp_p
         body = first.json()
         assert body["rank_status"]["status"] == "running", body["rank_status"]
         assert len(body["scores"]) == postings
-        deadline = time.monotonic() + 30.0
+        deadline = time.monotonic() + latency_bound(30.0)
         while body["rank_status"]["status"] == "running":
             assert time.monotonic() < deadline, body
             time.sleep(0.05)

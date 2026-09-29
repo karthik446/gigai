@@ -46,6 +46,7 @@ from tests.api_e2e.harness import (
     write_offline_find_jobs_config,
 )
 from tests.api_e2e.test_discover_fake_provider import _SETUP_BODY
+from tests.support.latency import latency_bound
 
 
 def test_run_over_a_seeded_watchlist_passes_the_existing_journeys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,7 +69,7 @@ def test_run_over_a_seeded_watchlist_passes_the_existing_journeys(tmp_path: Path
         # -- Update sources: seeds + fetches every admitted catalog board ----
         started = client.post("/api/sources/update", json={})
         assert started.status_code == 202, started.text
-        update_deadline = time.monotonic() + 120.0
+        update_deadline = time.monotonic() + latency_bound(120.0)
         while True:
             sources = client.get("/api/sources/update").json()
             if not sources["running"]:

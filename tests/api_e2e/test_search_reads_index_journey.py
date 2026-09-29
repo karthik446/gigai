@@ -38,6 +38,7 @@ from tests.api_e2e.harness import (
     stop_server,
     write_offline_find_jobs_config,
 )
+from tests.support.latency import latency_bound
 
 ACME_BOARD = "https://boards.greenhouse.io/acme"
 EMPTY_MESSAGE = "No company postings are stored on this machine yet. Run Update sources, then search again."
@@ -54,7 +55,7 @@ def _boards_only_config(target: Path) -> None:
 def _update_sources(client: httpx.Client) -> dict:
     started = client.post("/api/sources/update", json={})
     assert started.status_code == 202, started.text
-    deadline = time.monotonic() + 60.0
+    deadline = time.monotonic() + latency_bound(60.0)
     while True:
         body = client.get("/api/sources/update").json()
         if not body["running"]:

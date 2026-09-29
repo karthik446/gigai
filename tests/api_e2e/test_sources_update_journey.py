@@ -39,13 +39,14 @@ from tests.api_e2e.harness import (
     stop_server,
     write_offline_find_jobs_config,
 )
+from tests.support.latency import latency_bound
 
 ACME_BOARD = "https://boards.greenhouse.io/acme"
 KONG_BOARD = "https://jobs.ashbyhq.com/kong"
 
 
 def _poll_until_settled(client: httpx.Client, *, deadline_seconds: float = 60.0) -> dict:
-    deadline = time.monotonic() + deadline_seconds
+    deadline = time.monotonic() + latency_bound(deadline_seconds)
     while True:
         response = client.get("/api/sources/update")
         assert response.status_code == 200, response.text

@@ -31,6 +31,7 @@ from tests.api_e2e.harness import (
     setup_and_init,
     start_server,
 )
+from tests.support.latency import latency_bound
 
 
 def _process_is_alive(pid: int) -> bool:
@@ -48,7 +49,7 @@ def _process_is_alive(pid: int) -> bool:
 def _wait_until_gone(pid: int, *, timeout: float = 5.0) -> bool:
     import time
 
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + latency_bound(timeout)
     while time.monotonic() < deadline:
         if not _process_is_alive(pid):
             return True
