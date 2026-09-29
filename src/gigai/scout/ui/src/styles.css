@@ -1543,3 +1543,9 @@ table.data-table th {
 .jev-budget-row input[type="number"] { width: 7rem; }
 .jev-settings p { margin: 0; }
 .jev-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 0.88rem; }
+
+/* uat-bug-027: questions first, the requirement table collapsed below. */
+.questions-section { border-left: 3px solid var(--warn); }
+.question-requirement { margin: 0 0 4px; }
+.requirements-details > summary { cursor: pointer; }
+.requirements-details[open] > summary { margin-bottom: 8px; }

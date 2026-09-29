@@ -9,13 +9,14 @@ import { requirementStatusLabel, sortMatrixRows } from "../jobModel.js";
 // (question_ids.py), so it is never shown on its own; it sits in the
 // tooltip. Nothing is sent from here: the ONE "Re-assess" above the table
 // saves every filled box (answerDrafts.js).
-function QuestionBox({ question, state, value, onChange, disabled }) {
+function QuestionBox({ question, state, value, onChange, disabled, showRequirement = false }) {
   const inputId = `answer-${question.question_id}`;
   return (
     <div className="row-question" data-question-id={question.question_id}>
       <label htmlFor={inputId} title={question.question_id}>
         {question.question}
       </label>
+      {showRequirement && question.requirement && <p className="muted small question-requirement">About: {question.requirement}</p>}
       <input
         id={inputId}
         type="text"
@@ -67,6 +68,12 @@ function StatusCells({ row }) {
 // without one this component keeps its own. `tailor` (optional) is the
 // second action's {enabled, reason, label, busy, onClick}; `showVerdict`
 // hides the verdict badge where the page already shows the chip.
+//
+// uat-bug-027: `questionsFirst` (the job page) supersedes N5's boxes inside
+// the table. The open questions get their own section at the top (the task,
+// with the same Re-assess / Tailor actions and the same drafts); the table
+// below it is the reference, collapsed, and carries no answer boxes. No open
+// questions, no questions section. Other callers keep the N5 layout.
 export default function AssessmentBody({
   assessment,
   jobIdentity,
@@ -76,6 +83,7 @@ export default function AssessmentBody({
   controller,
   tailor,
   showVerdict = true,
+  questionsFirst = false,
 }) {
   const own = useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable });
   const answers = controller || own;
@@ -98,6 +106,123 @@ export default function AssessmentBody({
       />
     ));
 
+  const table = (withBoxes) => (
+    <table className="matrix-table">
+      <thead>
+        <tr>
+          <th>Requirement</th>
+          <th>Resume evidence</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {(withBoxes ? ordered : sorted).map((row) => {
+          const questions = withBoxes ? questionsByRow.get(row.requirement) || [] : [];
+          return (
+            <tr key={row.requirement} className={questions.length ? "has-question" : undefined}>
+              <td>{row.requirement}</td>
+              <td>
+                {row.resume_evidence && row.resume_evidence.length ? (
+                  <ul>
+                    {row.resume_evidence.map((evidence) => (
+                      <li key={evidence}>{evidence}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span className="muted">none</span>
+                )}
+                {boxes(questions)}
+              </td>
+              <StatusCells row={row} />
+            </tr>
+          );
+        })}
+        {/* A question whose requirement names no row still gets its box. */}
+        {withBoxes &&
+          unplaced.map((question) => (
+            <tr key={`question-${question.question_id}`} className="has-question">
+              <td>{question.requirement || <span className="muted">Other question</span>}</td>
+              <td>{boxes([question])}</td>
+              <StatusCells row={null} />
+            </tr>
+          ))}
+      </tbody>
+    </table>
+  );
+
+  const suggestions = assessment.suggestions && assessment.suggestions.length > 0 && (
+    <>
+      <div className="label" style={{ marginTop: 8 }}>
+        Suggestions
+      </div>
+      <ul>
+        {assessment.suggestions.map((suggestion) => (
+          <li key={suggestion}>{suggestion}</li>
+        ))}
+      </ul>
+    </>
+  );
+
+  const actions = (hasQuestions || tailor) && (
+    <RequirementActions
+      reassess={{
+        ...answers.gate,
+        label: jobIdentity ? "Re-assess" : "Save answers",
+        busy: answers.busy === "reassess",
+        onClick: answers.reassess,
+      }}
+      tailor={tailor}
+      busy={busy || Boolean(tailor && tailor.busy)}
+      error={answers.error}
+    />
+  );
+
+  if (questionsFirst) {
+    return (
+      <>
+        {hasQuestions ? (
+          <section className="panel questions-section" data-role="questions-section">
+            <h3>Questions for you ({answers.questions.length})</h3>
+            <p className="muted small">Answer what you can, then Re-assess once. Your answers are saved with it.</p>
+            {answers.questions.map((question) => (
+              <QuestionBox
+                key={question.question_id}
+                question={question}
+                state={stateFor.get(question.question_id)}
+                value={answers.valueFor(question.question_id)}
+                onChange={answers.setDraft}
+                disabled={busy}
+                showRequirement
+              />
+            ))}
+            {actions}
+          </section>
+        ) : (
+          actions && <section className="panel">{actions}</section>
+        )}
+        <section className="panel">
+          <details className="requirements-details" data-role="requirements-details">
+            <summary>
+              <h3 style={{ display: "inline" }}>Requirements ({assessment.matrix ? assessment.matrix.length : 0})</h3>
+            </summary>
+            {table(false)}
+            {suggestions}
+          </details>
+          {!hasQuestions && assessment.questions && assessment.questions.length > 0 && (
+            <>
+              <div className="label">Questions</div>
+              <ul>
+                {assessment.questions.map((question) => (
+                  <li key={question}>{question}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+      </>
+    );
+  }
+
   return (
     <>
       {showVerdict && assessment.verdict && (
@@ -106,73 +231,11 @@ export default function AssessmentBody({
         </div>
       )}
 
-      {(hasQuestions || tailor) && (
-        <RequirementActions
-          reassess={{
-            ...answers.gate,
-            label: jobIdentity ? "Re-assess" : "Save answers",
-            busy: answers.busy === "reassess",
-            onClick: answers.reassess,
-          }}
-          tailor={tailor}
-          busy={busy || Boolean(tailor && tailor.busy)}
-          error={answers.error}
-        />
-      )}
+      {actions}
 
-      <table className="matrix-table">
-        <thead>
-          <tr>
-            <th>Requirement</th>
-            <th>Resume evidence</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {ordered.map((row) => {
-            const questions = questionsByRow.get(row.requirement) || [];
-            return (
-              <tr key={row.requirement} className={questions.length ? "has-question" : undefined}>
-                <td>{row.requirement}</td>
-                <td>
-                  {row.resume_evidence && row.resume_evidence.length ? (
-                    <ul>
-                      {row.resume_evidence.map((evidence) => (
-                        <li key={evidence}>{evidence}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <span className="muted">none</span>
-                  )}
-                  {boxes(questions)}
-                </td>
-                <StatusCells row={row} />
-              </tr>
-            );
-          })}
-          {/* A question whose requirement names no row still gets its box. */}
-          {unplaced.map((question) => (
-            <tr key={`question-${question.question_id}`} className="has-question">
-              <td>{question.requirement || <span className="muted">Other question</span>}</td>
-              <td>{boxes([question])}</td>
-              <StatusCells row={null} />
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {table(true)}
 
-      {assessment.suggestions && assessment.suggestions.length > 0 && (
-        <>
-          <div className="label" style={{ marginTop: 8 }}>
-            Suggestions
-          </div>
-          <ul>
-            {assessment.suggestions.map((suggestion) => (
-              <li key={suggestion}>{suggestion}</li>
-            ))}
-          </ul>
-        </>
-      )}
+      {suggestions}
 
       {/* An old result carries plain-string questions only (no id, so no
           answer box); structured ones are in the table above, and

@@ -39,7 +39,9 @@ import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 //   N3  a plain "← Jobs" link at the top (the breadcrumb is gone here)
 //   N4  a short excerpt of the posting, no expander: "Open posting" has
 //       the rest
-//   N5  each open question sits in the requirement row it settles; ONE
+//   N5  (superseded by uat-bug-027: the open questions are their own section
+//       at the TOP, the requirement table below is collapsed reference)
+//       each open question sat in the requirement row it settles; ONE
 //       "Re-assess" at the top of Requirements saves every filled box
 //       (answerDrafts.js) and re-assesses once
 //   N6  no right-hand column: the verdict history and the tailored-resume
@@ -420,28 +422,27 @@ export default function JobPage({
 
       <JobDescription posting={posting} pasted={pasted} />
 
-      <section className="panel">
-        <h3>Requirements</h3>
-        {assessment ? (
-          <AssessmentBody
-            assessment={assessment}
-            jobIdentity={posting.normalized_url}
-            controller={answerDrafts}
+      {assessment ? (
+        <AssessmentBody
+          assessment={assessment}
+          jobIdentity={posting.normalized_url}
+          controller={answerDrafts}
+          tailor={tailorAction}
+          showVerdict={false}
+          questionsFirst
+        />
+      ) : (
+        <section className="panel">
+          <h3>Requirements</h3>
+          <RequirementActions
+            reassess={{ ...reassessGate({ assessed: false, states: [] }), label: "Re-assess", onClick: () => {} }}
             tailor={tailorAction}
-            showVerdict={false}
+            busy={actionsBusy}
           />
-        ) : (
-          <>
-            <RequirementActions
-              reassess={{ ...reassessGate({ assessed: false, states: [] }), label: "Re-assess", onClick: () => {} }}
-              tailor={tailorAction}
-              busy={actionsBusy}
-            />
-            <p className="muted">Not assessed yet. The requirement table and its questions appear once the posting is assessed.</p>
-          </>
-        )}
-        {tailorError && <div className="field-error">Could not save your answers before tailoring: {tailorError}</div>}
-      </section>
+          <p className="muted">Not assessed yet. The requirement table and its questions appear once the posting is assessed.</p>
+        </section>
+      )}
+      {tailorError && <div className="field-error">Could not save your answers before tailoring: {tailorError}</div>}
 
       <TailoredResumePanel state={tailored} profileLabel={profileLabel} questionPrompts={questionPrompts} />
 
