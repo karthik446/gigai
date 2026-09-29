@@ -1568,3 +1568,11 @@ table.data-table th {
 .questions-section { border-left: 3px solid var(--warn); }
 .question-requirement { margin: 0 0 4px; }
 .show-more { display: flex; justify-content: center; padding: 16px 0 8px; }
+
+/* uat-bug-048: the Jobs page's sources strip and first-run steps. */
+.sources-strip { margin: 10px 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
+.sources-strip.amber { border-color: var(--warn-border); background: var(--warn-bg); color: var(--warn); }
+.sources-strip .sources-steps { margin: 0; padding-left: 20px; }
+.sources-strip .sources-steps li { margin: 4px 0; }
+.sources-strip .sources-steps li.highlight { font-weight: 600; outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.sources-strip .button { margin-left: 8px; }

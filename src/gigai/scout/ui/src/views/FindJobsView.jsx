@@ -39,6 +39,8 @@ import {
   withLiveCounts,
 } from "../assessAllModel.js";
 import { indexNotice } from "../sourcesModel.js";
+import { noRunText, sourcesStrip } from "../sourcesStripModel.js";
+import SourcesStrip from "../components/SourcesStrip.jsx";
 import { ASSESSMENTS_HASH, RUNS_HASH, SETTINGS_HASH, runHash } from "../routing.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "blocked", "cancelled", "interrupted"]);
@@ -913,7 +915,9 @@ export default function FindJobsView({
         {rankError && <span className="muted">Rank: {rankError}</span>}
       </div>
     ) : null;
-  const notice = indexNotice(sources.status, { atsEnabled: Boolean(config && config.config && config.config.sources && config.config.sources.ats) });
+  const strip = sourcesStrip(sources.status);
+  // uat-bug-048: the strip says it; the Settings link notice only when the strip cannot.
+  const notice = strip.kind !== "unknown" ? null : indexNotice(sources.status, { atsEnabled: Boolean(config && config.config && config.config.sources && config.config.sources.ats) });
   const grid = (
     <>
       {resultsError && <div className="callout danger">Could not load results: {resultsError}</div>}
@@ -1030,11 +1034,17 @@ export default function FindJobsView({
             Jobs <span className="muted">{profile.label}</span>
           </h2>
           <div className="jobs-header-actions">
-            <button className="button" onClick={openDialog} disabled={!canRun || runActive} data-action="run">
+            <button className="button" onClick={openDialog} disabled={!canRun || runActive || Boolean(strip.runBlocked)} title={strip.runBlocked || undefined} data-action="run">
               {runActive ? "Run in progress…" : "Run find jobs"}
             </button>
           </div>
         </div>
+        <SourcesStrip strip={strip} read={sources.read} />
+        {strip.runBlocked && (
+          <p className="muted" style={{ margin: 0 }} data-role="run-blocked">
+            {strip.runBlocked}
+          </p>
+        )}
         <div className="jobs-header-meta">
           {!hasResume && config && (
             <p className="muted" style={{ margin: 0 }}>
@@ -1081,7 +1091,7 @@ export default function FindJobsView({
       {!results && !runActive && !resultsLoading && !runsState.loading && runsState.runs.length === 0 && (
         <div className="panel">
           <p className="muted" style={{ margin: 0 }}>
-            No find-jobs run yet for this profile. Run one above to see its postings here, or assess a single posting under{" "}
+            {noRunText(strip)}{" "}
             <a href={ASSESSMENTS_HASH}>Assessments</a>.
           </p>
         </div>

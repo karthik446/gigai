@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, getConfig, getSetup } from "./api.js";
+import { ApiError, getConfig, getSetup, getSourcesUpdate } from "./api.js";
 import { useApplications, useProfiles, useRuns } from "./hooks.js";
+import { finishLanding } from "./sourcesStripModel.js";
 import SetupWizard from "./wizard/index.js";
 import TopBar from "./components/TopBar.jsx";
 import FindJobsView from "./views/FindJobsView.jsx";
@@ -208,7 +209,10 @@ export default function App() {
       <SetupWizard
         onDone={() => {
           wizardDone();
-          navigate(SETTINGS_HASH);
+          // uat-bug-048: an empty store lands on Jobs (step 1 highlighted there).
+          getSourcesUpdate()
+            .then((status) => navigate(finishLanding(status, { fromSettings: true }).toJobs ? JOBS_HASH : SETTINGS_HASH))
+            .catch(() => navigate(SETTINGS_HASH));
         }}
         onCancel={() => setEditingSetup(false)}
       />
