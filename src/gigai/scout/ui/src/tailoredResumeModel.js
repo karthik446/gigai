@@ -209,12 +209,12 @@ export function previewStats(lines) {
   return { total: content.length, copied, rewritten, citingAnswers, unsourced, keywords: addedKeywords(content) };
 }
 
-// "N of M lines rewritten, K copied as-is; added keywords: a, b" -- the
+// "N of M lines rewritten, K copied as-is; New words (not in the cited lines): a, b" -- the
 // counts are previewStats' (M = every content line, N + K = M).
 export function changeSummary(stats) {
   const base = `${stats.rewritten} of ${stats.total} line${stats.total === 1 ? "" : "s"} rewritten, ${stats.copied} copied as-is`;
   const keywords = stats.keywords || [];
-  return keywords.length > 0 ? `${base}; added keywords: ${keywords.join(", ")}` : base;
+  return keywords.length > 0 ? `${base}; New words (not in the cited lines): ${keywords.join(", ")}` : base;
 }
 
 export function statsLine(stats) {

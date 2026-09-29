@@ -111,7 +111,7 @@ def test_summary_counts_match_the_line_provenance() -> None:
     assert out["stats"]["total"] == len(kinds) == 5
     assert out["stats"]["rewritten"] == kinds.count("rewritten") == 2
     assert out["stats"]["copied"] == kinds.count("copy") == 3
-    assert out["summary"] == "2 of 5 lines rewritten, 3 copied as-is; added keywords: Kubernetes"
+    assert out["summary"] == "2 of 5 lines rewritten, 3 copied as-is; New words (not in the cited lines): Kubernetes"
 
 
 def test_inline_segments_never_turn_text_into_markup() -> None:
