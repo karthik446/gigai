@@ -278,14 +278,12 @@ class RunRoutesMixin:
         except Exception:  # noqa: BLE001 - display-only enrichment must never break /results
             carried_forward = ()
         body["carried_forward_assessments"] = [item.to_json() for item in carried_forward]
-        # P6: additive -- Jev's pre-rank scores for this run's postings
-        # against the gig's selected profile. run-reads-fast (uat-bug-022,
-        # uat-bug-021 addendum 2): a read only READS scores, the ones
-        # already stored (the score cache, then the run's own sealed
-        # scores; ``run_reads.stored_rank_scores``). It used to score
-        # every row not yet cached, one Jev call each, inside this GET. A
-        # row with no stored score has no entry; no profile, no key or an
-        # unreadable cache is an empty list, never a broken /results.
+        # P6 / SCOPE-ADD-3 C1: additive -- the rank scores for this run's
+        # postings against the gig's selected profile. A read only READS
+        # scores, the ones already stored (the newest finished re-rank
+        # record, else the run's own ranking step; ``run_reads.stored_rank``);
+        # it never calls a model or Jev. No profile or nothing stored for it
+        # is an empty list, never a broken /results.
         try:
             rank_scores = self._run_stored_rank_scores(run_id)
         except Exception:  # noqa: BLE001 - display-only enrichment must never break /results

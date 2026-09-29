@@ -202,7 +202,9 @@ def test_the_jobs_page_reads_a_full_catalog_run_in_under_a_second_each(
         rows = page["payload"]["rows"]
         assert len(rows) == PAGE
         assert all("text" not in row["posting"] for row in rows)
-        assert all(row["outcome"] == "new" and row["rank_score"] is None for row in rows)
+        # The fake model's rank branch scored the run (C1): every row carries its stored score and its rank.
+        assert all(row["outcome"] == "new" and isinstance(row["rank"]["score"], int) for row in rows)
+        assert all(row["rank_score"] is not None and row["rank_score"]["score"] == row["rank"]["score"] for row in rows)
         assessed = [item["posting"]["normalized_url"] for item in page["payload"]["assessments"]]
         assert len(assessed) == ASSESSED
         # Every assessed posting is on the first page, above the others.

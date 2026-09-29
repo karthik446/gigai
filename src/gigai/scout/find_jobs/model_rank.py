@@ -67,6 +67,7 @@ import time
 from typing import TYPE_CHECKING, Any, Mapping
 
 from ...adapters.claude_cli import ClaudeCLIAdapter
+from ...adapters.codex_cli import CodexCLIAdapter
 from ...adapters.port import ModelInvocationError
 from ...canonical import canonical_json_digest, digest_imported_bytes
 from .discovery.storage import atomic_write
@@ -780,6 +781,11 @@ def _resolve(config: "GigAIConfig", adapter_kind: str, *, home_root: Path) -> _R
     effort: str | None = None
     if isinstance(port, ClaudeCLIAdapter):
         port = port.lean_copy()
+        effort = RANK_EFFORT
+    elif isinstance(port, CodexCLIAdapter):
+        # SCOPE-ADD-3 C1 (operator decision A): the ranker's own copy passes
+        # ``-c model_reasoning_effort=low``; the assess binding's port is untouched.
+        port = port.effort_copy()
         effort = RANK_EFFORT
     elif adapter_kind in _CLI_ADAPTERS:
         effort = RANK_EFFORT

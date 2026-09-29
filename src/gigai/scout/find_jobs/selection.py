@@ -7,14 +7,20 @@ row and a target cap, it dedupes near-identical postings, caps how many one
 company can contribute, and fills the remaining cap round-robin across
 companies so no single board can dominate the selection.
 
-uat-bug-010 (UAT N13): the Jev pre-rank has to reach that selection. The
+uat-bug-010 (UAT N13): the pre-rank has to reach that selection. The
 caller used to sort its rows by score and hand them over, and every step
 here then re-sorted by date, so the assess cap went to the newest postings
 rather than the best fits. The scores are now an input (``rank_scores``):
-``rank_rows`` is the one ordering (Jev score, then newest) shared by the
+``rank_rows`` is the one ordering (rank score, then newest) shared by the
 per-company cap and company visiting order below and by acquire's import
 bound (uat-bug-011), so the rows a run imports and the rows it assesses are
 ranked the same way.
+
+SCOPE-ADD-3 C1: the scores come from the run's own model ranking pass
+(``model_rank``), sealed as ``AcquireOutput.rank_scores``. A score that
+names a blocker (``mismatch_flags``) is DEMOTED, never dropped: scored
+unblocked rows first (best score first), then unscored rows, then blocked
+rows (best score first) -- ``model_rank.ordering_key``'s tiers.
 
 Deliberately isolated here, mirroring ``filters.py``'s own reasoning, so
 whichever node wires this in (today: ``market_acquisition.py``'s selection
@@ -62,11 +68,14 @@ class Candidate(Protocol):
 
 
 class Score(Protocol):
-    """The narrow read-only shape this module needs from a Jev rank score.
+    """The narrow read-only shape this module needs from a rank score.
 
-    ``jev_contracts.RankScore`` satisfies this structurally. ``score`` is
-    ``None`` for a row Jev never scored (past the cost cap, or a failed
-    call); such a row ranks with the rows that have no score entry at all.
+    ``jev_contracts.RankScore`` (the sealed ``AcquireOutput.rank_scores``
+    shape) satisfies this structurally. ``score`` is ``None`` for a row the
+    pass never scored (a budget stop, a failed batch); such a row ranks with
+    the rows that have no score entry at all. An optional ``mismatch_flags``
+    (the ranker's blockers), read with ``getattr``, demotes a scored row
+    below every unscored one (SCOPE-ADD-3 C1).
     """
 
     @property
@@ -138,26 +147,35 @@ def _sort_key_newest_first(row: Candidate) -> str:
     return published if isinstance(published, str) and published else ""
 
 
-def _scores_by_url(rank_scores: Sequence[Score]) -> Mapping[str, float]:
-    """``normalized_url -> score`` for the rows Jev actually scored."""
+@dataclass(frozen=True)
+class _Scored:
+    score: float
+    blocked: bool
 
-    scores: dict[str, float] = {}
+
+def _scores_by_url(rank_scores: Sequence[Score]) -> Mapping[str, _Scored]:
+    """``normalized_url -> (score, blocked)`` for the rows the pass actually scored."""
+
+    scores: dict[str, _Scored] = {}
     for item in rank_scores:
         score = item.score
         if isinstance(score, (int, float)) and not isinstance(score, bool):
-            scores[item.normalized_url] = score
+            scores[item.normalized_url] = _Scored(score, bool(getattr(item, "mismatch_flags", ())))
     return scores
 
 
-def _score_key(row: Candidate, scores: Mapping[str, float]) -> tuple[int, float]:
-    # Ascending: scored rows first, best score first; unscored rows last.
-    score = scores.get(row.normalized_url)
-    return (1, 0) if score is None else (0, -score)
+def _score_key(row: Candidate, scores: Mapping[str, _Scored]) -> tuple[int, float]:
+    # Ascending: scored unblocked rows first, best score first; then unscored
+    # rows; then blocked rows, best score first (demoted, never dropped).
+    scored = scores.get(row.normalized_url)
+    if scored is None:
+        return (1, 0)
+    return (2 if scored.blocked else 0, -scored.score)
 
 
 def _rank(
     rows: Sequence[Candidate],
-    scores: Mapping[str, float],
+    scores: Mapping[str, _Scored],
     imported_before: Collection[str] = (),
 ) -> list[Candidate]:
     # Stable passes, least significant first: newest first, then (only for
@@ -179,11 +197,12 @@ def rank_rows(
     *,
     imported_before: Collection[str] = (),
 ) -> list[Candidate]:
-    """``rows`` best first: Jev score descending, then newest, then ``rows`` order.
+    """``rows`` best first: rank score descending, then newest, then ``rows`` order.
 
     A row with no score (no entry, or an unscored entry) ranks after every
-    scored row. With no scores at all this is newest first. Every row comes
-    back; the caller slices what it needs.
+    scored unblocked row and before every blocked one (a score with
+    ``mismatch_flags``: demoted, never dropped). With no scores at all this
+    is newest first. Every row comes back; the caller slices what it needs.
 
     ``imported_before`` (the import cap's rotation, orchestrator decision
     2026-09-27): the ``normalized_url`` of every posting an earlier run
@@ -191,7 +210,7 @@ def rank_rows(
     same score, or no score at all -- the one never imported before goes
     first, then the newest. So without scores, consecutive runs over more
     rows than the cap import different slices until every row has had its
-    turn; with scores the Jev order stands and only its ties rotate. The
+    turn; with scores the rank order stands and only its ties rotate. The
     selection for assessment never passes it (acquire and assess's
     recompute must rank alike).
     """
@@ -216,8 +235,9 @@ def select_for_assessment(
        ``"duplicate"``. Scores play no part: near-identical postings score
        alike, and the newest is the one still open.
     2. Per-company cap: among the deduped survivors, keep at most
-       ``per_company`` per company, best ranked first (``rank_rows``: Jev
-       score, then newest); the rest are dropped as ``"company_cap"``.
+       ``per_company`` per company, best ranked first (``rank_rows``: rank
+       score with blocked rows demoted, then newest); the rest are dropped
+       as ``"company_cap"``.
     3. Round-robin fill: companies are visited in a fixed order (by each
        company's best score, best first; then by its newest surviving row,
        newest first; then by company name) and one row is taken per company

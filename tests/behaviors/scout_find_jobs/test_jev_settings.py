@@ -12,10 +12,9 @@ They are stored in ``<home>/local/scout/jev-settings.json``: the home's (the
 spend ledger is the home's), never under ``cache/``. A file that cannot be
 read turns ranking OFF: a spend switch fails closed.
 
-With ranking off a run's rank pass records ``skipped: disabled`` and asks
-Jev nothing, and a quick assessment asks Jev nothing and stores no reason
-(``RANK_SKIP_REASONS`` is a stored contract's enum). A budget stored as 0
-stops a run before its first call; the environment still wins over it.
+With ranking off a quick assessment asks Jev nothing and stores no reason
+(``RANK_SKIP_REASONS`` is a stored contract's enum). A run never asks Jev
+(SCOPE-ADD-3 C1).
 """
 
 from __future__ import annotations
@@ -38,15 +37,6 @@ from tests.behaviors.scout_find_jobs.test_quick_assess_jev import (  # noqa: F40
     _url_job,
     fx,
     jev,
-)
-from tests.behaviors.scout_find_jobs.test_rank_status import (  # noqa: F401 - fixtures
-    RUN_ID,
-    _acquire,
-    _Jev,
-    _posting,
-    _status_lines,
-    log,
-    substrate,
 )
 
 
@@ -207,135 +197,12 @@ def test_the_settings_are_the_homes_and_clearing_the_cache_keeps_them(home: Path
     assert jev_budget.read_settings(home) == {"jev_daily_budget_usd": 0.1, "jev_rank_enabled": False, "jev_run_cap_usd": 0.25}
 
 
-# --- a run obeys them ------------------------------------------------------------------------
-
-
-def test_a_run_with_ranking_off_records_disabled_and_asks_jev_nothing(substrate: dict, monkeypatch: pytest.MonkeyPatch, log) -> None:
-    jev_budget.write_settings(substrate["home"], rank_enabled=False)
-    jev = _Jev()
-
-    output, status = _acquire(substrate, monkeypatch, [_posting(n) for n in range(3)], jev=jev)
-
-    assert jev.asked == []
-    assert output.rank_scores == () and "rank_scores" not in output.to_json()
-    assert status is not None and status["status"] == "skipped" and status["reason"] == "disabled"
-    assert status["text"] == "skipped: disabled" and status["total"] == 3
-    records = _status_lines(log)
-    assert len(records) == 1 and records[0].levelno == logging.WARNING
-    assert "reason=disabled" in records[0].getMessage() and f"run_id={RUN_ID}" in records[0].getMessage()
-    # The run itself is untouched: every posting is imported and selected by date.
-    assert len(output.rows) == 3 and len(output.selected_postings) == 3
-    # Nothing was paid for.
-    assert list((substrate["home"] / "cache" / "scout" / "jev").glob("spend/*.jsonl")) == []
-
-
-def test_a_stored_budget_of_zero_stops_a_run_before_its_first_call_and_the_environment_wins(
-    substrate: dict, monkeypatch: pytest.MonkeyPatch, log
-) -> None:
-    jev_budget.write_settings(substrate["home"], daily_budget_usd=0)
-    jev = _Jev()
-
-    _output, status = _acquire(substrate, monkeypatch, [_posting(n) for n in range(3)], jev=jev)
-
-    assert jev.asked == []
-    assert status is not None and status["reason"] == "daily_budget_reached" and status["daily_budget_usd"] == "0.00"
-
-    monkeypatch.setenv(jev_budget.DAILY_BUDGET_ENV, "1.0")
-    second = "run_00000000-0000-4000-8000-000000000023"
-    _again, scored = _acquire(substrate, monkeypatch, [_posting(n) for n in range(10, 13)], jev=jev, run_id=second)
-
-    assert len(jev.asked) == 3
-    assert scored is not None and scored["text"] == "scored 3 of 3" and scored["daily_budget_usd"] == "1.00"
-
-
-# --- the per-run cap: one source of truth, env > file > default ------------------------------
-
-
-def test_the_stored_run_cap_bounds_the_search_and_the_environment_still_wins(
-    substrate: dict, monkeypatch: pytest.MonkeyPatch, log
-) -> None:
-    jev_budget.write_settings(substrate["home"], run_cap_usd=0.005)
-    jev = _Jev()
-
-    output, status = _acquire(substrate, monkeypatch, [_posting(n) for n in range(20)], jev=jev)
-
-    # 0.00048 a call, 8 at a time: 8 calls cost $0.0038, the next 8 pass $0.005 -- same
-    # shape as GIGAI_JEV_COST_CAP_USD (test_rank_status.py), now from the settings file.
-    assert len(jev.asked) == 16
-    assert status is not None and status["reason"] == "cost_cap_reached" and status["cost_cap_usd"] == "0.005"
-    assert [item.score is not None for item in output.rank_scores] == [True] * 16 + [False] * 4
-
-    # The environment still wins over the stored cap.
-    monkeypatch.setenv("GIGAI_JEV_COST_CAP_USD", "0")
-    second = "run_00000000-0000-4000-8000-000000000024"
-    _again, skipped = _acquire(substrate, monkeypatch, [_posting(n) for n in range(30, 33)], jev=jev, run_id=second)
-    assert skipped is not None and skipped["reason"] == "cost_cap_reached" and skipped["cost_cap_usd"] == "0.00"
-    assert len(jev.asked) == 16  # unchanged: the second run made no new calls
-
-
-def test_jev_disclosure_fixes_rank_run_cost_cap_reads_the_one_source_of_truth() -> None:
-    """market_acquisition._rank_candidates_with_status reads
-    jev_budget.run_cost_cap_usd, not a private env/default fallback."""
-
-    import inspect
-
-    from gigai.scout.find_jobs import market_acquisition
-
-    source = inspect.getsource(market_acquisition._rank_candidates_with_status)
-    assert "jev_budget.run_cost_cap_usd(home_root)" in source
-    assert "GIGAI_JEV_COST_CAP_USD" not in source
-
-
-def test_the_jev_console_notice_prints_once_per_process_never_when_off_or_no_key(
-    substrate: dict, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """jev-disclosure-fixes TARGET 2: one INFO line the first time a search's
-    own rank pass is about to call Jev in this process; never repeated; never
-    when ranking is off or there is no key; never carries resume text."""
-
-    from gigai.scout.find_jobs import market_acquisition
-
-    monkeypatch.setattr(market_acquisition, "_jev_notice_given", False)
-    monkeypatch.setattr(logging.getLogger("gigai.scout.server"), "propagate", True)
-    caplog.set_level(logging.INFO, logger="gigai.scout.server")
-    jev = _Jev()
-
-    NOTICE = "Jev: ranking with your profile resume (first 2,000 chars); turn off with Settings > Rank with Jev"
-
-    output, _status = _acquire(substrate, monkeypatch, [_posting(n) for n in range(2)], jev=jev)
-    notices = [record for record in caplog.records if record.getMessage() == NOTICE]
-    assert len(notices) == 1
-    assert not any("resume" in record.getMessage().lower() and record.getMessage() != NOTICE for record in caplog.records)
-
-    # A second run in the same process: no repeat.
-    caplog.clear()
-    second = "run_00000000-0000-4000-8000-000000000025"
-    _acquire(substrate, monkeypatch, [_posting(n) for n in range(10, 12)], jev=jev, run_id=second)
-    assert [record for record in caplog.records if record.getMessage() == NOTICE] == []
-
-
-def test_the_jev_console_notice_is_never_printed_when_off_or_no_key(
-    substrate: dict, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    from gigai.scout.find_jobs import market_acquisition
-
-    NOTICE = "Jev: ranking with your profile resume (first 2,000 chars); turn off with Settings > Rank with Jev"
-    monkeypatch.setattr(logging.getLogger("gigai.scout.server"), "propagate", True)
-    caplog.set_level(logging.INFO, logger="gigai.scout.server")
-
-    monkeypatch.setattr(market_acquisition, "_jev_notice_given", False)
-    jev_budget.write_settings(substrate["home"], rank_enabled=False)
-    _acquire(substrate, monkeypatch, [_posting(n) for n in range(2)], jev=_Jev())
-    assert [record for record in caplog.records if record.getMessage() == NOTICE] == []
-
-    caplog.clear()
-    jev_budget.write_settings(substrate["home"], rank_enabled=True)
-    from gigai.scout.find_jobs.jev_client import JEV_API_KEY_ENV_VAR
-
-    monkeypatch.delenv(JEV_API_KEY_ENV_VAR, raising=False)
-    second = "run_00000000-0000-4000-8000-000000000026"
-    _acquire(substrate, monkeypatch, [_posting(n) for n in range(3, 5)], jev=_Jev(), run_id=second)
-    assert [record for record in caplog.records if record.getMessage() == NOTICE] == []
+# --- a run no longer asks Jev ------------------------------------------------------------------
+# SCOPE-ADD-3 C1: the run's ranking step is the operator's own model
+# (``model_rank``), never Jev, so the run-path tests that were here (ranking
+# off -> ``skipped: disabled``, the stored budget/cap bounding a run's Jev
+# pass, the once-per-process Jev notice) were removed with the Jev pre-rank.
+# ``test_run_rank_step.py`` pins that the run path builds no Jev client.
 
 
 # --- quick assess obeys them -----------------------------------------------------------------

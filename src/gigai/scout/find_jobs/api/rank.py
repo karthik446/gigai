@@ -1,120 +1,87 @@
-"""P6: ``POST /api/runs/{run_id}/rank`` -- Jev pre-rank for one run's postings.
+"""``POST /api/runs/{run_id}/rank`` -- re-rank one run with the operator's own model.
 
-Resolves the run's own sealed ``outputs/acquire.json`` rows (the same file
-``carried_forward_assessments`` in ``server.py`` reads) against the given or
-selected profile's resume and scores them with ``jev_rank`` (cache-first,
-cost-capped, under the day's budget). It never rewrites the sealed acquire
-output.
+SCOPE-ADD-3 C1: a re-rank is a durable run record of the ``rank`` kind
+(``rank_records``: ``runs/rank_<uuid>/``, journal-committed details and
+``outputs/rank.json``, run-local progress), no longer a daemon thread in a
+process-local dict, and no longer Jev. The run's own model target (the
+local CLI, ``codex_cli`` by default) ranks the run's sealed postings
+against the given or selected profile's resume and the run's sealed
+preferences; the sealed run is never rewritten.
 
-Who may spend (operator decision 2026-09-28: Jev had cost $1.00): a
-find-jobs run, and ``POST /rank``, which is an explicit "Score with Jev".
-A page that READS a run never does:
+The body (``RankRequest`` fields plus two flags that are not):
 
-* ``compute_rank_scores`` -- what ``GET /results`` attaches as
-  ``rank_scores`` -- reads the score cache and asks Jev nothing;
-* ``POST /rank`` with ``"start": true`` in its body is the click. It does
-  not wait for Jev: it starts one ranking pass in the background, or joins
-  the one already running for the same ``(run, profile, resume revision)``
-  (single flight: a second click, a second tab never start a second pass
-  or spend twice), and answers at once with the scores cached so far and a
-  ``rank_status`` whose ``status`` is ``running``.
-* ``POST /rank`` WITHOUT ``start`` (``{}``, what a page sends when it
-  opens a run, and what a caller repeats while a pass runs) starts
-  nothing: the scores cached so far, and ``running`` while a pass runs,
-  then that pass's own result (what it cost, why it stopped) until the
-  next click, else ``not_requested`` when postings are still unscored.
+* ``{}`` -- a page reading the run: starts nothing. It answers the scores of
+  the newest rank record for this ``(run, profile, resume revision, prefs,
+  prompt)`` -- the live ones while its pass runs -- else the run's own
+  sealed scores (its ranking step), with ``rank_status`` ``running`` /
+  ``scored`` / ``skipped`` / ``not_requested``.
+* ``{"start": true}`` -- the click. Single flight: joins the pass running
+  for the same key (in this process or another live one), resumes a record
+  a restart interrupted (its completed batches come from the score cache),
+  answers a ``complete`` record as it is, or starts a new record. It never
+  waits for the model.
+* ``{"cancel": true}`` -- stops the running pass for the key: no further
+  model call starts; the record finishes ``cancelled`` with the batches
+  that landed.
 
-uat-bug-021: failing open is never silent. Every answer carries a
-``jev_rank.RankStatus`` (``scored N of M`` / ``skipped: <reason>``) and a
-pass logs it once. Reasons here: ``error:<ExceptionType>`` (the project
-could not be resolved, or anything unexpected), ``no_run_output`` (the
-run's sealed postings could not be read), ``no_candidates`` (it has no
-postings), ``no_profile``, ``no_key``, ``no_resume``, ``not_requested``
-(unscored postings and no pass was asked for), ``disabled`` ("Rank with
-Jev" is off, ``jev_budget.rank_enabled``: a click starts no pass and
-nothing asks Jev), and the pass's own
-``cost_cap_reached`` / ``daily_budget_reached`` / ``jev_error:<code>``.
-
-``GET /api/jev/usage`` (``JevUsageRoutesMixin``): today's Jev spend and the
-daily budget, ``jev_budget.usage``. ``POST /rank`` answers the same block
-as ``usage``.
-
-Per-run cap (jev-disclosure-fixes, TARGET 4): ``_effective_cost_cap`` reads
-``jev_budget.run_cost_cap_usd(home_root)`` (env > the operator's setting >
-``jev_rank.DEFAULT_COST_CAP_USD``); a request's own ``cost_cap_usd`` may only
-LOWER that cap, never raise it above what the operator allows.
+Every answer keeps the ``RankResponse`` keys the page reads (``scores`` in
+the run's own order, ``total_cost_usd`` ``"0"``: a local CLI bills no
+dollars here) plus ``rank_status`` and ``rank_record`` (the record's id,
+status -- ``interrupted`` when no live process runs it --, ranked/total).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from http import HTTPStatus
 import json
 import logging
-from http import HTTPStatus
 from pathlib import Path
-import threading
 
 import httpx
 
 from ....journal import JournalArtifactMissingError, read_committed_artifact
-from .. import jev_budget
-from ..contracts import AcquireOutput, FindJobsContractError
-from ..jev_contracts import RankRequest, RankResponse
-from ..jev_rank import (
-    RUN_CONCURRENCY,
-    RUN_RETRIES,
-    RankPreferences,
-    RankStatus,
-    log_rank_status,
-    rank_postings_report,
-    read_cached_scores,
-)
+from .. import jev_budget, rank_records, rank_run
+from ..contracts import AcquireOutput, FindJobsContractError, FindJobsRunInput
+from ..jev_contracts import RankRequest, RankResponse, RankScore
+from ..model_rank import RankResult
+from ..selection import rank_rows
 
 _logger = logging.getLogger("gigai.scout.server")
 
 
 @dataclass(frozen=True)
+class _Skip:
+    """Why a run cannot be ranked: ``reason`` and how many postings it has."""
+
+    reason: str
+    total: int = 0
+
+
+@dataclass(frozen=True)
 class _Resolved:
-    """What a ranking of one run needs: its postings, the profile, the resume.
-
-    ``prefs`` is the exact ``RankPreferences`` this route sends Jev (built
-    once, here, so the read path -- ``_cached``/``read_cached_scores`` --
-    and the write path -- ``rank_postings_report`` in ``_rank_run`` -- key
-    the cache identically; uat-bug-021 decision d, the cache key includes a
-    digest of these preferences).
-    """
-
-    project_id: str
-    rows: tuple
-    profile_id: str
-    resume_revision_id: str
-    titles: tuple[str, ...]
-    resume_text: str
-    prefs: RankPreferences
+    source: rank_records.RankInput
+    acquire: AcquireOutput
 
 
-def _skip(
-    run_id: str, reason: str, *, home_root, total: int = 0, exc: BaseException | None = None
-) -> tuple[RankResponse, RankStatus]:
+def _skip(run_id: str, reason: str, *, total: int = 0, exc: BaseException | None = None) -> _Skip:
     if exc is not None:
         # The type only: a message may name a path or quote a record.
-        _logger.warning("jev rank (%s): %s: %s", run_id, reason, type(exc).__name__)
-    return RankResponse(run_id, (), "0", False, 0), RankStatus.skipped(reason, total=total, home_root=home_root)
+        _logger.warning("rank (%s): %s: %s", run_id, reason, type(exc).__name__)
+    return _Skip(reason, total)
 
 
-def _resolve(
-    *, home_root, target, run_id: str, profile_id: str | None
-) -> _Resolved | tuple[RankResponse, RankStatus]:
-    """The run's postings and the profile's resume, or why there are none."""
+def _resolve(*, home_root, target, run_id: str, profile_id: str | None) -> _Resolved | _Skip:
+    """The run's sealed postings, input and the profile's resume -- or why there are none."""
 
+    from ....canonical import parse_json_bytes
     from ....workpad import resolve_workpad
     from ...profile_records import list_profiles, selected_profile
-    from .. import jev_client
 
     try:
         resolved = resolve_workpad(home_root=home_root, requested_target=target, gig_id=None, allow_semantic_state=True)
     except Exception as exc:  # noqa: BLE001 - display-only: the type is recorded and logged
-        return _skip(run_id, f"error:{type(exc).__name__}", home_root=home_root, exc=exc)
+        return _skip(run_id, f"error:{type(exc).__name__}", exc=exc)
     try:
         raw, _commit = read_committed_artifact(
             workpad=resolved.path,
@@ -124,11 +91,16 @@ def _resolve(
         )
         acquire = AcquireOutput.from_json(json.loads(raw))
     except (JournalArtifactMissingError, ValueError, FindJobsContractError, OSError) as exc:
-        return _skip(run_id, "no_run_output", home_root=home_root, exc=exc)
+        return _skip(run_id, "no_run_output", exc=exc)
     rows = tuple(item.posting for item in acquire.rows)
     if not rows:
-        return _skip(run_id, "no_candidates", home_root=home_root)
+        return _skip(run_id, "no_candidates")
     total = len(rows)
+    sealed_path = resolved.path / "runs" / run_id / "sealed" / "find-jobs-run-input.json"
+    try:
+        run_input = FindJobsRunInput.from_json(parse_json_bytes(sealed_path.read_bytes()))
+    except (OSError, ValueError, FindJobsContractError) as exc:
+        return _skip(run_id, "no_run_input", total=total, exc=exc)
 
     profile = None
     try:
@@ -137,18 +109,10 @@ def _resolve(
         else:
             profile = selected_profile(resolved, home_root=home_root, target=target)
     except Exception as exc:  # noqa: BLE001 - display-only: the type is logged
-        _logger.warning("jev rank (%s): the profile could not be read: %s", run_id, type(exc).__name__)
+        _logger.warning("rank (%s): the profile could not be read: %s", run_id, type(exc).__name__)
         profile = None
     if profile is None:
-        return _skip(run_id, "no_profile", home_root=home_root, total=total)
-
-    try:
-        has_key = jev_client.has_api_key(home_root=home_root)
-    except Exception as exc:  # noqa: BLE001 - display-only: the type is recorded and logged
-        return _skip(run_id, f"error:{type(exc).__name__}", home_root=home_root, total=total, exc=exc)
-    if not has_key:
-        return _skip(run_id, "no_key", home_root=home_root, total=total)
-
+        return _skip(run_id, "no_profile", total=total)
     try:
         from .... import private_records
 
@@ -163,255 +127,161 @@ def _resolve(
         content = record.get("content")
         resume_text = content.decode("utf-8", errors="replace") if isinstance(content, bytes) else None
     except Exception as exc:  # noqa: BLE001 - display-only: the type is logged
-        _logger.warning("jev rank (%s): the profile's resume could not be read: %s", run_id, type(exc).__name__)
+        _logger.warning("rank (%s): the profile's resume could not be read: %s", run_id, type(exc).__name__)
         resume_text = None
     if not resume_text:
-        return _skip(run_id, "no_resume", home_root=home_root, total=total)
-    titles = tuple(profile.titles)
-    return _Resolved(
-        project_id=resolved.project_id,
-        rows=rows,
+        return _skip(run_id, "no_resume", total=total)
+    # The pass asks about the rows in the run's own rank order, so a pass
+    # its call cap cuts short still scores the most promising rows.
+    ordered = tuple(rank_rows(rows, acquire.rank_scores))
+    source = rank_records.RankInput(
+        workpad_resolved=resolved,
+        parent_run_id=run_id,
+        rows=ordered,  # type: ignore[arg-type]
+        acquire_output_digest=acquire.digest(),
         profile_id=profile.profile_id,
         resume_revision_id=profile.resume_ref.revision_id,
-        titles=titles,
         resume_text=resume_text,
-        # Matches the RankPreferences built for rank_postings_report in
-        # _rank_run below exactly: this route does not yet read
-        # find-jobs.json's countries/visa flag (a pre-existing gap, not
-        # this packet's target -- only the cache key changed here).
-        prefs=RankPreferences(target_titles=titles, countries=(), visa_sponsorship_required=False),
+        prefs=rank_run.rank_prefs(run_input.config),
+        model_target=run_input.model_target.value,
+        home_root=Path(home_root),
+    )
+    return _Resolved(source, acquire)
+
+
+def _scores_from_record(
+    rows, record: rank_records.RankRecord | None
+) -> tuple[tuple[RankScore, ...], bool]:
+    """One entry per row from ``record`` (sealed result when finished, else live lines); ``(scores, any)``."""
+
+    if record is None:
+        return (), False
+    result = record.result()
+    if result is not None:
+        scores = rank_run.to_rank_scores(result, rows)
+        return scores, any(item.score is not None for item in scores)
+    live = rank_records.live_scores(record)
+    scores = tuple(_live_score(row, live.get(row.normalized_url)) for row in rows)
+    return scores, any(item.score is not None for item in scores)
+
+
+def _live_score(row, entry: dict | None) -> RankScore:
+    score = entry.get("score") if isinstance(entry, dict) else None
+    score = score if isinstance(score, int) and not isinstance(score, bool) else None
+    blockers = tuple(str(item) for item in (entry.get("blockers") or ())) if isinstance(entry, dict) and score is not None else ()
+    return RankScore(
+        normalized_url=row.normalized_url,
+        content_sha256=row.content_sha256 or "unknown",
+        fit=rank_run.fit_for(score),
+        score=score,
+        reasons=(),
+        mismatch_flags=blockers,
+        hidden_by_default=False,
+        cost_usd="0",
+        cached=False,
     )
 
 
-def _cached(resolved: _Resolved, *, home_root, target, run_id: str) -> RankResponse:
-    scores = read_cached_scores(
-        resolved.rows,
-        resume_text=resolved.resume_text,
-        prefs=resolved.prefs,
-        profile_id=resolved.profile_id,
-        resume_revision_id=resolved.resume_revision_id,
-        home_root=home_root,
-        target=target,
-    )
-    return RankResponse(run_id, scores, "0.000000", False, sum(1 for item in scores if item.score is None))
+def _status(status: str, scored: int, total: int, reason: str | None) -> dict[str, object]:
+    """``rank_status`` in the shape ``GET /progress`` serves (``rank_run.status_json``)."""
+
+    text = {
+        "running": f"ranking: {scored:,} of {total:,}",
+        "scored": f"scored {scored} of {total}",
+    }.get(status, f"skipped: {reason}" if status == "skipped" else f"{status}: {reason}")
+    return {
+        "status": status,
+        "ranker": "model",
+        "scored": scored,
+        "total": total,
+        "reason": reason,
+        "text": text,
+        "line": f"Ranking: {text}",
+        "cost_cap_usd": None,
+        "cost_usd": "0",
+        "throttled": None,
+        "spent_today_usd": None,
+        "daily_budget_usd": None,
+        "usage_line": None,
+    }
 
 
-def compute_rank_scores(
-    *, home_root, target, run_id: str, profile_id: str | None, cost_cap_usd: float | None = None
-) -> RankResponse:
-    """The scores ALREADY paid for, for ``run_id``'s postings against
-    ``profile_id`` (or the gig's selected profile). Jev is never asked: a
-    page that reads a run does not spend (``cost_cap_usd`` is accepted for
-    the callers that pass it and has nothing to bound). One entry per
-    posting, unscored where no score is cached. Never raises -- run,
-    profile or resume unavailable, or no key, is an empty ``RankResponse``,
-    so a display-only caller (``/results``) is never broken by it.
-    """
+def _body(run_id: str, scores: tuple[RankScore, ...], status: dict[str, object], record) -> dict[str, object]:
+    unscored = sum(1 for item in scores if item.score is None)
+    response = RankResponse(run_id, scores, "0", bool(status.get("reason") and str(status["reason"]).startswith("call_budget")), unscored)
+    return {**response.to_json(), "rank_status": status, "rank_record": rank_records.record_summary(record)}
+
+
+def rank_request(
+    *, home_root, target, run_id: str, profile_id: str | None, start: bool = False, cancel: bool = False
+) -> dict[str, object]:
+    """What ``POST /rank`` answers, at once. Only ``start`` can start a pass; only ``cancel`` stops one."""
 
     try:
-        resolved = _resolve(home_root=home_root, target=target, run_id=run_id, profile_id=profile_id)
-        if not isinstance(resolved, _Resolved):
-            return resolved[0]
-        return _cached(resolved, home_root=home_root, target=target, run_id=run_id)
-    except Exception as exc:  # noqa: BLE001 - display-only: the type is logged
-        _logger.warning("jev rank (%s): cached scores could not be read: %s", run_id, type(exc).__name__)
-        return RankResponse(run_id, (), "0", False, 0)
-
-
-def rank_run(
-    *,
-    home_root,
-    target,
-    run_id: str,
-    profile_id: str | None,
-    cost_cap_usd: float | None = None,
-    where: str = "rank",
-) -> tuple[RankResponse, RankStatus]:
-    """One whole ranking pass, waited for: the scores and what happened, logged once.
-
-    What ``POST /rank`` runs in the background. INFO when every posting was
-    scored, WARNING for a skip or a pass cut short. Never raises.
-    """
-
-    response, status = _rank_run(
-        home_root=home_root, target=target, run_id=run_id, profile_id=profile_id, cost_cap_usd=cost_cap_usd, where=where
-    )
-    log_rank_status(status, run_id=run_id, where=where)
-    return response, status
-
-
-def _effective_cost_cap(home_root, requested: float | None) -> float:
-    """The per-run cap in force: ``jev_budget.run_cost_cap_usd`` (env > the
-    operator's setting > ``jev_rank.DEFAULT_COST_CAP_USD``), or ``requested``
-    when it is lower. A request's own ``cost_cap_usd`` may only LOWER the run
-    cap, never raise it (jev-disclosure-fixes, TARGET 4)."""
-
-    cap = jev_budget.run_cost_cap_usd(home_root)
-    if requested is not None and requested < cap:
-        return requested
-    return cap
-
-
-def _rank_run(
-    *,
-    home_root,
-    target,
-    run_id: str,
-    profile_id: str | None,
-    cost_cap_usd: float | None,
-    where: str,
-    resolved: _Resolved | None = None,
-) -> tuple[RankResponse, RankStatus]:
-    from .. import jev_client
-    from ..jev_client import JevClient
-
-    total = 0
-    try:
-        found = resolved or _resolve(home_root=home_root, target=target, run_id=run_id, profile_id=profile_id)
-        if not isinstance(found, _Resolved):
-            return found
-        total = len(found.rows)
-        if not jev_budget.rank_enabled(home_root):  # ui-pass: "Rank with Jev" is off
-            return _skip(run_id, "disabled", home_root=home_root, total=total)
-        cap = _effective_cost_cap(home_root, cost_cap_usd)
-        api_key = jev_client.require_api_key(home_root=home_root)
-        http_client = _jev_http_client()
-        try:
-            report = rank_postings_report(
-                found.rows,
-                client=JevClient(api_key, http_client),
-                resume_text=found.resume_text,
-                prefs=found.prefs,
-                profile_id=found.profile_id,
-                resume_revision_id=found.resume_revision_id,
-                home_root=home_root,
-                target=target,
-                cost_cap_usd=cap,
-                concurrency=RUN_CONCURRENCY,
-                retries=RUN_RETRIES,
-                where=where,
-                run_id=run_id,
-            )
-        finally:
-            http_client.close()
+        found = _resolve(home_root=home_root, target=target, run_id=run_id, profile_id=profile_id)
     except Exception as exc:  # noqa: BLE001 - display-only: the type is recorded and logged
-        return _skip(run_id, f"error:{type(exc).__name__}", home_root=home_root, total=total, exc=exc)
-    unscored = sum(1 for item in report.scores if item.score is None)
-    response = RankResponse(run_id, report.scores, f"{report.total_cost_usd:.6f}", report.capped, unscored)
-    return response, RankStatus.from_report(report, cost_cap_usd=cap)
-
-
-def _jev_http_client() -> httpx.Client:
-    """The transport a ``/rank`` call uses -- its own module-level function
-    so ``bindings.py``'s test seam (``GIGAI_SCOUT_FIND_JOBS_TEST_JEV``) can
-    patch it exactly like ``market_acquisition._jev_http_client``."""
-
-    return httpx.Client(timeout=30.0)
-
-
-# --- single flight -----------------------------------------------------------------------
-
-
-@dataclass
-class _Pass:
-    """One ranking pass in this server process."""
-
-    thread: threading.Thread | None = None
-    result: tuple[RankResponse, RankStatus] | None = None
-    done: threading.Event = field(default_factory=threading.Event)
-
-
-_PASSES: dict[tuple[str, str, str, str, str], _Pass] = {}
-_PASSES_LOCK = threading.Lock()
-
-
-def start_or_join_rank(
-    *,
-    home_root,
-    target,
-    run_id: str,
-    profile_id: str | None,
-    cost_cap_usd: float | None = None,
-    start: bool = False,
-) -> tuple[RankResponse, RankStatus]:
-    """What ``POST /rank`` answers, at once. Only ``start=True`` can spend.
-
-    * a pass is running for this ``(run, profile, resume revision)``: the
-      scores cached so far, ``status: running``. Nothing is started.
-    * ``start`` and none is running: every posting is already scored ->
-      ``scored N of N``, no pass; else a pass starts in the background ->
-      ``status: running``.
-    * no ``start`` and none is running: the result of the pass that ended
-      last, if one did; else the scores cached so far (``not_requested``
-      when some posting has none).
-
-    The passes are this process's (the Scout server is one process); a
-    run's own pass in its child process ends before the run's output that
-    this reads exists.
-    """
-
-    try:
-        resolved = _resolve(home_root=home_root, target=target, run_id=run_id, profile_id=profile_id)
-    except Exception as exc:  # noqa: BLE001 - display-only: the type is recorded and logged
-        return _skip(run_id, f"error:{type(exc).__name__}", home_root=home_root, exc=exc)
-    if not isinstance(resolved, _Resolved):
+        found = _skip(run_id, f"error:{type(exc).__name__}", exc=exc)
+    if isinstance(found, _Skip):
         if start:
-            log_rank_status(resolved[1], run_id=run_id, where="rank")
-        return resolved
-    key = (str(Path(home_root)), resolved.project_id, run_id, resolved.profile_id, resolved.resume_revision_id)
-    cap = _effective_cost_cap(home_root, cost_cap_usd)
+            _logger.warning("rank (%s, rank): skipped: %s", run_id, found.reason)
+        return _body(run_id, (), _status("skipped", 0, found.total, found.reason), None)
 
-    with _PASSES_LOCK:
-        current = _PASSES.get(key)
-        running = current is not None and not current.done.is_set()
-        if not running:
-            if not start and current is not None and current.result is not None:
-                return current.result
-            cached = _cached(resolved, home_root=home_root, target=target, run_id=run_id)
-            scored = len(cached.scores) - cached.unscored
-            spent, budget = jev_budget.spent_today_usd(home_root), jev_budget.daily_budget_usd(home_root)
-            if cached.unscored == 0:
-                return cached, RankStatus("scored", scored, scored, None, cap, 0.0, None, spent, budget)
-            enabled = jev_budget.rank_enabled(home_root)
-            if not start or not enabled:
-                # ui-pass: with "Rank with Jev" off a click starts no pass
-                # either; the unscored postings say why.
-                status = "scored" if scored else "skipped"
-                reason = "not_requested" if enabled else "disabled"
-                if start:
-                    log_rank_status(
-                        RankStatus(status, scored, len(cached.scores), reason, cap, 0.0, None, spent, budget),
-                        run_id=run_id, where="rank",
-                    )
-                return cached, RankStatus(status, scored, len(cached.scores), reason, cap, 0.0, None, spent, budget)
-            current = _Pass()
-            _PASSES[key] = current
+    source = found.source
+    rows = tuple(item.posting for item in found.acquire.rows)
+    total = len(rows)
+    outcome = rank_records.start_or_join(source, start=start and not cancel)
+    record = outcome.record
+    if cancel and record is not None and record.status == "running":
+        rank_records.cancel(source.workpad_resolved.path, record.record_id)
+    if start and not cancel:
+        _logger.info("rank (%s, rank): %s %s", run_id, outcome.action, record.record_id if record else "-")
 
-            def work(this: _Pass = current) -> None:
-                try:
-                    response, status = _rank_run(
-                        home_root=home_root, target=target, run_id=run_id, profile_id=profile_id,
-                        cost_cap_usd=cost_cap_usd, where="rank", resolved=resolved,
-                    )
-                    log_rank_status(status, run_id=run_id, where="rank")
-                    this.result = (response, status)
-                finally:
-                    this.done.set()
+    scores, any_scored = _scores_from_record(rows, record)
+    if record is not None and record.status == "running":
+        scored = sum(1 for item in scores if item.score is not None)
+        live = record.live_status()
+        if live == "running":
+            return _body(run_id, scores, _status("running", scored, total, None), record)
+        return _body(run_id, scores, _status("scored" if scored else "skipped", scored, total, live), record)
+    if record is not None and record.status in rank_records.FINISHED and any_scored:
+        scored = sum(1 for item in scores if item.score is not None)
+        reason = record.details.get("fail_open_reason")
+        return _body(run_id, scores, _status("scored", scored, total, reason if isinstance(reason, str) else None), record)
 
-            current.thread = threading.Thread(target=work, name=f"jev-rank-{run_id}", daemon=True)
-            current.thread.start()
+    # No re-rank with scores: the run's own ranking step (sealed on its acquire output).
+    own = {item.normalized_url: item for item in found.acquire.rank_scores}
+    sealed = tuple(own.get(row.normalized_url) or _live_score(row, None) for row in rows)
+    scored = sum(1 for item in sealed if item.score is not None)
+    if record is not None and record.status in rank_records.FINISHED:
+        reason = record.details.get("fail_open_reason") or record.status
+        return _body(run_id, sealed, _status("scored" if scored else "skipped", scored, total, str(reason)), record)
+    if scored == total:
+        return _body(run_id, sealed, _status("scored", scored, total, None), record)
+    return _body(run_id, sealed, _status("scored" if scored else "skipped", scored, total, "not_requested"), record)
 
-    cached = _cached(resolved, home_root=home_root, target=target, run_id=run_id)
-    scored = len(cached.scores) - cached.unscored
-    return cached, RankStatus.running(scored=scored, total=len(cached.scores), cost_cap_usd=cap, home_root=home_root)
+
+def newest_rank_result(resolved, run_id: str, *, profile_id: str | None, resume_revision_id: str | None) -> RankResult | None:
+    """The newest finished re-rank of ``run_id`` for that profile + resume revision (the reads' source)."""
+
+    found = rank_records.newest_finished(
+        resolved.path, run_id, profile_id=profile_id, resume_revision_id=resume_revision_id
+    )
+    return found[1] if found is not None else None
 
 
 def wait_for_rank(*, timeout: float | None = None) -> bool:
-    """Wait until no pass is running in this process; false when ``timeout`` ran out first."""
+    """Wait until no re-rank pass runs in this process; false when ``timeout`` ran out first."""
 
-    with _PASSES_LOCK:
-        running = [item for item in _PASSES.values() if not item.done.is_set()]
-    return all(item.done.wait(timeout) for item in running)
+    return rank_records.wait_for_passes(timeout=timeout)
+
+
+def _jev_http_client() -> httpx.Client:
+    """Kept for ``bindings.py``'s ``GIGAI_SCOUT_FIND_JOBS_TEST_JEV`` seam only (C2 deletes it).
+
+    SCOPE-ADD-3 C1: ``/rank`` never calls Jev.
+    """
+
+    return httpx.Client(timeout=30.0)
 
 
 class RankRoutesMixin:
@@ -423,11 +293,12 @@ class RankRoutesMixin:
             return
         try:
             payload = dict(body) if isinstance(body, dict) else {}
-            # Not a RankRequest field: the one thing that tells a click
-            # ("Score with Jev") from a page reading the run.
+            # Not RankRequest fields: what tells a click ("start") or a stop
+            # ("cancel") from a page reading the run.
             start = payload.pop("start", False)
-            if type(start) is not bool:
-                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "start must be true or false")
+            cancel = payload.pop("cancel", False)
+            if type(start) is not bool or type(cancel) is not bool:
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "start and cancel must be true or false")
                 return
             payload.setdefault("run_id", run_id)
             request = RankRequest.from_json(payload)
@@ -437,30 +308,21 @@ class RankRoutesMixin:
         if request.run_id != run_id:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "run_id in the body must match the URL")
             return
-        cost_cap = None
-        if request.cost_cap_usd is not None:
-            try:
-                cost_cap = float(request.cost_cap_usd)
-            except ValueError:
-                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "cost_cap_usd must be a decimal string")
-                return
-        response, status = start_or_join_rank(
-            home_root=self._backend.home_root,
-            target=self._backend.target,
-            run_id=run_id,
-            profile_id=request.profile_id,
-            cost_cap_usd=cost_cap,
-            start=start,
-        )
-        # uat-bug-021: additive, next to the RankResponse's own keys.
         self._write_json(
             HTTPStatus.OK,
-            {**response.to_json(), "rank_status": status.to_json(), "usage": jev_budget.usage(self._backend.home_root)},
+            rank_request(
+                home_root=self._backend.home_root,
+                target=self._backend.target,
+                run_id=run_id,
+                profile_id=request.profile_id,
+                start=start,
+                cancel=cancel,
+            ),
         )
 
 
 class JevUsageRoutesMixin:
-    """``Handler`` mixin: ``GET /api/jev/usage`` -- today's Jev spend and the daily budget."""
+    """``Handler`` mixin: ``GET /api/jev/usage`` -- today's Jev spend and the daily budget (C2 removes it)."""
 
     def _handle_get_jev_usage(self) -> None:
         self._write_json(HTTPStatus.OK, jev_budget.usage(self._backend.home_root))
@@ -469,8 +331,7 @@ class JevUsageRoutesMixin:
 __all__ = [
     "JevUsageRoutesMixin",
     "RankRoutesMixin",
-    "compute_rank_scores",
-    "rank_run",
-    "start_or_join_rank",
+    "newest_rank_result",
+    "rank_request",
     "wait_for_rank",
 ]

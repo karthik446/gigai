@@ -170,6 +170,53 @@ _TEST_JS_SHELL_HTML = (
 )
 
 
+_TEST_BULK_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_BULK_POSTINGS"
+_TEST_BULK_BEST_OLDEST = 20
+_TEST_BULK_BEST_OLDEST_SMALL = 3  # a bulk of at most 100 jobs: the 3 oldest
+
+
+def _test_bulk_postings() -> list[dict[str, object]]:
+    """``N`` Greenhouse listing rows when ``GIGAI_SCOUT_FIND_JOBS_TEST_BULK_POSTINGS=N`` (``[]`` otherwise).
+
+    SCOPE-ADD-3 C1 follow-up: the api-e2e rank journeys need more postings
+    than the one-row fixture, in a shape where rank order and date order
+    DISAGREE. Job ``i`` is ``i`` minutes older than job 0 (the newest); the
+    :data:`_TEST_BULK_BEST_OLDEST` oldest (the 3 oldest of a bulk of at most 100) carry ``fit 95`` in their title (the
+    rank fixture's score, see ``_test_model_rank_reply``), every other job a
+    ``fit`` of 30-69, and job 0 (the newest) scores 99 but its text says a
+    security clearance is required, so the ranker names a blocker for it.
+    Read only when the test-HTTP seam is on; production never sets it.
+    """
+
+    try:
+        count = int(os.environ.get(_TEST_BULK_ENV, "0"))
+    except ValueError:
+        return []
+    best_oldest = _TEST_BULK_BEST_OLDEST if count > 100 else _TEST_BULK_BEST_OLDEST_SMALL
+    jobs: list[dict[str, object]] = []
+    for index in range(max(count, 0)):
+        if index == 0:
+            fit, note = 99, "Security clearance required."
+        elif index >= count - best_oldest:
+            fit, note = 95, "Build reliable Python services."
+        else:
+            fit, note = 30 + index % 40, "Build reliable Python services."
+        minutes = index % 60
+        hours = index // 60
+        jobs.append(
+            {
+                "id": str(1000 + index),
+                "title": f"Software Engineer fit {fit}",
+                "absolute_url": f"https://boards.greenhouse.io/acme/jobs/{1000 + index}",
+                "location": {"name": "Denver, CO"},
+                "updated_at": f"2026-09-22T{23 - hours:02d}:{59 - minutes:02d}:00Z",
+                "company_name": "Acme",
+                "content": f"&lt;p&gt;{note} Posting {index}.&lt;/p&gt;",
+            }
+        )
+    return jobs
+
+
 def _test_provider_handler(request: httpx.Request) -> httpx.Response:
     """Serve the fixed Exa/Greenhouse fixtures used by the child-process test."""
 
@@ -236,6 +283,9 @@ def _test_provider_handler(request: httpx.Request) -> httpx.Response:
             request=request,
         )
     if request.method == "GET" and request.url.host == "boards-api.greenhouse.io":
+        bulk = _test_bulk_postings()
+        if bulk:
+            return httpx.Response(200, json={"jobs": bulk}, request=request)
         return httpx.Response(
             200,
             json={
@@ -391,6 +441,48 @@ def _test_model_tailor_reply(prompt: str) -> dict[str, object]:
     return {"header": [{"copy": 1}], "sections": sections}
 
 
+#: SCOPE-ADD-3 C1 follow-up: the first line of every rank-v1 prompt
+#: (``model_rank.PROMPT`` -- the literal is repeated here so the fixture never
+#: imports the ranker; ``test_rank_journey.py`` asserts the two stay
+#: identical). Its presence means "this is a ranking batch, not an
+#: assessment": the fixture answers the strict id-keyed schema with a
+#: DETERMINISTIC score read from the posting's own digest line -- the
+#: ``fit <n>`` a journey puts in a posting title (60 when there is none) --
+#: and names the digest's ``flags=`` as blockers, so an api-e2e ranking pass
+#: yields real scores instead of failing open.
+TEST_MODEL_RANK_MARKER = "You are pre-ranking job postings for ONE candidate"
+TEST_MODEL_RANK_DEFAULT_SCORE = 60
+_TEST_MODEL_RANK_FIT = re.compile(r"\bfit (\d{1,3})\b")
+
+
+def _test_model_rank_reply(prompt: str) -> list[dict[str, object]]:
+    """One strict rank object per digest line under ``POSTINGS (n):`` in ``prompt``."""
+
+    items: list[dict[str, object]] = []
+    in_postings = False
+    for line in prompt.splitlines():
+        if line.startswith("POSTINGS ("):
+            in_postings = True
+            continue
+        if not in_postings:
+            continue
+        if not line.strip():
+            break
+        posting_id = line.split(" | ", 1)[0].strip()
+        fit = _TEST_MODEL_RANK_FIT.search(line)
+        score = min(int(fit.group(1)), 100) if fit else TEST_MODEL_RANK_DEFAULT_SCORE
+        flags = line.rsplit("flags=", 1)[1].split(",") if "flags=" in line else []
+        items.append(
+            {
+                "posting_id": posting_id,
+                "score": score,
+                "reasons": [f"fixture score {score}"],
+                "blockers": [flag.strip() for flag in flags if flag.strip()],
+            }
+        )
+    return items
+
+
 def _test_model_judge_reply(prompt: str) -> dict[str, object]:
     """The fixture's batched judge answer: every ``CLAIM <n>:`` block in ``prompt`` supported."""
 
@@ -481,6 +573,23 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
                     "done_reason": "stop",
                     "prompt_eval_count": 10,
                     "eval_count": 18,
+                },
+                request=request,
+            )
+        if TEST_MODEL_RANK_MARKER in prompt:
+            return httpx.Response(
+                200,
+                json={
+                    "model": TEST_MODEL_NAME,
+                    "created_at": "2026-09-29T00:00:00Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps(_test_model_rank_reply(prompt), separators=(",", ":")),
+                    },
+                    "done": True,
+                    "done_reason": "stop",
+                    "prompt_eval_count": 10,
+                    "eval_count": 14,
                 },
                 request=request,
             )

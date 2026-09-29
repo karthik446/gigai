@@ -13,9 +13,10 @@ these instead:
   ``created_at`` (what the grid's header took from ``GET /api/runs``).
   ``payload.rows``, ``payload.assessments``, ``payload.not_assessed`` and
   ``carried_forward_assessments`` hold the page's postings only, and no
-  posting carries its ``text``. Each row has ``rank_score``: the Jev score
-  already stored for it, or ``null``; there is no ``rank_scores`` list, and
-  this read never calls Jev. ``resume_label``/``resume_created_at`` are
+  posting carries its ``text``. Each row has ``rank_score`` (the stored
+  score in the sealed ``RankScore`` shape, or ``null``) and ``rank`` (the
+  model ranker's score, reasons, blockers and ``demoted``, or ``null``);
+  there is no ``rank_scores`` list, and this read never calls a model. ``resume_label``/``resume_created_at`` are
   left out: nothing on the page shows them, and resolving them is the
   slowest read a page would make after a run (0.8 s, 114 git subprocesses).
 * ``GET /api/runs/{run_id}/posting?url=<normalized_url>``: one posting of
@@ -27,7 +28,15 @@ these instead:
   their count).
 
 Rows are ordered as the grid sorts them (``jobModel.sortJobs``): verdict
-group, then the stored Jev score, then the newest posting. The first page
+group, then rank (SCOPE-ADD-3 C1, ``progress.rank_tier``: scored unblocked
+rows by score, then rows with no score, then blocked rows -- demoted, never
+hidden), then the newest posting.
+
+SCOPE-ADD-3 C1: the scores are the newest finished re-rank record of the
+run (``rank_records``) for the selected profile and resume revision, else
+the run's own ranking step (``AcquireOutput.rank_scores`` and its sealed
+``outputs/rank.json``) when the run used that profile and resume. No Jev
+score cache is read. The first page
 is then the top of the grid, not the first rows acquire happened to list.
 The verdict is the run's own (or the one it carried forward); an
 assessment made later from a job page is the UI's to merge, as before.
@@ -83,8 +92,7 @@ class RowJoins:
     """What a run's rows are joined to, read at one journal head.
 
     ``profile`` is the gig's selected profile (``None``: no scores, no job
-    state) and ``resume_text`` its resume, which a stored Jev score is filed
-    under; ``events`` is every application event by posting identity, or
+    state) and ``resume_text`` its resume; ``events`` is every application event by posting identity, or
     ``None`` when the job-state read is not available.
     """
 
@@ -150,7 +158,7 @@ def _resume_text(backend, resolved, profile) -> str | None:
             gig_id=resolved.gig_id,
         )
     except Exception as exc:  # noqa: BLE001 - display-only: the type is logged, never the resume
-        _logger.warning("the profile's resume could not be read for its stored Jev scores: %s", type(exc).__name__)
+        _logger.warning("the profile's resume could not be read for the run's joins: %s", type(exc).__name__)
         return None
     content = record.get("content")
     if not isinstance(content, bytes):
@@ -188,74 +196,112 @@ def run_assess_cap(evidence) -> int | None:
     return cap if isinstance(cap, int) else None
 
 
-def stored_rank_scores(
-    rows: Sequence[PostingRow], *, evidence, joins: RowJoins, home_root: Path, target: Path
-) -> dict[str, RankScore]:
-    """The Jev score already stored for each of ``rows``, by ``normalized_url``.
+@dataclass(frozen=True)
+class StoredRank:
+    """A run's stored ranking for the selected profile: ``RankScore`` per url, and the ranker's detail."""
 
-    Read from the score cache (``jev_rank.read_cached_scores``: what a run's
-    ranking pass and an explicit ``POST /rank`` paid for) for the selected
-    profile's resume, then from the run's own sealed scores when the run
-    used that same profile and resume revision. A row with neither has no
-    entry. Nothing here asks Jev.
+    scores: Mapping[str, RankScore]
+    detail: Mapping[str, Mapping[str, object]]
+    source: str | None = None  # "rank_record" | "run" | None
+    record_id: str | None = None
 
-    The preferences slice used to READ the cache (uat-bug-021 decision d:
-    the cache key includes a preferences digest) is the profile's titles
-    with no countries/visa flag -- the same slice ``api/rank.py``'s
-    ``_cached``/``compute_rank_scores`` reads with, since this is the same
-    kind of page read. A row scored by the acquire run pass itself (which
-    sends the project's full ``find-jobs.json`` roles/countries/visa) is
-    still found through ``acquire.rank_scores`` below, unaffected by the
-    live cache read's own key.
+
+def _run_rank_result(workpad: Path, run_id: str):
+    """The run's own sealed ``outputs/rank.json`` (its ranking step), or ``None``."""
+
+    import json
+
+    from ..model_rank import RankResult
+
+    path = workpad / "runs" / run_id / "outputs" / "rank.json"
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        return RankResult.from_json(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def stored_rank(rows: Sequence[PostingRow], *, evidence, joins: RowJoins, workpad: Path | None) -> StoredRank:
+    """The ranking already stored for ``rows`` (by ``normalized_url``); nothing here asks a model.
+
+    1. The newest finished re-rank record of the run (``rank_records``)
+       for the selected profile and its resume revision.
+    2. Else the run's own ranking step -- ``AcquireOutput.rank_scores``,
+       with reasons from its sealed ``outputs/rank.json`` -- when the run
+       used that same profile and resume revision.
+    A row with neither has no entry.
     """
+
+    from .. import rank_records, rank_run
 
     profile = joins.profile
     if profile is None:
-        return {}
+        return StoredRank({}, {})
     revision_id = profile.resume_ref.revision_id
-    from ..jev_rank import RankPreferences as _RankPreferences
-
-    prefs = _RankPreferences(target_titles=tuple(profile.titles), countries=(), visa_sponsorship_required=False)
-    scores: dict[str, RankScore] = {}
-    if joins.resume_text:
+    wanted = {row.normalized_url for row in rows}
+    run_id = getattr(evidence, "run_id", None)
+    if workpad is not None and isinstance(run_id, str):
         try:
-            from ..jev_rank import read_cached_scores
-        except ImportError:  # the cache has no page reader yet: the sealed scores below
-            read_cached_scores = None
-        if read_cached_scores is not None:
-            try:
-                cached = read_cached_scores(
-                    rows,
-                    resume_text=joins.resume_text,
-                    prefs=prefs,
-                    profile_id=profile.profile_id,
-                    resume_revision_id=revision_id,
-                    home_root=home_root,
-                    target=target,
-                )
-                scores = {item.normalized_url: item for item in cached if item.score is not None}
-            except Exception:  # noqa: BLE001 - display-only: a page without scores is still the page
-                _logger.exception("stored Jev scores could not be read")
+            found = rank_records.newest_finished(
+                workpad, run_id, profile_id=profile.profile_id, resume_revision_id=revision_id
+            )
+        except OSError:
+            found = None
+        if found is not None:
+            record, result = found
+            scores = {item.normalized_url: item for item in rank_run.to_rank_scores(result, rows) if item.score is not None}
+            detail = {
+                item.normalized_url: rank_run.posting_line(item)
+                for item in result.postings
+                if item.normalized_url in wanted
+            }
+            return StoredRank(scores, detail, "rank_record", record.record_id)
 
     run_input = evidence.run_input
     acquire = evidence.acquire_output
     if run_input is None or acquire is None or not acquire.rank_scores:
-        return scores
+        return StoredRank({}, {})
     pinned = run_input.pinned_resume
     same_resume = pinned is not None and pinned.revision_id == revision_id
     same_profile = run_input.profile_ref is None or run_input.profile_ref.profile_id == profile.profile_id
-    if same_resume and same_profile:
-        wanted = {row.normalized_url for row in rows}
-        for item in acquire.rank_scores:
-            if item.score is not None and item.normalized_url in wanted and item.normalized_url not in scores:
-                scores[item.normalized_url] = item
-    return scores
+    if not (same_resume and same_profile):
+        return StoredRank({}, {})
+    scores = {
+        item.normalized_url: item
+        for item in acquire.rank_scores
+        if item.score is not None and item.normalized_url in wanted
+    }
+    result = _run_rank_result(workpad, run_id) if workpad is not None and isinstance(run_id, str) else None
+    if result is not None:
+        detail = {item.normalized_url: rank_run.posting_line(item) for item in result.postings if item.normalized_url in wanted}
+    else:
+        detail = {
+            url: {"normalized_url": url, "score": item.score, "reasons": [], "blockers": list(item.mismatch_flags),
+                  "demoted": bool(item.mismatch_flags), "unscored_reason": None}
+            for url, item in scores.items()
+        }
+    return StoredRank(scores, detail, "run", None)
+
+
+def stored_rank_scores(
+    rows: Sequence[PostingRow], *, evidence, joins: RowJoins, home_root: Path, target: Path, workpad: Path | None = None
+) -> dict[str, RankScore]:
+    """``stored_rank``'s scores alone (the ``RankScore`` per ``normalized_url``)."""
+
+    return dict(stored_rank(rows, evidence=evidence, joins=joins, workpad=workpad).scores)
 
 
 class RunView:
     """One run's rows, in the grid's order, with what each row joins to."""
 
-    def __init__(self, evidence, *, scores: Mapping[str, RankScore]) -> None:
+    def __init__(
+        self,
+        evidence,
+        *,
+        scores: Mapping[str, RankScore],
+        rank_detail: Mapping[str, Mapping[str, object]] | None = None,
+    ) -> None:
         self.evidence = evidence
         acquire = evidence.acquire_output
         assess = evidence.assess_output
@@ -265,6 +311,7 @@ class RunView:
             item.normalized_url: item for item in (acquire.carried_forward_assessments if acquire is not None else ())
         }
         self.scores = scores
+        self.rank_detail = rank_detail or {}
         run_input = getattr(evidence, "run_input", None)
         self.config = run_input.config if run_input is not None else None
         rows = acquire.rows if acquire is not None else ()
@@ -279,16 +326,22 @@ class RunView:
             return "not_assessed"
         return result.verdict.value if result.verdict is not None else "assessed"
 
-    def _sort_key(self, row) -> tuple[int, int, bool, tuple[int, ...]]:
+    def _sort_key(self, row) -> tuple[int, tuple[int, int], bool, tuple[int, ...]]:
+        from ..progress import rank_tier
+
         url = row.posting.normalized_url
         score = self.scores.get(url)
-        value = score.score if score is not None and score.score is not None else -1
-        # Newest first inside one score, a posting with no date last. The UI
+        # A sealed run's row with no stored score is an UNSCORED row (ranked
+        # before the demoted ones), not a row still waiting for its batch.
+        entry: dict[str, object] = {"score": None}
+        if score is not None and score.score is not None:
+            entry = {"score": score.score, "blockers": list(score.mismatch_flags)}
+        # Newest first inside one rank, a posting with no date last. The UI
         # compares the date's text, so this does too: each character's
         # inverse sorts a later date earlier.
         published_at = row.posting.published_at or ""
         newest_first = tuple(-ord(char) for char in published_at)
-        return (_VERDICT_GROUP.get(self._verdict(url), 5), -value, not published_at, newest_first)
+        return (_VERDICT_GROUP.get(self._verdict(url), 5), rank_tier(entry), not published_at, newest_first)
 
     def find(self, url: str):
         return next((row for row in self.rows if row.posting.normalized_url == url), None)
@@ -300,6 +353,11 @@ class RunView:
             "posting": posting if text else grid_posting(posting),
             "outcome": row.outcome.value,
             "rank_score": score.to_json() if score is not None else None,
+            # SCOPE-ADD-3 C1: the model ranker's own line (reasons, blockers,
+            # demoted), or null when the row has no stored rank.
+            "rank": dict(self.rank_detail[row.posting.normalized_url])
+            if row.posting.normalized_url in self.rank_detail
+            else None,
         }
         # uat-bug-028: why the posting passed the run's work mode + area
         # (the card's line). Beside the posting, never in it: a mode read
@@ -446,32 +504,30 @@ class RunReadsRoutesMixin:
         evidence = read_run_evidence(resolved, run_id)
         joins = row_joins(backend, resolved)
         rows = tuple(item.posting for item in (evidence.acquire_output.rows if evidence.acquire_output is not None else ()))
-        scores = stored_rank_scores(
-            rows, evidence=evidence, joins=joins, home_root=backend.home_root, target=backend.target
-        )
-        return resolved, RunView(evidence, scores=scores), joins
+        stored = stored_rank(rows, evidence=evidence, joins=joins, workpad=Path(resolved.path))
+        return resolved, RunView(evidence, scores=stored.scores, rank_detail=stored.detail), joins
 
     def _run_stored_rank_scores(self, run_id: str) -> tuple[RankScore, ...]:
         """The no-query ``/results``' ``rank_scores``, read and never scored.
 
         One entry per posting, in the run's own order: its stored score, or
         the unscored entry (``fit`` and ``score`` ``null``) where none is
-        stored. Empty when there is nothing to score against or with: no
-        selected profile, no resume, or no Jev key. That is what the read
-        answered while it still asked Jev for the missing scores.
+        stored. Empty when there is nothing stored for the selected profile
+        (no profile, or the run was never ranked for it).
         """
 
-        from .. import jev_client
-        from ..jev_rank import unscored
+        from ..jev_contracts import RankScore as _RankScore
 
         _resolved, view, joins = self._run_view(run_id)
-        if joins.profile is None or not joins.resume_text:
-            return ()
-        if not jev_client.has_api_key(home_root=self._backend.home_root):
+        if joins.profile is None or not view.scores:
             return ()
         acquire = view.evidence.acquire_output
         rows = [row.posting for row in (acquire.rows if acquire is not None else ())]
-        return tuple(view.scores.get(row.normalized_url) or unscored(row) for row in rows)
+        return tuple(
+            view.scores.get(row.normalized_url)
+            or _RankScore(row.normalized_url, row.content_sha256 or "unknown", None, None, (), (), False, "0", False)
+            for row in rows
+        )
 
     def _join_row_fields(self, body: dict[str, object], *, resolved, view: RunView, joins: RowJoins) -> None:
         """``rows[].h1b`` and ``rows[].job_state``, as the no-query ``/results`` adds them."""
@@ -585,6 +641,7 @@ __all__ = [
     "results_page",
     "row_joins",
     "run_assess_cap",
+    "stored_rank",
     "run_counts",
     "stored_rank_scores",
     "summarise_progress",

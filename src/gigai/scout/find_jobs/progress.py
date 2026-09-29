@@ -23,13 +23,25 @@ Layout, all under ``runs/<run_id>/progress/``:
   carrying its reason, so the UI can show "why" before the sealed
   ``outputs/assess.json`` exists at all.
 - ``cap.json``: ``{"cap": <int>, "candidate_count": <int>,
-  "not_imported_count": <int>}``, written once acquire knows the selection
+  "not_imported_count": <int>, "selected_count": <int>}``, written once acquire knows the selection
   cap and how many candidates it saw. Optional; absent until acquire has
   that information. ``not_imported_count`` (uat-bug-011) is how many
   postings matched every filter but were left out of this run's import
   ("N more matched, not imported this run"); a file written before the key
   existed reads as 0.
-- ``rank.json`` (uat-bug-021): what Jev did for this run's candidates,
+- ``rank.jsonl`` (SCOPE-ADD-3 C1): the run's model ranking pass as it
+  happens, one JSON line per event, written from ``model_rank``'s
+  ``on_batch``: ``{"event": "started", "total", "model_target",
+  "batch_size", "concurrency", "max_calls"}``; one ``{"event": "batch",
+  "batch_id", "source": "cache"|"model", "valid", "attempts", "seconds",
+  "split", "split_from", "ranked", "total", "postings": [{"normalized_url",
+  "score", "reasons", "blockers", "demoted", "unscored_reason"}]}`` per
+  landed batch (``ranked``: rows done so far); ``{"event": "finished",
+  "status", "fail_open_reason", "scored", "total"}``. ``read_progress``
+  folds it into ``rank`` (counts, per-posting scores so far) and orders
+  ``postings`` by rank: scored unblocked rows by score, then unscored, then
+  blocked (demoted), then rows not ranked yet, each in acquire order.
+- ``rank.json`` (uat-bug-021): what the ranking pass did for this run,
   ``jev_rank.RankStatus.to_json()``: ``{"status": "scored"|"skipped",
   "scored": <int>, "total": <int>, "reason": <str>|null, "cost_cap_usd":
   <str>|null, "cost_usd": <str>, "throttled": <str>|null,
@@ -89,6 +101,7 @@ _ACQUIRE_FILENAME = "acquire.jsonl"
 _ASSESS_FILENAME = "assess.jsonl"
 _CAP_FILENAME = "cap.json"
 _RANK_FILENAME = "rank.json"
+_RANK_LINES_FILENAME = "rank.jsonl"
 # Q2 (acquire at scale): per-board progress + the watchlist seeding record.
 _BOARDS_FILENAME = "boards.jsonl"
 _BOARDS_SUMMARY_FILENAME = "boards.json"
@@ -301,18 +314,38 @@ class ProgressWriter:
             )
         )
 
-    def cap_known(self, *, cap: int, candidate_count: int, not_imported_count: int = 0) -> None:
-        self._guard(
-            lambda: _replace_json(
-                self._dir / _CAP_FILENAME,
-                {"cap": cap, "candidate_count": candidate_count, "not_imported_count": not_imported_count},
-            )
-        )
+    def cap_known(
+        self, *, cap: int, candidate_count: int, not_imported_count: int = 0, selected_count: int | None = None
+    ) -> None:
+        payload: dict[str, object] = {
+            "cap": cap,
+            "candidate_count": candidate_count,
+            "not_imported_count": not_imported_count,
+        }
+        if selected_count is not None:
+            payload["selected_count"] = selected_count
+        self._guard(lambda: _replace_json(self._dir / _CAP_FILENAME, payload))
 
     def rank_status(self, payload: Mapping[str, object]) -> None:
-        """Replace ``rank.json`` with what Jev did for this run (uat-bug-021)."""
+        """Replace ``rank.json`` with what the ranking pass did for this run (uat-bug-021)."""
 
         self._guard(lambda: _replace_json(self._dir / _RANK_FILENAME, dict(payload)))
+
+    # -- SCOPE-ADD-3 C1: the model ranking pass, batch by batch --------------
+
+    def rank_started(self, payload: Mapping[str, object]) -> None:
+        record = {"event": "started", **dict(payload), "at": _now()}
+        self._guard(lambda: _append_line(self._dir / _RANK_LINES_FILENAME, record))
+
+    def rank_batch(self, payload: Mapping[str, object]) -> None:
+        """Append one landed batch (``model_rank.on_batch``) the moment it lands."""
+
+        record = {"event": "batch", **dict(payload), "at": _now()}
+        self._guard(lambda: _append_line(self._dir / _RANK_LINES_FILENAME, record))
+
+    def rank_finished(self, payload: Mapping[str, object]) -> None:
+        record = {"event": "finished", **dict(payload), "at": _now()}
+        self._guard(lambda: _append_line(self._dir / _RANK_LINES_FILENAME, record))
 
     # -- Q2: per-board progress + the seeding record ------------------------
 
@@ -388,6 +421,11 @@ class ProgressSnapshot:
     not_imported_count: int = 0
     # uat-bug-021: additive, None until acquire's ranking pass ends (and for older runs).
     rank_status: dict[str, object] | None = None
+    # SCOPE-ADD-3 C1: additive. ``rank`` folds rank.jsonl (None before a
+    # pass started, and for older runs); ``assess_counts`` is "assessing X
+    # of Y" (None until acquire has selected).
+    rank: dict[str, object] | None = None
+    assess_counts: dict[str, object] | None = None
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -401,6 +439,8 @@ class ProgressSnapshot:
             "watchlist_seed": self.watchlist_seed,
             "not_imported_count": self.not_imported_count,
             "rank_status": self.rank_status,
+            "rank": self.rank,
+            "assess_counts": self.assess_counts,
         }
 
 
@@ -462,7 +502,11 @@ def read_progress(run_root: Path) -> ProgressSnapshot:
     cap = None
     candidate_count = None
     not_imported_count = 0
+    selected_count = None
     if isinstance(cap_payload, dict):
+        raw_selected = cap_payload.get("selected_count")
+        if isinstance(raw_selected, int) and not isinstance(raw_selected, bool) and raw_selected >= 0:
+            selected_count = raw_selected
         raw_cap = cap_payload.get("cap")
         raw_candidates = cap_payload.get("candidate_count")
         raw_not_imported = cap_payload.get("not_imported_count")
@@ -472,6 +516,10 @@ def read_progress(run_root: Path) -> ProgressSnapshot:
             candidate_count = raw_candidates
         if isinstance(raw_not_imported, int) and not isinstance(raw_not_imported, bool) and raw_not_imported > 0:
             not_imported_count = raw_not_imported
+
+    rank = read_rank(directory)
+    if rank is not None:
+        postings = _with_rank(postings, rank)
 
     return ProgressSnapshot(
         steps=steps,
@@ -483,8 +531,168 @@ def read_progress(run_root: Path) -> ProgressSnapshot:
         boards=_read_boards(directory),
         watchlist_seed=_read_watchlist_seed(directory),
         not_imported_count=not_imported_count,
-        rank_status=_read_rank_status(directory),
+        rank_status=_live_rank_status(_read_rank_status(directory), rank),
+        rank=None if rank is None else {key: value for key, value in rank.items() if key != "scores"},
+        assess_counts=_assess_counts(assess_events, selected_count, steps.get("assess")),
     )
+
+
+def _live_rank_status(status: dict[str, object] | None, rank: Mapping[str, object] | None) -> dict[str, object] | None:
+    """``rank_status`` with the live ``rank.jsonl`` counts folded in (SCOPE-ADD-3 C1).
+
+    ``GET /progress`` passes ``rank_status`` through as it is, so this is how
+    "Ranked 350 of 1,458" reaches it while the pass runs: before the pass
+    writes ``rank.json`` the status is ``running`` with the live counts;
+    after, the final status gains ``ranked`` (and keeps its own ``text``).
+    """
+
+    if rank is None:
+        return status
+    live = {
+        "ranked": rank.get("ranked"),
+        "rank_total": rank.get("total"),
+        "rank_text": rank.get("text"),
+        "demoted": rank.get("demoted"),
+    }
+    if status is not None:
+        return {**live, **status}
+    total = rank.get("total") if isinstance(rank.get("total"), int) else 0
+    return {
+        "status": "running",
+        "ranker": "model",
+        "scored": rank.get("scored", 0),
+        "total": total,
+        "reason": None,
+        "text": rank.get("text"),
+        "line": f"Ranking: {rank.get('text')}",
+        "cost_cap_usd": None,
+        "cost_usd": "0",
+        "throttled": None,
+        "spent_today_usd": None,
+        "daily_budget_usd": None,
+        "usage_line": None,
+        **live,
+    }
+
+
+def read_rank(directory: Path) -> dict[str, object] | None:
+    """Fold ``rank.jsonl`` into ``{"status", "ranked", "scored", "demoted", "total", "text", ...}``.
+
+    ``scores`` (dropped from the snapshot's ``rank``, attached to each
+    posting instead) maps ``normalized_url`` to that posting's rank so far.
+    ``status`` is ``running`` until the ``finished`` line, then the pass's
+    own (``complete``/``partial``/``cancelled``/``skipped``).
+    """
+
+    lines = _read_jsonl(directory / _RANK_LINES_FILENAME)
+    if not lines:
+        return None
+    rank: dict[str, object] = {"status": "running", "ranked": 0, "scored": 0, "demoted": 0, "total": None}
+    scores: dict[str, dict[str, object]] = {}
+    for line in lines:
+        event = line.get("event")
+        total = line.get("total")
+        if isinstance(total, int) and not isinstance(total, bool):
+            rank["total"] = total
+        if event == "started":
+            for key in ("model_target", "batch_size", "concurrency", "max_calls", "started_at"):
+                if key in line:
+                    rank[key] = line[key]
+            rank.setdefault("started_at", line.get("at"))
+        elif event == "batch":
+            for item in line.get("postings") or ():
+                if isinstance(item, dict) and isinstance(item.get("normalized_url"), str):
+                    entry = {key: value for key, value in item.items() if key != "normalized_url"}
+                    entry["batch_id"] = line.get("batch_id")
+                    scores[item["normalized_url"]] = entry
+        elif event == "finished":
+            rank["status"] = line.get("status") if isinstance(line.get("status"), str) else "finished"
+            rank["fail_open_reason"] = line.get("fail_open_reason")
+            rank["finished_at"] = line.get("at")
+    rank["ranked"] = len(scores)
+    rank["scored"] = sum(1 for item in scores.values() if isinstance(item.get("score"), int))
+    rank["demoted"] = sum(1 for item in scores.values() if item.get("demoted"))
+    rank["batches"] = sum(1 for line in lines if line.get("event") == "batch")
+    total = rank["total"]
+    rank["text"] = f"Ranked {len(scores):,} of {total:,}" if isinstance(total, int) else f"Ranked {len(scores):,}"
+    rank["scores"] = scores
+    return rank
+
+
+def rank_tier(entry: Mapping[str, object] | None) -> tuple[int, int]:
+    """Sort key for one posting's rank entry: ``model_rank.ordering_key``'s tiers, then not ranked yet.
+
+    Scored unblocked (best score first), unscored, blocked (demoted, best
+    score first), then a posting with no entry yet.
+    """
+
+    if entry is None:
+        return (3, 0)
+    score = entry.get("score")
+    if not isinstance(score, int) or isinstance(score, bool):
+        return (1, 0)
+    return (2 if entry.get("demoted") or entry.get("blockers") else 0, -score)
+
+
+def _with_rank(postings: list[dict[str, object]], rank: Mapping[str, object]) -> list[dict[str, object]]:
+    """``postings`` in rank order, each with its ``rank`` entry (``None`` while not ranked yet)."""
+
+    scores = rank.get("scores")
+    scores = scores if isinstance(scores, dict) else {}
+    ranked = []
+    for index, posting in enumerate(postings):
+        entry = scores.get(posting.get("normalized_url"))
+        ranked.append((rank_tier(entry), index, {**posting, "rank": entry}))
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in ranked]
+
+
+def _assess_counts(
+    events: list[dict[str, object]], selected_count: int | None, step: object
+) -> dict[str, object] | None:
+    """"Assessing X of Y": ``selected`` (acquire's picks), ``started``, ``finished``, ``in_flight``.
+
+    ``position`` is the one being assessed now (finished + 1, at most
+    ``selected``); ``text`` is ``"Assessing 3 of 10"`` while the assess step
+    runs and ``"Assessed 10 of 10"`` once it is done. ``None`` until acquire
+    has selected (``cap.json``'s ``selected_count``).
+    """
+
+    if selected_count is None:
+        return None
+    started: set[str] = set()
+    finished: set[str] = set()
+    failed = 0
+    for event in events:
+        url = event.get("normalized_url")
+        if not isinstance(url, str):
+            continue
+        if event.get("event") == "started":
+            started.add(url)
+        elif event.get("event") == "finished":
+            finished.add(url)
+            if not event.get("ok"):
+                failed += 1
+    status = step.get("status") if isinstance(step, dict) else None
+    done = status in {"done", "failed"}
+    in_flight = len(started - finished)
+    position = min(len(finished) + (1 if in_flight else 0), selected_count)
+    if done or (selected_count and len(finished) >= selected_count):
+        text = f"Assessed {len(finished)} of {selected_count}"
+    elif status == "running" or started:
+        text = f"Assessing {max(position, 1) if selected_count else 0} of {selected_count}"
+    else:
+        text = f"{selected_count} to assess"
+    return {
+        "selected": selected_count,
+        "started": len(started),
+        "finished": len(finished),
+        "failed": failed,
+        "in_flight": in_flight,
+        "position": position,
+        "status": status,
+        "text": text,
+    }
 
 
 def _read_rank_status(directory: Path) -> dict[str, object] | None:
@@ -547,5 +755,7 @@ __all__ = [
     "ProgressSnapshot",
     "ProgressWriter",
     "progress_dir",
+    "rank_tier",
     "read_progress",
+    "read_rank",
 ]

@@ -31,8 +31,11 @@ the order and paging rules are checked on rows built here.
 from __future__ import annotations
 
 import ast
+import json
+import shutil
 import threading
 import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import quote
@@ -44,6 +47,7 @@ import gigai.journal as journal
 from gigai import run as run_module
 from gigai.scout import projection
 from gigai.scout.find_jobs import jev_client, jev_rank
+from gigai.scout.find_jobs.bindings import TEST_MODEL_RANK_DEFAULT_SCORE as _FIXTURE_RANK_SCORE
 from gigai.scout.find_jobs.api import run_reads, runs_list
 from gigai.scout.find_jobs.contracts import (
     AggregateStatus,
@@ -447,7 +451,10 @@ def test_a_results_page_is_the_full_read_without_the_text(unread) -> None:
         assert row["outcome"] == whole["outcome"]
         assert row.get("h1b") == whole.get("h1b")
         assert row.get("job_state") == whole.get("job_state")
-        assert row["rank_score"] is None  # no Jev key in this project: nothing is stored
+        # The fixture model's rank branch scored the run's own ranking pass: the stored score is served, no Jev.
+        assert row["rank_score"]["score"] == _FIXTURE_RANK_SCORE
+        assert {item["normalized_url"]: item["score"] for item in full["rank_scores"]}[row["posting"]["normalized_url"]] == _FIXTURE_RANK_SCORE
+        assert row["rank"]["score"] == _FIXTURE_RANK_SCORE
     # Left out of a page: see run_reads.py.
     assert {"rank_scores", "resume_label", "resume_created_at"} <= set(full)
     assert not {"rank_scores", "resume_label", "resume_created_at"} & set(page)
@@ -513,28 +520,41 @@ def test_a_results_page_never_asks_jev(unread, monkeypatch: pytest.MonkeyPatch) 
     assert page.status_code == 200 and detail.status_code == 200
 
 
-def test_a_page_carries_the_scores_already_stored(unread, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_page_carries_the_newest_rank_record_s_scores_and_never_the_jev_cache(
+    unread, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SCOPE-ADD-3 C1: the scores a page shows are the newest finished rank
+    record of the run for the selected profile; no Jev score cache is read."""
+
     fx = unread
-    asked: list[dict[str, object]] = []
 
-    def read_cached_scores(rows, **kwargs):
-        asked.append(kwargs)
-        return tuple(_score(row.normalized_url, 88 if index == 0 else None) for index, row in enumerate(rows))
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("a page read the Jev score cache")
 
-    # The score cache's page reader (jev_rank.read_cached_scores); a build
-    # without one reads the run's sealed scores only.
-    monkeypatch.setattr(jev_rank, "read_cached_scores", read_cached_scores, raising=False)
+    monkeypatch.setattr(jev_rank, "read_cached_scores", refuse, raising=False)
+    before = fx.client.get(f"/api/runs/{fx.run_id}/results", params={"limit": 100}).json()
+    last = before["payload"]["rows"][-1]["posting"]["normalized_url"]
+    profile = fx.backend._selected_profile()
+    record = _write_rank_record(
+        fx.resolved.path, fx.run_id, profile_id=profile.profile_id, revision_id=profile.resume_ref.revision_id,
+        scores={last: (88, [])},
+    )
+    try:
+        with run_reads._JOINS_CACHE_LOCK:
+            run_reads._joins_cache.clear()
+        page = fx.client.get(f"/api/runs/{fx.run_id}/results", params={"limit": 100}).json()
+    finally:
+        shutil.rmtree(record)
 
-    page = fx.client.get(f"/api/runs/{fx.run_id}/results", params={"limit": 100}).json()
-
-    [first, *rest] = page["payload"]["rows"]
-    assert first["rank_score"]["score"] == 88 and first["rank_score"]["fit"] == "strong"
-    assert first["rank_score"]["normalized_url"] == first["posting"]["normalized_url"]
-    assert all(row["rank_score"] is None for row in rest)
-    [call] = asked
-    assert call["resume_text"] and call["profile_id"] and call["resume_revision_id"]
-    assert (call["home_root"], call["target"]) == (fx.backend.home_root, fx.backend.target)
-
+    rows = page["payload"]["rows"]
+    ranked = [row for row in rows if row["rank_score"] is not None]
+    assert [row["posting"]["normalized_url"] for row in ranked] == [last]
+    [row] = ranked
+    assert row["rank_score"]["score"] == 88 and row["rank_score"]["fit"] == "strong"
+    assert row["rank"]["reasons"] == ["fits the stack"] and row["rank"]["demoted"] is False
+    # Inside its verdict group the ranked row now leads the unranked ones.
+    group = [item["posting"]["normalized_url"] for item in rows if item["outcome"] == row["outcome"]]
+    assert last in group
 
 # --------------------------------------------------------------------------
 # GET /api/runs/{run_id}/posting?url=
@@ -558,7 +578,7 @@ def test_a_posting_is_read_complete(unread) -> None:
     assert body["row"]["outcome"] == whole["outcome"]
     assert body["row"].get("h1b") == whole.get("h1b")
     assert body["row"].get("job_state") == whole.get("job_state")
-    assert body["row"]["rank_score"] is None
+    assert body["row"]["rank_score"]["score"] == _FIXTURE_RANK_SCORE == body["row"]["rank"]["score"]
     assert body["assessment"] == assessment and body["assessment"]["matrix"]
     assert body["not_assessed_reason"] is None and body["carried_forward"] is None
 
@@ -571,7 +591,8 @@ def test_the_full_read_s_scores_are_one_entry_per_posting_in_the_run_s_order(
     handler._backend = SimpleNamespace(home_root=tmp_path)
     joins = _joins(resume_text="a resume")
     monkeypatch.setattr(handler, "_run_view", lambda run_id: (None, view, joins), raising=False)
-    monkeypatch.setattr(jev_client, "has_api_key", lambda *, home_root: True)
+    # SCOPE-ADD-3 C1: no Jev key is needed to READ the stored scores.
+    monkeypatch.delenv(jev_client.JEV_API_KEY_ENV_VAR, raising=False)
 
     scores = handler._run_stored_rank_scores("run_1")
 
@@ -583,13 +604,13 @@ def test_the_full_read_s_scores_are_one_entry_per_posting_in_the_run_s_order(
     ]
     assert len(scores) == 10
 
-    # Nothing to score with or against: the list is empty, as it always was.
-    monkeypatch.setattr(jev_client, "has_api_key", lambda *, home_root: False)
+    # Nothing stored, or no profile to read for: the list is empty, as it always was.
+    empty, _postings = _view(scores={})
+    monkeypatch.setattr(handler, "_run_view", lambda run_id: (None, empty, joins), raising=False)
     assert handler._run_stored_rank_scores("run_1") == ()
-    monkeypatch.setattr(jev_client, "has_api_key", lambda *, home_root: True)
-    for without in (_joins(resume_text=None), run_reads.RowJoins(head="head", profile=None, resume_text=None, events=None)):
-        monkeypatch.setattr(handler, "_run_view", lambda run_id, without=without: (None, view, without), raising=False)
-        assert handler._run_stored_rank_scores("run_1") == ()
+    no_profile = run_reads.RowJoins(head="head", profile=None, resume_text=None, events=None)
+    monkeypatch.setattr(handler, "_run_view", lambda run_id: (None, view, no_profile), raising=False)
+    assert handler._run_stored_rank_scores("run_1") == ()
 
 
 def test_a_posting_the_run_does_not_have_is_404_and_a_missing_url_422(finished_run) -> None:
@@ -736,6 +757,23 @@ def test_rows_are_in_the_grid_s_order() -> None:
     ]
 
 
+def test_a_blocked_score_is_demoted_below_unscored_rows_in_its_group() -> None:
+    """SCOPE-ADD-3 C1: inside a verdict group, scored unblocked rows by score,
+    then unscored rows, then rows whose rank names a blocker (demoted, shown)."""
+
+    from dataclasses import replace as _replace
+
+    _view0, postings = _view()
+    blocked = _replace(_score(postings["plain-old"].normalized_url, 99), mismatch_flags=("no_sponsor",))
+    view, _postings = _view(scores={
+        postings["plain-old"].normalized_url: blocked,
+        postings["refused"].normalized_url: _score(postings["refused"].normalized_url, 10),
+    })
+
+    not_assessed = [row.posting.title for row in view.rows if row.posting.title in {"plain-old", "plain-new", "refused", "undated"}]
+    assert not_assessed == ["refused", "plain-new", "undated", "plain-old"]
+
+
 def test_without_scores_the_order_is_the_verdict_then_the_newest() -> None:
     view, _postings = _view(scores={})
     assert [row.posting.title for row in view.rows][:3] == ["matched-low", "carried", "matched-high"]  # acquire's own order
@@ -800,12 +838,44 @@ def test_one_posting_s_rows_are_complete() -> None:
 
 def _sealed(*, profile_id: str | None, revision_id: str, scores: tuple[RankScore, ...]):
     return SimpleNamespace(
+        run_id="run_1",
         run_input=SimpleNamespace(
             pinned_resume=SimpleNamespace(revision_id=revision_id),
             profile_ref=None if profile_id is None else SimpleNamespace(profile_id=profile_id),
         ),
         acquire_output=SimpleNamespace(rank_scores=scores),
     )
+
+
+def _write_rank_record(
+    workpad: Path,
+    parent_run_id: str,
+    *,
+    profile_id: str,
+    revision_id: str,
+    scores: dict[str, tuple[int, list[str]]],
+    started_at: str = "2026-09-28T00:00:00Z",
+) -> Path:
+    """A finished ``runs/rank_*`` record on disk (what ``rank_records`` writes and commits)."""
+
+    from gigai.scout.find_jobs.model_rank import RankedPosting, RankResult
+
+    record_id = f"rank_{uuid.uuid4()}"
+    root = workpad / "runs" / record_id
+    (root / "outputs").mkdir(parents=True)
+    (root / "run-details.json").write_text(json.dumps({
+        "kind": "rank", "run_id": record_id, "parent_run_id": parent_run_id, "status": "complete",
+        "started_at": started_at, "key": {"profile_id": profile_id, "resume_revision_id": revision_id},
+        "key_digest": "sha256:test",
+    }))
+    postings = tuple(
+        RankedPosting(f"p{index}", url, "sha256:" + "a" * 64, score, ("fits the stack",), tuple(blockers), "b000")
+        for index, (url, (score, blockers)) in enumerate(scores.items())
+    )
+    result = RankResult("codex_cli", "codex-default", "default", None, "low", "low", 50, 8, 10, None, postings, (),
+                        "complete", None, 1.0)
+    (root / "outputs" / "rank.json").write_text(json.dumps(result.to_json()))
+    return root
 
 
 def _joins(*, resume_text: str | None = None, titles: tuple[str, ...] = ("Engineer",)) -> run_reads.RowJoins:
@@ -831,30 +901,37 @@ def test_a_run_s_sealed_scores_count_only_for_the_resume_they_were_made_for(tmp_
     assert stored(_sealed(profile_id="profile_1", revision_id="revision_1", scores=sealed), no_profile) == {}
 
 
-def test_a_cached_score_wins_over_the_sealed_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_finished_rank_record_wins_over_the_run_s_sealed_scores(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """SCOPE-ADD-3 C1: the newest finished re-rank of the run, for the reading
+    profile and resume revision, is what a page shows; the Jev cache is not read."""
+
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("a page read the Jev score cache")
+
+    monkeypatch.setattr(jev_rank, "read_cached_scores", refuse, raising=False)
     rows = (_posting("a"), _posting("b"), _posting("c"))
     sealed = (_score(rows[0].normalized_url, 70), _score(rows[1].normalized_url, 30))
-    joins = _joins(resume_text="a resume", titles=("Engineer", "Staff Engineer"))
-    asked: list[dict[str, object]] = []
+    evidence = _sealed(profile_id="profile_1", revision_id="revision_1", scores=sealed)
 
-    def read_cached_scores(cached_rows, **kwargs):
-        asked.append(kwargs)
-        return (_score(rows[0].normalized_url, 95), _score(rows[1].normalized_url, None), _score(rows[2].normalized_url, None))
+    def stored(joins=_joins()) -> dict[str, int | None]:
+        found = run_reads.stored_rank_scores(
+            rows, evidence=evidence, joins=joins, home_root=tmp_path, target=tmp_path, workpad=tmp_path
+        )
+        return {url: item.score for url, item in found.items()}
 
-    monkeypatch.setattr(jev_rank, "read_cached_scores", read_cached_scores, raising=False)
-
-    found = run_reads.stored_rank_scores(
-        rows, evidence=_sealed(profile_id="profile_1", revision_id="revision_1", scores=sealed),
-        joins=joins, home_root=tmp_path, target=tmp_path,
-    )
-
-    assert {url: item.score for url, item in found.items()} == {rows[0].normalized_url: 95, rows[1].normalized_url: 30}
-    # The read was actually reached with the reading profile's own titles as
-    # the preferences slice (uat-bug-021 decision d's cache key): a stub that
-    # ignored prefs would pass for the wrong reason.
-    [call] = asked
-    assert call["prefs"].target_titles == joins.profile.titles
-
+    assert stored() == {rows[0].normalized_url: 70, rows[1].normalized_url: 30}
+    # A record for ANOTHER profile is not this page's.
+    _write_rank_record(tmp_path, "run_1", profile_id="profile_2", revision_id="revision_1",
+                       scores={rows[2].normalized_url: (99, [])}, started_at="2026-09-28T02:00:00Z")
+    assert stored() == {rows[0].normalized_url: 70, rows[1].normalized_url: 30}
+    # This profile's record wins, whole: its scores, blockers carried as mismatch flags.
+    _write_rank_record(tmp_path, "run_1", profile_id="profile_1", revision_id="revision_1",
+                       scores={rows[0].normalized_url: (95, []), rows[2].normalized_url: (20, ["no_sponsor"])},
+                       started_at="2026-09-28T01:00:00Z")
+    assert stored() == {rows[0].normalized_url: 95, rows[2].normalized_url: 20}
+    found = run_reads.stored_rank(rows, evidence=evidence, joins=_joins(), workpad=tmp_path)
+    assert found.source == "rank_record" and found.scores[rows[2].normalized_url].mismatch_flags == ("no_sponsor",)
+    assert found.detail[rows[2].normalized_url]["demoted"] is True
 
 def test_a_score_cache_that_cannot_be_read_costs_the_scores_not_the_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     rows = (_posting("a"),)

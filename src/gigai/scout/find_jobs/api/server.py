@@ -988,6 +988,10 @@ class ScoutFindJobsBackend:
             # uat-bug-021: what Jev did for this run ("scored N of M" /
             # "skipped: <reason>"); null until acquire's ranking pass ends.
             "rank_status": None if snapshot.rank_status is None else dict(snapshot.rank_status),
+            # SCOPE-ADD-3 C1 follow-up (additive): the folded rank.jsonl
+            # ("Ranked N of M") and "Assessing X of Y", both from the server.
+            "rank": None if snapshot.rank is None else dict(snapshot.rank),
+            "assess_counts": None if snapshot.assess_counts is None else dict(snapshot.assess_counts),
         }
 
     def _sealed_selection_cap(self, run_id: str) -> int | None:
