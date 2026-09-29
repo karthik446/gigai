@@ -435,7 +435,7 @@ def test_cache_key_covers_resume_prefs_model_and_versions(tmp_path: Path, monkey
     monkeypatch.setattr(model_rank, "PROMPT_VERSION", "rank-v2")
     assert model_rank.cache_key(**base) != key
     monkeypatch.setattr(model_rank, "PROMPT_VERSION", "rank-v1")
-    monkeypatch.setattr(model_rank, "DIGEST_VERSION", "digest-v3")
+    monkeypatch.setattr(model_rank, "DIGEST_VERSION", "digest-v9")
     assert model_rank.cache_key(**base) != key
     assert model_rank.prefs_digest(_PREFS) != model_rank.prefs_digest(CandidatePrefs(titles=("Staff Software Engineer",)))
     assert cache_dir(tmp_path) == tmp_path / "cache" / "scout" / "rank" / "scores"

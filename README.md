@@ -55,8 +55,9 @@ your machine is exactly what that target sees:
   years, the skills found in the posting's requirements section, and hints
   like "no sponsorship" or "clearance") plus a **compact digest of your
   resume**: your target titles, countries, visa need and location, the
-  skills found in your resume, an experience-years figure, and up to 300
-  characters copied from the start of your resume. The full resume and the
+  job titles, skills and domain found in your resume, and an experience-years
+  figure. Your name, email, phone, address and links are never sent for
+  ranking (they are stripped from the digest). The full resume and the
   full posting text are not sent for ranking.
 - **Assessment** sends the posting text and your resume, as before, for each
   posting being assessed. A resume pasted into a single quick assessment goes

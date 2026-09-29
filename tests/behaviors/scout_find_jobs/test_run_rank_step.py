@@ -264,7 +264,7 @@ def test_rank_json_is_committed_in_the_rank_result_shape(substrate: dict, monkey
     )
     sealed = json.loads(raw)
     assert sealed["schema_version"] == "scout-rank:1" and sealed["run_id"] == RUN_ID and sealed["kind"] == "run"
-    assert (sealed["prompt_version"], sealed["digest_version"]) == ("rank-v1", "digest-v2")
+    assert (sealed["prompt_version"], sealed["digest_version"]) == ("rank-v1", "digest-v3")
     assert (sealed["model_target"], sealed["configured_target"], sealed["resolved_model"]) == (
         "ollama_local", "ollama-default", "fake-rank-model")
     assert {"effort", "effort_applied", "batch_size", "concurrency", "max_calls", "status", "fail_open_reason"} <= set(sealed)

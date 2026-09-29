@@ -48,14 +48,32 @@ def test_the_named_model_targets_are_the_ones_scout_can_select() -> None:
         assert f"`{target.value}`" in privacy
 
 
+_MESSY_RESUME = """Robin T. Sample
+robin.sample@example.com | +1 (555) 010-4477 | 555.010.9988
+77 Birch Avenue Apt 2, Boulder, CO 80301
+github.com/robinsample | https://www.linkedin.com/in/robin-sample
+
+Staff Software Engineer | Senior Backend Engineer
+Backend engineer with 9 years building payment platforms in Python and Go on AWS with Postgres.
+"""
+
+
 def test_the_resume_digest_claims_match_what_the_digest_contains() -> None:
     prefs = rank_digest.CandidatePrefs(titles=("Staff Engineer",), countries=("US",), location="Denver, CO")
-    digest = rank_digest.resume_digest("Skilled in Python.\n\n" + "x" * 900, prefs)
+    digest = rank_digest.resume_digest(_MESSY_RESUME, prefs)
     for line in ("targets:", "countries:", "needs visa sponsorship:", "location:", "skills:"):
         assert line in digest
-    summary = next(part for part in digest.split("\n")[0].split("; ") if part.startswith("x"))
-    assert len(summary) <= 300
-    assert "up to 300 characters copied from the start of your resume" in _privacy()
+    # titles, skills, domain and years found in the resume are present
+    assert "titles: Staff Software Engineer; Senior Backend Engineer" in digest
+    assert "Python" in digest and "domain: payments" in digest and "9+ yrs" in digest
+    # no free-text excerpt of the resume is copied, and no header detail survives
+    assert "Backend engineer with 9 years" not in digest and "building payment platforms" not in digest
+    for private in ("Robin", "Sample", "example.com", "555", "Birch", "Boulder", "80301", "github", "linkedin", "http"):
+        assert private not in digest, private
+    privacy = _privacy()
+    assert "the job titles, skills and domain found in your resume, and an experience-years figure" in privacy
+    assert "Your name, email, phone, address and links are never sent for ranking" in privacy
+    assert "characters copied from the start of your resume" not in privacy
 
 
 def test_a_posting_digest_carries_no_description_text() -> None:

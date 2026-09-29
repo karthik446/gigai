@@ -63,7 +63,7 @@ mechanics here. Those belong in the internal changelog.
   requirements" instead of being called a match.
 - Tailored resumes resolve board postings the same way.
 - What Scout sends to a model is now stated in the README: ranking sends
-  one-line posting digests and a compact resume digest; assessment sends the
+  one-line posting digests and a compact resume digest (digest-v3: titles, skills, domain and years, no header or contact details); assessment sends the
   posting and your resume; with a local Ollama target nothing leaves the
   machine.
 

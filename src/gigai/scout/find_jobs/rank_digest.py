@@ -22,9 +22,12 @@ text::
   postings the full assessment only ASKS about (a "U.S. citizen or permanent
   resident" line), which is why a blocker demotes and never hides.
 
-The resume digest is a few lines: years, a short summary, the skills in the
-same vocabulary as ``req=``, and the candidate's constraints (target titles,
-countries, visa need, location). ``level=`` comes from the target titles
+The resume digest is a few lines: years, the job titles found in the resume,
+its domain, the skills in the same vocabulary as ``req=``, and the candidate's
+constraints (target titles, countries, visa need, location). It is built from
+structure, never free text from the top of the resume, and a final guard strips
+emails, phone numbers, URLs/handles and street-address lines so the ranking
+model never sees a header block. ``level=`` comes from the target titles
 (the spike hard-coded the operator's current title).
 """
 
@@ -34,7 +37,10 @@ from dataclasses import dataclass
 import re
 from typing import Protocol, Sequence
 
-DIGEST_VERSION = "digest-v2"
+#: v3 (uat-bug-030): the resume digest is built from structure and privacy-guarded;
+#: posting digests are unchanged from v2. The bump keys the score cache, so a score
+#: made with the old resume digest is never reused.
+DIGEST_VERSION = "digest-v3"
 
 # canonical label -> regex (case-insensitive). Kept to terms that separate one
 # engineering posting from another (the spike's vocabulary, unchanged).
@@ -216,23 +222,93 @@ def posting_digest(posting: DigestPosting, posting_id: str) -> str:
     return " | ".join(parts)
 
 
+_TITLE_WORD = re.compile(
+    r"\b(engineer|developer|architect|scientist|analyst|manager|lead|director|consultant|administrator|designer|"
+    r"programmer|sre|devops|researcher|specialist)\b",
+    re.I,
+)
+_TITLE_CUT = re.compile(r"\s+(?:at|@|-|–|—)\s+|[,(]")
+_SEGMENT_SPLIT = re.compile(r"[|·•]")
+_MAX_RESUME_TITLES = 3
+_MAX_TITLE_WORDS = 6
+_DOMAINS = (
+    "payments", "fintech", "healthcare", "blockchain", "robotics", "embedded", "security", "search", "ML", "LLM",
+    "computer vision", "data pipelines", "HPC/GPU", "mobile", "SRE",
+)
+
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+|(?<!\w)@[\w.]{2,}")
+_URL = re.compile(
+    r"(?:https?://|www\.)\S+"
+    r"|\b(?:[\w-]+\.)+(?:com|net|org|io|dev|me|ai|app|co|us|ca|uk|in|xyz|tech)\b(?:/\S*)?",
+    re.I,
+)
+_PHONE = re.compile(
+    r"(?<![\w.])(?:\+?\d{1,3}[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}(?!\d)"
+    r"|(?<![\w.])\+\d[\d\s().-]{7,}\d",
+)
+_STREET = re.compile(
+    r"\b\d{1,6}\s+(?:[\w.]+\s+){0,4}(?:street|st|avenue|ave|road|rd|boulevard|blvd|drive|dr|lane|ln|way|court|ct|"
+    r"place|pl|parkway|pkwy|suite|apt)\b\.?",
+    re.I,
+)
+_PO_BOX = re.compile(r"\bp\.?\s?o\.?\s?box\s+\d+", re.I)
+
+
+def _is_clean(text: str) -> bool:
+    return not any(p.search(text) for p in (_EMAIL, _URL, _PHONE, _STREET, _PO_BOX))
+
+
+def guard_private(text: str) -> str:
+    """Strip emails, phones, URLs/handles and drop street-address lines from digest text."""
+
+    out: list[str] = []
+    for line in text.split("\n"):
+        if _STREET.search(line) or _PO_BOX.search(line):
+            continue
+        for pattern in (_EMAIL, _URL, _PHONE):
+            line = pattern.sub("", line)
+        out.append(line)
+    return "\n".join(out)
+
+
+def resume_titles(resume_text: str) -> list[str]:
+    """Job titles found in the resume, from short title-shaped segments (never running text)."""
+
+    found: dict[str, None] = {}
+    for line in resume_text.split("\n"):
+        for segment in _SEGMENT_SPLIT.split(line):
+            segment = segment.strip().strip("#*_-: ").strip()
+            if not segment or not _is_clean(segment):
+                continue
+            title = _TITLE_CUT.split(segment)[0].strip()
+            words = title.split()
+            if 1 < len(words) <= _MAX_TITLE_WORDS and _TITLE_WORD.search(title) and not any(c.isdigit() for c in title):
+                found.setdefault(title, None)
+    return list(found)[:_MAX_RESUME_TITLES]
+
+
 def resume_digest(resume_text: str, prefs: CandidatePrefs) -> str:
-    """The compact candidate block the rank prompt carries instead of the resume."""
+    """The compact candidate block the rank prompt carries instead of the resume.
+
+    Titles, years, skills, seniority and domain only; the header block (name,
+    contact details, links) never enters it (uat-bug-030).
+    """
 
     techs = techs_in(resume_text)
-    years = max((int(m.group(1)) for m in _YEARS_RE.finditer(resume_text[:600])), default=None)
-    levels = list(dict.fromkeys(level_of(title) for title in prefs.titles))
-    head = resume_text.split("\n\n", 3)
-    summary = next((block for block in head if len(block) > 80), "")[:300].replace("\n", " ")
+    years = max((int(m.group(1)) for m in _YEARS_RE.finditer(resume_text[:600]) if 0 < int(m.group(1)) <= 45), default=None)
+    titles = resume_titles(resume_text)
+    levels = list(dict.fromkeys(level_of(title) for title in (*prefs.titles, *titles)))
+    domain = [label for label in techs if label in _DOMAINS]
     location = (prefs.location or "").strip() or "unknown"
-    return "\n".join([
-        f"CANDIDATE: level={'/'.join(levels) or '?'}; {years or '?'}+ yrs; " + summary.strip(),
+    return guard_private("\n".join([
+        f"CANDIDATE: level={'/'.join(levels) or '?'}; {years or '?'}+ yrs; titles: {'; '.join(titles) or '-'}; "
+        f"domain: {', '.join(domain) or '-'}",
         "skills: " + (", ".join(techs) or "-"),
         "targets: " + ("; ".join(prefs.titles) or "unspecified"),
         "countries: " + (",".join(prefs.countries) or "any"),
         "needs visa sponsorship: " + ("yes" if prefs.visa_sponsorship_required else "no"),
         "location: " + location + (" (remote preferred)" if prefs.remote_preferred else ""),
-    ])
+    ]))
 
 
 def batch_lines(postings: Sequence[tuple[str, DigestPosting]]) -> list[str]:
@@ -246,9 +322,11 @@ __all__ = [
     "TECH",
     "batch_lines",
     "constraint_flags",
+    "guard_private",
     "level_of",
     "posting_digest",
     "requirements_section",
     "resume_digest",
+    "resume_titles",
     "techs_in",
 ]

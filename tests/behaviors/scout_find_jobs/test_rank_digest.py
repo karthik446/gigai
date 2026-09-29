@@ -17,9 +17,11 @@ from gigai.scout.find_jobs.rank_digest import (
     DIGEST_VERSION,
     CandidatePrefs,
     constraint_flags,
+    guard_private,
     posting_digest,
     requirements_section,
     resume_digest,
+    resume_titles,
 )
 
 
@@ -146,8 +148,7 @@ def test_resume_digest_golden() -> None:
         remote_preferred=True,
     )
     assert resume_digest(_RESUME, prefs) == "\n".join([
-        "CANDIDATE: level=staff/senior; 9+ yrs; Backend engineer with 9 years building payment and data platforms in "
-        "Python and Go on AWS, with Kubernetes and Postgres in production.",
+        "CANDIDATE: level=staff/senior; 9+ yrs; titles: Senior Software Engineer; domain: payments",
         "skills: Python, Go, AWS, Kubernetes, Terraform, Kafka, Postgres, payments",
         "targets: Staff Software Engineer; Senior Software Engineer",
         "countries: US",
@@ -158,9 +159,68 @@ def test_resume_digest_golden() -> None:
 
 def test_resume_digest_defaults() -> None:
     digest = resume_digest("Short.", CandidatePrefs())
-    assert digest.splitlines()[0] == "CANDIDATE: level=?; ?+ yrs; "
+    assert digest.splitlines()[0] == "CANDIDATE: level=?; ?+ yrs; titles: -; domain: -"
     assert digest.splitlines()[2:] == ["targets: unspecified", "countries: any", "needs visa sponsorship: no", "location: unknown"]
 
 
 def test_digest_version() -> None:
-    assert DIGEST_VERSION == "digest-v2"
+    assert DIGEST_VERSION == "digest-v3"
+
+
+# uat-bug-030: the ranking model never sees the resume header. Synthetic data only.
+MESSY_RESUME = """Sam Q. Example
+sam.example@example.com | +1 (555) 123-4567 | 555.987.6543 | +1 555 246 8101
+1234 Maple Street Apt 5, Denver, CO 80202
+github.com/samexample | https://www.linkedin.com/in/sam-example | www.sam-example.dev
+Reach me: sam.example@example.com or +1-555-321-0987 or linkedin.com/in/sam-example
+
+Staff Software Engineer | Senior Backend Engineer
+Backend engineer with 9 years building payment platforms in Python and Go on AWS with Postgres.
+
+Experience
+Senior Software Engineer at Acme Pay (2019-2023): Python, Kafka, Terraform
+"""
+
+_PRIVATE = (
+    "Sam", "Example", "sam.example", "example.com", "+1", "555", "123-4567", "987.6543", "246 8101", "321-0987",
+    "1234 Maple", "Maple Street", "Denver", "80202", "github", "linkedin", "sam-example", "www.", "http",
+)
+
+
+def _prefs() -> CandidatePrefs:
+    return CandidatePrefs(titles=("Staff Software Engineer",), countries=("US",), location="Remote")
+
+
+def test_resume_digest_never_carries_the_header_block() -> None:
+    digest = resume_digest(MESSY_RESUME, _prefs())
+    for private in _PRIVATE:
+        assert private not in digest, private
+    assert "Staff Software Engineer" in digest and "Senior Backend Engineer" in digest
+    assert "9+ yrs" in digest and "Python" in digest and "Kafka" in digest and "domain: payments" in digest
+
+
+def test_rendered_rank_prompt_never_carries_the_header_block() -> None:
+    from gigai.scout.find_jobs.model_rank import render_rank_prompt
+
+    prompt = render_rank_prompt(["p1 | Engineer @ acme | lvl=mid | loc=? [US] | yrs=5+ | req=Python"], resume_digest(MESSY_RESUME, _prefs()))
+    for private in _PRIVATE:
+        assert private not in prompt, private
+    assert "Staff Software Engineer" in prompt and "9+ yrs" in prompt
+
+
+@pytest.mark.parametrize("text", [
+    "mail sam@example.com now", "call +1 555 123 4567", "call (555) 123-4567", "call 555.123.4567", "see github.com/sam",
+    "see https://x.example.org/p", "see www.example.dev", "see linkedin.com/in/sam", "handle @samexample",
+])
+def test_guard_strips_contact_details_from_free_text(text: str) -> None:
+    guarded = guard_private(text)
+    assert not any(t in guarded for t in ("@", "555", "github", "http", "www", "linkedin", "example"))
+
+
+def test_guard_drops_street_address_lines_and_keeps_years() -> None:
+    assert guard_private("keep 9+ yrs\n12 Oak Avenue, Springfield") == "keep 9+ yrs"
+    assert guard_private("2019-2023 | 9+ yrs; Python") == "2019-2023 | 9+ yrs; Python"
+
+
+def test_resume_titles_come_from_title_shaped_segments_only() -> None:
+    assert resume_titles(MESSY_RESUME) == ["Staff Software Engineer", "Senior Backend Engineer", "Senior Software Engineer"]
