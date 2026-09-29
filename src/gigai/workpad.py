@@ -59,6 +59,11 @@ _V2_ROOTS = frozenset({
     "state.sqlite", "graph-selections", "addressed", "feedback", "findings",
     "review", "traces", "occurrences", "comparisons", "decisions", "goals",
     "gig.md",
+    # SQLite's own sidecars for state.sqlite, already declared (ignored) by
+    # WORKPAD_V2_GITIGNORE: a rollback journal exists while any writer's
+    # transaction is open, and this listing is taken without that writer's
+    # lock (uat-bug-034), so refusing it fails concurrent readers.
+    "state.sqlite-journal", "state.sqlite-wal", "state.sqlite-shm",
 })
 WORKPAD_GIT_USER_NAME = "GigAI Journal"
 WORKPAD_GIT_USER_EMAIL = "local@gigai.invalid"
