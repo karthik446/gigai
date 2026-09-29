@@ -30,6 +30,11 @@ from the model:
   span and ``continued_lines`` names the extra lines; the guards, the
   stored refs and every consumer of ``SourceRef.text`` see the span.  Copy
   lines never expand (they are one resume line verbatim).
+- CROSS-ENTRY guard (uat-bug-036): a rewritten line may cite several resume
+  lines only when the lines that sit in an entry (a role/project/degree
+  block, ``resume_entries``) all sit in the same entry; two roles in one
+  claim are rejected as ``cross_entry_citation``.  Summary/skills prose
+  lines and answers belong to no entry and never conflict.
 - NUMERIC guard: every number in a rewritten line (digits or number words,
   ranges, ``5+``, ``$1.2M`` vs ``1.2 million``) appears in a cited source.
 - POSTING-TERM guard: a rewritten line may not carry a skill/tool/technology
@@ -242,6 +247,36 @@ def resume_continuations(resume_text: str) -> dict[int, tuple[int, ...]]:
     return continuations
 
 
+#: A markdown heading of level 1-2 (``# Name``, ``## Experience``) opens a
+#: SECTION block; a bold heading or a level 3+ heading opens an ENTRY block.
+_SECTION_HEADING = re.compile(r"#{1,2}(?:\s|\Z)")
+
+
+def resume_entries(resume_text: str) -> dict[int, int]:
+    """Which numbered resume lines belong to which entry (uat-bug-036): ``{n: heading line}``.
+
+    The resume is split by its own heading lines (``_is_heading_line``); a
+    line belongs to the nearest heading line above it.  A block is an ENTRY
+    (a role, project or degree) when its heading is a bold/underscore
+    heading (``**Staff ML Engineer -- Northwind** (2021-present)``) or a
+    markdown heading of level 3 or deeper; every line of it, the heading
+    included, maps to the heading's line number.  A block opened by a level
+    1-2 heading (``# Name``, ``## Summary``, ``## Skills``) or by no heading
+    at all is section prose and is NOT keyed: it belongs to no entry.
+    Numbering is exactly ``resume_lines``'s.  A resume without entry
+    headings keys nothing, so the cross-entry guard never fires on it.
+    """
+
+    entries: dict[int, int] = {}
+    heading = 0  # line number of the entry heading that owns the current block; 0 = none
+    for number, line in enumerate(resume_lines(resume_text), 1):
+        if _is_heading_line(line):
+            heading = 0 if _SECTION_HEADING.match(line) else number
+        if heading:
+            entries[number] = heading
+    return entries
+
+
 @dataclass(frozen=True)
 class AnswerSource:
     """One answered ``experience_qa`` question as a citable source."""
@@ -287,6 +322,10 @@ class TailorContext:
     #: ``resume_continuations(resume_text)``: which lines a cited line runs on
     #: into.  Empty (the default) means no ref is ever expanded.
     continuations: Mapping[int, tuple[int, ...]] = field(default_factory=dict)
+    #: ``resume_entries(resume_text)``: line number -> the heading line of the
+    #: entry it belongs to.  Empty (the default) means no line is in an entry,
+    #: so the cross-entry guard never fires.
+    entries: Mapping[int, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -916,6 +955,28 @@ def check_rewritten_line(where: str, text: str, refs: Sequence[SourceRef], terms
         _reject(f'{where} contains the posting term "{borrowed[0]}" that appears in none of its cited sources ({cited})')
 
 
+def check_single_entry(where: str, refs: Sequence[SourceRef], ctx: TailorContext) -> None:
+    """The cross-entry guard (uat-bug-036): one rewritten line, one role or project.
+
+    A line's resume refs may span several lines only when every line that
+    sits in an entry (``resume_entries``) sits in the SAME entry.  Lines of
+    section prose (summary, skills, header: no entry) and answers never
+    conflict; so a summary line may cite a summary line plus one role, but
+    not two roles.  Rejects with ``cross_entry_citation``.
+    """
+
+    owners: dict[int, int] = {}  # entry heading line -> first cited line in it
+    for ref in refs:
+        if ref.kind == "resume" and ref.line in ctx.entries:
+            owners.setdefault(ctx.entries[ref.line], ref.line)
+    if len(owners) > 1:
+        parts = ", ".join(f'R{cited} in "{_display(ctx.resume_lines[heading - 1])}"' for heading, cited in owners.items())
+        _reject(
+            f"{where} is a cross_entry_citation: it combines resume lines from different roles or projects ({parts}); "
+            "cite lines of one role or project only"
+        )
+
+
 def _rewritten_line(raw: object, where: str, ctx: TailorContext, terms: Iterable[str]) -> TailoredLine:
     if type(raw) is not dict:
         _reject(f"{where} is not an object")
@@ -932,6 +993,7 @@ def _rewritten_line(raw: object, where: str, ctx: TailorContext, terms: Iterable
     if "\x00" in text:
         _reject(f"{where} text contains a NUL character")
     refs = _refs(raw.get("refs"), where, ctx)
+    check_single_entry(where, refs, ctx)
     text = text.strip()
     check_rewritten_line(where, text, refs, terms)
     return TailoredLine("rewritten", text, refs)
@@ -1449,7 +1511,7 @@ def run_tailored_resume(
     active = config if config is not None else load_config(home_root)
     binding = _resolve_binding(active, model_target, home_root=home_root)
     tailor_job = TailorJob(title=job.title, company=job.company, location=job.location, posting_text=job.text)
-    ctx = TailorContext(resume_lines=lines, answers=answers, matrix=matrix, continuations=resume_continuations(resume.text))
+    ctx = TailorContext(resume_lines=lines, answers=answers, matrix=matrix, continuations=resume_continuations(resume.text), entries=resume_entries(resume.text))
     try:
         attempt = tailor_once(binding, tailor_job, ctx)
     finally:
@@ -1531,6 +1593,7 @@ __all__ = [
     "TailoredSection",
     "canonical_term",
     "check_rewritten_line",
+    "check_single_entry",
     "guard_terms",
     "list_tailored_resumes",
     "load_tailor_instructions",
@@ -1540,6 +1603,7 @@ __all__ = [
     "render_markdown",
     "render_tailor_prompt",
     "resume_continuations",
+    "resume_entries",
     "resume_lines",
     "run_tailored_resume",
     "tailor_once",

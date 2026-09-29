@@ -523,7 +523,7 @@ def _context(resume: Resume, answers: Sequence[FixedAnswer]):
     """
 
     from gigai.scout.question_ids import normalize_question_id
-    from gigai.scout.tailored_resume import AnswerSource, TailorContext, resume_continuations, resume_lines
+    from gigai.scout.tailored_resume import AnswerSource, TailorContext, resume_continuations, resume_entries, resume_lines
 
     keyed: dict[str, AnswerSource] = {}
     for item in answers:
@@ -531,7 +531,7 @@ def _context(resume: Resume, answers: Sequence[FixedAnswer]):
         keyed[canonical] = AnswerSource(canonical, item.answer, "eval")
     # tailor-r2: exactly the product's context, so a cited wrapped line reaches
     # the guards, the row's sources and the judge as its whole span.
-    return TailorContext(resume_lines=resume_lines(resume.text), answers=keyed, continuations=resume_continuations(resume.text))
+    return TailorContext(resume_lines=resume_lines(resume.text), answers=keyed, continuations=resume_continuations(resume.text), entries=resume_entries(resume.text))
 
 
 def _job(posting: Posting):
