@@ -179,6 +179,14 @@ def run_counts(evidence) -> dict[str, int]:
     }
 
 
+def run_assess_cap(evidence) -> int | None:
+    """The run's own assess cap (``selection_cap``), ``None`` before the run has one."""
+
+    assess = getattr(evidence, "assess_output", None)
+    cap = getattr(assess, "selection_cap", None)
+    return cap if isinstance(cap, int) else None
+
+
 def stored_rank_scores(
     rows: Sequence[PostingRow], *, evidence, joins: RowJoins, home_root: Path, target: Path
 ) -> dict[str, RankScore]:
@@ -315,6 +323,7 @@ def results_page(view: RunView, *, limit: int, offset: int) -> dict[str, object]
         "offset": offset,
         "created_at": evidence.started_at,
         "counts": run_counts(evidence),
+        "assess_cap": run_assess_cap(evidence),
         "payload": {
             "schema_version": payload.schema_version,
             "run_id": payload.run_id,
@@ -566,6 +575,7 @@ __all__ = [
     "posting_rows",
     "results_page",
     "row_joins",
+    "run_assess_cap",
     "run_counts",
     "stored_rank_scores",
     "summarise_progress",

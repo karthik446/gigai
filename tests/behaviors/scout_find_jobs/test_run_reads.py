@@ -430,6 +430,8 @@ def test_a_results_page_is_the_full_read_without_the_text(unread) -> None:
     assert (page["total"], page["limit"], page["offset"]) == (len(full["payload"]["rows"]), 100, 0)
     assert page["created_at"] == fx.client.get("/api/runs").json()["runs"][0]["created_at"]
     assert page["counts"] == fx.client.get("/api/runs").json()["runs"][0]["counts"]
+    # uat-bug-025: the run's own assess cap rides on every page (what "Not assessed: this run assessed its top N" reads).
+    assert isinstance(page["assess_cap"], int) and page["assess_cap"] >= 1
     assert set(page["payload"]) == set(full["payload"])
     for key in ("schema_version", "run_id", "config", "pinned_resume", "failures", "assessments", "node_receipts", "status"):
         assert page["payload"][key] == full["payload"][key], key
@@ -866,3 +868,9 @@ def test_a_score_cache_that_cannot_be_read_costs_the_scores_not_the_page(tmp_pat
         joins=_joins(resume_text="a resume"), home_root=tmp_path, target=tmp_path,
     )
     assert {url: item.score for url, item in found.items()} == {rows[0].normalized_url: 70}
+
+
+def test_run_assess_cap_is_the_selection_cap_or_none() -> None:
+    assert run_reads.run_assess_cap(SimpleNamespace(assess_output=SimpleNamespace(selection_cap=7))) == 7
+    assert run_reads.run_assess_cap(SimpleNamespace(assess_output=None)) is None
+    assert run_reads.run_assess_cap(SimpleNamespace()) is None

@@ -750,11 +750,25 @@ export function filterJobs(jobs, filters) {
   return jobs.filter((job) => jobMatchesFilters(job, filters));
 }
 
+// uat-bug-025: what the run says about the jobs it left unassessed. A run
+// posting past the run's assess cap stays "acquired" for good; once the run
+// has ended that is not "waiting" but "beyond the cap" (`assessCap` is the
+// run's own selection_cap, null when the read did not carry one).
+export function withRunEnd(jobs, { ended, assessCap }) {
+  if (!ended) {
+    return jobs;
+  }
+  return jobs.map((job) => (job.row ? { ...job, runEnded: true, assessCap: assessCap || null } : job));
+}
+
 export function notAssessedLine(job) {
   if (job.status === "assessing") {
     return "Assessing…";
   }
   if (job.status === "acquired") {
+    if (job.runEnded) {
+      return job.assessCap ? `Not assessed: this run assessed its top ${job.assessCap}` : "Not assessed: past this run's assess cap";
+    }
     return "Waiting to be assessed";
   }
   if (job.status === "failed") {

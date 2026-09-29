@@ -203,7 +203,7 @@ function AssessNow({ posting, origin, onAssessed }) {
             });
         }}
       >
-        {state === "saving" ? "Assessing…" : "Assess this posting"}
+        {state === "saving" ? "Assessing…" : "Assess"}
       </button>
       {error && <div className="field-error">{error}</div>}
     </span>
@@ -399,7 +399,7 @@ export default function JobPage({
             {!assessment && (
               <div className="callout info" style={{ margin: "12px 0 0" }} title={job.notAssessedReason ? notAssessedReasonDetail(job.notAssessedReason) : undefined}>
                 {notAssessedLine(job)}.
-                {job.status !== "assessing" && job.status !== "acquired" && <AssessNow posting={posting} origin={assessOrigin} onAssessed={onQuickUpdated} />}
+                {job.status !== "assessing" && (job.status !== "acquired" || job.runEnded) && <AssessNow posting={posting} origin={assessOrigin} onAssessed={onQuickUpdated} />}
               </div>
             )}
           </div>

@@ -22,7 +22,7 @@ import JobPage from "./JobPage.jsx";
 import AssessmentsView from "./AssessmentsView.jsx";
 import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
 import { relativeTimeLabel } from "../display.js";
-import { PASTED_RESUME_KEY, addRunPostings, assessmentJobs, buildJobs, dateTimeLabel, isScored, runJobs as onlyRunJobs, usedPastedResume } from "../jobModel.js";
+import { PASTED_RESUME_KEY, addRunPostings, assessmentJobs, buildJobs, dateTimeLabel, isScored, runJobs as onlyRunJobs, usedPastedResume, withRunEnd } from "../jobModel.js";
 import { canScoreWithJev, createRankPass, jevCardSkipWords, jevNoticeText, jevRankingOn, jevRunConsentLine, mergeRankScores } from "../jevModel.js";
 import { needAnswersCount, withJobStates } from "../jobStateModel.js";
 import { rankStatusLine, rankUsageLine, runFailure } from "../runText.js";
@@ -392,7 +392,7 @@ export default function FindJobsView({
           setRankScores(storedRankScores(response));
           if (!drawn) {
             drawn = true;
-            setRunMeta({ created_at: response.created_at, counts: response.counts });
+            setRunMeta({ created_at: response.created_at, counts: response.counts, assess_cap: response.assess_cap ?? null });
             setResultsLoading(false);
             loadQuickItems();
           }
@@ -503,6 +503,7 @@ export default function FindJobsView({
   );
 
   const runActive = Boolean(runId && runStatus && !TERMINAL_STATUSES.has(runStatus.status));
+  const runEnded = Boolean(runId && runStatus && TERMINAL_STATUSES.has(runStatus.status));
   const routeRunId = route.view === "run" ? route.params.runId : null;
 
   // Q4a-nav: a run page shows ITS run -- load it unless it is already the
@@ -591,9 +592,10 @@ export default function FindJobsView({
   const newestRun = runsState.runs[0] || null;
 
   const applications = applicationsState.applications;
+  const assessCap = runMeta ? runMeta.assess_cap : null;
   const jobs = useMemo(
-    () => withJobStates(buildJobs({ rows, rankScores, quickItems, runCreatedAt }), applications, tailoredIds),
-    [rows, rankScores, quickItems, runCreatedAt, applications, tailoredIds],
+    () => withRunEnd(withJobStates(buildJobs({ rows, rankScores, quickItems, runCreatedAt }), applications, tailoredIds), { ended: runEnded, assessCap }),
+    [rows, rankScores, quickItems, runCreatedAt, applications, tailoredIds, runEnded, assessCap],
   );
   // Jobs and a run page show the run's postings only (uat-bug-016): an
   // on-demand assessment belongs to no run; it is a card on Assessments.
