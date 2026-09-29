@@ -10,6 +10,71 @@ The boundary is fixed in one direction only — **a Gig imports GigAI core;
 GigAI core never imports a Gig.** Gigs are portable, reviewable units of
 work, not plugins the runtime depends on.
 
+## Quickstart (Scout)
+
+One path from zero to a running Scout: find jobs, assess them, tailor a resume.
+
+**1. Requirements**
+
+- macOS or Linux, and Python 3.11+.
+- [`uv`](https://docs.astral.sh/uv/getting-started/installation/) (one line: `curl -LsSf https://astral.sh/uv/install.sh | sh`).
+- **One model CLI, installed and logged in.** Codex: run `codex login`
+  (check it with `codex login status`). Or Claude Code: run `claude`, then
+  `/login`. A local Ollama model or an OpenRouter key also work, but are optional.
+- Exa search is optional and off; you do not need it.
+- Internet access for **Update sources** (it reads public job boards).
+
+**2. Prepare your resume, with your personal info removed**
+
+Use a Markdown (`.md`) or plain-text (`.txt`) file, **with your name, email,
+phone, street address and links/URLs removed** (and anything else you would not
+paste into Codex or Claude). Assessment and tailoring send your resume text to
+the model provider you picked, and Scout does not yet remove personal info for
+you. A PDF or DOCX resume must be converted first:
+
+```bash
+pdftotext resume.pdf resume.txt          # Linux, or macOS with poppler
+textutil -convert txt resume.docx        # macOS built-in, .docx only
+```
+
+**3. Install**
+
+```bash
+uv tool install gigai
+gigai --version
+```
+
+Or install from the release tag (this works once the `v0.1.9` tag exists):
+
+```bash
+uv tool install "git+https://github.com/karthik446/gigai@v0.1.9"
+```
+
+**4. Set up and run**
+
+```bash
+gigai setup          # once per machine: press Enter to accept the defaults
+gigai scout run      # starts Scout and opens the browser
+```
+
+In the browser, the setup wizard asks you to pick the model ("Model for
+Scout"), add your resume (paste it or upload the `.md`/`.txt` file), and set
+your roles, location and work mode. Then:
+
+1. **Update sources** (in Settings): fills the company store from the public
+   job boards. The first update over the whole catalog runs in passes of up to
+   20 minutes each (the default time budget) and continues where it stopped;
+   later updates are a single short pass.
+2. **Run find jobs** (Jobs page): ranks the stored postings that pass your
+   filters and assesses the top ones.
+3. **Assess all new**: on the finished run, assesses the rest in the background.
+4. **Tailor resume**: on a posting's page, drafts a resume for that posting.
+   Review every line; each shows its sources.
+
+`gigai scout stop` stops Scout; `gigai scout run --port 9000` picks another
+port if 8765 is taken. More detail for scripts and agents is under
+[For agents](#for-agents) below.
+
 ## Scout, the first Gig
 
 Scout ships with GigAI and implements `find-jobs`, a job-search workflow:
@@ -58,10 +123,11 @@ or assessment. What your machine sends to the model target is exactly:
   like "no sponsorship" or "clearance") plus a **compact digest of your
   resume**: your target titles, countries, visa need and location, the
   job titles, skills and domain found in your resume, and an experience-years
-  figure. Your name, email, phone, address and links are never sent for
-  ranking (they are stripped from the digest). The full resume and the
+  figure. Scout leaves contact lines (name, email, phone, address, links) out
+  of the ranking digest where it can recognize them, but do not rely on it:
+  remove personal info from the resume you add. The full resume and the
   full posting text are not sent for ranking.
-- **Assessment** sends the posting text and your resume for each posting
+- **Assessment and tailoring** send your resume text: an assessment sends the posting text and your resume for each posting
   being assessed, including each posting "Assess all new" assesses. A pasted resume is used for that assessment only: its full text is never saved and never sent anywhere but your assessment model; the stored result keeps short evidence quotes on your machine.
 - **With a local Ollama target nothing leaves the machine.** Scout only
   talks to Ollama on a numeric loopback address (`127.0.0.1`).
@@ -105,36 +171,27 @@ does. A time estimate is shown only once a per-call time has been measured.
   board addresses.
 - Nothing else.
 
-## Install
-
-Requires Python 3.11+. Scout also needs one model target: Codex (`codex_cli`,
-the `codex` CLI) or Claude (`claude_cli`, the `claude` CLI) on your `PATH`.
-A local Ollama model (`ollama_local`) or an OpenRouter key (`openrouter_api`)
-are optional alternatives.
-
-```bash
-uv tool install gigai
-gigai --version
-gigai --help
-```
-
-## Quickstart for humans
-
-```bash
-gigai setup        # interactive: workspace, access, models, roles
-gigai doctor        # confirm the install is healthy
-cd /path/to/a/git/repo
-gigai init          # bind this repository as a GigAI project
-gigai gigs          # list Gigs registered for this project
-```
-
 ## For agents
 
 It's mostly agents — Claude, Codex, and similar — driving GigAI, so these
 commands are non-interactive and scriptable. Every one below was run against
 this build.
 
-### Setup
+### Setup, projects and Gigs (advanced)
+
+`gigai setup` is interactive by default (workspace, access, models, roles).
+`gigai doctor` confirms the install is healthy. `gigai init` binds a git
+repository as a GigAI project and `gigai gigs` lists the Gigs registered for
+it; Scout needs neither.
+
+```bash
+gigai doctor
+cd /path/to/a/git/repo
+gigai init          # bind this repository as a GigAI project
+gigai gigs          # list Gigs registered for this project
+```
+
+Non-interactive setup:
 
 ```bash
 gigai setup --non-interactive \
@@ -200,7 +257,7 @@ idempotent for an already-bound project.
 ### Scout: install and run
 
 Everything below runs from an installed package (`uv tool install gigai`) —
-no source checkout needed, and Scout runs from anywhere: no `cd` into a
+no source checkout needed (run `gigai setup` once first), and Scout runs from anywhere: no `cd` into a
 target repo and no `gigai init` step first.
 
 ```bash
@@ -335,14 +392,18 @@ gigai gig use <gig-id> --json
 `gigai scout install` already activates Scout when it's the only Gig bound,
 so this is only needed when switching between Gigs.
 
-> **0.1.8.x limit:** `gigai scout resume add` only accepts `.txt`/`.md`/
-> `.markdown` files up to 1 MB; a `.pdf` or `.docx` resume is rejected
-> (`media_type_unsupported`). Convert it first, e.g.:
+> **Resume input:** `gigai scout resume add` accepts `.txt`, `.md` and
+> `.markdown` files up to 1 MB (the setup wizard's upload takes the same three
+> types); a `.pdf` or `.docx` resume is rejected (`media_type_unsupported`).
+> Convert it first, e.g.:
 >
 > ```bash
 > pdftotext resume.pdf resume.txt          # Linux, or macOS with poppler
 > textutil -convert txt resume.docx        # macOS built-in, .docx only
 > ```
+>
+> Remove your personal info from the file first: see the
+> [Quickstart](#quickstart-scout).
 
 ### Exa search
 
@@ -394,6 +455,32 @@ stale.
   malformed invocation — a bad flag or missing argument — is a Click usage
   error and goes to **stderr** as plain text; check the exit code, don't
   assume JSON is always present.
+
+## Roadmap / TODO
+
+- [ ] Download PDF for tailored resumes (replaces Download .md) (0.1.10)
+- [ ] Resume display settings, kept on your machine (0.1.10): fill in your name, title and contact line once (location | work authorization | LinkedIn | GitHub | email | phone) on your profile. These fields are stored only on your computer and are never sent to Codex, Claude, Ollama, OpenRouter, Exa or any other service; Scout adds them to your PDF locally, after the model has finished. A test will check that none of them appear in anything sent to a model or the network.
+- [ ] Remove personal info from resumes automatically before any model call (until then: add a resume without it)
+- [ ] Import PDF/DOCX resumes directly
+- [ ] The setup wizard checks the chosen CLI is installed and logged in
+- [ ] Mark an assessment "posting changed, re-assess" when a posting's text changes
+- [ ] Show the posting's own keywords on the tailored resume summary
+- [ ] Faster settings load (workpad cache); consistent tailor judging
+
+### Known limitations
+
+- Alpha: expect rough edges (see [Status](#status)).
+- macOS and Linux only.
+- Filters default to the US (`countries` starts as `["US"]`); other countries
+  can be set in the setup wizard or `find-jobs.json`.
+- Assessments saved before the Lever fix stay as they were until you
+  re-assess them (an old "Matched" on a Lever posting may not hold).
+- The run dialog does not save "All new postings" as your default; set it in
+  `find-jobs.json` (`"default_assess_cap": "all"`) if you want it to stick.
+
+Contributions and bug reports are welcome: see
+[CONTRIBUTING.md](CONTRIBUTING.md) and the
+[issues](https://github.com/karthik446/gigai/issues).
 
 ## Development
 

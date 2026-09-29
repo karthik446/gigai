@@ -73,7 +73,12 @@ def test_the_resume_digest_claims_match_what_the_digest_contains() -> None:
         assert private not in digest, private
     privacy = _privacy()
     assert "the job titles, skills and domain found in your resume, and an experience-years figure" in privacy
-    assert "Your name, email, phone, address and links are never sent for ranking" in privacy
+    # uat-bug-047: no promise of removal; the reader is told to supply a resume without personal info.
+    assert "Scout leaves contact lines (name, email, phone, address, links) out of the ranking digest where it can recognize them" in privacy
+    assert "but do not rely on it: remove personal info from the resume you add" in privacy
+    for promise in ("are never sent for ranking", "they are stripped", "are stripped from the digest"):
+        assert promise not in privacy, promise
+    assert "**Assessment and tailoring** send your resume text" in privacy
     assert "characters copied from the start of your resume" not in privacy
 
 
@@ -139,8 +144,9 @@ def test_the_readme_names_claude_as_a_required_choice_and_says_where_it_sends() 
     """uat-bug-035: Codex or Claude is the one required target; Claude's traffic goes to Anthropic."""
 
     text = _flat(_text())
-    install = _flat(_text().split("## Install", 1)[1].split("\n## ", 1)[0])
-    assert "Scout also needs one model target: Codex (`codex_cli`, the `codex` CLI) or Claude (`claude_cli`, the `claude` CLI)" in install
+    quickstart = _flat(_text().split("## Quickstart (Scout)", 1)[1].split("\n## ", 1)[0])
+    assert "One model CLI, installed and logged in.** Codex: run `codex login` (check it with `codex login status`). Or Claude Code: run `claude`, then `/login`." in quickstart
+    assert "Exa search is optional and off" in quickstart
     privacy = _privacy()
     assert "`claude_cli` (the Claude Code CLI sends it to Anthropic)" in privacy
     assert "`codex_cli` (the Codex CLI sends it to OpenAI)" in privacy
@@ -173,3 +179,43 @@ def test_assess_all_new_is_described_and_keeps_the_privacy_statement_true() -> N
     assert "per-token" not in text and "Scout passes them no API key" in text
     assert "each posting's assessment sends your resume and that posting to that provider" in text
     assert "including each posting \"Assess all new\" assesses" in _privacy()
+
+
+def test_the_quickstart_is_first_numbered_and_asks_for_a_resume_without_personal_info() -> None:
+    """uat-bug-047: one path from zero to Scout, resume input rule matching the code, roadmap present."""
+    from gigai.scout import resume_import
+
+    text = _text()
+    assert text.index("## Quickstart (Scout)") < text.index("## Scout, the first Gig") < text.index("## Privacy and security")
+    quickstart = _flat(text.split("## Quickstart (Scout)", 1)[1].split("\n## ", 1)[0])
+    for step in ("**1. Requirements**", "**2. Prepare your resume", "**3. Install**", "**4. Set up and run**"):
+        assert step in quickstart, step
+    assert "with your name, email, phone, street address and links/URLs removed" in quickstart
+    assert "Scout does not yet remove personal info for you" in quickstart
+    for command in ("uv tool install gigai", "gigai --version", "gigai setup", "gigai scout run"):
+        assert command in quickstart, command
+    assert "from the release tag" in quickstart and "@v0.1.9" in quickstart
+    for button in ("Update sources", "Run find jobs", "Assess all new", "Tailor resume"):
+        assert f"**{button}**" in quickstart, button
+    # the human quickstart no longer starts with gigai init / gigai gigs
+    assert "gigai init" not in quickstart and "gigai gigs" not in quickstart
+    # the resume input rule is the code's
+    assert resume_import.RESUME_SUFFIXES == (".txt", ".md", ".markdown") and resume_import.RESUME_MAX_BYTES == 1_048_576
+    flat = _flat(text).replace("> ", "")
+    assert "accepts `.txt`, `.md` and `.markdown` files up to 1 MB" in flat and "0.1.8.x limit" not in flat
+    assert "## Roadmap / TODO" in text and "### Known limitations" in text and "(CONTRIBUTING.md)" in text
+    assert "- [ ] Remove personal info from resumes automatically before any model call" in text
+
+
+def test_the_roadmap_lists_resume_display_settings_as_its_own_future_item() -> None:
+    """uat-bug-047 addendum: a 0.1.10 roadmap item (future wording), separate from the PDF line; 0.1.9 promises no stripping."""
+    roadmap = _flat(_text().split("## Roadmap / TODO", 1)[1].split("\n## ", 1)[0])
+    assert "- [ ] Download PDF for tailored resumes (replaces Download .md) (0.1.10)" in roadmap
+    assert (
+        "- [ ] Resume display settings, kept on your machine (0.1.10): fill in your name, title and contact line once "
+        "(location | work authorization | LinkedIn | GitHub | email | phone) on your profile. These fields are stored "
+        "only on your computer and are never sent to Codex, Claude, Ollama, OpenRouter, Exa or any other service; "
+        "Scout adds them to your PDF locally, after the model has finished. A test will check that none of them appear "
+        "in anything sent to a model or the network."
+    ) in roadmap
+    assert "will check" in roadmap and "jev" not in roadmap.lower()
