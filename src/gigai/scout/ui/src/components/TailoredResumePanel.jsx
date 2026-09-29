@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, getTailoredResumes, postTailoredResume } from "../api.js";
 import { dateTimeLabel } from "../jobModel.js";
-import { downloadName, latestStored, previewLines, previewStats, sourcesHover, sourceLabel, statsLine } from "../tailoredResumeModel.js";
+import {
+  changeSummary,
+  downloadName,
+  inlineSegments,
+  latestStored,
+  previewLines,
+  previewStats,
+  sourcesHover,
+  sourceLabel,
+  statsLine,
+} from "../tailoredResumeModel.js";
 
 // Q4b-ui (v0.1.9): the tailored-resume panel on the job page
 // (mockups/cards-and-job-page.html, "Tailored resume"), over Q3's routes:
@@ -58,7 +68,69 @@ function errorView(error) {
   return { heading: "Could not tailor the resume", body: detail, hint: null };
 }
 
-function PreviewLine({ line, index, open, onToggle, promptFor }) {
+// uat-bug-044: the changed words of a rewritten line, highlighted. Every
+// piece of model text below goes into the tree as a React text child (React
+// escapes it); the panel never injects raw HTML.
+function DiffText({ segments }) {
+  return segments.map((segment, index) => (
+    <span key={index}>
+      {index > 0 && " "}
+      {segment.added ? <mark className="diff-added">{segment.text}</mark> : segment.text}
+    </span>
+  ));
+}
+
+function Inline({ text }) {
+  return inlineSegments(text).map((segment, index) => (segment.bold ? <strong key={index}>{segment.text}</strong> : <span key={index}>{segment.text}</span>));
+}
+
+// The clean copy: headings, bold and bullets as formatted text, no markers.
+function CleanCopy({ lines }) {
+  return (
+    <div className="clean-resume" data-view="clean">
+      {lines.map((line, index) => {
+        if (line.kind === "blank") {
+          return null;
+        }
+        if (line.kind === "heading") {
+          return (
+            <h4 className="clean-section" key={index}>
+              {line.text}
+            </h4>
+          );
+        }
+        if (line.role === "title") {
+          return (
+            <h3 className="clean-title" key={index}>
+              <Inline text={line.plain} />
+            </h3>
+          );
+        }
+        if (line.role === "entry") {
+          return (
+            <h5 className="clean-entry" key={index}>
+              <Inline text={line.plain} />
+            </h5>
+          );
+        }
+        if (line.role === "bullet") {
+          return (
+            <p className="clean-bullet" key={index}>
+              <Inline text={line.plain} />
+            </p>
+          );
+        }
+        return (
+          <p className="clean-text" key={index}>
+            <Inline text={line.plain} />
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function PreviewLine({ line, index, open, onToggle, promptFor, showChanges }) {
   if (line.kind === "blank") {
     return (
       <div className="md-line blank">
@@ -76,7 +148,15 @@ function PreviewLine({ line, index, open, onToggle, promptFor }) {
     );
   }
   const copied = line.kind === "copy";
+  const originals = showChanges && !copied ? line.original : [];
   return (
+    <>
+      {originals.map((original, originalIndex) => (
+        <div className="md-line original" key={`original-${originalIndex}`} title={original.label} data-original-of={index}>
+          <span className="prov blank">·</span>
+          <span className="original-text">{original.text}</span>
+        </div>
+      ))}
     <div
       className={`md-line ${line.kind}${open ? " open" : ""}`}
       title={sourcesHover(line, promptFor)}
@@ -102,7 +182,14 @@ function PreviewLine({ line, index, open, onToggle, promptFor }) {
         </span>
       )}
       <span>
-        {line.display}
+        {showChanges && !copied && line.diff ? (
+          <>
+            {line.display.slice(0, line.display.length - line.plain.length)}
+            <DiffText segments={line.diff} />
+          </>
+        ) : (
+          line.display
+        )}
         {open && (
           <span className="src-list">
             {line.refs.length === 0 && <span className="src-item muted">No source cited.</span>}
@@ -118,11 +205,13 @@ function PreviewLine({ line, index, open, onToggle, promptFor }) {
         )}
       </span>
     </div>
+    </>
   );
 }
 
-function Preview({ response, profileLabel, promptFor }) {
+export function Preview({ response, profileLabel, promptFor, initialView = "changes" }) {
   const [open, setOpen] = useState(() => new Set());
+  const [view, setView] = useState(initialView); // "changes" (default) | "clean"
   const lines = previewLines(response.result);
   const stats = previewStats(lines);
   const toggle = useCallback((index) => {
@@ -142,6 +231,20 @@ function Preview({ response, profileLabel, promptFor }) {
       <div className="tailor-meta" title={response.updated_at || undefined}>
         Tailored {dateTimeLabel(response.updated_at) || "just now"} · from resume <strong>{resumeName}</strong>
       </div>
+      <div className="resume-change-bar">
+        <div className="resume-summary" data-testid="change-summary">
+          {changeSummary(stats)}
+        </div>
+        <div className="view-toggle" role="group" aria-label="Resume view">
+          <button type="button" className={`button small ${view === "changes" ? "" : "secondary"}`} aria-pressed={view === "changes"} onClick={() => setView("changes")}>
+            Show changes
+          </button>
+          <button type="button" className={`button small ${view === "clean" ? "" : "secondary"}`} aria-pressed={view === "clean"} onClick={() => setView("clean")}>
+            Clean copy
+          </button>
+        </div>
+      </div>
+      {view === "changes" && (
       <div className="resume-legend">
         <span>
           <span className="prov resume">R</span> copied verbatim from the resume
@@ -151,11 +254,18 @@ function Preview({ response, profileLabel, promptFor }) {
         </span>
         <span className="muted">Hover or click a line to see its sources.</span>
       </div>
-      <div className="md-preview" data-tailored-lines={stats.total}>
-        {lines.map((line, index) => (
-          <PreviewLine key={index} line={line} index={index} open={open.has(index)} onToggle={toggle} promptFor={promptFor} />
-        ))}
-      </div>
+      )}
+      {view === "changes" ? (
+        <div className="md-preview" data-tailored-lines={stats.total} data-view="changes">
+          {lines.map((line, index) => (
+            <PreviewLine key={index} line={line} index={index} open={open.has(index)} onToggle={toggle} promptFor={promptFor} showChanges />
+          ))}
+        </div>
+      ) : (
+        <div className="clean-wrap" data-tailored-lines={stats.total}>
+          <CleanCopy lines={lines} />
+        </div>
+      )}
       <div className="resume-stats">{statsLine(stats)}</div>
     </>
   );

@@ -234,7 +234,7 @@ def test_preview_lines_are_the_responses_own_text_in_markdown_order() -> None:
 
 def test_stats_download_name_and_latest_stored() -> None:
     out = _run_node(_payload())
-    assert out["stats"] == {"total": 7, "copied": 4, "rewritten": 3, "citingAnswers": 1, "unsourced": 0}
+    assert out["stats"] == {"total": 7, "copied": 4, "rewritten": 3, "citingAnswers": 1, "unsourced": 0, "keywords": []}
     assert out["statsLine"] == "7 lines · 4 copied verbatim · 3 rewritten (1 citing your answers)"
     assert out["downloadName"] == "tailored-resume-acme-corp-software-engineer.md"
     assert out["downloadNameBare"] == "tailored-resume.md"

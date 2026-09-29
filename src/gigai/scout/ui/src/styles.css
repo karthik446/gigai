@@ -1453,6 +1453,20 @@ table.data-table th {
 .src-note { color: var(--muted); margin-right: 6px; }
 .src-note::before { content: "· "; }
 .src-text { display: block; color: var(--muted); margin-top: 1px; }
+.resume-change-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.resume-summary { font-size: 0.85rem; font-weight: 600; }
+.view-toggle { display: inline-flex; gap: 4px; }
+.md-line.original { cursor: default; color: var(--muted); text-decoration: line-through; opacity: 0.8; }
+.md-line.original .original-text { padding-left: 0; }
+.diff-added { background: var(--ok-bg); color: var(--ok); border-radius: 3px; padding: 0 2px; }
+.clean-wrap { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); padding: 12px 16px; line-height: 1.5; }
+.clean-resume h3, .clean-resume h4, .clean-resume h5 { margin: 0.9em 0 0.3em; }
+.clean-resume .clean-title { margin-top: 0; font-size: 1.15rem; }
+.clean-resume .clean-section { font-size: 0.95rem; border-bottom: 1px solid var(--border); padding-bottom: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
+.clean-resume .clean-entry { font-size: 0.9rem; }
+.clean-resume p { margin: 0.2em 0; }
+.clean-resume .clean-bullet { padding-left: 1.2em; text-indent: -0.9em; }
+.clean-resume .clean-bullet::before { content: "• "; }
 .resume-stats { font-size: 0.78rem; color: var(--muted); margin-top: 8px; }
 .tailor-error { margin: 0 0 10px; font-size: 0.85rem; }
 
