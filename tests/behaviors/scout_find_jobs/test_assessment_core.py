@@ -153,10 +153,7 @@ GOLDEN_PROMPT = (
     'sessions"), application rules, or behavioral and soft bullets (communication, ownership, curiosity, '
     '"seeks feedback", "comfortable with ambiguity", "uses AI tools responsibly", "familiar with standard'
     ' IDEs and debugging practices"). None of these is ever a question.\n'
-    '- One bullet is ONE requirement, even when it lists several examples or sub-clauses. Test its '
-    'substance, not every example word: "advanced SQL ... joins, window functions, aggregations" is met '
-    'by demonstrated advanced SQL; "dbt, Airflow, Snowflake, or similar" is met by any comparable tool; '
-    '"statistical or ML models" is met by either.\n'
+    '- One requirement per distinct skill or technology area. A bullet that lists several examples or sub-clauses of ONE area is one requirement: test its substance, not every example word ("advanced SQL ... joins, window functions, aggregations" is met by demonstrated advanced SQL; "dbt, Airflow, Snowflake, or similar" is met by any comparable tool; "statistical or ML models" is met by either; "HTML5, CSS3, Tailwind" is one front-end styling row). A bullet that joins UNRELATED areas with "and", "+" or a comma is split into one row per area, each with its own status and its own question, because the candidate may have one and not the other: "Java + Spring Boot and a React SPA with state management (Recoil)" is two rows (Java/Spring Boot backend; React SPA with Recoil state management), never one row or one question. Related stacks of one area stay together (Java + Spring Boot; React + Recoil); different languages offered as alternatives ("Python or Kotlin") stay one row.\n'
     '- If the posting states no requirements at all, emit one row: requirement "No stated requirements", '
     'class "nice_to_have", status "met", empty resume_evidence.\n'
     '\n'
@@ -256,8 +253,7 @@ GOLDEN_PROMPT = (
     'resume_evidence, and emit no question for it.\n'
     '\n'
     'OUTPUT BOUNDS (the validator rejects anything outside them, and you get exactly one retry):\n'
-    '- matrix: 1 to 12 rows. If the posting yields more, keep every HARD row, then ASKABLE rows, and drop'
-    ' NICE_TO_HAVE rows first; merge closely related bullets into one row rather than exceed 12.\n'
+    '- matrix: 1 to 12 rows. If the posting yields more, keep every HARD row, then ASKABLE rows, and drop NICE_TO_HAVE rows first; merge only bullets that name the same skill area into one row rather than exceed 12 (never merge unrelated skills to fit the cap; drop NICE_TO_HAVE, then the least central ASKABLE rows, instead).\n'
     '- questions: 0 to 12 objects, each with all three keys "question_id", "question", "requirement"; '
     'never a bare string.\n'
     '- question_id: exactly one colon, lowercase letters, digits and underscores only, in the form '
@@ -303,7 +299,7 @@ GOLDEN_RETRY_PROMPT = (
     + _VALIDATION_ERROR
     + '. You cannot see that attempt, so produce a fresh answer that avoids the named problem: "at most '
     '12 allowed" or "at least 1 row is required" means a list broke OUTPUT BOUNDS (drop NICE_TO_HAVE '
-    'rows first, merge related bullets); "question_id ... is invalid" means an id broke the id form; '
+    'rows first, merge only same-area bullets); "question_id ... is invalid" means an id broke the id form; '
     '"rule 7" means the verdict contradicted the rows or questions (recompute it from the rows: any '
     "HARD unmet -> not_a_match, else any question -> pending_user_answers, else "
     'matched_above_threshold); "no JSON object" means the answer was not bare JSON. Return corrected '
@@ -313,19 +309,19 @@ GOLDEN_RETRY_PROMPT = (
 # sha256 of the assess-prompt-v2 prompts, recorded by the capture script
 # above (the strings above are the source of truth; the digests guard the
 # transcription).
-GOLDEN_SHA256 = "f8c08c65b4664b212663e78c5aa9248c3951fbc650263288cab6f428f4ab2f4f"
-GOLDEN_RETRY_SHA256 = "6a2c8a17ad68d52d7d81d6248e9a542f1fe06d3b18bb0931c439c0d6fafd662b"
+GOLDEN_SHA256 = "15f63599582eb6ebb6b8f2784ce65735b23193539d0dd56d8bf3ef127df07fe0"
+GOLDEN_RETRY_SHA256 = "3bf3cab82ec4528b9fac599b36a1cac399eb097c2717932b0b3463e89453b026"
 # 13,000-byte posting text and resume plus a 400-char validation error:
 # the three ``_MAX_PROMPT_*`` bounds (12_000 / 12_000 / 300) produce this exact prompt.
-GOLDEN_BOUNDED_SHA256 = "6e9b09d545f9dafa8be5c1327a29f83db2288fba3b27b9c3b9a1c48cd7af4f12"
-GOLDEN_BOUNDED_LEN = 37_929
+GOLDEN_BOUNDED_SHA256 = "75de387bacd4c3a45fc8fca8660833d75f7f654301c76b85dbde07714642b38f"
+GOLDEN_BOUNDED_LEN = 38_710
 
 # Digest of the shipped ``assess.md`` bytes; bump ONLY when the template changes on purpose.
 # assess-prompt-v2 (v0.1.9) INTENTIONAL CHANGE: bumped for the rewritten body (see above).
 # assess-prompt-v3 (v0.1.9) INTENTIONAL CHANGE: bumped again for the three rules (see above).
 # assess-prompt-v3-r1 (v0.1.9) INTENTIONAL CHANGE: bumped for the two sentences (see above).
 # assess-prompt-v3-r2 (v0.1.9) INTENTIONAL CHANGE: bumped for the two HARD-class sentences (see above).
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:59679af634cba34afefddc272f61d0b1f269bd9df48d564f76cfbfe109f327e0"
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:c64635f8042f8e4f8d56186626bd00865b618f620ff6687c1b3f6756af9e5e8c"
 
 
 def _sha256(text: str) -> str:
