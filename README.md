@@ -50,13 +50,14 @@ Or install from the release tag (this works once the `v0.1.9` tag exists):
 uv tool install "git+https://github.com/karthik446/gigai@v0.1.9"
 ```
 
-**4. Set up and run**
+**4. Run**
 
 ```bash
-gigai setup          # once per machine: press Enter to accept the defaults
 gigai scout run      # starts Scout and opens the browser
 ```
 
+The first run on a new machine creates GigAI's settings with their defaults
+(`~/.gigai/config.toml`) and says so; there is nothing else to set up first.
 In the browser, the setup wizard asks you to pick the model ("Model for
 Scout"), add your resume (paste it or upload the `.md`/`.txt` file), and set
 your roles, location and work mode. Then:
@@ -180,6 +181,10 @@ this build.
 ### Setup, projects and Gigs (advanced)
 
 `gigai setup` is interactive by default (workspace, access, models, roles).
+Scout users do not need it: the first `gigai scout run` (or `gigai scout
+install`) writes the same settings `gigai setup` writes when you accept every
+default, and never changes an existing config. Run `gigai setup` to change
+them.
 `gigai doctor` confirms the install is healthy. `gigai init` binds a git
 repository as a GigAI project and `gigai gigs` lists the Gigs registered for
 it; Scout needs neither.
@@ -257,7 +262,8 @@ idempotent for an already-bound project.
 ### Scout: install and run
 
 Everything below runs from an installed package (`uv tool install gigai`) —
-no source checkout needed (run `gigai setup` once first), and Scout runs from anywhere: no `cd` into a
+no source checkout needed (the first `gigai scout run` or `gigai scout install` writes GigAI's
+default settings), and Scout runs from anywhere: no `cd` into a
 target repo and no `gigai init` step first.
 
 ```bash

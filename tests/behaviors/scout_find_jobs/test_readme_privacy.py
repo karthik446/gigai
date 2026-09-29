@@ -188,12 +188,21 @@ def test_the_quickstart_is_first_numbered_and_asks_for_a_resume_without_personal
     text = _text()
     assert text.index("## Quickstart (Scout)") < text.index("## Scout, the first Gig") < text.index("## Privacy and security")
     quickstart = _flat(text.split("## Quickstart (Scout)", 1)[1].split("\n## ", 1)[0])
-    for step in ("**1. Requirements**", "**2. Prepare your resume", "**3. Install**", "**4. Set up and run**"):
+    for step in ("**1. Requirements**", "**2. Prepare your resume", "**3. Install**", "**4. Run**"):
         assert step in quickstart, step
     assert "with your name, email, phone, street address and links/URLs removed" in quickstart
     assert "Scout does not yet remove personal info for you" in quickstart
-    for command in ("uv tool install gigai", "gigai --version", "gigai setup", "gigai scout run"):
+    for command in ("uv tool install gigai", "gigai --version", "gigai scout run"):
         assert command in quickstart, command
+    # uat-bug-050: `gigai scout run` writes the default settings itself, so the
+    # human quickstart has no setup step; `gigai setup` stays documented for
+    # changing core settings.
+    assert "gigai setup" not in quickstart
+    assert "The first run on a new machine creates GigAI's settings with their defaults" in quickstart
+    advanced = _flat(text.split("### Setup, projects and Gigs (advanced)", 1)[1].split("\n## ", 1)[0])
+    assert "`gigai setup` is interactive by default" in advanced
+    assert "Scout users do not need it: the first `gigai scout run`" in advanced
+    assert "run `gigai setup` once first" not in text
     assert "from the release tag" in quickstart and "@v0.1.9" in quickstart
     for button in ("Update sources", "Run find jobs", "Assess all new", "Tailor resume"):
         assert f"**{button}**" in quickstart, button

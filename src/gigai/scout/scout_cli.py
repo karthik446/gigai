@@ -117,6 +117,27 @@ def _fail(exc: Exception, *, as_json: bool, fallback: str) -> None:
     raise click.ClickException(str(exc))
 
 
+def _ensure_gigai_settings(home_root: Path, *, as_json: bool) -> None:
+    """On a fresh machine, write the settings `gigai setup` writes by default.
+
+    uat-bug-050: `gigai scout run` / `install` are the first commands a new
+    user types. With no ``<home>/config.toml`` they used to stop at "run
+    'gigai setup'"; now they write exactly what an Enter-through ``gigai
+    setup`` writes and carry on. An existing config.toml (valid, invalid, or
+    older) is never touched here: it is loaded and reported as before.
+    """
+
+    config_file = home_root.expanduser().resolve(strict=False) / "config.toml"
+    if config_file.exists() or config_file.is_symlink():
+        return
+    # Imported here: gigai.cli imports this module to register `gigai scout`.
+    from ..cli import write_default_setup
+
+    write_default_setup(home_root, as_json=as_json)
+    if not as_json:
+        click.echo(f"Created GigAI settings with defaults at {_display_path(config_file)}")
+
+
 def write_starter_find_jobs_config(target_root: Path) -> bool:
     """Write a placeholder ``find-jobs.json`` if one doesn't already exist.
 
@@ -160,6 +181,7 @@ def install_command(
     """Bind, approve, and activate Scout for the bound project; safe to rerun."""
 
     home_root = home_value or default_home_root()
+    _ensure_gigai_settings(home_root, as_json=as_json)
     try:
         resolved_target = _resolved_target(target_value, home_root, username=username, as_json=as_json)
         result = install_scout(home_root=home_root, requested_target=resolved_target)
@@ -499,6 +521,7 @@ def run_command(
         )
 
     home_root = home_value or default_home_root()
+    _ensure_gigai_settings(home_root, as_json=as_json)
     try:
         resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
         result = run_supervisor.start(

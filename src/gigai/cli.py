@@ -100,6 +100,7 @@ from .occurrence import (
 )
 from .question_generation import G27_DISCOVERY_PROMPT, generate_model_questions
 from .setup import (
+    SetupResult,
     build_config,
     detect_editor_argv,
     default_home_root,
@@ -952,6 +953,97 @@ def setup_command(
 ) -> None:
     """Run terminal setup, or update config non-interactively."""
 
+    result = _run_terminal_setup(
+        non_interactive=non_interactive,
+        home_value=home_value,
+        workpad_root=workpad_root,
+        editor=editor,
+        editor_arg=editor_arg,
+        open_with_target=open_with_target,
+        credential_ref=credential_ref,
+        clear_credentials=clear_credentials,
+        endpoint_spec=endpoint_spec,
+        model_target_spec=model_target_spec,
+        create_model_target=create_model_target,
+        target_output_limit_spec=target_output_limit_spec,
+        target_reasoning_effort_spec=target_reasoning_effort_spec,
+        as_json=as_json,
+    )
+    payload = {
+        "schema_version": result.config.schema_version,
+        "home_root": os.fspath(result.config.home_root),
+        "workpad_root": os.fspath(result.config.workpad_root),
+        "config_changed": result.config_changed,
+        "standard_pack_changed": result.pack_changed,
+        "mount_checks": [
+            {"id": check.id, "status": check.status} for check in result.mount_checks
+        ],
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        changed = "updated" if result.config_changed else "unchanged"
+        click.echo(f"GigAI setup complete; configuration {changed}.")
+        click.echo(
+            "Authoritative workpad root: "
+            + _display_local_path(result.config.workpad_root)
+        )
+
+
+def write_default_setup(home_value: Path | None, *, as_json: bool) -> SetupResult:
+    """Write what `gigai setup` writes when every prompt takes its default.
+
+    uat-bug-050: `gigai scout run` / `gigai scout install` call this on a
+    missing config.toml so a fresh machine needs no separate setup step. It
+    is the same terminal-setup path with each prompt answered by its default
+    (no stdin, no summary), so the bytes match an Enter-through `gigai setup`.
+    """
+
+    return _run_terminal_setup(
+        non_interactive=False,
+        home_value=home_value,
+        workpad_root=None,
+        editor=None,
+        editor_arg=(),
+        open_with_target=None,
+        credential_ref=(),
+        clear_credentials=False,
+        endpoint_spec=(),
+        model_target_spec=(),
+        create_model_target=None,
+        target_output_limit_spec=(),
+        target_reasoning_effort_spec=(),
+        as_json=as_json,
+        accept_defaults=True,
+    )
+
+
+def _run_terminal_setup(
+    *,
+    non_interactive: bool,
+    home_value: Path | None,
+    workpad_root: Path | None,
+    editor: str | None,
+    editor_arg: tuple[str, ...],
+    open_with_target: bool | None,
+    credential_ref: tuple[str, ...],
+    clear_credentials: bool,
+    endpoint_spec: tuple[str, ...],
+    model_target_spec: tuple[str, ...],
+    create_model_target: str | None,
+    target_output_limit_spec: tuple[str, ...],
+    target_reasoning_effort_spec: tuple[str, ...],
+    as_json: bool,
+    accept_defaults: bool = False,
+) -> SetupResult:
+    """Resolve and apply one setup; `accept_defaults` answers every prompt with its default."""
+
+    def prompt_text(label: str, *, default: str) -> str:
+        return default if accept_defaults else _setup_text_prompt(label, default=default)
+
+    def prompt_confirm(label: str, *, default: bool) -> bool:
+        return default if accept_defaults else _setup_confirm(label, default=default)
+
     _require_supported_platform()
     requested_home = (
         (home_value or default_home_root()).expanduser().resolve(strict=False)
@@ -993,7 +1085,7 @@ def setup_command(
     else:
         requested_home = (
             Path(
-                _setup_text_prompt(
+                prompt_text(
                     "GigAI home",
                     default=_display_local_path(requested_home),
                 )
@@ -1020,7 +1112,7 @@ def setup_command(
         )
         resolved_workpad = (
             Path(
-                _setup_text_prompt(
+                prompt_text(
                     "Authoritative workpad root",
                     default=_display_local_path(default_workpad),
                 )
@@ -1047,7 +1139,7 @@ def setup_command(
                 default_editor = detected_editor[0]
         try:
             resolved_editor = resolve_editor_argv(
-                _setup_text_prompt(
+                prompt_text(
                     "Editor program (used to open workpads)",
                     default=default_editor or "",
                 ),
@@ -1061,7 +1153,7 @@ def setup_command(
             )
         except ValueError as exc:
             _raise_cli_error(str(exc), as_json=as_json, code="setup_editor_invalid")
-        resolved_open = _setup_confirm(
+        resolved_open = prompt_confirm(
             "Open workpads with their target later?",
             default=(
                 open_with_target
@@ -1235,7 +1327,7 @@ def setup_command(
             endpoints=endpoints,
             detected_models=discovery_snapshot.models,
         )
-        if not non_interactive and create_model_target is None:
+        if not non_interactive and not accept_defaults and create_model_target is None:
             selected_create_target = _select_terminal_create_target(
                 options=runtime_options,
                 default=selected_create_target,
@@ -1284,7 +1376,7 @@ def setup_command(
                     )
                 )
             profiles = tuple(profiles_list)
-        if not non_interactive:
+        if not non_interactive and not accept_defaults:
             click.secho("\nGigAI setup", bold=True, fg="cyan")
             click.echo(
                 "  GigAI home: "
@@ -1325,26 +1417,7 @@ def setup_command(
         persist_discovery_snapshot(result.config.home_root, discovery_snapshot)
     except (ConfigurationError, OSError, ValueError) as exc:
         _raise_cli_error(str(exc), as_json=as_json, code="setup_invalid")
-
-    payload = {
-        "schema_version": result.config.schema_version,
-        "home_root": os.fspath(result.config.home_root),
-        "workpad_root": os.fspath(result.config.workpad_root),
-        "config_changed": result.config_changed,
-        "standard_pack_changed": result.pack_changed,
-        "mount_checks": [
-            {"id": check.id, "status": check.status} for check in result.mount_checks
-        ],
-    }
-    if as_json:
-        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
-    else:
-        changed = "updated" if result.config_changed else "unchanged"
-        click.echo(f"GigAI setup complete; configuration {changed}.")
-        click.echo(
-            "Authoritative workpad root: "
-            + _display_local_path(result.config.workpad_root)
-        )
+    return result
 
 
 def _run_browser_setup(

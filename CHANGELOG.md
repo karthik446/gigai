@@ -111,6 +111,9 @@ mechanics here. Those belong in the internal changelog.
   personal info removed, install, run), a Roadmap / TODO with known
   limitations, and privacy wording that no longer promises contact lines are
   stripped from ranking.
+- **`gigai scout run` sets itself up.** On a new machine it writes GigAI's
+  settings with the defaults `gigai setup` offers, then starts Scout; no
+  separate `gigai setup` step. An existing config is never changed.
 - **Full assessments wording.** The run dialog's cap is "Full assessments" with
   a line saying every matching posting is ranked; postings past the limit are
   labelled "Not fully assessed" (use Assess to assess one), and Settings says
