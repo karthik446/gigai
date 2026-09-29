@@ -547,6 +547,48 @@ def _lever_lists_text(lists: object) -> str:
     return "\n\n".join(sections)
 
 
+#: uat-bug-046: how much longer the HTML ``description`` must be than the plain
+#: text before it replaces it (the same 1.5x and 500 chars the operator's
+#: board cache was measured with: 1,460 of 68,943 postings).
+_LEVER_HTML_MIN_RATIO = 1.5
+_LEVER_HTML_MIN_GAIN = 500
+
+
+def _lever_text(job: dict[str, object]) -> str:
+    """A Lever posting's text: ``descriptionPlain`` + ``lists``, or the full HTML body.
+
+    Lever's ``descriptionPlain`` is normally the whole opening and ``lists``
+    carries Requirements/Benefits. Some boards put the entire posting in the
+    HTML ``description`` instead (``descriptionPlain`` stops after a few
+    paragraphs and ``lists`` is empty), and the requirements were lost.
+    When ``html_to_text(description)`` is materially longer than the plain
+    text + lists, the HTML text is used (with ``lists`` appended only if the
+    HTML does not already contain them); otherwise the text is exactly what
+    it always was, so every other posting keeps its content hash. With no
+    plain text and no lists at all, ``description`` is the fallback.
+    """
+
+    plain = job.get("descriptionPlain")
+    html = job.get("description")
+    plain_text = html_to_text(plain if type(plain) is str else None)
+    lists_text = _lever_lists_text(job.get("lists"))
+    current = "\n\n".join(part for part in (plain_text, lists_text) if part)
+    html_text = html_to_text(html if type(html) is str else None)
+    if html_text and (
+        not current
+        or (len(html_text) >= _LEVER_HTML_MIN_RATIO * len(current) and len(html_text) - len(current) >= _LEVER_HTML_MIN_GAIN)
+    ):
+        if lists_text and _squash(lists_text) not in _squash(html_text):
+            return "\n\n".join((html_text, lists_text))
+        return html_text
+    return current
+
+
+def _squash(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+
+
 def _lever_countries(job: dict[str, object]) -> tuple[str, ...] | None:
     """Lever's structured country signal: ``country`` + ``categories.allLocations``.
 
@@ -613,15 +655,7 @@ def _lever_rows(payload: list, board_token: str, config: FindJobsConfig, stats: 
         if type(categories) is dict and type(categories.get("location")) is str:
             location_name = categories["location"]
         countries = _lever_countries(job)
-        description = job.get("descriptionPlain")
-        # Lever's descriptionPlain is already plain text (occasionally with
-        # simple list markup); html_to_text is a no-op on text with no tags
-        # and still normalizes the rare HTML fragment. `lists` is a separate
-        # array of structured sections (e.g. Requirements/Benefits), each
-        # with its own `text` heading and HTML `content`; append them so the
-        # full posting body (not just the intro paragraph) reaches assess.
-        text = html_to_text(description if type(description) is str else None)
-        text = "\n\n".join(part for part in (text, _lever_lists_text(job.get("lists"))) if part)
+        text = _lever_text(job)
         content_bytes = _text_bytes(title, text or None)
         rows.append(
             PostingRow(

@@ -157,6 +157,10 @@ class AssessAttempt:
     # assessments) keeps building attempts the same way.
     dropped_questions: int = 0
     dropped_question_ids: tuple[str, ...] = ()
+    # uat-bug-046: True when the model answered Matched on a thin requirement
+    # matrix for a long posting (``posting_looks_incomplete``): the answer is
+    # withheld, ``validation_error`` carries ``POSTING_INCOMPLETE_MESSAGE``.
+    incomplete_posting: bool = False
 
     def __post_init__(self) -> None:
         if self.ok and (self.parsed is None or self.not_assessed_reason is not None):
@@ -317,7 +321,70 @@ def assess_once(
     )
     if attempt.ok and dropped_count:
         attempt = replace(attempt, dropped_questions=dropped_count, dropped_question_ids=dropped)
+    if attempt.ok and posting_looks_incomplete(job.posting_text, attempt.parsed):
+        # Never Matched on a posting whose requirements look cut off: the
+        # answer is withheld and the posting stays not assessed.
+        return AssessAttempt(
+            False,
+            None,
+            NotAssessedReason.FAILED,
+            attempt.usage,
+            attempt.attempts,
+            POSTING_INCOMPLETE_MESSAGE,
+            incomplete_posting=True,
+        )
     return attempt
+
+
+# --- incomplete-posting guard (uat-bug-046) -------------------------------------------
+
+#: What the operator is told when a "Matched" rests on a thin requirement matrix.
+POSTING_INCOMPLETE_MESSAGE = "Posting text looks incomplete: open the posting"
+
+#: A matrix needs this many requirement rows (beyond location/eligibility ones) to back a Matched.
+_MIN_REQUIREMENT_ROWS = 3
+#: A posting shorter than this is allowed a short matrix: a real short posting can have two requirements.
+_SHORT_POSTING_CHARS = 1_200
+
+# Rows about where the candidate may work, not what the job needs.
+_ELIGIBILITY_ROW = re.compile(
+    r"\b(remote(?:ly)?|work(?:ing)? (?:from|anywhere)|located|location|relocat\w*|on-?site|hybrid|"
+    r"authori[sz]ation|eligib\w*|sponsor\w*|visa|citizen\w*|work permit|right to work|"
+    r"time ?zone|(?:in|within) the (?:us|u\.s\.|united states|uk|eu|canada))\b",
+    re.IGNORECASE,
+)
+_NO_STATED_REQUIREMENTS = "no stated requirements"
+
+
+def _row_is_requirement(requirement: str) -> bool:
+    text = requirement.strip().lower().rstrip(".")
+    return bool(text) and text != _NO_STATED_REQUIREMENTS and _ELIGIBILITY_ROW.search(text) is None
+
+
+def posting_looks_incomplete(posting_text: str, parsed: object) -> bool:
+    """True when a Matched verdict rests on too thin a matrix to trust.
+
+    The rule needs ALL of: the verdict is Matched, fewer than
+    ``_MIN_REQUIREMENT_ROWS`` matrix rows are about the job (rows about
+    remote/location/eligibility/"No stated requirements" do not count), and
+    the posting text is at least ``_SHORT_POSTING_CHARS`` long -- a long text
+    with almost no requirements is a posting whose requirements were cut off.
+    A "No stated requirements" row leaves the answer to the uat-bug-029
+    guard (``quick_assess.posting_requirements_unreadable``).
+    A verdict other than Matched is never blocked (nothing false to fix), and
+    a genuinely short posting with two requirements stays assessed.
+    Residual false positive: a real posting of 1,200+ characters that states
+    fewer than three requirements is not assessed and the operator opens it.
+    """
+
+    verdict = getattr(parsed, "verdict", None)
+    if getattr(verdict, "value", verdict) != "matched_above_threshold":
+        return False
+    matrix = getattr(parsed, "matrix", ())
+    if any(str(getattr(row, "requirement", "")).strip().lower().rstrip(".") == _NO_STATED_REQUIREMENTS for row in matrix):
+        return False  # the model says the posting states none: quick_assess's uat-bug-029 guard owns that path
+    real = sum(1 for row in matrix if _row_is_requirement(str(getattr(row, "requirement", ""))))
+    return real < _MIN_REQUIREMENT_ROWS and len(posting_text) >= _SHORT_POSTING_CHARS
 
 
 def _extract_json_object(raw: object) -> Mapping[str, object]:
@@ -621,8 +688,10 @@ __all__ = [
     "AssessContext",
     "AssessJob",
     "INSTRUCTIONS_DIGEST",
+    "POSTING_INCOMPLETE_MESSAGE",
     "PriorAnswer",
     "assess_once",
+    "posting_looks_incomplete",
     "invoke_json_once",
     "load_assess_instructions",
     "render_assess_prompt",

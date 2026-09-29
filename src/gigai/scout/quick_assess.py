@@ -72,7 +72,7 @@ from ..config import GigAIConfig, load_config
 from ..model_targets import ModelTargetResolutionError
 from .assessment_core import INSTRUCTIONS_DIGEST, AssessContext, AssessJob
 from .assessment_core import PriorAnswer as CorePriorAnswer
-from .assessment_core import assess_once
+from .assessment_core import POSTING_INCOMPLETE_MESSAGE, assess_once
 from .experience_answers import read_answers
 from .find_jobs.assess_contracts import (
     ORIGIN_QUICK_ASSESS,
@@ -606,6 +606,9 @@ def run_quick_assessment(
         binding.close()
 
     if not attempt.ok:
+        if attempt.incomplete_posting:
+            # uat-bug-046: nothing is stored; the job stays "not assessed".
+            raise QuickAssessError("posting_requirements_unreadable", POSTING_INCOMPLETE_MESSAGE)
         reason = attempt.not_assessed_reason
         if reason is NotAssessedReason.MODEL_OUTPUT_INVALID:
             detail = attempt.validation_error or "the model's answer did not match the assessment schema"

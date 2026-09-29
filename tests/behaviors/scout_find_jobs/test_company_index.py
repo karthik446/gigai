@@ -40,6 +40,7 @@ from gigai.scout.find_jobs.company_index import (
     UpdateTotals,
     board_list_url,
     body_digest,
+    indexed_body_digest,
     cached_posting_rows,
     index_state,
     observe_company,
@@ -570,7 +571,7 @@ def test_refresh_indexes_a_company_from_its_cached_body_without_a_request(tmp_pa
     entry = index.read("lever", "acme")
     assert entry is not None
     assert entry.company == "Acme Corp" and entry.checked_at == T1
-    assert entry.body_sha256 == body_digest(body) and entry.etag is None
+    assert entry.body_sha256 == indexed_body_digest("lever", body_digest(body)) and entry.etag is None
     assert entry.postings["lev-1"].content_sha256 == content_hash(b"Software Engineer\nBuild things.")
     assert entry.postings["lev-1"].first_seen == T1
 

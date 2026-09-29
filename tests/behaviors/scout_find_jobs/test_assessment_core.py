@@ -948,3 +948,68 @@ def test_installed_interpreter_reads_the_shipped_instructions(installed_gigai: I
 @pytest.fixture
 def installed_gigai() -> InstalledGigAI:
     return InstalledGigAI.current()
+
+
+# --- uat-bug-046: a Matched on a thin matrix of a long posting is withheld ----------
+
+def _matched(*requirements: str) -> str:
+    return json.dumps({
+        "verdict": "matched_above_threshold",
+        "matrix": [{"requirement": item, "class": "hard", "resume_evidence": ["ok"], "status": "met"} for item in requirements],
+        "suggestions": [],
+        "questions": [],
+        "sponsorship": "not_offered",
+    })
+
+
+_LONG_POSTING = "We build clinical software and value careful engineering. " * 30  # ~1,700 chars, no requirement list
+
+
+def test_thin_matrix_on_a_long_posting_is_not_matched() -> None:
+    from gigai.scout.assessment_core import POSTING_INCOMPLETE_MESSAGE
+    from gigai.scout.find_jobs.contracts import NotAssessedReason
+
+    binding = _ScriptedBinding([_matched("May work remotely anywhere in the US")])
+    outcome = assess_once(binding, _job(posting_text=_LONG_POSTING), _ctx(), parse=_parse)
+
+    assert not outcome.ok and outcome.parsed is None  # no Matched verdict comes out
+    assert outcome.not_assessed_reason is NotAssessedReason.FAILED
+    assert outcome.incomplete_posting and outcome.validation_error == POSTING_INCOMPLETE_MESSAGE
+    assert POSTING_INCOMPLETE_MESSAGE == "Posting text looks incomplete: open the posting"
+    assert len(binding.port.prompts) == 1  # not retried
+
+
+def test_only_eligibility_rows_do_not_count_as_requirements() -> None:
+    rows = ("Remote within the United States", "Authorized to work in the US", "Located in Denver, CO", "No visa sponsorship needed")
+    outcome = assess_once(_ScriptedBinding([_matched(*rows)]), _job(posting_text=_LONG_POSTING), _ctx(), parse=_parse)
+    assert not outcome.ok and outcome.incomplete_posting
+
+
+def test_three_real_requirements_on_a_long_posting_stay_matched() -> None:
+    outcome = assess_once(
+        _ScriptedBinding([_matched("7+ years of software engineering", "PostgreSQL", "React and TypeScript")]),
+        _job(posting_text=_LONG_POSTING),
+        _ctx(),
+        parse=_parse,
+    )
+    assert outcome.ok and outcome.parsed.verdict.value == "matched_above_threshold"
+
+
+def test_a_genuinely_short_posting_with_two_requirements_stays_matched() -> None:
+    short = "Acme needs a Python engineer. Requirements: 5+ years of Python; experience with GCP."
+    outcome = assess_once(
+        _ScriptedBinding([_matched("5+ years of Python", "experience with GCP")]), _job(posting_text=short), _ctx(), parse=_parse
+    )
+    assert outcome.ok and outcome.parsed.verdict.value == "matched_above_threshold"
+
+
+def test_a_thin_matrix_that_is_not_matched_is_left_alone() -> None:
+    output = json.dumps({
+        "verdict": "not_a_match",
+        "matrix": [{"requirement": "10+ years of Rust", "class": "hard", "resume_evidence": [], "status": "unmet"}],
+        "suggestions": [],
+        "questions": [],
+        "not_a_match_reason": "Needs 10 years of Rust.",
+    })
+    outcome = assess_once(_ScriptedBinding([output]), _job(posting_text=_LONG_POSTING), _ctx(), parse=_parse)
+    assert outcome.ok and outcome.parsed.verdict.value == "not_a_match"

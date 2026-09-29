@@ -334,6 +334,75 @@ def test_lever_url_and_mapping() -> None:
     assert row.content_sha256 == content_hash("Data Engineer\nOwn the pipeline.".encode("utf-8"))
 
 
+def _lever_rows_for(job: dict) -> tuple:
+    body = {"id": "x1", "text": "Senior Software Engineer", "hostedUrl": "https://jobs.lever.co/bright/x1", "categories": {"location": "Remote"}, "createdAt": 1758326400000, **job}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[body])
+
+    with _client(handler) as client:
+        return list_lever_board(client, "bright", _config(("software engineer",)))
+
+
+def test_lever_full_body_only_in_html_description_reaches_the_text() -> None:
+    # uat-bug-046: descriptionPlain stops after the intro, lists is empty, and the
+    # whole posting (with its requirements) is only in the HTML description.
+    intro = "<p>Lead the technical vision for our platform.</p>"
+    reqs = "<h3>Requirements</h3><ul><li>7+ years of software engineering</li><li>Strong PostgreSQL skills</li></ul>"
+    filler = "".join(f"<p>Paragraph {n} about how we work together and what we value.</p>" for n in range(30))
+    rows = _lever_rows_for(
+        {"descriptionPlain": "Lead the technical vision for our platform.", "lists": [], "description": intro + filler + reqs}
+    )
+    text = rows[0].text
+    assert text is not None
+    assert "7+ years" in text and "PostgreSQL" in text
+    assert rows[0].content_sha256 == content_hash(("Senior Software Engineer\n" + text).encode("utf-8"))
+
+
+def test_lever_normal_posting_text_is_unchanged() -> None:
+    # description is the same intro as descriptionPlain; lists carry the requirements.
+    rows = _lever_rows_for(
+        {
+            "descriptionPlain": "Own the pipeline.",
+            "description": "<div>Own the pipeline.</div>",
+            "lists": [{"text": "Requirements", "content": "<ul><li>5+ years</li></ul>"}],
+        }
+    )
+    assert rows[0].text == "Own the pipeline.\n\nRequirements\n5+ years"
+
+
+def test_lever_description_fallback_when_plain_and_lists_are_missing() -> None:
+    rows = _lever_rows_for({"description": "<p>Build things. 3+ years of Go.</p>"})
+    assert rows[0].text == "Build things. 3+ years of Go."
+
+
+def test_lever_html_that_already_holds_the_lists_does_not_duplicate_them() -> None:
+    list_html = "<ul><li>8+ years of Rust experience</li></ul>"
+    filler = "".join(f"<p>Paragraph {n} about how we work together and what we value.</p>" for n in range(30))
+    rows = _lever_rows_for(
+        {
+            "descriptionPlain": "Short intro.",
+            "description": f"<p>Short intro.</p>{filler}<h3>Requirements</h3>{list_html}",
+            "lists": [{"text": "Requirements", "content": list_html}],
+        }
+    )
+    assert rows[0].text is not None
+    assert rows[0].text.count("8+ years of Rust experience") == 1
+
+
+def test_lever_lists_missing_from_the_html_are_appended_once() -> None:
+    filler = "".join(f"<p>Paragraph {n} about how we work together and what we value.</p>" for n in range(30))
+    rows = _lever_rows_for(
+        {
+            "descriptionPlain": "Short intro.",
+            "description": f"<p>Short intro.</p>{filler}",
+            "lists": [{"text": "Requirements", "content": "<ul><li>9+ years of Zig</li></ul>"}],
+        }
+    )
+    assert rows[0].text is not None
+    assert rows[0].text.count("9+ years of Zig") == 1
+
+
 def test_lever_lists_are_appended_to_text() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

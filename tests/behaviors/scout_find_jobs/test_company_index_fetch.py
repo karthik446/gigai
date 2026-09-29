@@ -180,3 +180,46 @@ def test_a_200_with_the_same_bytes_leaves_a_lever_company_untouched(tmp_path: Pa
 
     assert change.status == STATUS_UPDATED and change.changed == ("lev-2",) and change.new == () and change.removed == ()
     assert requests == ["/v0/postings/acme"] * 3
+
+
+def test_a_lever_company_indexed_before_the_text_fix_is_reread_once_and_marked_changed(tmp_path: Path) -> None:
+    # uat-bug-046: the cached body is byte-identical, but the postings' text now
+    # includes the full HTML description, so an index built by the older parser
+    # must not be skipped as "untouched".
+    from dataclasses import replace
+
+    filler = "".join(f"<p>Paragraph {n} about how we work together and what we value.</p>" for n in range(30))
+    jobs = [
+        {
+            "id": "lev-1",
+            "text": "Software Engineer",
+            "hostedUrl": "https://jobs.lever.co/acme/lev-1",
+            "categories": {"location": "Austin, TX"},
+            "createdAt": 1758326400000,
+            "descriptionPlain": "Lead the vision.",
+            "lists": [],
+            "description": f"<p>Lead the vision.</p>{filler}<ul><li>7+ years of PostgreSQL</li></ul>",
+        }
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=jobs)
+
+    index, cache = _stores(tmp_path)
+    _fetch(handler, cache, "lever", "acme")
+    refresh_company(index, cache, ats="lever", slug="acme", company="Acme", observed_at=T1)
+    entry = index.read("lever", "acme")
+    assert entry is not None
+    raw_digest = cache.lookup("lever", "https://api.lever.co/v0/postings/acme?mode=json").sha256
+    assert entry.body_sha256 != raw_digest  # tagged with the text revision
+
+    # What the older parser stored: the raw body digest and the intro-only text hash.
+    old_hash = content_hash(b"Software Engineer\nLead the vision.")
+    stale = replace(entry, body_sha256=raw_digest, postings={"lev-1": replace(entry.postings["lev-1"], content_sha256=old_hash)})
+    index.write(stale)
+
+    change = refresh_company(index, cache, ats="lever", slug="acme", observed_at=T2)
+    assert change.status == STATUS_UPDATED and change.changed == ("lev-1",)
+
+    again = refresh_company(index, cache, ats="lever", slug="acme", observed_at=T3)
+    assert again.status == STATUS_UNTOUCHED

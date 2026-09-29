@@ -620,3 +620,26 @@ def test_short_prose_blurb_without_cue_words_is_assessed_not_refused(fx: Profile
     response = _run(fx, AssessRequest(job=AssessJobInput(job_text=blurb)))
 
     assert response.result.verdict is Verdict.MATCHED_ABOVE_THRESHOLD
+
+
+def test_matched_on_a_thin_matrix_of_a_long_posting_is_not_assessed_and_stores_nothing(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """uat-bug-046: the Lever posting stored without its requirements got Matched on one 'remote' row."""
+
+    thin = json.dumps(
+        {
+            "verdict": "matched_above_threshold",
+            "matrix": [{"requirement": "May work remotely anywhere in the US", "class": "hard", "status": "met", "resume_evidence": ["Denver"]}],
+            "suggestions": [],
+            "questions": [],
+            "not_a_match_reason": None,
+        }
+    )
+    _install(monkeypatch, [thin])
+    long_text = "We build clinical software and value careful engineering. " * 30
+
+    with pytest.raises(QuickAssessError) as excinfo:
+        _run(fx, AssessRequest(job=AssessJobInput(job_text=long_text)))
+
+    assert excinfo.value.code == "posting_requirements_unreadable"
+    assert str(excinfo.value) == "Posting text looks incomplete: open the posting"
+    assert list_quick_assessments(fx.home_root, fx.target) == ()

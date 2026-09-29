@@ -119,6 +119,19 @@ def body_digest(body: bytes) -> str:
     return digest_imported_bytes(body)
 
 
+#: uat-bug-046: bump when a provider's parsed posting text changes for the SAME
+#: cached body, so an indexed company is re-read once instead of being skipped
+#: as "untouched" (its stored ``body_sha256`` no longer matches).
+_TEXT_REVISION = {"lever": "lever-text-2"}
+
+
+def indexed_body_digest(ats: str, body_sha256: str) -> str:
+    """What ``body_sha256`` holds for ``ats``: the cache digest, tagged with the text revision if it has one."""
+
+    revision = _TEXT_REVISION.get(ats)
+    return body_sha256 if revision is None else f"{body_sha256}+{revision}"
+
+
 def company_key(ats: str, slug: str) -> str:
     """``<ats>:<slug>``: the same key the rotation's last-fetched index uses."""
 
@@ -781,7 +794,8 @@ def refresh_company(
     previous = index.read(ats, slug)
     name = company or (previous.company if previous is not None else slug)
     observed: dict[str, ObservedPosting] | None = None
-    if previous is None or previous.body_sha256 != entry.sha256:
+    digest = indexed_body_digest(ats, entry.sha256)
+    if previous is None or previous.body_sha256 != digest:
         lookup = cached_detail_lookup(cache, slug) if details and ats == "greenhouse" else None
         try:
             observed = parse_board_body(ats, slug, entry.body, detail_lookup=lookup)
@@ -794,7 +808,7 @@ def refresh_company(
         slug=slug,
         observed_at=stamp,
         observed=observed,
-        body_sha256=entry.sha256,
+        body_sha256=digest,
         etag=entry.etag,
         last_modified=entry.last_modified,
     )
