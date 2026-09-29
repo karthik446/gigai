@@ -1236,6 +1236,12 @@ class ScoutFindJobsBackend:
             )
 
         if path.is_symlink() or not path.is_file():
+            # uat-bug-049: a NEW config's cap follows its model target: a
+            # local CLI target (codex_cli, claude_cli, ollama_local) assesses
+            # all new postings, openrouter_api (per-call cost) keeps 10. With
+            # no model_target sent the target is the new config's default
+            # (ollama_local), so the same rule applies to it.
+            new_target = model_target_sent or ModelTarget.OLLAMA_LOCAL
             config = FindJobsConfig(
                 roles=() if profile is not None else roles,
                 merged_queries=() if profile is not None else roles,
@@ -1245,8 +1251,8 @@ class ScoutFindJobsBackend:
                 # uat-bug-033: a NEW config starts with Exa off (an existing
                 # file's saved value is kept by the else branch below).
                 sources=SourceToggles(exa=False, ats=True, hiringcafe=False),
-                default_assess_cap=10,
-                default_model_target=model_target_sent or ModelTarget.OLLAMA_LOCAL,
+                default_assess_cap=10 if new_target is ModelTarget.OPENROUTER_API else "all",
+                default_model_target=new_target,
                 countries=countries,
                 visa_sponsorship_required=visa_sponsorship_required,
                 max_age_days=max_age_days_sent,

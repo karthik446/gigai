@@ -79,7 +79,7 @@ export default function ConfigPanel({ config, resumePreview, resumeLabel, resume
           <SourceList sources={config.sources} />
         </div>
         <div className="field">
-          <div className="label">Default cap</div>
+          <div className="label">Default full assessments</div>
           <div className="value">{isAssessAll(config.default_assess_cap) ? "All new postings" : config.default_assess_cap}</div>
         </div>
         <div className="field">

@@ -90,6 +90,10 @@ STARTER_FIND_JOBS_CONFIG = FindJobsConfig(
     remote=True,
     published_after=None,
     sources=SourceToggles(exa=False, ats=True, hiringcafe=False),
+    # uat-bug-049: the starter's model target is the contract default
+    # (ollama_local, a local target), so its cap is "all" like a new wizard
+    # config with a local target; an existing file is never rewritten.
+    default_assess_cap="all",
 )
 
 
