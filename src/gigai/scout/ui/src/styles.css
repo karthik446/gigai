@@ -1555,3 +1555,4 @@ table.data-table th {
 .question-requirement { margin: 0 0 4px; }
 .requirements-details > summary { cursor: pointer; }
 .requirements-details[open] > summary { margin-bottom: 8px; }
+.show-more { display: flex; justify-content: center; padding: 16px 0 8px; }

@@ -790,6 +790,102 @@ def test_pages_cover_the_run_once_and_join_only_their_own_rows(monkeypatch: pyte
     assert second["payload"]["rows"][2]["rank_score"] is None
 
 
+def _big_view(count: int = 500) -> run_reads.RunView:
+    """``count`` rows with many ties (7 scores, 3 dates, some unscored, some assessed) in a shuffled acquire order."""
+
+    import random
+
+    postings = [
+        _posting(f"job-{index:03d}", published_at=f"2026-09-{20 + index % 3}T00:00:00Z" if index % 11 else None)
+        for index in range(count)
+    ]
+    random.Random(33).shuffle(postings)
+    scores = {
+        posting.normalized_url: _score(posting.normalized_url, (index * 13) % 7 * 10 if index % 5 else None)
+        for index, posting in enumerate(postings)
+    }
+    assessed = postings[:20]
+    acquire = SimpleNamespace(
+        rows=tuple(PostingRowResult(posting, RowOutcome.NEW) for posting in postings),
+        carried_forward_assessments=(),
+        rank_scores=(),
+    )
+    assess = SimpleNamespace(
+        assessments=tuple(
+            _assessed(posting, Verdict.MATCHED_ABOVE_THRESHOLD if index % 2 else Verdict.PENDING_USER_ANSWERS)
+            for index, posting in enumerate(assessed)
+        ),
+        not_assessed=(),
+    )
+    evidence = SimpleNamespace(run_id="run_1", acquire_output=acquire, assess_output=assess, started_at="2026-09-28T00:00:00Z")
+    return run_reads.RunView(evidence, scores=scores)
+
+
+@pytest.fixture
+def paged_reads(monkeypatch: pytest.MonkeyPatch):
+    payload = SimpleNamespace(
+        schema_version="scout-find-jobs-present-payload:1", run_id="run_1",
+        config=SimpleNamespace(to_json=lambda: {"roles": []}), pinned_resume=None, failures=(), node_receipts=(),
+        status=AggregateStatus.SUCCEEDED,
+    )
+    monkeypatch.setattr(projection, "present_payload_from", lambda evidence: payload)
+    monkeypatch.setattr(run_reads, "run_counts", lambda evidence: {"found": 500, "new": 500, "assessed": 20, "matched": 10})
+
+    def page(view: run_reads.RunView, limit: int, offset: int) -> dict:
+        return run_reads.results_page(view, limit=limit, offset=offset)
+
+    return page
+
+
+def _page_urls(page: dict) -> list[str]:
+    return [row["posting"]["normalized_url"] for row in page["payload"]["rows"]]
+
+
+def test_n33_pages_of_50_at_500_rows_never_overlap_or_skip(paged_reads) -> None:
+    view = _big_view()
+    everything = [row.posting.normalized_url for row in view.rows]
+    pages = [paged_reads(view, 50, offset) for offset in range(0, 500, 50)]
+
+    assert [len(_page_urls(page)) for page in pages] == [50] * 10
+    assert all(page["total"] == 500 and page["limit"] == 50 for page in pages)
+    assert [page["offset"] for page in pages] == list(range(0, 500, 50))
+    joined = [url for page in pages for url in _page_urls(page)]
+    assert joined == everything, "pages read one after the other are the one total order"
+    assert len(set(joined)) == 500, "no row twice, none missing"
+    # Page boundaries do not depend on the page size: 3 pages of 170 are the same order.
+    assert [url for offset in (0, 170, 340) for url in _page_urls(paged_reads(view, 170, offset))] == everything
+    # Page 1 is the top of the order: the assessed rows (matched, then needs answers) come first.
+    assert len(pages[0]["payload"]["assessments"]) == 20
+
+
+def test_n33_the_order_is_stable_across_reads_and_ties_keep_the_sealed_order() -> None:
+    view = _big_view()
+    again = run_reads.RunView(view.evidence, scores=dict(view.scores))
+    assert [row.posting.normalized_url for row in again.rows] == [row.posting.normalized_url for row in view.rows]
+    acquire_position = {row.posting.normalized_url: index for index, row in enumerate(view.evidence.acquire_output.rows)}
+    keys = [view._sort_key(row) for row in view.rows]
+    for (left, right), (key_left, key_right) in zip(zip(view.rows, view.rows[1:]), zip(keys, keys[1:])):
+        assert key_left <= key_right
+        if key_left == key_right:
+            assert acquire_position[left.posting.normalized_url] < acquire_position[right.posting.normalized_url]
+
+
+def test_n33_total_limit_past_total_and_offset_past_total(paged_reads) -> None:
+    view = _big_view()
+    everything = [row.posting.normalized_url for row in view.rows]
+
+    whole = paged_reads(view, 500, 0)
+    assert (whole["total"], _page_urls(whole)) == (500, everything)
+    beyond = paged_reads(view, 500, 450)  # limit past what is left: the rest, 50 rows
+    assert _page_urls(beyond) == everything[450:] and beyond["total"] == 500
+    last = paged_reads(view, 50, 475)
+    assert _page_urls(last) == everything[475:] and len(_page_urls(last)) == 25
+    for offset in (500, 501, 9999):
+        empty = paged_reads(view, 50, offset)
+        assert _page_urls(empty) == [] and empty["total"] == 500 and empty["offset"] == offset
+        assert empty["payload"]["assessments"] == [] and empty["payload"]["not_assessed"] == []
+
+
 def test_one_posting_s_rows_are_complete() -> None:
     view, postings = _view()
 

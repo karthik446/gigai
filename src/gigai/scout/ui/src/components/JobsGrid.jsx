@@ -1,8 +1,9 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import JobCard from "./JobCard.jsx";
 import { displayCompanyName } from "../display.js";
 import { EMPTY_FILTERS, filterJobs, hasActiveFilter, sortByAssessedAt, sortJobs } from "../jobModel.js";
 import { stateOptions } from "../jobStateModel.js";
+import { filtersKey, hasMore, initialShown, pageOf, rowsWanted, showMoreLabel, showMoreShown, showingLine } from "../pageModel.js";
 import { RANK_HONEST_NOTE, RANK_ORDER_NOTE, sameOrder, streamOrder } from "../rankModel.js";
 
 // Q4a: the card grid that replaces the Find-jobs postings list
@@ -19,6 +20,14 @@ import { RANK_HONEST_NOTE, RANK_ORDER_NOTE, sameOrder, streamOrder } from "../ra
 // it, the cards already shown keep their places (their tiles still update)
 // and new cards join at the end (rankModel.streamOrder), so the card the
 // operator is on never jumps; the list re-sorts when they leave it.
+//
+// N33 (pagination): the grid draws ~50 cards ("Showing 50 of 500 postings")
+// and "Show more" adds the next 50 (pageModel.js). The rows arrive from the
+// server a page at a time in this same order (`onWantRows(count)` asks the
+// view for `count` rows; earlier pages are never read again), so the top
+// `shown` cards are the top of the order and a later page only adds cards
+// at the end. A filter reads every row of the run (the view loads the rest
+// when one is used) and goes back to page 1.
 //
 // uat-bug-018: the "State" chips filter by the job's derived state
 // (job.state, jobStateModel.js) and each says how many jobs are in it,
@@ -85,7 +94,7 @@ function StateChips({ options, value, onChange }) {
   );
 }
 
-export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, from }) {
+export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, from, total = null, onWantRows = null, loadingMore = false }) {
   const assessments = from === "assessments";
   const noun = assessments ? "assessments" : "postings";
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -107,11 +116,28 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, f
   // The streaming hold: the order last drawn, and whether the operator is
   // on the list (pointer over it, or focus in it).
   const [hold, setHold] = useState(false);
+  // N33: how many cards may be drawn; back to one page when a filter changes.
+  const paged = !assessments;
+  const [shown, setShown] = useState(initialShown());
+  const filterState = filtersKey(effectiveFilters);
+  useEffect(() => {
+    setShown(initialShown());
+  }, [filterState]);
+  const filtersActive = hasActiveFilter(effectiveFilters);
+  const runTotal = Math.max(total ?? jobs.length, jobs.length);
+  const wanted = paged ? rowsWanted({ shown, total: runTotal, filtersActive }) : 0;
+  useEffect(() => {
+    if (onWantRows && wanted > jobs.length) {
+      onWantRows(wanted);
+    }
+  }, [onWantRows, wanted, jobs.length]);
   const drawnIds = useRef([]);
   const visible = useMemo(() => streamOrder(sorted, drawnIds.current, hold), [sorted, hold]);
   useLayoutEffect(() => {
     drawnIds.current = visible.map((job) => job.id);
   }, [visible]);
+  const drawn = paged ? pageOf(visible, shown) : visible;
+  const matching = filtersActive || !paged ? sorted.length : runTotal;
   const orderHeld = hold && !sameOrder(visible, sorted);
   const holdHandlers = {
     onPointerEnter: () => setHold(true),
@@ -130,7 +156,12 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, f
 
   return (
     <div>
-      <section className="panel" style={{ padding: "12px 16px" }}>
+      <section
+        className="panel"
+        style={{ padding: "12px 16px" }}
+        onFocus={() => onWantRows && runTotal > jobs.length && onWantRows(runTotal)}
+        onPointerDownCapture={() => onWantRows && runTotal > jobs.length && onWantRows(runTotal)}
+      >
         <div className="filter-bar">
           <div className="filter-row">
             <div className="filter-group filter-search">
@@ -175,7 +206,7 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, f
           </div>
           <div className="result-count">
             <span>
-              {visible.length} of {jobs.length} {noun}
+              {paged ? showingLine({ drawn: drawn.length, matching, noun }) : `${visible.length} of ${jobs.length} ${noun}`}
               {runLabel ? ` · ${runLabel}` : ""} ·{" "}
               {assessments ? (
                 "newest first"
@@ -204,12 +235,24 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, f
       </section>
 
       <div className="card-grid" data-role="jobs-grid" {...holdHandlers}>
-        {visible.length === 0 ? (
+        {drawn.length === 0 ? (
           <div className="empty-state">{jobs.length === 0 ? emptyMessage || "No postings acquired yet." : `No ${noun} match these filters.`}</div>
         ) : (
-          visible.map((job) => <JobCard key={job.id} job={job} visaRequired={visaRequired} from={from} />)
+          drawn.map((job) => <JobCard key={job.id} job={job} visaRequired={visaRequired} from={from} />)
         )}
       </div>
+      {paged && hasMore({ drawn: drawn.length, matching }) && (
+        <div className="show-more" data-role="show-more">
+          <button
+            type="button"
+            className="button secondary"
+            disabled={loadingMore && drawn.length < shown}
+            onClick={() => setShown((current) => showMoreShown(Math.max(current, drawn.length)))}
+          >
+            {loadingMore && drawn.length < shown ? "Loading…" : showMoreLabel({ drawn: drawn.length, matching })}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

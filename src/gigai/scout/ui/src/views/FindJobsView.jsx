@@ -4,7 +4,8 @@ import {
   buildRunRequest,
   getAssessments,
   getRunProgress,
-  getRunResults,
+  JOBS_PAGE_ROWS,
+  createResultsPager,
   getRuns,
   getRunStatus,
   postRank,
@@ -147,6 +148,12 @@ export default function FindJobsView({
   const [progress, setProgress] = useState(null);
   const [boardRows, setBoardRows] = useState([]);
   const [results, setResults] = useState(null);
+  // N33: the run's row count as the server counts it (the grid says "Showing
+  // 50 of 500"), and the reader that asks for the next page when the grid
+  // wants more rows (createResultsPager: each page read once).
+  const [resultsTotal, setResultsTotal] = useState(null);
+  const resultsPager = useRef(null);
+  const pendingRowReads = useRef(0);
   const [resultsError, setResultsError] = useState(null);
   const [resultsLoading, setResultsLoading] = useState(false);
   // run-reads-fast (uat-bug-022): what the loaded run's results say about
@@ -243,6 +250,7 @@ export default function FindJobsView({
     boardRowsRef.current = [];
     setBoardRows([]);
     setResults(null);
+    setResultsTotal(null);
     setRunMeta(null);
     setNewestLoading(true);
     setPagesLoading(false);
@@ -383,16 +391,26 @@ export default function FindJobsView({
     (id) => {
       setResultsLoading(true);
       setPagesLoading(true);
-      // run-reads-fast: the results come a page at a time, the top of the
-      // grid first. The first page is drawn as soon as it is in; the later
-      // ones add their cards to it.
+      // N33: the first page (the top of the grid) is read and drawn; later
+      // pages come when the grid asks for them (wantResultRows). A re-read
+      // after a re-rank pass (the order changed) reads as many rows as were
+      // loaded, from the top.
+      const previous = resultsPager.current;
+      const keep = previous && previous.runId === id ? previous.pager.loaded() : 0;
+      if (previous) {
+        previous.pager.stop();
+      }
       let drawn = false;
-      return getRunResults(id, {
+      const pager = createResultsPager(id, {
         onPage: (response) => {
           if (shownRunId.current !== id) {
             return false; // another run is shown now: stop reading this one
           }
+          if (!resultsPager.current || resultsPager.current.pager !== pager) {
+            return false; // a newer read of this run took over
+          }
           setResults(response.payload);
+          setResultsTotal(response.total);
           // The scores already stored for these rows: a read, never a model call.
           setRankScores(storedRankScores(response));
           if (!drawn) {
@@ -403,9 +421,12 @@ export default function FindJobsView({
           }
           return true;
         },
-      })
+      });
+      resultsPager.current = { runId: id, pager };
+      return pager
+        .ensure(Math.max(keep, JOBS_PAGE_ROWS))
         .then(() => {
-          if (shownRunId.current !== id) {
+          if (shownRunId.current !== id || resultsPager.current.pager !== pager) {
             return;
           }
           setPagesLoading(false);
@@ -425,6 +446,35 @@ export default function FindJobsView({
     },
     [loadQuickItems, followRankPass],
   );
+
+  // N33: the grid (or a job page for a posting not loaded yet) wants `count`
+  // rows of the run: the pager reads the pages it lacks and no other.
+  const wantResultRows = useCallback((count) => {
+    const current = resultsPager.current;
+    if (!current || current.runId !== shownRunId.current) {
+      return;
+    }
+    const total = current.pager.total();
+    if (total === null || current.pager.loaded() >= Math.min(count, total)) {
+      return;
+    }
+    pendingRowReads.current += 1;
+    setPagesLoading(true);
+    current
+      .pager.ensure(count)
+      .catch((error) => {
+        if (resultsPager.current === current) {
+          setResultsError(error.message || String(error));
+        }
+      })
+      .finally(() => {
+        pendingRowReads.current -= 1;
+        if (pendingRowReads.current <= 0 && resultsPager.current === current) {
+          pendingRowReads.current = 0;
+          setPagesLoading(false);
+        }
+      });
+  }, []);
 
   reloadResults.current = loadResults;
 
@@ -489,6 +539,7 @@ export default function FindJobsView({
       setProgress(null);
       setRankScores([]);
       setResults(null);
+      setResultsTotal(null);
       setRunMeta(null);
       setResultsLoading(true);
       getRunStatus(pastRunId)
@@ -568,6 +619,7 @@ export default function FindJobsView({
       showRun(response.run_id);
       setRunStatus({ run_id: response.run_id, status: response.status, node_receipts: response.node_receipts });
       setResults(null);
+      setResultsTotal(null);
       setRunMeta(null);
       setResultsError(null);
       setProgress(null);
@@ -623,6 +675,15 @@ export default function FindJobsView({
     () => withJobStates(assessmentJobs(quickItems, jobs, pastedItems, runPostingIds), applications, tailoredIds),
     [quickItems, jobs, pastedItems, runPostingIds, applications, tailoredIds],
   );
+  // N33: a job page for a posting that is not on the loaded pages reads the
+  // rest of the run (the pager asks for the pages it lacks).
+  const jobRouteId = route.view === "job" || route.view === "assessment" ? route.params.jobId : null;
+  const jobInLoaded = jobRouteId === null || jobs.some((job) => job.id === jobRouteId) || assessed.some((job) => job.id === jobRouteId);
+  useEffect(() => {
+    if (!jobInLoaded && resultsTotal !== null && rows.length < resultsTotal) {
+      wantResultRows(resultsTotal);
+    }
+  }, [jobInLoaded, resultsTotal, rows.length, wantResultRows]);
   const jobsWaiting = useMemo(() => needAnswersCount(runJobs), [runJobs]);
   const anyRanked = useMemo(() => runJobs.some((job) => isRanked(job.rank)), [runJobs]);
   const assessmentsWaiting = useMemo(() => needAnswersCount(assessed), [assessed]);
@@ -728,6 +789,9 @@ export default function FindJobsView({
           visaRequired={visaRequired}
           runLabel={runLabel}
           emptyMessage={runActive ? "Waiting for the first postings…" : "This run found no postings."}
+          total={runActive ? null : resultsTotal}
+          onWantRows={runActive ? null : wantResultRows}
+          loadingMore={pagesLoading}
         />
       )}
     </>
@@ -804,6 +868,9 @@ export default function FindJobsView({
             visaRequired={visaRequired}
             runLabel={runLabel}
             emptyMessage={runActive ? "Waiting for the first postings…" : "This run found no postings."}
+            total={runActive ? null : resultsTotal}
+            onWantRows={runActive ? null : wantResultRows}
+            loadingMore={pagesLoading}
           />
         )}
       </div>

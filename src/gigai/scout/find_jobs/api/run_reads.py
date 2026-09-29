@@ -11,6 +11,11 @@ these instead:
   of the run's rows in the grid's own order, in the no-query response's
   shape plus ``total``/``limit``/``offset``, the run's ``counts`` and its
   ``created_at`` (what the grid's header took from ``GET /api/runs``).
+  N33 (the Jobs page loads ~50 cards a page): the order is total and
+  stable, so ``offset`` pages never overlap or skip; ``total`` is the
+  whole run's row count whatever ``limit``/``offset`` are; an ``offset``
+  at or past ``total`` answers an empty page, and a ``limit`` past
+  ``total`` answers the rest.
   ``payload.rows``, ``payload.assessments``, ``payload.not_assessed`` and
   ``carried_forward_assessments`` hold the page's postings only, and no
   posting carries its ``text``. Each row has ``rank_score`` (the stored
@@ -315,7 +320,10 @@ class RunView:
         run_input = getattr(evidence, "run_input", None)
         self.config = run_input.config if run_input is not None else None
         rows = acquire.rows if acquire is not None else ()
-        self.rows = tuple(sorted(rows, key=self._sort_key))
+        # N33: the order is a total order (the sealed acquire position breaks
+        # every tie), so pages read one after the other never overlap or skip.
+        ordered = sorted(enumerate(rows), key=lambda item: (*self._sort_key(item[1]), item[0]))
+        self.rows = tuple(row for _index, row in ordered)
 
     def _verdict(self, url: str) -> str:
         result = self.assessments.get(url)

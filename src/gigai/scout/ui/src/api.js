@@ -179,6 +179,55 @@ export async function getRunResults(runId, { pageSize = RESULTS_PAGE_SIZE, onPag
   return merged;
 }
 
+// N33: the Jobs page's own reader. It asks for `pageSize` rows at a time,
+// only when the page wants them: `ensure(count)` reads pages until `count`
+// rows (or the run's `total`) are in, each page from where the last ended,
+// so earlier pages are never asked for again. Calls queue, so two waiting
+// for rows never read the same page twice. `onPage(response)` gets everything
+// read so far after each page (the merged response); returning false stops
+// reading (another run is shown). `ensure` answers the merged response.
+export const JOBS_PAGE_ROWS = 50;
+
+export function createResultsPager(runId, { pageSize = JOBS_PAGE_ROWS, fetchPage = getRunResultsPage, onPage } = {}) {
+  let merged = null;
+  let stopped = false;
+  let queue = Promise.resolve();
+  const loaded = () => (merged ? merged.payload.rows.length : 0);
+
+  async function read(count) {
+    while (!stopped && (merged === null || (loaded() < count && loaded() < merged.total))) {
+      const page = await fetchPage(runId, { limit: pageSize, offset: loaded() });
+      if (stopped) {
+        break;
+      }
+      if (merged === null) {
+        merged = page;
+      } else if (page.payload.rows.length === 0) {
+        break; // the run has fewer rows than it said: never loop on an empty page
+      } else {
+        merged = mergeRunResultsPages(merged, page);
+      }
+      if (onPage && onPage(merged) === false) {
+        stopped = true;
+      }
+    }
+    return merged;
+  }
+
+  return {
+    ensure(count) {
+      const result = queue.then(() => read(count));
+      queue = result.catch(() => {});
+      return result;
+    },
+    stop() {
+      stopped = true;
+    },
+    loaded,
+    total: () => (merged ? merged.total : null),
+  };
+}
+
 // The stored scores of a results response, in POST /rank's `scores` shape
 // (jobModel.buildJobs' `rankScores`). An older response whose rows carry
 // no `rank_score` (or no rows) reads as none.
