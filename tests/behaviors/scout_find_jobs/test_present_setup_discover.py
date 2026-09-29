@@ -662,8 +662,12 @@ def test_write_setup_saves_prefs_and_updates_find_jobs_json_when_missing(
     assert written.remote is True
     assert written.countries == ("US",)
     assert written.visa_sponsorship_required is True
-    # Untouched fields keep FindJobsConfig's own defaults on first write.
-    assert written.default_assess_cap == 10
+    # uat-bug-049: a NEW config for a local target (ollama_local is the
+    # default when no model_target is sent) saves 'all new postings' as its
+    # default full-assessment cap, not the old 10.
+    assert written.default_assess_cap == "all", (
+        "uat-bug-049: a new config with a local target defaults default_assess_cap to 'all'"
+    )
 
 
 def test_write_setup_keeps_other_find_jobs_json_fields_unchanged(
