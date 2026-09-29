@@ -85,12 +85,12 @@ mechanics here. Those belong in the internal changelog.
   per search. Acquire rotates through the shipped company catalog, least
   recently fetched first.
 - **Profiles.** Keep several resumes and preferences as profiles; runs,
-  assessment, discovery, interview prep and the CLI use the selected one.
+  assessment, discovery and the CLI use the selected one.
   `gigai scout resume add` stores a resume; `gigai scout resume tailor` (and
   the job page) produce a tailored resume for a posting.
 - **Setup and discovery.** A setup interview in the Scout UI, a Discover
-  panel and `gigai scout discover` propose companies to watch. `gigai scout
-  prep <posting-url>` prepares interview material for a posting.
+  panel and `gigai scout discover` propose companies to watch. Interview prep
+  (`gigai scout prep`) is hidden in this release until it has been tested.
 - **One-command Scout.** `gigai scout install`, `gigai scout run`, `stop` and
   `status`, `gigai gig use`, and `gigai secrets add|list|rm` (stores API keys
   locally; the Exa key is read from there).

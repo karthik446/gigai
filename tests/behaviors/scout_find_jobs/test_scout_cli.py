@@ -253,3 +253,14 @@ def test_resume_add_with_explicit_profile_attaches_to_that_profile_not_selected(
     )
     assert updated_other.resume_ref.record_id != other_profile.resume_ref.record_id
     assert updated_other.revision == other_profile.revision + 1
+
+
+def test_prep_is_hidden_from_scout_help_but_still_runs() -> None:
+    """uat-bug-051: hidden in 0.1.9 until tested; still invokable for anyone who knows it."""
+    runner = CliRunner()
+    listing = runner.invoke(cli, ["scout", "--help"])
+    assert listing.exit_code == 0, listing.output
+    assert not any(line.split()[:1] == ["prep"] for line in listing.output.splitlines())
+    direct = runner.invoke(cli, ["scout", "prep", "--help"])
+    assert direct.exit_code == 0, direct.output
+    assert "POSTING_URL" in direct.output

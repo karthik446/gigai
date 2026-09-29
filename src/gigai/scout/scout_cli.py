@@ -748,7 +748,7 @@ def discover_command(
             click.echo(f"Note: {source.name} was skipped: {source.skip_reason}")
 
 
-@scout_group.command("prep")
+@scout_group.command("prep", hidden=True)
 @click.argument("posting_url")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))

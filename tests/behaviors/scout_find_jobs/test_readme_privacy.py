@@ -228,3 +228,16 @@ def test_the_roadmap_lists_resume_display_settings_as_its_own_future_item() -> N
         "in anything sent to a model or the network."
     ) in roadmap
     assert "will check" in roadmap and "jev" not in roadmap.lower()
+
+
+def test_the_roadmap_parks_interview_prep_and_readme_never_presents_it_as_a_feature() -> None:
+    """uat-bug-051: hidden in 0.1.9; only a roadmap line mentions it."""
+    text = _text()
+    roadmap = _flat(text.split("## Roadmap / TODO", 1)[1].split("\n## ", 1)[0])
+    assert (
+        "- [ ] Interview prep (0.1.10): research the company and likely interview questions "
+        "through your own Codex or Claude CLI (no separate API key)"
+    ) in roadmap
+    assert "openai" not in roadmap.lower() and "OPENAI_API_KEY" not in text
+    assert "scout prep" not in text
+    assert text.lower().count("interview prep") == 1

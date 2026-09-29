@@ -468,6 +468,7 @@ stale.
 - [ ] Resume display settings, kept on your machine (0.1.10): fill in your name, title and contact line once (location | work authorization | LinkedIn | GitHub | email | phone) on your profile. These fields are stored only on your computer and are never sent to Codex, Claude, Ollama, OpenRouter, Exa or any other service; Scout adds them to your PDF locally, after the model has finished. A test will check that none of them appear in anything sent to a model or the network.
 - [ ] Remove personal info from resumes automatically before any model call (until then: add a resume without it)
 - [ ] Import PDF/DOCX resumes directly
+- [ ] Interview prep (0.1.10): research the company and likely interview questions through your own Codex or Claude CLI (no separate API key)
 - [ ] The setup wizard checks the chosen CLI is installed and logged in
 - [ ] Mark an assessment "posting changed, re-assess" when a posting's text changes
 - [ ] Show the posting's own keywords on the tailored resume summary
