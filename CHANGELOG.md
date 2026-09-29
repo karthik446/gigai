@@ -82,6 +82,13 @@ mechanics here. Those belong in the internal changelog.
 
 #### Changed
 
+- **Exa is off for a new setup.** A new `find-jobs.json` (the starter file or
+  the first setup save) starts with Exa off, so searches use the bundled
+  company list and stored boards and a model target is the only requirement.
+  Settings has a "Search sources" toggle, "Also search the open web with Exa
+  (needs an Exa key)", after `gigai secrets add exa`; the setup wizard no
+  longer mentions an Exa key while Exa is off. An existing config keeps the
+  Exa setting it saved.
 - Assessing a job by URL reads a company-careers link's text from the job
   board's own posting (Greenhouse `gh_jid` links), and a page whose text has
   no readable requirements is now reported as "couldn't read this posting's

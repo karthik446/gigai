@@ -14,9 +14,9 @@ work, not plugins the runtime depends on.
 
 Scout ships with GigAI and implements `find-jobs`, a job-search workflow:
 
-- **Acquire** — pull public postings from Exa search and the
-  Greenhouse/Lever/Ashby applicant-tracking boards through an auto-managed
-  watchlist.
+- **Acquire** — pull public postings from the Greenhouse/Lever/Ashby
+  applicant-tracking boards through an auto-managed watchlist, plus Exa
+  search if you turn it on (it is off for a new setup).
 - **Rank** — every posting that passes your filters (titles, location, the
   publication window, visa sponsorship, work mode) is ranked by the model
   target you already use, and results stream in as batches finish. The order
@@ -173,7 +173,7 @@ target repo and no `gigai init` step first.
 
 ```bash
 gigai scout install --json                    # bind, approve, and activate Scout
-gigai secrets add exa                         # store EXA_API_KEY locally — see "Exa search" below
+gigai secrets add exa                         # optional: only if you turn on Exa — see "Exa search" below
 gigai scout resume add ./resume.txt --json    # import + wrap your resume for find-jobs
 ```
 
@@ -196,7 +196,7 @@ starting Scout:
   "work_mode": "hybrid",
   "remote": false,
   "published_after": "2026-09-15T00:00:00Z",
-  "sources": { "exa": true, "ats": true, "hiringcafe": false },
+  "sources": { "exa": false, "ats": true, "hiringcafe": false },
   "default_assess_cap": 10,
   "default_model_target": "ollama_local",
   "countries": ["US"],
@@ -310,6 +310,11 @@ so this is only needed when switching between Gigs.
 
 ### Exa search
 
+You only need one model target (`ollama_local`, `codex_cli` or
+`openrouter_api`) to start. Exa is an optional extra, off for a new setup.
+To turn it on, store a key with the command below, then tick **Also search the
+open web with Exa (needs an Exa key)** in Settings.
+
 ```bash
 gigai secrets add exa
 ```
@@ -321,8 +326,8 @@ secret):
 export EXA_API_KEY=...
 ```
 
-Without either, Exa discovery refuses to run; ATS-board acquisition is
-unaffected.
+Without either, Exa refuses to run; ATS-board acquisition is
+unaffected. An existing `find-jobs.json` keeps the Exa setting it already has.
 
 ### From a source checkout (contributors)
 

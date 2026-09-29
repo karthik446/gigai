@@ -118,3 +118,14 @@ def test_the_pasted_resume_and_status_claims_are_the_decided_wording() -> None:
         "(two UAT rounds, 2026-09-27 and 2026-09-29); expect rough edges."
     ) in status
     assert "not yet had a live-provider" not in status
+
+
+def test_the_readme_says_exa_is_optional_and_off_for_a_new_setup() -> None:
+    text = _flat(_text())
+    assert "You only need one model target (`ollama_local`, `codex_cli` or `openrouter_api`) to start" in text
+    assert "Exa is an optional extra, off for a new setup" in text
+    assert "Also search the open web with Exa (needs an Exa key)" in text
+    assert "gigai secrets add exa" in text
+    assert "claude_cli" not in text
+    privacy = _privacy()
+    assert "Exa, only if enabled in your sources" in privacy
