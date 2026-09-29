@@ -18,6 +18,10 @@ export function rowsFromProgress(progress) {
       assessment: assessmentEntry?.assessment || null,
       notAssessedReason: assessmentEntry?.reason || null,
       h1b: null, // the live snapshot has no catalog join; the sealed results row does
+      // SCOPE-ADD-3 D: GET /progress postings[].rank, the model's line for
+      // this posting once its batch has landed (null until then). The
+      // server sends the postings in rank order; the grid re-sorts anyway.
+      rank: posting.rank || null,
     };
   });
 }
@@ -63,6 +67,10 @@ export function rowsFromResults(payload) {
       // in_area, passes} -- why the posting passed the run's work mode +
       // area (jobModel.whyPassedLine); null on a live row.
       workModeFit: row.work_mode_fit || null,
+      // SCOPE-ADD-3 D: rows[].rank {score, reasons, blockers, demoted,
+      // unscored_reason}, the model's line; null for a row with no stored
+      // rank (an older run keeps its `rank_score`, read by storedRankScores).
+      rank: row.rank || null,
     };
   });
 }

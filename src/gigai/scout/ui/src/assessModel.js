@@ -78,10 +78,11 @@ export function canAssess({ jobMode, jobUrl, jobText, mode, otherProfileId, resu
   return true;
 }
 
-// Only a profile's resume is sent to Jev (operator decision 2026-09-27); a
-// pasted one goes to the assessment model and nowhere else.
+// What leaves the machine for one assessment: the resume goes to the model
+// target that assesses (and ranks) and nowhere else; a pasted one is used
+// for this call only and never stored.
 export function assessPrivacyNote(mode) {
   return mode === "text"
-    ? "A pasted resume is sent to the assessment model only. It is not sent to Jev, so this assessment has no Jev score."
-    : "Your resume is sent to Jev to rank postings.";
+    ? "A pasted resume is sent to the assessment model for this call only and is never stored."
+    : "Your resume is sent to your own model target only, the one that assesses and ranks postings.";
 }

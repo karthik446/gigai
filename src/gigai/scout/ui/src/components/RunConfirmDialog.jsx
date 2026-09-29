@@ -30,7 +30,7 @@ function useStoredIndex(enabled) {
   return state;
 }
 
-export default function RunConfirmDialog({ config, onConfirm, onCancel, submitting, error, jevLine }) {
+export default function RunConfirmDialog({ config, onConfirm, onCancel, submitting, error }) {
   const [selectionCap, setSelectionCap] = useState(config.default_assess_cap);
   const [modelTarget, setModelTarget] = useState(config.default_model_target);
 
@@ -115,9 +115,12 @@ export default function RunConfirmDialog({ config, onConfirm, onCancel, submitti
           {isHosted
             ? " This model target sends posting text and your resume text to that hosted provider."
             : " The local model target keeps posting and resume text on this machine."}
-          {/* ui-pass (uat-bug-021): with a Jev key and ranking on, the run
-              also sends the resume's start to Jev (jevModel.jevRunConsentLine). */}
-          {jevLine && <div data-role="jev-run-consent">{jevLine}</div>}
+          {/* SCOPE-ADD-3: the same model target ranks every posting that
+              passes your filters before the run assesses its top ones. */}
+          <div data-role="rank-run-note">
+            This model also ranks every posting that passes your filters, likely fits first, so that can take a few
+            minutes on a big search.
+          </div>
         </div>
 
         {error && <div className="callout danger">{error}</div>}

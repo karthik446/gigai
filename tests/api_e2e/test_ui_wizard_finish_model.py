@@ -176,8 +176,8 @@ console.log(JSON.stringify({
 
 PASTED = "Jordan Rivera\nStaff engineer.\n"
 UPLOADED = "# Jordan Rivera\n\nStaff engineer — Go.\n".encode("utf-8")
-ALL_SET = {"exa": True, "jev": True, "openrouter": True, "openai": True}
-NONE_SET = {"exa": False, "jev": False, "openrouter": False, "openai": False}
+ALL_SET = {"exa": True, "openrouter": True, "openai": True}
+NONE_SET = {"exa": False, "openrouter": False, "openai": False}
 PASTE_FIELDS = {"profileName": " Staff platform ", "resumeMode": "paste", "resumeText": PASTED, "titles": ["Staff Engineer"]}
 EXISTING_PROFILE = {
     "profile_id": "profile_existing",
@@ -230,7 +230,9 @@ def _fixture() -> dict:
             "allSetOllama": {"modelTarget": "ollama_local", "keys": ALL_SET, "extraction": None},
             "ollamaAnswered": {"modelTarget": "ollama_local", "keys": ALL_SET, "extraction": {"model_target": "ollama_local"}},
             "ollamaAfterAnotherModel": {"modelTarget": "ollama_local", "keys": ALL_SET, "extraction": {"model_target": "codex_cli"}},
-            "jevUnset": {"modelTarget": "codex_cli", "keys": {**ALL_SET, "jev": False}, "extraction": None},
+            # SCOPE-ADD-3: an older server still answers a `jev` key; the
+            # wizard never names it (Jev is gone from the product).
+            "staleJevUnset": {"modelTarget": "codex_cli", "keys": {**NONE_SET, "jev": False}, "extraction": None},
             "exaUnset": {"modelTarget": "codex_cli", "keys": {**ALL_SET, "exa": False}, "extraction": None},
             "nothingSet": {"modelTarget": "openrouter_api", "keys": NONE_SET, "extraction": None},
             "nothingSetCodex": {"modelTarget": "codex_cli", "keys": NONE_SET, "extraction": None},
@@ -311,11 +313,12 @@ def test_nothing_is_listed_when_nothing_is_missing(out: dict) -> None:
 
 
 def test_a_key_is_named_only_when_it_is_not_set(out: dict) -> None:
-    assert out["hints"]["jevUnset"] == ["jev"]
     assert out["hints"]["exaUnset"] == ["exa"]
-    assert out["hints"]["nothingSet"] == ["openrouter", "exa", "jev"]
+    assert out["hints"]["nothingSet"] == ["openrouter", "exa"]
     # The OpenRouter key matters only to the OpenRouter model.
-    assert out["hints"]["nothingSetCodex"] == ["exa", "jev"]
+    assert out["hints"]["nothingSetCodex"] == ["exa"]
+    # SCOPE-ADD-3: no Jev key hint, even from an older server's answer.
+    assert out["hints"]["staleJevUnset"] == ["exa"]
     # The key state could not be read: nothing is claimed to be missing.
     assert out["hints"]["keysUnknown"] == []
 
@@ -324,7 +327,7 @@ def test_ollama_is_named_only_when_it_is_the_chosen_model(out: dict) -> None:
     assert out["hints"]["allSetOllama"] == ["ollama"]
     assert out["hints"]["keysUnknownOllama"] == ["ollama"]
     assert out["hints"]["ollamaAfterAnotherModel"] == ["ollama"]
-    for name in ("allSetOpenRouter", "allSetCodex", "jevUnset", "nothingSet", "keysUnknown"):
+    for name in ("allSetOpenRouter", "allSetCodex", "staleJevUnset", "nothingSet", "keysUnknown"):
         assert "ollama" not in out["hints"][name], name
     # An extraction that just answered through Ollama shows it running.
     assert out["hints"]["ollamaAnswered"] == []
@@ -332,10 +335,8 @@ def test_ollama_is_named_only_when_it_is_the_chosen_model(out: dict) -> None:
 
 def test_the_hint_lines_say_what_to_run(out: dict) -> None:
     by_id = {line["id"]: line for line in out["lines"]}
-    assert by_id["jev"]["text"] == "Jev key not set"
-    assert by_id["jev"]["command"] == "gigai secrets add jev"
-    assert by_id["jev"]["note"].startswith("optional")
-    assert "Your resume is sent to Jev" in by_id["jev"]["note"]
+    assert "jev" not in by_id
+    assert all("jev" not in json.dumps(line).lower() for line in out["lines"])
     assert by_id["exa"]["text"] == "Exa key not set"
     assert by_id["exa"]["command"] == "gigai secrets add exa"
     assert by_id["exa"]["note"].startswith("optional")

@@ -1002,27 +1002,34 @@ table.data-table th {
 /* Q4a-nav-r1: the "Quick assess" source chip on on-demand jobs (QuickAssessChip.jsx) */
 .ats-badge.ats-quick { background: var(--quick-bg); color: var(--quick); }
 
-.jev-badge {
+/* SCOPE-ADD-3 D: the model's rank tile (RankBadge.jsx). A demoted posting
+   (a blocker) keeps its score and says "blocker"; a posting with no score
+   yet has a dashed tile. */
+.rank-badge {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
-  min-width: 46px;
+  min-width: 52px;
   padding: 4px 6px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   line-height: 1.1;
   color: var(--muted);
   flex-shrink: 0;
+  text-align: center;
 }
-.jev-badge .jev-score { font-size: 1.05rem; font-weight: 700; color: var(--text); }
-.jev-badge.strong { border-color: var(--ok); background: var(--ok-bg); }
-.jev-badge.strong .jev-score { color: var(--ok); }
-.jev-badge.maybe { border-color: var(--warn); background: var(--warn-bg); }
-.jev-badge.maybe .jev-score { color: var(--warn); }
-.jev-badge.no { border-color: var(--danger); background: var(--danger-bg); }
-.jev-badge.no .jev-score { color: var(--danger); }
-.jev-badge.unscored { border-style: dashed; }
+.rank-badge .rank-score { font-size: 1.05rem; font-weight: 700; color: var(--text); }
+.rank-badge.strong { border-color: var(--ok); background: var(--ok-bg); }
+.rank-badge.strong .rank-score { color: var(--ok); }
+.rank-badge.maybe { border-color: var(--warn); background: var(--warn-bg); }
+.rank-badge.maybe .rank-score { color: var(--warn); }
+.rank-badge.no { border-color: var(--danger); background: var(--danger-bg); }
+.rank-badge.no .rank-score { color: var(--danger); }
+.rank-badge.blocked { border-color: var(--danger); border-style: dotted; }
+.rank-badge.unranked { border-style: dashed; }
+.rank-blocker-line { color: var(--danger); font-size: 0.8rem; }
+.job-card > .rank-blocker-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .verdict-chip {
   display: inline-flex;
@@ -1064,7 +1071,9 @@ table.data-table th {
 .job-header .job-facts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 .job-header .header-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .job-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
-.jev-reasons { font-size: 0.78rem; color: var(--muted); text-align: right; max-width: 320px; }
+.rank-detail { font-size: 0.78rem; color: var(--muted); text-align: right; max-width: 320px; display: flex; flex-direction: column; gap: 4px; }
+.rank-detail .rank-blockers { color: var(--danger); }
+.rank-detail .rank-note { font-style: italic; }
 .panel h3 { font-size: 0.95rem; margin: 16px 0 8px; }
 .panel h3:first-child { margin-top: 0; }
 
@@ -1534,15 +1543,12 @@ table.data-table th {
 .job-state-row .chip-group-label { margin-bottom: 0; }
 .job-state-note { margin: 8px 0 0; }
 
-/* ui-pass (uat-bug-021): Settings' Jev panel and the run grid's
-   "Score with Jev" bar. */
-.jev-disclosure p { margin: 0 0 4px; }
-.jev-settings { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.jev-settings .jev-toggle { font-size: 0.9rem; color: var(--text); }
-.jev-budget-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.jev-budget-row input[type="number"] { width: 7rem; }
-.jev-settings p { margin: 0; }
-.jev-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 0.88rem; }
+/* SCOPE-ADD-3 D: the run's rank counts ("Ranked 350 of 1,458 · Assessing
+   3 of 10") and the Rank / Re-rank bar above the grid. */
+.rank-counts { margin: 0.5rem 0 0; font-size: 0.92rem; color: var(--text); }
+.rank-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 0.88rem; }
+/* uat-bug-029: the job could not be assessed; a note, not an error. */
+.requirements-unreadable { margin-top: 6px; font-size: 0.85rem; }
 
 /* uat-bug-027: questions first, the requirement table collapsed below. */
 .questions-section { border-left: 3px solid var(--warn); }

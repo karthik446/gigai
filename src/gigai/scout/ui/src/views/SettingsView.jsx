@@ -1,7 +1,6 @@
 import ConfigPanel from "../components/ConfigPanel.jsx";
 import AddCompanyForm from "../components/AddCompanyForm.jsx";
 import SourcesUpdatePanel from "../components/SourcesUpdatePanel.jsx";
-import JevSettingsPanel from "../components/JevSettingsPanel.jsx";
 import ProfilesView from "./ProfilesView.jsx";
 
 export default function SettingsView({
@@ -54,10 +53,6 @@ export default function SettingsView({
           {!prefs && <span className="muted">Preferences are saved by the setup wizard.</span>}
         </div>
       </section>
-
-      {/* ui-pass (uat-bug-021): what a search sends to Jev and may cost,
-          "Rank with Jev: on/off" and the daily budget. */}
-      <JevSettingsPanel />
 
       <div id="settings-profiles">
         <ProfilesView

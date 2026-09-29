@@ -57,8 +57,6 @@ export function initialWorkMode(prefs, config) {
 // review alone: no discovery cadence, no budget.
 export const STEPS = ["Resume", "Target", "Companies", "Review"];
 
-export const JEV_PRIVACY_LINE = "Your resume is sent to Jev to rank postings.";
-
 // uat-bug-020: what Finish can store as a resume -- the formats and the
 // size `gigai scout resume add` accepts (resume_import.py).
 export const RESUME_FILE_PATTERN = /\.(txt|md|markdown)$/i;
@@ -425,14 +423,6 @@ export function setupHints({ modelTarget, keys, extraction }) {
   }
   if (unset("exa")) {
     lines.push({ id: "exa", text: "Exa key not set", command: "gigai secrets add exa", note: "optional: finds companies on the open web" });
-  }
-  if (unset("jev")) {
-    lines.push({
-      id: "jev",
-      text: "Jev key not set",
-      command: "gigai secrets add jev",
-      note: `optional: pre-rank postings. ${JEV_PRIVACY_LINE}`,
-    });
   }
   return lines;
 }

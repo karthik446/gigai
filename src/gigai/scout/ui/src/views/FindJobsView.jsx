@@ -3,7 +3,6 @@ import {
   ApiError,
   buildRunRequest,
   getAssessments,
-  getJevSettings,
   getRunProgress,
   getRunResults,
   getRuns,
@@ -22,10 +21,10 @@ import JobPage from "./JobPage.jsx";
 import AssessmentsView from "./AssessmentsView.jsx";
 import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
 import { relativeTimeLabel } from "../display.js";
-import { PASTED_RESUME_KEY, addRunPostings, assessmentJobs, buildJobs, dateTimeLabel, isScored, runJobs as onlyRunJobs, usedPastedResume, withRunEnd } from "../jobModel.js";
-import { canScoreWithJev, createRankPass, jevCardSkipWords, jevNoticeText, jevRankingOn, jevRunConsentLine, mergeRankScores } from "../jevModel.js";
+import { PASTED_RESUME_KEY, addRunPostings, assessmentJobs, buildJobs, dateTimeLabel, runJobs as onlyRunJobs, usedPastedResume, withRunEnd } from "../jobModel.js";
+import { createRankPass, isRanked, mergeRankScores, rankButtonLabel, rankPassLine, rankPassRunning } from "../rankModel.js";
 import { needAnswersCount, withJobStates } from "../jobStateModel.js";
-import { rankStatusLine, rankUsageLine, runFailure } from "../runText.js";
+import { runFailure } from "../runText.js";
 import { indexNotice } from "../sourcesModel.js";
 import { ASSESSMENTS_HASH, RUNS_HASH, SETTINGS_HASH, runHash } from "../routing.js";
 
@@ -38,7 +37,7 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 // Q4a (v0.1.9): the postings list is the card grid (JobsGrid) and each card
 // opens a job page (JobPage) by hash route (#/jobs/<normalized_url>,
 // routing.js). The cards merge three existing reads (jobModel.buildJobs):
-// the run's rows + assessments, the Jev rank scores, and the quick-assess
+// the run's rows + assessments, the model's ranks, and the quick-assess
 // store (GET /api/assessments?profile_id=…) where every job-page
 // re-assessment and every "+ Assess a job" lands -- a card's verdict chip
 // is always the latest of the two. An on-demand assessment is a card on
@@ -85,17 +84,18 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 // link to Settings' "Update sources"; a run page says how many postings
 // matched but were not imported (progress.not_imported_count, uat-bug-011).
 //
-// ui-pass (uat-bug-021): the page never asks Jev on its own. A run's cards
-// show the scores already stored (each results page's `rank_score`,
-// api.storedRankScores); nothing POSTs /rank when a run opens. "Score with
-// Jev" (only with a Jev key, ranking on, room in today's budget and an
-// unscored posting: jevModel.canScoreWithJev) is the one call that may
-// spend: POST /rank with `start` set, then the same route read ({}) while the
-// pass runs, each answer's scores merged into the grid as they arrive
-// (jevModel.createRankPass). The run's own Jev line is on its status panel
-// (NodeStatusList `rankStatus`), and a card with no score says why in its
-// "– Jev" tooltip (jevModel.jevCardSkipWords). The privacy line "Your
-// resume is sent to Jev" shows only when it is true: a key and ranking on.
+// SCOPE-ADD-3 D: the run ranks every posting that passed its filters with
+// the operator's own model, a batch at a time. While the run goes, the grid
+// is GET /progress's postings, each with its `rank` once its batch has
+// landed, so the first ranked batch shows at once and the grid re-orders by
+// score as more land (JobsGrid holds the order while the operator is on the
+// list). Once the run ends the grid is GET /results' rows, each with its
+// `rank` (score, reasons, blockers). The run's status panel says "Ranked N
+// of M · Assessing X of Y" (NodeStatusList). A finished run's grid has a
+// Rank / Re-rank button: POST /rank {start: true} starts (or joins) a
+// re-rank pass by the same model, whose scores re-order the grid as they
+// land, with Cancel ({cancel: true}); when it ends the results are read
+// again for the new reasons (rankModel.createRankPass).
 //
 // Still DROPPED from the mockup (no backing API): "New since last run".
 // Phase 2 fields (work_mode / pay / H-1B count, tailored resume) render
@@ -157,13 +157,12 @@ export default function FindJobsView({
   // True while pages after the first are still coming: a job page for a
   // posting that is not in yet says "Loading", not "not found".
   const [pagesLoading, setPagesLoading] = useState(false);
+  // The rows' stored scores (RankScore), with a re-rank pass's answers
+  // merged in as they land.
   const [rankScores, setRankScores] = useState([]);
-  // ui-pass: GET /api/jev/settings (key, on/off, budget, today's usage), and
-  // what the page's own "Score with Jev" pass last said (POST /rank's
-  // rank_status and usage). Null until read / until a click.
-  const [jevSettings, setJevSettings] = useState(null);
-  const [rankStatus, setRankStatus] = useState(null);
-  const [jevUsage, setJevUsage] = useState(null);
+  // What POST /rank last said about a re-rank pass of the shown run
+  // (`rank_record`), null until read; whether a click is on its way.
+  const [rankRecord, setRankRecord] = useState(null);
   const [rankStarting, setRankStarting] = useState(false);
   const [rankError, setRankError] = useState(null);
   const [quickItems, setQuickItems] = useState([]);
@@ -208,15 +207,14 @@ export default function FindJobsView({
       progressPollTimer.current = null;
     }
   }, []);
-  // Ends the reads of a "Score with Jev" pass (the pass itself runs on in
-  // the server) and forgets what it said: it was about the run shown before.
+  // Ends the reads of a re-rank pass (the pass itself runs on in the
+  // server) and forgets what it said: it was about the run shown before.
   const stopRankPass = useCallback(() => {
     if (rankPass.current) {
-      rankPass.current.stop();
+      rankPass.current.pass.stop();
       rankPass.current = null;
     }
-    setRankStatus(null);
-    setJevUsage(null);
+    setRankRecord(null);
     setRankStarting(false);
     setRankError(null);
   }, []);
@@ -226,17 +224,11 @@ export default function FindJobsView({
       stopPolling();
       stopProgressPolling();
       if (rankPass.current) {
-        rankPass.current.stop();
+        rankPass.current.pass.stop();
       }
     },
     [stopPolling, stopProgressPolling],
   );
-
-  const loadJevSettings = useCallback(() => {
-    getJevSettings()
-      .then(setJevSettings)
-      .catch(() => setJevSettings(null));
-  }, []);
 
   // Reset run state when the selected profile changes -- a run belongs to
   // whichever profile was selected when it started; switching profiles
@@ -293,14 +285,6 @@ export default function FindJobsView({
     }
   }, [route.view, ownsRoute, loadQuickItems]);
 
-  // ui-pass: the Jev settings, re-read with the same rule (Settings may
-  // have turned ranking off or changed the budget meanwhile).
-  useEffect(() => {
-    if (ownsRoute) {
-      loadJevSettings();
-    }
-  }, [route.view, ownsRoute, loadJevSettings]);
-
   const handleQuickUpdated = useCallback(
     (item) => {
       if (!item || !item.job) {
@@ -346,33 +330,54 @@ export default function FindJobsView({
       });
   }, []);
 
-  // The click: the only thing on this page that may spend.
-  function scoreWithJev() {
-    const id = runId;
-    if (rankPass.current) {
-      rankPass.current.stop();
+  // One re-rank pass of run `id`: `action` is "read" (on load), "start"
+  // (the Rank / Re-rank click) or "cancel". Answers for another run are
+  // dropped; each answer's scores re-order the grid as they land, and when a
+  // pass it saw running ends the results are read again (`reloadResults`,
+  // set below: the rows then carry the new reasons).
+  const reloadResults = useRef(null);
+  const followRankPass = useCallback((id, action) => {
+    if (!rankPass.current || rankPass.current.runId !== id) {
+      if (rankPass.current) {
+        rankPass.current.stop();
+      }
+      const pass = createRankPass({
+        runId: id,
+        postRank,
+        isCurrent: () => shownRunId.current === id,
+        intervalMs: POLL_INTERVAL_MS,
+        onResponse: (response) => {
+          setRankStarting(false);
+          setRankError(null);
+          const record = response && response.rank_record ? response.rank_record : null;
+          setRankRecord(record);
+          if (rankPassRunning(record)) {
+            setRankScores((known) => mergeRankScores(known, response.scores));
+          }
+        },
+        onEnd: () => {
+          if (reloadResults.current) {
+            reloadResults.current(id);
+          }
+        },
+        onError: (error) => {
+          setRankStarting(false);
+          setRankError(error.message || String(error));
+        },
+      });
+      rankPass.current = { runId: id, pass };
     }
-    setRankStarting(true);
-    setRankError(null);
-    const pass = createRankPass({
-      runId: id,
-      postRank,
-      isCurrent: () => shownRunId.current === id,
-      intervalMs: POLL_INTERVAL_MS,
-      onResponse: (response) => {
-        setRankStarting(false);
-        setRankScores((known) => mergeRankScores(known, response.scores));
-        setRankStatus(response.rank_status || null);
-        setJevUsage(response.usage || null);
-      },
-      onError: (error) => {
-        setRankStarting(false);
-        setRankError(error.message || String(error));
-      },
-    });
-    rankPass.current = pass;
-    pass.start();
-  }
+    const { pass } = rankPass.current;
+    if (action === "start") {
+      setRankStarting(true);
+      setRankError(null);
+      pass.start();
+    } else if (action === "cancel") {
+      pass.cancel();
+    } else {
+      pass.read();
+    }
+  }, []);
 
   const loadResults = useCallback(
     (id) => {
@@ -388,7 +393,7 @@ export default function FindJobsView({
             return false; // another run is shown now: stop reading this one
           }
           setResults(response.payload);
-          // The scores already stored for these rows: a read, never a Jev call.
+          // The scores already stored for these rows: a read, never a model call.
           setRankScores(storedRankScores(response));
           if (!drawn) {
             drawn = true;
@@ -404,8 +409,10 @@ export default function FindJobsView({
             return;
           }
           setPagesLoading(false);
-          // The run's own pass may have spent: today's usage is re-read.
-          loadJevSettings();
+          // Is a re-rank of this run running (a click on another tab, or
+          // before a reload)? One read ({} never starts a pass); a running
+          // one is followed until it ends.
+          followRankPass(id, "read");
         })
         .catch((error) => {
           if (shownRunId.current !== id) {
@@ -416,8 +423,10 @@ export default function FindJobsView({
           setResultsError(error.message || String(error));
         });
     },
-    [loadQuickItems, loadJevSettings],
+    [loadQuickItems, followRankPass],
   );
+
+  reloadResults.current = loadResults;
 
   const runsReload = runsState.reload;
   const pollStatus = useCallback(
@@ -430,6 +439,10 @@ export default function FindJobsView({
           setRunStatus(status);
           if (TERMINAL_STATUSES.has(status.status)) {
             stopProgressPolling();
+            // One last read: the counts as the run left them.
+            getRunProgress(id)
+              .then((snapshot) => shownRunId.current === id && setProgress(snapshot))
+              .catch(() => {});
             loadResults(id);
             // The just-finished run's created_at feeds the verdict history
             // and the summary strip.
@@ -611,7 +624,7 @@ export default function FindJobsView({
     [quickItems, jobs, pastedItems, runPostingIds, applications, tailoredIds],
   );
   const jobsWaiting = useMemo(() => needAnswersCount(runJobs), [runJobs]);
-  const unscoredCount = useMemo(() => runJobs.filter((job) => !isScored(job.rank)).length, [runJobs]);
+  const anyRanked = useMemo(() => runJobs.some((job) => isRanked(job.rank)), [runJobs]);
   const assessmentsWaiting = useMemo(() => needAnswersCount(assessed), [assessed]);
   useEffect(() => {
     if (onNeedAnswers) {
@@ -674,49 +687,47 @@ export default function FindJobsView({
   }
 
   const runLabel = currentRun ? `run ${relativeTimeLabel(currentRun.created_at)}` : runActive ? "run in progress" : "";
-  const jevSkipWords = jevCardSkipWords(rankStatus, progress?.rank_status, jevSettings);
-  const scoreOffered =
-    Boolean(runId && results) &&
-    !runActive &&
-    !pagesLoading &&
-    !rankStarting &&
-    canScoreWithJev({ settings: jevSettings, usage: jevUsage, rankStatus, unscored: unscoredCount });
-  const jevUsageLine = jevSettings ? rankUsageLine(jevUsage || jevSettings.usage) : null;
-  const jevBar =
-    runId && results && jevRankingOn(jevSettings) ? (
-      <div className="jev-bar" data-role="jev-bar">
-        {scoreOffered && (
-          <button type="button" className="button small secondary" data-action="score-with-jev" onClick={scoreWithJev}>
-            Score with Jev
+  const passRunning = rankPassRunning(rankRecord);
+  const passLine = rankPassLine(rankRecord);
+  const rankBar =
+    runId && results && !runActive ? (
+      <div className="rank-bar" data-role="rank-bar">
+        {!passRunning && (
+          <button
+            type="button"
+            className="button small secondary"
+            data-action="rank"
+            disabled={pagesLoading || rankStarting}
+            onClick={() => followRankPass(runId, "start")}
+            title="Rank this run's postings again with your model: likely fits first, likely no-matches last."
+          >
+            {rankStarting ? "Starting…" : rankButtonLabel(anyRanked)}
           </button>
         )}
-        {rankStarting && <span className="muted">Jev: starting…</span>}
-        {rankStatus && (
-          <span className="muted" data-role="rank-route-status" data-rank-status={rankStatus.status}>
-            {rankStatusLine(rankStatus)}
+        {passRunning && (
+          <button type="button" className="button small secondary" data-action="cancel-rank" onClick={() => followRankPass(runId, "cancel")}>
+            Cancel re-rank
+          </button>
+        )}
+        {passLine && (
+          <span className="muted" data-role="rank-pass" data-rank-record-status={rankRecord.status}>
+            {passLine}
           </span>
         )}
-        {rankError && <span className="muted">Jev: {rankError}</span>}
-        {jevUsageLine && (
-          <span className="muted" data-role="jev-usage">
-            {jevUsageLine}
-          </span>
-        )}
+        {rankError && <span className="muted">Rank: {rankError}</span>}
       </div>
     ) : null;
-  const jevNotice = jevNoticeText(jevSettings);
   const notice = indexNotice(sources.status, { atsEnabled: Boolean(config && config.config && config.config.sources && config.config.sources.ats) });
   const grid = (
     <>
       {resultsError && <div className="callout danger">Could not load results: {resultsError}</div>}
-      {jevBar}
+      {rankBar}
       {(results || runActive) && (
         <JobsGrid
           jobs={runJobs}
           visaRequired={visaRequired}
           runLabel={runLabel}
           emptyMessage={runActive ? "Waiting for the first postings…" : "This run found no postings."}
-          jevSkipWords={jevSkipWords}
         />
       )}
     </>
@@ -780,18 +791,19 @@ export default function FindJobsView({
             rotation={progress?.rotation}
             boards={progress?.boards}
             notImported={progress?.not_imported_count}
+            rank={progress?.rank}
+            assessCounts={progress?.assess_counts}
             rankStatus={progress?.rank_status}
           />
         )}
         {loaded && resultsError && <div className="callout danger">Could not load results: {resultsError}</div>}
-        {loaded && !(failure && runJobs.length === 0) && jevBar}
+        {loaded && !(failure && runJobs.length === 0) && rankBar}
         {loaded && (results || runActive) && !(failure && runJobs.length === 0) && (
           <JobsGrid
             jobs={runJobs}
             visaRequired={visaRequired}
             runLabel={runLabel}
             emptyMessage={runActive ? "Waiting for the first postings…" : "This run found no postings."}
-            jevSkipWords={jevSkipWords}
           />
         )}
       </div>
@@ -820,11 +832,6 @@ export default function FindJobsView({
           </div>
         </div>
         <div className="jobs-header-meta">
-          {jevNotice && (
-            <p className="privacy-note" data-role="jev-notice" style={{ margin: 0 }}>
-              {jevNotice}
-            </p>
-          )}
           {!hasResume && config && (
             <p className="muted" style={{ margin: 0 }}>
               Add a resume in <a href={SETTINGS_HASH}>Settings</a> to enable a run.
@@ -841,7 +848,6 @@ export default function FindJobsView({
           onCancel={closeDialog}
           submitting={runSubmitting}
           error={runError}
-          jevLine={jevRunConsentLine(jevSettings)}
         />
       )}
 
@@ -860,6 +866,8 @@ export default function FindJobsView({
           rotation={progress?.rotation}
           boards={progress?.boards}
           notImported={progress?.not_imported_count}
+          rank={progress?.rank}
+          assessCounts={progress?.assess_counts}
           rankStatus={progress?.rank_status}
         />
       )}

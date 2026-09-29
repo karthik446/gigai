@@ -4,7 +4,10 @@
 //   rows          boardRows.js rows from GET /api/runs/{id}/results (or the
 //                 live /progress snapshot): posting + status + the run's own
 //                 assessment (+ carried-forward, uat-bug-009)
-//   rankScores    POST /api/runs/{id}/rank (Jev pre-rank, P6)
+//   rankScores    scores in POST /api/runs/{id}/rank's RankScore shape: the
+//                 rows' stored `rank_score`s and a re-rank pass's answers
+//                 (rankModel.js); a row's own `rank` line (the model's
+//                 reasons and blockers) comes with the row
 //   quickItems    GET /api/assessments?profile_id=…: the quick-assess store,
 //                 where every job-page re-assessment lands (P3/P5) with its
 //                 verdict history (Q4a)
@@ -26,6 +29,7 @@
 //                       `job.workModeFit`; `source: "derived"` is a mode read
 //                       from the location text, never the board's field
 import { displayCompanyName, notAssessedReasonLabel, sponsorshipLabel } from "./display.js";
+import { compareRank, isRanked, mergeRank, rankEntry, rankFilterValue } from "./rankModel.js";
 
 export const VERDICT_LABELS = {
   matched_above_threshold: "Matched",
@@ -36,38 +40,17 @@ export const VERDICT_LABELS = {
 };
 
 // Operator answer 1: sort by verdict group (matched > needs answers > not
-// assessed > not a match), Jev score within a group. "assessed" is a result
-// the prompt gave no verdict for (pre-P2 result shape): assessed, so it
-// sits above the not-assessed group.
+// assessed > not a match), then the model's rank within a group
+// (rankModel.compareRank: likely fits first, likely no-matches last, a
+// posting with a blocker at the end). "assessed" is a result the prompt
+// gave no verdict for (pre-P2 result shape): assessed, so it sits above the
+// not-assessed group.
 export const VERDICT_ORDER = {
   matched_above_threshold: 0,
   pending_user_answers: 1,
   assessed: 2,
   not_assessed: 3,
   not_a_match: 4,
-};
-
-// RankScore.reasons / mismatch_flags are category ids (jev_contracts.py),
-// never prose. uat-batch1 (O1): every id the Jev client can emit
-// (jev_client.py: _REASON_CRITERIA's keys for `reasons`, _MISMATCH_FLAGS
-// for `mismatch_flags`) has its words here; an id this table does not know
-// is humanized ("some_new_id" -> "Some new id"), never shown raw.
-export const JEV_REASON_TEXT = {
-  title_match: "Title matches",
-  stack_match: "Stack matches",
-  seniority_match: "Level matches",
-  domain_match: "Domain matches",
-  domain_mismatch: "Different domain",
-  seniority_mismatch: "Different level",
-  location_mismatch: "Location outside your preferences",
-};
-
-export const JEV_FLAG_TEXT = {
-  domain: "Domain differs",
-  seniority: "Level differs",
-  stack: "Stack differs",
-  location: "Location differs",
-  sponsorship: "Sponsorship differs",
 };
 
 export const MODE_LABELS = { remote: "Remote", hybrid: "Hybrid", onsite: "On-site", on_site: "On-site" };
@@ -87,47 +70,8 @@ export function humanizeId(id) {
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
 }
 
-export function jevReasonText(id) {
-  return JEV_REASON_TEXT[id] || humanizeId(id);
-}
-
-export function jevFlagText(id) {
-  return JEV_FLAG_TEXT[id] || `${humanizeId(id)} differs`;
-}
-
-export function jevReasonsLine(rank) {
-  if (!rank || rank.fit === null || rank.fit === undefined) {
-    return "";
-  }
-  const reasons = (rank.reasons || []).map(jevReasonText);
-  const flags = (rank.mismatch_flags || []).map(jevFlagText);
-  return reasons.concat(flags).filter(Boolean).join(" · ");
-}
-
-// uat-batch2 (uat-bug-015): why a quick assessment has no Jev score, in
-// words. The ids are AssessResponse.rank_skip_reason's
-// (assess_contracts.RANK_SKIP_REASONS; the static test reads them from the
-// Python module, so a new id fails the test until it has words here).
-export const JEV_SKIP_TEXT = {
-  no_key: "No Jev key",
-  ephemeral_resume: "Pasted resume: not sent to Jev",
-  no_title_or_company: "No title or company to score",
-  cost_cap: "Jev budget reached",
-  error: "Jev unavailable",
-};
-
-export function jevSkipText(reason) {
-  if (!reason) {
-    return "";
-  }
-  return JEV_SKIP_TEXT[reason] || humanizeId(reason);
-}
-
-// True when `rank` is a RankScore Jev really scored (a row past the cost
-// cap is a RankScore with fit/score null).
-export function isScored(rank) {
-  return Boolean(rank) && rank.fit !== null && rank.fit !== undefined;
-}
+// True when the model gave this posting a score (rankModel.isRanked).
+export const isScored = isRanked;
 
 export function classLabel(requirementClass) {
   return requirementClass ? CLASS_LABELS[requirementClass] || humanizeId(requirementClass) : "";
@@ -374,10 +318,10 @@ export function buildJobs({ rows, rankScores, quickItems, runCreatedAt }) {
     const quickIsLatest = Boolean(quick) && (!row.assessment || !runAt || assessmentTime(quick) >= runAt);
     const assessment = quickIsLatest ? quick.result : row.assessment || null;
     const assessmentSource = assessment ? (quickIsLatest ? "quick" : "run") : null;
-    // The run's own Jev score first; a row the run never scored (past its
-    // cost cap) shows the score its quick assessment got, or why it has none.
-    const runRank = rankByUrl.get(url) || null;
-    const rank = isScored(runRank) ? runRank : (quick && quick.rank_score) || runRank;
+    // SCOPE-ADD-3 D: the row's own rank line (score, reasons, blockers),
+    // with a newer score from a re-rank pass over it. A quick assessment's
+    // stored `rank_score` is never shown: it came from the retired hosted ranker.
+    const rank = mergeRank(rankEntry(row.rank), rankEntry(rankByUrl.get(url)));
     return {
       id: url,
       posting,
@@ -387,7 +331,6 @@ export function buildJobs({ rows, rankScores, quickItems, runCreatedAt }) {
       fromRunDate: row.fromRunDate || null,
       runCreatedAt: runCreatedAt || null,
       rank,
-      rankSkipReason: isScored(rank) ? null : (quick && quick.rank_skip_reason) || null,
       quick,
       assessment,
       assessmentSource,
@@ -558,7 +501,7 @@ export function assessmentJobs(quickItems, jobs, pastedItems, runPostingIds) {
       if (known && !known.row) {
         return known;
       }
-      // A run's card for the same posting lends its Jev score only.
+      // A run's card for the same posting lends its rank only.
       return quickOnlyJob(item, known ? known.rank : null);
     });
 }
@@ -572,10 +515,10 @@ export function sortByAssessedAt(jobs) {
   return jobs.slice().sort((a, b) => assessedAt(b).localeCompare(assessedAt(a)));
 }
 
-// uat-batch2 (quick-assess-text-jev): `posting_text` is the full public
-// posting text (absent for a pasted job, whose text is never stored);
-// `rank_score` is the Jev score in the run's RankScore shape, and
-// `rank_skip_reason` says why there is none (never both).
+// uat-batch2: `posting_text` is the full public posting text (absent for a
+// pasted job, whose text is never stored). `rank` is the rank a run's card
+// for the same posting lends it, else a re-rank score for its identity; an
+// item's own stored `rank_score` (the retired hosted ranker's) is not shown.
 export function quickOnlyJob(item, rank = null) {
   const job = item.job || {};
   const posting = {
@@ -590,7 +533,7 @@ export function quickOnlyJob(item, rank = null) {
     source_kind: job.fetch_kind === "pasted" ? "pasted text" : "on demand",
   };
   const assessment = item.result || null;
-  const ownRank = item.rank_score || rank || null;
+  const ownRank = rankEntry(rank);
   return {
     id: job.job_identity,
     posting,
@@ -600,7 +543,6 @@ export function quickOnlyJob(item, rank = null) {
     fromRunDate: null,
     runCreatedAt: null,
     rank: ownRank,
-    rankSkipReason: isScored(ownRank) ? null : item.rank_skip_reason || null,
     pastedResume: usedPastedResume(item),
     quick: item,
     assessment,
@@ -726,10 +668,9 @@ export function sortJobs(jobs) {
     if (groupDelta !== 0) {
       return groupDelta;
     }
-    const scoreA = a.rank && typeof a.rank.score === "number" ? a.rank.score : -1;
-    const scoreB = b.rank && typeof b.rank.score === "number" ? b.rank.score : -1;
-    if (scoreA !== scoreB) {
-      return scoreB - scoreA;
+    const rankDelta = compareRank(a.rank, b.rank);
+    if (rankDelta !== 0) {
+      return rankDelta;
     }
     return (b.posting.published_at || "").localeCompare(a.posting.published_at || "");
   });
@@ -738,7 +679,10 @@ export function sortJobs(jobs) {
 // uat-bug-018: `state` filters by the job's derived state (job.state.state,
 // jobStateModel.withJobStates); it took the place of the grid's "Assessed"
 // chips. `assessed` (by verdict) is still honoured for a caller that sets it.
-export const EMPTY_FILTERS = { search: "", company: "", fit: "all", sponsorship: "all", assessed: "all", state: "all", showHidden: false };
+// `fit` filters by the model's rank (rankModel.rankFilterValue: strong,
+// maybe, no, blocked, unranked). Nothing is hidden by default: a posting
+// with a blocker is demoted, never hidden (SCOPE-ADD-3).
+export const EMPTY_FILTERS = { search: "", company: "", fit: "all", sponsorship: "all", assessed: "all", state: "all" };
 
 export function hasActiveFilter(filters) {
   return Boolean(
@@ -752,15 +696,11 @@ export function hasActiveFilter(filters) {
 }
 
 export function jobMatchesFilters(job, filters) {
-  if (job.rank && job.rank.hidden_by_default && !filters.showHidden) {
-    return false;
-  }
   if (filters.company && job.posting.company !== filters.company) {
     return false;
   }
   if (filters.fit !== "all") {
-    const fit = job.rank && job.rank.fit !== null && job.rank.fit !== undefined ? job.rank.fit : "unscored";
-    if (fit !== filters.fit) {
+    if (rankFilterValue(job.rank) !== filters.fit) {
       return false;
     }
   }

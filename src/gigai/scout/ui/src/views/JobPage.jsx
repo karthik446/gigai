@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, getAnswers, getRunPosting, postApplication, postAssess } from "../api.js";
+import { REQUIREMENTS_UNREADABLE_TEXT, isRequirementsUnreadable } from "../rankModel.js";
 import AssessmentBody from "../components/AssessmentBody.jsx";
 import RequirementActions from "../components/RequirementActions.jsx";
-import JevBadge from "../components/JevBadge.jsx";
+import RankBadge from "../components/RankBadge.jsx";
 import VerdictChip from "../components/VerdictChip.jsx";
 import SponsorshipBadge from "../components/SponsorshipBadge.jsx";
 import ProviderBadge from "../components/ProviderBadge.jsx";
@@ -19,7 +20,6 @@ import {
   assessOriginFor,
   dateLabel,
   jdExcerpt,
-  jevReasonsLine,
   notAssessedLine,
   payLabel,
   questionPromptIndex,
@@ -56,8 +56,10 @@ import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 //   uat-bug-014  a quick-assessed URL job shows its excerpt (the store's
 //                posting_text, jobModel.quickOnlyJob); a PASTED job says
 //                its text is never stored
-//   uat-bug-015  the Jev tile of a quick assessment shows its score, or
-//                says in words why it has none (job.rankSkipReason)
+//
+// SCOPE-ADD-3 D: the header's tile is the model's rank (RankBadge), with
+// its reasons and blockers under it and the note that a rank is a guess,
+// not a verdict. An on-demand assessment has no rank and no tile.
 //
 // Data, all from existing routes:
 //   header/JD   the run's posting row (GET /api/runs/{id}/results ->
@@ -174,9 +176,13 @@ function JobDescription({ posting, pasted }) {
   );
 }
 
+// uat-bug-029: a posting whose requirements could not be read (POST
+// /api/assess 422 posting_requirements_unreadable) stays not assessed, and
+// the page says so as a note, not an error.
 function AssessNow({ posting, origin, onAssessed }) {
   const [state, setState] = useState("idle");
   const [error, setError] = useState(null);
+  const [unreadable, setUnreadable] = useState(false);
   if (!posting.url) {
     return null;
   }
@@ -190,6 +196,7 @@ function AssessNow({ posting, origin, onAssessed }) {
         onClick={() => {
           setState("saving");
           setError(null);
+          setUnreadable(false);
           postAssess({ job: { job_url: posting.url }, origin })
             .then((response) => {
               setState("idle");
@@ -197,7 +204,9 @@ function AssessNow({ posting, origin, onAssessed }) {
             })
             .catch((err) => {
               setState("idle");
-              if (err instanceof ApiError && err.status === 504) {
+              if (isRequirementsUnreadable(err)) {
+                setUnreadable(true);
+              } else if (err instanceof ApiError && err.status === 504) {
                 setError("The model timed out assessing this posting. Try again, or a faster model target.");
               } else {
                 setError(err.message || String(err));
@@ -207,6 +216,11 @@ function AssessNow({ posting, origin, onAssessed }) {
       >
         {state === "saving" ? "Assessing…" : "Assess"}
       </button>
+      {unreadable && (
+        <div className="muted requirements-unreadable" data-role="requirements-unreadable">
+          {REQUIREMENTS_UNREADABLE_TEXT}. It stays not assessed; open the posting to read it yourself.
+        </div>
+      )}
       {error && <div className="field-error">{error}</div>}
     </span>
   );
@@ -321,7 +335,6 @@ export default function JobPage({
     );
   }
 
-  const reasons = jevReasonsLine(job.rank);
   const mode = workModeLabel(posting);
   const pay = payLabel(posting.pay);
   // A question is shown by its prompt wherever it appears (the tailored
@@ -406,8 +419,7 @@ export default function JobPage({
             )}
           </div>
           <div className="header-side">
-            <JevBadge rank={job.rank} skipReason={job.rankSkipReason} showReason />
-            {reasons && <div className="jev-reasons">{reasons}</div>}
+            <RankBadge rank={job.rank} detail hideWhenNone={job.status === "on_demand"} />
           </div>
         </div>
         <div className="job-actions">

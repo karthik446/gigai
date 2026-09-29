@@ -19,10 +19,6 @@ import { postApplication } from "../api.js";
 // shows the carried fit/reasons instead of a bare "Not assessed" (see
 // boardRows.js's rowsFromResults).
 //
-// P6/P9 (v0.1.9, additive/optional): `rankScore` is this posting's Jev
-// pre-rank (RankScore, jev_contracts.py) when the caller has one (only
-// FindJobsView does, via POST /api/runs/{id}/rank) -- shows fit/score plus
-// its category-id reasons/mismatch flags (Jev has no free-text output).
 // `profileId` + `showPrep` gate the "Prep for interview" panel, shown only
 // on an assessed card with a real posting URL.
 const STATUS_LABELS = {
@@ -33,19 +29,6 @@ const STATUS_LABELS = {
   not_assessed: "Not assessed",
   carried_forward: "Unchanged",
 };
-
-function RankBadge({ rankScore }) {
-  if (!rankScore || rankScore.fit === null || rankScore.fit === undefined) {
-    return null;
-  }
-  const cls = rankScore.fit === "strong" ? "met" : rankScore.fit === "no" ? "unmet" : "unclear";
-  return (
-    <span className={`status-badge ${cls}`} title={rankScore.reasons.join(", ")}>
-      Jev: {rankScore.fit}
-      {typeof rankScore.score === "number" ? ` (${rankScore.score})` : ""}
-    </span>
-  );
-}
 
 // P9c: "Mark applied" records a POST /api/applications event
 // (external_ref = this posting's normalized_url) -- own local state so one
@@ -93,7 +76,7 @@ function MarkAppliedButton({ normalizedUrl }) {
   );
 }
 
-export default function PostingCard({ row, rankScore, profileId, showPrep }) {
+export default function PostingCard({ row, profileId, showPrep }) {
   const { posting, status, assessment, notAssessedReason, fromRunDate } = row;
   const statusLabel = status === "carried_forward" ? unchangedSinceLabel(fromRunDate) : STATUS_LABELS[status] || status;
   const jobIdentity = posting.normalized_url || null;
@@ -117,7 +100,6 @@ export default function PostingCard({ row, rankScore, profileId, showPrep }) {
           {posting.location && <span>{posting.location}</span>}
           {posting.source_kind && <span className="muted">{posting.source_kind}</span>}
           <SponsorshipBadge sponsorship={assessment?.sponsorship || posting.sponsorship} />
-          <RankBadge rankScore={rankScore} />
         </div>
       </summary>
 
@@ -135,10 +117,6 @@ export default function PostingCard({ row, rankScore, profileId, showPrep }) {
 
       {status === "failed" && (
         <p className="muted">{notAssessedReason ? notAssessedReasonLabel(notAssessedReason) : "The model call for this posting failed."}</p>
-      )}
-
-      {rankScore && rankScore.mismatch_flags && rankScore.mismatch_flags.length > 0 && (
-        <p className="muted">Jev mismatch flags: {rankScore.mismatch_flags.join(", ")}</p>
       )}
 
       {assessment && <AssessmentBody assessment={assessment} jobIdentity={jobIdentity} />}

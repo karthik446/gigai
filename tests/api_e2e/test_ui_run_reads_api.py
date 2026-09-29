@@ -290,7 +290,7 @@ def test_the_jobs_view_draws_each_page_and_opens_on_one_small_read() -> None:
     view = (UI_SRC / "views" / "FindJobsView.jsx").read_text(encoding="utf-8")
 
     load = view[view.index("const loadResults = useCallback(") :]
-    load = load[: load.index("[loadQuickItems, loadJevSettings],")]
+    load = load[: load.index("[loadQuickItems, followRankPass],")]
     on_page = load[load.index("onPage: (response) => {") : load.index(".then(() => {")]
     # A page for a run that is no longer shown stops the read.
     assert "if (shownRunId.current !== id) {\n            return false;" in on_page

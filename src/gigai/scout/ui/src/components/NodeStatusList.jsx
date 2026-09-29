@@ -1,6 +1,7 @@
 import { relativeTimeLabel } from "../display.js";
 import { SETTINGS_HASH } from "../routing.js";
-import { notImportedLine, rankStatusLine, rotationLine, searchLines } from "../runText.js";
+import { notImportedLine, rotationLine, searchLines } from "../runText.js";
+import { rankCountsLine, rankShortfallLine, rankedByLine } from "../rankModel.js";
 
 const NODE_ORDER = ["acquire", "assess", "present"];
 
@@ -39,19 +40,19 @@ function stepLabel(receipt, progressStep) {
 // companies Exa found, how many wait, and when the stored postings need an
 // update, each with a link to Settings where that helps (runText.searchLines).
 //
-// `rankStatus` (GET /progress's rank_status, uat-bug-021): what Jev did for
-// this run, "Jev: scored 412 of 1,458 (cost $0.23, cost cap $0.25)" or
-// "Jev: skipped (no resume)"; no line until the ranking pass ended.
-//
-// jev-disclosure-fixes (finding 1): the day's spend against the daily
-// budget is the live bar's alone (FindJobsView's `jevBar`, always current);
-// this panel no longer repeats it from the run's own snapshot (stale the
-// moment another pass -- a click, another run -- spends after this one).
-export default function NodeStatusList({ status, nodeReceipts, progressSteps, rotation, boards, notImported, rankStatus }) {
+// SCOPE-ADD-3 D: the ranking and assessing counts, "Ranked 350 of 1,458 ·
+// Assessing 3 of 10", from GET /progress's `rank` and `assess_counts`
+// (rankModel.rankCountsLine; a run sealed before either existed has them
+// null and gets no line). "Ranked by your model: <name>" only when the
+// server names the model (`rank_status`/`rank`), and one line when the pass
+// ended with postings it did not rank.
+export default function NodeStatusList({ status, nodeReceipts, progressSteps, rotation, boards, notImported, rank, assessCounts, rankStatus }) {
   const search = searchLines(boards, relativeTimeLabel);
   const line = search ? null : rotationLine(rotation, boards);
   const leftOut = notImportedLine(notImported);
-  const jev = rankStatusLine(rankStatus);
+  const counts = rankCountsLine(rank, assessCounts);
+  const rankedBy = counts ? rankedByLine(rankStatus, rank) : null;
+  const shortfall = rankShortfallLine(rank, rankStatus);
   return (
     <section className="panel">
       <h2>Run status: {status}</h2>
@@ -88,13 +89,19 @@ export default function NodeStatusList({ status, nodeReceipts, progressSteps, ro
           </p>
         ))}
       {leftOut && (
-        <p className="muted not-imported-line" data-role="not-imported" title="They matched every filter. A run imports a bounded number of postings: the best Jev fit first, the newest first when Jev did not score them.">
+        <p className="muted not-imported-line" data-role="not-imported" title="They matched every filter. A run imports a bounded number of postings: the best ranked first, the newest first where the model gave no score.">
           {leftOut}
         </p>
       )}
-      {jev && (
-        <p className="muted" data-role="rank-status" data-rank-status={rankStatus.status} style={{ margin: "0.35rem 0 0", fontSize: "0.88rem" }}>
-          {jev}
+      {counts && (
+        <p className="rank-counts" data-role="rank-counts" data-rank-status={(rank && rank.status) || undefined}>
+          {counts}
+          {rankedBy && <span className="muted"> · {rankedBy}</span>}
+        </p>
+      )}
+      {shortfall && (
+        <p className="muted" data-role="rank-shortfall" style={{ margin: "0.35rem 0 0", fontSize: "0.88rem" }}>
+          {shortfall}
         </p>
       )}
     </section>

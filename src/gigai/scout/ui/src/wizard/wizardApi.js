@@ -124,7 +124,7 @@ export function storeResume(fields) {
   return request("POST", "/api/resumes", fields);
 }
 
-// uat-bug-020: {keys: {exa, jev, openrouter, openai: true|false}} -- whether
+// uat-bug-020: {keys: {exa, openrouter, openai: true|false}} -- whether
 // each API key is set, never a value.
 export function getSecretsStatus() {
   return request("GET", "/api/secrets/status");

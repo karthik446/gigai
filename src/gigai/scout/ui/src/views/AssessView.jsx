@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ApiError, postAssess } from "../api.js";
 import Breadcrumb from "../components/Breadcrumb.jsx";
 import { assessPrivacyNote, assessResume, assessingAgainst, canAssess, otherProfiles } from "../assessModel.js";
+import { REQUIREMENTS_UNREADABLE_TEXT, isRequirementsUnreadable } from "../rankModel.js";
 import { ORIGIN_QUICK_ASSESS } from "../jobModel.js";
 import { ASSESSMENTS_HASH } from "../routing.js";
 
@@ -40,6 +41,8 @@ export default function AssessView({ profiles, selectedProfileId, config, config
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  // uat-bug-029: the posting's requirements could not be read; not an error.
+  const [unreadable, setUnreadable] = useState(false);
 
   const others = otherProfiles(profiles, selectedProfileId);
   const against = assessingAgainst({ mode, profiles, activeProfileId: selectedProfileId, otherProfileId, config, configLoading });
@@ -62,13 +65,16 @@ export default function AssessView({ profiles, selectedProfileId, config, config
     event.preventDefault();
     setSubmitting(true);
     setError(null);
+    setUnreadable(false);
     try {
       const job = jobMode === "url" ? { job_url: jobUrl.trim() } : { job_text: jobText };
       const resume = assessResume({ mode, activeProfileId: selectedProfileId, otherProfileId, resumeText });
       const result = await postAssess({ job, resume, origin: ORIGIN_QUICK_ASSESS });
       onAssessed(result);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 504) {
+      if (isRequirementsUnreadable(err)) {
+        setUnreadable(true);
+      } else if (err instanceof ApiError && err.status === 504) {
         setError("The model timed out assessing this posting. Try again, or a smaller/faster model target.");
       } else {
         setError(err.message || String(err));
@@ -187,6 +193,11 @@ export default function AssessView({ profiles, selectedProfileId, config, config
 
           <p className="privacy-note">{assessPrivacyNote(mode)}</p>
 
+          {unreadable && (
+            <div className="callout info" data-role="requirements-unreadable">
+              {REQUIREMENTS_UNREADABLE_TEXT}. Nothing was assessed; try the posting's own page on the company's job board, or paste its text.
+            </div>
+          )}
           {error && <div className="callout danger">{error}</div>}
 
           <div className="actions" style={{ justifyContent: "flex-start" }}>

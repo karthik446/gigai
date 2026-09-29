@@ -39,11 +39,15 @@ function messageFor404(path, detail) {
 // be found."), which is wrong: no run is missing, the config file is.
 // prefs_missing/discovery_unavailable/discovery_running are the S2-B setup/
 // discover routes' own named error codes, same reasoning.
+// posting_requirements_unreadable (uat-bug-029, POST /api/assess 422): "Couldn't
+// read this posting's requirements", which the pages show as a note, not an
+// error (rankModel.isRequirementsUnreadable).
 const CODES_WITH_OWN_MESSAGE = new Set([
   "config_missing",
   "prefs_missing",
   "discovery_unavailable",
   "discovery_running",
+  "posting_requirements_unreadable",
 ]);
 
 class ApiError extends Error {
@@ -122,8 +126,9 @@ export function getRunStatus(runId) {
 // `limit` rows from `offset`, in the grid's own order, plus `total` /
 // `limit` / `offset`, the run's `counts` and `created_at`. No posting
 // carries its `text` (getRunPosting reads one posting whole), and each row
-// has `rank_score`: the Jev score already stored for it, or null. The read
-// never asks Jev.
+// has `rank_score` (the score stored for it, RankScore) and `rank` (the
+// model's line: score, reasons, blockers), each null when there is none.
+// The read never calls a model.
 //
 // The server sends `carried_forward_assessments` beside `payload`, and the
 // cards are built from `payload` alone (boardRows.rowsFromResults reads
@@ -174,10 +179,12 @@ export async function getRunResults(runId, { pageSize = RESULTS_PAGE_SIZE, onPag
   return merged;
 }
 
-// The stored Jev scores of a results response, in POST /rank's `scores`
-// shape (jobModel.buildJobs' `rankScores`).
+// The stored scores of a results response, in POST /rank's `scores` shape
+// (jobModel.buildJobs' `rankScores`). An older response whose rows carry
+// no `rank_score` (or no rows) reads as none.
 export function storedRankScores(response) {
-  return response.payload.rows.map((row) => row.rank_score).filter(Boolean);
+  const rows = (response && response.payload && response.payload.rows) || [];
+  return rows.map((row) => row && row.rank_score).filter(Boolean);
 }
 
 // One posting of a run, complete: {row: {posting (with its text), outcome,
@@ -300,26 +307,14 @@ export function getAnswers() {
   return request("GET", "/api/answers");
 }
 
-// P6: Jev pre-rank for one run's postings, against a profile (default: the
-// selected one). No key configured -> scores come back empty (fail open),
-// never an error. uat-bug-021: `{}` only READS (the scores cached so far and
-// the pass's `rank_status`); `{start: true}` is the "Score with Jev" click,
-// the one call on a page that may spend (jevModel.createRankPass).
+// SCOPE-ADD-3: the ranking pass for one run's postings, by the run's own
+// model target (rankModel.createRankPass). `{}` only READS (the scores so
+// far, `rank_status` and `rank_record`); `{start: true}` is the Rank /
+// Re-rank click (starts a pass, or joins the one running); `{cancel: true}`
+// stops it. An older server's answer may carry a `usage` block or no
+// `rank_record`: both are ignored.
 export function postRank(runId, fields) {
   return request("POST", `/api/runs/${encodeURIComponent(runId)}/rank`, fields || {});
-}
-
-// ui-pass (uat-bug-021 decision a): the home's Jev settings, "Rank with Jev"
-// on/off and the daily budget, plus whether a Jev key is set and today's
-// usage (find_jobs/api/jev_settings.py): {jev_daily_budget_usd,
-// jev_rank_enabled, daily_budget_env, has_key, usage}. PUT takes either
-// setting alone; the other keeps its stored value.
-export function getJevSettings() {
-  return request("GET", "/api/jev/settings");
-}
-
-export function putJevSettings(fields) {
-  return request("PUT", "/api/jev/settings", fields);
 }
 
 // P9c: every find-jobs run for this target (newest first), with per-run

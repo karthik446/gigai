@@ -1,16 +1,24 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import JobCard from "./JobCard.jsx";
 import { displayCompanyName } from "../display.js";
 import { EMPTY_FILTERS, filterJobs, hasActiveFilter, sortByAssessedAt, sortJobs } from "../jobModel.js";
 import { stateOptions } from "../jobStateModel.js";
+import { RANK_HONEST_NOTE, RANK_ORDER_NOTE, sameOrder, streamOrder } from "../rankModel.js";
 
 // Q4a: the card grid that replaces the Find-jobs postings list
 // (FindJobsPostingsBoard.jsx), per mockups/cards-and-job-page.html.
-// Filters are client-side over the job model: Jev fit (incl. unscored),
-// sponsorship (only when find-jobs.json visa_sponsorship_required is true),
-// state, company, search (title/company/location/requirements), and "show
-// postings Jev hides by default" (RankScore.hidden_by_default). Sort:
-// verdict group, then Jev score (operator answer 1; jobModel.sortJobs).
+// Filters are client-side over the job model: the model's rank band (incl.
+// blocked and not ranked), sponsorship (only when find-jobs.json
+// visa_sponsorship_required is true), state, company, search
+// (title/company/location/requirements). Sort: verdict group, then the
+// model's rank (likely fits first · likely no-matches last, a posting with a
+// blocker at the end, never hidden; jobModel.sortJobs).
+//
+// SCOPE-ADD-3 D (streaming): while a run ranks, each poll can re-order the
+// list as batches land. While the pointer is over the list or focus is in
+// it, the cards already shown keep their places (their tiles still update)
+// and new cards join at the end (rankModel.streamOrder), so the card the
+// operator is on never jumps; the list re-sorts when they leave it.
 //
 // uat-bug-018: the "State" chips filter by the job's derived state
 // (job.state, jobStateModel.js) and each says how many jobs are in it,
@@ -19,15 +27,14 @@ import { stateOptions } from "../jobStateModel.js";
 // took the place of the "Assessed" chips (the verdicts are states).
 //
 // uat-batch2 (uat-bug-016): the Assessments page is this same grid with
-// `from="assessments"`: newest assessment first (jobModel.sortByAssessedAt),
-// and nothing hidden by Jev (the operator asked for each of these
-// assessments; hiding one because Jev scored it low would lose it).
+// `from="assessments"`: newest assessment first (jobModel.sortByAssessedAt).
 const FIT_OPTIONS = [
   ["all", "All"],
-  ["strong", "Strong"],
-  ["maybe", "Maybe"],
-  ["no", "No"],
-  ["unscored", "Unscored"],
+  ["strong", "Likely fit"],
+  ["maybe", "Possible fit"],
+  ["no", "Likely no-match"],
+  ["blocked", "Blocker"],
+  ["unranked", "Not ranked"],
 ];
 const SPONSORSHIP_OPTIONS = [
   ["all", "All"],
@@ -78,7 +85,7 @@ function StateChips({ options, value, onChange }) {
   );
 }
 
-export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, from, jevSkipWords }) {
+export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, from }) {
   const assessments = from === "assessments";
   const noun = assessments ? "assessments" : "postings";
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -86,18 +93,36 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, f
   // The sponsorship filter exists only alongside the chip (operator
   // amendment); when the config turns it off, any stale selection resets.
   const shownFilters = visaRequired ? filters : { ...filters, sponsorship: "all" };
-  const effectiveFilters = assessments ? { ...shownFilters, showHidden: true } : shownFilters;
+  const effectiveFilters = shownFilters;
 
   const companies = useMemo(() => {
     const set = new Set(jobs.map((job) => job.posting.company).filter(Boolean));
     return [...set].sort((a, b) => displayCompanyName(a).localeCompare(displayCompanyName(b)));
   }, [jobs]);
 
-  const visible = useMemo(() => {
+  const sorted = useMemo(() => {
     const matching = filterJobs(jobs, effectiveFilters);
     return assessments ? sortByAssessedAt(matching) : sortJobs(matching);
   }, [jobs, effectiveFilters, assessments]);
-  const hiddenCount = useMemo(() => (assessments ? 0 : jobs.filter((job) => job.rank && job.rank.hidden_by_default).length), [jobs, assessments]);
+  // The streaming hold: the order last drawn, and whether the operator is
+  // on the list (pointer over it, or focus in it).
+  const [hold, setHold] = useState(false);
+  const drawnIds = useRef([]);
+  const visible = useMemo(() => streamOrder(sorted, drawnIds.current, hold), [sorted, hold]);
+  useLayoutEffect(() => {
+    drawnIds.current = visible.map((job) => job.id);
+  }, [visible]);
+  const orderHeld = hold && !sameOrder(visible, sorted);
+  const holdHandlers = {
+    onPointerEnter: () => setHold(true),
+    onPointerLeave: () => setHold(false),
+    onFocus: () => setHold(true),
+    onBlur: (event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) {
+        setHold(false);
+      }
+    },
+  };
   const states = useMemo(
     () => stateOptions(filterJobs(jobs, { ...effectiveFilters, state: "all" }), effectiveFilters.state),
     [jobs, effectiveFilters],
@@ -135,7 +160,7 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, f
             </div>
           </div>
           <div className="filter-row">
-            <ChipGroup label="Jev fit" options={FIT_OPTIONS} value={filters.fit} onChange={(value) => setFilter("fit", value)} />
+            {!assessments && <ChipGroup label="Rank" options={FIT_OPTIONS} value={filters.fit} onChange={(value) => setFilter("fit", value)} />}
             {visaRequired && (
               <ChipGroup
                 label="Sponsorship"
@@ -151,8 +176,20 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, f
           <div className="result-count">
             <span>
               {visible.length} of {jobs.length} {noun}
-              {runLabel ? ` · ${runLabel}` : ""} · {assessments ? "newest first" : "sorted by verdict, then Jev score"}
-              {!filters.showHidden && hiddenCount > 0 ? ` · ${hiddenCount} hidden by Jev` : ""}
+              {runLabel ? ` · ${runLabel}` : ""} ·{" "}
+              {assessments ? (
+                "newest first"
+              ) : (
+                <span data-role="rank-order-note" title={`Assessed postings are grouped by their verdict first. ${RANK_HONEST_NOTE}`}>
+                  {RANK_ORDER_NOTE}
+                </span>
+              )}
+              {orderHeld && (
+                <span className="muted" data-role="order-held">
+                  {" "}
+                  · new ranks landed; the list re-orders when you move off it
+                </span>
+              )}
               {hasActiveFilter(effectiveFilters) && (
                 <>
                   {" · "}
@@ -162,21 +199,15 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, f
                 </>
               )}
             </span>
-            {!assessments && (
-              <label className="filter-toggle">
-                <input type="checkbox" checked={filters.showHidden} onChange={(event) => setFilter("showHidden", event.target.checked)} />{" "}
-                Show postings Jev hides by default
-              </label>
-            )}
           </div>
         </div>
       </section>
 
-      <div className="card-grid">
+      <div className="card-grid" data-role="jobs-grid" {...holdHandlers}>
         {visible.length === 0 ? (
           <div className="empty-state">{jobs.length === 0 ? emptyMessage || "No postings acquired yet." : `No ${noun} match these filters.`}</div>
         ) : (
-          visible.map((job) => <JobCard key={job.id} job={job} visaRequired={visaRequired} from={from} jevSkipWords={jevSkipWords} />)
+          visible.map((job) => <JobCard key={job.id} job={job} visaRequired={visaRequired} from={from} />)
         )}
       </div>
     </div>
