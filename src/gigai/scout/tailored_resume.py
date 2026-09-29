@@ -1397,7 +1397,7 @@ def run_tailored_resume(
     # 1. Job text (public data; network only for a URL).
     try:
         with job_fetch_client() as client:
-            job = resolve_job(request.job, client=client)
+            job = resolve_job(request.job, client=client, home_root=home_root)
     except FindJobsContractError as exc:
         raise TailorError(exc.code, str(exc)) from exc
     from .find_jobs.assess_contracts import AssessRequest

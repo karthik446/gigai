@@ -573,3 +573,37 @@ def test_request_dto_parses_and_rejects_unknown_keys() -> None:
     with pytest.raises(Exception) as info:
         TailorRequest.from_json({"job": {"job_text": "x"}, "preferences": {}})
     assert getattr(info.value, "code", "") == "unknown_key"
+
+
+def test_tailor_resolves_a_gh_jid_company_url_through_the_board_api_with_home_root(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """uat-bug-029 follow-up: tailor passes home_root to resolve_job, so an indexed gh_jid company URL
+    reads the board API (not the careers page)."""
+
+    import httpx
+
+    from gigai.scout.find_jobs.company_index import CompanyIndex, CompanyIndexEntry, IndexedPosting
+
+    url = "https://www.nexhealth.com/careers/open-positions?gh_jid=5993376004"
+    posting = IndexedPosting("5993376004", "Senior Software Engineer, Remote", "Remote", url, None, None, "2026-09-28T00:00:00Z", "2026-09-28T00:00:00Z")
+    CompanyIndex.for_home(fx.home_root).write(
+        CompanyIndexEntry("NexHealth", "greenhouse", "nexhealth", None, None, None, {"5993376004": posting})
+    )
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.url.host}{request.url.path}")
+        if request.url.host == "boards-api.greenhouse.io":
+            return httpx.Response(200, json={"id": 5993376004, "title": "Senior Software Engineer, Remote", "company_name": "NexHealth", "content": "&lt;p&gt;5+ years of Python.&lt;/p&gt;"})
+        return httpx.Response(200, text="<html><body>Jobs at NexHealth ABELDent</body></html>")
+
+    monkeypatch.setattr(
+        tailored_resume, "job_fetch_client", lambda: httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+    )
+    _install(monkeypatch, [OSError("connection reset")])  # stop right after job resolution
+
+    with pytest.raises(TailorError) as info:
+        _run(fx, TailorRequest(job=AssessJobInput(job_url=url)))
+    assert info.value.code == "model_unavailable"
+
+    assert seen and seen[0] == "boards-api.greenhouse.io/v1/boards/nexhealth/jobs/5993376004"
+    assert all(host_path.startswith("boards-api") for host_path in seen)

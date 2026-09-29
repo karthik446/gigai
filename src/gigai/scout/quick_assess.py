@@ -483,12 +483,35 @@ def posting_requirements_unreadable(text: str, body: AssessmentBody) -> bool:
     only "No stated requirements").  Either alone is not enough: a real
     posting without headings that yields real rows stays assessed, and a
     posting with requirement wording whose model answer is "No stated
-    requirements" stays the legitimate requirement-free path.  Residual
-    false positive: a genuinely requirement-free posting that also uses none
-    of the cue words (a one-line "we are hiring" blurb) is refused.
+    requirements" stays the legitimate requirement-free path.  A third
+    condition: the text must not read as running prose (``_reads_as_prose``),
+    so a short cue-free blurb is assessed while a list-of-names scrape is
+    refused.  Residual: a cue-free blurb written as short lines is refused.
+    A previously stored bad Matched file is left in place (never deleted).
     """
 
-    return not _has_requirement_cue(text) and not _has_real_requirement(body)
+    return not _has_requirement_cue(text) and not _has_real_requirement(body) and not _reads_as_prose(text)
+
+
+#: A line this long (in words) is running prose, not a nav/list label.
+_PROSE_LINE_WORDS = 8
+_PROSE_MIN_WORDS = 15
+_PROSE_MIN_SHARE = 0.6
+
+
+def _reads_as_prose(text: str) -> bool:
+    """A short real blurb: at least 15 words and 60% of them in lines of 8+ words.
+
+    The scraped NexHealth page (integration names, nav labels, a few slogans)
+    puts only ~42% of its words in long lines, so it stays unreadable; a
+    one-paragraph "we are hiring" blurb is prose and is assessed.
+    """
+
+    counts = [len(line.split()) for line in text.splitlines() if line.strip()]
+    total = sum(counts)
+    if total < _PROSE_MIN_WORDS:
+        return False
+    return sum(n for n in counts if n >= _PROSE_LINE_WORDS) / total >= _PROSE_MIN_SHARE
 
 
 # --- the assessment ----------------------------------------------------------------

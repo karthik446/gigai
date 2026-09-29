@@ -609,3 +609,14 @@ def test_requirement_free_wording_with_real_requirements_or_cues_stays_assessed(
     _install(monkeypatch, [_NO_STATED])
     response = _run(fx, AssessRequest(job=AssessJobInput(job_text="You will help our team ship. There are no formal qualifications.")))
     assert response.result.verdict is Verdict.MATCHED_ABOVE_THRESHOLD
+
+
+def test_short_prose_blurb_without_cue_words_is_assessed_not_refused(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard's false positive: a real requirement-free blurb with none of the cue words is assessed."""
+
+    _install(monkeypatch, [_NO_STATED])
+    blurb = "Our small team builds scheduling software for dental clinics across the country and we are hiring an engineer to join the crew in Austin."
+
+    response = _run(fx, AssessRequest(job=AssessJobInput(job_text=blurb)))
+
+    assert response.result.verdict is Verdict.MATCHED_ABOVE_THRESHOLD
