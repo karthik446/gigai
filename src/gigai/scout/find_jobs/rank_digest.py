@@ -37,10 +37,12 @@ from dataclasses import dataclass
 import re
 from typing import Protocol, Sequence
 
-#: v3 (uat-bug-030): the resume digest is built from structure and privacy-guarded;
-#: posting digests are unchanged from v2. The bump keys the score cache, so a score
-#: made with the old resume digest is never reused.
-DIGEST_VERSION = "digest-v3"
+#: v4 (uat-bug-032): the resume digest is built from the resume BODY (the header block is
+#: dropped by structure) and the candidate's own name tokens are stripped from the final
+#: text; v3 (uat-bug-030) built it from structure and privacy-guarded it. Posting digests
+#: are unchanged from v2. The bump keys the score cache, so a score made with an older
+#: resume digest is never reused.
+DIGEST_VERSION = "digest-v4"
 
 # canonical label -> regex (case-insensitive). Kept to terms that separate one
 # engineering posting from another (the spike's vocabulary, unchanged).
@@ -271,6 +273,78 @@ def guard_private(text: str) -> str:
     return "\n".join(out)
 
 
+_RESUME_SECTION = re.compile(
+    r"^(?:professional\s+|career\s+|executive\s+|technical\s+|work\s+)?"
+    r"(?:summary|profile|objective|about(?:\s+me)?|experience|employment(?:\s+history)?|work\s+history|"
+    r"skills|technical\s+skills|core\s+competencies|education|projects|certifications?|awards|publications|"
+    r"languages|interests|references|contact|contact\s+(?:info|information|details))$",
+    re.I,
+)
+_ZIP_LINE = re.compile(r"\b[A-Z][A-Za-z.\s]+,\s*[A-Z]{2}\b(?:\s+\d{5}(?:-\d{4})?)?|\b\d{5}(?:-\d{4})?\b")
+_HEADER_MAX_WORDS = 12
+_NAME_STOP = frozenset({
+    "senior", "sr", "junior", "jr", "staff", "principal", "lead", "head", "chief", "associate", "intern", "software",
+    "backend", "back", "end", "frontend", "front", "full", "stack", "fullstack", "data", "machine", "learning", "ml",
+    "platform", "cloud", "site", "reliability", "devops", "mobile", "web", "systems", "security", "and", "of", "the",
+    "engineer", "developer", "architect", "scientist", "analyst", "manager", "director", "consultant", "administrator",
+    "designer", "programmer", "sre", "researcher", "specialist", "resume", "cv", "curriculum", "vitae",
+})
+
+
+def _is_resume_section(line: str) -> bool:
+    return bool(_RESUME_SECTION.match(line.strip().strip("#*_-:= ").strip()))
+
+
+def _is_contact_line(line: str) -> bool:
+    return not _is_clean(line) or bool(_ZIP_LINE.search(line))
+
+
+def split_resume_header(resume_text: str) -> tuple[list[str], list[str]]:
+    """``(header_lines, body_lines)``: the name/contact block dropped by structure (uat-bug-032).
+
+    With a section heading (Summary, Experience, Skills, ...) the header is the
+    leading block above the first heading, up to the first blank line, and
+    only its short or contact-like lines (a long sentence is body text). With
+    no heading the header is the first block (up to the first blank line).
+    Contact-like lines (email, phone, URL, street, city/state/zip) are dropped
+    from the body either way.
+    """
+
+    lines = resume_text.split("\n")
+    first = next((i for i, line in enumerate(lines) if line.strip()), len(lines))
+    heading = next((i for i, line in enumerate(lines) if _is_resume_section(line)), None)
+    end = first
+    while end < len(lines) and lines[end].strip() and (heading is None or end < heading):
+        line = lines[end]
+        if heading is not None and not _is_contact_line(line) and len(line.split()) > _HEADER_MAX_WORDS:
+            break
+        end += 1
+    header, body = lines[first:end], lines[end:]
+    return header, [line for line in body if not _is_contact_line(line)]
+
+
+def _name_tokens(header: Sequence[str], name: str | None) -> set[str]:
+    """The candidate's own name words: ``name`` when given, else the header's first line minus title vocabulary."""
+
+    if name is not None and name.strip():
+        words = re.findall(r"[^\W\d_]+", name)
+    else:
+        first = header[0] if header else ""
+        if _is_contact_line(first) or any(c.isdigit() for c in first):
+            return set()
+        words = [w for w in re.findall(r"[^\W\d_]+", first) if w.lower() not in _NAME_STOP]
+    return {w.lower() for w in words if len(w) > 1}
+
+
+def guard_name(text: str, tokens: set[str]) -> str:
+    """Remove each name token (case-insensitive, whole word) from ``text``."""
+
+    if not tokens:
+        return text
+    pattern = re.compile(r"(?<![^\W_])(?:" + "|".join(re.escape(t) for t in sorted(tokens, key=len, reverse=True)) + r")(?![^\W_])", re.I)
+    return "\n".join(re.sub(r"[ \t]{2,}", " ", pattern.sub("", line)) for line in text.split("\n"))
+
+
 def resume_titles(resume_text: str) -> list[str]:
     """Job titles found in the resume, from short title-shaped segments (never running text)."""
 
@@ -287,20 +361,28 @@ def resume_titles(resume_text: str) -> list[str]:
     return list(found)[:_MAX_RESUME_TITLES]
 
 
-def resume_digest(resume_text: str, prefs: CandidatePrefs) -> str:
+def resume_digest(resume_text: str, prefs: CandidatePrefs, *, name: str | None = None) -> str:
     """The compact candidate block the rank prompt carries instead of the resume.
 
-    Titles, years, skills, seniority and domain only; the header block (name,
-    contact details, links) never enters it (uat-bug-030).
+    Titles, years, skills, seniority and domain only, read from the resume BODY:
+    the header block (name, contact details, links) is dropped by structure
+    and the candidate's own name tokens are removed from the final text
+    (uat-bug-030, uat-bug-032). ``name`` is the profile's name when the caller
+    has it; otherwise it is read from the header's first line. The location
+    line comes only from ``prefs.location`` (the run's explicit config), never
+    from resume text.
     """
 
-    techs = techs_in(resume_text)
-    years = max((int(m.group(1)) for m in _YEARS_RE.finditer(resume_text[:600]) if 0 < int(m.group(1)) <= 45), default=None)
-    titles = resume_titles(resume_text)
+    header, body_lines = split_resume_header(resume_text)
+    body = "\n".join(body_lines)
+    tokens = _name_tokens(header, name)
+    techs = techs_in(body)
+    years = max((int(m.group(1)) for m in _YEARS_RE.finditer(body[:600]) if 0 < int(m.group(1)) <= 45), default=None)
+    titles = resume_titles(body)
     levels = list(dict.fromkeys(level_of(title) for title in (*prefs.titles, *titles)))
     domain = [label for label in techs if label in _DOMAINS]
     location = (prefs.location or "").strip() or "unknown"
-    return guard_private("\n".join([
+    return guard_name(guard_private("\n".join([
         f"CANDIDATE: level={'/'.join(levels) or '?'}; {years or '?'}+ yrs; titles: {'; '.join(titles) or '-'}; "
         f"domain: {', '.join(domain) or '-'}",
         "skills: " + (", ".join(techs) or "-"),
@@ -308,7 +390,7 @@ def resume_digest(resume_text: str, prefs: CandidatePrefs) -> str:
         "countries: " + (",".join(prefs.countries) or "any"),
         "needs visa sponsorship: " + ("yes" if prefs.visa_sponsorship_required else "no"),
         "location: " + location + (" (remote preferred)" if prefs.remote_preferred else ""),
-    ]))
+    ])), tokens)
 
 
 def batch_lines(postings: Sequence[tuple[str, DigestPosting]]) -> list[str]:
@@ -322,11 +404,13 @@ __all__ = [
     "TECH",
     "batch_lines",
     "constraint_flags",
+    "guard_name",
     "guard_private",
     "level_of",
     "posting_digest",
     "requirements_section",
     "resume_digest",
     "resume_titles",
+    "split_resume_header",
     "techs_in",
 ]

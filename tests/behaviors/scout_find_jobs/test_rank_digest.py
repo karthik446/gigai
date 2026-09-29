@@ -17,11 +17,13 @@ from gigai.scout.find_jobs.rank_digest import (
     DIGEST_VERSION,
     CandidatePrefs,
     constraint_flags,
+    guard_name,
     guard_private,
     posting_digest,
     requirements_section,
     resume_digest,
     resume_titles,
+    split_resume_header,
 )
 
 
@@ -148,7 +150,7 @@ def test_resume_digest_golden() -> None:
         remote_preferred=True,
     )
     assert resume_digest(_RESUME, prefs) == "\n".join([
-        "CANDIDATE: level=staff/senior; 9+ yrs; titles: Senior Software Engineer; domain: payments",
+        "CANDIDATE: level=staff/senior; 9+ yrs; titles: -; domain: payments",
         "skills: Python, Go, AWS, Kubernetes, Terraform, Kafka, Postgres, payments",
         "targets: Staff Software Engineer; Senior Software Engineer",
         "countries: US",
@@ -164,7 +166,7 @@ def test_resume_digest_defaults() -> None:
 
 
 def test_digest_version() -> None:
-    assert DIGEST_VERSION == "digest-v3"
+    assert DIGEST_VERSION == "digest-v4"
 
 
 # uat-bug-030: the ranking model never sees the resume header. Synthetic data only.
@@ -224,3 +226,58 @@ def test_guard_drops_street_address_lines_and_keeps_years() -> None:
 
 def test_resume_titles_come_from_title_shaped_segments_only() -> None:
     assert resume_titles(MESSY_RESUME) == ["Staff Software Engineer", "Senior Backend Engineer", "Senior Software Engineer"]
+
+
+# uat-bug-032: a title-shaped name and a messy header never reach the digest or the rendered prompt.
+TITLE_NAME_RESUME = """Senior Engineer Sam Example
+Sam Example, Denver, CO 80202
+sam.example@example.com | (555) 123-4567 | +44 20 7946 0958 | 555 987 6543
+https://sam-example.dev | github.com/samexample | linkedin.com/in/sam-example | Denver CO / sam@x.io / 555.111.2222
+
+Staff Software Engineer | Senior Backend Engineer
+Backend engineer with 9 years building payment platforms in Python and Go on AWS with Postgres.
+
+Experience
+Senior Software Engineer at Acme Pay (2019-2023): Python, Kafka, Terraform
+"""
+
+_TITLE_NAME_PRIVATE = (
+    "Sam", "Example", "sam.example", "example.com", "x.io", "555", "123-4567", "7946", "0958", "987 6543", "111.2222",
+    "Denver", "CO", "80202", "github", "linkedin", "sam-example", "http", "www.",
+)
+
+
+@pytest.mark.parametrize("resume", [MESSY_RESUME, TITLE_NAME_RESUME])
+def test_title_shaped_name_and_header_never_reach_digest_or_prompt(resume: str) -> None:
+    from gigai.scout.find_jobs.model_rank import render_rank_prompt
+
+    digest = resume_digest(resume, _prefs())
+    prompt = render_rank_prompt(["p1 | Engineer @ acme | lvl=mid | loc=? [US] | yrs=5+ | req=Python"], digest)
+    for text in (digest, prompt):
+        for private in _TITLE_NAME_PRIVATE:
+            assert private not in text, private
+        assert "Staff Software Engineer" in text and "Senior Backend Engineer" in text
+        assert "9+ yrs" in text and "Python" in text and "Kafka" in text and "domain: payments" in text
+    assert "Senior Engineer Sam" not in digest
+
+
+def test_split_header_by_structure_and_no_heading_fallback() -> None:
+    header, body = split_resume_header(TITLE_NAME_RESUME)
+    assert header[0] == "Senior Engineer Sam Example" and len(header) == 4
+    assert body[0] == "" and "Staff Software Engineer | Senior Backend Engineer" in body
+    header, body = split_resume_header("Sam Example\nDenver, CO 80202\nsam@example.com\n\nPython developer, 7 years of Go.\nCall 555-123-4567\n")
+    assert header == ["Sam Example", "Denver, CO 80202", "sam@example.com"]
+    assert not any("555" in line for line in body) and "Python developer, 7 years of Go." in body
+
+
+def test_name_guard_removes_profile_name_tokens_whole_word_case_insensitively() -> None:
+    assert guard_name("built by SAM at Examples inc; example", {"sam", "example"}) == "built by at Examples inc; "
+    digest = resume_digest("Sam Example\n\nStaff Engineer\nPython, 6 years", CandidatePrefs(titles=("Sam Lead Engineer",)), name="Sam Example")
+    assert "sam" not in digest.lower().replace("sampling", "")
+    assert "Lead Engineer" in digest
+
+
+def test_location_line_comes_only_from_prefs() -> None:
+    digest = resume_digest(TITLE_NAME_RESUME, CandidatePrefs(countries=("US",)))
+    assert "location: unknown" in digest and "Denver" not in digest
+    assert "location: Remote (remote preferred)" in resume_digest(TITLE_NAME_RESUME, CandidatePrefs(location="Remote", remote_preferred=True))
