@@ -30,7 +30,15 @@ from gigai.scout.find_jobs.api import static as static_module
 from gigai.scout.find_jobs.bindings import TEST_MODEL_EXTRACT_REPLY
 
 from tests.api_e2e.after_journey import assert_clean_and_healthy
-from tests.api_e2e.harness import resolve_workpad_path, setup_and_init, start_server, stop_server
+from tests.api_e2e.harness import (
+    poll_until_terminal,
+    resolve_workpad_path,
+    run_request_body,
+    setup_and_init,
+    start_server,
+    stop_server,
+    write_offline_find_jobs_config,
+)
 from tests.support.fake_claude import calls, write_fake_claude
 
 WIZARD_SRC = Path(static_module.__file__).resolve().parents[2] / "ui" / "src" / "wizard"
@@ -162,6 +170,11 @@ def test_the_wizard_chooses_claude_extracts_through_it_and_finishes(tmp_path: Pa
         assert [item["profile_id"] for item in profiles["profiles"]] == [out["finished"]["profileId"]]
         assert client.get("/api/setup").status_code == 200
 
+        # uat-bug-038: Finish saved the wizard's one model choice as the
+        # default model target (the starter config's is ollama_local).
+        saved_config = json.loads((target / "find-jobs.json").read_text(encoding="utf-8"))
+        assert saved_config["default_model_target"] == "claude_cli"
+
         # A quick assessment with Claude goes through the same CLI, plan mode.
         assessed = client.post(
             "/api/assess", json={"job": {"job_text": POSTING}, "model_target": "claude_cli", "origin": "quick_assess"}
@@ -171,7 +184,31 @@ def test_the_wizard_chooses_claude_extracts_through_it_and_finishes(tmp_path: Pa
         assess_call = calls(record)[-1]
         assert assess_call["kind"] == "assess" and assess_call["argv"] == PLAN_ARGV
 
+        # ... and a run started the way the run dialog starts one (its select
+        # opens on the config's default target) uses it: sealed and ranked.
+        write_offline_find_jobs_config(target, sources_live=True)
+        config_body = client.get("/api/config").json()
+        assert config_body["config"]["default_model_target"] == "claude_cli"
+        run_response = client.post(
+            "/api/run",
+            json=run_request_body(
+                config_body["config_digest"], model_target=config_body["config"]["default_model_target"]
+            ),
+        )
+        assert run_response.status_code == 202, run_response.text
+        run_id = run_response.json()["run_id"]
+        status_body = poll_until_terminal(client, run_id)
+        assert status_body["status"] == "succeeded", status_body
         workpad = resolve_workpad_path(home, target)
+        run_dir = workpad / "runs" / run_id
+        sealed = json.loads((run_dir / "sealed" / "find-jobs-run-input.json").read_text(encoding="utf-8"))
+        assert sealed["model_target"] == "claude_cli"
+        sealed_config = json.loads((run_dir / "sealed" / "find-jobs-config.json").read_text(encoding="utf-8"))
+        assert sealed_config["default_model_target"] == "claude_cli"
+        assess = json.loads((run_dir / "outputs" / "assess.json").read_text(encoding="utf-8"))
+        assert assess["model_target"] == "claude_cli" and assess["producer"]["adapter"] == "claude_cli"
+        # (No rank.json here: the ranking pass runs only over the import cap;
+        # test_claude_cli_target.py pins rank.json's claude_cli target.)
     finally:
         stop_server(server)
 

@@ -17,7 +17,14 @@ from __future__ import annotations
 import re
 from http import HTTPStatus
 
-from ..contracts import MAX_AGE_DAYS_MAXIMUM, FindJobsConfig, FindJobsContractError, SourceToggles, is_location_placeholder
+from ..contracts import (
+    MAX_AGE_DAYS_MAXIMUM,
+    FindJobsConfig,
+    FindJobsContractError,
+    ModelTarget,
+    SourceToggles,
+    is_location_placeholder,
+)
 from .config import _prefs_prefill_from_config
 from .server import (
     ConfigMissingError,
@@ -137,6 +144,22 @@ def _setup_profile_id(body: dict[str, object], errors: dict[str, str]) -> str | 
     return value
 
 
+def _setup_model_target(body: dict[str, object], errors: dict[str, str]) -> str | None:
+    """uat-bug-038: the optional model target Finish saves as ``default_model_target``.
+
+    ``None`` when absent (the save then leaves find-jobs.json's target as it
+    is). Never a ``DiscoveryPrefs`` field.
+    """
+
+    if "model_target" not in body or body["model_target"] is None:
+        return None
+    value = body["model_target"]
+    if not isinstance(value, str) or value not in {target.value for target in ModelTarget}:
+        errors["model_target"] = f"model_target must be one of {', '.join(target.value for target in ModelTarget)}"
+        return None
+    return value
+
+
 def _validate_setup_body(body: object) -> dict[str, object]:
     """Validate a ``PUT /api/setup`` body against the 11 S23 interview fields.
 
@@ -154,6 +177,11 @@ def _validate_setup_body(body: object) -> dict[str, object]:
     returned dict only when the body set it. It is never a prefs field:
     ``_handle_put_setup`` takes it out and hands it to ``write_setup`` as
     its own argument.
+
+    uat-bug-038: plus ``model_target`` (optional ModelTarget value), present
+    in the returned dict only when the body set it: ``write_setup`` saves it
+    as find-jobs.json's ``default_model_target`` and strips it before
+    ``DiscoveryPrefs`` is built.
     """
 
     if not isinstance(body, dict):
@@ -176,6 +204,7 @@ def _validate_setup_body(body: object) -> dict[str, object]:
         "budget_usd_per_session",
         "max_age_days",
         "profile_id",
+        "model_target",
     }
     errors: dict[str, str] = {}
     unknown = set(body) - known_keys
@@ -201,6 +230,7 @@ def _validate_setup_body(body: object) -> dict[str, object]:
     budget_usd_per_session = _setup_budget_usd_per_session(body, errors)
     max_age_days = _setup_max_age_days(body, errors)
     profile_id = _setup_profile_id(body, errors)
+    model_target = _setup_model_target(body, errors)
 
     if errors:
         raise SetupValidationError(errors)
@@ -226,6 +256,8 @@ def _validate_setup_body(body: object) -> dict[str, object]:
         fields["max_age_days"] = max_age_days
     if profile_id is not None:
         fields["profile_id"] = profile_id
+    if model_target is not None:
+        fields["model_target"] = model_target
     return fields
 
 
@@ -313,6 +345,20 @@ class SetupRoutesMixin:
         body = self._read_json_body()
         if body is None:
             return
+        # uat-bug-038: a model_target that is not a ModelTarget value is a
+        # 422 (the body is well-formed JSON, the value is unprocessable),
+        # answered before anything is saved.
+        if isinstance(body, dict):
+            target_errors: dict[str, str] = {}
+            _setup_model_target(body, target_errors)
+            if target_errors:
+                self._error_with_extra(
+                    HTTPStatus.UNPROCESSABLE_ENTITY,
+                    "invalid_value",
+                    target_errors["model_target"],
+                    {"field_errors": target_errors},
+                )
+                return
         try:
             prefs_fields = _validate_setup_body(body)
         except SetupValidationError as exc:

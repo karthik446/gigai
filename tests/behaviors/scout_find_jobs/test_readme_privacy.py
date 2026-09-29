@@ -146,3 +146,16 @@ def test_the_readme_names_claude_as_a_required_choice_and_says_where_it_sends() 
     assert "`codex_cli` (the Codex CLI sends it to OpenAI)" in privacy
     assert "`default_model_target` accepts `ollama_local`, `codex_cli`, `claude_cli`, or `openrouter_api`" in text
     assert "which ignores `--model`, so assessments run Claude Code's default model" in text
+
+
+def test_the_readme_says_tailored_resumes_are_drafts_and_states_the_evidence_exactly() -> None:
+    """uat-bug-038: the draft sentence, the evidence note (judge count and adjudication, no rounding) and the wizard's saved target."""
+
+    text = _flat(_text())
+    assert "Tailored resumes are drafts: review each line; every line shows its sources." in text
+    assert "155 and 151 lines" in text and "0.6% and 0.66% of lines" in text
+    assert "one judge-flagged plural" in text and "not a new fact" in text
+    assert "the setup wizard's \"Model for Scout\" choice is saved here when you press Finish" in text
+    changelog = _flat((Path(__file__).resolve().parents[3] / "CHANGELOG.md").read_text(encoding="utf-8"))
+    assert "Tailored resumes are drafts." in changelog and "0.6% and 0.66% of lines" in changelog
+    assert "The setup wizard saves your model choice as the default model target." in changelog

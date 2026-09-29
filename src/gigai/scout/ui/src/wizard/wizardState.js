@@ -97,7 +97,10 @@ export function initialFields({ prefs, config, selectedProfile, resumes }) {
     // The uploaded file's own bytes (base64), sent as they are on Finish.
     uploadBase64: null,
     existingRef: stored,
-    modelTarget: MODEL_TARGETS.includes(configuredTarget) ? configuredTarget : "ollama_local",
+    // uat-bug-038: the one model choice. The saved default target, else Codex
+    // (no availability check is reported to the wizard; a missing CLI shows as
+    // the extraction's own "not available on PATH" message).
+    modelTarget: MODEL_TARGETS.includes(configuredTarget) ? configuredTarget : "codex_cli",
     extraction: null,
     stack: [],
     seniority: [],
@@ -356,6 +359,8 @@ export function setupBody(fields, existingPrefs) {
     cadence_days: fields.cadenceDays,
     budget_usd_per_session: fields.budgetUsdPerSession,
     max_age_days: clampMaxAgeDays(fields.maxAgeDays),
+    // uat-bug-038: the one model choice is also the run's default target.
+    model_target: fields.modelTarget,
   };
 }
 

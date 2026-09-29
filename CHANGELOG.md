@@ -83,9 +83,19 @@ mechanics here. Those belong in the internal changelog.
   `claude` CLI on your PATH), offered as "Claude (claude CLI)" wherever a
   model target is chosen; Codex or Claude is the one model target Scout
   needs. Assessments run Claude Code's default model.
+- **Tailored resumes are drafts.** Review each line; every line shows its
+  sources. Two confirming live runs on the release candidate (155 and 151
+  lines) found no fabricated facts once one judge-flagged plural ("Kubernetes
+  platforms" for the source's "Kubernetes platform") was reviewed as a wording
+  difference, not a new fact; each run had 1 minor precision flag (0.6% and
+  0.66% of lines).
 
 #### Changed
 
+- **The setup wizard saves your model choice as the default model target.** The one
+  "Model for Scout" choice reads your resume and is also the model your runs use
+  (change it later in Settings or in a run's dialog). An existing setup keeps
+  every other saved value.
 - **Exa is off for a new setup.** A new `find-jobs.json` (the starter file or
   the first setup save) starts with Exa off, so searches use the bundled
   company list and stored boards and a model target is the only requirement.

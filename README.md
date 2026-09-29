@@ -37,7 +37,11 @@ Everything Scout writes stays under your configured GigAI home and the bound
 project's workpad. Tailored resumes (`gigai scout resume tailor`, `POST
 /api/tailored-resumes`) are stored under the gig too (`scout/<project>/resumes/`,
 ephemeral pasted-resume runs under `ephemeral/`) and contain resume-derived
-text by design. Scout is one Gig among others GigAI can host; it gets no
+text by design. Tailored resumes are drafts: review each line; every line shows its sources.
+Two confirming live runs on the release candidate (155 and 151 lines) found no fabricated facts
+once one judge-flagged plural ("Kubernetes platforms" for the source's "Kubernetes platform") was
+reviewed as a wording difference, not a new fact; 1 minor precision flag in each run (0.6% and 0.66% of lines).
+Scout is one Gig among others GigAI can host; it gets no
 special runtime treatment.
 
 ## Privacy and security
@@ -230,8 +234,10 @@ and labelled as derived. A posting whose location says nothing usable (for
 example just "United States") is kept and labelled rather than dropped.
 Without a `work_mode`, the answer saved in setup is used, else Any.
 `default_model_target` accepts `ollama_local`, `codex_cli`, `claude_cli`, or
-`openrouter_api`. A new setup starts on `ollama_local`: set `codex_cli` or
-`claude_cli` here to use Codex or Claude by default (the run dialog can also
+`openrouter_api`. A new file starts on `ollama_local`; the setup wizard's
+"Model for Scout" choice is saved here when you press Finish, and it is also
+the model that reads your resume in the wizard. You can set `codex_cli` or
+`claude_cli` here yourself (the run dialog can also
 pick the target for one run). `hiringcafe` is defined in the schema but not a live source
 in this release; leave it `false`. `countries` is a list of ISO-3166 alpha-2
 codes to filter postings by; a posting whose location resolves to a

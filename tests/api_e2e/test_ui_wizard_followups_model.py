@@ -256,7 +256,7 @@ def test_a_first_profile_is_named_and_selected(out: dict) -> None:
 
 
 def test_pasted_and_uploaded_text_is_sent_as_text(out: dict) -> None:
-    assert out["extracts"]["pasted"]["body"] == {"model_target": "ollama_local", "resume_text": PASTED}
+    assert out["extracts"]["pasted"]["body"] == {"model_target": "codex_cli", "resume_text": PASTED}
     assert out["extracts"]["uploaded"]["body"] == {"model_target": "codex_cli", "resume_text": PASTED}
 
 

@@ -98,7 +98,7 @@ function fakeApi(server) {
       return { selected_profile_id: id };
     },
     putSetup: async (body) => {
-      record("putSetup", { roles: body.roles, max_age_days: body.max_age_days });
+      record("putSetup", { roles: body.roles, max_age_days: body.max_age_days, model_target: body.model_target });
       return { prefs: body };
     },
   };
@@ -161,7 +161,20 @@ const steps = {
   edit: state.setupBody({ ...state.initialFields({ prefs: savedPrefs, config: null, selectedProfile: null, resumes: [] }), ...input.finishes.freshPaste.fields }, savedPrefs),
 };
 
+// uat-bug-038: the one model choice: preselected from the saved default
+// target, else Codex; Finish sends it as `model_target`.
+const pick = (config) => state.initialFields({ prefs: {}, config, selectedProfile: null, resumes: [] }).modelTarget;
+const modelChoice = {
+  savedClaude: pick({ config: { default_model_target: "claude_cli" } }),
+  savedOllama: pick({ config: { default_model_target: "ollama_local" } }),
+  noConfig: pick(null),
+  unknownSaved: pick({ config: { default_model_target: "nope" } }),
+  sent: state.setupBody({ ...reviewFields, modelTarget: "claude_cli" }, null).model_target,
+  labels: state.MODEL_TARGETS.map((target) => state.modelTargetLabel(target)),
+};
+
 console.log(JSON.stringify({
+  modelChoice,
   hints,
   lines,
   exports: Object.keys(state).sort(),
@@ -422,7 +435,7 @@ def test_finish_stores_the_pasted_resume_then_the_profile_with_it(out: dict) -> 
         "resume_revision_id": "revision_new",
     }
     assert first["calls"][3] == ["selectProfile", first["profileId"]]
-    assert first["calls"][4][1] == {"roles": ["Staff Engineer"], "max_age_days": 60}
+    assert first["calls"][4][1] == {"roles": ["Staff Engineer"], "max_age_days": 60, "model_target": "codex_cli"}
 
     # The wizard opened again: the selected profile is updated, none is made.
     assert _names(second) == ["storeResume", "getProfiles", "updateProfile", "putSetup"]
@@ -559,3 +572,18 @@ def test_the_preferences_still_carry_the_cadence_and_the_budget(out: dict) -> No
     # Values saved before (when the wizard still asked) are kept as they are.
     edit = out["steps"]["edit"]
     assert edit["cadence_days"] == 3 and edit["budget_usd_per_session"] == 1.25
+
+
+def test_the_one_model_choice_starts_on_the_saved_target_else_codex_and_finish_sends_it(out: dict) -> None:
+    choice = out["modelChoice"]
+    assert choice["savedClaude"] == "claude_cli" and choice["savedOllama"] == "ollama_local"
+    assert choice["noConfig"] == "codex_cli" and choice["unknownSaved"] == "codex_cli"
+    assert choice["sent"] == "claude_cli"
+    assert choice["labels"] == ["Ollama (local)", "Codex (codex CLI)", "Claude (claude CLI)", "OpenRouter (API)"]
+
+
+def test_the_wizard_has_one_model_select_labelled_model_for_scout() -> None:
+    resume = (WIZARD_SRC / "ResumeScreen.jsx").read_text(encoding="utf-8")
+    assert resume.count("<select") == resume.count('id="wz-model-target"') == 1
+    assert "Model for Scout" in resume
+    assert "Which model reads the resume?" not in resume

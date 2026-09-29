@@ -218,10 +218,10 @@ export default function ResumeScreen({
         </div>
       )}
 
-      <h3>Analysis model</h3>
+      <h3>Model</h3>
       <div className="form-group">
         <label className="form-label" htmlFor="wz-model-target">
-          Which model reads the resume?
+          Model for Scout
         </label>
         <select
           id="wz-model-target"

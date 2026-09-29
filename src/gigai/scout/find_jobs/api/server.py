@@ -1063,7 +1063,7 @@ class ScoutFindJobsBackend:
         # sends on this same PUT; it is NEVER a DiscoveryPrefs field, so it
         # is left out of the prefs dataclass here and consumed only by
         # `_update_find_jobs_config` below.
-        prefs = discovery.DiscoveryPrefs(**{key: value for key, value in prefs_fields.items() if key != "max_age_days"})
+        prefs = discovery.DiscoveryPrefs(**{key: value for key, value in prefs_fields.items() if key not in ("max_age_days", "model_target")})
         discovery.save_prefs(home_root=self.home_root, target=self._target_root(), prefs=prefs)
         self._update_find_jobs_config(prefs_fields, profile_id=profile_id)
 
@@ -1157,8 +1157,11 @@ class ScoutFindJobsBackend:
         (derived from ``work_mode``), ``countries``, and
         ``visa_sponsorship_required`` still go to the shared file; every other
         ``FindJobsConfig`` field (``published_after``, ``sources``,
-        ``default_assess_cap``, ``default_model_target``) is read from the
-        existing file and kept unchanged.
+        ``default_assess_cap``) is read from the existing file and kept
+        unchanged; ``default_model_target`` too unless the body carries
+        ``model_target`` (uat-bug-038: the wizard's Finish sends its one
+        model choice, which is then the default target; a new starter config
+        gets it as well).
 
         Q1 (v0.1.9): the publication window. ``max_age_days`` is preserved
         from the existing file on every save (a Preferences save that
@@ -1192,6 +1195,7 @@ class ScoutFindJobsBackend:
         city: str | None = prefs_fields["city"]  # type: ignore[assignment]
         countries: tuple[str, ...] = tuple(prefs_fields["countries"])  # type: ignore[arg-type]
         visa_sponsorship_required = bool(prefs_fields["visa_sponsorship_required"])
+        model_target_sent = ModelTarget(str(prefs_fields["model_target"])) if prefs_fields.get("model_target") else None
         window_sent = prefs_fields.get("max_age_days") is not None
         max_age_days_sent: int | None = prefs_fields.get("max_age_days") if window_sent else None  # type: ignore[assignment]
 
@@ -1242,7 +1246,7 @@ class ScoutFindJobsBackend:
                 # file's saved value is kept by the else branch below).
                 sources=SourceToggles(exa=False, ats=True, hiringcafe=False),
                 default_assess_cap=10,
-                default_model_target=ModelTarget.OLLAMA_LOCAL,
+                default_model_target=model_target_sent or ModelTarget.OLLAMA_LOCAL,
                 countries=countries,
                 visa_sponsorship_required=visa_sponsorship_required,
                 max_age_days=max_age_days_sent,
@@ -1258,7 +1262,7 @@ class ScoutFindJobsBackend:
                 published_after=None if window_sent else existing.published_after,
                 sources=existing.sources,
                 default_assess_cap=existing.default_assess_cap,
-                default_model_target=existing.default_model_target,
+                default_model_target=model_target_sent or existing.default_model_target,
                 countries=countries,
                 visa_sponsorship_required=visa_sponsorship_required,
                 max_age_days=max_age_days_sent if window_sent else existing.max_age_days,
