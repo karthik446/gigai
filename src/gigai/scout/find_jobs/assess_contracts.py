@@ -38,7 +38,7 @@ from .contracts import (
     _string,
     _strings,
 )
-from .jev_contracts import RankScore
+from .rank_contracts import RankScore
 
 #: ``ResolvedJob.fetch_kind`` values, in the order ``resolve_job`` tries them.
 FETCH_KINDS: tuple[str, ...] = ("pasted", "ats_single", "ats_board", "generic")
@@ -46,11 +46,9 @@ FETCH_KINDS: tuple[str, ...] = ("pasted", "ats_single", "ats_board", "generic")
 _TEXT_IDENTITY_PREFIX = "text:"
 
 #: ``AssessResponse.rank_skip_reason`` values (uat-bug-015): why a quick
-#: assessment carries no Jev score.  ``no_key``: no Jev key is configured;
-#: ``ephemeral_resume``: the resume was pasted for this call (only profile
-#: resumes are sent to Jev); ``no_title_or_company``: the job names neither,
-#: so Jev has nothing to score; ``cost_cap``: the Jev cost cap was already
-#: spent; ``error``: the Jev call failed (the assessment itself is unaffected).
+#: assessment carries no rank score.  Stored-contract enum, kept so a file
+#: written by a Jev-era build still parses; a new assessment never sets one
+#: (SCOPE-ADD-3 C2 removed the quick-assess Jev score).
 RANK_SKIP_REASONS: tuple[str, ...] = ("no_key", "ephemeral_resume", "no_title_or_company", "cost_cap", "error")
 
 #: ``AssessRequest.origin`` / ``AssessResponse.origin`` values: where the
@@ -521,7 +519,7 @@ class AssessResponse(_Contract):
     # or stored) and for a file written before this field. Omitted from JSON
     # when ``None``.
     posting_text: str | None = None
-    # uat-bug-015 (v0.1.9, additive): this posting's Jev score in the shape
+    # uat-bug-015 (v0.1.9, additive): this posting's rank score (Jev-era files only; never written now) in the shape
     # run results carry in ``rank_scores`` (``normalized_url`` is the
     # ``job_identity``), or why there is none (:data:`RANK_SKIP_REASONS`).
     # At most one of the two is set; both are ``None`` for a file written

@@ -34,17 +34,8 @@ this route too.  The prompt is the same shape ``interview_prep/
 categories.py`` uses: JSON only, a fixed schema, one retry on unparsable
 output.
 
-Why ``extractor`` is always ``"model"`` (the Jev option was considered and
-NOT built): Jev's ``POST /v1/decide`` answers only typed ``choice`` /
-``score`` / ``noul`` questions over a fixed option set the caller supplies
-up front (``orchestrator/research/S28-jev-matching/jev-api-notes.md``: no
-free-text output, no array output, at most 255 options per ``choice``).
-Extracting a tech stack or suggesting job titles is open-ended text
-generation -- the set of technologies and titles is not enumerable in
-advance, and a ``choice`` question cannot multi-select.  Only ``seniority``
-could be a single Jev ``choice``; running two extractors for one screen
-would give partial results and add a second paid dependency for one field,
-so 0.1.9 extracts everything through the configured model.  The field stays
+Why ``extractor`` is always ``"model"``: 0.1.9 extracts everything through the
+configured model (no other extractor exists). The field stays
 in the contract so the wizard can say which extractor ran.
 """
 

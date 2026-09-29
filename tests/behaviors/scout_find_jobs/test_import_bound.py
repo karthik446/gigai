@@ -53,7 +53,7 @@ from gigai.scout.find_jobs.contracts import (
     WatchlistEntry,
     WatchlistFirstSeen,
 )
-from gigai.scout.find_jobs.jev_contracts import RankScore
+from gigai.scout.find_jobs.rank_contracts import RankScore
 from gigai.scout.find_jobs.market_acquisition import BOARDS_FROM_FETCH, AcquireLimits, acquire_node
 from gigai.scout.find_jobs.progress import ProgressWriter, read_progress
 from tests.behaviors.scout_find_jobs.test_unchanged_reassess import _context, _managed_workpad

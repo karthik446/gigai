@@ -70,7 +70,7 @@ class Candidate(Protocol):
 class Score(Protocol):
     """The narrow read-only shape this module needs from a rank score.
 
-    ``jev_contracts.RankScore`` (the sealed ``AcquireOutput.rank_scores``
+    ``rank_contracts.RankScore`` (the sealed ``AcquireOutput.rank_scores``
     shape) satisfies this structurally. ``score`` is ``None`` for a row the
     pass never scored (a budget stop, a failed batch); such a row ranks with
     the rows that have no score entry at all. An optional ``mismatch_flags``

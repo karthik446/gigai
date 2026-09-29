@@ -12,7 +12,7 @@ Replaces P6's Jev pass on a daemon thread in a process-local dict. Pinned:
   rows it had scored come from the score cache (never asked again);
 * cancellable: ``{"cancel": true}`` stops the pass; the batches that landed
   are kept and the record finishes ``cancelled``;
-* a ``complete`` record answers later starts; no Jev call anywhere.
+* a ``complete`` record answers later starts; no other ranker exists.
 
 Unit-level against a real gig (``build_gig_with_resume``: a committed resume
 and a selected profile) with the parent run's committed acquire output
@@ -33,7 +33,7 @@ import pytest
 
 from gigai.canonical import digest_imported_bytes
 from gigai.journal import read_committed_artifact
-from gigai.scout.find_jobs import jev_client, jev_rank, model_rank, rank_records, rank_run
+from gigai.scout.find_jobs import model_rank, rank_records, rank_run
 from gigai.scout.find_jobs.api import rank as rank_api
 from gigai.scout.find_jobs.contracts import (
     ATSProvider,
@@ -45,7 +45,7 @@ from gigai.scout.find_jobs.contracts import (
     SourceKind,
     URLSetDiff,
 )
-from gigai.scout.find_jobs.jev_contracts import RankRequest
+from gigai.scout.find_jobs.rank_contracts import RankRequest
 from gigai.scout.find_jobs.progress import read_progress
 from tests.support.rank_fakes import RankBinding, RankPort
 from tests.support.scout_profile_fixtures import ProfileFixtureGig, build_gig_with_resume, default_find_jobs_config
@@ -56,14 +56,8 @@ RUN_ID = "run_1"
 @pytest.fixture
 def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[ProfileFixtureGig]:
     gig = build_gig_with_resume(tmp_path)
-    monkeypatch.setenv(jev_client.JEV_API_KEY_ENV_VAR, "jv_test_key_never_used")
-
-    def refuse(*_args, **_kwargs):
-        raise AssertionError("/rank asked Jev")
-
-    monkeypatch.setattr(jev_client.JevClient, "__init__", refuse)
-    monkeypatch.setattr(jev_rank, "rank_postings_report", refuse)
-    monkeypatch.setattr(rank_api, "_jev_http_client", refuse)
+    # A stale Jev key in the environment is unknown and unused: /rank runs on the run's own model.
+    monkeypatch.setenv("JEV_API_KEY", "jv_test_key_never_used")
     yield gig
     rank_api.wait_for_rank(timeout=30)
 

@@ -115,15 +115,6 @@ def fx(tmp_path: Path) -> ProfileFixtureGig:
     return build_gig_with_resume(tmp_path, resume_text=_RESUME)
 
 
-@pytest.fixture(autouse=True)
-def _no_ambient_jev_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """uat-bug-015: an exported ``JEV_API_KEY`` must never turn these tests
-    into live Jev calls; the one Jev test below installs a fake and its own key."""
-
-    monkeypatch.delenv("JEV_API_KEY", raising=False)
-    monkeypatch.delenv("GIGAI_JEV_COST_CAP_USD", raising=False)
-
-
 @pytest.fixture
 def ollama_config(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
     config = _config_with_ollama(fx.home_root)
@@ -219,76 +210,35 @@ def test_post_assess_then_get_assessments(running_server, ollama_config, monkeyp
     _assert_error(client.get("/api/assessments", params={"profile_id": "../../etc"}), status=422, code="invalid_value")
 
 
-def test_url_posting_text_and_jev_score_are_served_and_listed(running_server, ollama_config, monkeypatch: pytest.MonkeyPatch) -> None:
-    """uat-bug-014 + uat-bug-015 over HTTP: a public posting assessed by URL
-    carries its fetched text and (a key exists) one Jev score, on the POST
-    response and on ``GET /api/assessments`` -- the job page's data."""
+def test_url_posting_text_is_served_and_listed_and_no_rank_score_is_written(running_server, ollama_config, monkeypatch: pytest.MonkeyPatch) -> None:
+    """uat-bug-014 over HTTP: a public posting assessed by URL carries its
+    fetched text, on the POST response and on ``GET /api/assessments`` -- the
+    job page's data. SCOPE-ADD-3 C2: a quick assessment carries no rank score
+    and no skip reason, even with a (now unknown) ``JEV_API_KEY`` in the
+    environment; nothing else is called."""
 
-    from gigai import secrets_store
-    from gigai.scout.find_jobs import market_acquisition
-
-    client, fx, _port = running_server
+    client, _fx, _port = running_server
     _install_model(monkeypatch, [_MATCH])
     monkeypatch.setenv("GIGAI_SCOUT_FIND_JOBS_TEST_HTTP", "1")
-    secrets_store.set("JEV_API_KEY", "fixture-jev-key", home_root=fx.home_root)
-    jev_calls: list[dict] = []
-
-    def jev_handler(request: httpx.Request) -> httpx.Response:
-        jev_calls.append(json.loads(request.content))
-        return httpx.Response(
-            200,
-            json={
-                "answers": {"fit": {"choice": "maybe"}, "score": {"score": 5}, "top_reason": {"choice": "title_match"}},
-                "usage": {"cost_usd": 0.0005},
-            },
-            request=request,
-        )
-
-    monkeypatch.setattr(
-        market_acquisition, "_jev_http_client", lambda: httpx.Client(transport=httpx.MockTransport(jev_handler))
-    )
+    monkeypatch.setenv("JEV_API_KEY", "fixture-key-never-read")
 
     response = client.post("/api/assess", json={"job": {"job_url": "https://boards.greenhouse.io/acme/jobs/101"}})
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["job"]["fetch_kind"] == "ats_single" and "text" not in body["job"]
     assert body["posting_text"] == "Build reliable Python services."
-    assert body["rank_score"] == {
-        "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
-        "content_sha256": body["job"]["text_sha256"],
-        "fit": "maybe",
-        "score": 56,
-        "reasons": ["title_match"],
-        "mismatch_flags": [],
-        "hidden_by_default": False,
-        "cost_usd": "0.000500",
-        "cached": False,
-    }
-    assert "rank_skip_reason" not in body
-    assert len(jev_calls) == 1 and "Fixture Resume" not in response.text
+    assert body["result"]["verdict"] == "matched_above_threshold"
+    assert "rank_score" not in body and "rank_skip_reason" not in body
+    assert "Fixture Resume" not in response.text
 
     listed = client.get("/api/assessments").json()["items"]
     assert len(listed) == 1
-    assert listed[0]["posting_text"] == body["posting_text"] and listed[0]["rank_score"] == body["rank_score"]
+    assert listed[0]["posting_text"] == body["posting_text"]
     # uat-bug-018: the list adds the derived ``job_state`` to the served
     # item; the stored file never carries it.
     job_state = listed[0].pop("job_state")
     assert job_state == {"state": "matched", "since": body["created_at"], "next_events": ["applied"]}
     assert listed[0] == json.loads(Path(body["stored_path"]).read_text(encoding="utf-8"))
-
-
-def test_without_a_jev_key_the_response_has_no_score_and_says_why(running_server, ollama_config, monkeypatch: pytest.MonkeyPatch) -> None:
-    client, _fx, _port = running_server
-    _install_model(monkeypatch, [_MATCH])
-    monkeypatch.setenv("GIGAI_SCOUT_FIND_JOBS_TEST_HTTP", "1")
-
-    response = client.post("/api/assess", json={"job": {"job_url": "https://boards.greenhouse.io/acme/jobs/101"}})
-
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["result"]["verdict"] == "matched_above_threshold"
-    assert "rank_score" not in body and body["rank_skip_reason"] == "no_key"
-    assert body["posting_text"] == "Build reliable Python services."
 
 
 def test_the_origin_the_caller_sends_is_stored_served_and_kept(running_server, ollama_config, monkeypatch: pytest.MonkeyPatch) -> None:

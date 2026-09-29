@@ -24,7 +24,6 @@ import time
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qsl, urlsplit
 
-import httpx
 
 from ...canonical import canonical_json_bytes, digest_imported_bytes
 from ..acquisition_records import (
@@ -85,7 +84,7 @@ if IMPORT_ROW_CAP > MAX_PUBLIC_IMPORT_ROWS:  # pragma: no cover - a constant mis
 
 # Q2 (acquire at scale): the knobs for the ATS board fetch pass. Env vars so
 # an operator can tune a run without a config-contract change (the same
-# precedent as ``GIGAI_JEV_COST_CAP_USD``); ``AcquireLimits`` is also an
+# precedent as the ``GIGAI_SCOUT_*`` knobs); ``AcquireLimits`` is also an
 # explicit ``acquire_node`` keyword for tests and callers.
 ATS_CONCURRENCY_ENV = "GIGAI_SCOUT_ATS_CONCURRENCY"
 ATS_MIN_INTERVAL_ENV = "GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS"
@@ -1150,16 +1149,6 @@ def _rank_logger() -> logging.Logger:
     return logging.getLogger("gigai.scout.server")
 
 
-def _jev_http_client() -> httpx.Client:
-    """Kept for ``bindings.py``'s ``GIGAI_SCOUT_FIND_JOBS_TEST_JEV`` seam only.
-
-    SCOPE-ADD-3 C1: the run path never calls Jev (the model ranker below
-    replaced the Jev pre-rank); C2 deletes this with the rest of Jev.
-    """
-
-    return httpx.Client(timeout=30.0)
-
-
 def _title_tier(row: PostingRow, roles: Sequence[str]) -> int:
     title = normalize_title(row.title or "")
     wanted = [normalize_title(str(role)) for role in roles if str(role).strip()]
@@ -1257,8 +1246,7 @@ def _rank_candidates(
 ) -> tuple:
     """SCOPE-ADD-3 C1: the run's ranking step. One ``RankScore`` per row of ``rows``, or ``()``.
 
-    Replaces the P6 Jev pre-rank at the same seam (between the acquire rows
-    and selection): the run's own ``model_target`` (the operator's local
+    Runs at the seam between the acquire rows and selection: the run's own ``model_target`` (the operator's local
     CLI, ``codex_cli`` by default) ranks EVERY row that passed the filters.
     Never raises. Fails open: a skipped or failed pass returns ``()`` (or
     unscored entries), which leaves the import cap and the selection in
@@ -1888,7 +1876,7 @@ def _acquire_node_body(
     # progress/rank.jsonl and sealing outputs/rank.json. Fails open by design
     # (no resume, target unavailable, call cap) -- `_rank_candidates` never
     # raises; an empty or unscored `rank_scores` leaves every ranking below
-    # in today's date order, and assess runs regardless. No Jev call.
+    # in today's date order, and assess runs regardless.
     # `rank_scores` is sealed onto `AcquireOutput` below so assess's own twin
     # recompute (`proposal_execution.py`) reuses the SAME scores rather than
     # re-ranking -- the two selections can never disagree.
@@ -1915,11 +1903,11 @@ def _acquire_node_body(
     # it is NEW again the next time it is seen.
     #
     # Rotation (orchestrator decision 2026-09-27): where the score does not
-    # separate two rows (the same score, or no Jev scores at all), the row
+    # separate two rows (the same score, or no scores at all), the row
     # no earlier run imported goes first, then the newest. "Imported before"
     # is `previous`: the rows of this target's earlier sealed batches, which
     # is exactly what an import recorded (the company index knows what a
-    # sources update saw, not what a run imported). So without Jev, runs
+    # sources update saw, not what a run imported). So without scores, runs
     # over more rows than the cap take different slices until every row has
     # had its turn.
     not_imported_count = max(0, len(rows) - IMPORT_ROW_CAP)
@@ -1954,7 +1942,7 @@ def _acquire_node_body(
     # uat-bug-010 (UAT N13): the scores are passed in. Sorting `candidates`
     # by score before this call did nothing, because every step inside
     # re-sorts by date; the assess cap went to the newest postings, not the
-    # best Jev fits. `candidates` stays in `rows` order, the order assess's
+    # best-ranked rows. `candidates` stays in `rows` order, the order assess's
     # recompute reads the sealed rows back in.
     selection = select_for_assessment(candidates, cap=input.selection_cap, rank_scores=rank_scores)
     # `select_for_assessment` returns the same `PostingRow` objects it was

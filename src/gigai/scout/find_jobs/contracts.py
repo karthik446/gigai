@@ -37,9 +37,9 @@ if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
 
     import httpx
 
-    # P6: type-only, to avoid a real import cycle with jev_contracts.py
+    # P6: type-only, to avoid a real import cycle with rank_contracts.py
     # (which imports from this module); see AcquireOutput.rank_scores.
-    from .jev_contracts import RankScore
+    from .rank_contracts import RankScore
 
 
 class FindJobsContractError(ValueError):
@@ -1291,11 +1291,12 @@ class AcquireOutput(_Contract):
     # was found, plus that earlier result. `()` default keeps an old
     # serialized acquire output (pre-uat-bug-009) parsing unchanged.
     carried_forward_assessments: tuple[CarriedForwardAssessment, ...] = ()
-    # P6: additive/optional -- one Jev pre-rank score per candidate row, in
-    # the order the ranking call scored them; `()` for a run with no Jev key
-    # (fail open) or one sealed before P6 shipped. `RankScore` lives in
-    # ``jev_contracts.py`` (plan's shared-DTO rule); imported lazily here so
-    # this module -- imported by ``jev_contracts.py`` itself -- never forms
+    # P6: additive/optional -- one rank score per candidate row, in
+    # the order the ranking pass scored them (SCOPE-ADD-3 C1: the model
+    # ranker; a P6-era run holds Jev-scored ones, same shape); `()` for a
+    # fail-open run or one sealed before P6 shipped. `RankScore` lives in
+    # ``rank_contracts.py`` (plan's shared-DTO rule); imported lazily here so
+    # this module -- imported by ``rank_contracts.py`` itself -- never forms
     # an import cycle.
     rank_scores: tuple["RankScore", ...] = ()
     # uat-bug-011: additive/optional -- how many postings matched every
@@ -1354,7 +1355,7 @@ class AcquireOutput(_Contract):
         if "rank_scores" in value:
             if type(value["rank_scores"]) is not list:
                 _fail("wrong_type", "acquire_output.rank_scores must be an array")
-            from .jev_contracts import RankScore
+            from .rank_contracts import RankScore
 
             rank_scores = tuple(RankScore.from_json(item) for item in value["rank_scores"])
         not_imported_count = 0

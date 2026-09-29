@@ -1,6 +1,6 @@
 """P7 (v0.1.9): the eval harness runs end to end through the shipped path with the fake model.
 
-Integration lane (temp home, the ``bindings.py`` model/Jev seams): every call
+Integration lane (temp home, the ``bindings.py`` model seam): every call
 goes through ``proposal_execution.resolve_model_adapter`` (patched by
 ``bindings._patch_test_model_transport`` onto ``bindings._test_model_handler``)
 and ``assessment_core.assess_once`` with the packaged ``assess.md`` -- no live
@@ -20,7 +20,7 @@ from gigai.scout.assessment_core import INSTRUCTIONS_DIGEST
 
 from tests.evals import run_assess_eval as harness
 
-_SEAMS = ("GIGAI_SCOUT_FIND_JOBS_TEST_MODEL", "GIGAI_SCOUT_FIND_JOBS_TEST_JEV")
+_SEAMS = ("GIGAI_SCOUT_FIND_JOBS_TEST_MODEL",)
 
 
 @pytest.fixture(autouse=True)
@@ -73,7 +73,6 @@ def test_fake_model_run_goes_end_to_end_through_the_shipped_path(tmp_path: Path)
     assert metrics["reliability"]["invalid_after_retry"] == 0 and metrics["reliability"]["invalid_after_retry_bar_met"] is True
     assert metrics["reliability"]["model_cost_usd"] == "unavailable"
     assert metrics["question_recall"]["hit_normalized"] == 0 and metrics["question_recall"]["recall_normalized"] is None
-    assert metrics["jev"] is None
     # The seam env vars were restored after the run.
     assert all(name not in os.environ for name in _SEAMS)
 
@@ -181,26 +180,6 @@ def test_a_not_a_match_answer_reaches_the_report_with_its_questions_dropped(monk
         "dropped_questions": 2, "dropped_question_ids": ["cloud:aws", "years:ml"],
     }]
     assert metrics["false_asks"]["counted_on"].startswith("kept questions only")
-
-
-def test_fake_jev_prefilter_ranks_every_fixture_posting_per_resume(tmp_path: Path) -> None:
-    report = _run(tmp_path, "--clean-fit-only", "--max-calls", "2", "--with-jev", "--fake-jev")
-    jev = report["metrics"]["jev"]
-    assert jev["top_n"] == harness.DEFAULT_TOP_N and jev["postings_ranked"] == 15
-    # The first two planned clean fits are the US ones: the Poland clean fit is excluded (US-only, 2026-09-25).
-    assert set(jev["per_resume"]) == {"cf-senior-analytics-engineer-us", "cf-analytics-intern-sf"}
-    for entry in jev["per_resume"].values():
-        assert len(entry["ranking"]) == 15
-        assert all(item["fit"] == "strong" and item["score"] == 89 for item in entry["ranking"])
-        assert entry["cost_usd"] == pytest.approx(0.0075)
-    # Every fake score ties at 89, so the top-N follows fixture order and the intern posting
-    # (12th) sits outside it: check the pre-filter bookkeeping, not the tie order.
-    checks = [check for entry in jev["per_resume"].values() for check in entry["labels"] if check["must_keep"]]
-    assert jev["must_keep"] == len(checks) == 2
-    assert all(check["in_top_n"] == (check["rank"] <= harness.DEFAULT_TOP_N) for check in checks)
-    assert jev["kept"] == sum(check["in_top_n"] for check in checks) == 1 and jev["prefilter_rate"] == 0.5
-    assert report["metrics"]["reliability"]["jev_cost_usd"] == pytest.approx(0.015)
-    assert report["run"]["fake_jev"] is True
 
 
 def test_dry_run_plans_rows_without_any_call(capsys: pytest.CaptureFixture[str]) -> None:

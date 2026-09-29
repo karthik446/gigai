@@ -33,7 +33,7 @@ from gigai.scout.find_jobs.contracts import (
     SourceKind,
     SourceToggles,
 )
-from gigai.scout.find_jobs.jev_contracts import RankScore
+from gigai.scout.find_jobs.rank_contracts import RankScore
 from gigai.scout.find_jobs.market_acquisition import IMPORT_ROW_CAP, acquire_node
 from gigai.scout.find_jobs.selection import rank_rows, select_for_assessment
 from tests.behaviors.scout_find_jobs.test_unchanged_reassess import _context, _managed_workpad

@@ -33,7 +33,7 @@ record is never reopened (its ``outputs/rank.json`` has one publisher): a
 (cache-first, so only the rows without a score cost a call).
 
 The reads use the newest finished record with a score for the run
-(:func:`newest_finished`). No Jev anywhere.
+(:func:`newest_finished`).
 """
 
 from __future__ import annotations

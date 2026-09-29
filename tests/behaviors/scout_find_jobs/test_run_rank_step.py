@@ -33,7 +33,7 @@ import threading
 import pytest
 
 from gigai.journal import read_committed_artifact
-from gigai.scout.find_jobs import jev_client, jev_rank, market_acquisition, rank_run
+from gigai.scout.find_jobs import market_acquisition, rank_run
 from gigai.scout.find_jobs.ats_board_clients import ATSBoardClients
 from gigai.scout.find_jobs.contracts import (
     AcquireInput,
@@ -94,14 +94,8 @@ class _Watchlist:
 @pytest.fixture
 def substrate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     fixture, target = _assess_fixture(tmp_path)
-    monkeypatch.setenv(jev_client.JEV_API_KEY_ENV_VAR, "jv_test_key_never_used")
-
-    def refuse(*_args, **_kwargs):
-        raise AssertionError("the run path asked Jev")
-
-    monkeypatch.setattr(jev_client.JevClient, "__init__", refuse)
-    monkeypatch.setattr(jev_rank, "rank_postings_report", refuse)
-    monkeypatch.setattr(market_acquisition, "_jev_http_client", refuse)
+    # A stale Jev key in the environment is unknown and unused by the run path.
+    monkeypatch.setenv("JEV_API_KEY", "jv_test_key_never_used")
     return {**fixture, "target": target}
 
 

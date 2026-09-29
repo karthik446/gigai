@@ -16,7 +16,7 @@ and a re-rank record (``rank_records``) wrap around it:
   batch's scores as soon as it lands. It also polls a cancel file, which is
   how a re-rank started in one process is cancelled from another.
 * :func:`to_rank_scores`: the result in the sealed ``AcquireOutput.rank_scores``
-  shape (``jev_contracts.RankScore``; no schema change): ``mismatch_flags``
+  shape (``rank_contracts.RankScore``; no schema change): ``mismatch_flags``
   carries the blockers (``selection`` demotes on it), ``hidden_by_default``
   is always false (blockers demote, never hide), ``cost_usd`` ``"0"``.
 * :func:`seal_rank_json`: ``RankResult.to_json()`` committed to the workpad
@@ -27,7 +27,7 @@ and a re-rank record (``rank_records``) wrap around it:
   refused commit is logged and the run goes on; the scores are still sealed
   in ``AcquireOutput.rank_scores`` and streamed in ``progress/rank.jsonl``.
 
-No Jev anywhere: the local CLI (the run's ``model_target``) is the only ranker.
+The local CLI (the run's ``model_target``) is the only ranker.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ from .model_rank import (
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
     from .contracts import FindJobsConfig, PostingRow
-    from .jev_contracts import RankScore
+    from .rank_contracts import RankScore
     from .progress import ProgressWriter
 
 # The most calls one pass may make: ~6,000 postings at batch 50 with retries.
@@ -117,7 +117,7 @@ def fit_for(score: int | None) -> str | None:
 def to_rank_scores(result: RankResult, rows: Sequence["PostingRow"]) -> tuple["RankScore", ...]:
     """One ``RankScore`` per row of ``rows`` (in ``rows`` order), unscored where the pass had none."""
 
-    from .jev_contracts import RankScore
+    from .rank_contracts import RankScore
 
     by_url = result.by_url()
     scores = []
@@ -138,6 +138,37 @@ def to_rank_scores(result: RankResult, rows: Sequence["PostingRow"]) -> tuple["R
     return tuple(scores)
 
 
+def read_sealed_rank(root: Path, run_id: str) -> RankResult | None:
+    """The run's sealed ``runs/<run_id>/outputs/rank.json`` as a ``RankResult``, or ``None``.
+
+    ``None`` for a run with no such file (sealed before the model ranker, a
+    fail-open pass that scored nothing, a refused commit) or an unreadable
+    one. Never raises: an ordering enrichment must not fail its caller.
+    """
+
+    try:
+        value = json.loads((Path(root) / "runs" / run_id / "outputs" / RANK_OUTPUT_NAME).read_text(encoding="utf-8"))
+        return RankResult.from_json(value) if isinstance(value, Mapping) else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def sealed_rank_scores(root: Path, run_id: str, rows: Sequence["PostingRow"]) -> tuple["RankScore", ...]:
+    """The scores acquire's selection used, read back from the sealed ``rank.json``.
+
+    The twin recompute in assess (``proposal_execution``) ranks its eligible
+    set by these, so it picks exactly what acquire picked. Same conversion
+    acquire applies to the in-memory result (:func:`to_rank_scores`); ``()``
+    (date order) when there is no usable sealed pass, as acquire's own
+    fail-open does.
+    """
+
+    result = read_sealed_rank(root, run_id)
+    if result is None or result.status == "skipped":
+        return ()
+    return to_rank_scores(result, rows)
+
+
 def posting_line(item: Any) -> dict[str, object]:
     """One posting's rank, as a ``rank.jsonl`` batch line and the reads carry it."""
 
@@ -155,7 +186,7 @@ def status_json(result: RankResult | None, *, total: int, reason: str | None = N
     """``progress/rank.json``: what the pass did, in the ``rank_status`` shape ``GET /progress`` already serves.
 
     ``status`` is ``scored`` (the pass ran; ``scored`` of ``total`` got a
-    score) or ``skipped`` (no model call was possible). The Jev-only keys
+    score) or ``skipped`` (no model call was possible). The cost/budget keys
     (``cost_*``, ``throttled``, ``*_budget_usd``, ``usage_line``) are kept,
     empty, so a reader of the old shape keeps working until the UI moves on.
     """
@@ -370,6 +401,8 @@ __all__ = [
     "fit_for",
     "json_bytes",
     "posting_line",
+    "read_sealed_rank",
+    "sealed_rank_scores",
     "rank_json_bytes",
     "rank_prefs",
     "run_call_cap",

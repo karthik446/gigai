@@ -308,21 +308,21 @@ def test_the_key_state_is_booleans_from_the_environment_and_the_home(
     assert nothing.status_code == 200, nothing.text
     assert nothing.json() == {
         "schema_version": "scout-secrets-status:1",
-        "keys": {"exa": False, "jev": False, "openai": False, "openrouter": False},
+        "keys": {"exa": False, "openai": False, "openrouter": False},
     }
 
     monkeypatch.setenv("EXA_API_KEY", "exa-environment-secret")
+    # A JEV_API_KEY left in the store is no longer a known service: it is not reported.
     secrets_store.set("JEV_API_KEY", "jev-stored-secret", home_root=fx.home_root)
     secrets_store.set("OPENROUTER_API_KEY", "   ", home_root=fx.home_root)  # blank is not set
     some = client.get("/api/secrets/status")
-    assert some.json()["keys"] == {"exa": True, "jev": True, "openai": False, "openrouter": False}
+    assert some.json()["keys"] == {"exa": True, "openai": False, "openrouter": False}
     assert "secret" not in some.text.replace("scout-secrets-status", "")
 
     monkeypatch.setenv("EXA_API_KEY", "  ")
     secrets_store.remove("JEV_API_KEY", home_root=fx.home_root)
     assert client.get("/api/secrets/status").json()["keys"] == {
         "exa": False,
-        "jev": False,
         "openai": False,
         "openrouter": False,
     }
@@ -337,4 +337,4 @@ def test_without_a_home_only_the_environment_counts(monkeypatch: pytest.MonkeyPa
         monkeypatch.delenv(env_var, raising=False)
     monkeypatch.setenv("JEV_API_KEY", "jev-environment-secret")
 
-    assert secrets_status.keys_set(None) == {"exa": False, "jev": True, "openai": False, "openrouter": False}
+    assert secrets_status.keys_set(None) == {"exa": False, "openai": False, "openrouter": False}

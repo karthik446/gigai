@@ -121,7 +121,7 @@ def unbound(monkeypatch: pytest.MonkeyPatch):
     # Restores the worker entry the launch hook replaces.
     monkeypatch.setattr(run, "_worker_entry", run._worker_entry)
     monkeypatch.delenv(bindings._HOME_ROOT_ENV, raising=False)
-    for name in (bindings._TEST_HTTP_ENV, bindings._TEST_MODEL_ENV, bindings._TEST_JEV_ENV, "JEV_API_KEY", "EXA_API_KEY"):
+    for name in (bindings._TEST_HTTP_ENV, bindings._TEST_MODEL_ENV, "EXA_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     try:
         yield

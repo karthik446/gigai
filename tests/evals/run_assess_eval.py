@@ -21,8 +21,7 @@ Modes
   ``../orchestrator/research/evals/<date>.json``.  Never writes under the home.
 - FAKE (``--fake-model``): a temp home with the ``ollama_local`` fixture target
   and the ``GIGAI_SCOUT_FIND_JOBS_TEST_MODEL=1`` seam (``bindings._test_model_handler``),
-  so the whole harness runs end to end offline.  ``--with-jev --fake-jev`` does
-  the same for Jev through ``bindings._test_jev_handler``.
+  so the whole harness runs end to end offline.
 
 Metrics (``metrics`` in the report; see ``summarize``): verdict agreement,
 clean-fit match rate (every failure listed with the model's questions),
@@ -32,12 +31,10 @@ asks (clean-fit rows: every question is one by construction; other rows: a
 token heuristic lists *possible* false asks for review; every false-ask figure
 counts the questions the product KEEPS -- ``dropped_questions`` per row and in
 the summary is what ``assessment_core`` stripped off a ``not_a_match`` answer,
-assess-prompt-v3-r1), Jev as a pre-filter
-(``--with-jev``: does every matched/pending-labelled posting land in the
-resume's top-N), cross-profile discrimination (same posting, two resumes) and
+assess-prompt-v3-r1), cross-profile discrimination (same posting, two resumes) and
 reliability (valid-output rate, invalid-after-retry rate with its < 5% release
 bar, retries, latency, tokens; model cost is ``unavailable`` because the
-adapters report no cost, Jev cost is real).
+adapters report no cost).
 
 Excluded rows (``excluded=true`` in ``labels.csv``; the operator's label
 policy of 2026-09-25, rule E: Canadian/province rows are dropped from 0.1.9
@@ -70,7 +67,6 @@ from gigai.scout.question_ids import normalize_question_id
 
 if TYPE_CHECKING:  # pragma: no cover - the product imports stay lazy so `--dry-run`/the offline test import nothing heavy
     from gigai.config import GigAIConfig
-    from gigai.scout.find_jobs.contracts import PostingRow
 
 EVAL_DIR = Path(__file__).resolve().parent
 FIXTURES_DIR = EVAL_DIR / "fixtures"
@@ -82,7 +78,6 @@ REPO_ROOT = EVAL_DIR.parents[1]
 DEFAULT_REPORT_DIR = REPO_ROOT.parent / "orchestrator" / "research" / "evals"
 
 DEFAULT_MAX_CALLS = 20
-DEFAULT_TOP_N = 10  # FindJobsConfig.default_assess_cap: what a real run would assess
 DEFAULT_MODEL_TARGET = os.environ.get("GIGAI_ASSESS_EVAL_MODEL_TARGET", "codex_cli")
 INVALID_AFTER_RETRY_BAR = 0.05
 
@@ -451,7 +446,7 @@ def _latency(values: Sequence[float]) -> dict[str, float | None]:
     }
 
 
-def summarize(rows: Sequence[Mapping[str, Any]], *, planned: int, max_calls: int, jev: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def summarize(rows: Sequence[Mapping[str, Any]], *, planned: int, max_calls: int) -> dict[str, Any]:
     """Every metric the plan lists, from the stored rows alone (re-runnable on a report)."""
 
     rows = [row for row in rows if not row.get("excluded")]  # rule E: an excluded row enters no metric
@@ -622,141 +617,7 @@ def summarize(rows: Sequence[Mapping[str, Any]], *, planned: int, max_calls: int
             "latency_seconds": _latency([float(row["elapsed_seconds"]) for row in rows]),
             "tokens": tokens,
             "model_cost_usd": "unavailable",
-            "jev_cost_usd": jev["total_cost_usd"] if jev else None,
         },
-        "jev": jev,
-    }
-
-
-# --- Jev pre-filter --------------------------------------------------------------------
-
-
-def _jev_http_client() -> object:
-    import httpx
-
-    from gigai.scout.find_jobs import bindings
-
-    if bindings._test_jev_enabled():
-        return httpx.Client(transport=httpx.MockTransport(bindings._test_jev_handler), timeout=30.0)
-    return httpx.Client(timeout=30.0)
-
-
-def _posting_row(posting: Posting) -> "PostingRow":
-    from gigai.canonical import digest_imported_bytes
-    from gigai.scout.find_jobs.contracts import ATSProvider, PostingRow, SourceKind
-
-    return PostingRow(
-        url=posting.url,
-        normalized_url=posting.url,
-        provider=ATSProvider.GREENHOUSE,
-        board_token=posting.company,
-        company=posting.company,
-        title=posting.title,
-        location=posting.location,
-        published_at=None,
-        content_sha256=digest_imported_bytes(posting.full_text.encode("utf-8")),
-        source_kind=SourceKind.ATS,
-        query_key="assess-eval",
-        text=posting.full_text,
-    )
-
-
-def rank_with_jev(
-    labels: Sequence[Label],
-    resumes: Mapping[str, Resume],
-    postings: Mapping[str, Posting],
-    *,
-    api_key: str,
-    cache_home: Path,
-    top_n: int,
-    cost_cap_usd: float,
-) -> dict[str, Any]:
-    """P6's ``rank_postings`` per resume over every fixture posting; the pre-filter check.
-
-    A posting labelled matched/pending for a resume must land in that resume's
-    top-N (``FindJobsConfig.default_assess_cap`` = 10 by default); a not_a_match
-    posting may land anywhere.  The cache lives under ``cache_home`` with a
-    fixed eval project id (the eval has no bound project), so a rerun is free.
-    """
-
-    from gigai.scout.find_jobs import jev_rank
-    from gigai.scout.find_jobs.jev_client import JevClient
-    from gigai.scout.find_jobs.jev_rank import RankPreferences, order_by_rank, rank_postings
-
-    rows = tuple(_posting_row(posting) for posting in postings.values())
-    by_url = {row.normalized_url: posting_id for row, posting_id in zip(rows, postings)}
-    original_project_id = jev_rank.project_id
-    jev_rank.project_id = lambda home_root, target: "assess-eval"  # type: ignore[assignment]
-    client = _jev_http_client()
-    total_cost = 0.0
-    per_resume: dict[str, Any] = {}
-    kept = 0
-    checked = 0
-    try:
-        jev = JevClient(api_key, client)  # type: ignore[arg-type]
-        for resume_id in sorted({label.resume_id for label in labels}):
-            resume = resumes[resume_id]
-            prefs = RankPreferences(target_titles=resume.titles, countries=resume.countries, visa_sponsorship_required=resume.visa_sponsorship_required)
-            scores, cost, capped = rank_postings(
-                rows,
-                client=jev,
-                resume_text=resume.text,
-                prefs=prefs,
-                profile_id=f"eval:{resume_id}",
-                resume_revision_id=None,
-                home_root=cache_home,
-                target=cache_home,
-                cost_cap_usd=cost_cap_usd,
-            )
-            total_cost += cost
-            ordered = order_by_rank(rows, scores)
-            ranking = [by_url[row.normalized_url] for row in ordered]
-            score_by_url = {score.normalized_url: score for score in scores}
-            ranked = [
-                {
-                    "rank": index + 1,
-                    "posting_id": by_url[row.normalized_url],
-                    "fit": score_by_url[row.normalized_url].fit,
-                    "score": score_by_url[row.normalized_url].score,
-                    "hidden_by_default": score_by_url[row.normalized_url].hidden_by_default,
-                    "cached": score_by_url[row.normalized_url].cached,
-                }
-                for index, row in enumerate(ordered)
-            ]
-            checks = []
-            for label in labels:
-                if label.resume_id != resume_id:
-                    continue
-                position = ranking.index(label.posting_id) + 1
-                must_keep = label.expected_verdict in CONSIDER_VERDICTS
-                in_top = position <= top_n
-                if must_keep:
-                    checked += 1
-                    kept += int(in_top)
-                checks.append(
-                    {
-                        "posting_id": label.posting_id,
-                        "expected_verdict": label.expected_verdict,
-                        "must_keep": must_keep,
-                        "rank": position,
-                        "in_top_n": in_top,
-                        "kept": in_top if must_keep else None,
-                    }
-                )
-            per_resume[resume_id] = {"cost_usd": round(cost, 6), "capped": capped, "ranking": ranked, "labels": checks}
-    finally:
-        jev_rank.project_id = original_project_id  # type: ignore[assignment]
-        close = getattr(client, "close", None)
-        if callable(close):
-            close()
-    return {
-        "top_n": top_n,
-        "postings_ranked": len(rows),
-        "must_keep": checked,
-        "kept": kept,
-        "prefilter_rate": _rate(kept, checked),
-        "total_cost_usd": round(total_cost, 6),
-        "per_resume": per_resume,
     }
 
 
@@ -857,17 +718,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--clean-fit-only", action="store_true", help="only the clean-fit rows")
     parser.add_argument("--resume", action="append", default=[], metavar="RESUME_ID", help="only rows for this resume (repeatable)")
     parser.add_argument("--posting", action="append", default=[], metavar="POSTING_ID", help="only rows for this posting (repeatable)")
-    parser.add_argument("--with-jev", action="store_true", help="also rank every fixture posting per resume with Jev (P6 jev_rank) and check the top-N pre-filter")
-    parser.add_argument("--top-n", type=int, default=DEFAULT_TOP_N, help=f"pre-filter depth for --with-jev (default {DEFAULT_TOP_N}, the default assess cap)")
-    parser.add_argument("--jev-cost-cap-usd", type=float, default=1.0, help="per-resume Jev spend cap for --with-jev (default 1.0)")
-    parser.add_argument("--jev-cache-home", type=Path, default=None, help="where the Jev rank cache lives (default <report dir>/jev_cache_home; a temp dir when fake)")
     parser.add_argument("--report", type=Path, default=None, help="report path (default ../orchestrator/research/evals/<date>.json)")
     parser.add_argument("--home", type=Path, default=None, help="GigAI home to read the config from (default $GIGAI_HOME or ~/.gigai); never written")
     parser.add_argument("--model-target", default=DEFAULT_MODEL_TARGET, help=f"sealed adapter kind to resolve through the operator's config (default {DEFAULT_MODEL_TARGET})")
     parser.add_argument("--fake-model", action="store_true", help="offline: a temp home with the ollama_local fixture target and the GIGAI_SCOUT_FIND_JOBS_TEST_MODEL seam")
-    parser.add_argument("--fake-jev", action="store_true", help="offline: the GIGAI_SCOUT_FIND_JOBS_TEST_JEV seam for --with-jev")
-    parser.add_argument("--dry-run", action="store_true", help="print the planned rows and exit without any model or Jev call")
-    parser.add_argument("--rescore", type=Path, default=None, metavar="REPORT_JSON", help="no calls: re-annotate the stored rows of this report with the current scoring code and write the re-scored report to --report (the stored jev section is kept)")
+    parser.add_argument("--dry-run", action="store_true", help="print the planned rows and exit without any model call")
+    parser.add_argument("--rescore", type=Path, default=None, metavar="REPORT_JSON", help="no calls: re-annotate the stored rows of this report with the current scoring code and write the re-scored report to --report")
     parser.add_argument("--quiet", action="store_true")
     return parser
 
@@ -898,10 +754,7 @@ def _print_summary(metrics: Mapping[str, Any], report_path: Path, *, out=sys.std
         f"reliability: valid {reliability['valid']}/{calls['made']} ({reliability['valid_output_rate']}); invalid after retry {reliability['invalid_after_retry']} ({reliability['invalid_after_retry_rate']}, bar < {reliability['invalid_after_retry_bar']} met: {reliability['invalid_after_retry_bar_met']}); retries {reliability['retries']} (recovered {reliability['recovered_on_retry']}); transport failures {reliability['transport_failures']}",
         file=out,
     )
-    print(f"latency s: {reliability['latency_seconds']}; tokens: {reliability['tokens']}; model cost: {reliability['model_cost_usd']}; jev cost usd: {reliability['jev_cost_usd']}", file=out)
-    jev = metrics.get("jev")
-    if jev:
-        print(f"jev pre-filter: kept {jev['kept']}/{jev['must_keep']} matched/pending postings in the top-{jev['top_n']} ({jev['prefilter_rate']})", file=out)
+    print(f"latency s: {reliability['latency_seconds']}; tokens: {reliability['tokens']}; model cost: {reliability['model_cost_usd']}", file=out)
     print(f"report: {report_path}", file=out)
 
 
@@ -916,7 +769,7 @@ def rescore_report(source: Mapping[str, Any], resumes: Mapping[str, Resume], *, 
 
     rows = [annotate_row(dict(row), resumes[row["resume_id"]].text) for row in source["rows"]]
     run = dict(source["run"])
-    metrics = summarize(rows, planned=int(source["metrics"]["calls"]["planned"]), max_calls=int(run["max_calls"]), jev=source["metrics"].get("jev"))
+    metrics = summarize(rows, planned=int(source["metrics"]["calls"]["planned"]), max_calls=int(run["max_calls"]))
     run["rescored_from"] = {"head": run.get("head"), "finished_at": run.get("finished_at"), "instructions_digest": run.get("instructions_digest")}
     run["rescored_at"] = now.isoformat().replace("+00:00", "Z")
     run["rescored_head"] = _git_head()
@@ -954,8 +807,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     seams: dict[str, str] = {}
     if args.fake_model:
         seams["GIGAI_SCOUT_FIND_JOBS_TEST_MODEL"] = "1"
-    if args.fake_jev:
-        seams["GIGAI_SCOUT_FIND_JOBS_TEST_JEV"] = "1"
 
     with tempfile.TemporaryDirectory(prefix="gigai-assess-eval-") as tmp, seam_env(**seams):
         tmp_root = Path(tmp)
@@ -991,20 +842,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if callable(close):
                 close()
 
-        jev_section = None
-        if args.with_jev:
-            from gigai.scout.find_jobs import jev_client
-
-            if args.fake_jev:
-                api_key = "fake-key"
-                cache_home = tmp_root / "jev_home"
-            else:
-                api_key = jev_client.require_api_key(home_root=home_root)
-                cache_home = args.jev_cache_home or (report_path.parent / "jev_cache_home")
-            called = [label for label in rows_to_call[: args.max_calls]]
-            jev_section = rank_with_jev(called, resumes, postings, api_key=api_key, cache_home=cache_home, top_n=args.top_n, cost_cap_usd=args.jev_cost_cap_usd)
-
-    metrics = summarize(results, planned=len(rows_to_call), max_calls=args.max_calls, jev=jev_section)
+    metrics = summarize(results, planned=len(rows_to_call), max_calls=args.max_calls)
     from gigai.scout.assessment_core import INSTRUCTIONS_DIGEST
 
     report = {
@@ -1015,7 +853,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             "finished_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "head": _git_head(),
             "fake_model": args.fake_model,
-            "fake_jev": args.fake_jev,
             "model_target": model_target,
             "adapter_target": getattr(getattr(getattr(binding, "current", None), "target", None), "name", None),
             "adapter_port": getattr(getattr(binding, "port", None), "name", None),

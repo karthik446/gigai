@@ -3,7 +3,7 @@
 SCOPE-ADD-3 C1: a re-rank is a durable run record of the ``rank`` kind
 (``rank_records``: ``runs/rank_<uuid>/``, journal-committed details and
 ``outputs/rank.json``, run-local progress), no longer a daemon thread in a
-process-local dict, and no longer Jev. The run's own model target (the
+process-local dict. The run's own model target (the
 local CLI, ``codex_cli`` by default) ranks the run's sealed postings
 against the given or selected profile's resume and the run's sealed
 preferences; the sealed run is never rewritten.
@@ -38,12 +38,11 @@ import json
 import logging
 from pathlib import Path
 
-import httpx
 
 from ....journal import JournalArtifactMissingError, read_committed_artifact
-from .. import jev_budget, rank_records, rank_run
+from .. import rank_records, rank_run
 from ..contracts import AcquireOutput, FindJobsContractError, FindJobsRunInput
-from ..jev_contracts import RankRequest, RankResponse, RankScore
+from ..rank_contracts import RankRequest, RankResponse, RankScore
 from ..model_rank import RankResult
 from ..selection import rank_rows
 
@@ -275,15 +274,6 @@ def wait_for_rank(*, timeout: float | None = None) -> bool:
     return rank_records.wait_for_passes(timeout=timeout)
 
 
-def _jev_http_client() -> httpx.Client:
-    """Kept for ``bindings.py``'s ``GIGAI_SCOUT_FIND_JOBS_TEST_JEV`` seam only (C2 deletes it).
-
-    SCOPE-ADD-3 C1: ``/rank`` never calls Jev.
-    """
-
-    return httpx.Client(timeout=30.0)
-
-
 class RankRoutesMixin:
     """``Handler`` mixin: ``POST /api/runs/{run_id}/rank``."""
 
@@ -321,15 +311,7 @@ class RankRoutesMixin:
         )
 
 
-class JevUsageRoutesMixin:
-    """``Handler`` mixin: ``GET /api/jev/usage`` -- today's Jev spend and the daily budget (C2 removes it)."""
-
-    def _handle_get_jev_usage(self) -> None:
-        self._write_json(HTTPStatus.OK, jev_budget.usage(self._backend.home_root))
-
-
 __all__ = [
-    "JevUsageRoutesMixin",
     "RankRoutesMixin",
     "newest_rank_result",
     "rank_request",

@@ -12,9 +12,9 @@ only while the model seam is on); (h) ``GET /api/assessments`` lists (a)+(b);
 no live network or model call.
 
 uat-bug-014/015: a posting assessed by URL carries its fetched text
-(``posting_text``; pasted text never) and, with a Jev key, one Jev score
-(``rank_score``, the fake Jev of ``test_rank_journey.py``); with no key the
-assessment is unchanged and ``rank_skip_reason`` says ``no_key``.
+(``posting_text``; pasted text never). SCOPE-ADD-3 C2: a quick assessment
+carries no rank score and no ``rank_skip_reason``, with or without a (now
+unknown) Jev key in the environment.
 """
 
 from __future__ import annotations
@@ -60,8 +60,6 @@ def test_assess_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     home, target = setup_and_init(tmp_path)
     add_resume(home, target, tmp_path)
     write_offline_find_jobs_config(target)
-    # No Jev key in this journey (the server child inherits the environment).
-    monkeypatch.delenv("JEV_API_KEY", raising=False)
     server = start_server(home, target, monkeypatch=monkeypatch)
     try:
         client = server.client
@@ -85,10 +83,9 @@ def test_assess_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         assert a["resume"]["profile_id"], "the selected profile's resume must be the default"
         assert a["preferences"]["titles"] == ["software engineer"]
         assert a["producer"]["model_target"] == "ollama_local"
-        # uat-bug-014: the fetched public posting text is served; uat-bug-015:
-        # no Jev key -> no score, and the response says why.
+        # uat-bug-014: the fetched public posting text is served; no rank score.
         assert a["posting_text"] == "Build reliable Python services."
-        assert "rank_score" not in a and a["rank_skip_reason"] == "no_key"
+        assert "rank_score" not in a and "rank_skip_reason" not in a
         # assess-origin-field: a POST that names no origin is a quick assessment.
         assert a["origin"] == "quick_assess"
         single_latency.assert_within_budget()
@@ -168,62 +165,49 @@ def test_assess_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     assert_clean_and_healthy(workpad, home)
 
 
-def test_assess_journey_with_a_jev_key_stores_text_and_jev_score(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """uat-bug-014 + uat-bug-015: the operator's flow -- a Jev key exists,
-    "+ Assess a job" with a public URL -> the job page's data
-    (``GET /api/assessments``) carries the posting text AND a Jev score in
-    the run rows' ``rank_scores`` shape.  Fake Jev
-    (``GIGAI_SCOUT_FIND_JOBS_TEST_JEV=1``); no live Jev call."""
+def test_assess_journey_with_a_stale_jev_key_stores_text_and_no_score(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """uat-bug-014: "+ Assess a job" with a public URL -> the job page's data
+    (``GET /api/assessments``) carries the posting text. A ``JEV_API_KEY`` left
+    in the environment is unknown: no score, no skip reason, no Jev call."""
 
     home, target = setup_and_init(tmp_path)
     add_resume(home, target, tmp_path)
     write_offline_find_jobs_config(target)
-    server = start_server(home, target, monkeypatch=monkeypatch, test_jev=True)
+    monkeypatch.setenv("JEV_API_KEY", "api-e2e-stale-key")
+    server = start_server(home, target, monkeypatch=monkeypatch)
     try:
         client = server.client
         url = "https://boards.greenhouse.io/acme/jobs/101"
 
         first, first_latency = timed_request(
-            "POST /api/assess (job_url, Jev key)", lambda: client.post("/api/assess", json={"job": {"job_url": url}})
+            "POST /api/assess (job_url)", lambda: client.post("/api/assess", json={"job": {"job_url": url}})
         )
         assert first.status_code == 200, first.text
         a = first.json()
         assert a["result"]["verdict"] == "pending_user_answers"
         assert a["posting_text"] == "Build reliable Python services." and "text" not in a["job"]
-        assert a["rank_score"] == {
-            "normalized_url": url,
-            "content_sha256": a["job"]["text_sha256"],
-            "fit": "strong",
-            "score": 89,
-            "reasons": ["stack_match"],
-            "mismatch_flags": [],
-            "hidden_by_default": False,
-            "cost_usd": "0.000500",
-            "cached": False,
-        }
-        assert "rank_skip_reason" not in a
+        assert "rank_score" not in a and "rank_skip_reason" not in a
         first_latency.assert_within_budget()
 
-        # The job page reads the stored result: text + score are both there.
+        # The job page reads the stored result: the text is there.
         items = client.get("/api/assessments").json()["items"]
         assert len(items) == 1
         assert items[0]["job"]["job_identity"] == url
-        assert items[0]["posting_text"] == a["posting_text"] and items[0]["rank_score"] == a["rank_score"]
+        assert items[0]["posting_text"] == a["posting_text"] and "rank_score" not in items[0]
 
-        # Re-assess: the Jev cache answers (no second spend), history appends.
+        # Re-assess: history appends.
         again = client.post("/api/assess", json={"job": {"job_url": url}})
         assert again.status_code == 200, again.text
-        assert again.json()["rank_score"]["cached"] is True
-        assert again.json()["rank_score"]["score"] == 89
+        assert "rank_score" not in again.json()
         assert [entry["trigger"] for entry in again.json()["history"]] == ["assess", "reassess"]
 
-        # A pasted resume is never sent to Jev; pasted job text is never stored.
+        # Pasted job text is never stored.
         pasted = client.post(
             "/api/assess",
             json={"job": {"job_text": _POSTING, "title": "Software Engineer"}, "resume": {"resume_text": "Pasted resume: Python services."}},
         )
         assert pasted.status_code == 200, pasted.text
-        assert "rank_score" not in pasted.json() and pasted.json()["rank_skip_reason"] == "ephemeral_resume"
+        assert "rank_score" not in pasted.json() and "rank_skip_reason" not in pasted.json()
         assert "posting_text" not in pasted.json() and _POSTING not in pasted.text
 
         workpad = resolve_workpad_path(home, target)

@@ -409,7 +409,6 @@ def test_the_server_entry_defaults_to_home_scout_from_any_cwd(
 
     monkeypatch.delenv("GIGAI_SCOUT_FIND_JOBS_TEST_HTTP", raising=False)
     monkeypatch.delenv("GIGAI_SCOUT_FIND_JOBS_TEST_MODEL", raising=False)
-    monkeypatch.delenv("GIGAI_SCOUT_FIND_JOBS_TEST_JEV", raising=False)
     backends: list[object] = []
     monkeypatch.setattr(
         present_api, "_run_forever", lambda bind, *, backend=None: backends.append(backend)

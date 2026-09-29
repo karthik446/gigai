@@ -223,6 +223,7 @@ def _assert_set_up(
 
 def test_a_pasted_resume_becomes_the_profiles_pinned_resume(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("JEV_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     home, target = setup_and_init(tmp_path)
     server = start_server(home, target, monkeypatch=monkeypatch)
@@ -272,20 +273,23 @@ def test_a_pasted_resume_becomes_the_profiles_pinned_resume(tmp_path: Path, monk
         keys_body = keys.json()
         assert set(keys_body) == {"schema_version", "keys"}
         assert keys_body["schema_version"] == "scout-secrets-status:1"
-        assert set(keys_body["keys"]) == {"exa", "jev", "openai", "openrouter"}
+        assert set(keys_body["keys"]) == {"exa", "openai", "openrouter"}
         assert all(isinstance(value, bool) for value in keys_body["keys"].values())
-        # The harness exports an Exa key; Jev and OpenRouter have none.
+        # The harness exports an Exa key; OpenAI and OpenRouter have none. Jev is not a known service.
         assert keys_body["keys"]["exa"] is True
-        assert keys_body["keys"]["jev"] is False and keys_body["keys"]["openrouter"] is False
+        assert keys_body["keys"]["openai"] is False and keys_body["keys"]["openrouter"] is False
         keys_latency.assert_within_budget()
-        secrets_store.set("JEV_API_KEY", "jev-journey-secret-value", home_root=home)
+        secrets_store.set("OPENAI_API_KEY", "openai-journey-secret-value", home_root=home)
+        secrets_store.set("JEV_API_KEY", "jev-left-behind-value", home_root=home)  # unknown now: never reported
         try:
             after_add = client.get("/api/secrets/status")
         finally:
+            secrets_store.remove("OPENAI_API_KEY", home_root=home)
             secrets_store.remove("JEV_API_KEY", home_root=home)
-        assert after_add.json()["keys"]["jev"] is True
-        assert "jev-journey-secret-value" not in after_add.text and "api-e2e-test-key" not in after_add.text
-        assert client.get("/api/secrets/status").json()["keys"]["jev"] is False
+        assert after_add.json()["keys"] == {"exa": True, "openai": True, "openrouter": False}
+        assert "openai-journey-secret-value" not in after_add.text and "api-e2e-test-key" not in after_add.text
+        assert "jev-left-behind-value" not in after_add.text
+        assert client.get("/api/secrets/status").json()["keys"]["openai"] is False
 
         workpad = resolve_workpad_path(home, target)
     finally:

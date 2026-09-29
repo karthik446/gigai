@@ -256,6 +256,7 @@ def _assess_node_body(
     from .find_jobs.contracts import PinnedResume
     from .find_jobs.filters import exclusion_reason
     from .find_jobs.market_acquisition import _default_profile_id, _prior_assessments, _role_match
+    from .find_jobs import rank_run
     from .find_jobs.selection import select_for_assessment
     from ..workpad import resolve_workpad
 
@@ -365,15 +366,16 @@ def _assess_node_body(
         # overrides the sealed selection authority above -- only the
         # provisional OVER_CAP labels just added are refined.
         #
-        # P6 / uat-bug-010: acquire passes the SEALED
-        # `AcquireOutput.rank_scores` into `select_for_assessment`
-        # (market_acquisition.py); this twin recompute passes the same
-        # sealed scores, never re-ranking by calling Jev again, and its rows
-        # in the same order (the sealed acquire rows' own order, which is
-        # the order acquire's candidates were in), so the one shared
+        # uat-bug-010: acquire passes the run's model-rank scores into
+        # `select_for_assessment` (market_acquisition.py); this twin
+        # recompute reads the SAME scores back from the run's sealed
+        # `outputs/rank.json` in the WORKPAD (the journal commits it there;
+        # `root` above is the target) (`rank_run.sealed_rank_scores`, the same
+        # conversion acquire applies), never re-ranking, and its rows in the
+        # same order (the sealed acquire rows' own order), so the one shared
         # function returns the identical selection and the identical
-        # duplicate/over_cap labels. `_read_rank_scores` degrades to `()` for
-        # a run with no Jev key/pre-P6 run: date order, as before P6.
+        # duplicate/over_cap labels. No sealed pass (a run before the model
+        # ranker, a fail-open pass): `()`, date order, as acquire fell back.
         eligible_urls = {posting.normalized_url for posting in eligible_postings}
         candidates_in_acquire_order = [
             posting
@@ -383,7 +385,7 @@ def _assess_node_body(
         recomputed = select_for_assessment(
             candidates_in_acquire_order,
             cap=input.selection_cap,
-            rank_scores=_read_rank_scores(root, input.acquire_batch_ref),
+            rank_scores=rank_run.sealed_rank_scores(Path(context.workpad_path), context.run_id, candidates_in_acquire_order),
         )
         drop_reason_by_url = {
             url: (NotAssessedReason.DUPLICATE if reason == "duplicate" else NotAssessedReason.OVER_CAP)
@@ -693,40 +695,6 @@ def _read_acquire_rows(root: Path, batch_ref: str) -> tuple[tuple[object, object
         except ValueError:
             outcome = RowOutcome.NEW
         result.append((PostingRow.from_json(posting_json), outcome))
-    return tuple(result)
-
-
-def _read_rank_scores(root: Path, batch_ref: str) -> tuple:
-    """P6: the sealed ``AcquireOutput.rank_scores`` from this run's acquire batch.
-
-    Assess re-runs ``select_for_assessment`` over the eligible set for its
-    own not-assessed labeling; it must rank that set by the SAME scores
-    acquire itself used, or the twin recompute could disagree with
-    acquire's own selection. Reads the exact same
-    ``batch_ref`` file ``_read_acquire_rows`` reads, one key over
-    (``rank_scores``) -- degrades to ``()`` for any run sealed before P6, a
-    run with no Jev key, or a malformed/missing file (never raises: an
-    ordering enrichment must not fail assess).
-    """
-
-    from .find_jobs.jev_contracts import RankScore
-
-    try:
-        path = root / batch_ref
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ()
-    if not isinstance(value, Mapping):
-        return ()
-    items = value.get("rank_scores")
-    if not isinstance(items, list):
-        return ()
-    result = []
-    for item in items:
-        try:
-            result.append(RankScore.from_json(item))
-        except (ValueError, TypeError):
-            continue
     return tuple(result)
 
 

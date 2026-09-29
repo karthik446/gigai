@@ -2,7 +2,7 @@
 
 After a full-catalog run the Jobs page stayed empty for about a minute:
 ``GET /api/runs`` built every run's results (16 s), ``.../results``
-answered every row with its posting text and scored the rows with Jev on
+answered every row with its posting text and scored the rows on
 the way (45 s, 3.9 MB), and ``.../progress`` carried the text again
 (3.7 MB). The wall-clock guard at catalog size is
 ``tests/api_e2e/test_run_reads_fast_journey.py``; what is pinned here, with
@@ -15,7 +15,7 @@ counts and spies instead of time:
   path-by-path read a busy journal falls back to gives the same evidence;
 * a status poll of a run that is still going reads no sealed artifact;
 * ``.../results?limit=&offset=``: the page, its order (the grid's), its
-  edges, and what it refuses; no posting text; never a Jev client;
+  edges, and what it refuses; no posting text; never a model client;
 * ``.../posting?url=``: one posting, complete;
 * ``.../progress?summary=1``: no posting text, no list of skipped boards;
 * the no-query ``/results`` and ``/progress`` answer what they did;
@@ -46,7 +46,6 @@ import pytest
 import gigai.journal as journal
 from gigai import run as run_module
 from gigai.scout import projection
-from gigai.scout.find_jobs import jev_client, jev_rank
 from gigai.scout.find_jobs.bindings import TEST_MODEL_RANK_DEFAULT_SCORE as _FIXTURE_RANK_SCORE
 from gigai.scout.find_jobs.api import run_reads, runs_list
 from gigai.scout.find_jobs.contracts import (
@@ -63,7 +62,7 @@ from gigai.scout.find_jobs.contracts import (
     SourceKind,
     Verdict,
 )
-from gigai.scout.find_jobs.jev_contracts import RankScore
+from gigai.scout.find_jobs.rank_contracts import RankScore
 from gigai.scout.find_jobs.present_api import ScoutFindJobsBackend, serve
 from gigai.workpad import resolve_workpad
 
@@ -451,7 +450,7 @@ def test_a_results_page_is_the_full_read_without_the_text(unread) -> None:
         assert row["outcome"] == whole["outcome"]
         assert row.get("h1b") == whole.get("h1b")
         assert row.get("job_state") == whole.get("job_state")
-        # The fixture model's rank branch scored the run's own ranking pass: the stored score is served, no Jev.
+        # The fixture model's rank branch scored the run's own ranking pass: the stored score is served.
         assert row["rank_score"]["score"] == _FIXTURE_RANK_SCORE
         assert {item["normalized_url"]: item["score"] for item in full["rank_scores"]}[row["posting"]["normalized_url"]] == _FIXTURE_RANK_SCORE
         assert row["rank"]["score"] == _FIXTURE_RANK_SCORE
@@ -502,36 +501,13 @@ def test_the_page_reads_of_an_unknown_run_are_404(finished_run) -> None:
         assert response.json()["error"]["code"] == "not_found"
 
 
-def test_a_results_page_never_asks_jev(unread, monkeypatch: pytest.MonkeyPatch) -> None:
-    fx = unread
-    monkeypatch.setenv("JEV_API_KEY", "run-reads-test-jev-key")  # a project WITH a key
-
-    def refuse(*_args, **_kwargs):
-        raise AssertionError("a page read built a Jev client")
-
-    monkeypatch.setattr(jev_client.JevClient, "__init__", refuse)
-    monkeypatch.setattr(jev_rank, "rank_postings_report", refuse)
-    monkeypatch.setattr(jev_rank, "rank_postings", refuse)
-
-    page = fx.client.get(f"/api/runs/{fx.run_id}/results", params={"limit": 100})
-    detail_url = page.json()["payload"]["rows"][0]["posting"]["normalized_url"]
-    detail = fx.client.get(f"/api/runs/{fx.run_id}/posting", params={"url": detail_url})
-
-    assert page.status_code == 200 and detail.status_code == 200
-
-
-def test_a_page_carries_the_newest_rank_record_s_scores_and_never_the_jev_cache(
+def test_a_page_carries_the_newest_rank_record_s_scores(
     unread, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """SCOPE-ADD-3 C1: the scores a page shows are the newest finished rank
-    record of the run for the selected profile; no Jev score cache is read."""
+    record of the run for the selected profile."""
 
     fx = unread
-
-    def refuse(*_args, **_kwargs):
-        raise AssertionError("a page read the Jev score cache")
-
-    monkeypatch.setattr(jev_rank, "read_cached_scores", refuse, raising=False)
     before = fx.client.get(f"/api/runs/{fx.run_id}/results", params={"limit": 100}).json()
     last = before["payload"]["rows"][-1]["posting"]["normalized_url"]
     profile = fx.backend._selected_profile()
@@ -591,8 +567,6 @@ def test_the_full_read_s_scores_are_one_entry_per_posting_in_the_run_s_order(
     handler._backend = SimpleNamespace(home_root=tmp_path)
     joins = _joins(resume_text="a resume")
     monkeypatch.setattr(handler, "_run_view", lambda run_id: (None, view, joins), raising=False)
-    # SCOPE-ADD-3 C1: no Jev key is needed to READ the stored scores.
-    monkeypatch.delenv(jev_client.JEV_API_KEY_ENV_VAR, raising=False)
 
     scores = handler._run_stored_rank_scores("run_1")
 
@@ -903,12 +877,8 @@ def test_a_run_s_sealed_scores_count_only_for_the_resume_they_were_made_for(tmp_
 
 def test_a_finished_rank_record_wins_over_the_run_s_sealed_scores(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """SCOPE-ADD-3 C1: the newest finished re-rank of the run, for the reading
-    profile and resume revision, is what a page shows; the Jev cache is not read."""
+    profile and resume revision, is what a page shows."""
 
-    def refuse(*_args, **_kwargs):
-        raise AssertionError("a page read the Jev score cache")
-
-    monkeypatch.setattr(jev_rank, "read_cached_scores", refuse, raising=False)
     rows = (_posting("a"), _posting("b"), _posting("c"))
     sealed = (_score(rows[0].normalized_url, 70), _score(rows[1].normalized_url, 30))
     evidence = _sealed(profile_id="profile_1", revision_id="revision_1", scores=sealed)
@@ -932,20 +902,6 @@ def test_a_finished_rank_record_wins_over_the_run_s_sealed_scores(tmp_path: Path
     found = run_reads.stored_rank(rows, evidence=evidence, joins=_joins(), workpad=tmp_path)
     assert found.source == "rank_record" and found.scores[rows[2].normalized_url].mismatch_flags == ("no_sponsor",)
     assert found.detail[rows[2].normalized_url]["demoted"] is True
-
-def test_a_score_cache_that_cannot_be_read_costs_the_scores_not_the_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    rows = (_posting("a"),)
-
-    def broken(*_args, **_kwargs):
-        raise OSError("the cache is unreadable")
-
-    monkeypatch.setattr(jev_rank, "read_cached_scores", broken, raising=False)
-    found = run_reads.stored_rank_scores(
-        rows, evidence=_sealed(profile_id="profile_1", revision_id="revision_1", scores=(_score(rows[0].normalized_url, 70),)),
-        joins=_joins(resume_text="a resume"), home_root=tmp_path, target=tmp_path,
-    )
-    assert {url: item.score for url, item in found.items()} == {rows[0].normalized_url: 70}
-
 
 def test_run_assess_cap_is_the_selection_cap_or_none() -> None:
     assert run_reads.run_assess_cap(SimpleNamespace(assess_output=SimpleNamespace(selection_cap=7))) == 7

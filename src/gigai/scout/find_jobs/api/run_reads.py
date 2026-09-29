@@ -2,7 +2,7 @@
 
 After a full-catalog run (500 imported postings) the Jobs page stayed empty
 for about a minute: ``GET /api/runs/{run_id}/results`` answered every row
-with its posting text (3.9 MB) and scored the rows with Jev on the way, and
+with its posting text (3.9 MB) and scored the rows on the way, and
 ``.../progress`` carried the same text again (3.7 MB). The no-query form of
 both routes is unchanged (``runs.py``); the grid and the job page read
 these instead:
@@ -35,8 +35,8 @@ hidden), then the newest posting.
 SCOPE-ADD-3 C1: the scores are the newest finished re-rank record of the
 run (``rank_records``) for the selected profile and resume revision, else
 the run's own ranking step (``AcquireOutput.rank_scores`` and its sealed
-``outputs/rank.json``) when the run used that profile and resume. No Jev
-score cache is read. The first page
+``outputs/rank.json``) when the run used that profile and resume. No
+Jev score cache is read (it stays on disk, unused). The first page
 is then the top of the grid, not the first rows acquire happened to list.
 The verdict is the run's own (or the one it carried forward); an
 assessment made later from a job page is the UI's to merge, as before.
@@ -57,7 +57,7 @@ import threading
 from urllib.parse import parse_qs, urlsplit
 
 from ..contracts import PostingRow, RowOutcome, Verdict
-from ..jev_contracts import RankScore
+from ..rank_contracts import RankScore
 from ..work_mode import work_mode_fit
 from .server import _logger
 
@@ -516,7 +516,7 @@ class RunReadsRoutesMixin:
         (no profile, or the run was never ranked for it).
         """
 
-        from ..jev_contracts import RankScore as _RankScore
+        from ..rank_contracts import RankScore as _RankScore
 
         _resolved, view, joins = self._run_view(run_id)
         if joins.profile is None or not view.scores:

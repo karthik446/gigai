@@ -44,7 +44,7 @@ from gigai.scout.find_jobs.contracts import (
     SourceToggles,
 )
 from gigai.scout.find_jobs.filters import location_countries
-from gigai.scout.find_jobs.jev_contracts import RankScore
+from gigai.scout.find_jobs.rank_contracts import RankScore
 from gigai.scout.find_jobs.market_acquisition import acquire_node
 from gigai.scout.find_jobs.selection import (
     DEFAULT_PER_COMPANY_CAP,
@@ -53,6 +53,7 @@ from gigai.scout.find_jobs.selection import (
 )
 from gigai.scout.proposal_execution import assess_node
 from tests.behaviors.scout_find_jobs.test_assess_model_policy import _assess_fixture, _ScriptedBinding
+from tests.support.rank_fakes import RankPort, install_rank_port
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -271,7 +272,7 @@ def _posting(company: str, job: int, title: str, *, published_at: str) -> Postin
 
 
 def _ranked_batch() -> tuple[list[PostingRow], dict[str, int]]:
-    """Eight role-matched postings: the three best Jev fits are the OLDEST ones."""
+    """Eight role-matched postings: the three best-ranked postings are the OLDEST ones."""
 
     rows = [
         _posting("Northwind", 1, "Software Engineer, Payments", published_at="2026-09-27T00:00:00Z"),
@@ -285,14 +286,6 @@ def _ranked_batch() -> tuple[list[PostingRow], dict[str, int]]:
     ]
     scores = {1: 20, 2: 18, 3: 16, 4: 30, 5: 30, 6: 95, 7: 90, 8: 85}
     return rows, {row.normalized_url: scores[index + 1] for index, row in enumerate(rows)}
-
-
-def _rank_score(row: PostingRow, score: int) -> RankScore:
-    return RankScore(
-        normalized_url=row.normalized_url, content_sha256=row.content_sha256 or "sha256:" + "0" * 64,
-        fit="strong" if score >= 70 else "no", score=score, reasons=(), mismatch_flags=(),
-        hidden_by_default=False, cost_usd="0", cached=True,
-    )
 
 
 class _Exa:
@@ -313,8 +306,30 @@ class _Watchlist:
         return ()
 
 
+class _Spy:
+    """Records every ``select_for_assessment`` call: its rows' urls, the score it was given, and what it selected.
+
+    Wraps the ONE shared function both call sites use, so what is asserted is
+    each site's own selection, not an intermediate.
+    """
+
+    def __init__(self, real) -> None:
+        self.real = real
+        self.calls: list[dict] = []
+
+    def __call__(self, rows, *, cap, per_company=DEFAULT_PER_COMPANY_CAP, rank_scores=()):
+        result = self.real(rows, cap=cap, per_company=per_company, rank_scores=rank_scores)
+        self.calls.append({
+            "rows": [row.normalized_url for row in rows],
+            "scored": {item.normalized_url: item.score for item in rank_scores},
+            "selected": [row.normalized_url for row in result.selected],
+        })
+        return result
+
+
 def _acquire_then_assess(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, rows: list[PostingRow], scores: dict[str, int], cap: int
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, rows: list[PostingRow], scores: dict[str, int], cap: int,
+    spy: _Spy | None = None, batch_without_scores: bool = False,
 ):
     fixture, target = _assess_fixture(tmp_path)
     resolved = fixture["resolved"]
@@ -342,10 +357,17 @@ def _acquire_then_assess(
         sealed_dir.mkdir(parents=True, exist_ok=True)
         (sealed_dir / "find-jobs-run-input.json").write_text(sealed_input)
 
-    def fake_rank(candidates, **_kwargs):
-        return tuple(_rank_score(row, scores[row.normalized_url]) for row in candidates if row.normalized_url in scores)
+    # The REAL ranking step: a scripted model port scores each posting from
+    # its digest line, the run seals ``outputs/rank.json`` in the journal.
+    by_title = {f"{row.title} @ {row.company} |": scores[row.normalized_url] for row in rows}
 
-    monkeypatch.setattr("gigai.scout.find_jobs.market_acquisition._rank_candidates", fake_rank)
+    def score_for(line: str) -> tuple[int, list[str]]:
+        return next(score for prefix, score in by_title.items() if line.startswith(prefix)), []
+
+    install_rank_port(monkeypatch, RankPort(score_for))
+    if spy is not None:
+        monkeypatch.setattr("gigai.scout.find_jobs.market_acquisition.select_for_assessment", spy)
+        monkeypatch.setattr("gigai.scout.find_jobs.selection.select_for_assessment", spy)
 
     def context(goal: str) -> NodeContext:
         return NodeContext(
@@ -365,6 +387,13 @@ def _acquire_then_assess(
     )
     (run_dir / "outputs").mkdir(parents=True, exist_ok=True)
     (run_dir / "outputs" / "acquire.json").write_bytes(canonical_json_bytes(acquired.to_json()))
+    batch_ref = run_dir / "outputs" / "acquire.json"
+    if batch_without_scores:
+        # A batch file that lists the acquired rows but carries no scores (what
+        # ``records/scout-acquisition/<batch>/input.json`` is): the twin must not
+        # depend on the batch file for them.
+        batch_ref = run_dir / "outputs" / "acquire-rows.json"
+        batch_ref.write_bytes(canonical_json_bytes({key: value for key, value in acquired.to_json().items() if key != "rank_scores"}))
 
     good = json.dumps({
         "matrix": [{"requirement": "Python", "resume_evidence": ["Built Python services"], "status": "met"}],
@@ -379,7 +408,7 @@ def _acquire_then_assess(
     assessed = assess_node(
         context("assess"),
         AssessInput(
-            acquire_batch_ref=str(run_dir / "outputs" / "acquire.json"),
+            acquire_batch_ref=str(batch_ref),
             acquire_output_digest="sha256:" + "0" * 64,
             selected_postings=acquired.selected_postings,
             selection_cap=cap,
@@ -396,7 +425,7 @@ def _acquire_then_assess(
     return acquired, assessed
 
 
-def test_the_assessed_postings_are_the_best_jev_fits_not_the_newest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_assessed_postings_are_the_best_ranked_not_the_newest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     rows, scores = _ranked_batch()
     acquired, assessed = _acquire_then_assess(tmp_path, monkeypatch, rows=rows, scores=scores, cap=3)
 
@@ -431,3 +460,27 @@ def test_acquire_and_the_assess_recompute_make_the_same_selection(tmp_path: Path
     assert {row.posting.normalized_url: row.reason for row in assessed.not_assessed} == expected_reason
     acquire_counts = {item.reason: item.count for item in acquired.dropped_counts}
     assert acquire_counts == dict(Counter(expected_reason.values()))
+
+
+@pytest.mark.parametrize("batch_without_scores", [False, True], ids=["batch_carries_scores", "batch_carries_no_scores"])
+def test_both_call_sites_make_the_identical_selection_by_the_sealed_model_ranks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, batch_without_scores: bool
+) -> None:
+    """uat-bug-010, operator requirement (never met since P6): assess's twin
+    recompute ranks by the SAME sealed model scores acquire's selection used
+    (``runs/<run>/outputs/rank.json``). The best-ranked postings are the
+    OLDEST: a recompute that fell back to date order picks the newest."""
+
+    rows, scores = _ranked_batch()
+    spy = _Spy(select_for_assessment)
+    acquired, _assessed = _acquire_then_assess(tmp_path, monkeypatch, rows=rows, scores=scores, cap=3, spy=spy, batch_without_scores=batch_without_scores)
+
+    acquire_call, twin_call = spy.calls[0], spy.calls[-1]
+    assert len(spy.calls) >= 2, "acquire and assess must each select"
+    oldest_best = [row.normalized_url for row in rows if row.company in {"Fabrikam", "Initech", "Umbrella"}]
+    # Acquire, from its in-memory scores.
+    assert acquire_call["selected"] == twin_call["selected"], (acquire_call, twin_call)
+    assert set(acquire_call["selected"]) == set(oldest_best)
+    assert {item.normalized_url for item in acquired.selected_postings} == set(oldest_best)
+    # The twin was handed the same real scores, not none.
+    assert twin_call["scored"] == {url: scores[url] for url in twin_call["rows"]}

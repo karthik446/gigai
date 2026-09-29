@@ -282,7 +282,7 @@ class RunRoutesMixin:
         # postings against the gig's selected profile. A read only READS
         # scores, the ones already stored (the newest finished re-rank
         # record, else the run's own ranking step; ``run_reads.stored_rank``);
-        # it never calls a model or Jev. No profile or nothing stored for it
+        # it never calls a model. No profile or nothing stored for it
         # is an empty list, never a broken /results.
         try:
             rank_scores = self._run_stored_rank_scores(run_id)

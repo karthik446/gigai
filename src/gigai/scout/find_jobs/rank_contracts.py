@@ -1,4 +1,7 @@
-"""P6: frozen DTOs for Jev pre-ranking.
+"""Frozen DTOs for posting rank scores (the sealed ``AcquireOutput.rank_scores`` shape).
+
+SCOPE-ADD-3 C2: this was ``jev_contracts.py``; the module moved, the classes and
+their ``schema_version`` strings did not (stored values stay readable).
 
 Deliberately its own module (plan's shared-DTO rule, PLAN-api-first-
 granular.md section 2): ``contracts.py`` only gains one additive field
@@ -28,8 +31,7 @@ from .contracts import (
     _strings,
 )
 
-# Jev has no free-text output type (jev-api-notes.md); `fit` is one of these
-# three fixed category picks, never prose.
+# `fit` is one of these three fixed category picks, never prose.
 _FIT_VALUES = frozenset({"strong", "maybe", "no"})
 
 
@@ -44,11 +46,9 @@ def _optional_fit(value: object) -> str | None:
 
 @dataclass(frozen=True)
 class RankScore(_Contract):
-    """One posting's Jev pre-rank score, or an unscored placeholder past the cap.
+    """One posting's rank score, or an unscored placeholder past the cap.
 
-    ``reasons``/``mismatch_flags`` are category ids (jev-api-notes.md's
-    design-decision mapping), never prose: Jev's typed primitives
-    (choice/score/noul) cannot emit free text.
+    ``reasons``/``mismatch_flags`` are category ids, never prose.
     """
 
     schema_version: ClassVar[str] = "scout-jev-rank-score:1"

@@ -1,6 +1,6 @@
 """P7 (v0.1.9): the assess eval set is well-formed and its metrics compute as specified -- offline.
 
-Nothing here calls a model, Jev or the network: the fixtures parse, every
+Nothing here calls a model or the network: the fixtures parse, every
 label references an existing pair, ids match the shipped ``question_id``
 shape, every row renders through the shipped prompt without truncation, and
 ``summarize`` produces each planned metric from synthetic rows.  The label
@@ -315,8 +315,8 @@ def test_summarize_computes_every_planned_metric() -> None:
     assert reliability["invalid_after_retry_bar"] == 0.05 and reliability["invalid_after_retry_bar_met"] is False
     assert (reliability["retries"], reliability["recovered_on_retry"], reliability["transport_failures"]) == (2, 1, 1)
     assert reliability["latency_seconds"]["max"] == 30.0 and reliability["tokens"] == {"input": 500, "output": 250, "total": 750}
-    assert reliability["model_cost_usd"] == "unavailable" and reliability["jev_cost_usd"] is None
-    assert metrics["jev"] is None
+    assert reliability["model_cost_usd"] == "unavailable"
+    assert "jev" not in metrics and "jev_cost_usd" not in reliability
 
 
 def test_summarize_skips_excluded_rows_in_every_metric() -> None:

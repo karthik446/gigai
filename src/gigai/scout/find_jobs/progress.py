@@ -42,12 +42,11 @@ Layout, all under ``runs/<run_id>/progress/``:
   ``postings`` by rank: scored unblocked rows by score, then unscored, then
   blocked (demoted), then rows not ranked yet, each in acquire order.
 - ``rank.json`` (uat-bug-021): what the ranking pass did for this run,
-  ``jev_rank.RankStatus.to_json()``: ``{"status": "scored"|"skipped",
-  "scored": <int>, "total": <int>, "reason": <str>|null, "cost_cap_usd":
-  <str>|null, "cost_usd": <str>, "throttled": <str>|null,
-  "spent_today_usd": <str>|null, "daily_budget_usd": <str>|null, "text":
-  "scored N of M" | "skipped: <reason>", "line": "Jev: ...", "usage_line":
-  "Jev: $0.31 of $0.50 today"|null}``. Written once, when acquire's
+  ``rank_run.status_json()``: ``{"status": "scored"|"skipped", "ranker":
+  "model", "scored": <int>, "total": <int>, "reason": <str>|null, "text":
+  "scored N of M" | "skipped: <reason>", "line": "Ranking: ...", ...}``
+  (the cost/budget keys stay, empty; a file written by a P6-era run may
+  carry Jev values there and still reads). Written once, when acquire's
   ranking pass ends; absent for a run sealed before it existed.
 - ``boards.json`` (Q2): ``{"total": <int>, "budget_seconds": <float>|null,
   "status": "running"|"done", ...totals}``; written once acquire has planned

@@ -1,12 +1,10 @@
 """uat-bug-020: ``GET /api/secrets/status`` -- which API keys are set, as booleans.
 
-The setup wizard's last screen names a key only when it is missing ("Jev
-key not set: `gigai secrets add jev` (optional)"). No existing response
-carried that, so this route answers ``{"keys": {"<service>": true|false}}``
+The setup wizard's last screen names a key only when it is missing. No
+existing response carried that, so this route answers ``{"keys": {"<service>": true|false}}``
 for every service ``gigai secrets add`` knows (``secrets_catalog``).
 
-Set means what the clients themselves resolve (``exa_client`` /
-``jev_client``): the environment variable, else the GigAI home's secret
+Set means what the clients themselves resolve (``exa_client``): the environment variable, else the GigAI home's secret
 store, non-empty. Booleans only: a key's value, length or prefix is never
 read into the response or the log. Keys are still added from the CLI only.
 """

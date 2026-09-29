@@ -17,13 +17,8 @@ inert when unset (see ``bindings.py``'s own docstring):
 - ``GIGAI_SCOUT_FIND_JOBS_TEST_MODEL=1`` -- swaps in an ``httpx.MockTransport``
   standing in for the local model adapter's Ollama-shaped calls
   (``bindings._test_model_handler``). No live model process is required.
-- ``GIGAI_SCOUT_FIND_JOBS_TEST_JEV=1`` (P6) -- swaps in an
-  ``httpx.MockTransport`` standing in for Jev's ``/v1/decide`` call
-  (``bindings._test_jev_handler``), for both the acquire node's own ranking
-  call and the ``/rank`` route's. No live Jev call is required; used by
-  ``test_rank_journey.py``.
 
-All three env vars are read only inside ``bindings.py``; production callers
+Both env vars are read only inside ``bindings.py``; production callers
 (and every test in this repo that does not set them) leave them unset, so
 the production path is untouched. this module never introduces a new seam.
 """
@@ -47,11 +42,9 @@ from tests.support.latency import latency_bound
 
 # The inert-unless-set test seams bindings.py exposes for the real-backend
 # M1/uat-bug-005 tests. Setting HTTP+MODEL makes a real find-jobs run fully
-# offline: no live Exa/ATS/model call. P6 adds a third, JEV, for the rank
-# journey (test_rank_journey.py) -- fake Jev responses, no live call.
+# offline: no live Exa/ATS/model call.
 TEST_HTTP_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_HTTP"
 TEST_MODEL_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_MODEL"
-TEST_JEV_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_JEV"
 
 # Generous per-journey wait budgets. A find-jobs run against the fixture
 # transports finishes in well under a second; these are loose enough to
@@ -253,7 +246,6 @@ def start_server(
     monkeypatch: pytest.MonkeyPatch,
     test_http: bool = True,
     test_model: bool = True,
-    test_jev: bool = False,
 ) -> RunningServer:
     """Start the real supervised server (``gigai scout run --no-browser``).
 
@@ -266,20 +258,12 @@ def start_server(
     boundary) -- this is exactly why the seam exists as an env var and not
     a Python-level monkeypatch/fixture.
 
-    ``test_jev`` (P6) defaults to ``False``: only ``test_rank_journey.py``
-    opts in, so every other journey's acquire node runs with no Jev key
-    (fail open, today's ordering) exactly as before this packet -- proving
-    the "no key" half of P6's own behavior contract for every other journey
-    in this suite, not just its own.
     """
 
     if test_http:
         monkeypatch.setenv(TEST_HTTP_ENV, "1")
     if test_model:
         monkeypatch.setenv(TEST_MODEL_ENV, "1")
-    if test_jev:
-        monkeypatch.setenv(TEST_JEV_ENV, "1")
-        monkeypatch.setenv("JEV_API_KEY", "api-e2e-test-jev-key")
     monkeypatch.setenv("EXA_API_KEY", "api-e2e-test-key")
 
     chosen_port = port if port is not None else free_port()
@@ -289,7 +273,7 @@ def start_server(
         port=chosen_port,
         foreground=False,
         open_browser=False,
-        allow_test_seams=(test_http or test_model or test_jev),
+        allow_test_seams=(test_http or test_model),
     )
     base_url = result.state.url
     client = httpx.Client(base_url=base_url, timeout=latency_bound(CLIENT_TIMEOUT_SECONDS))

@@ -58,9 +58,6 @@ TEST_MODEL_DIGEST = "sha256:" + ("0" * 64)
 _HOME_ROOT_ENV = "GIGAI_SCOUT_FIND_JOBS_HOME_ROOT"
 _TEST_HTTP_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_HTTP"
 _TEST_MODEL_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_MODEL"
-# P6: the seam name harness.py's own docstring already reserved for the
-# fake Jev client (mirrors _TEST_HTTP_ENV/_TEST_MODEL_ENV's shape exactly).
-_TEST_JEV_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_JEV"
 # P5: the quick-assess deadline for the fake model; read ONLY when
 # _TEST_MODEL_ENV is on (see _test_assess_timeout_seconds).
 _TEST_ASSESS_TIMEOUT_ENV = "GIGAI_SCOUT_ASSESS_TIMEOUT_SECONDS"
@@ -649,78 +646,6 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(404, json={"error": "test fixture route not found"}, request=request)
 
 
-def _test_jev_handler(request: httpx.Request) -> httpx.Response:
-    """Fake ``POST /v1/decide`` for the offline P6 journeys (no live Jev call).
-
-    Shape mirrors ``jev-api-notes.md``'s EXECUTED response exactly (``model``,
-    ``answers.<key>.{choice|score|noul}``, ``usage.cost_usd``) so
-    ``jev_client._parse_response`` exercises the real parsing path. Every
-    posting scores ``strong``/``score=8`` with no mismatch flags -- the
-    journeys assert on ordering and cache behavior, not on a specific
-    fit/score value, so one fixed answer is enough (a per-request-body
-    branch would only be needed if a journey asserted a *different* score
-    for a different posting, which none do).
-    """
-
-    if request.method == "POST" and request.url.host == "jevtypesafeai.com" and request.url.path == "/api/v1/decide":
-        return httpx.Response(
-            200,
-            json={
-                "model": "jev-test",
-                "answers": {
-                    "fit": {"choice": "strong", "confidence": 0.9},
-                    "score": {"score": 8},
-                    "top_reason": {"choice": "stack_match"},
-                    "flag_domain": {"noul": 0.0},
-                    "flag_seniority": {"noul": 0.0},
-                    "flag_stack": {"noul": 0.0},
-                    "flag_location": {"noul": 0.0},
-                    "flag_sponsorship": {"noul": 0.0},
-                },
-                "usage": {"input_tokens": 1200, "cost_usd": 0.0005, "credits_remaining_usd": 9.9995},
-            },
-            request=request,
-        )
-    return httpx.Response(404, json={"error": "test fixture route not found"}, request=request)
-
-
-def _test_jev_enabled() -> bool:
-    return os.environ.get(_TEST_JEV_ENV) == "1"
-
-
-def _patch_test_jev_transport() -> None:
-    """Inject a MockTransport into P6's real Jev client for offline journeys only.
-
-    Same seam shape as ``_patch_test_model_transport``: the production test
-    harness patches exactly two module attributes --
-    ``market_acquisition._jev_http_client`` (the acquire node's own ranking
-    call) and ``api.rank._jev_http_client`` (the ``/rank`` route's call) --
-    never a value imported from either, so both call sites are intercepted
-    wherever they run (including a spawned child process for acquire, where
-    a parent-process transport object cannot be pickled -- the same reason
-    the HTTP/model seams build their MockTransport freshly here rather than
-    passing one in).
-    """
-
-    if not _test_jev_enabled():
-        return
-
-    def jev_test_client() -> httpx.Client:
-        return httpx.Client(transport=httpx.MockTransport(_test_jev_handler), timeout=_TIMEOUT)
-
-    setattr(jev_test_client, "_scout_test_transport", True)
-
-    from . import market_acquisition as scout_market_acquisition
-
-    if not getattr(scout_market_acquisition._jev_http_client, "_scout_test_transport", False):
-        scout_market_acquisition._jev_http_client = jev_test_client  # type: ignore[assignment]
-
-    from .api import rank as scout_rank_api
-
-    if not getattr(scout_rank_api._jev_http_client, "_scout_test_transport", False):
-        scout_rank_api._jev_http_client = jev_test_client  # type: ignore[assignment]
-
-
 def _http_client() -> httpx.Client:
     transport = httpx.MockTransport(_test_provider_handler) if _test_http_enabled() else None
     return httpx.Client(
@@ -942,7 +867,6 @@ def _register_nodes(
 
     config = load_config(home)
     _patch_test_model_transport(config)
-    _patch_test_jev_transport()
     http_client = _http_client()
     watchlist = _BoundWatchlist(home, root)
     acquire = partial(

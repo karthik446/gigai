@@ -985,7 +985,7 @@ class ScoutFindJobsBackend:
             # out of this run's import ("N more matched, not imported this
             # run"); 0 until acquire writes cap.json, and for older runs.
             "not_imported_count": snapshot.not_imported_count,
-            # uat-bug-021: what Jev did for this run ("scored N of M" /
+            # uat-bug-021: what the ranking pass did for this run ("scored N of M" /
             # "skipped: <reason>"); null until acquire's ranking pass ends.
             "rank_status": None if snapshot.rank_status is None else dict(snapshot.rank_status),
             # SCOPE-ADD-3 C1 follow-up (additive): the folded rank.jsonl
@@ -1380,9 +1380,8 @@ def _make_handler(
     from .config import ConfigRoutesMixin
     from .discover import DiscoverRoutesMixin
     from .extract import ResumeExtractRoutesMixin
-    from .jev_settings import JevSettingsRoutesMixin
     from .profiles import ProfilesRoutesMixin
-    from .rank import JevUsageRoutesMixin, RankRoutesMixin
+    from .rank import RankRoutesMixin
     from .resumes import ResumesRoutesMixin
     from .runs import RunRoutesMixin
     from .runs_list import RunsListRoutesMixin
@@ -1401,8 +1400,6 @@ def _make_handler(
         RunsListRoutesMixin,
         ProfilesRoutesMixin,
         RankRoutesMixin,
-        JevUsageRoutesMixin,
-        JevSettingsRoutesMixin,
         AssessRoutesMixin,
         AnswersRoutesMixin,
         ApplicationsRoutesMixin,
@@ -1609,12 +1606,6 @@ def _make_handler(
                     if path == "/api/secrets/status":
                         self._handle_get_secrets_status()
                         return
-                    if path == "/api/jev/usage":
-                        self._handle_get_jev_usage()
-                        return
-                    if path == "/api/jev/settings":
-                        self._handle_get_jev_settings()
-                        return
                     # run-reads-fast (uat-bug-022): with a query these two are
                     # the page-sized reads (``run_reads.py``); with none they
                     # answer what they always did.
@@ -1712,9 +1703,6 @@ def _make_handler(
             try:
                 if path == "/api/setup":
                     self._handle_put_setup()
-                    return
-                if path == "/api/jev/settings":
-                    self._handle_put_jev_settings()
                     return
                 profile_id = _match_profile_id(path, suffix="")
                 if profile_id is not None:

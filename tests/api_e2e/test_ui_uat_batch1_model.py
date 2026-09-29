@@ -9,10 +9,11 @@ reading the source.
 
 What is pinned, by UAT item:
 
-* O1  every reason / flag id the Jev client can emit
-  (``jev_client._REASON_CRITERIA`` / ``_MISMATCH_FLAGS``, read from the
-  Python module itself) has words; an id the table does not know is
-  humanized; no card line ever carries a raw ``snake_case`` id.
+* O1  (SCOPE-ADD-3 D) a rank's reasons and blockers read as words: the
+  model's own prose as it is, and a category id an older run stored
+  (the retired hosted ranker's reason / mismatch-flag ids, inlined below as
+  ``OLDER_RUN_REASON_IDS`` / ``OLDER_RUN_FLAG_IDS`` since that client is
+  deleted) humanized; no card line ever carries a raw ``snake_case`` id.
 * N5  each open question is placed in the requirement row it settles; one
   Re-assess is N ``POST /api/answers`` bodies with ``reassess`` on the LAST
   one only.
@@ -43,23 +44,30 @@ from pathlib import Path
 
 import pytest
 
-from gigai.scout.find_jobs import jev_client
 from gigai.scout.find_jobs.api import static as static_module
 
 UI_SRC = Path(static_module.__file__).resolve().parents[2] / "ui" / "src"
 JOB_MODEL_JS = UI_SRC / "jobModel.js"
 ANSWERS_MODEL_JS = UI_SRC / "answersModel.js"
 RUN_TEXT_JS = UI_SRC / "runText.js"
+RANK_MODEL_JS = UI_SRC / "rankModel.js"
 THEME_JS = UI_SRC / "theme.js"
 STYLES_CSS = UI_SRC / "styles.css"
 
 RAW_ID = re.compile(r"[a-z]+_[a-z_]+")
+
+# The category ids an older run's stored RankScore may carry (reasons /
+# mismatch_flags of the retired hosted ranker, deleted in SCOPE-ADD-3 C2),
+# inlined here: a run sealed before 0.1.9 still reads.
+OLDER_RUN_REASON_IDS = ("title_match", "stack_match", "seniority_match", "domain_mismatch", "seniority_mismatch", "location_mismatch")
+OLDER_RUN_FLAG_IDS = ("domain", "seniority", "stack", "location", "sponsorship")
 
 NODE_SCRIPT = """
 import * as jobModel from {job_model_url};
 import * as answers from {answers_url};
 import * as runText from {run_text_url};
 import * as theme from {theme_url};
+import * as rankModel from {rank_model_url};
 const input = JSON.parse(process.argv[1]);
 
 const priorMap = (rows) => new Map((rows || []).map((row) => [row.question_id, row]));
@@ -85,9 +93,12 @@ const applied = { ...attrs };
 theme.applyTheme(root, null);
 
 process.stdout.write(JSON.stringify({
-  reasons: Object.fromEntries(input.reasonIds.map((id) => [id, jobModel.jevReasonText(id)])),
-  flags: Object.fromEntries(input.flagIds.map((id) => [id, jobModel.jevFlagText(id)])),
-  lines: input.ranks.map((rank) => jobModel.jevReasonsLine(rank)),
+  reasons: Object.fromEntries(input.reasonIds.map((id) => [id, rankModel.rankEntry({ score: 50, reasons: [id] }).reasons[0]])),
+  flags: Object.fromEntries(input.flagIds.map((id) => [id, rankModel.rankEntry({ score: 50, mismatch_flags: [id] }).blockers[0]])),
+  lines: input.ranks.map((rank) => {
+    const entry = rankModel.rankEntry(rank);
+    return [rankModel.rankReasonsLine(entry), rankModel.rankBlockersLine(entry)].filter(Boolean).join(" | ");
+  }),
   gating,
   placed: { rows: Object.fromEntries([...placed.rows].map(([k, v]) => [k, v.map((q) => q.question_id)])), unplaced: placed.unplaced.map((q) => q.question_id) },
   excerpts: input.texts.map((text) => jobModel.jdExcerpt(text)),
@@ -137,14 +148,17 @@ def _gating(name: str, **fields: object) -> dict:
 
 def _payload() -> dict:
     return {
-        "reasonIds": [*jev_client._REASON_CRITERIA, "domain_match", "brand_new_reason"],
-        "flagIds": [*jev_client._MISMATCH_FLAGS, "brand_new_flag"],
+        "reasonIds": [*OLDER_RUN_REASON_IDS, "domain_match", "brand_new_reason"],
+        "flagIds": [*OLDER_RUN_FLAG_IDS, "brand_new_flag"],
         "ranks": [
             {"fit": "strong", "score": 89, "reasons": ["title_match"], "mismatch_flags": ["stack"]},
-            {"fit": "maybe", "score": 50, "reasons": [], "mismatch_flags": list(jev_client._MISMATCH_FLAGS)},
+            {"fit": "maybe", "score": 50, "reasons": [], "mismatch_flags": list(OLDER_RUN_FLAG_IDS)},
             {"fit": "no", "score": 10, "reasons": ["brand_new_reason"], "mismatch_flags": ["brand_new_flag"]},
             {"fit": None, "score": None, "reasons": ["title_match"], "mismatch_flags": []},
             None,
+            # the model ranker's own line: prose reasons and blockers as they are
+            {"score": 82, "reasons": ["Python services match the resume", "Senior level fits"], "blockers": [], "demoted": False},
+            {"score": 91, "reasons": ["Strong stack overlap"], "blockers": ["Requires an active TS/SCI clearance"], "demoted": True},
         ],
         "gating": [
             _gating("nothing typed"),
@@ -246,6 +260,7 @@ def out() -> dict:
         ("{answers_url}", ANSWERS_MODEL_JS),
         ("{run_text_url}", RUN_TEXT_JS),
         ("{theme_url}", THEME_JS),
+        ("{rank_model_url}", RANK_MODEL_JS),
     ):
         script = script.replace(name, json.dumps(path.resolve().as_uri()))
     completed = subprocess.run(
@@ -269,27 +284,29 @@ def _gate(out: dict, name: str) -> dict:
 # --- O1 ------------------------------------------------------------------------
 
 
-def test_every_jev_id_the_client_can_emit_has_words(out: dict) -> None:
-    assert set(jev_client._REASON_CRITERIA) <= set(out["reasons"])
-    assert set(jev_client._MISMATCH_FLAGS) <= set(out["flags"])
+def test_every_id_an_older_run_stored_reads_as_words(out: dict) -> None:
+    assert set(OLDER_RUN_REASON_IDS) <= set(out["reasons"])
+    assert set(OLDER_RUN_FLAG_IDS) <= set(out["flags"])
     for table in (out["reasons"], out["flags"]):
         for raw, words in table.items():
             assert words and words != raw, (raw, words)
             assert not RAW_ID.search(words), f"{raw!r} still reads as an id: {words!r}"
             assert words[0].isupper(), words
-    assert out["reasons"]["title_match"] == "Title matches"
-    assert out["flags"]["stack"] == "Stack differs"
-    # An id this table has never seen is humanized, never shown raw.
+    assert out["reasons"]["title_match"] == "Title match"
+    assert out["flags"]["stack"] == "Stack"
+    # An id no table has ever seen is humanized, never shown raw.
     assert out["reasons"]["brand_new_reason"] == "Brand new reason"
-    assert out["flags"]["brand_new_flag"] == "Brand new flag differs"
+    assert out["flags"]["brand_new_flag"] == "Brand new flag"
 
 
-def test_the_jev_line_is_words_only(out: dict) -> None:
-    assert out["lines"][0] == "Title matches · Stack differs"
-    assert out["lines"][1] == "Domain differs · Level differs · Stack differs · Location differs · Sponsorship differs"
-    assert out["lines"][2] == "Brand new reason · Brand new flag differs"
-    assert out["lines"][3] == ""  # never scored: no line
+def test_the_rank_line_is_words_only(out: dict) -> None:
+    assert out["lines"][0] == "Title match | Blocker: Stack"
+    assert out["lines"][1] == "Blocker: Domain · Seniority · Stack · Location · Sponsorship"
+    assert out["lines"][2] == "Brand new reason | Blocker: Brand new flag"
+    assert out["lines"][3] == "Title match"  # no score: the reasons stay, no blocker claimed
     assert out["lines"][4] == ""
+    assert out["lines"][5] == "Python services match the resume · Senior level fits"
+    assert out["lines"][6] == "Strong stack overlap | Blocker: Requires an active TS/SCI clearance"
     for line in out["lines"]:
         assert "flag:" not in line and not RAW_ID.search(line), line
 
@@ -457,8 +474,8 @@ def test_a_run_page_shows_only_its_own_run() -> None:
     for call in ("getRunResults(id, {", "getRunProgress(id)", "getRunStatus(id)", "getRunStatus(pastRunId)"):
         start = view.index(call)
         assert "shownRunId.current" in view[start : start + 260], f"{call}: its response is not checked against the shown run"
-    # ui-pass: a page no longer POSTs /rank when a run opens; a "Score with
-    # Jev" pass's answers are checked the same way (jevModel.createRankPass).
+    # SCOPE-ADD-3 D: a re-rank pass's answers are checked the same way
+    # (rankModel.createRankPass).
     start = view.index("createRankPass({")
     assert "isCurrent: () => shownRunId.current === id," in view[start : start + 260]
     assert "setRunId(" not in view.replace("setRunId(id);", "", 1).replace("[runId, setRunId]", ""), "set the shown run through showRun() only"
