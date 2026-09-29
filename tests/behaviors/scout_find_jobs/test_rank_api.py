@@ -276,6 +276,9 @@ def test_a_cancel_stops_the_pass_and_keeps_the_batches_that_landed(fx, monkeypat
     try:
         started = _post(fx, start=True)
         assert port.first_answered.wait(30)
+        # K=1: b001 is submitted only after b000 lands. Cancel only once b001 is provably in flight
+        # (asked and held on the gate), else a cancel landing first legitimately starts no b001.
+        assert port.second_started.wait(30)
         cancelled = _post(fx, cancel=True)
     finally:
         port.gate.set()

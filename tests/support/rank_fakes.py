@@ -37,6 +37,7 @@ class RankPort:
         self.fail = fail
         self.gate = threading.Event()
         self.first_answered = threading.Event()
+        self.second_started = threading.Event()  # the second call is provably in flight (asked, held on ``gate``)
         self._lock = threading.Lock()
 
     @property
@@ -49,6 +50,8 @@ class RankPort:
         with self._lock:
             self.prompts.append(request.prompt)
             first = len(self.prompts) == 1
+            if len(self.prompts) == 2:
+                self.second_started.set()
         if self.hold_after_first and not first:
             assert self.gate.wait(30), "the test never released the held batches"
         items = []
