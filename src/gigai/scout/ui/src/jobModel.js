@@ -756,7 +756,7 @@ export function notAssessedLine(job) {
   }
   if (job.status === "acquired") {
     if (job.runEnded) {
-      return job.assessCap ? `Not assessed: this run assessed its top ${job.assessCap}` : "Not assessed: past this run's assess cap";
+      return job.assessCap ? `Not assessed: this run assessed its top ${job.assessCap}` : "Not assessed: past this run's full-assessment limit";
     }
     return "Waiting to be assessed";
   }

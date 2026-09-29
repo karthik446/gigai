@@ -296,8 +296,8 @@ Nothing in it leaves the machine.
 **Find jobs reads that store; it does not check the boards itself.** A search
 takes your watchlist companies' stored postings, applies your titles, the
 publication window, the country rule and your work-mode preference, ranks
-every posting that passes, and assesses the top ones in the background, with
-no board request, so it takes seconds, not minutes. Run **Update
+every posting that passes, and fully assesses the top-ranked ones (the run's
+"Full assessments" setting) in the background, with no board request, so it takes seconds, not minutes. Run **Update
 sources** first, and again whenever you want fresh postings:
 
 - nothing stored yet: the search says `Run Update sources` instead of

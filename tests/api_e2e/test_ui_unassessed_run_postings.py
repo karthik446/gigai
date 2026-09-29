@@ -10,7 +10,7 @@ Pinned:
 * while the run is going an ``acquired`` row reads "Waiting to be assessed";
 * once it has ended the same row reads "Not assessed: this run assessed its
   top N", N being the run's own cap (never a hard-coded 10), and without a
-  cap read "Not assessed: past this run's assess cap";
+  cap read "Not assessed: past this run's full-assessment limit";
 * a row the run did not leave ``acquired`` keeps its own words, and an
   on-demand job (no run row) is left alone;
 * the job page offers "Assess" for such a row once the run has ended, with
@@ -70,7 +70,7 @@ def test_waiting_only_while_the_run_is_going(out: dict) -> None:
 def test_after_the_run_the_line_names_the_runs_own_cap(out: dict) -> None:
     assert out["ended10"] == "Not assessed: this run assessed its top 10"
     assert out["ended25"] == "Not assessed: this run assessed its top 25"
-    assert out["endedNoCap"] == "Not assessed: past this run's assess cap"
+    assert out["endedNoCap"] == "Not assessed: past this run's full-assessment limit"
 
 
 def test_other_rows_keep_their_words(out: dict) -> None:
@@ -88,3 +88,14 @@ def test_the_job_page_offers_assess_only_once_the_run_has_ended() -> None:
     assert '"Assessing…" : "Assess"}' in page
     view = (UI_SRC / "views" / "FindJobsView.jsx").read_text()
     assert "withRunEnd(" in view and "assess_cap: response.assess_cap" in view
+
+
+def test_the_cap_reads_as_full_assessments_not_as_a_limit_on_what_is_looked_at() -> None:
+    """uat-bug-040: wording only; the field, config key and range are unchanged."""
+    dialog = (UI_SRC / "components" / "RunConfirmDialog.jsx").read_text()
+    assert "Full assessments (1-50)" in dialog and "Assessment cap" not in dialog
+    assert "Every matching posting is ranked. This many of the top-ranked ones are then assessed in full; you can assess the" in " ".join(dialog.split())
+    assert "rest one at a time with Assess." in dialog
+    assert "config.default_assess_cap" in dialog and "min={1}" in dialog and "max={50}" in dialog
+    display = (UI_SRC / "display.js").read_text()
+    assert "Ranked below the full-assessment limit for this run. Use Assess to assess it now." in display

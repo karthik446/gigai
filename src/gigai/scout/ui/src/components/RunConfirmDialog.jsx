@@ -84,7 +84,7 @@ export default function RunConfirmDialog({ config, onConfirm, onCancel, submitti
 
         <div className="form-group">
           <label className="form-label" htmlFor="selection-cap">
-            Assessment cap (1-50)
+            Full assessments (1-50)
           </label>
           <input
             id="selection-cap"
@@ -94,6 +94,10 @@ export default function RunConfirmDialog({ config, onConfirm, onCancel, submitti
             value={selectionCap}
             onChange={handleCapChange}
           />
+          <small className="muted">
+            Every matching posting is ranked. This many of the top-ranked ones are then assessed in full; you can assess the
+            rest one at a time with Assess.
+          </small>
         </div>
 
         <div className="form-group">

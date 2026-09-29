@@ -97,7 +97,7 @@ const NOT_ASSESSED_REASON_DETAILS = {
   unchanged: "Already seen with no content change.",
   duplicate: "Duplicate of another posting in this batch.",
   failed: "Acquisition failed for this posting.",
-  over_cap: "Assessment cap was reached before this posting.",
+  over_cap: "Ranked below the full-assessment limit for this run. Use Assess to assess it now.",
   role_mismatch: "Title did not match the configured role filter.",
   no_resume: "No resume was pinned for this run.",
   model_unavailable: "The model target was unavailable.",
