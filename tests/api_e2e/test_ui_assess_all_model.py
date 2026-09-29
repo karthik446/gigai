@@ -221,3 +221,9 @@ def test_the_jobs_page_has_the_button_the_confirm_line_and_live_counts() -> None
 def test_the_built_bundle_carries_assess_all_new() -> None:
     bundle = "".join(path.read_text(encoding="utf-8") for path in (UI / "dist" / "assets").glob("index-*.js"))
     assert "Assess all new (" in bundle and "All new postings" in bundle and "/assess-all" in bundle
+
+
+def test_a_saved_all_cap_shows_as_all_new_postings_in_the_config_panel_and_profiles() -> None:
+    for name in ("components/ConfigPanel.jsx", "views/ProfilesView.jsx"):
+        source = (UI_SRC / name).read_text(encoding="utf-8")
+        assert 'isAssessAll(config.default_assess_cap) ? "All new postings" : config.default_assess_cap' in source, name

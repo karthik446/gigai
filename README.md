@@ -61,8 +61,8 @@ or assessment. What your machine sends to the model target is exactly:
   figure. Your name, email, phone, address and links are never sent for
   ranking (they are stripped from the digest). The full resume and the
   full posting text are not sent for ranking.
-- **Assessment** sends the posting text and your resume, as before, for each
-  posting being assessed. A pasted resume is used for that assessment only: its full text is never saved and never sent anywhere but your assessment model; the stored result keeps short evidence quotes on your machine.
+- **Assessment** sends the posting text and your resume for each posting
+  being assessed, including each posting "Assess all new" assesses. A pasted resume is used for that assessment only: its full text is never saved and never sent anywhere but your assessment model; the stored result keeps short evidence quotes on your machine.
 - **With a local Ollama target nothing leaves the machine.** Scout only
   talks to Ollama on a numeric loopback address (`127.0.0.1`).
 - With `codex_cli` (the Codex CLI sends it to OpenAI), `claude_cli` (the
@@ -76,6 +76,18 @@ Ranking scores are cached on disk under `<home>/cache/scout/rank/scores/`
 text); the cache is safe to delete. What ranking costs is whatever your
 model target charges; a run makes a bounded number of ranking calls, and
 postings past that bound stay unranked and keep date order.
+
+**Assess all new.** A run assesses its top-ranked postings automatically (the
+run's "Full assessments" setting). On a finished run, **Assess all new**
+assesses the rest in the background: one model call per posting, 4 at a time,
+with Cancel, and a second click resumes without redoing finished ones. The run
+dialog's "All new postings" choice does the same during the run and is the
+starting choice for the `ollama_local`, `codex_cli` and `claude_cli` targets;
+`openrouter_api` starts on a number. Runs on the `codex_cli` and
+`claude_cli` targets use your own CLI login and its usage limits; Scout passes
+them no API key. With a hosted model target each posting's assessment sends
+your resume and that posting to that provider, exactly as any other assessment
+does. A time estimate is shown only once a per-call time has been measured.
 
 **Network traffic besides your model.** Scout makes these other requests:
 
@@ -297,7 +309,7 @@ Nothing in it leaves the machine.
 takes your watchlist companies' stored postings, applies your titles, the
 publication window, the country rule and your work-mode preference, ranks
 every posting that passes, and fully assesses the top-ranked ones (the run's
-"Full assessments" setting) in the background, with no board request, so it takes seconds, not minutes. Run **Update
+"Full assessments" setting) in the background, with no board request, so it takes seconds, not minutes. **Assess all new** on the finished run assesses the rest. Run **Update
 sources** first, and again whenever you want fresh postings:
 
 - nothing stored yet: the search says `Run Update sources` instead of

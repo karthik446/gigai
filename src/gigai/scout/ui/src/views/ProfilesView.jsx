@@ -4,6 +4,7 @@ import { archiveProfile, createProfile, updateProfile } from "../api.js";
 import { useRuns } from "../hooks.js";
 import { relativeTimeLabel } from "../display.js";
 import { modelTargetLabel } from "../modelTargets.js";
+import { isAssessAll } from "../assessAllModel.js";
 
 // P9/P9c (F3): Profiles.
 //
@@ -298,7 +299,7 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
           <div className="field-row">
             <div className="field">
               <div className="label">Default full assessments</div>
-              <div className="value">{config.default_assess_cap}</div>
+              <div className="value">{isAssessAll(config.default_assess_cap) ? "All new postings" : config.default_assess_cap}</div>
             </div>
             <div className="field">
               <div className="label">Model target</div>

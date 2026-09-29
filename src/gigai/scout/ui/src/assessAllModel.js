@@ -34,8 +34,8 @@ export function capValid(cap) {
 }
 
 // The dialog's starting choice: "All new postings" for a local CLI target
-// (Ollama, Codex, Claude: no per-token bill), a number for a target billed per
-// token -- the saved number, else 10.
+// (Ollama, Codex, Claude), a number for the target treated as billed per
+// token (OpenRouter) -- the saved number, else 10.
 export function defaultSelectionCap(savedCap, modelTarget) {
   if (PER_TOKEN_TARGETS.includes(modelTarget)) {
     return Number.isInteger(savedCap) ? savedCap : 10;

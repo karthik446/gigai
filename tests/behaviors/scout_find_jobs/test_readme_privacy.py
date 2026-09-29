@@ -159,3 +159,17 @@ def test_the_readme_says_tailored_resumes_are_drafts_and_states_the_evidence_exa
     changelog = _flat((Path(__file__).resolve().parents[3] / "CHANGELOG.md").read_text(encoding="utf-8"))
     assert "Tailored resumes are drafts." in changelog and "0.6% and 0.66% of lines" in changelog
     assert "The setup wizard saves your model choice as the default model target." in changelog
+
+
+def test_assess_all_new_is_described_and_keeps_the_privacy_statement_true() -> None:
+    # uat-bug-042: quick_assess sends the posting and resume (assessment_core.render_assess_prompt); the
+    # background job calls that same path (find_jobs/assess_all.quick_assess_one) with the run's model target.
+    from gigai.scout.find_jobs import assess_all
+
+    assert assess_all.ASSESS_CONCURRENCY == 4
+    text = _flat(_text())
+    assert "**Assess all new.** A run assesses its top-ranked postings automatically" in text
+    assert "one model call per posting, 4 at a time" in text
+    assert "per-token" not in text and "Scout passes them no API key" in text
+    assert "each posting's assessment sends your resume and that posting to that provider" in text
+    assert "including each posting \"Assess all new\" assesses" in _privacy()

@@ -50,6 +50,21 @@ mechanics here. Those belong in the internal changelog.
   when there is one, else from the location text (labelled as derived);
   postings whose mode cannot be told are kept and labelled.
 - **Assess button** on run postings that were not assessed, on the job page.
+- **Assess all new.** A finished run has an **Assess all new** button that
+  assesses every new posting the run did not assess, in the background, four
+  at a time; you can cancel it and click again to resume without redoing
+  finished ones, and the counts and cards update as results land. The run
+  dialog's "Full assessments" now offers **All new postings**, the starting
+  choice for the Codex, Claude and Ollama targets (OpenRouter starts on a
+  number). A time estimate is shown only when a per-call time has been
+  measured. Codex and Claude CLI runs use your own CLI login and its usage limits
+  (Scout passes them no API key); a hosted
+  target sends each posting's assessment to that provider.
+- **Tailored resume "Show changes".** The tailored resume shows each rewritten
+  line with the original line(s) it came from struck through above it, the
+  new words highlighted, and a summary of lines rewritten and copied and
+  "New words (not in the cited lines)". A **Clean copy** toggle shows the
+  resume as formatted text; the downloaded `.md` is unchanged.
 - **Questions first** on the job page: your open questions sit at the top,
   with the requirements table collapsed below.
 - **Per-skill requirement rows.** A requirement that joins unrelated skills
@@ -92,6 +107,13 @@ mechanics here. Those belong in the internal changelog.
 
 #### Changed
 
+- **Full assessments wording.** The run dialog's cap is "Full assessments" with
+  a line saying every matching posting is ranked; postings past the limit are
+  labelled "Not fully assessed" (use Assess to assess one), and Settings says
+  "Default full assessments". A saved "all" shows as "All new postings".
+- **Tailoring status sits next to the Tailor button** with the model name and
+  a running timer, and points to the result or the error when it finishes.
+  The requirements table on the job page is always open.
 - **The setup wizard saves your model choice as the default model target.** The one
   "Model for Scout" choice reads your resume and is also the model your runs use
   (change it later in Settings or in a run's dialog). An existing setup keeps
@@ -122,6 +144,24 @@ mechanics here. Those belong in the internal changelog.
   skills, domain and years, no header or contact details); assessment sends
   the posting and your resume; with a local Ollama target nothing leaves the
   machine.
+
+#### Fixed
+
+- **Lever postings keep their requirements.** When Lever's plain text is cut
+  down, Scout now uses the full HTML description (about 2% of Lever postings).
+  The first Update sources after upgrading re-reads every Lever company once
+  from the local cache; postings whose text grew show as changed.
+- An assessment of a long posting that finds fewer than 3 real requirement
+  rows is no longer reported as Matched: it is not assessed, with "Posting text
+  looks incomplete: open the posting".
+  Known limit: an assessment saved before this fix stays as it was until you
+  click Assess again.
+- The tailored resume preview no longer shows doubled heading markers
+  ("### ### GUILD EDUCATION").
+
+Known limit: choosing "All new postings" in the run dialog is not written back
+to `find-jobs.json`; set `"default_assess_cap": "all"` there to make it the
+saved default.
 
 #### Removed
 
