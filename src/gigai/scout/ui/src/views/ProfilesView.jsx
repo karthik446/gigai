@@ -297,7 +297,7 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
           </div>
           <div className="field-row">
             <div className="field">
-              <div className="label">Default assess cap</div>
+              <div className="label">Default full assessments</div>
               <div className="value">{config.default_assess_cap}</div>
             </div>
             <div className="field">

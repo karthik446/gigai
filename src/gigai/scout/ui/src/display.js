@@ -66,7 +66,7 @@ function formatShortDate(isoDate) {
 }
 
 // uat-bug-009: plain-word labels for the not-assessed reason each card shows
-// -- the operator's own words ("Over cap", "Filtered: location",
+// -- the operator's own words ("Not fully assessed", "Filtered: location",
 // "Duplicate") in place of the longer sentences below, which stay as the
 // tooltip/detail text (see notAssessedReasonDetail). "Unchanged since
 // <date>" is built separately, from the carried-forward entry's
@@ -78,7 +78,7 @@ const NOT_ASSESSED_REASON_LABELS = {
   unchanged: "Unchanged",
   duplicate: "Duplicate",
   failed: "Acquisition failed",
-  over_cap: "Over cap",
+  over_cap: "Not fully assessed",
   role_mismatch: "Filtered: role",
   no_resume: "No resume pinned",
   model_unavailable: "Model unavailable",
