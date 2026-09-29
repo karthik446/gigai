@@ -7,10 +7,11 @@
 import { formatCount } from "./runText.js";
 import { boardsChecked, isRunning, sourcesProgress } from "./sourcesModel.js";
 
-// MEASURED, not estimated: the operator's own update on 2026-09-29 (read from
+// A lower bound: the operator's own update on 2026-09-29 (read from
 // ~/.gigai/cache/scout/companies/last-update.json, status succeeded,
 // started 18:18:14Z, finished 18:33:05Z = 14.85 min for 10,370 boards, 50
-// did not answer). Shown as "about 15 min". Re-measure before changing it.
+// did not answer) was partly served from cache. Shown as "15 minutes or more".
+// Re-measure a cold first update before turning this into an estimate.
 export const MEASURED_UPDATE_MINUTES = 15;
 
 function count(value) {
@@ -69,7 +70,7 @@ export function sourcesStrip(status, { now = Date.now() } = {}) {
       amber: false,
       steps: {
         highlightStep: 1,
-        update: `Update sources: downloads postings from ${boards} (uses the network, no model; about ${MEASURED_UPDATE_MINUTES} min)`,
+        update: `Update sources: downloads postings from ${boards} (uses the network, no model; can take ${MEASURED_UPDATE_MINUTES} minutes or more the first time)`,
         run: "Run find jobs",
       },
       runBlocked: running ? "Updating sources… Run find jobs opens when it finishes." : "Update sources first, then run.",

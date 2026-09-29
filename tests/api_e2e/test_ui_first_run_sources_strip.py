@@ -57,7 +57,7 @@ def test_empty_store_shows_numbered_steps_and_blocks_run(out: dict) -> None:
     assert empty["kind"] == "empty"
     assert empty["steps"]["highlightStep"] == 1
     assert empty["steps"]["update"].startswith("Update sources: downloads postings from")
-    assert "about 15 min" in empty["steps"]["update"]
+    assert "can take 15 minutes or more the first time" in empty["steps"]["update"]
     assert empty["steps"]["run"] == "Run find jobs"
     assert empty["runBlocked"] == "Update sources first, then run."
 
