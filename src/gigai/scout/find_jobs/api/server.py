@@ -1399,6 +1399,7 @@ def _make_handler(
     from .answers import AnswersRoutesMixin
     from .applications import ApplicationsRoutesMixin
     from .assess import AssessRoutesMixin
+    from .assess_all import AssessAllRoutesMixin
     from .config import ConfigRoutesMixin
     from .discover import DiscoverRoutesMixin
     from .extract import ResumeExtractRoutesMixin
@@ -1423,6 +1424,7 @@ def _make_handler(
         ProfilesRoutesMixin,
         RankRoutesMixin,
         AssessRoutesMixin,
+        AssessAllRoutesMixin,
         AnswersRoutesMixin,
         ApplicationsRoutesMixin,
         ResumeExtractRoutesMixin,
@@ -1710,6 +1712,10 @@ def _make_handler(
                 run_id = _match_run_id(path, suffix="/rank")
                 if run_id is not None:
                     self._handle_post_rank(run_id)
+                    return
+                run_id = _match_run_id(path, suffix="/assess-all")
+                if run_id is not None:
+                    self._handle_post_assess_all(run_id)
                     return
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
             except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET

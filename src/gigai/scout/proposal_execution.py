@@ -180,6 +180,7 @@ def _assess_node_body(
     """
     from .find_jobs.contracts import (
         AssessOutput,
+        is_assess_all,
         AssessmentResult,
         MatrixStatus,
         NotAssessedReason,
@@ -259,7 +260,7 @@ def _assess_node_body(
     from .find_jobs.filters import exclusion_reason
     from .find_jobs.market_acquisition import _default_profile_id, _prior_assessments, _role_match
     from .find_jobs import rank_run
-    from .find_jobs.selection import select_for_assessment
+    from .find_jobs.selection import select_for_assessment, selection_limits
     from ..workpad import resolve_workpad
 
     selected_by_url = {item.normalized_url: item for item in input.selected_postings}
@@ -384,9 +385,11 @@ def _assess_node_body(
             for posting, _outcome in acquire_rows
             if posting.normalized_url in selected_by_url or posting.normalized_url in eligible_urls
         ]
+        recompute_cap, recompute_per_company = selection_limits(input.selection_cap)
         recomputed = select_for_assessment(
             candidates_in_acquire_order,
-            cap=input.selection_cap,
+            cap=recompute_cap,
+            per_company=recompute_per_company,
             rank_scores=rank_run.sealed_rank_scores(Path(context.workpad_path), context.run_id, candidates_in_acquire_order),
         )
         drop_reason_by_url = {
@@ -433,37 +436,23 @@ def _assess_node_body(
         location=prompt_location,
     )
 
-    for posting, posting_text in to_assess[: input.selection_cap]:
-        if not posting_text:
-            # U25: an older acquire batch (or a row the acquirer genuinely
-            # could not fetch) has no captured posting text.  Guessing a
-            # requirements matrix from the title alone is worse than not
-            # assessing it, so this single posting is skipped and the rest
-            # of the batch continues (U22 per-posting isolation).
-            not_assessed.append(NotAssessedRow(posting, NotAssessedReason.FAILED))
-            if progress is not None:
-                progress.not_assessed(posting.normalized_url, reason=NotAssessedReason.FAILED.value)
-            continue
-        attempted += 1
-        if progress is not None:
-            # B4: a "started" line the instant this posting is handed to the
-            # model, so its card can show "assessing…" instead of sitting on
-            # "waiting" for however long the model call + retry takes.
-            progress.assessment_started(posting.normalized_url)
+    def call_model(posting: object, posting_text: bytes) -> object:
         # The frozen assessment_result.posting field is the narrower
         # SelectedPosting DTO, not the full PostingRow the model was
         # shown; use the sealed selected-posting identity so parsing
         # never fails on PostingRow's extra keys (provider,
         # board_token, text, ...).
-        selected_posting = selected_by_url[posting.normalized_url]
-        selected_posting_json = selected_posting.to_json()
+        selected_posting_json = selected_by_url[posting.normalized_url].to_json()
 
         def parse_selected(normalized: dict[str, object], _posting_json: dict = selected_posting_json) -> object:
             return parse_assessment_proposal(
                 {**normalized, "posting": _posting_json, "proposal_revision_ref": None}
             )
 
-        outcome = assess_once(binding, _assess_job(posting, posting_text), assess_context, parse=parse_selected)
+        return assess_once(binding, _assess_job(posting, posting_text), assess_context, parse=parse_selected)
+
+    def record_outcome(posting: object, outcome: object) -> None:
+        nonlocal model_attempts
         model_attempts += outcome.attempts
         if not outcome.ok:
             # MODEL_DENIED / MODEL_UNAVAILABLE / MODEL_OUTPUT_INVALID, mapped
@@ -474,12 +463,12 @@ def _assess_node_body(
             not_assessed.append(NotAssessedRow(posting, reason))
             if progress is not None:
                 progress.assessment_finished(posting.normalized_url, ok=False, reason=reason.value)
-            continue
+            return
         parsed = outcome.parsed
         saved = save_assessment_revision(
             home_root=home_root,
             target=resolved,
-            posting=selected_posting,
+            posting=selected_by_url[posting.normalized_url],
             result=parsed,
             producer=producer,
             pinned_resume=input.pinned_resume,
@@ -491,6 +480,84 @@ def _assess_node_body(
         usage_values.append(outcome.usage)
         if progress is not None:
             progress.assessment_finished(posting.normalized_url, ok=True, assessment_json=parsed.to_json())
+
+    cap_limit, _per_company = selection_limits(input.selection_cap)
+
+    def without_text(posting: object) -> None:
+        # U25: an older acquire batch (or a row the acquirer genuinely
+        # could not fetch) has no captured posting text.  Guessing a
+        # requirements matrix from the title alone is worse than not
+        # assessing it, so this single posting is skipped and the rest
+        # of the batch continues (U22 per-posting isolation).
+        not_assessed.append(NotAssessedRow(posting, NotAssessedReason.FAILED))
+        if progress is not None:
+            progress.not_assessed(posting.normalized_url, reason=NotAssessedReason.FAILED.value)
+
+    if not is_assess_all(input.selection_cap):
+        # A numeric cap: one posting at a time, exactly as before.
+        for posting, posting_text in to_assess[:cap_limit]:
+            if not posting_text:
+                without_text(posting)
+                continue
+            attempted += 1
+            if progress is not None:
+                # B4: a "started" line the instant this posting is handed to the
+                # model, so its card can show "assessing…" instead of sitting on
+                # "waiting" for however long the model call + retry takes.
+                progress.assessment_started(posting.normalized_url)
+            record_outcome(posting, call_model(posting, posting_text))
+    else:
+        # uat-bug-042: "all" is up to ASSESS_ALL_CEILING model calls, so they
+        # run ASSESS_CONCURRENCY at a time (each codex/claude child is
+        # ~260-330 MB). Only the model call runs on a worker thread; the
+        # progress lines, the saved revision and the sealed lists are written
+        # here, one at a time, as each call lands. The sealed assessments are
+        # then put back in selection order, so the output does not depend on
+        # which call finished first.
+        from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait as wait_futures
+
+        from .find_jobs.assess_all import assess_concurrency
+
+        ready: list[tuple[object, bytes]] = []
+        for posting, posting_text in to_assess[:cap_limit]:
+            if posting_text:
+                ready.append((posting, posting_text))
+            else:
+                without_text(posting)
+        order = {posting.normalized_url: index for index, (posting, _text) in enumerate(ready)}
+        failed_from = len(not_assessed)
+        pending = iter(ready)
+        with ThreadPoolExecutor(max_workers=assess_concurrency(), thread_name_prefix="scout-assess") as pool:
+            in_flight: dict[object, object] = {}
+
+            def submit_next() -> bool:
+                nonlocal attempted
+                item = next(pending, None)
+                if item is None:
+                    return False
+                posting, posting_text = item
+                attempted += 1
+                if progress is not None:
+                    progress.assessment_started(posting.normalized_url)
+                in_flight[pool.submit(call_model, posting, posting_text)] = posting
+                return True
+
+            while len(in_flight) < assess_concurrency() and submit_next():
+                pass
+            while in_flight:
+                done, _running = wait_futures(tuple(in_flight), return_when=FIRST_COMPLETED)
+                for future in done:
+                    posting = in_flight.pop(future)
+                    # An exception assess_once does not name propagates, as in
+                    # the sequential loop; the pool waits for the calls in flight.
+                    record_outcome(posting, future.result())
+                    submit_next()
+        def in_order(url: str) -> int:
+            return order.get(url, len(order))
+
+        assessments.sort(key=lambda item: in_order(item.posting.normalized_url))
+        revisions[:] = [item.proposal_revision_ref for item in assessments if item.proposal_revision_ref]
+        not_assessed[failed_from:] = sorted(not_assessed[failed_from:], key=lambda row: in_order(row.posting.normalized_url))
 
     if attempted and model_attempts and not assessments:
         # Every posting that had text and reached the model failed there.

@@ -377,6 +377,13 @@ export function postRank(runId, fields) {
   return request("POST", `/api/runs/${encodeURIComponent(runId)}/rank`, fields || {});
 }
 
+// uat-bug-042: "Assess all new" for one run: {} reads the plan, the newest job
+// and the run's live counts; {start: true} starts or joins; {cancel: true}
+// stops (what finished is kept). See assessAllModel.js.
+export function postAssessAll(runId, fields) {
+  return request("POST", `/api/runs/${encodeURIComponent(runId)}/assess-all`, fields || {});
+}
+
 // P9c: every find-jobs run for this target (newest first), with per-run
 // counts (found/new/assessed/matched) -- the dashboard's "last run"/"new
 // since last run", the Profiles run-history table, and the Find-jobs

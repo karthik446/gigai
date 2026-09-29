@@ -91,11 +91,16 @@ def test_the_job_page_offers_assess_only_once_the_run_has_ended() -> None:
 
 
 def test_the_cap_reads_as_full_assessments_not_as_a_limit_on_what_is_looked_at() -> None:
-    """uat-bug-040: wording only; the field, config key and range are unchanged."""
+    """uat-bug-040: wording only; the field, config key and range are unchanged.
+
+    uat-bug-042: the field is "Full assessments" with "All new postings" or
+    "Top-ranked only (1-50)"; the number's helper line is unchanged and now
+    lives in assessAllModel.js (fullAssessmentsHelp)."""
     dialog = (UI_SRC / "components" / "RunConfirmDialog.jsx").read_text()
-    assert "Full assessments (1-50)" in dialog and "Assessment cap" not in dialog
-    assert "Every matching posting is ranked. This many of the top-ranked ones are then assessed in full; you can assess the" in " ".join(dialog.split())
-    assert "rest one at a time with Assess." in dialog
+    assert "Full assessments" in dialog and "Top-ranked only (1-{SELECTION_CAP_MAX})" in dialog and "Assessment cap" not in dialog
+    model = (UI_SRC / "assessAllModel.js").read_text()
+    assert "Every matching posting is ranked. This many of the top-ranked ones are then assessed in full; you can assess the" in " ".join(model.split())
+    assert "rest one at a time with Assess." in model and "fullAssessmentsHelp(selectionCap, modelTarget)" in dialog
     assert "config.default_assess_cap" in dialog and "min={1}" in dialog and "max={50}" in dialog
     display = (UI_SRC / "display.js").read_text()
     assert "Ranked below the full-assessment limit for this run. Use Assess to assess it now." in display

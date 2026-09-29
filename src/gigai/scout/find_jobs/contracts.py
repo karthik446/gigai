@@ -371,6 +371,45 @@ def _integer(value: object, name: str, *, minimum: int | None = None, maximum: i
     return value
 
 
+#: uat-bug-042: a run's "Full assessments" setting is a number (1 to
+#: :data:`SELECTION_CAP_MAXIMUM`, the cap every older config and sealed run
+#: carries) or, explicitly, :data:`ASSESS_ALL`: every new posting the run
+#: imports. "all" is its own JSON value (a string), never a big number, so a
+#: numeric config or sealed run serializes -- and digests -- exactly as before.
+ASSESS_ALL = "all"
+SELECTION_CAP_MAXIMUM = 50
+#: The most postings one run assesses in full when its cap is "all": the
+#: import cap (``market_acquisition.IMPORT_ROW_CAP``), so "all" is every
+#: imported posting. It is a ceiling so a later import-cap change can never
+#: make a run's model calls unbounded; past it, rows are "over the limit" and
+#: the run says so (``market_acquisition``).
+ASSESS_ALL_CEILING = 500
+
+SelectionCap = int | str
+
+
+def selection_cap_value(value: object, name: str) -> SelectionCap:
+    """A cap from JSON: an integer 1..50, or the string ``"all"``."""
+
+    if value == ASSESS_ALL and type(value) is str:
+        return ASSESS_ALL
+    if type(value) is str:
+        _fail("invalid_value", f'{name} must be an integer from 1 to {SELECTION_CAP_MAXIMUM} or "{ASSESS_ALL}"')
+    return _integer(value, name, minimum=1, maximum=SELECTION_CAP_MAXIMUM)
+
+
+def is_assess_all(cap: object) -> bool:
+    """True when ``cap`` means every new posting (``"all"``)."""
+
+    return cap == ASSESS_ALL
+
+
+def selection_cap_limit(cap: SelectionCap) -> int:
+    """How many postings ``cap`` lets a run assess: the number, or :data:`ASSESS_ALL_CEILING` for ``"all"``."""
+
+    return ASSESS_ALL_CEILING if is_assess_all(cap) else int(cap)
+
+
 def _enum(value: object, enum_type: type[StrEnum], name: str) -> StrEnum:
     if type(value) is not str:
         _fail("wrong_type", f"{name} must be a string enum value")
@@ -532,7 +571,7 @@ class FindJobsConfig(_Contract):
     remote: bool
     published_after: str | None
     sources: SourceToggles
-    default_assess_cap: int = 10
+    default_assess_cap: SelectionCap = 10
     default_model_target: ModelTarget = ModelTarget.OLLAMA_LOCAL
     countries: tuple[str, ...] = ()
     visa_sponsorship_required: bool = False
@@ -620,7 +659,7 @@ class FindJobsConfig(_Contract):
             _bool(value["remote"], "remote"),
             _optional_string(value["published_after"], "published_after"),
             SourceToggles.from_json(value["sources"]),
-            _integer(value["default_assess_cap"], "default_assess_cap", minimum=1, maximum=50),
+            selection_cap_value(value["default_assess_cap"], "default_assess_cap"),
             _enum(value["default_model_target"], ModelTarget, "default_model_target"),
             countries,
             visa_sponsorship_required,
@@ -1046,7 +1085,7 @@ class FindJobsRunInput(_Contract):
     schema_version: ClassVar[str] = "scout-find-jobs-run-input:1"
     config: FindJobsConfig
     config_digest: str
-    selection_cap: int
+    selection_cap: SelectionCap
     selection_rule: SelectionRule
     model_target: ModelTarget
     pinned_resume: PinnedResume
@@ -1089,7 +1128,7 @@ class FindJobsRunInput(_Contract):
         return cls(
             config,
             config_digest,
-            _integer(value["selection_cap"], "selection_cap", minimum=1, maximum=50),
+            selection_cap_value(value["selection_cap"], "selection_cap"),
             _enum(value["selection_rule"], SelectionRule, "selection_rule"),
             _enum(value["model_target"], ModelTarget, "model_target"),
             PinnedResume.from_json(value["pinned_resume"]),
@@ -1104,7 +1143,7 @@ class AcquireInput(_Contract):
     config_digest: str
     prior_batch_digest: str | None
     rows: tuple[PostingRow, ...]
-    selection_cap: int
+    selection_cap: SelectionCap
     selection_rule: SelectionRule
 
     def to_json(self) -> dict[str, object]:
@@ -1130,7 +1169,7 @@ class AcquireInput(_Contract):
             _digest_value(value["config_digest"], "config_digest"),
             _optional_digest(value["prior_batch_digest"], "prior_batch_digest"),
             tuple(PostingRow.from_json(item) for item in value["rows"]),
-            _integer(value["selection_cap"], "selection_cap", minimum=1, maximum=50),
+            selection_cap_value(value["selection_cap"], "selection_cap"),
             _enum(value["selection_rule"], SelectionRule, "selection_rule"),
         )
 
@@ -1728,7 +1767,7 @@ class AssessInput(_Contract):
     acquire_batch_ref: str
     acquire_output_digest: str
     selected_postings: tuple[SelectedPosting, ...]
-    selection_cap: int
+    selection_cap: SelectionCap
     selection_reasons: tuple[SelectionReason, ...]
     pinned_resume: PinnedResume
     target: str
@@ -1758,7 +1797,7 @@ class AssessInput(_Contract):
             _fail("wrong_type", "assess_input selection arrays are malformed")
         selected = tuple(SelectedPosting.from_json(item) for item in value["selected_postings"])
         reasons = tuple(SelectionReason(_string(key, "selection_reasons.key"), _enum(reason, SelectionReasonCode, f"selection_reasons.{key}")) for key, reason in value["selection_reasons"].items())
-        result = cls(_string(value["acquire_batch_ref"], "acquire_batch_ref"), _digest_value(value["acquire_output_digest"], "acquire_output_digest"), selected, _integer(value["selection_cap"], "selection_cap", minimum=1, maximum=50), reasons, PinnedResume.from_json(value["pinned_resume"]), _string(value["target"], "target"), _enum(value["model_target"], ModelTarget, "model_target"), _string(value["answer_association_version"], "answer_association_version"))
+        result = cls(_string(value["acquire_batch_ref"], "acquire_batch_ref"), _digest_value(value["acquire_output_digest"], "acquire_output_digest"), selected, selection_cap_value(value["selection_cap"], "selection_cap"), reasons, PinnedResume.from_json(value["pinned_resume"]), _string(value["target"], "target"), _enum(value["model_target"], ModelTarget, "model_target"), _string(value["answer_association_version"], "answer_association_version"))
         _validate_assess_input(result)
         return result
 
@@ -1767,7 +1806,7 @@ def _validate_assess_input(value: AssessInput) -> None:
     urls = tuple(item.normalized_url for item in value.selected_postings)
     if len(urls) != len(set(urls)):
         _fail("invalid_value", "assess_input.selected_postings must be unique")
-    if len(urls) > value.selection_cap:
+    if len(urls) > selection_cap_limit(value.selection_cap):
         _fail("invalid_value", "assess_input selected postings exceed selection_cap")
     if any(not item.role_match for item in value.selected_postings):
         _fail("invalid_value", "assess_input selected postings must match the role filter")
@@ -1786,7 +1825,7 @@ class AssessOutput(_Contract):
     selected_postings: tuple[SelectedPosting, ...]
     pinned_resume: PinnedResume
     target: str
-    selection_cap: int
+    selection_cap: SelectionCap
     selection_rule: SelectionRule
     candidate_rows: tuple[PostingRowResult, ...]
     assessments: tuple[AssessmentResult, ...]
@@ -1823,12 +1862,12 @@ class AssessOutput(_Contract):
         if type(value["selected_postings"]) is not list or type(value["candidate_rows"]) is not list or type(value["assessments"]) is not list or type(value["not_assessed"]) is not list or type(value["failures"]) is not list:
             _fail("wrong_type", "assess_output arrays are malformed")
         usage = None if value["usage"] is None else UsageBlock.from_json(value["usage"])
-        result = cls(tuple(SelectedPosting.from_json(item) for item in value["selected_postings"]), PinnedResume.from_json(value["pinned_resume"]), _string(value["target"], "target"), _integer(value["selection_cap"], "selection_cap", minimum=1, maximum=50), _enum(value["selection_rule"], SelectionRule, "selection_rule"), tuple(PostingRowResult.from_json(item) for item in value["candidate_rows"]), tuple(AssessmentResult.from_json(item) for item in value["assessments"]), tuple(NotAssessedRow.from_json(item) for item in value["not_assessed"]), _strings(value["proposal_revision_refs"], "proposal_revision_refs", allow_empty=True), _enum(value["model_target"], ModelTarget, "model_target"), Producer.from_json(value["producer"]), usage, tuple(FailureRow.from_json(item) for item in value["failures"]))
+        result = cls(tuple(SelectedPosting.from_json(item) for item in value["selected_postings"]), PinnedResume.from_json(value["pinned_resume"]), _string(value["target"], "target"), selection_cap_value(value["selection_cap"], "selection_cap"), _enum(value["selection_rule"], SelectionRule, "selection_rule"), tuple(PostingRowResult.from_json(item) for item in value["candidate_rows"]), tuple(AssessmentResult.from_json(item) for item in value["assessments"]), tuple(NotAssessedRow.from_json(item) for item in value["not_assessed"]), _strings(value["proposal_revision_refs"], "proposal_revision_refs", allow_empty=True), _enum(value["model_target"], ModelTarget, "model_target"), Producer.from_json(value["producer"]), usage, tuple(FailureRow.from_json(item) for item in value["failures"]))
         selected_urls = tuple(item.normalized_url for item in result.selected_postings)
         candidate_urls = {item.posting.normalized_url for item in result.candidate_rows}
         if len(selected_urls) != len(set(selected_urls)):
             _fail("invalid_value", "assess_output selected postings must be unique")
-        if len(selected_urls) > result.selection_cap:
+        if len(selected_urls) > selection_cap_limit(result.selection_cap):
             _fail("invalid_value", "assess_output selected postings exceed selection_cap")
         if any(not item.role_match for item in result.selected_postings):
             _fail("invalid_value", "assess_output selected postings must match the role filter")
@@ -2227,7 +2266,7 @@ class RunRequest(_Contract):
     schema_version: ClassVar[str] = "scout-find-jobs-run-request:1"
     consent: UIConsentEnvelope
     config_digest: str
-    selection_cap: int
+    selection_cap: SelectionCap
     selection_rule: SelectionRule
     model_target: ModelTarget
 
@@ -2239,7 +2278,7 @@ class RunRequest(_Contract):
         value = _object(obj, ("schema_version", "consent", "config_digest", "selection_cap", "selection_rule", "model_target"), "run_request")
         if value["schema_version"] != cls.schema_version:
             _fail("bad_enum", "run_request.schema_version is unsupported")
-        return cls(UIConsentEnvelope.from_json(value["consent"]), _digest_value(value["config_digest"], "config_digest"), _integer(value["selection_cap"], "selection_cap", minimum=1, maximum=50), _enum(value["selection_rule"], SelectionRule, "selection_rule"), _enum(value["model_target"], ModelTarget, "model_target"))
+        return cls(UIConsentEnvelope.from_json(value["consent"]), _digest_value(value["config_digest"], "config_digest"), selection_cap_value(value["selection_cap"], "selection_cap"), _enum(value["selection_rule"], SelectionRule, "selection_rule"), _enum(value["model_target"], ModelTarget, "model_target"))
 
 
 @dataclass(frozen=True)
@@ -2380,6 +2419,7 @@ __all__ = [
     "ASSESS_CAPABILITY", "ASSESS_CAPABILITY_ID", "ASSESS_DECLARED_EFFECTS", "ASSESS_EFFECTS", "ASSESS_LOCAL_EFFECTS",
     "API_BIND", "ATSBoardClient", "ATSProvider", "AcquireInput", "AcquireNodeCallable", "AcquireOutput", "ExaSearchClient",
     "AggregateStatus", "ArtifactRef", "AssessmentQuestion", "AssessmentResult", "AssessInput", "AssessNodeCallable", "AssessOutput", "ConsentActor", "ConfigRequest", "ConfigResponse",
+    "ASSESS_ALL", "ASSESS_ALL_CEILING", "SELECTION_CAP_MAXIMUM", "SelectionCap", "is_assess_all", "selection_cap_limit", "selection_cap_value",
     "DEFAULT_MAX_AGE_DAYS", "DropCount", "LOCATION_PLACEHOLDER_PREFIX", "MAX_AGE_DAYS_MAXIMUM", "is_location_placeholder",
     "EditedURL", "FindJobsConfig", "FindJobsContractError", "FailureRow", "FindJobsRunInput", "FindJobsConfig", "GoalError", "GoalStatus", "MatrixStatus", "ModelTarget", "NodeContext",
     "NodeFailure", "NodeReceipt", "NodeReceiptFixture", "NodeReceiptStatus", "NodeStatus", "NodeCallable", "NormalizedPostingRow", "NormalizedPublicPostingRow", "NotAssessedReason",

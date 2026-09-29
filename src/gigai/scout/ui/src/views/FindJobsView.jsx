@@ -8,6 +8,7 @@ import {
   createResultsPager,
   getRuns,
   getRunStatus,
+  postAssessAll,
   postRank,
   startRun,
   storedRankScores,
@@ -26,6 +27,17 @@ import { PASTED_RESUME_KEY, addRunPostings, assessmentJobs, buildJobs, dateTimeL
 import { createRankPass, isRanked, mergeRankScores, rankButtonLabel, rankPassLine, rankPassRunning } from "../rankModel.js";
 import { needAnswersCount, withJobStates } from "../jobStateModel.js";
 import { runFailure } from "../runText.js";
+import {
+  assessAllButtonLabel,
+  assessAllRunning,
+  createAssessAllPoll,
+  estimateSourceLine,
+  jobLine,
+  planLine,
+  privacyLine,
+  skipReasonText,
+  withLiveCounts,
+} from "../assessAllModel.js";
 import { indexNotice } from "../sourcesModel.js";
 import { ASSESSMENTS_HASH, RUNS_HASH, SETTINGS_HASH, runHash } from "../routing.js";
 
@@ -97,6 +109,14 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 // re-rank pass by the same model, whose scores re-order the grid as they
 // land, with Cancel ({cancel: true}); when it ends the results are read
 // again for the new reasons (rankModel.createRankPass).
+//
+// uat-bug-042: a finished run's grid also has "Assess all new (N)": POST
+// /assess-all reads the plan (N new postings not assessed yet, the run's
+// model, K at a time, a minute figure only when a call was timed); the click
+// shows that line first and "Start" queues them all in the background
+// (rank order, K at a time, cancellable; a start after a cancel skips what
+// finished). While it runs the store is re-read as results land, so cards
+// and the header's Assessed / Matched / Need your answers move with it.
 //
 // Still DROPPED from the mockup (no backing API): "New since last run".
 // Phase 2 fields (work_mode / pay / H-1B count, tailored resume) render
@@ -172,6 +192,12 @@ export default function FindJobsView({
   const [rankRecord, setRankRecord] = useState(null);
   const [rankStarting, setRankStarting] = useState(false);
   const [rankError, setRankError] = useState(null);
+  // uat-bug-042: what POST /assess-all last said about the shown run
+  // ({plan, job, counts, skip_reason}); whether the confirm line is open.
+  const [assessAll, setAssessAll] = useState(null);
+  const [assessAllConfirm, setAssessAllConfirm] = useState(false);
+  const [assessAllError, setAssessAllError] = useState(null);
+  const assessAllPoll = useRef(null);
   const [quickItems, setQuickItems] = useState([]);
   // Assessments made against a PASTED resume: the store files them under no
   // profile, so the profile's list never has them. Cards on Assessments
@@ -224,6 +250,13 @@ export default function FindJobsView({
     setRankRecord(null);
     setRankStarting(false);
     setRankError(null);
+    if (assessAllPoll.current) {
+      assessAllPoll.current.poll.stop();
+      assessAllPoll.current = null;
+    }
+    setAssessAll(null);
+    setAssessAllConfirm(false);
+    setAssessAllError(null);
   }, []);
 
   useEffect(
@@ -232,6 +265,9 @@ export default function FindJobsView({
       stopProgressPolling();
       if (rankPass.current) {
         rankPass.current.pass.stop();
+      }
+      if (assessAllPoll.current) {
+        assessAllPoll.current.poll.stop();
       }
     },
     [stopPolling, stopProgressPolling],
@@ -387,6 +423,53 @@ export default function FindJobsView({
     }
   }, []);
 
+  // uat-bug-042: "Assess all new" for run `id`: `action` is "read", "start"
+  // or "cancel". Each answer that shows more results landed re-reads the
+  // quick-assess store (the cards' verdicts); answers for another run are
+  // dropped.
+  const assessAllDone = useRef(-1);
+  const followAssessAll = useCallback(
+    (id, action) => {
+      if (!assessAllPoll.current || assessAllPoll.current.runId !== id) {
+        if (assessAllPoll.current) {
+          assessAllPoll.current.poll.stop();
+        }
+        assessAllDone.current = -1;
+        const poll = createAssessAllPoll({
+          runId: id,
+          post: postAssessAll,
+          isCurrent: () => shownRunId.current === id,
+          intervalMs: POLL_INTERVAL_MS,
+          onResponse: (response) => {
+            setAssessAllError(null);
+            setAssessAll(response);
+            const job = response ? response.job : null;
+            const landed = job ? (job.assessed || 0) + (job.failed || 0) : 0;
+            if (job && landed !== assessAllDone.current) {
+              if (assessAllDone.current >= 0) {
+                loadQuickItems();
+              }
+              assessAllDone.current = landed;
+            }
+          },
+          onEnd: () => loadQuickItems(),
+          onError: (error) => setAssessAllError(error.message || String(error)),
+        });
+        assessAllPoll.current = { runId: id, poll };
+      }
+      const { poll } = assessAllPoll.current;
+      if (action === "start") {
+        setAssessAllConfirm(false);
+        poll.start();
+      } else if (action === "cancel") {
+        poll.cancel();
+      } else {
+        poll.read();
+      }
+    },
+    [loadQuickItems],
+  );
+
   const loadResults = useCallback(
     (id) => {
       setResultsLoading(true);
@@ -434,6 +517,7 @@ export default function FindJobsView({
           // before a reload)? One read ({} never starts a pass); a running
           // one is followed until it ends.
           followRankPass(id, "read");
+          followAssessAll(id, "read");
         })
         .catch((error) => {
           if (shownRunId.current !== id) {
@@ -444,7 +528,7 @@ export default function FindJobsView({
           setResultsError(error.message || String(error));
         });
     },
-    [loadQuickItems, followRankPass],
+    [loadQuickItems, followRankPass, followAssessAll],
   );
 
   // N33: the grid (or a job page for a posting not loaded yet) wants `count`
@@ -748,6 +832,57 @@ export default function FindJobsView({
   }
 
   const runLabel = currentRun ? `run ${relativeTimeLabel(currentRun.created_at)}` : runActive ? "run in progress" : "";
+  const assessAllJob = assessAll && assessAll.run_id === runId ? assessAll.job : null;
+  const assessAllPlan = assessAll && assessAll.run_id === runId ? assessAll.plan : null;
+  const assessAllCounts = assessAll && assessAll.run_id === runId ? assessAll.counts : null;
+  const assessAllBusy = assessAllRunning(assessAllJob);
+  const assessAllBar =
+    runId && results && !runActive && (assessAllBusy || assessAllJob || (assessAllPlan && assessAllPlan.count > 0) || (assessAll && assessAll.skip_reason)) ? (
+      <div className="rank-bar" data-role="assess-all-bar">
+        {!assessAllBusy && assessAllPlan && assessAllPlan.count > 0 && !assessAllConfirm && (
+          <button
+            type="button"
+            className="button small secondary"
+            data-action="assess-all"
+            onClick={() => setAssessAllConfirm(true)}
+            title="Assess every new posting of this run that is not assessed yet, likely fits first."
+          >
+            {assessAllButtonLabel(assessAllPlan)}
+          </button>
+        )}
+        {!assessAllBusy && assessAllConfirm && assessAllPlan && (
+          <span data-role="assess-all-confirm">
+            <span data-role="assess-all-plan">{planLine(assessAllPlan)}</span>{" "}
+            <span className="muted" data-role="assess-all-estimate">
+              {estimateSourceLine(assessAllPlan)}
+            </span>{" "}
+            {privacyLine(assessAllPlan.model_target) && (
+              <span className="muted" data-role="assess-all-privacy">
+                {privacyLine(assessAllPlan.model_target)}
+              </span>
+            )}{" "}
+            <button type="button" className="button small" data-action="assess-all-start" onClick={() => followAssessAll(runId, "start")}>
+              Start
+            </button>{" "}
+            <button type="button" className="button small secondary" onClick={() => setAssessAllConfirm(false)}>
+              Not now
+            </button>
+          </span>
+        )}
+        {assessAllBusy && (
+          <button type="button" className="button small secondary" data-action="cancel-assess-all" onClick={() => followAssessAll(runId, "cancel")}>
+            Cancel assessing
+          </button>
+        )}
+        {assessAllJob && (
+          <span className="muted" data-role="assess-all-progress" data-assess-all-status={assessAllJob.status}>
+            {jobLine(assessAllJob)}
+          </span>
+        )}
+        {assessAll && assessAll.skip_reason && <span className="muted">{skipReasonText(assessAll.skip_reason)}</span>}
+        {assessAllError && <span className="muted">Assess all new: {assessAllError}</span>}
+      </div>
+    ) : null;
   const passRunning = rankPassRunning(rankRecord);
   const passLine = rankPassLine(rankRecord);
   const rankBar =
@@ -783,6 +918,7 @@ export default function FindJobsView({
     <>
       {resultsError && <div className="callout danger">Could not load results: {resultsError}</div>}
       {rankBar}
+      {assessAllBar}
       {(results || runActive) && (
         <JobsGrid
           jobs={runJobs}
@@ -862,6 +998,7 @@ export default function FindJobsView({
         )}
         {loaded && resultsError && <div className="callout danger">Could not load results: {resultsError}</div>}
         {loaded && !(failure && runJobs.length === 0) && rankBar}
+        {loaded && !(failure && runJobs.length === 0) && assessAllBar}
         {loaded && (results || runActive) && !(failure && runJobs.length === 0) && (
           <JobsGrid
             jobs={runJobs}
@@ -880,9 +1017,9 @@ export default function FindJobsView({
   return (
     <div>
       <JobsSummaryStrip
-        lastRun={newestRun}
+        lastRun={withLiveCounts(newestRun, runId, assessAllCounts)}
         runsLoading={runsState.loading}
-        needAnswersCount={results || runActive ? jobsWaiting : null}
+        needAnswersCount={results || runActive ? (assessAllCounts && newestRun && newestRun.run_id === runId ? assessAllCounts.needs_answers : jobsWaiting) : null}
         applications={applicationsState.applications}
         applicationsLoading={applicationsState.loading}
       />

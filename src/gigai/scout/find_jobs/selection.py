@@ -140,6 +140,12 @@ def _dedupe_key(row: Candidate) -> tuple[str, str, frozenset[str]]:
     )
 
 
+def duplicate_key(row: Candidate) -> tuple[str, str, frozenset[str]]:
+    """What makes two postings near-identical here: company, normalized title, country (uat-bug-042 reuses it)."""
+
+    return _dedupe_key(row)
+
+
 def _sort_key_newest_first(row: Candidate) -> str:
     # ISO 8601 timestamps sort lexicographically; a missing/unparseable
     # published_at sorts last (oldest) rather than raising.
@@ -222,7 +228,7 @@ def select_for_assessment(
     rows: Sequence[Candidate],
     *,
     cap: int,
-    per_company: int = DEFAULT_PER_COMPANY_CAP,
+    per_company: int | None = DEFAULT_PER_COMPANY_CAP,
     rank_scores: Sequence[Score] = (),
 ) -> SelectionResult:
     """Pick up to ``cap`` diverse candidates from ``rows``.
@@ -247,6 +253,9 @@ def select_for_assessment(
 
     ``rank_scores`` is optional. With none (or none that carry a score) the
     ranking is by date alone, exactly as before uat-bug-010.
+
+    ``per_company=None`` (uat-bug-042: a run whose cap is "all") keeps every
+    deduped row of every company: step 2 drops nothing.
 
     ``rows`` with ``cap <= 0`` selects nothing (every row is ``"over_cap"``).
     Order within ``rows`` only breaks a tie between rows with the same score
@@ -275,8 +284,9 @@ def select_for_assessment(
     capped_by_company: dict[str, list[Candidate]] = {}
     for company, members in by_company.items():
         ordered = _rank(members, scores)
-        capped_by_company[company] = ordered[:per_company]
-        for loser in ordered[per_company:]:
+        keep = len(ordered) if per_company is None else per_company
+        capped_by_company[company] = ordered[:keep]
+        for loser in ordered[keep:]:
             dropped[loser.normalized_url] = "company_cap"
 
     # Deterministic company visiting order: each company's newest surviving
@@ -323,12 +333,31 @@ def select_for_assessment(
     return SelectionResult(ordered_selected, dropped)
 
 
+def selection_limits(selection_cap: int | str) -> tuple[int, int | None]:
+    """``(cap, per_company)`` for a run's ``selection_cap`` (uat-bug-042).
+
+    A number keeps today's selection: that many, at most
+    :data:`DEFAULT_PER_COMPANY_CAP` per company. ``"all"`` is every new
+    posting: up to ``contracts.ASSESS_ALL_CEILING``, no per-company cap
+    (duplicates are still dropped). Acquire's selection and assess's
+    recompute both call this, so the two agree.
+    """
+
+    from .contracts import is_assess_all, selection_cap_limit
+
+    if is_assess_all(selection_cap):
+        return selection_cap_limit(selection_cap), None
+    return selection_cap_limit(selection_cap), DEFAULT_PER_COMPANY_CAP
+
+
 __all__ = [
     "Candidate",
     "DEFAULT_PER_COMPANY_CAP",
     "Score",
     "SelectionResult",
+    "duplicate_key",
     "normalize_title",
     "rank_rows",
     "select_for_assessment",
+    "selection_limits",
 ]

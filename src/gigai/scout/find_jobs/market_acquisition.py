@@ -65,7 +65,7 @@ from .contracts import (
 from .filters import exclusion_reason, location_mismatch_detail
 from .work_mode import work_mode_fit
 from .progress import ProgressWriter
-from .selection import normalize_title, rank_rows, select_for_assessment
+from .selection import normalize_title, rank_rows, select_for_assessment, selection_limits
 from ...workpad import ResolvedWorkpad, resolve_workpad
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
@@ -1987,7 +1987,10 @@ def _acquire_node_body(
     # re-sorts by date; the assess cap went to the newest postings, not the
     # best-ranked rows. `candidates` stays in `rows` order, the order assess's
     # recompute reads the sealed rows back in.
-    selection = select_for_assessment(candidates, cap=input.selection_cap, rank_scores=rank_scores)
+    # uat-bug-042: a cap of "all" is every new posting (up to
+    # ASSESS_ALL_CEILING, no per-company cap); a number is today's selection.
+    cap_limit, per_company = selection_limits(input.selection_cap)
+    selection = select_for_assessment(candidates, cap=cap_limit, per_company=per_company, rank_scores=rank_scores)
     # `select_for_assessment` returns the same `PostingRow` objects it was
     # given (see selection.py's `ordered_selected`); the narrower `Candidate`
     # protocol is only its own input/output typing, so cast back for the
@@ -2012,11 +2015,21 @@ def _acquire_node_body(
         # (operator: show "assessing 5 of 42 matches, cap 5"), known as soon
         # as acquire finishes selecting -- well before assess starts.
         progress.cap_known(
-            cap=input.selection_cap,
+            cap=cap_limit,
             candidate_count=len(candidates),
             not_imported_count=not_imported_count,
             selected_count=len(selected),
         )
+
+    if per_company is None:
+        over_ceiling = sum(1 for reason in selection.dropped.values() if reason == "over_cap")
+        if over_ceiling:
+            print(
+                f"scout acquire: full assessments \"all\": assessing the top {len(selected)} new postings "
+                f"(the most one run assesses); {over_ceiling} more stay not assessed -- "
+                "use \"Assess all new\" on the Jobs page for them",
+                file=sys.stderr,
+            )
 
     if not_imported_count:
         print(
