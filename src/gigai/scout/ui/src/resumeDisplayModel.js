@@ -27,7 +27,7 @@ export const KIND_PLACEHOLDERS = {
   phone: "+1 555 123 4567",
 };
 
-export const PRIVACY_NOTE = "Stays on this machine; added to your PDF locally and never sent to a model.";
+export const PRIVACY_NOTE = "Stored on this machine only; added to your PDF locally.";
 
 const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 const LINK_KINDS = new Set(["linkedin", "github", "link"]);
