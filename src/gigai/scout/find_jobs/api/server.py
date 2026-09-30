@@ -62,6 +62,7 @@ from .common import (
     _match_run_id,
     _receipt_span_ms,
 )
+from .openapi import with_allowed_keys
 from .profiles import _match_profile_id
 
 # _TEST_HTTP_ENV/_TEST_MODEL_ENV live in present_api.py now -- they're only
@@ -1402,6 +1403,7 @@ def _make_handler(
     *,
     run_start_timeout_seconds: float = RUN_START_TIMEOUT_SECONDS,
 ) -> type[BaseHTTPRequestHandler]:
+    from .agent_routes import AgentRoutesMixin
     from .answers import AnswersRoutesMixin
     from .applications import ApplicationsRoutesMixin
     from .assess import AssessRoutesMixin
@@ -1423,6 +1425,7 @@ def _make_handler(
     from .watchlist import WatchlistRoutesMixin
 
     class Handler(
+        AgentRoutesMixin,
         ConfigRoutesMixin,
         SetupRoutesMixin,
         DiscoverRoutesMixin,
@@ -1483,6 +1486,8 @@ def _make_handler(
             )
 
         def _write_json(self, status: int, payload: dict[str, object]) -> None:
+            # 0110-007: an unknown_key 422 names the keys the route allows (openapi.py's table).
+            payload = with_allowed_keys(self.command or "", urlsplit(self.path).path, payload)
             body = json.dumps(payload).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
@@ -1616,7 +1621,24 @@ def _make_handler(
                 return
             path = urlsplit(self.path).path
             try:
+                # 0110-007: the agent-facing routes. ``/api`` (and ``/api/``) sit outside the
+                # ``/api/`` prefix below; ``/llms.txt`` and ``/api/jobs`` return personal
+                # values or a guide meant for the local agent, so the Host is checked.
+                if path in ("/api", "/api/"):
+                    self._handle_get_api_index()
+                    return
+                if path == "/llms.txt":
+                    if self._check_host():
+                        self._handle_get_llms()
+                    return
                 if path.startswith("/api/"):
+                    if path == "/api/openapi.json":
+                        self._handle_get_openapi()
+                        return
+                    if path == "/api/jobs":
+                        if self._check_host():
+                            self._handle_get_job()
+                        return
                     if path == "/api/health":
                         self._write_json(HTTPStatus.OK, {"status": "ok"})
                         return
