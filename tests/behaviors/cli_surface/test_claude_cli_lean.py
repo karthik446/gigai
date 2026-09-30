@@ -70,11 +70,12 @@ def test_default_assess_argv_is_unchanged() -> None:
     assert not adapter.lean
     assert adapter.argv(_request(model="sonnet", effort="low")) == (
         _EXE, "-p", "--output-format", "json", "--no-session-persistence",
-        "--permission-mode", "plan", "--tools", "", "--model", "sonnet",
+        "--permission-mode", "plan", "--tools", "", "--setting-sources", "", "--strict-mcp-config",
+        "--model", "sonnet",
     )
     assert adapter.argv(_request(model="default")) == (
         _EXE, "-p", "--output-format", "json", "--no-session-persistence",
-        "--permission-mode", "plan", "--tools", "",
+        "--permission-mode", "plan", "--tools", "", "--setting-sources", "", "--strict-mcp-config",
     )
 
 

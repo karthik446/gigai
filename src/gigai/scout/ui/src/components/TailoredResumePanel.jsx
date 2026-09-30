@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, getTailoredResumes, postTailoredResume } from "../api.js";
+import { ApiError, getResumeDisplay, getTailoredResumes, postTailoredResume, postTailoredResumePdf } from "../api.js";
 import { dateTimeLabel } from "../jobModel.js";
+import { hasContactLine } from "../resumeDisplayModel.js";
+import { SETTINGS_HASH } from "../routing.js";
 import {
   changeSummary,
-  downloadName,
   inlineSegments,
   latestStored,
   previewLines,
@@ -25,7 +26,9 @@ import {
 //   preview  tailoredResumeModel.previewLines(result): every content line is
 //            the response's own text, with its refs (the cited resume line /
 //            answer text) on hover and on click. Nothing is fabricated here.
-//   download a client-side Blob of the response's `markdown` verbatim
+//   download POST /api/tailored-resumes/pdf -> the PDF, saved under the
+//            server's Content-Disposition name (0.1.10-003; the .md link is
+//            gone from the UI, the API's `markdown` field stays)
 //
 // uat-batch1 (N6): the right-hand column is gone, and with it this panel's
 // own button and explainer. "Tailor resume" is one of the two actions at
@@ -37,12 +40,11 @@ import {
 // A posting without a URL (a pasted-text quick assessment: the store never
 // serializes the text) cannot be tailored from here (answersModel.tailorGate
 // says so on the action); a stored one for it still shows.
-function saveMarkdown(response) {
-  const blob = new Blob([response.markdown], { type: "text/markdown" });
+function saveBlob(blob, fileName) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = downloadName(response);
+  anchor.download = fileName;
   document.body.appendChild(anchor);
   anchor.click();
   document.body.removeChild(anchor);
@@ -346,13 +348,40 @@ export function useTailoredResume({ jobIdentity, jobUrl, profileId }) {
       });
   }, [jobUrl, profileId]);
 
-  return { stored, loadingStored, tailoring, elapsed, error, outcome, tailor, visible: Boolean(stored || tailoring || error) };
+  return { stored, loadingStored, tailoring, elapsed, error, outcome, tailor, jobIdentity, profileId, visible: Boolean(stored || tailoring || error) };
 }
 
 export default function TailoredResumePanel({ state, profileLabel, questionPrompts }) {
   const promptFor = (id) => (questionPrompts && questionPrompts.get(id)) || null;
   const { stored, tailoring, elapsed, error } = state;
   const panel = useRef(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState(null);
+  const [hasContact, setHasContact] = useState(true);
+
+  // Empty settings still download (name only); the panel then points at the
+  // settings section. A failed read just hides the hint.
+  useEffect(() => {
+    let live = true;
+    if (!stored) {
+      return undefined;
+    }
+    getResumeDisplay(state.profileId)
+      .then((response) => live && setHasContact(hasContactLine(response)))
+      .catch(() => live && setHasContact(true));
+    return () => {
+      live = false;
+    };
+  }, [stored, state.profileId]);
+
+  const downloadPdf = useCallback(() => {
+    setDownloading(true);
+    setDownloadError(null);
+    postTailoredResumePdf({ profileId: state.profileId, jobIdentity: state.jobIdentity })
+      .then(({ blob, fileName }) => saveBlob(blob, fileName))
+      .catch((err) => setDownloadError(err.detail || err.message || String(err)))
+      .finally(() => setDownloading(false));
+  }, [state.profileId, state.jobIdentity]);
 
   // uat-bug-043: the action sits above the requirement table and its status
   // sits by the button; when a run finishes (result or error) bring the panel
@@ -374,11 +403,24 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
       <div className="resume-toolbar">
         <h3>Tailored resume</h3>
         {stored && !tailoring && (
-          <button type="button" className="button small secondary" onClick={() => saveMarkdown(stored)}>
-            Download .md
+          <button type="button" className="button small secondary" onClick={downloadPdf} disabled={downloading}>
+            {downloading ? "Preparing…" : "Download PDF"}
           </button>
         )}
       </div>
+      {stored && !tailoring && !hasContact && (
+        <div className="muted" data-role="contact-hint" style={{ fontSize: "0.82rem" }}>
+          <a href={`${SETTINGS_HASH}`} onClick={() => setTimeout(() => document.getElementById("resume-display")?.scrollIntoView(), 0)}>
+            Add your contact line
+          </a>{" "}
+          to your PDF.
+        </div>
+      )}
+      {downloadError && (
+        <div className="callout danger" role="alert">
+          Could not make the PDF. {downloadError}
+        </div>
+      )}
       {error && (
         <div className="callout danger tailor-error" role="alert">
           <strong>{errorView(error).heading}.</strong> {errorView(error).body}

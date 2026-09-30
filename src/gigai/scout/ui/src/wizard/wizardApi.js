@@ -138,4 +138,9 @@ export function extractResume(fields) {
   return request("POST", "/api/resume/extract", fields);
 }
 
+// 0.1.10-001: {resume_text | resume_ref} -> {found: [labels]}. Local, no model.
+export function checkResume(fields) {
+  return request("POST", "/api/resume/check", fields);
+}
+
 export { ApiError };

@@ -37,7 +37,9 @@ def _request(model: str = "default", effort: str | None = None) -> InvocationReq
 
 # The argv the assess path ran before C1, spelled out: any change is deliberate.
 _ASSESS_ARGV = (
-    _EXE, "exec", "--json", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "--cd", _DIR, "-",
+    _EXE, "exec", "--json", "--ephemeral", "--sandbox", "read-only",
+    "--disable", "shell_tool", "--disable", "memories",  # 0110-004: no shell, no memories
+    "--skip-git-repo-check", "--cd", _DIR, "-",
 )
 
 

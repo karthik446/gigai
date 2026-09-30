@@ -1,5 +1,8 @@
 import { useRef, useState } from "react";
+import ResumeWarning from "../components/ResumeWarning.jsx";
 import TagListInput from "../components/TagListInput.jsx";
+import useResumeCheck from "../components/useResumeCheck.js";
+import { contactHeadsUp } from "../resumeWarning.js";
 import { MODEL_TARGETS, MODEL_TARGET_HINTS, RESUME_FILE_PATTERN, RESUME_MAX_BYTES, bytesToBase64, modelTargetLabel } from "./wizardState.js";
 
 // Screen 1 -- name the profile, supply a resume (paste / upload / choose an
@@ -21,6 +24,20 @@ export default function ResumeScreen({
 }) {
   const [uploadError, setUploadError] = useState(null);
   const fileInput = useRef(null);
+  // 0.1.10-001: the local heads-up; "Continue anyway" applies to this text only.
+  const [continuedText, setContinuedText] = useState(null);
+  const stored = fields.resumeMode === "existing";
+  const found = useResumeCheck(
+    stored
+      ? fields.existingRef
+        ? { resume_ref: { record_id: fields.existingRef.record_id, revision_id: fields.existingRef.revision_id } }
+        : null
+      : fields.resumeText.trim()
+        ? { resume_text: fields.resumeText }
+        : null,
+  );
+  const headsUp = contactHeadsUp(found, { stored });
+  const needsContinue = Boolean(headsUp) && !stored && continuedText !== fields.resumeText;
 
   function handleFile(event) {
     const file = event.target.files && event.target.files[0];
@@ -66,6 +83,7 @@ export default function ResumeScreen({
 
   const canExtract =
     !extracting &&
+    !needsContinue &&
     (fields.resumeMode === "existing" ? Boolean(fields.existingRef) : fields.resumeText.trim().length > 0);
   const extraction = fields.extraction;
 
@@ -126,6 +144,7 @@ export default function ResumeScreen({
       </div>
 
       <h3>Resume</h3>
+      <ResumeWarning modelTarget={fields.modelTarget} />
       <div className="wz-tabs" role="tablist">
         {[
           ["paste", "Paste text"],
@@ -215,6 +234,19 @@ export default function ResumeScreen({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {headsUp && (
+        <div className="callout warn" role="status" data-role="resume-heads-up">
+          {headsUp}
+          {needsContinue && (
+            <div style={{ marginTop: 8 }}>
+              <button type="button" className="button secondary small" onClick={() => setContinuedText(fields.resumeText)}>
+                Continue anyway
+              </button>
+            </div>
+          )}
         </div>
       )}
 

@@ -70,7 +70,11 @@ your roles, location and work mode. Then:
    filters and assesses the top ones.
 3. **Assess all new**: on the finished run, assesses the rest in the background.
 4. **Tailor resume**: on a posting's page, drafts a resume for that posting.
-   Review every line; each shows its sources.
+   Review every line; each shows its sources. **Download PDF** saves it as a
+   PDF. Under Settings > Profiles, **Resume display** holds the name, title
+   and contact line (location, work authorization, LinkedIn, GitHub, other
+   links, email, phone) printed at the top of the PDF; they are stored only
+   on your computer and added to the PDF locally.
 
 `gigai scout stop` stops Scout; `gigai scout run --port 9000` picks another
 port if 8765 is taken. More detail for scripts and agents is under
@@ -112,11 +116,21 @@ special runtime treatment.
 
 ## Privacy and security
 
+**Remove your personal info before adding a resume:** name, email, phone,
+street address and links. Scout sends your resume text to the model you pick
+(Codex -> OpenAI, Claude -> Anthropic, OpenRouter -> your provider) to assess
+postings and tailor your resume, and it does not remove personal info for you
+yet. With Ollama it stays on this machine, but keep it out anyway if you might
+switch models. The setup wizard, the Assessments page, Settings > Profiles and
+`gigai scout resume add` all show this warning, and the wizard also runs a
+local check (no model) that lists any email, phone, linkedin.com/github.com
+link or street address it spots; it can miss things.
+
 **Scout has no service of its own.** Ranking and assessment both run on
 the model target you configured (`ollama_local`, `codex_cli`, `claude_cli` or
 `openrouter_api`, whichever the search's `default_model_target` names). There
 is no ranking service, no extra key, and no extra third party for ranking
-or assessment. What your machine sends to the model target is exactly:
+or assessment. Scout runs `codex` with its shell tool and memories turned off, and `claude` with your settings, MCP servers and tools turned off, so a model call cannot read your local files or CLI memories. What your machine sends to the model target is exactly:
 
 - **Ranking** sends the target, one batch at a time, one short line per
   posting (title, company, location and countries, seniority level, minimum
@@ -464,8 +478,7 @@ stale.
 
 ## Roadmap / TODO
 
-- [ ] Download PDF for tailored resumes (replaces Download .md) (0.1.10)
-- [ ] Resume display settings, kept on your machine (0.1.10): fill in your name, title and contact line once (location | work authorization | LinkedIn | GitHub | email | phone) on your profile. These fields are stored only on your computer and are never sent to Codex, Claude, Ollama, OpenRouter, Exa or any other service; Scout adds them to your PDF locally, after the model has finished. A test will check that none of them appear in anything sent to a model or the network.
+- [ ] Keep the Resume display fields (name, title, contact line) out of everything sent to a model or the network (0.1.10): a test will check that none of them appear in any model or network payload
 - [ ] Remove personal info from resumes automatically before any model call (until then: add a resume without it)
 - [ ] Import PDF/DOCX resumes directly
 - [ ] Interview prep (0.1.10): research the company and likely interview questions through your own Codex or Claude CLI (no separate API key)
@@ -478,6 +491,7 @@ stale.
 
 - Alpha: expect rough edges (see [Status](#status)).
 - macOS and Linux only.
+- Alpine/musl Linux isn't supported yet: the PDF renderer (Typst) has no musl wheel, so installing there fails.
 - Filters default to the US (`countries` starts as `["US"]`); other countries
   can be set in the setup wizard or `find-jobs.json`.
 - Assessments saved before the Lever fix stay as they were until you

@@ -1,3 +1,5 @@
+import ResumeWarning from "../components/ResumeWarning.jsx";
+import ResumeDisplayPanel from "../components/ResumeDisplayPanel.jsx";
 import { useState } from "react";
 import TagListInput from "../components/TagListInput.jsx";
 import { archiveProfile, createProfile, updateProfile } from "../api.js";
@@ -191,6 +193,7 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
               onChange={setNewTitles}
               placeholder="staff ai engineer, staff backend engineer…"
             />
+            <ResumeWarning modelTarget={config ? config.default_model_target : undefined} />
             <p className="muted" style={{ fontSize: "0.8rem" }}>
               Resume defaults to the currently selected profile's resume; add a resume for this profile afterward via{" "}
               <code>gigai scout resume add</code>.
@@ -227,6 +230,7 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
               <small className="muted">revision {selected.resume_ref.revision_id}</small>
             </div>
           </div>
+          <ResumeWarning modelTarget={config ? config.default_model_target : undefined} />
           <p className="muted" style={{ fontSize: "0.8rem" }}>
             Replace via <code>gigai scout resume add &lt;file&gt; --profile {selected.profile_id}</code>.
           </p>
@@ -274,6 +278,8 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
           {archiveNote && <div className="callout info">{archiveNote}</div>}
         </section>
       )}
+
+      {selected && <ResumeDisplayPanel profileId={selected.profile_id} />}
 
       {config && (
         <section className="panel">

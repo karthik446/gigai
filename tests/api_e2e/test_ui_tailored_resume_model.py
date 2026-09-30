@@ -13,7 +13,6 @@ What is pinned:
   lines -- nothing the panel shows is fabricated client-side; each line
   keeps its refs (the cited source text) for the hover/expand;
 * the stats line counts copied / rewritten / citing-answers lines;
-* the download file name comes from the response's job fields;
 * ``latestStored`` picks the newest ``updated_at``;
 * ``payLabel``/``workModeLabel``/``h1bLabel`` render ONLY when the field is
   present (operator answer 3) in the spec's formats (``$180k–$220k / yr``,
@@ -83,7 +82,7 @@ RESPONSE = {
 }
 
 NODE_SCRIPT = """
-import { previewLines, previewStats, statsLine, sourcesHover, sourceLabel, downloadName, latestStored } from {tailored_url};
+import { previewLines, previewStats, statsLine, sourcesHover, sourceLabel, latestStored } from {tailored_url};
 import { buildJobs, payLabel, workModeLabel, h1bLabel, triggerLabel, questionPromptIndex } from {job_model_url};
 const input = JSON.parse(process.argv[1]);
 const prompts = questionPromptIndex(input.prompts);
@@ -99,8 +98,6 @@ process.stdout.write(JSON.stringify({
   sourceLabels: input.refs.map((ref) => sourceLabel(ref)),
   sourceLabelsWithPrompts: input.refs.map((ref) => sourceLabel(ref, promptFor)),
   triggers: input.triggers.map((trigger) => [triggerLabel(trigger), triggerLabel(trigger, promptFor)]),
-  downloadName: downloadName(input.response),
-  downloadNameBare: downloadName({ job: {} }),
   latest: latestStored(input.stored) ? latestStored(input.stored).stored_path : null,
   pay: input.pay.map(payLabel),
   modes: input.modes.map((posting) => workModeLabel(posting)),
@@ -236,8 +233,6 @@ def test_stats_download_name_and_latest_stored() -> None:
     out = _run_node(_payload())
     assert out["stats"] == {"total": 7, "copied": 4, "rewritten": 3, "citingAnswers": 1, "unsourced": 0, "keywords": []}
     assert out["statsLine"] == "7 lines · 4 copied verbatim · 3 rewritten (1 citing your answers)"
-    assert out["downloadName"] == "tailored-resume-acme-corp-software-engineer.md"
-    assert out["downloadNameBare"] == "tailored-resume.md"
     assert out["latest"] == "newest"
 
 

@@ -1411,6 +1411,7 @@ def _make_handler(
     from .extract import ResumeExtractRoutesMixin
     from .profiles import ProfilesRoutesMixin
     from .rank import RankRoutesMixin
+    from .resume_display import ResumeDisplayRoutesMixin
     from .resumes import ResumesRoutesMixin
     from .runs import RunRoutesMixin
     from .runs_list import RunsListRoutesMixin
@@ -1435,6 +1436,7 @@ def _make_handler(
         ApplicationsRoutesMixin,
         ResumeExtractRoutesMixin,
         ResumesRoutesMixin,
+        ResumeDisplayRoutesMixin,
         SecretsStatusRoutesMixin,
         TailoredResumesRoutesMixin,
         WatchlistRoutesMixin,
@@ -1485,6 +1487,15 @@ def _make_handler(
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _write_bytes(self, status: int, content_type: str, body: bytes, headers: dict[str, str] | None = None) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(body)
 
@@ -1564,13 +1575,22 @@ def _make_handler(
                 self._error(HTTPStatus.FORBIDDEN, "forbidden_origin", "request Origin is not allowed")
                 return False
 
+            return self._check_host()
+
+        def _check_host(self) -> bool:
+            """DNS-rebinding guard: ``Host`` must match the bound host:port.
+
+            Also applied to GET routes that return personal values (``GET
+            /api/resume-display``), which ``_check_csrf`` never covers.
+            """
+
+            port = self._bound_port()
             allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
             host = self.headers.get("Host")
             if host not in allowed_hosts:
                 self._log_rejection("forbidden_origin: request Host does not match the bound server")
                 self._error(HTTPStatus.FORBIDDEN, "forbidden_origin", "request Host does not match the bound server")
                 return False
-
             return True
 
         def _read_json_body(self) -> object | None:
@@ -1617,6 +1637,10 @@ def _make_handler(
                         return
                     if path == "/api/tailored-resumes":
                         self._handle_get_tailored_resumes()
+                        return
+                    if path == "/api/resume-display":
+                        if self._check_host():
+                            self._handle_get_resume_display()
                         return
                     if path == "/api/answers":
                         self._handle_get_answers()
@@ -1693,11 +1717,17 @@ def _make_handler(
                 if path == "/api/tailored-resumes":
                     self._handle_post_tailored_resumes()
                     return
+                if path == "/api/tailored-resumes/pdf":
+                    self._handle_post_tailored_resume_pdf()
+                    return
                 if path == "/api/answers":
                     self._handle_post_answers()
                     return
                 if path == "/api/resume/extract":
                     self._handle_post_resume_extract()
+                    return
+                if path == "/api/resume/check":
+                    self._handle_post_resume_check()
                     return
                 if path == "/api/resumes":
                     self._handle_post_resumes()
@@ -1740,6 +1770,9 @@ def _make_handler(
                     return
                 if path == "/api/config/sources":
                     self._handle_put_config_sources()
+                    return
+                if path == "/api/resume-display":
+                    self._handle_put_resume_display()
                     return
                 profile_id = _match_profile_id(path, suffix="")
                 if profile_id is not None:

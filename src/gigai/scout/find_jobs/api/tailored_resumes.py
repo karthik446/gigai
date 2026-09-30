@@ -21,11 +21,14 @@ assess routes use (``api/assess.py``'s ``_ERROR_STATUS``) plus
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from http import HTTPStatus
 from urllib.parse import parse_qs, urlsplit
 
 from ...quick_assess import QuickAssessError
 from ...tailored_resume import TailoredResumesListResponse, TailorRequest, list_tailored_resumes, run_tailored_resume
+from ...resume_display import load_display, pdf_header
+from ...resume_pdf import pdf_file_name, render_pdf
 from ..contracts import FindJobsContractError
 from .assess import _ERROR_STATUS as _ASSESS_ERROR_STATUS
 
@@ -65,6 +68,54 @@ class TailoredResumesRoutesMixin:
             self._error(_status_for(exc.code), exc.code, str(exc))
             return
         self._write_json(HTTPStatus.OK, response.to_json())
+
+    def _handle_post_tailored_resume_pdf(self) -> None:
+        body = self._read_json_body()
+        if body is None:
+            return
+        if type(body) is not dict or set(body) != {"profile_id", "job_identity"}:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "body must be exactly profile_id and job_identity")
+            return
+        profile_id, job_identity = body["profile_id"], body["job_identity"]
+        if not isinstance(profile_id, str) or not profile_id or not isinstance(job_identity, str) or not job_identity:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "profile_id and job_identity must be non-empty strings")
+            return
+        target = self._tailor_target()
+        if target is None:
+            return
+        home_root = self._backend.home_root
+        try:
+            items = list_tailored_resumes(home_root, target, profile_id=profile_id, job_identity=job_identity)
+        except QuickAssessError as exc:
+            self._error(_status_for(exc.code), exc.code, str(exc))
+            return
+        if not items:
+            self._error(HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that profile and job")
+            return
+        stored = items[0]
+        settings = load_display(home_root)
+        fallback = ""
+        if settings is None or not settings.name:
+            from .resume_display import suggestion_for_profile
+
+            suggestion = suggestion_for_profile(self._backend, None if profile_id == "ephemeral" else profile_id)
+            fallback = (suggestion.name if suggestion else "") or (stored.result.header[0].text if stored.result.header else "")
+        header = pdf_header(settings, profile_id, fallback)
+        try:
+            stamp = datetime.fromisoformat(stored.updated_at.replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            pdf = render_pdf(stored.result, header, company=stored.job.company, timestamp=stamp)
+        except Exception:  # noqa: BLE001 - a render failure is typed, and never echoes the resume
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "pdf_render_failed", "the PDF could not be rendered")
+            return
+        file_name = pdf_file_name(header.name, stored.job.company)
+        self._write_bytes(
+            HTTPStatus.OK,
+            "application/pdf",
+            pdf,
+            {"Content-Disposition": f'attachment; filename="{file_name}"'},
+        )
 
     def _handle_get_tailored_resumes(self) -> None:
         target = self._tailor_target()

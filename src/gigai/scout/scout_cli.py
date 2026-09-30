@@ -30,6 +30,7 @@ from .find_jobs.discovery import (
 )
 from .interview_prep import InterviewPrepError, build_prep
 from .resume_import import import_resume_file
+from .resume_pii import RESUME_WARNING
 from .target_resolution import ScoutTargetError, _display_path, resolve_scout_target
 from .template import ScoutInstallError, install_scout
 
@@ -305,6 +306,7 @@ def resume_add_command(
         "revision_id": resume.revision_id,
         "record_created": resume.record_created,
         "profile_id": attached_profile.profile_id if attached_profile is not None else None,
+        "warning": RESUME_WARNING,
     }
     if as_json:
         _emit(payload, True, "")
@@ -317,6 +319,7 @@ def resume_add_command(
     )
     if attached_profile is not None:
         click.echo(f"Attached to profile {attached_profile.label} ({attached_profile.profile_id})")
+    click.echo(f"Warning: {RESUME_WARNING}")
 
 
 def _attach_resume_to_profile(

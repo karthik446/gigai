@@ -45,7 +45,7 @@ WIZARD_SRC = Path(static_module.__file__).resolve().parents[2] / "ui" / "src" / 
 
 PASTED = "Jordan Rivera\nStaff engineer: nine years of Python, Kafka and Kubernetes on AWS.\n"
 LABEL = "Claude profile"
-PLAN_ARGV = ["-p", "--output-format", "json", "--no-session-persistence", "--permission-mode", "plan", "--tools", ""]
+PLAN_ARGV = ["-p", "--output-format", "json", "--no-session-persistence", "--permission-mode", "plan", "--tools", "", "--setting-sources", "", "--strict-mcp-config"]
 POSTING = (
     "Acme is hiring a Software Engineer to build reliable Python services. "
     "Requirements: Python in production; GCP experience is a plus. Remote within the US."

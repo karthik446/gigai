@@ -216,18 +216,20 @@ def test_the_quickstart_is_first_numbered_and_asks_for_a_resume_without_personal
     assert "- [ ] Remove personal info from resumes automatically before any model call" in text
 
 
-def test_the_roadmap_lists_resume_display_settings_as_its_own_future_item() -> None:
-    """uat-bug-047 addendum: a 0.1.10 roadmap item (future wording), separate from the PDF line; 0.1.9 promises no stripping."""
-    roadmap = _flat(_text().split("## Roadmap / TODO", 1)[1].split("\n## ", 1)[0])
-    assert "- [ ] Download PDF for tailored resumes (replaces Download .md) (0.1.10)" in roadmap
+def test_resume_display_ships_and_only_the_model_privacy_guarantee_stays_on_the_roadmap() -> None:
+    """0.1.10-003: Download PDF and Resume display are shipped (present tense); the never-sent guarantee is still a roadmap item."""
+    text = _text()
+    roadmap = _flat(text.split("## Roadmap / TODO", 1)[1].split("\n## ", 1)[0])
+    assert "Download PDF for tailored resumes" not in roadmap and "- [ ] Resume display settings" not in roadmap
+    shipped = _flat(text.split("## Roadmap / TODO", 1)[0])
+    assert "**Download PDF** saves it as a PDF" in shipped and "**Resume display**" in shipped
+    assert "stored only on your computer and added to the PDF locally" in shipped
     assert (
-        "- [ ] Resume display settings, kept on your machine (0.1.10): fill in your name, title and contact line once "
-        "(location | work authorization | LinkedIn | GitHub | email | phone) on your profile. These fields are stored "
-        "only on your computer and are never sent to Codex, Claude, Ollama, OpenRouter, Exa or any other service; "
-        "Scout adds them to your PDF locally, after the model has finished. A test will check that none of them appear "
-        "in anything sent to a model or the network."
+        "- [ ] Keep the Resume display fields (name, title, contact line) out of everything sent to a model or the network "
+        "(0.1.10): a test will check that none of them appear in any model or network payload"
     ) in roadmap
-    assert "will check" in roadmap and "jev" not in roadmap.lower()
+    assert "Alpine/musl Linux isn't supported yet: the PDF renderer (Typst) has no musl wheel, so installing there fails." in _flat(text)
+    assert "jev" not in roadmap.lower()
 
 
 def test_the_roadmap_parks_interview_prep_and_readme_never_presents_it_as_a_feature() -> None:

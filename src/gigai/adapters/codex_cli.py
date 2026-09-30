@@ -9,6 +9,7 @@ import tempfile
 from typing import Mapping
 
 from .capabilities import require_capabilities
+from .cli_probe import require_codex_capabilities
 from .port import InvocationRequest, InvocationResult, ModelInvocationError, NormalizedUsage
 from .process import run_json_process
 
@@ -16,6 +17,17 @@ from .process import run_json_process
 # SCOPE-ADD-3 C1 (operator decision A): the reasoning efforts codex's
 # ``model_reasoning_effort`` config key takes. Anything else is not passed.
 _CODEX_EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh"})
+
+# 0110-004 hardening: a read-only sandbox still lets the model read local files
+# (prep spike, EXECUTED: it ran ``rg`` over ``~/.codex/memories``). Every Scout
+# call therefore turns the shell tool and memories off. Verified against
+# codex-cli 0.159.2 (``codex exec --help``; ``codex features list`` shows both
+# ``shell_tool`` and ``memories``). ``--ignore-user-config`` is deliberately NOT
+# used: it skips ``$CODEX_HOME/config.toml``, where a user's custom model
+# provider and default model live, so it can break "default" model selection.
+# No version gate: the first call per process probes ``codex features list``.
+_CODEX_HARDENING = ("--disable", "shell_tool", "--disable", "memories")
+_UNKNOWN_FLAG_MARKERS = ("unexpected argument", "unrecognized", "unknown option", "unknown flag")
 
 
 class CodexCLIAdapter:
@@ -58,6 +70,7 @@ class CodexCLIAdapter:
             "--ephemeral",
             "--sandbox",
             "read-only",
+            *_CODEX_HARDENING,
             "--skip-git-repo-check",
             "--cd",
             directory,
@@ -71,13 +84,23 @@ class CodexCLIAdapter:
 
     def invoke(self, request: InvocationRequest) -> InvocationResult:
         require_capabilities(("text",), request.required_capabilities, target_name=request.target_name)
+        assert self._executable is not None
+        require_codex_capabilities(self._executable)
         with tempfile.TemporaryDirectory(prefix="gigai-codex-") as directory:
-            output = run_json_process(
-                self.argv(request, directory),
-                prompt=request.prompt,
-                cwd=Path(directory),
-                timeout_seconds=self._timeout_seconds,
-            )
+            try:
+                output = run_json_process(
+                    self.argv(request, directory),
+                    prompt=request.prompt,
+                    cwd=Path(directory),
+                    timeout_seconds=self._timeout_seconds,
+                )
+            except ModelInvocationError as exc:
+                if any(marker in str(exc).lower() for marker in _UNKNOWN_FLAG_MARKERS):
+                    raise ModelInvocationError(
+                        f"this codex does not support the lockdown flags Scout requires; "
+                        f"upgrade codex ({exc})"
+                    ) from exc
+                raise
         text, model, usage = _parse_codex_jsonl(output.stdout, request.model)
         return InvocationResult(
             status="success",

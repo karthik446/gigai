@@ -30,6 +30,28 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.9.1
+
+#### Added
+
+- **Download PDF for tailored resumes.** The tailored resume panel downloads a
+  PDF. A new **Resume display** section on the profile page holds your name, a
+  title per profile and a contact line; they are stored only on this machine
+  and added to the PDF locally. GigAI now depends on Typst to draw the PDF;
+  Alpine/musl Linux is not supported.
+- **A personal-info warning wherever a resume is added** (the setup wizard,
+  Assessments paste, Settings > Profiles and `gigai scout resume add`), and a
+  local heads-up when the text contains an email address, phone number, link
+  or street address.
+
+#### Changed
+
+- **Codex and Claude CLI calls run locked down.** Codex runs with its shell
+  tool and memories disabled; Claude runs with its settings, MCP servers and
+  tools turned off. Your installed Codex or Claude must support these flags,
+  or the call fails with a message to upgrade it.
+- **Download .md is replaced by Download PDF** in the tailored resume panel.
+
 ### 0.1.9
 
 #### Added
