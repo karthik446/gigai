@@ -9,6 +9,7 @@ import tempfile
 from typing import Mapping
 
 from .capabilities import require_capabilities
+from .cli_probe import require_codex_capabilities
 from .port import InvocationRequest, InvocationResult, ModelInvocationError, NormalizedUsage
 from .process import run_json_process
 
@@ -24,7 +25,7 @@ _CODEX_EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh"})
 # ``shell_tool`` and ``memories``). ``--ignore-user-config`` is deliberately NOT
 # used: it skips ``$CODEX_HOME/config.toml``, where a user's custom model
 # provider and default model live, so it can break "default" model selection.
-CODEX_MIN_VERSION = "0.159.2"
+# No version gate: the first call per process probes ``codex features list``.
 _CODEX_HARDENING = ("--disable", "shell_tool", "--disable", "memories")
 _UNKNOWN_FLAG_MARKERS = ("unexpected argument", "unrecognized", "unknown option", "unknown flag")
 
@@ -83,6 +84,8 @@ class CodexCLIAdapter:
 
     def invoke(self, request: InvocationRequest) -> InvocationResult:
         require_capabilities(("text",), request.required_capabilities, target_name=request.target_name)
+        assert self._executable is not None
+        require_codex_capabilities(self._executable)
         with tempfile.TemporaryDirectory(prefix="gigai-codex-") as directory:
             try:
                 output = run_json_process(
@@ -95,7 +98,7 @@ class CodexCLIAdapter:
                 if any(marker in str(exc).lower() for marker in _UNKNOWN_FLAG_MARKERS):
                     raise ModelInvocationError(
                         f"this codex does not support the lockdown flags Scout requires; "
-                        f"upgrade codex to {CODEX_MIN_VERSION} or newer ({exc})"
+                        f"upgrade codex ({exc})"
                     ) from exc
                 raise
         text, model, usage = _parse_codex_jsonl(output.stdout, request.model)
@@ -148,4 +151,4 @@ def _normalize_usage(usage: Mapping[str, object]) -> NormalizedUsage:
     return NormalizedUsage(input_tokens, output_tokens, total_tokens)
 
 
-__all__ = ["CODEX_MIN_VERSION", "CodexCLIAdapter"]
+__all__ = ["CodexCLIAdapter"]

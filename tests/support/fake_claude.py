@@ -32,6 +32,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FAKE_CLAUDE_MODEL = "claude-fake-5-5"
 
 
+#: What ``claude --help`` lists: the flags the adapter's capability probe requires.
+FAKE_CLAUDE_HELP = "Usage: claude [options]\n  --setting-sources <sources>\n  --strict-mcp-config\n  --tools <tools...>"
+
+
 def prompt_kind(prompt: str) -> str:
     from gigai.scout.find_jobs import bindings
 
@@ -64,6 +68,10 @@ def main(record: str) -> int:
     argv = sys.argv[1:]
     if argv == ["--version"]:
         print("2.1.0 (Claude Code)")
+        return 0
+    if argv == ["--help"]:
+        # the adapter's capability probe: answered, never recorded as a model call
+        print(FAKE_CLAUDE_HELP)
         return 0
     prompt = sys.stdin.read()
     with open(record, "a", encoding="utf-8") as handle:

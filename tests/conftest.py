@@ -203,3 +203,21 @@ __all__ = [
     "pytest_configure",
     "pytest_report_header",
 ]
+
+
+@pytest.fixture(autouse=True)
+def _canned_cli_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI capability probe (codex features list / claude --help) is answered locally: fake CLIs in tests only know the call under test. test_cli_adapter_hardening overrides this fixture to exercise the real probe."""
+
+    from gigai.adapters import cli_probe
+
+    cli_probe.reset_probe_cache()
+    monkeypatch.setattr(
+        cli_probe,
+        "_run_probe",
+        lambda argv: (
+            "shell_tool stable true\nmemories stable false\n"
+            if argv[1:] == ("features", "list")
+            else "--setting-sources\n--strict-mcp-config\n--tools\n"
+        ),
+    )
