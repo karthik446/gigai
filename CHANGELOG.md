@@ -30,6 +30,65 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.10
+
+#### Added
+
+- **Your name and contact lines are removed before a model sees your resume.** Before any resume text
+  goes to a model, Scout removes the name and contact lines (email, phone,
+  address, links); the tailored resume it writes has no header. The **Resume
+  display** fields (name, title, contact line) are never sent to a model or
+  over the network; they are added only to your PDF, on this machine. It
+  cannot catch personal details elsewhere in the text (a first line that holds
+  both a title and your name, or contact details inside a sentence), so keep
+  those out of the resume body.
+- **Resume display is easier to find.** It is a step in the setup wizard, a
+  row on the Review screen, a section under the profile card in Settings, and
+  an **Edit** link next to **Download PDF**.
+- **Keep original / Use rewrite anyway.** In the tailored resume panel, each
+  line can be switched between your original and the rewrite, and the PDF
+  follows your choice.
+- **A calmer first run.** The first-run steps are one compact stepper, a
+  disabled button says why once, and the empty state is shorter.
+- **A "posting text changed" marker.** When a posting's text changed after
+  it was assessed, the job shows "Posting text changed since this assessment:
+  re-assess" next to the verdict, which stays visible. A posting whose
+  requirement list looks cut off is labelled "Posting text looks incomplete"
+  and is not assessed.
+- **An API and CLI manual for agents.** Scout's server has a `GET /api` index,
+  an OpenAPI 3.1 description at `/api/openapi.json` and `/llms.txt`;
+  `GET /api/jobs?url=` returns one job with everything known about it; an
+  `unknown_key` error names the allowed top-level keys. `gigai agent-context`
+  prints the CLI manual (`--json` for the machine-readable form).
+- **A public docs site** at <https://karthik446.github.io/gigai/> (quickstart,
+  concepts, CLI and API reference, changelog), and a short README that links
+  to it.
+
+#### Changed
+
+- **Tailoring keeps your lines as written.** It copies your resume lines
+  verbatim by default. A rewrite needs a stated reason and must keep every
+  number, named technology, scope word and ownership verb of the lines it
+  comes from; otherwise your original line is kept. Resumes aim for at most two
+  pages; roles older than about eight years keep at most three bullets, and
+  bullets are dropped whole, never shortened.
+- **The personal-info warning** now says your name and contact lines are
+  removed before a model sees the resume, and what it cannot catch.
+- **Downgrade note.** Tailored resumes written by 0.1.10 do not appear in the
+  list of an older version after a downgrade. They are not corrupted and
+  return after upgrading again.
+- **The PDF layout is tidier.** Spacing is more even, lines wrapped in your
+  resume text are joined, and skills and summary read as paragraphs.
+- **`gigai scout run` frees the port from an older Scout.** If an older Scout
+  server (including 0.1.9.x) is verifiably holding the port, it is stopped
+  and `gigai scout run --json` reports it as `stopped_server`. A process that
+  is not Scout is left alone.
+
+#### Fixed
+
+- **`gigai scout resume add` works as the first command** on a fresh
+  machine, without running `gigai setup` first.
+
 ### 0.1.9.1
 
 #### Added
