@@ -15,7 +15,7 @@ on:
         required: true
         type: string
       dry_run:
-        description: Run every check and stop before creating the tag
+        description: Run validate, preflight, CI (or its skip), build and smoke, then stop before creating the tag and before any publish
         required: true
         type: boolean
         default: true
@@ -37,42 +37,54 @@ jobs:
     permissions:
       contents: write
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
+      tag: ${{ steps.name.outputs.tag }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Validate sha and version
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ inputs.sha }}
           RELEASE_VERSION: ${{ inputs.version }}
         run: python -m tools.release_dispatch --sha "${RELEASE_SHA}" --version "${RELEASE_VERSION}"
-      - id: tag
-        name: Create the annotated tag on the SHA
+      - id: name
+        name: Name the release tag
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: echo "tag=v${RELEASE_VERSION}" >> "${GITHUB_OUTPUT}"
+      - name: Create the annotated tag on the SHA
         if: ${{ !inputs.dry_run }}
         env:
           RELEASE_SHA: ${{ inputs.sha }}
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${RELEASE_VERSION}" -m "GigAI ${RELEASE_VERSION}" "${RELEASE_SHA}"
-          git push origin "refs/tags/v${RELEASE_VERSION}"
-          echo "tag=v${RELEASE_VERSION}" >> "${GITHUB_OUTPUT}"
-      - name: Dry run stops before tagging
+          # tools.release_dispatch already accepted an existing tag only when it
+          # peels to exactly this SHA and has no GitHub Release (re-dispatch after
+          # a partial run), so a matching tag is reused instead of re-created.
+          if [ "$(git rev-parse -q --verify "refs/tags/v${RELEASE_VERSION}^{}" || true)" = "${RELEASE_SHA}" ]; then
+            echo "tag v${RELEASE_VERSION} already exists at ${RELEASE_SHA}; reusing it"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "v${RELEASE_VERSION}" -m "GigAI ${RELEASE_VERSION}" "${RELEASE_SHA}"
+            git push origin "refs/tags/v${RELEASE_VERSION}"
+          fi
+      - name: Dry run creates no tag
         if: ${{ inputs.dry_run }}
-        run: echo "dry run - every check passed for v${{ inputs.version }} at ${{ inputs.sha }}; no tag created"
+        run: echo "dry run - v${{ inputs.version }} at ${{ inputs.sha }} validated; no tag created, the later jobs build and smoke the SHA"
 
   preflight:
     name: Release preflight
     needs: dispatch
-    # A pushed tag skips `dispatch`; a dispatch continues only when it created
-    # the tag (dry_run leaves `dispatch.outputs.tag` empty and stops here).
-    if: ${{ !cancelled() && (needs.dispatch.result == 'skipped' || (needs.dispatch.result == 'success' && needs.dispatch.outputs.tag != '')) }}
+    # A pushed tag skips `dispatch`; a dispatch (dry run or real) continues once
+    # its validation passed. A dry run checks out the SHA, a real run the tag.
+    if: ${{ !cancelled() && (needs.dispatch.result == 'skipped' || needs.dispatch.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       tag: ${{ steps.metadata.outputs.tag }}
+      ref: ${{ steps.metadata.outputs.ref }}
       commit: ${{ steps.metadata.outputs.commit }}
       version: ${{ steps.metadata.outputs.version }}
       gate_green: ${{ steps.gate.outputs.gate_green }}
@@ -80,22 +92,31 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: refs/tags/${{ needs.dispatch.outputs.tag || github.ref_name }}
+          ref: ${{ inputs.dry_run && inputs.sha || format('refs/tags/{0}', needs.dispatch.outputs.tag || github.ref_name) }}
       - id: metadata
         env:
           RELEASE_TAG: ${{ needs.dispatch.outputs.tag || github.ref_name }}
           DISPATCH_SHA: ${{ inputs.sha }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          test "$(git cat-file -t "refs/tags/${RELEASE_TAG}")" = tag
-          if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then
-            test "$(git rev-parse "refs/tags/${RELEASE_TAG}^{}")" = "${DISPATCH_SHA}"
+          if [ "${DRY_RUN}" = true ]; then
+            # dry run: no tag exists yet; everything below runs on the SHA itself
+            test "$(git rev-parse HEAD)" = "${DISPATCH_SHA}"
+            echo "ref=${DISPATCH_SHA}" >> "${GITHUB_OUTPUT}"
+            echo "commit=${DISPATCH_SHA}" >> "${GITHUB_OUTPUT}"
           else
-            test "${GITHUB_REF_TYPE}" = tag
+            test "$(git cat-file -t "refs/tags/${RELEASE_TAG}")" = tag
+            if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then
+              test "$(git rev-parse "refs/tags/${RELEASE_TAG}^{}")" = "${DISPATCH_SHA}"
+            else
+              test "${GITHUB_REF_TYPE}" = tag
+            fi
+            echo "ref=refs/tags/${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
+            echo "commit=$(git rev-parse "refs/tags/${RELEASE_TAG}^{}")" >> "${GITHUB_OUTPUT}"
           fi
           echo "tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
           python tools/release_check.py verify-tag --tag "${RELEASE_TAG}"
           python tools/release_check.py verify-lockfile
-          echo "commit=$(git rev-parse "refs/tags/${RELEASE_TAG}^{}")" >> "${GITHUB_OUTPUT}"
           echo "version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "${GITHUB_OUTPUT}"
       - id: gate
         name: Was the release gate already green on this tree?
@@ -118,14 +139,15 @@ jobs:
     # (release)", workflow_dispatch) already passed on this exact TREE. Compared
     # by tree, not commit: a squash merge gives the tag a new commit id with the
     # same tree as the tested PR head (v0.1.9: 80865ec and 9728387 share tree 12e7cfa).
-    if: needs.preflight.outputs.gate_green != 'true'
+    # Explicit status check: on the tag-push path `dispatch` (an ancestor) is skipped.
+    if: needs.preflight.outputs.gate_green != 'true' && !cancelled() && needs.preflight.result == 'success'
     uses: ./.github/workflows/pull_request.yaml
     permissions:
       contents: read
       actions: read
     with:
       profile: release
-      ref: refs/tags/${{ needs.preflight.outputs.tag }}
+      ref: ${{ needs.preflight.outputs.ref }}
 
   build:
     name: Build and attest release artifacts
@@ -142,7 +164,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: refs/tags/${{ needs.preflight.outputs.tag }}
+          ref: ${{ needs.preflight.outputs.ref }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -168,6 +190,9 @@ jobs:
   smoke-artifacts:
     name: Fresh wheel and source-distribution smoke test
     needs: [preflight, build]
+    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
+    # would skip this job through the implicit success(), so gate on direct needs.
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -203,6 +228,9 @@ jobs:
   publish-testpypi:
     name: Publish to TestPyPI
     needs: [preflight, smoke-artifacts]
+    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
+    # would skip this job through the implicit success(), so gate on direct needs.
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.smoke-artifacts.result == 'success' && !inputs.dry_run }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: testpypi
@@ -226,6 +254,9 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     needs: [preflight, publish-testpypi]
+    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
+    # would skip this job through the implicit success(), so gate on direct needs.
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.publish-testpypi.result == 'success' && !inputs.dry_run }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: pypi
@@ -247,6 +278,9 @@ jobs:
   github-release:
     name: Verify provenance and create GitHub Release
     needs: [preflight, build, publish-pypi]
+    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
+    # would skip this job through the implicit success(), so gate on direct needs.
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' && needs.publish-pypi.result == 'success' && !inputs.dry_run }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -255,7 +289,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: refs/tags/${{ needs.preflight.outputs.tag }}
+          ref: ${{ needs.preflight.outputs.ref }}
           sparse-checkout: |
             CHANGELOG.md
             tools/release_notes.py
@@ -339,17 +373,23 @@ jobs:
   post-release-compatibility:
     name: Full compatibility matrix (post-release)
     needs: [preflight, github-release]
+    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
+    # would skip this job through the implicit success(), so gate on direct needs.
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.github-release.result == 'success' }}
     uses: ./.github/workflows/pull_request.yaml
     permissions:
       contents: read
       actions: read
     with:
       profile: full
-      ref: refs/tags/${{ needs.preflight.outputs.tag }}
+      ref: ${{ needs.preflight.outputs.ref }}
 
   verify-testpypi:
     name: TestPyPI clean install on ${{ matrix.os }} (post-publish)
     needs: [preflight, publish-testpypi]
+    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
+    # would skip this job through the implicit success(), so gate on direct needs.
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.publish-testpypi.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     continue-on-error: true
@@ -397,6 +437,9 @@ jobs:
   verify-pypi:
     name: PyPI clean install on ${{ matrix.os }} (post-publish)
     needs: [preflight, github-release]
+    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
+    # would skip this job through the implicit success(), so gate on direct needs.
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.github-release.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     continue-on-error: true

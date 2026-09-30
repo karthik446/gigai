@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import subprocess
+import urllib.error
+import urllib.request
 
 import pytest
 
@@ -54,6 +57,78 @@ def test_branch_not_allowed() -> None:
 
 def test_tag_exists() -> None:
     _rejects("already exists", tag_exists=True)
+    _rejects("already exists", tag_exists=True, tag_commit=None)
+
+
+def test_existing_tag_at_the_same_sha_without_a_release_is_accepted() -> None:
+    release_dispatch.validate_dispatch(
+        SHA, VERSION, replace(GOOD, tag_exists=True, tag_commit=SHA, release_exists=False)
+    )
+
+
+def test_existing_tag_at_a_different_sha_is_rejected() -> None:
+    _rejects(f"not {SHA}", tag_exists=True, tag_commit="b" * 40)
+
+
+def test_existing_tag_with_a_github_release_is_rejected() -> None:
+    _rejects("GitHub Release exists", tag_exists=True, tag_commit=SHA, release_exists=True)
+
+
+def test_existing_tag_for_a_version_already_on_pypi_is_rejected() -> None:
+    _rejects("on PyPI", tag_exists=True, tag_commit=SHA, on_pypi=True)
+
+
+def test_pypi_lookup_fails_closed_on_any_unexpected_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Response:
+        def __init__(self, status: int) -> None:
+            self.status = status
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def http_error(code: int) -> urllib.error.HTTPError:
+        return urllib.error.HTTPError("u", code, "m", None, None)  # type: ignore[arg-type]
+
+    outcomes: list[object] = [Response(200), http_error(404), http_error(503), urllib.error.URLError("dns")]
+
+    def fake_urlopen(*args: object, **kwargs: object) -> Response:
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome  # type: ignore[return-value]
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    assert release_dispatch._on_pypi("0.1.9.1") is True
+    assert release_dispatch._on_pypi("0.1.9.1") is False
+    with pytest.raises(release_dispatch.ReleaseDispatchError, match="HTTP 503"):
+        release_dispatch._on_pypi("0.1.9.1")
+    with pytest.raises(release_dispatch.ReleaseDispatchError, match="cannot check PyPI"):
+        release_dispatch._on_pypi("0.1.9.1")
+
+
+def _completed(returncode: int, stderr: str = "") -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess([], returncode, stdout="", stderr=stderr)
+
+
+def test_release_lookup_fails_closed_on_any_unexpected_gh_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outcomes = iter([_completed(0), _completed(1, "release not found"), _completed(1, "HTTP 502")])
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: next(outcomes))
+    assert release_dispatch._release_exists("v0.1.9.1") is True
+    assert release_dispatch._release_exists("v0.1.9.1") is False
+    with pytest.raises(release_dispatch.ReleaseDispatchError, match="HTTP 502"):
+        release_dispatch._release_exists("v0.1.9.1")
+
+    def missing_gh(*args: object, **kwargs: object) -> None:
+        raise FileNotFoundError("gh")
+
+    monkeypatch.setattr(subprocess, "run", missing_gh)
+    with pytest.raises(release_dispatch.ReleaseDispatchError, match="cannot check"):
+        release_dispatch._release_exists("v0.1.9.1")
 
 
 def test_pyproject_version_mismatch() -> None:
@@ -106,3 +181,12 @@ def test_dispatch_job_validates_then_tags_and_dry_run_stops_before_tagging() -> 
     assert graph["preflight"] == ["dispatch"]
     # every later job releases the tag from preflight, never the dispatching branch
     assert "ref: refs/tags/${{ github.ref_name }}" not in text
+
+
+def test_dispatch_tag_step_reuses_an_existing_tag_at_the_sha() -> None:
+    text = _workflow()
+    assert 'git rev-parse -q --verify "refs/tags/v${RELEASE_VERSION}^{}"' in text
+    assert "reusing it" in text
+    # the release lookup needs a token in the validate step
+    validate = text.split("- name: Validate sha and version", 1)[1].split("- id: tag", 1)[0]
+    assert "GH_TOKEN: ${{ github.token }}" in validate

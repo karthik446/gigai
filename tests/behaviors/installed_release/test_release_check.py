@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from email.message import EmailMessage
 import io
+import re
 from pathlib import Path
 import tarfile
 import zipfile
@@ -192,3 +193,115 @@ def test_checksum_manifest_rejects_tampering(tmp_path: Path) -> None:
 
     with pytest.raises(release_check.ReleaseCheckError, match="does not match"):
         release_check.verify_checksums(tmp_path / "dist", artifacts)
+
+
+def _job_conditions(workflow: str) -> dict[str, str]:
+    """Return each job's job-level ``if:`` text (empty when it has none)."""
+
+    conditions: dict[str, str] = {}
+    current = ""
+    in_jobs = False
+    for line in workflow.splitlines():
+        if line == "jobs:":
+            in_jobs = True
+        elif in_jobs and line.startswith("  ") and not line.startswith("   ") and line.rstrip().endswith(":"):
+            current = line.strip().removesuffix(":")
+            conditions[current] = ""
+        elif in_jobs and current and line.startswith("    if:"):
+            conditions[current] = line.removeprefix("    if:").strip()
+    return conditions
+
+
+def _ancestors(graph: dict[str, list[str]], job: str) -> set[str]:
+    found: set[str] = set()
+    pending = list(graph[job])
+    while pending:
+        need = pending.pop()
+        if need not in found:
+            found.add(need)
+            pending.extend(graph[need])
+    return found
+
+
+def test_jobs_downstream_of_skippable_jobs_have_explicit_status_guards() -> None:
+    """A skipped `ci` (gate green) or `dispatch` (tag push) must not skip the release.
+
+    Run 36665265416 reported success and published nothing: a job without an
+    `if:` gets the implicit `success()`, which is false when a skipped job sits
+    in its needs chain.
+    """
+
+    workflow = _read_release_workflow()
+    graph = release_notes.parse_workflow_job_needs(workflow)
+    conditions = _job_conditions(workflow)
+
+    downstream = sorted(job for job in graph if _ancestors(graph, job) & {"dispatch", "ci"})
+    assert {"preflight", "ci", "build", "smoke-artifacts", "publish-pypi", "verify-pypi"} <= set(downstream)
+    for job in downstream:
+        condition = conditions[job]
+        assert "!cancelled()" in condition, f"{job} relies on the implicit success()"
+        for need in graph[job]:
+            assert f"needs.{need}.result" in condition, (job, need)
+
+
+def _evaluate(condition: str, results: dict[str, str], *, dry_run: bool, gate_green: bool) -> bool:
+    expression = condition.removeprefix("${{").removesuffix("}}").strip()
+    expression = expression.replace("!cancelled()", "True").replace("!inputs.dry_run", "(not DRY)")
+    expression = expression.replace("needs.preflight.outputs.gate_green", "GATE")
+    expression = re.sub(r"needs\.([\w-]+)\.result", r'R["\1"]', expression)
+    expression = expression.replace("&&", " and ").replace("||", " or ")
+    expression = re.sub(r"!(?!=)", " not ", expression)
+    assert "needs." not in expression and "inputs." not in expression, condition
+    return bool(eval(expression, {"__builtins__": {}}, {"R": results, "DRY": dry_run, "GATE": "true" if gate_green else "false"}))  # noqa: S307
+
+
+def _simulate(*, dispatch: bool, dry_run: bool, gate_green: bool) -> dict[str, str]:
+    """Walk the release graph the way GitHub does: no `if:` means implicit success()."""
+
+    workflow = _read_release_workflow()
+    graph = release_notes.parse_workflow_job_needs(workflow)
+    conditions = _job_conditions(workflow)
+    results: dict[str, str] = {}
+    remaining = list(graph)
+    while remaining:
+        job = next(name for name in remaining if all(need in results for need in graph[name]))
+        remaining.remove(job)
+        needs = {need: results[need] for need in graph[job]}
+        if job == "dispatch":
+            run = dispatch
+        elif conditions[job]:
+            run = _evaluate(conditions[job], results, dry_run=dry_run, gate_green=gate_green)
+        else:
+            run = all(result == "success" for result in needs.values())
+        results[job] = "success" if run else "skipped"
+    return results
+
+
+@pytest.mark.parametrize("gate_green", [True, False])
+@pytest.mark.parametrize(
+    ("dispatch", "dry_run"), [(True, False), (False, False)], ids=["dispatch", "tag-push"]
+)
+def test_release_reaches_every_publish_job_on_both_trigger_paths(
+    dispatch: bool, dry_run: bool, gate_green: bool
+) -> None:
+    results = _simulate(dispatch=dispatch, dry_run=dry_run, gate_green=gate_green)
+    assert results["dispatch"] == ("success" if dispatch else "skipped")
+    assert results["ci"] == ("skipped" if gate_green else "success")
+    skipped = sorted(job for job, result in results.items() if result != "success" and job not in {"dispatch", "ci"})
+    assert not skipped, f"skipped after build: {skipped}"
+
+
+@pytest.mark.parametrize("gate_green", [True, False])
+def test_dry_run_reaches_smoke_and_stops_before_publish(gate_green: bool) -> None:
+    results = _simulate(dispatch=True, dry_run=True, gate_green=gate_green)
+    assert results["preflight"] == results["build"] == results["smoke-artifacts"] == "success"
+    for job in ("publish-testpypi", "publish-pypi", "github-release", "post-release-compatibility",
+                "verify-testpypi", "verify-pypi"):
+        assert results[job] == "skipped", job
+
+
+def test_dry_run_never_tags_and_builds_the_sha() -> None:
+    workflow = _read_release_workflow()
+    assert "name: Create the annotated tag on the SHA\n        if: ${{ !inputs.dry_run }}" in workflow
+    assert "inputs.dry_run && inputs.sha ||" in workflow  # preflight checks out the SHA in a dry run
+    assert workflow.count("ref: ${{ needs.preflight.outputs.ref }}") == 4  # ci, build, github-release, post-release
