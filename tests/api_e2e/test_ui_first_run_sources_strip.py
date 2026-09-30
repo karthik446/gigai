@@ -33,6 +33,11 @@ const out = {
   unknown: m.sourcesStrip(null, { now }),
   noRunEmpty: m.noRunText(m.sourcesStrip(status({ status: "empty", companies_indexed: 0 }), { now })),
   noRunFresh: m.noRunText(m.sourcesStrip(status({ status: "ready", companies_indexed: 5, last_checked_at: "2026-09-29T11:00:00Z" }), { now })),
+  stepsEmpty: m.firstRunSteps(status({ status: "empty", companies_indexed: 0 }), { hasRun: false }),
+  stepsUpdated: m.firstRunSteps(status({ status: "ready", companies_indexed: 12 }), { hasRun: false, stored: "12 companies stored" }),
+  stepsBoth: m.firstRunSteps(status({ status: "ready", companies_indexed: 12 }), { hasRun: true }),
+  freshNoRun: m.sourcesStrip(status({ status: "ready", companies_indexed: 12, last_checked_at: "2026-09-29T11:00:00Z" }), { now, hasRun: false }),
+  noRunFreshNoRun: m.noRunText(m.sourcesStrip(status({ status: "ready", companies_indexed: 12, last_checked_at: "2026-09-29T11:00:00Z" }), { now, hasRun: false })),
   landEmptyFromSettings: m.finishLanding(status({ status: "empty", companies_indexed: 0 }), { fromSettings: true }),
   landFullFromSettings: m.finishLanding(status({ status: "ready", companies_indexed: 9 }), { fromSettings: true }),
   landFullFirstRun: m.finishLanding(status({ status: "ready", companies_indexed: 9 }), { fromSettings: false }),
@@ -55,16 +60,17 @@ def out() -> dict:
 def test_empty_store_shows_numbered_steps_and_blocks_run(out: dict) -> None:
     empty = out["empty"]
     assert empty["kind"] == "empty"
-    assert empty["steps"]["highlightStep"] == 1
-    assert empty["steps"]["update"].startswith("Update sources: downloads postings from")
-    assert "can take 15 minutes or more the first time" in empty["steps"]["update"]
-    assert empty["steps"]["run"] == "Run find jobs"
+    first, second = empty["steps"]
+    assert (first["title"], first["state"], first["action"]) == ("Update sources", "current", "update-sources")
+    assert first["description"].startswith("Downloads postings from")
+    assert "can take 15 minutes or more the first time" in first["description"]
+    assert (second["title"], second["state"], second["action"]) == ("Run find jobs", "todo", None)
     assert empty["runBlocked"] == "Update sources first, then run."
 
 
 def test_board_count_comes_from_the_server_never_a_constant(out: dict) -> None:
-    assert "~10,370 company boards" in out["emptyKnown"]["steps"]["update"]
-    assert "~" not in out["empty"]["steps"]["update"], "no count when the server did not say one"
+    assert "~10,370 company boards" in out["emptyKnown"]["steps"][0]["description"]
+    assert "~" not in out["empty"]["steps"][0]["description"], "no count when the server did not say one"
     source = (UI_SRC / "sourcesStripModel.js").read_text(encoding="utf-8")
     assert "10370" not in source.replace("10,370 boards", "") and "10,360" not in source.split("export function")[1]
 
@@ -92,9 +98,25 @@ def test_unreadable_status_shows_no_strip(out: dict) -> None:
     assert out["unknown"]["kind"] == "unknown" and out["unknown"]["runBlocked"] == ""
 
 
-def test_empty_state_text_names_both_steps_only_when_empty(out: dict) -> None:
-    assert "Update sources" in out["noRunEmpty"] and "Run find jobs" in out["noRunEmpty"]
+def test_empty_state_is_short_while_the_steps_show(out: dict) -> None:
+    assert out["noRunEmpty"] == "No runs yet." and out["noRunFreshNoRun"] == "No runs yet."
     assert "Update sources" not in out["noRunFresh"] and "Run one above" in out["noRunFresh"]
+
+
+def test_stepper_states(out: dict) -> None:
+    states = lambda key: [step["state"] for step in out[key]]  # noqa: E731
+    assert states("stepsEmpty") == ["current", "todo"]
+    assert states("stepsUpdated") == ["done", "current"]
+    assert out["stepsUpdated"][0]["description"] == "12 companies stored on this machine."
+    assert states("stepsBoth") == ["done", "done"]
+    assert out["freshNoRun"]["steps"] is not None and out["fresh"]["steps"] is None
+
+
+def test_disabled_reason_is_shown_once() -> None:
+    strip = (UI_SRC / "components" / "SourcesStrip.jsx").read_text(encoding="utf-8")
+    jobs = (UI_SRC / "views" / "FindJobsView.jsx").read_text(encoding="utf-8")
+    assert strip.count("strip.runBlocked") == 2  # step 2's line only (condition + text)
+    assert "strip.runBlocked && !strip.steps" in jobs, "the header line shows only when no stepper does"
 
 
 def test_wizard_finish_lands_on_jobs_with_step_1_only_when_empty(out: dict) -> None:
@@ -107,6 +129,6 @@ def test_jsx_wiring() -> None:
     jobs = (UI_SRC / "views" / "FindJobsView.jsx").read_text(encoding="utf-8")
     assert "<SourcesStrip" in jobs and "strip.runBlocked" in jobs and "noRunText(strip)" in jobs
     strip = (UI_SRC / "components" / "SourcesStrip.jsx").read_text(encoding="utf-8")
-    assert 'data-highlight={strip.steps.highlightStep === 1' in strip and "startSourcesUpdate" in strip
+    assert 'data-highlight={step.state === "current"' in strip and "startSourcesUpdate" in strip
     app = (UI_SRC / "App.jsx").read_text(encoding="utf-8")
     assert "finishLanding(" in app

@@ -44,14 +44,44 @@ function knownBoardTotal(status) {
   return count(status && status.update && status.update.boards && status.update.boards.total);
 }
 
+// The compact first-run stepper: [{n, title, description, state, action}].
+// state is done | current | todo; action is the button the step carries
+// ("update-sources") or null. Step 1 is done once the store holds postings
+// (or the last update finished with some); step 2 is done once a run exists.
+export function firstRunSteps(status, { hasRun = false, boards = "", running = false, stored = "" } = {}) {
+  const index = status && status.index;
+  const storeReady = Boolean(index) && index.status !== "empty" && count(index.companies_indexed) > 0;
+  const step1 = storeReady ? "done" : "current";
+  const step2 = hasRun ? "done" : storeReady ? "current" : "todo";
+  const scope = boards || "the company boards on your watchlist";
+  return [
+    {
+      n: 1,
+      title: "Update sources",
+      description: storeReady
+        ? `${stored || "Postings stored"} on this machine.`
+        : `Downloads postings from ${scope} (network only, no model; can take ${MEASURED_UPDATE_MINUTES} minutes or more the first time).`,
+      state: step1,
+      action: "update-sources",
+    },
+    {
+      n: 2,
+      title: "Run find jobs",
+      description: "Finds and ranks postings for this profile.",
+      state: step2,
+      action: null,
+    },
+  ];
+}
+
 // What the strip shows:
 //   kind      unknown (not read / failed) | empty | fresh | stale
 //   running   an update is live: `progress` is the inline bar
 //   line      the strip's sentence ("" for unknown)
 //   amber     stale ("out of date")
-//   steps     the numbered first-run steps (empty store only), else null
+//   steps     the first-run stepper (empty store, or no run yet), else null
 //   runBlocked  why Run find jobs is off ("" when it is on)
-export function sourcesStrip(status, { now = Date.now() } = {}) {
+export function sourcesStrip(status, { now = Date.now(), hasRun = true } = {}) {
   const index = status && status.index;
   const running = isRunning(status);
   if (!index) {
@@ -68,32 +98,30 @@ export function sourcesStrip(status, { now = Date.now() } = {}) {
       progress,
       line: "Company postings: none stored on this machine yet",
       amber: false,
-      steps: {
-        highlightStep: 1,
-        update: `Update sources: downloads postings from ${boards} (uses the network, no model; can take ${MEASURED_UPDATE_MINUTES} minutes or more the first time)`,
-        run: "Run find jobs",
-      },
+      steps: firstRunSteps(status, { hasRun: false, boards, running }),
       runBlocked: running ? "Updating sources… Run find jobs opens when it finishes." : "Update sources first, then run.",
     };
   }
   const stale = index.status === "stale";
   const age = ageLabel(index.last_checked_at, now);
   const companies = `${formatCount(stored)} compan${stored === 1 ? "y" : "ies"} stored`;
+  const steps = hasRun ? null : firstRunSteps(status, { hasRun, running, stored: companies });
   return {
     kind: stale ? "stale" : "fresh",
     running,
     progress,
     line: `Company postings: ${companies}${age ? ` · updated ${age}` : ""}${stale ? " · out of date" : ""}`,
     amber: stale,
-    steps: null,
+    steps,
     runBlocked: "",
   };
 }
 
-// The empty-state text of a profile with no runs.
+// The empty-state text of a profile with no runs: short while the stepper
+// is showing (the steps already say what to do).
 export function noRunText(strip) {
-  if (strip && strip.kind === "empty") {
-    return "No find-jobs run yet for this profile. First click Update sources above (step 1), then Run find jobs (step 2) to see its postings here, or assess a single posting under";
+  if (strip && strip.steps) {
+    return "No runs yet.";
   }
   return "No find-jobs run yet for this profile. Run one above to see its postings here, or assess a single posting under";
 }

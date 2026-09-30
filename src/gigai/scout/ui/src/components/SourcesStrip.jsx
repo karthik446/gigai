@@ -30,11 +30,20 @@ export default function SourcesStrip({ strip, read }) {
   return (
     <div className={`sources-strip${strip.amber ? " amber" : ""}`} data-role="sources-strip" data-kind={strip.kind}>
       {strip.steps ? (
-        <ol className="sources-steps" data-role="first-run-steps">
-          <li className={strip.steps.highlightStep === 1 ? "highlight" : undefined} data-step="1" data-highlight={strip.steps.highlightStep === 1 ? "true" : undefined}>
-            {strip.steps.update} {button}
-          </li>
-          <li data-step="2">{strip.steps.run}</li>
+        <ol className="first-run-steps" data-role="first-run-steps">
+          {strip.steps.map((step) => (
+            <li key={step.n} className={`first-run-step ${step.state}`} data-step={step.n} data-state={step.state} data-highlight={step.state === "current" ? "true" : undefined}>
+              <span className="first-run-num" aria-hidden="true">{step.state === "done" ? "✓" : step.n}</span>
+              <span className="first-run-text">
+                <span className="first-run-title">{step.title}</span>
+                <span className="muted first-run-desc">{step.description}</span>
+                {step.n === 2 && step.state !== "done" && strip.runBlocked && (
+                  <span className="muted first-run-desc" data-role="run-blocked">{strip.runBlocked}</span>
+                )}
+              </span>
+              {step.action === "update-sources" && button}
+            </li>
+          ))}
         </ol>
       ) : (
         <div className="sources-strip-row">
