@@ -383,13 +383,18 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     ),
     RouteSpec(
         "GET", "/api/resume-display", "The saved PDF header settings and the suggestion to prefill them.", "read", "none",
-        {"saved": False, "name": "", "contact": [], "titles": {}}, host_checked=True, errors=((403, "forbidden_origin"),),
-        description="Returns personal values, so the Host header must match the bound server.",
+        {"saved": False, "name": "", "contact": [], "titles": {}, "spacing_scale": 1.0, "auto_fit": True}, host_checked=True, errors=((403, "forbidden_origin"),),
+        description="Returns personal values, so the Host header must match the bound server. spacing_scale and auto_fit read as 1.0 and true until saved.",
     ),
     RouteSpec(
-        "PUT", "/api/resume-display", "Save the PDF header settings (name, contact line, per-profile titles).", "write", "none", {"saved": True},
-        params=(_b("name", "string", "The name printed on the PDF."), _b("contact", "array", "Contact items {kind, value}."), _b("titles", "object", "Title per profile id.")),
-        request_example={"name": "Kar Ohm", "contact": [], "titles": {}}, errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID),
+        "PUT", "/api/resume-display", "Save the PDF display settings (name, contact line, per-profile titles, spacing).", "write", "none", {"saved": True},
+        params=(
+            _b("name", "string", "The name printed on the PDF."), _b("contact", "array", "Contact items {kind, value}."), _b("titles", "object", "Title per profile id."),
+            _b("spacing_scale", "number", "The PDF spacing unit's scale, 0.7 to 1.4 (default 1.0); used when auto_fit is false."),
+            _b("auto_fit", "boolean", "Pick the spacing scale that ends the content near a page boundary (default true)."),
+        ),
+        request_example={"name": "Kar Ohm", "contact": [], "titles": {}, "spacing_scale": 1.0, "auto_fit": True}, errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID),
+        description="Keys left out keep their saved values. A spacing_scale outside 0.7..1.4 answers 422 invalid_value.",
     ),
     # --- resume ----------------------------------------------------------------------
     RouteSpec(

@@ -78,6 +78,15 @@ def test_tailored_resume_pdf_journey(tmp_path: Path, monkeypatch: pytest.MonkeyP
         text = _text(second.content)
         assert "kar@example.test" in text and "Staff Engineer" in text
 
+        # (b2) 0110-017: with auto fit off the PDF follows the saved spacing scale.
+        pdfs = []
+        for scale in (0.7, 1.4):
+            assert client.put("/api/resume-display", json={"spacing_scale": scale, "auto_fit": False}).status_code == 200
+            spaced = client.post("/api/tailored-resumes/pdf", json=key)
+            assert spaced.status_code == 200 and spaced.content.startswith(b"%PDF")
+            pdfs.append(spaced.content)
+        assert pdfs[0] != pdfs[1]
+
         # (c) not found.
         missing = client.post("/api/tailored-resumes/pdf", json={**key, "job_identity": "https://example.test/none"})
         assert missing.status_code == 404 and missing.json()["error"]["code"] == "tailored_resume_not_found"

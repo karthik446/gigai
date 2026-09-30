@@ -2,7 +2,8 @@
 
 Stored once per home at ``<home>/scout/resume-display.json`` (``scout-resume-display:1``),
 0600, display-only: nothing here ever feeds a model prompt or the network.  Reads are
-tolerant (missing, symlinked or malformed means "not saved").  ``suggest`` is a local,
+tolerant (missing, symlinked or malformed means "not saved"; a file written before 0110-017
+has no ``spacing_scale``/``auto_fit`` and reads as the defaults).  ``suggest`` is a local,
 pure prefill parser: it never writes and never overrides saved values.
 """
 
@@ -11,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,6 +22,8 @@ SCHEMA_VERSION = "scout-resume-display:1"
 KINDS: tuple[str, ...] = ("location", "work_authorization", "linkedin", "github", "link", "email", "phone")
 MAX_CONTACT = 12
 MAX_VALUE = 200
+#: The PDF spacing unit's scale (0110-017): the Resume display slider's range and default.
+SPACING_MIN, SPACING_MAX, SPACING_DEFAULT = 0.7, 1.4, 1.0
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -36,6 +39,8 @@ class DisplaySettings:
     contact: tuple[ContactEntry, ...] = ()
     titles: dict[str, str] = field(default_factory=dict)
     updated_at: str = ""
+    spacing_scale: float = SPACING_DEFAULT
+    auto_fit: bool = True
 
 
 @dataclass(frozen=True)
@@ -66,8 +71,18 @@ def _clean(value: object) -> str:
     return _CONTROL.sub(" ", value).strip()[:MAX_VALUE] if isinstance(value, str) else ""
 
 
+def valid_spacing(value: object) -> bool:
+    """A real number (not a bool) inside the slider's range."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and SPACING_MIN <= value <= SPACING_MAX
+
+
+def _spacing(value: object) -> float:
+    return round(float(value), 2) if valid_spacing(value) else SPACING_DEFAULT
+
+
 def normalize(settings: DisplaySettings) -> DisplaySettings:
-    """Drop empty values, unknown kinds and duplicates of single-use kinds; keep order."""
+    """Drop empty values, unknown kinds and duplicates of single-use kinds; keep order.  An out-of-range
+    spacing scale reads as the default."""
 
     seen: set[str] = set()
     contact: list[ContactEntry] = []
@@ -80,7 +95,8 @@ def normalize(settings: DisplaySettings) -> DisplaySettings:
         if len(contact) >= MAX_CONTACT:
             break
     titles = {key: title for key, value in settings.titles.items() if isinstance(key, str) and key and (title := _clean(value))}
-    return DisplaySettings(_clean(settings.name), tuple(contact), titles, settings.updated_at)
+    auto_fit = settings.auto_fit if type(settings.auto_fit) is bool else True
+    return DisplaySettings(_clean(settings.name), tuple(contact), titles, settings.updated_at, _spacing(settings.spacing_scale), auto_fit)
 
 
 def load_display(home_root: Path) -> DisplaySettings | None:
@@ -102,7 +118,9 @@ def load_display(home_root: Path) -> DisplaySettings | None:
                 contact.append(ContactEntry(item["kind"], item["value"]))
     titles = raw.get("titles") if type(raw.get("titles")) is dict else {}
     updated = raw.get("updated_at") if isinstance(raw.get("updated_at"), str) else ""
-    return normalize(DisplaySettings(_clean(raw.get("name")), tuple(contact), dict(titles), updated))
+    spacing = raw.get("spacing_scale", SPACING_DEFAULT)
+    auto_fit = raw.get("auto_fit", True)
+    return normalize(DisplaySettings(_clean(raw.get("name")), tuple(contact), dict(titles), updated, spacing, auto_fit))
 
 
 def save_display(home_root: Path, settings: DisplaySettings, *, now: datetime | None = None) -> DisplaySettings:
@@ -110,7 +128,7 @@ def save_display(home_root: Path, settings: DisplaySettings, *, now: datetime | 
 
     clean = normalize(settings)
     stamp = (now or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z")
-    clean = DisplaySettings(clean.name, clean.contact, clean.titles, stamp)
+    clean = replace(clean, updated_at=stamp)
     path = display_path(home_root)
     if path.is_symlink():
         raise OSError("resume display settings path is a symlink")
@@ -120,6 +138,8 @@ def save_display(home_root: Path, settings: DisplaySettings, *, now: datetime | 
         "name": clean.name,
         "contact": [{"kind": e.kind, "value": e.value} for e in clean.contact],
         "titles": clean.titles,
+        "spacing_scale": clean.spacing_scale,
+        "auto_fit": clean.auto_fit,
         "updated_at": clean.updated_at,
     }
     atomic_write(path, (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
@@ -258,6 +278,9 @@ __all__ = [
     "KINDS",
     "PdfHeader",
     "SCHEMA_VERSION",
+    "SPACING_DEFAULT",
+    "SPACING_MAX",
+    "SPACING_MIN",
     "Suggestion",
     "display_path",
     "load_display",
@@ -265,4 +288,5 @@ __all__ = [
     "pdf_header",
     "save_display",
     "suggest",
+    "valid_spacing",
 ]

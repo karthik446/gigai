@@ -36,7 +36,7 @@ from ...tailored_resume import (
     run_tailored_resume,
     save_tailor_response,
 )
-from ...resume_display import load_display, pdf_header
+from ...resume_display import DisplaySettings, load_display, pdf_header
 from ...resume_pdf import pdf_file_name, render_pdf
 from ..contracts import FindJobsContractError
 from .assess import _ERROR_STATUS as _ASSESS_ERROR_STATUS
@@ -114,7 +114,8 @@ class TailoredResumesRoutesMixin:
             stamp = datetime.fromisoformat(stored.updated_at.replace("Z", "+00:00"))
             if stamp.tzinfo is None:
                 stamp = stamp.replace(tzinfo=timezone.utc)
-            pdf = render_pdf(stored.result, header, company=stored.job.company, timestamp=stamp)
+            layout = settings or DisplaySettings()
+            pdf = render_pdf(stored.result, header, company=stored.job.company, timestamp=stamp, spacing_scale=layout.spacing_scale, auto_fit=layout.auto_fit)
         except Exception:  # noqa: BLE001 - a render failure is typed, and never echoes the resume
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "pdf_render_failed", "the PDF could not be rendered")
             return
