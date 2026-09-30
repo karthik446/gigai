@@ -1,5 +1,15 @@
 import ResumeWarning from "../components/ResumeWarning.jsx";
 import ResumeDisplayPanel from "../components/ResumeDisplayPanel.jsx";
+import NewProfileResume from "../components/NewProfileResume.jsx";
+import { storeResume } from "../wizard/wizardApi.js";
+import {
+  canCreateProfile,
+  createProfileWithResume,
+  existingChoices,
+  initialNewResume,
+  resumeDescription,
+  sharedResumeNotes,
+} from "../profileResumeModel.js";
 import { useState } from "react";
 import TagListInput from "../components/TagListInput.jsx";
 import { archiveProfile, createProfile, updateProfile } from "../api.js";
@@ -75,10 +85,13 @@ function RunHistoryTable({ profileId }) {
 
 export default function ProfilesView({ profiles, selectedProfileId, onSelectProfile, config, reloadProfiles }) {
   const selected = profiles.find((profile) => profile.profile_id === selectedProfileId) || null;
+  const sharedNotes = sharedResumeNotes(profiles);
 
   const [creating, setCreating] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [newTitles, setNewTitles] = useState([]);
+  const [newResume, setNewResume] = useState(initialNewResume());
+  const [resumeBlocked, setResumeBlocked] = useState(false);
   const [createError, setCreateError] = useState(null);
   const [createSaving, setCreateSaving] = useState(false);
 
@@ -92,15 +105,16 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
 
   async function handleCreate(event) {
     event.preventDefault();
-    if (!newLabel.trim() || newTitles.length === 0) {
+    if (!canCreateProfile({ label: newLabel, titles: newTitles, resume: newResume }) || resumeBlocked) {
       return;
     }
     setCreateSaving(true);
     setCreateError(null);
     try {
-      await createProfile({ label: newLabel.trim(), titles: newTitles });
+      await createProfileWithResume({ label: newLabel, titles: newTitles, resume: newResume }, { storeResume, createProfile });
       setNewLabel("");
       setNewTitles([]);
+      setNewResume(initialNewResume());
       setCreating(false);
       reloadProfiles();
     } catch (error) {
@@ -163,6 +177,12 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
                 <div className="muted" style={{ fontSize: "0.8rem" }}>
                   {profile.titles.join(", ") || "no titles set"}
                 </div>
+                <div className="muted" style={{ fontSize: "0.8rem" }}>{resumeDescription(profile, config)}</div>
+                {sharedNotes[profile.profile_id] && (
+                  <div className="callout warn" role="note" data-role="shared-resume-warning" style={{ fontSize: "0.8rem" }}>
+                    {sharedNotes[profile.profile_id]}
+                  </div>
+                )}
               </div>
               <button className="button small secondary" onClick={() => onSelectProfile(profile.profile_id)}>
                 {profile.profile_id === selectedProfileId ? "Selected" : "Select"}
@@ -193,17 +213,23 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
               onChange={setNewTitles}
               placeholder="staff ai engineer, staff backend engineer…"
             />
-            <ResumeWarning modelTarget={config ? config.default_model_target : undefined} />
+            <NewProfileResume
+              value={newResume}
+              onChange={setNewResume}
+              choices={existingChoices(profiles, config)}
+              modelTarget={config ? config.default_model_target : undefined}
+              onBlockedChange={setResumeBlocked}
+            />
             <p className="muted" style={{ fontSize: "0.8rem" }}>
-              Resume defaults to the currently selected profile's resume; add a resume for this profile afterward via{" "}
-              <code>gigai scout resume add</code>.
+              This profile gets the resume you give here; it does not use the selected profile's resume unless you choose
+              it under "Choose existing".
             </p>
             {createError && <div className="callout danger">{createError}</div>}
             <div className="actions">
               <button type="button" className="button secondary" onClick={() => setCreating(false)} disabled={createSaving}>
                 Cancel
               </button>
-              <button type="submit" className="button" disabled={createSaving || !newLabel.trim() || newTitles.length === 0}>
+              <button type="submit" className="button" disabled={createSaving || resumeBlocked || !canCreateProfile({ label: newLabel, titles: newTitles, resume: newResume })}>
                 {createSaving ? "Creating…" : "Create profile"}
               </button>
             </div>
