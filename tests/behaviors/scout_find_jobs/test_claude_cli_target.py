@@ -55,7 +55,7 @@ CLAUDE_ENDPOINT = Endpoint(name="claude", adapter="claude_cli")
 CLAUDE_TARGET = ConfigModelTarget("claude-default", "claude", "default", ("text",), 4096)
 
 # The argvs after the executable, spelled out: any change is deliberate.
-PLAN_ARGV = ["-p", "--output-format", "json", "--no-session-persistence", "--permission-mode", "plan", "--tools", ""]
+PLAN_ARGV = ["-p", "--output-format", "json", "--no-session-persistence", "--permission-mode", "plan", "--tools", "", "--setting-sources", "", "--strict-mcp-config"]
 LEAN_ARGV = [
     "-p", "--output-format", "json", "--no-session-persistence",
     "--tools", "", "--system-prompt", LEAN_SYSTEM_PROMPT, "--setting-sources", "", "--strict-mcp-config",

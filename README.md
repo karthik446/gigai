@@ -125,7 +125,7 @@ link or street address it spots; it can miss things.
 the model target you configured (`ollama_local`, `codex_cli`, `claude_cli` or
 `openrouter_api`, whichever the search's `default_model_target` names). There
 is no ranking service, no extra key, and no extra third party for ranking
-or assessment. What your machine sends to the model target is exactly:
+or assessment. Scout runs `codex` with its shell tool and memories turned off, and `claude` with your settings, MCP servers and tools turned off, so a model call cannot read your local files or CLI memories. What your machine sends to the model target is exactly:
 
 - **Ranking** sends the target, one batch at a time, one short line per
   posting (title, company, location and countries, seniority level, minimum

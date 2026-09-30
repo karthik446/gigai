@@ -27,6 +27,13 @@ LEAN_SYSTEM_PROMPT = (
 _LEAN_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 _LEAN_DEFAULT_EFFORT = "low"
 
+# 0110-004 hardening: every mode loads no user/project/local settings and no
+# MCP servers, and enables no tools. Verified against Claude Code 2.1.285
+# (``claude --help``: --setting-sources, --strict-mcp-config, --tools "").
+CLAUDE_MIN_VERSION = "2.1.285"
+_CLAUDE_HARDENING = ("--setting-sources", "", "--strict-mcp-config")
+_UNKNOWN_FLAG_MARKERS = ("unknown option", "unknown argument", "unexpected argument", "unrecognized")
+
 
 class ClaudeCLIAdapter:
     """Invoke Claude Code in print/JSON/plan mode without session persistence.
@@ -72,15 +79,13 @@ class ClaudeCLIAdapter:
                 "",
                 "--system-prompt",
                 LEAN_SYSTEM_PROMPT,
-                "--setting-sources",
-                "",
-                "--strict-mcp-config",
+                *_CLAUDE_HARDENING,
                 "--disable-slash-commands",
                 "--effort",
                 effort,
             ))
         else:
-            argv.extend(("--permission-mode", "plan", "--tools", ""))
+            argv.extend(("--permission-mode", "plan", "--tools", "", *_CLAUDE_HARDENING))
         if request.model != "default":
             argv.extend(("--model", request.model))
         return tuple(argv)
@@ -88,18 +93,26 @@ class ClaudeCLIAdapter:
     def invoke(self, request: InvocationRequest) -> InvocationResult:
         require_capabilities(("text",), request.required_capabilities, target_name=request.target_name)
         with TemporaryDirectory(prefix="gigai-claude-") as directory:
-            output = run_json_process(
-                self.argv(request),
-                prompt=request.prompt,
-                cwd=Path(directory),
-                timeout_seconds=self._timeout_seconds,
-                extra_environment_names=(
-                    # Claude's macOS login lookup requires USER even with HOME
-                    # preserved. Keep this adapter-specific, not full inheritance.
-                    "USER",
-                    *(("CLAUDE_CODE_OAUTH_TOKEN",) if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") else ()),
-                ),
-            )
+            try:
+                output = run_json_process(
+                    self.argv(request),
+                    prompt=request.prompt,
+                    cwd=Path(directory),
+                    timeout_seconds=self._timeout_seconds,
+                    extra_environment_names=(
+                        # Claude's macOS login lookup requires USER even with HOME
+                        # preserved. Keep this adapter-specific, not full inheritance.
+                        "USER",
+                        *(("CLAUDE_CODE_OAUTH_TOKEN",) if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") else ()),
+                    ),
+                )
+            except ModelInvocationError as exc:
+                if any(marker in str(exc).lower() for marker in _UNKNOWN_FLAG_MARKERS):
+                    raise ModelInvocationError(
+                        f"this claude does not support the lockdown flags Scout requires; "
+                        f"upgrade Claude Code to {CLAUDE_MIN_VERSION} or newer ({exc})"
+                    ) from exc
+                raise
         text, model, usage = _parse_claude_json(output.stdout, request.model, model_usage_fallback=self._lean)
         return InvocationResult(
             status="success",
@@ -149,4 +162,4 @@ def _normalize_usage(usage: Mapping[str, object]) -> NormalizedUsage:
     return NormalizedUsage(input_tokens, output_tokens, total_tokens)
 
 
-__all__ = ["ClaudeCLIAdapter", "LEAN_SYSTEM_PROMPT"]
+__all__ = ["CLAUDE_MIN_VERSION", "ClaudeCLIAdapter", "LEAN_SYSTEM_PROMPT"]
