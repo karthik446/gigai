@@ -26,7 +26,7 @@ import {
   storedOrigin,
   workModeLabel,
 } from "../jobModel.js";
-import { eventActionLabel, jobStateFor } from "../jobStateModel.js";
+import { eventActionLabel, jobStateFor, staleAssessmentNote } from "../jobStateModel.js";
 import { modelTargetLabel } from "../modelTargets.js";
 import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 
@@ -180,7 +180,7 @@ function JobDescription({ posting, pasted }) {
 // uat-bug-029: a posting whose requirements could not be read (POST
 // /api/assess 422 posting_requirements_unreadable) stays not assessed, and
 // the page says so as a note, not an error.
-function AssessNow({ posting, origin, onAssessed }) {
+function AssessNow({ posting, origin, onAssessed, label = "Assess" }) {
   const [state, setState] = useState("idle");
   const [error, setError] = useState(null);
   const [unreadable, setUnreadable] = useState(false);
@@ -215,7 +215,7 @@ function AssessNow({ posting, origin, onAssessed }) {
             });
         }}
       >
-        {state === "saving" ? "Assessing…" : "Assess"}
+        {state === "saving" ? "Assessing…" : label}
       </button>
       {unreadable && (
         <div className="muted requirements-unreadable" data-role="requirements-unreadable">
@@ -444,6 +444,12 @@ export default function JobPage({
               {visaRequired && <SponsorshipBadge sponsorship={job.sponsorship} h1b={job.h1b} />}
               {job.status === "carried_forward" && <span className="tag">{unchangedSinceLabel(job.fromRunDate)}</span>}
             </div>
+            {assessment && staleAssessmentNote(job) && (
+              <p className="muted small" data-role="assessment-stale">
+                {staleAssessmentNote(job)}
+                <AssessNow posting={posting} origin={assessOrigin} onAssessed={onQuickUpdated} label="Re-assess" />
+              </p>
+            )}
             {assessment && assessment.not_a_match_reason && (
               <div className="callout danger" style={{ margin: "12px 0 0" }}>
                 {assessment.not_a_match_reason}

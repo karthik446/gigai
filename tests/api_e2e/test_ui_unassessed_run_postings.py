@@ -85,7 +85,7 @@ def test_a_run_rows_assess_is_the_job_pages(out: dict) -> None:
 def test_the_job_page_offers_assess_only_once_the_run_has_ended() -> None:
     page = (UI_SRC / "views" / "JobPage.jsx").read_text()
     assert '(job.status !== "acquired" || job.runEnded) && <AssessNow' in page
-    assert '"Assessing…" : "Assess"}' in page
+    assert '"Assessing…" : label}' in page and 'label = "Assess"' in page
     view = (UI_SRC / "views" / "FindJobsView.jsx").read_text()
     assert "withRunEnd(" in view and "assess_cap: response.assess_cap" in view
 

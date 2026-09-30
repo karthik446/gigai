@@ -89,6 +89,7 @@ const NOT_ASSESSED_REASON_LABELS = {
   model_output_invalid: "Model output invalid",
   published_too_old: "Older than your time window",
   work_mode_mismatch: "Filtered: work mode or area",
+  posting_incomplete: "Posting text looks incomplete: open the posting",
 };
 
 // The longer, original sentence form -- kept for a detail/tooltip line
@@ -108,6 +109,7 @@ const NOT_ASSESSED_REASON_DETAILS = {
   model_output_invalid: "The model's answer for this posting could not be parsed.",
   published_too_old: "Published before the configured time window (max_age_days, or the fixed published_after date when set).",
   work_mode_mismatch: "The posting's work mode or area is outside your work mode and city/area preference.",
+  posting_incomplete: "The posting text read as cut off, so it was not assessed. Open the posting to read it yourself.",
 };
 
 export function notAssessedReasonLabel(reason) {

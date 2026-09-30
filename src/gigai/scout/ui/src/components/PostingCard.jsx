@@ -4,6 +4,7 @@ import SponsorshipBadge from "./SponsorshipBadge.jsx";
 import PrepPanel from "./PrepPanel.jsx";
 import { displayCompanyName, notAssessedReasonDetail, notAssessedReasonLabel, unchangedSinceLabel } from "../display.js";
 import { postApplication } from "../api.js";
+import { staleAssessmentNote } from "../jobStateModel.js";
 
 // One card per posting (B4: operator "load ui sooner, one search -> assess
 // load, as a card"). `row` is the normalized shape `buildBoardRows` produces
@@ -117,6 +118,12 @@ export default function PostingCard({ row, profileId, showPrep }) {
 
       {status === "failed" && (
         <p className="muted">{notAssessedReason ? notAssessedReasonLabel(notAssessedReason) : "The model call for this posting failed."}</p>
+      )}
+
+      {assessment && staleAssessmentNote({ row }) && (
+        <p className="muted small" data-role="assessment-stale">
+          {staleAssessmentNote({ row })}
+        </p>
       )}
 
       {assessment && <AssessmentBody assessment={assessment} jobIdentity={jobIdentity} />}

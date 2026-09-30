@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import PostingCard from "./PostingCard.jsx";
-import { displayCompanyName } from "../display.js";
+import { displayCompanyName, notAssessedReasonLabel } from "../display.js";
 
 // B4: the single flat row model both the live /progress view and the final
 // sealed /results view render through, so cards never thrash layout when a
@@ -149,7 +149,7 @@ export default function PostingsBoard({ rows, cap }) {
               {" "}
               Not assessed:{" "}
               {Object.entries(cap.notAssessedCounts)
-                .map(([reason, count]) => `${count} ${reason}`)
+                .map(([reason, count]) => `${count} ${notAssessedReasonLabel(reason)}`)
                 .join(", ")}
               .
             </>
