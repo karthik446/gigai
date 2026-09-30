@@ -112,6 +112,7 @@ from .setup_interview import SetupDraft, SetupHTTPServer
 from .run import ProposalRunRequest, TailorRunRequest, RunError, launch_run, read_run_details
 from .run_plan import RunPlanError, create_run_plan, list_run_plans, read_run_plan
 from .provider_review import ProviderReviewError, close_provider_review_no_fix_required
+from .agent_context import agent_context_command
 from .private_records import (
     PrivateRecordError,
     create_record,
@@ -149,6 +150,7 @@ def _invocation_argv() -> tuple[str, ...]:
     invoke_without_command=True,
     context_settings={"help_option_names": ["--help"]},
     help=(
+        "Run 'gigai agent-context' for the full command manual. "
         "Configure, diagnose, and bind targets for this contract-first GigAI "
         "installation. Resolve and open only already-provisioned Gig workpads."
     ),
@@ -4228,6 +4230,7 @@ cli.add_command(interview_group)
 cli.add_command(scout_group)
 cli.add_command(transfer_group)
 cli.add_command(secrets_group)
+cli.add_command(agent_context_command)
 # Keep existing G45 wrapper create/read behavior while exposing native CRUD.
 # Registering this independently named group as "record" would silently replace
 # the existing Click group and break its accepted command surface.

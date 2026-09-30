@@ -6,7 +6,7 @@ TEST_XDIST_WORKERS ?= auto
 TEST_XDIST_MAX_WORKERS ?= 14
 TEST_XDIST_DIST ?= worksteal
 
-.PHONY: test test-macos-smoke test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live
+.PHONY: test test-macos-smoke test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live cli-manual
 
 # Complete portable offline coverage: one source discovery pass, the existing
 # deterministic behavior evaluation, and a fresh wheel plus every installed
@@ -127,3 +127,8 @@ test-debian-offline:
 		--env GIGAI_AUDIT_TARGET=/audit/target \
 		--env GIGAI_AUDIT_WORKPAD=/audit/workpad \
 		gigai-debian-offline:local
+
+# 0110-008: regenerate docs/cli.md from the Click tree plus data/cli/commands.yaml.
+# tests/behaviors/cli_surface/test_agent_context.py fails when it is stale.
+cli-manual:
+	$(UV) run python -m gigai.agent_context --markdown > docs/cli.md
