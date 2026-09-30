@@ -83,18 +83,13 @@ def test_bullet_rhythm_leading_within_gap_between_and_no_overlap() -> None:
     assert between and min(between) > leading + TOL, f"bullet gap {min(between)} <= line gap {leading}"
 
 
-def test_skills_hard_wrapped_source_is_one_paragraph_and_summary_is_not_a_bullet() -> None:
+def test_skills_hard_wrapped_source_is_tags_and_summary_is_not_a_bullet() -> None:
     data = _pdf(_skills_wrapped())
-    lines = [t for page in _lines(data) for _, _, t, _ in page]
-    text = "\n".join(lines)
+    text = "\n".join(t for page in _lines(data) for _, _, t, _ in page)
     assert "•" not in text.split("SKILLS")[1] and "•" not in text.split("SUMMARY")[1].split("EXPERIENCE")[0]
-    skills = [y for page in _lines(data) for y, _, t, _ in page if "Kafka" in t or "Sinatra" in t]
-    body = text.split("SKILLS")[1].strip().split("\n")
-    assert " ".join(body).count("·") >= 8 and all(not l.startswith("•") for l in body)
-    # one paragraph: every skills line sits one leading apart (no block gap between them)
-    page = next(p for p in _lines(data) if any("Sinatra" in t for _, _, t, _ in p))
-    ys = [y for y, _, t, _ in page[[t for _, _, t, _ in page].index("SKILLS") + 1 :]]
-    assert len({round(a - b, 1) for a, b in zip(ys, ys[1:])}) <= 1 and skills
+    tags = _skill_tags(data)
+    assert "Kafka/SQS" in tags and "Ruby/Rails/Sinatra" in tags and "LLM/GenAI (RAG, evals, agent orchestration)" in tags
+    assert "·" not in "".join(tags)
 
 
 def test_no_heading_is_the_last_line_on_a_page() -> None:
@@ -112,3 +107,101 @@ def test_render_is_deterministic() -> None:
 def test_golden_png_renders() -> None:
     """The committed golden is for visual review; regenerate with typst format=png when the template changes."""
     assert (FIXTURES / "resume_pdf_layout_golden.png").stat().st_size > 10_000
+
+
+def _texts(data: bytes) -> list[str]:
+    return [t.strip() for page in _lines(data) for _, _, t, _ in page]
+
+
+def _skill_runs(data: bytes) -> list[str]:
+    """Every text run (one per chip) after the SKILLS heading, in reading order."""
+    runs: list[str] = []
+    for page in PdfReader(io.BytesIO(data)).pages:
+        found: list[str] = []
+        page.extract_text(visitor_text=lambda text, cm, tm, font, size: found.append(text) if text.strip() else None)
+        runs += found
+    return [r.strip() for r in runs[[r.strip() for r in runs].index("SKILLS") + 1 :]]
+
+
+def _skill_tags(data: bytes) -> list[str]:
+    return _skill_runs(data)
+
+
+def test_no_duplicated_text_lines() -> None:
+    """0110-015: a hard-wrapped paragraph whose copy lines each cite their continuations prints once."""
+    lines = _texts(_pdf(_result()))
+    repeated = sorted({l for l in lines if len(l) > 12 and lines.count(l) > 1})
+    assert not repeated, f"text lines printed more than once: {repeated}"
+    body = " ".join(lines)
+    for item in ("Active Directory/Citrix", "Visio/process mapping", "SQL (Oracle, SQL Server)"):
+        assert body.count(item) == 1, f"{item!r} printed {body.count(item)} times"
+
+
+def test_skills_rendered_as_n_unique_tags() -> None:
+    tags = _skill_tags(_pdf(_result()))
+    assert len(tags) == 11 and len({t.casefold() for t in tags}) == 11, tags
+    assert tags[0] == "SQL (Oracle, SQL Server)" and tags[-1] == "Visio/process mapping"  # reading order kept
+
+
+def _filled(count: int, dropped: int = 0, long_entry: bool = False) -> TailoredResume:
+    """The fixture with ``count`` extra one-line summary paragraphs and the last ``dropped`` experience bullets
+    removed, to slide the page break through the entries and to size the overflow."""
+    result = _result()
+    filler = tuple(TailoredLine("copy", f"Filler paragraph {i} about scheduling and billing systems.", ()) for i in range(count))
+    sections = []
+    for s in result.sections:
+        if s.heading == "summary":
+            s = replace(s, lines=s.lines + filler)
+        elif s.heading == "experience" and long_entry:  # one long role (10 bullets) so a page break can fall inside it
+            first = s.entries[0]
+            s = replace(s, entries=(replace(first, bullets=first.bullets * 2),) + s.entries[1:])
+        elif s.heading == "experience" and dropped:
+            entries = list(s.entries)
+            left = dropped
+            for index in range(len(entries) - 1, -1, -1):
+                cut = min(left, max(len(entries[index].bullets) - 1, 0))
+                if cut:
+                    entries[index] = replace(entries[index], bullets=entries[index].bullets[:-cut])
+                    left -= cut
+            s = replace(s, entries=tuple(entries))
+        sections.append(s)
+    return replace(result, sections=tuple(sections))
+
+
+def _kinds(page: list[tuple[float, float, str, float]]) -> list[str]:
+    return ["bullet" if t.startswith("•") else "wrap" if x > 75 and size < 10.5 else "other" for _, x, t, size in page]
+
+
+def test_no_entry_split_leaves_one_bullet_alone() -> None:
+    splits = 0
+    for count in range(0, 40):
+        pages = _lines(_pdf(_filled(count, long_entry=True)))
+        for before, after in zip(pages, pages[1:]):
+            kinds_after = _kinds(after)
+            if not kinds_after or kinds_after[0] not in ("bullet", "wrap"):
+                continue  # the page break falls between entries
+            splits += 1
+            head = 0
+            for kind in kinds_after:
+                if kind == "other":
+                    break
+                head += kind == "bullet"
+            tail = 0
+            for kind in reversed(_kinds(before)):
+                if kind == "other":
+                    break
+                tail += kind == "bullet"
+            assert head >= 2 and tail >= 2, f"count={count}: an entry splits {tail} | {head} bullets across the page break"
+    assert splits, "no fixture size split an entry across pages"
+
+
+def test_one_page_when_it_overflows_by_a_small_amount() -> None:
+    """Rule: a small overflow is tightened onto one page; a real second page carries real content."""
+    saw_one = saw_two = False
+    for dropped in range(0, 12):
+        pages = _lines(_pdf(_filled(0, dropped)))
+        saw_one |= len(pages) == 1
+        if len(pages) > 1:
+            saw_two = True
+            assert len(pages[1]) >= 6, f"dropped={dropped}: page 2 holds only {len(pages[1])} lines (a small overflow should fit page 1)"
+    assert saw_one and saw_two

@@ -45,13 +45,28 @@ def _source_is_bullet(line: TailoredLine) -> bool:
     return _LEADING_MARKERS.match(source.lstrip()) is not None and not source.lstrip().startswith("#")
 
 
+def _covered(line: TailoredLine) -> set[int]:
+    """The resume line numbers a copy line prints: what it cites plus the lines that wrap on from it."""
+    return {n for ref in line.refs if ref.kind == "resume" for n in (ref.line, *ref.continued_lines)}
+
+
 def _paragraphs(lines: tuple[TailoredLine, ...]) -> list[dict[str, object]]:
-    """Real bullets stay bullets; consecutive non-bullet lines (a hard-wrapped paragraph) join into one."""
+    """Real bullets stay bullets; consecutive non-bullet lines (a hard-wrapped paragraph) join into one.
+
+    A copy line is stored EXPANDED to its wrapped continuation lines (``tailored_resume._resume_ref``), so a
+    hard-wrapped paragraph copied line by line stores line 1 = 1..n, line 2 = 2..n, ...; a copy whose first
+    resume line an earlier copy already printed is skipped (0110-015), so no text is ever printed twice.
+    """
     out: list[dict[str, object]] = []
+    printed: set[int] = set()
     for line in lines:
         text = _flat(shown_text(line))
         if not text:
             continue
+        if line.kind == "copy" and line.refs and line.refs[0].line in printed:
+            continue
+        if line.kind == "copy":
+            printed |= _covered(line)
         if _source_is_bullet(line):
             out.append({"text": text, "bullet": True})
         elif out and not out[-1]["bullet"]:
@@ -59,6 +74,23 @@ def _paragraphs(lines: tuple[TailoredLine, ...]) -> list[dict[str, object]]:
         else:
             out.append({"text": text, "bullet": False})
     return out
+
+
+_TAG_SEPARATORS = re.compile(r"\s*[·;]\s*|\s*,\s*(?![^()]*\))")
+
+
+def _tags(paragraphs: list[dict[str, object]]) -> list[str]:
+    """Skills as unique chips: split on middle dots, semicolons and commas outside parentheses (a slash group
+    such as ``Docker/Kubernetes`` stays one tag, as the resume writes it); order kept, case-insensitive dedupe."""
+    seen: set[str] = set()
+    tags: list[str] = []
+    for paragraph in paragraphs:
+        for part in _TAG_SEPARATORS.split(str(paragraph["text"])):
+            tag = part.strip().rstrip(".").strip()
+            if tag and tag.casefold() not in seen:
+                seen.add(tag.casefold())
+                tags.append(tag)
+    return tags
 
 
 def _heading_line(text: str) -> dict[str, str]:
@@ -83,7 +115,8 @@ def _body(result: TailoredResume) -> list[dict[str, object]]:
                 entries.append({"heading": [_heading_line(l.text) for l in entry.heading], "bullets": [_flat(shown_text(l)) for l in entry.bullets]})
         else:
             lines = _paragraphs(section.lines)
-        sections.append({"heading": section.heading.upper(), "lines": lines, "entries": entries})
+        tags = _tags(lines) if section.heading == "skills" else []
+        sections.append({"heading": section.heading.upper(), "lines": [] if tags else lines, "tags": tags, "entries": entries})
     return sections
 
 
