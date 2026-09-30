@@ -10,7 +10,7 @@
   --wz-step-inactive: var(--step-inactive);
 }
 
-/* Step indicator (mockup: 4 dots). */
+/* Step indicator (mockup: 4 dots; 5 since 0110-013). */
 .setup-wizard .wz-steps {
   display: flex;
   align-items: center;

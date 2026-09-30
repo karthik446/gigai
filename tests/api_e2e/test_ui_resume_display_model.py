@@ -53,6 +53,11 @@ console.log(JSON.stringify({
   hasContactEmpty: m.hasContactLine({ saved: false, contact: [] }),
   hasContactBlank: m.hasContactLine({ saved: true, contact: [c("email", " ")] }),
   hasContact: m.hasContactLine({ saved: true, contact: [c("email", "j@x.io")] }),
+  headerFull: m.headerLine({ name: "Jane", title: "Staff Engineer", contact: [c("email", "j@x.io"), c("github", "https://github.com/j/")] }),
+  headerNameOnly: m.headerLine({ name: "Jane", title: "", contact: [] }),
+  headerEmpty: m.headerLine({ name: "", title: "", contact: [] }),
+  savedLine: m.savedHeaderLine({ saved: true, name: "Jane", title: "Staff", contact: [c("email", "j@x.io")] }),
+  unsavedLine: m.savedHeaderLine({ saved: false, name: "", title: "", contact: [], suggested: { name: "Jane", title: "x", contact: [c("email", "j@x.io")] } }),
   note: m.PRIVACY_NOTE,
   fileName: api.pdfFileName('attachment; filename="jane-doe-resume-acme.pdf"'),
   fileNameFallback: api.pdfFileName(null),
@@ -148,3 +153,39 @@ def test_the_settings_section_is_on_the_profile_page_with_the_note() -> None:
     assert "<ResumeDisplayPanel" in view
     panel = (UI_SRC / "components" / "ResumeDisplayPanel.jsx").read_text(encoding="utf-8")
     assert 'id="resume-display"' in panel and "PRIVACY_NOTE" in panel and "putResumeDisplay" in panel
+
+
+def test_the_header_reads_as_one_line_and_only_saved_values_make_it() -> None:
+    out = _run()
+    assert out["headerFull"] == "Jane · Staff Engineer · j@x.io | github.com/j"
+    assert out["headerNameOnly"] == "Jane" and out["headerEmpty"] == ""
+    assert out["savedLine"] == "Jane · Staff · j@x.io"
+    # a suggested prefill is not saved: the tailored panel never shows it
+    assert out["unsavedLine"] == ""
+
+
+def test_the_panel_sits_under_the_profile_card_before_run_history_and_archive() -> None:
+    """0110-013: the Resume display panel follows the profile detail card."""
+
+    view = (UI_SRC / "views" / "ProfilesView.jsx").read_text(encoding="utf-8")
+    detail = view.index("Profile detail")
+    panel = view.index("<ResumeDisplayPanel")
+    assert detail < panel < view.index("<h3>Run history</h3>") < view.index("handleArchive}")
+    # it is a sibling of the profile card, not inside it: the card is closed first
+    assert "</section>" in view[detail:panel]
+
+
+def test_the_tailored_panel_shows_the_pdf_header_with_an_edit_link() -> None:
+    panel = (UI_SRC / "components" / "TailoredResumePanel.jsx").read_text(encoding="utf-8")
+    assert "PDF header:" in panel and 'data-role="pdf-header-edit"' in panel
+    assert "savedHeaderLine(response)" in panel and "SETTINGS_HASH" in panel
+    assert 'getElementById("resume-display")' in panel
+    # the existing empty state stays
+    assert "Add your contact line" in panel
+
+
+def test_one_form_serves_the_panel_and_the_wizard_step() -> None:
+    panel = (UI_SRC / "components" / "ResumeDisplayPanel.jsx").read_text(encoding="utf-8")
+    screen = (UI_SRC / "wizard" / "ResumeDisplayScreen.jsx").read_text(encoding="utf-8")
+    assert "export function ResumeDisplayFields" in panel and panel.count("<ResumeDisplayFields") == 1
+    assert "ResumeDisplayFields" in screen and "putResumeDisplay" not in screen

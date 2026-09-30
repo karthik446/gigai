@@ -8,6 +8,7 @@
 // (the run dialog offers the same list); re-exported for the wizard.
 export { MODEL_TARGETS, MODEL_TARGET_HINTS, MODEL_TARGET_LABELS, modelTargetLabel } from "../modelTargets.js";
 import { MODEL_TARGETS } from "../modelTargets.js";
+import { buildPutBody, headerLine } from "../resumeDisplayModel.js";
 
 // uat-bug-028: each mode is a filter (find-jobs.json `work_mode`, applied
 // by the index search before ranking); `hint` says what it keeps.
@@ -49,7 +50,7 @@ export function initialWorkMode(prefs, config) {
 
 // uat-bug-020 (A2): Discover is hidden in 0.1.9, so the last step is the
 // review alone: no discovery cadence, no budget.
-export const STEPS = ["Resume", "Target", "Companies", "Review"];
+export const STEPS = ["Resume", "Resume display", "Target", "Companies", "Review"];
 
 // uat-bug-020: what Finish can store as a resume -- the formats and the
 // size `gigai scout resume add` accepts (resume_import.py).
@@ -117,7 +118,12 @@ export function initialFields({ prefs, config, selectedProfile, resumes }) {
     city: typeof p.city === "string" && !isLocationPlaceholder(p.city) ? p.city : "",
     visaSponsorshipRequired: Boolean(p.visa_sponsorship_required),
     maxAgeDays: Number.isInteger(configuredWindow) && configuredWindow >= 1 ? clampMaxAgeDays(configuredWindow) : DEFAULT_MAX_AGE_DAYS,
-    // screen 3
+    // screen 2 (0110-013): the PDF header draft (resumeDisplayModel's draft),
+    // loaded from GET /api/resume-display when the step is first opened; null
+    // until then. `displaySkipped` leaves the saved header untouched.
+    display: null,
+    displaySkipped: false,
+    // screen 4
     excludeCompanies: p.exclude_companies || [],
     watchCompanies: p.watch_companies || [],
     // Not asked (A2: Discover is hidden in 0.1.9). PUT /api/setup still
@@ -223,7 +229,7 @@ export function screenIsComplete(step, fields) {
   if (step === 1) {
     return fields.profileName.trim().length > 0 && hasResume(fields);
   }
-  if (step === 2) {
+  if (step === 3) {
     return fields.titles.length > 0 && fields.countries.length > 0 && fields.maxAgeDays >= 1;
   }
   return true;
@@ -364,6 +370,26 @@ export function setupBody(fields, existingPrefs) {
   };
 }
 
+// 0110-013: whether Finish saves the Resume display step: it was opened
+// (a draft exists) and not skipped. Skipping leaves the saved header alone.
+export function shouldSaveDisplay(fields) {
+  return Boolean(fields.display) && !fields.displaySkipped;
+}
+
+// PUT /api/resume-display's body for the step, for the profile Finish saved
+// (this profile's title goes with it); null when the step is not saved.
+export function displayBody(fields, profileId) {
+  return shouldSaveDisplay(fields) ? buildPutBody(fields.display, profileId) : null;
+}
+
+// The Review step's "PDF header" value.
+export function displayReviewText(fields) {
+  if (fields.displaySkipped || !fields.display) {
+    return "(skipped: the saved header stays as it is)";
+  }
+  return headerLine(fields.display) || "(empty)";
+}
+
 export function reviewRows(fields, resumes) {
   const list = (values) => (values.length ? values.join(", ") : "(none)");
   const workMode = WORK_MODES.find((mode) => mode.value === fields.workMode);
@@ -376,6 +402,7 @@ export function reviewRows(fields, resumes) {
   return [
     ["Profile", `${fields.profileName.trim() || "(unnamed)"}${fields.profileMode === "update" ? " (update)" : " (new)"}`],
     ["Resume", resumeSummary(fields, resumes)],
+    ["PDF header", displayReviewText(fields)],
     ["Extracted by", extractor],
     ["Tech stack", list(fields.stack)],
     ["Seniority", list(fields.seniority)],

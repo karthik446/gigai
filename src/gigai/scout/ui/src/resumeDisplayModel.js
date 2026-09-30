@@ -147,3 +147,21 @@ export function buildPutBody(draft, profileId) {
 export function hasContactLine(response) {
   return draftFromResponse(response).contact.some((entry) => text(entry.value));
 }
+
+// The header on one line, for a row that names it ("PDF header: ..."): the
+// name, the title and the contact line, empty parts skipped. "" when there is
+// nothing to print.
+export function headerLine(draft) {
+  const preview = previewHeader(draft);
+  return [preview.name, preview.title, preview.contactLine].filter(Boolean).join(" · ");
+}
+
+// The line for what is SAVED (GET /api/resume-display): a suggested prefill
+// is not saved, so it never shows here. "" while nothing is saved.
+export function savedHeaderLine(response) {
+  const body = response || {};
+  if (body.saved !== true) {
+    return "";
+  }
+  return headerLine({ name: body.name, title: body.title, contact: cleanEntries(body.contact) });
+}

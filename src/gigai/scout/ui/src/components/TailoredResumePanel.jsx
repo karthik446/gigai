@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, getResumeDisplay, getTailoredResumes, postTailoredResume, postTailoredResumePdf, putTailoredResumeLine } from "../api.js";
 import { dateTimeLabel } from "../jobModel.js";
-import { hasContactLine } from "../resumeDisplayModel.js";
+import { hasContactLine, savedHeaderLine } from "../resumeDisplayModel.js";
 import { SETTINGS_HASH } from "../routing.js";
 import {
   changeSummary,
@@ -399,6 +399,8 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState(null);
   const [hasContact, setHasContact] = useState(true);
+  // 0110-013: the saved header on one line ("" while nothing is saved).
+  const [headerText, setHeaderText] = useState("");
   const [choosing, setChoosing] = useState(false);
   const [choiceError, setChoiceError] = useState(null);
 
@@ -410,8 +412,18 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
       return undefined;
     }
     getResumeDisplay(state.profileId)
-      .then((response) => live && setHasContact(hasContactLine(response)))
-      .catch(() => live && setHasContact(true));
+      .then((response) => {
+        if (live) {
+          setHasContact(hasContactLine(response));
+          setHeaderText(savedHeaderLine(response));
+        }
+      })
+      .catch(() => {
+        if (live) {
+          setHasContact(true);
+          setHeaderText("");
+        }
+      });
     return () => {
       live = false;
     };
@@ -473,6 +485,14 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
           </button>
         )}
       </div>
+      {stored && !tailoring && headerText && (
+        <div className="muted" data-role="pdf-header" style={{ fontSize: "0.82rem" }}>
+          PDF header: <span data-role="pdf-header-line">{headerText}</span> ·{" "}
+          <a href={`${SETTINGS_HASH}`} data-role="pdf-header-edit" onClick={() => setTimeout(() => document.getElementById("resume-display")?.scrollIntoView(), 0)}>
+            Edit
+          </a>
+        </div>
+      )}
       {stored && !tailoring && !hasContact && (
         <div className="muted" data-role="contact-hint" style={{ fontSize: "0.82rem" }}>
           <a href={`${SETTINGS_HASH}`} onClick={() => setTimeout(() => document.getElementById("resume-display")?.scrollIntoView(), 0)}>
