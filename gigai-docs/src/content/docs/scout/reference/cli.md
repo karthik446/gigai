@@ -64,7 +64,7 @@ Bind, approve, and activate Scout for the bound project; safe to rerun.
 
 `gigai scout install [OPTIONS]`
 
-effect: `write` · external: `none` · output: Human-readable text; --json emits one JSON object.
+effect: `write` · external: `none` · output: Human-readable text; --json emits one JSON object, including "stopped_server" (always null for install).
 
 Example:
 
@@ -108,7 +108,7 @@ Install/activate Scout if needed, then start (or reuse) its local API + UI.
 
 `gigai scout run [OPTIONS]`
 
-effect: `write` · external: `none` · output: Human-readable text; --json emits one JSON object.
+effect: `write` · external: `none` · output: Human-readable text; --json emits one JSON object, including "stopped_server": {pid, home, target} for a verified older Scout server that was stopped to free the port, else null.
 
 Example:
 

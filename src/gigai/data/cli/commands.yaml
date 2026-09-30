@@ -725,7 +725,7 @@
       "summary": "Bind, approve, and activate Scout for the bound project; safe to rerun.",
       "effect": "write",
       "external": "none",
-      "output": "Human-readable text; --json emits one JSON object.",
+      "output": "Human-readable text; --json emits one JSON object, including \"stopped_server\" (always null for install).",
       "examples": [
         "gigai scout install"
       ]
@@ -765,7 +765,7 @@
       "summary": "Install/activate Scout if needed, then start (or reuse) its local API + UI.",
       "effect": "write",
       "external": "none",
-      "output": "Human-readable text; --json emits one JSON object.",
+      "output": "Human-readable text; --json emits one JSON object, including \"stopped_server\": {pid, home, target} for a verified older Scout server that was stopped to free the port, else null.",
       "examples": [
         "gigai scout run --no-browser"
       ],

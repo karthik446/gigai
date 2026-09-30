@@ -207,6 +207,8 @@ def install_command(
         "activated": result.activated,
         "wrote_starter_config": wrote_config,
         "changed": changed,
+        # install never touches a server; the key keeps the shape the same as `run`.
+        "stopped_server": None,
     }
     if as_json:
         _emit(payload, True, "")
@@ -545,6 +547,7 @@ def run_command(
         "cleaned_stale": result.cleaned_stale,
         "restarted_from_version": result.restarted_from_version,
         "stopped_other": result.stopped_other.to_json() if result.stopped_other is not None else None,
+        "stopped_server": result.stopped_server.to_json() if result.stopped_server is not None else None,
         **result.state.to_json(),
     }
     if as_json:

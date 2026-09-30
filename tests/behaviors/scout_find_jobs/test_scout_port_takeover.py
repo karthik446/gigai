@@ -201,7 +201,8 @@ def test_a_plain_listener_on_the_port_keeps_todays_error(projects) -> None:
         result = _scout(home, project_b, "run", "--port", str(port), "--no-browser")
 
         assert result.exit_code != 0
-        assert f"Error: port {port} is already in use; pass --port to choose a different one" in result.output
+        assert f"port {port} is in use by pid " in result.output
+        assert "which is not a Scout server; stop it or pass --port" in result.output
         assert STOPPED_OPENING not in result.output
         # The listener was not touched: it still accepts a connection.
         with socket.create_connection(("127.0.0.1", port), timeout=latency_bound(2.0)):
@@ -240,7 +241,8 @@ def test_a_recorded_pid_that_is_not_our_server_keeps_todays_error_and_is_not_kil
         result = _scout(home, project_b, "run", "--port", str(port), "--no-browser")
 
         assert result.exit_code != 0
-        assert f"Error: port {port} is already in use; pass --port to choose a different one" in result.output
+        assert f"port {port} is in use by pid " in result.output
+        assert "which is not a Scout server; stop it or pass --port" in result.output
         assert STOPPED_OPENING not in result.output
         assert stranger.poll() is None, "a process that is not our Scout server must never be signalled"
         assert state_a.is_file(), "another project's state file is that project's to clean up"
@@ -394,3 +396,183 @@ def test_the_printed_notice_keeps_the_space_in_use_target(
         copied = _as_copied_from_a_terminal(notice, columns)
         assert "use --target ~/scout" in copied
         assert "use--target" not in copied
+
+
+# --- 0.1.10 item 3: an older Scout server from a moved home holds the port ----
+
+
+def _spawn_listener(port: int, *, argv_tail: tuple[str, ...] = ()) -> subprocess.Popen[bytes]:
+    """A stranger that listens on ``port`` (plain sockets, never answers HTTP)."""
+
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import socket, time\n"
+            "listener = socket.socket()\n"
+            "listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+            f"listener.bind(('127.0.0.1', {port}))\n"
+            "listener.listen(5)\n"
+            "print('listening', flush=True)\n"
+            "time.sleep(300)\n",
+            *argv_tail,
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    assert process.stdout is not None
+    assert process.stdout.readline().strip() == b"listening"
+    return process
+
+
+def test_run_stops_a_verified_older_scout_server_from_a_moved_home(projects) -> None:
+    """The operator's case: a real Scout server whose home no longer records it."""
+
+    home, project_a, project_b = projects
+    port = _free_port()
+    first = _scout_json(home, project_a, "run", "--port", str(port), "--no-browser")
+    old_pid = int(first["pid"])  # type: ignore[arg-type]
+    _state_path(home, project_a).unlink()  # the moved home: nothing records this server any more
+    assert run_supervisor._other_live_servers(home, "someone-else") == ()
+
+    result = _scout(home, project_b, "run", "--port", str(port), "--no-browser")
+
+    assert result.exit_code == 0, result.output
+    assert STOPPED_OPENING not in result.output
+    assert (
+        f"Stopped an older Scout server (pid {old_pid}, started with --home {home} "
+        f"--target {project_a}) that was using port {port}"
+    ) in result.output
+    assert f"Scout is running at http://127.0.0.1:{port}" in result.output
+    assert _wait_until_gone(old_pid)
+    assert _scout_json(home, project_b, "status")["state"] == "running"
+
+
+def test_json_reports_stopped_server_when_stopped_and_null_when_not(projects) -> None:
+    home, project_a, project_b = projects
+    port = _free_port()
+    first = _scout_json(home, project_a, "run", "--port", str(port), "--no-browser")
+    assert first["stopped_server"] is None
+    old_pid = int(first["pid"])  # type: ignore[arg-type]
+    _state_path(home, project_a).unlink()
+
+    raw = _scout(home, project_b, "run", "--port", str(port), "--no-browser", "--json")
+    assert raw.exit_code == 0, raw.output
+    # The human line goes to stderr (CliRunner mixes it in); stdout is the JSON object.
+    assert "Stopped an older Scout server" in raw.output
+    second = json.loads([line for line in raw.output.splitlines() if line.startswith("{")][-1])
+
+    assert second["stopped_server"] == {"pid": old_pid, "home": str(home), "target": str(project_a)}
+    assert second["stopped_other"] is None
+    assert _scout_json(home, project_b, "run", "--port", str(port), "--no-browser")["stopped_server"] is None
+    assert _scout_json(home, project_b, "install")["stopped_server"] is None
+
+
+def test_a_non_scout_listener_is_not_killed_and_the_message_names_it(projects) -> None:
+    home, _, project_b = projects
+    port = _free_port()
+    stranger = _spawn_listener(port)
+    try:
+        result = _scout(home, project_b, "run", "--port", str(port), "--no-browser")
+
+        assert result.exit_code != 0
+        assert f"port {port} is in use by pid {stranger.pid} (" in result.output
+        assert "which is not a Scout server; stop it or pass --port" in result.output
+        assert stranger.poll() is None
+    finally:
+        stranger.kill()
+        stranger.wait(timeout=5.0)
+
+
+def test_a_process_naming_present_api_that_fails_the_identity_check_is_not_killed(projects) -> None:
+    home, _, project_b = projects
+    port = _free_port()
+    # Its argv reads `-m gigai.scout.find_jobs.present_api` but it never answers Scout's identity.
+    impostor = _spawn_listener(port, argv_tail=("-m", "gigai.scout.find_jobs.present_api"))
+    try:
+        assert "-m gigai.scout.find_jobs.present_api" in (run_supervisor._command_line_for_pid(impostor.pid) or "")
+
+        result = _scout(home, project_b, "run", "--port", str(port), "--no-browser")
+
+        assert result.exit_code != 0
+        assert "which is not a Scout server; stop it or pass --port" in result.output
+        assert impostor.poll() is None
+    finally:
+        impostor.kill()
+        impostor.wait(timeout=5.0)
+
+
+def test_a_command_line_that_changes_before_the_signal_is_not_signalled(
+    projects, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, _, project_b = projects
+    port = _free_port()
+    stranger = _spawn_listener(port, argv_tail=("-m", "gigai.scout.find_jobs.present_api"))
+    real = run_supervisor._command_line_for_pid
+    reads: list[int] = []
+
+    def racing(pid: int) -> str | None:
+        reads.append(pid)
+        line = real(pid)
+        return line if len(reads) == 1 else f"{line} (pid reused)"
+
+    signals: list[tuple[int, int]] = []
+    try:
+        with monkeypatch.context() as patched:
+            patched.setattr(run_supervisor, "_command_line_for_pid", racing)
+            patched.setattr(run_supervisor, "_answers_scout_identity", lambda _port, **_kw: True)
+            patched.setattr(run_supervisor.os, "kill", lambda pid, sig: signals.append((pid, sig)))
+            with pytest.raises(run_supervisor.ScoutRunError):
+                run_supervisor._stop_verified_older_scout(port)
+        assert len(reads) >= 2, "the command line must be re-read before signalling"
+        assert signals == []
+        assert stranger.poll() is None
+    finally:
+        stranger.kill()
+        stranger.wait(timeout=5.0)
+
+
+def _serve_json(routes: dict[str, tuple[int, object]]):
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            status, body = routes.get(self.path, (404, {"error": "not_found"}))
+            data = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+@pytest.mark.parametrize(
+    ("routes", "expected"),
+    [
+        # 0.1.9.x: /api is 404, /api/secrets/status answers Scout's legacy schema.
+        ({"/api/secrets/status": (200, {"schema_version": "scout-secrets-status:1", "keys": {}})}, True),
+        # 0.1.10+: the agent API index.
+        ({"/api": (200, {"schema_version": "scout-api-index:1"})}, True),
+        # Generic health, an unrelated schema, or an error status never counts.
+        ({"/api/health": (200, {"status": "ok"})}, False),
+        ({"/api/secrets/status": (200, {"schema_version": "other:1"})}, False),
+        ({"/api/secrets/status": (500, {"schema_version": "scout-secrets-status:1"})}, False),
+        ({}, False),
+    ],
+)
+def test_identity_accepts_the_0110_index_or_the_legacy_0191_answer(routes, expected: bool) -> None:
+    server = _serve_json(routes)
+    try:
+        assert run_supervisor._answers_scout_identity(server.server_address[1]) is expected
+    finally:
+        server.shutdown()
+        server.server_close()
