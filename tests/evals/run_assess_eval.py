@@ -126,6 +126,10 @@ class Resume:
     kind: str  # "synthetic" | "clean_fit"
     clean_fit_posting_id: str | None
     source: str
+    # find-jobs.json `location` (-> {{candidate_location}}). 0110-003 P1 withholds the
+    # resume header's Location/citizenship line from the model, so this is the only
+    # way the candidate's place reaches the prompt. Empty renders as "unknown".
+    location: str = ""
 
 
 @dataclass(frozen=True)
@@ -178,6 +182,7 @@ def load_resumes(index_path: Path = RESUMES_INDEX_PATH) -> dict[str, Resume]:
             kind=item["kind"],
             clean_fit_posting_id=item.get("clean_fit_posting_id"),
             source=item.get("source", ""),
+            location=item.get("location", ""),
         )
         if resume.resume_id in resumes:
             raise ValueError(f"duplicate resume_id {resume.resume_id!r}")
@@ -349,6 +354,7 @@ def assess_row(binding: object, label: Label, posting: Posting, resume: Resume) 
         visa_sponsorship_required=resume.visa_sponsorship_required,
         countries=resume.countries,
         titles=resume.titles,
+        location=resume.location,
     )
     started = time.monotonic()
     attempt = assess_once(binding, job, ctx, parse=_parse_body)
