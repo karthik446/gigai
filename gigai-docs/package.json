@@ -1,0 +1,18 @@
+{
+  "name": "gigai-docs",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build && node scripts/check-links.mjs dist --base \"${DOCS_BASE:-/}\"",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.42.4",
+    "astro": "7.3.5",
+    "astro-mermaid": "2.1.0",
+    "mermaid": "11.17.2",
+    "starlight-openapi": "0.26.3"
+  }
+}

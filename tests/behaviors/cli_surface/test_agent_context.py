@@ -104,6 +104,11 @@ def test_agent_context_command_and_first_help_line() -> None:
     assert "gigai agent-context" in first_line[:80]
 
 
-def test_generated_cli_doc_is_current() -> None:
-    expected = render_markdown(build_manual(cli))
-    assert (REPO / "docs" / "cli.md").read_text(encoding="utf-8") == expected, "run `make cli-manual`"
+def test_markdown_manual_renders_every_command() -> None:
+    # The site's CLI pages (tools/docs_gen.py, gated by tests/behaviors/ci_tooling/test_docs_gen.py)
+    # are built from this renderer; docs/cli.md and `make cli-manual` were replaced by them.
+    manual = build_manual(cli)
+    text = render_markdown(manual)
+    for entry in manual["commands"]:
+        assert f"## `gigai {entry['command']}`" in text, entry["command"]
+    assert not (REPO / "docs" / "cli.md").exists()

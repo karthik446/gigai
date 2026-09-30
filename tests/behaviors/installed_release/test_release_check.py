@@ -42,6 +42,7 @@ def test_release_job_graph_does_not_let_verify_pypi_block_the_release() -> None:
         "github-release",
         "post-release-compatibility",
         "verify-testpypi",
+        "docs",
     }
     assert expected_jobs <= graph.keys(), sorted(expected_jobs - graph.keys())
 
@@ -78,6 +79,8 @@ def test_reusable_workflow_callers_grant_the_called_jobs_permissions() -> None:
 
     for caller in ("ci", "post-release-compatibility"):
         assert jobs[caller].permissions == {"contents": "read", "actions": "read"}, caller
+    # docs.yml's publish job pushes the gh-pages branch.
+    assert jobs["docs"].permissions == {"contents": "write"}
 
 
 def _write_project(path: Path, version: str = "0.1.0") -> Path:
@@ -167,6 +170,20 @@ def test_release_artifacts_reject_ambiguous_wheels(tmp_path: Path) -> None:
     (tmp_path / "dist" / "gigai-0.1.0-py2.py3-none-any.whl").write_bytes(b"duplicate")
     with pytest.raises(release_check.ReleaseCheckError, match="exactly one wheel"):
         release_check.release_artifacts(tmp_path / "dist", "gigai", "0.1.0")
+
+
+def test_release_artifacts_must_not_ship_the_docs_site(tmp_path: Path) -> None:
+    artifacts = _write_artifacts(tmp_path / "dist")
+    release_check.verify_not_shipped(artifacts)
+
+    payload = _metadata()
+    with tarfile.open(artifacts.sdist, "w:gz") as archive:
+        for name in ("gigai-0.1.0/PKG-INFO", "gigai-0.1.0/gigai-docs/src/content/docs/index.md"):
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+    with pytest.raises(release_check.ReleaseCheckError, match="repo-only files"):
+        release_check.verify_not_shipped(artifacts)
 
 
 def test_release_artifacts_reject_metadata_version_drift(tmp_path: Path) -> None:
@@ -296,7 +313,7 @@ def test_dry_run_reaches_smoke_and_stops_before_publish(gate_green: bool) -> Non
     results = _simulate(dispatch=True, dry_run=True, gate_green=gate_green)
     assert results["preflight"] == results["build"] == results["smoke-artifacts"] == "success"
     for job in ("publish-testpypi", "publish-pypi", "github-release", "post-release-compatibility",
-                "verify-testpypi", "verify-pypi"):
+                "verify-testpypi", "verify-pypi", "docs"):
         assert results[job] == "skipped", job
 
 
@@ -304,4 +321,4 @@ def test_dry_run_never_tags_and_builds_the_sha() -> None:
     workflow = _read_release_workflow()
     assert "name: Create the annotated tag on the SHA\n        if: ${{ !inputs.dry_run }}" in workflow
     assert "inputs.dry_run && inputs.sha ||" in workflow  # preflight checks out the SHA in a dry run
-    assert workflow.count("ref: ${{ needs.preflight.outputs.ref }}") == 4  # ci, build, github-release, post-release
+    assert workflow.count("ref: ${{ needs.preflight.outputs.ref }}") == 5  # ci, build, github-release, post-release, docs

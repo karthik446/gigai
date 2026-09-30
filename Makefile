@@ -6,7 +6,7 @@ TEST_XDIST_WORKERS ?= auto
 TEST_XDIST_MAX_WORKERS ?= 14
 TEST_XDIST_DIST ?= worksteal
 
-.PHONY: test test-macos-smoke test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live cli-manual
+.PHONY: test test-macos-smoke test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live
 
 # Complete portable offline coverage: one source discovery pass, the existing
 # deterministic behavior evaluation, and a fresh wheel plus every installed
@@ -128,7 +128,18 @@ test-debian-offline:
 		--env GIGAI_AUDIT_WORKPAD=/audit/workpad \
 		gigai-debian-offline:local
 
-# 0110-008: regenerate docs/cli.md from the Click tree plus data/cli/commands.yaml.
-# tests/behaviors/cli_surface/test_agent_context.py fails when it is stale.
-cli-manual:
-	$(UV) run python -m gigai.agent_context --markdown > docs/cli.md
+# Public docs site (gigai-docs/, Astro Starlight; Node 22). Reference pages (CLI, Scout API,
+# changelog) are generated from the code; commit what docs-gen writes. CI runs docs-check.
+# docs-gen replaced 0110-008's `cli-manual` / docs/cli.md: one generated manual, one freshness gate.
+.PHONY: docs-gen docs-check docs-dev docs-build
+docs-gen:
+	$(UV) run --locked python tools/docs_gen.py
+
+docs-check:
+	$(UV) run --locked python tools/docs_gen.py --check
+
+docs-dev: docs-gen
+	cd gigai-docs && npm ci && npm run dev
+
+docs-build: docs-check
+	cd gigai-docs && npm ci && npm run build

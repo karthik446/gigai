@@ -136,6 +136,27 @@ def _sdist_metadata(path: Path) -> tuple[str, str]:
         return _metadata_values(extracted.read(), path)
 
 
+_NOT_SHIPPED = ("gigai-docs/",)
+
+
+def _members(path: Path) -> list[str]:
+    if path.suffix == ".whl":
+        with zipfile.ZipFile(path) as archive:
+            return archive.namelist()
+    with tarfile.open(path, "r:gz") as archive:
+        # sdist members are "<name>-<version>/<path>"
+        return [member.name.partition("/")[2] for member in archive.getmembers()]
+
+
+def verify_not_shipped(artifacts: ReleaseArtifacts) -> None:
+    """Require that repo-only trees (the public docs site) are in neither artifact."""
+
+    for artifact in (artifacts.wheel, artifacts.sdist):
+        leaked = sorted(m for m in _members(artifact) if m.startswith(_NOT_SHIPPED))
+        if leaked:
+            raise ReleaseCheckError(f"{artifact.name} ships repo-only files: {leaked[:5]}")
+
+
 def verify_artifacts(artifacts: ReleaseArtifacts, name: str, version: str) -> None:
     """Require wheel and sdist metadata to equal the static project metadata."""
 
@@ -224,6 +245,7 @@ def main() -> None:
 
     artifacts = release_artifacts(args.dist, name, version)
     verify_artifacts(artifacts, name, version)
+    verify_not_shipped(artifacts)
     if args.command == "write-checksums":
         checksum_path = write_checksums(args.dist, artifacts)
         print(f"wrote {checksum_path} for {name} {version}")

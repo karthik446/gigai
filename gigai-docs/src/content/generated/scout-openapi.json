@@ -1,0 +1,4215 @@
+{
+  "components": {
+    "schemas": {
+      "Error": {
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "allowed_keys": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Loopback-only HTTP API of `gigai scout`. Writes need Content-Type: application/json and a Host of the bound 127.0.0.1/localhost port. Errors are {\"error\": {\"code\", \"message\"}}. x-gigai-effect says whether a route changes stored state; x-gigai-external says whether it spends a model call or reads the network.",
+    "title": "GigAI Scout local API",
+    "version": "0.1.9.1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api": {
+      "get": {
+        "description": "Start here. Every route this server answers, with its effect and cost class; follow `openapi` for parameters, schemas and error codes.",
+        "operationId": "get_api",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "llms": "/llms.txt",
+                  "openapi": "/api/openapi.json",
+                  "routes": [
+                    {
+                      "effect": "read",
+                      "external": "none",
+                      "method": "GET",
+                      "path": "/api/health",
+                      "summary": "Liveness."
+                    }
+                  ],
+                  "schema_version": "scout-api-index:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-api-index:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          }
+        },
+        "summary": "Index of every route (method, path, effect, one line) plus the spec and agent-guide links.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/answers": {
+      "get": {
+        "description": "Every stored answer.",
+        "operationId": "get_api_answers",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "answers": [
+                    {
+                      "answer": "Yes",
+                      "prompt": "Are you authorized?",
+                      "question_id": "auth:work_authorization",
+                      "record_id": "rec_1",
+                      "revision_id": "rev_1"
+                    }
+                  ]
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          }
+        },
+        "summary": "Every stored answer.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      },
+      "post": {
+        "description": "Storing the answer is local; the model runs only when `reassess` is given.",
+        "operationId": "post_api_answers",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "answer": "Yes",
+                "question_id": "auth:work_authorization"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "answer": {
+                    "description": "Your answer.",
+                    "type": "string"
+                  },
+                  "question_id": {
+                    "description": "The question's id (<category>:<value>).",
+                    "type": "string"
+                  },
+                  "reassess": {
+                    "description": "A job identity to assess again with the answer.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "question_id",
+                  "answer"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "answers": []
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "reassess_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "reassess_not_found, target_unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, answer_invalid, reassess_unavailable"
+          }
+        },
+        "summary": "Answer an assessment question; with reassess the job is assessed again.",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "model"
+      }
+    },
+    "/api/applications": {
+      "get": {
+        "description": "Every application event, by job.",
+        "operationId": "get_api_applications",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "applications": []
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          }
+        },
+        "summary": "Every application event, by job.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      },
+      "post": {
+        "description": "Record an application event (applied, interview_scheduled, ...) for a job.",
+        "operationId": "post_api_applications",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "event_kind": "applied",
+                "normalized_url": "https://boards.greenhouse.io/acme/jobs/101"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "event_kind": {
+                    "description": "applied | interview_scheduled | offer_received | rejected | withdrawn.",
+                    "type": "string"
+                  },
+                  "job_identity": {
+                    "description": "Text identity for pasted jobs.",
+                    "type": "string"
+                  },
+                  "normalized_url": {
+                    "description": "The posting URL (or job_identity).",
+                    "type": "string"
+                  },
+                  "notes": {
+                    "description": "Free text.",
+                    "type": "string"
+                  },
+                  "occurred_at": {
+                    "description": "ISO time; default now.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "event_kind"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "event": {
+                    "event_kind": "applied"
+                  },
+                  "job_state": {
+                    "next_events": [],
+                    "since": "2026-09-29T10:00:00Z",
+                    "state": "applied"
+                  }
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_transition",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_transition"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, invalid_value"
+          }
+        },
+        "summary": "Record an application event (applied, interview_scheduled, ...) for a job.",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/assess": {
+      "post": {
+        "description": "Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=.",
+        "operationId": "post_api_assess",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "job": {
+                  "job_url": "https://boards.greenhouse.io/acme/jobs/101"
+                }
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "job": {
+                    "description": "The posting: {\"job_url\": \"<https url>\"} or {\"text\": \"<pasted posting>\"}.",
+                    "type": "object"
+                  },
+                  "model_target": {
+                    "description": "Which model target answers (claude or codex); omitted = the configured one.",
+                    "type": "string"
+                  },
+                  "origin": {
+                    "description": "quick_assess | job_page.",
+                    "type": "string"
+                  },
+                  "preferences": {
+                    "description": "Override the effective preferences.",
+                    "type": "object"
+                  },
+                  "resume": {
+                    "description": "Which resume: omitted = the selected profile; else {\"profile_id\": \"...\"} or pasted resume text.",
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "description": "Optional; must equal the request schema version when present.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "job"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "job": {
+                    "job_identity": "https://boards.greenhouse.io/acme/jobs/101"
+                  },
+                  "result": {
+                    "matrix": [],
+                    "questions": [],
+                    "suggestions": [],
+                    "verdict": "matched_above_threshold"
+                  },
+                  "schema_version": "scout-assess-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-assess-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "model_denied",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "model_denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value, wrong_type, unknown_key, job_input_invalid"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "job_fetch_failed",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "job_fetch_failed, model_output_invalid"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "model_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "model_unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "assess_timeout",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "assess_timeout"
+          }
+        },
+        "summary": "Assess one job (URL or pasted text) against a resume: verdict, requirement matrix, questions.",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "model"
+      }
+    },
+    "/api/assessments": {
+      "get": {
+        "description": "Stored quick assessments, newest first, each with its job_state.",
+        "operationId": "get_api_assessments",
+        "parameters": [
+          {
+            "description": "Only this resume identity.",
+            "in": "query",
+            "name": "profile_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only this verdict.",
+            "in": "query",
+            "name": "verdict",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [],
+                  "schema_version": "scout-assessments-list-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-assessments-list-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "bad_enum",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "bad_enum"
+          }
+        },
+        "summary": "Stored quick assessments, newest first, each with its job_state.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/config": {
+      "get": {
+        "description": "The find-jobs config, the pinned resume preview and the config digest a run request needs.",
+        "operationId": "get_api_config",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "config": {},
+                  "config_digest": "sha256:...",
+                  "resume": null
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "config_missing",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "config_missing"
+          }
+        },
+        "summary": "The find-jobs config, the pinned resume preview and the config digest a run request needs.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/config/sources": {
+      "put": {
+        "description": "Turn the Exa source on or off.",
+        "operationId": "put_api_config_sources",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "exa": true
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "exa": {
+                    "description": "true enables Exa (needs a key), false disables it.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "exa"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "sources": {
+                    "exa": true
+                  }
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "config_missing",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "config_missing"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "wrong_type",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "wrong_type"
+          }
+        },
+        "summary": "Turn the Exa source on or off.",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/discover": {
+      "post": {
+        "description": "Spends the Exa budget; returns immediately; read GET /api/discover/latest.",
+        "operationId": "post_api_discover",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "request_id": "disc_1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "discovery_conflict",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "discovery_conflict"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "discovery_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "discovery_unavailable"
+          }
+        },
+        "summary": "Start a company-discovery pass (Exa).",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "network"
+      }
+    },
+    "/api/discover/latest": {
+      "get": {
+        "description": "The latest discovery pass and whether one is running.",
+        "operationId": "get_api_discover_latest",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "latest": null,
+                  "running": false
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          }
+        },
+        "summary": "The latest discovery pass and whether one is running.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/health": {
+      "get": {
+        "description": "Liveness probe.",
+        "operationId": "get_api_health",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "status": "ok"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          }
+        },
+        "summary": "Liveness probe.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "description": "Read only; never calls a model or the network. Aggregates the newest run posting, its rank, every run or quick assessment of the job (with the requirement matrix), the questions still unanswered, stored tailored resumes, the job's state with the events it accepts next, and the action links. The UI route #/jobs/<posting url> maps to this route.",
+        "operationId": "get_api_jobs",
+        "parameters": [
+          {
+            "description": "The posting URL, raw or normalized (the UI's #/jobs/<url> route maps here).",
+            "in": "query",
+            "name": "url",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "answers": [],
+                  "application_events": [],
+                  "assessments": [
+                    {
+                      "matrix": [],
+                      "profile_id": null,
+                      "questions": [],
+                      "run_id": "run_20260929T100000Z",
+                      "source": "run",
+                      "suggestions": [],
+                      "verdict": "matched_above_threshold"
+                    }
+                  ],
+                  "h1b": null,
+                  "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                  "job_state": {
+                    "next_events": [
+                      "applied"
+                    ],
+                    "since": "2026-09-29T10:05:00Z",
+                    "state": "tailored"
+                  },
+                  "links": {
+                    "assess": {
+                      "body": {
+                        "job": {
+                          "job_url": "https://boards.greenhouse.io/acme/jobs/101"
+                        }
+                      },
+                      "method": "POST",
+                      "path": "/api/assess"
+                    },
+                    "mark_applied": {
+                      "body": {
+                        "event_kind": "applied",
+                        "normalized_url": "https://boards.greenhouse.io/acme/jobs/101"
+                      },
+                      "method": "POST",
+                      "path": "/api/applications"
+                    },
+                    "pdf": {
+                      "body": {
+                        "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                        "profile_id": "prof_1"
+                      },
+                      "method": "POST",
+                      "path": "/api/tailored-resumes/pdf"
+                    },
+                    "run_posting": {
+                      "method": "GET",
+                      "path": "/api/runs/run_20260929T100000Z/posting?url=..."
+                    },
+                    "self": {
+                      "method": "GET",
+                      "path": "/api/jobs?url=..."
+                    },
+                    "tailor": {
+                      "body": {
+                        "job": {
+                          "job_url": "https://boards.greenhouse.io/acme/jobs/101"
+                        }
+                      },
+                      "method": "POST",
+                      "path": "/api/tailored-resumes"
+                    }
+                  },
+                  "open_questions": [
+                    {
+                      "question": "Are you authorized to work in the US?",
+                      "question_id": "auth:work_authorization",
+                      "requirement": null
+                    }
+                  ],
+                  "posting": {
+                    "company": "Acme",
+                    "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
+                    "text": "...",
+                    "title": "Software Engineer"
+                  },
+                  "rank": {
+                    "blockers": [],
+                    "demoted": false,
+                    "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
+                    "reasons": [
+                      "Python"
+                    ],
+                    "score": 82,
+                    "unscored_reason": null
+                  },
+                  "rank_score": null,
+                  "runs": [
+                    {
+                      "outcome": "new",
+                      "run_id": "run_20260929T100000Z"
+                    }
+                  ],
+                  "schema_version": "scout-job-response:1",
+                  "tailored_resumes": [
+                    {
+                      "company": "Acme",
+                      "created_at": "2026-09-29T10:05:00Z",
+                      "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                      "links": {
+                        "pdf": {
+                          "body": {
+                            "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                            "profile_id": "prof_1"
+                          },
+                          "method": "POST",
+                          "path": "/api/tailored-resumes/pdf"
+                        }
+                      },
+                      "profile_id": "prof_1",
+                      "title": "Software Engineer",
+                      "updated_at": "2026-09-29T10:05:00Z"
+                    }
+                  ],
+                  "work_mode_fit": null
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-job-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "forbidden_origin",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden_origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found, target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value, unknown_key"
+          }
+        },
+        "summary": "One job, complete: posting, rank, assessment + requirement matrix, open questions, tailored resumes, job state, action links.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
+      }
+    },
+    "/api/openapi.json": {
+      "get": {
+        "description": "Every route with params, response schema_version, example, error codes, x-gigai-effect and x-gigai-external.",
+        "operationId": "get_api_openapi_json",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "info": {
+                    "title": "GigAI Scout local API",
+                    "version": "0.1.10"
+                  },
+                  "openapi": "3.1.0",
+                  "paths": {}
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          }
+        },
+        "summary": "This API as an OpenAPI 3.1 document (generated from the server's route table).",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/profiles": {
+      "get": {
+        "description": "Every profile and which is selected.",
+        "operationId": "get_api_profiles",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "profiles": [],
+                  "selected": null
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          }
+        },
+        "summary": "Every profile and which is selected.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      },
+      "post": {
+        "description": "Create a profile.",
+        "operationId": "post_api_profiles",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "label": "Backend",
+                "titles": [
+                  "Software Engineer"
+                ]
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "label": {
+                    "description": "Profile name.",
+                    "type": "string"
+                  },
+                  "queries": {
+                    "description": "Search queries (default: titles).",
+                    "type": "array"
+                  },
+                  "resume_record_id": {
+                    "description": "Stored resume record.",
+                    "type": "string"
+                  },
+                  "resume_revision_id": {
+                    "description": "Stored resume revision.",
+                    "type": "string"
+                  },
+                  "titles": {
+                    "description": "Titles to search (non-empty).",
+                    "type": "array"
+                  },
+                  "titles_to_avoid": {
+                    "description": "Titles to skip.",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "label",
+                  "titles"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "profile": {
+                    "label": "Backend",
+                    "profile_id": "prof_1"
+                  }
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "wrong_type",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "wrong_type"
+          }
+        },
+        "summary": "Create a profile.",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/profiles/selection": {
+      "post": {
+        "description": "Select the profile that runs and assessments use.",
+        "operationId": "post_api_profiles_selection",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "profile_id": "prof_1"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "profile_id": {
+                    "description": "The profile to select.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "profile_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "selected": "prof_1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          }
+        },
+        "summary": "Select the profile that runs and assessments use.",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/profiles/{profile_id}": {
+      "put": {
+        "description": "Update a profile.",
+        "operationId": "put_api_profiles_profile_id",
+        "parameters": [
+          {
+            "description": "A profile id from GET /api/profiles.",
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "label": "Backend",
+                "titles": [
+                  "Software Engineer"
+                ]
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "label": {
+                    "description": "Profile name.",
+                    "type": "string"
+                  },
+                  "queries": {
+                    "description": "Search queries.",
+                    "type": "array"
+                  },
+                  "resume_record_id": {
+                    "description": "Stored resume record.",
+                    "type": "string"
+                  },
+                  "resume_revision_id": {
+                    "description": "Stored resume revision.",
+                    "type": "string"
+                  },
+                  "titles": {
+                    "description": "Titles (non-empty).",
+                    "type": "array"
+                  },
+                  "titles_to_avoid": {
+                    "description": "Titles to skip.",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "label",
+                  "titles"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "profile": {
+                    "profile_id": "prof_1"
+                  }
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "wrong_type",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "wrong_type"
+          }
+        },
+        "summary": "Update a profile.",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/profiles/{profile_id}/archive": {
+      "post": {
+        "description": "Archive a profile, optionally moving its selection to another.",
+        "operationId": "post_api_profiles_profile_id_archive",
+        "parameters": [
+          {
+            "description": "A profile id from GET /api/profiles.",
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {},
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "replacement_profile_id": {
+                    "description": "Profile to select instead.",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "archived": "prof_1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          }
+        },
+        "summary": "Archive a profile, optionally moving its selection to another.",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/resume-display": {
+      "get": {
+        "description": "Returns personal values, so the Host header must match the bound server.",
+        "operationId": "get_api_resume_display",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "contact": [],
+                  "name": "",
+                  "saved": false,
+                  "titles": {}
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "forbidden_origin",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden_origin"
+          }
+        },
+        "summary": "The saved PDF header settings and the suggestion to prefill them.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
+      },
+      "put": {
+        "description": "Save the PDF header settings (name, contact line, per-profile titles).",
+        "operationId": "put_api_resume_display",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "contact": [],
+                "name": "Kar Ohm",
+                "titles": {}
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "contact": {
+                    "description": "Contact items {kind, value}.",
+                    "type": "array"
+                  },
+                  "name": {
+                    "description": "The name printed on the PDF.",
+                    "type": "string"
+                  },
+                  "titles": {
+                    "description": "Title per profile id.",
+                    "type": "object"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "saved": true
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, invalid_value"
+          }
+        },
+        "summary": "Save the PDF header settings (name, contact line, per-profile titles).",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/resume/check": {
+      "post": {
+        "description": "Local scan only; nothing is stored.",
+        "operationId": "post_api_resume_check",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "resume_text": "..."
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "resume_ref": {
+                    "description": "A stored resume {record_id, revision_id, content_sha256}.",
+                    "type": "object"
+                  },
+                  "resume_text": {
+                    "description": "Pasted resume text (send exactly one of resume_text, resume_ref).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "findings": []
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "wrong_type",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "wrong_type, invalid_value"
+          }
+        },
+        "summary": "Check resume text for personal data before it is sent to a model (local, no model).",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/resume/extract": {
+      "post": {
+        "description": "Extract search preferences from a resume with the model.",
+        "operationId": "post_api_resume_extract",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "resume_text": "..."
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "model_target": {
+                    "description": "Model target.",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "description": "Use this profile's stored resume.",
+                    "type": "string"
+                  },
+                  "resume_ref": {
+                    "description": "A stored resume {record_id, revision_id, content_sha256}.",
+                    "type": "object"
+                  },
+                  "resume_text": {
+                    "description": "Pasted resume text.",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "suggestions": {}
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "model_denied",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "model_denied"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, invalid_value"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "model_output_invalid",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "model_output_invalid"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "model_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "model_unavailable"
+          }
+        },
+        "summary": "Extract search preferences from a resume with the model.",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "model"
+      }
+    },
+    "/api/resumes": {
+      "post": {
+        "description": "Store a resume (pasted text or a base64 file).",
+        "operationId": "post_api_resumes",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "text": "..."
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "content_base64": {
+                    "description": "Uploaded file, base64.",
+                    "type": "string"
+                  },
+                  "file_name": {
+                    "description": "Uploaded file name.",
+                    "type": "string"
+                  },
+                  "text": {
+                    "description": "Resume text (exclusive with file_name).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "record_id": "rec_1",
+                  "revision_id": "rev_1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, resume_input_invalid, resume_too_large"
+          }
+        },
+        "summary": "Store a resume (pasted text or a base64 file).",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/run": {
+      "post": {
+        "description": "Reads the boards over the network and spends model calls on assessment; returns as soon as the run is allocated. Poll GET /api/runs/{run_id}.",
+        "operationId": "post_api_run",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "config_digest": "sha256:...",
+                "schema_version": "scout-find-jobs-run-request:1",
+                "selection_cap": 10
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "config_digest": {
+                    "description": "config_digest from GET /api/config.",
+                    "type": "string"
+                  },
+                  "consent": {
+                    "description": "The consent envelope the UI sends.",
+                    "type": "object"
+                  },
+                  "model_target": {
+                    "description": "Model target.",
+                    "type": "string"
+                  },
+                  "schema_version": {
+                    "description": "scout-find-jobs-run-request:1.",
+                    "type": "string"
+                  },
+                  "selection_cap": {
+                    "description": "Postings to assess (1..50).",
+                    "type": "integer"
+                  },
+                  "selection_rule": {
+                    "description": "Which postings the cap keeps.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "consent",
+                  "config_digest",
+                  "selection_cap",
+                  "selection_rule",
+                  "model_target"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "node_receipts": [],
+                  "run_id": "run_20260929T100000Z",
+                  "schema_version": "scout-find-jobs-run-response:1",
+                  "status": "running"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-find-jobs-run-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "config_missing",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "config_missing"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "config_digest_mismatch",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "config_digest_mismatch"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value, unknown_key"
+          }
+        },
+        "summary": "Start a find-jobs run (acquire, rank, assess up to the cap).",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "model"
+      }
+    },
+    "/api/runs": {
+      "get": {
+        "description": "Every run, newest first, with counts.",
+        "operationId": "get_api_runs",
+        "parameters": [
+          {
+            "description": "Keep the runs of this profile.",
+            "in": "query",
+            "name": "profile_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Keep the runs with this status.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The newest N runs (1..500).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "runs": [
+                    {
+                      "counts": {
+                        "assessed": 10,
+                        "found": 40,
+                        "matched": 3,
+                        "new": 12
+                      },
+                      "created_at": "2026-09-29T10:00:00Z",
+                      "profile_id": "prof_1",
+                      "run_id": "run_20260929T100000Z",
+                      "status": "succeeded"
+                    }
+                  ],
+                  "schema_version": "scout-runs-list-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-runs-list-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found, target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value"
+          }
+        },
+        "summary": "Every run, newest first, with counts.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/runs/{run_id}": {
+      "get": {
+        "description": "One run's status, node receipts and progress.",
+        "operationId": "get_api_runs_run_id",
+        "parameters": [
+          {
+            "description": "A run id from GET /api/runs (run_...).",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "run_id": "run_20260929T100000Z",
+                  "status": "succeeded"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          }
+        },
+        "summary": "One run's status, node receipts and progress.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/runs/{run_id}/assess-all": {
+      "post": {
+        "description": "Assess every unassessed posting of a finished run (start / cancel / read).",
+        "operationId": "post_api_runs_run_id_assess_all",
+        "parameters": [
+          {
+            "description": "A run id from GET /api/runs (run_...).",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "start": true
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "cancel": {
+                    "description": "true stops.",
+                    "type": "boolean"
+                  },
+                  "start": {
+                    "description": "true starts.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "counts": {},
+                  "state": "idle"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key"
+          }
+        },
+        "summary": "Assess every unassessed posting of a finished run (start / cancel / read).",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "model"
+      }
+    },
+    "/api/runs/{run_id}/posting": {
+      "get": {
+        "description": "For a job across runs and quick assessments use GET /api/jobs?url= instead.",
+        "operationId": "get_api_runs_run_id_posting",
+        "parameters": [
+          {
+            "description": "A run id from GET /api/runs (run_...).",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The posting's normalized_url.",
+            "in": "query",
+            "name": "url",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "assessment": null,
+                  "carried_forward": null,
+                  "not_assessed_reason": null,
+                  "row": {},
+                  "run_id": "run_20260929T100000Z",
+                  "schema_version": "scout-find-jobs-run-posting:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-find-jobs-run-posting:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value, unknown_key"
+          }
+        },
+        "summary": "One posting of a run, complete with its text and assessment.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/runs/{run_id}/progress": {
+      "get": {
+        "description": "A run's live progress (postings, boards, assessments); ?summary=1 drops posting text.",
+        "operationId": "get_api_runs_run_id_progress",
+        "parameters": [
+          {
+            "description": "A run id from GET /api/runs (run_...).",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "1 for the small form (no posting text).",
+            "in": "query",
+            "name": "summary",
+            "required": false,
+            "schema": {
+              "enum": [
+                "0",
+                "1"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "boards": {},
+                  "postings": [],
+                  "run_id": "run_20260929T100000Z"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value, unknown_key"
+          }
+        },
+        "summary": "A run's live progress (postings, boards, assessments); ?summary=1 drops posting text.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/runs/{run_id}/rank": {
+      "post": {
+        "description": "Rank a run's postings against the selected profile's resume (start / cancel / read).",
+        "operationId": "post_api_runs_run_id_rank",
+        "parameters": [
+          {
+            "description": "A run id from GET /api/runs (run_...).",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "start": true
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "cancel": {
+                    "description": "true stops one.",
+                    "type": "boolean"
+                  },
+                  "cost_cap_usd": {
+                    "description": "Spend cap.",
+                    "type": "number"
+                  },
+                  "profile_id": {
+                    "description": "Rank for this profile.",
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "description": "Must match the URL.",
+                    "type": "string"
+                  },
+                  "schema_version": {
+                    "description": "Optional request schema version.",
+                    "type": "string"
+                  },
+                  "start": {
+                    "description": "true starts a ranking.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "state": "idle"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value, wrong_type, unknown_key"
+          }
+        },
+        "summary": "Rank a run's postings against the selected profile's resume (start / cancel / read).",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "model"
+      }
+    },
+    "/api/runs/{run_id}/results": {
+      "get": {
+        "description": "A run's rows with assessments; with ?limit=N a page of them, without text.",
+        "operationId": "get_api_runs_run_id_results",
+        "parameters": [
+          {
+            "description": "A run id from GET /api/runs (run_...).",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size 1..500; without it the whole run with posting text.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page start (needs limit).",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "limit": 50,
+                  "offset": 0,
+                  "payload": {
+                    "rows": []
+                  },
+                  "run_id": "run_20260929T100000Z",
+                  "schema_version": "scout-find-jobs-run-results-response:1",
+                  "total": 40
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-find-jobs-run-results-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value, unknown_key"
+          }
+        },
+        "summary": "A run's rows with assessments; with ?limit=N a page of them, without text.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/secrets/status": {
+      "get": {
+        "description": "Which provider keys are set (never their values).",
+        "operationId": "get_api_secrets_status",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "exa": {
+                    "present": false
+                  }
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          }
+        },
+        "summary": "Which provider keys are set (never their values).",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/setup": {
+      "get": {
+        "description": "The saved preferences (the wizard's answers).",
+        "operationId": "get_api_setup",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "countries": [
+                    "US"
+                  ],
+                  "roles": [
+                    "Software Engineer"
+                  ]
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "prefs_missing",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "prefs_missing"
+          }
+        },
+        "summary": "The saved preferences (the wizard's answers).",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      },
+      "put": {
+        "description": "Save preferences and derive the find-jobs config from them.",
+        "operationId": "put_api_setup",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "countries": [
+                  "US"
+                ],
+                "roles": [
+                  "Software Engineer"
+                ]
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "budget_usd_per_session": {
+                    "description": "Spend cap per session.",
+                    "type": "number"
+                  },
+                  "cadence_days": {
+                    "description": "Days between discovery runs.",
+                    "type": "integer"
+                  },
+                  "city": {
+                    "description": "City for onsite/hybrid.",
+                    "type": "string"
+                  },
+                  "company_stage_size": {
+                    "description": "Stage/size preference.",
+                    "type": "string"
+                  },
+                  "countries": {
+                    "description": "Country codes.",
+                    "type": "array"
+                  },
+                  "dealbreaker_stack": {
+                    "description": "Stack to avoid.",
+                    "type": "array"
+                  },
+                  "exclude_companies": {
+                    "description": "Companies to skip.",
+                    "type": "array"
+                  },
+                  "industries_exclude": {
+                    "description": "Industries to exclude.",
+                    "type": "array"
+                  },
+                  "industries_include": {
+                    "description": "Industries to include.",
+                    "type": "array"
+                  },
+                  "max_age_days": {
+                    "description": "Ignore postings older than this.",
+                    "type": "integer"
+                  },
+                  "model_target": {
+                    "description": "Model target.",
+                    "type": "string"
+                  },
+                  "must_have_stack": {
+                    "description": "Required stack.",
+                    "type": "array"
+                  },
+                  "profile_id": {
+                    "description": "Save into this profile.",
+                    "type": "string"
+                  },
+                  "roles": {
+                    "description": "Job titles to search for (non-empty).",
+                    "type": "array"
+                  },
+                  "titles_to_avoid": {
+                    "description": "Titles to skip.",
+                    "type": "array"
+                  },
+                  "visa_sponsorship_required": {
+                    "description": "Default false.",
+                    "type": "boolean"
+                  },
+                  "watch_companies": {
+                    "description": "Companies to watch.",
+                    "type": "array"
+                  },
+                  "work_mode": {
+                    "description": "remote | hybrid | onsite (as the wizard offers).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "roles"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "countries": [
+                    "US"
+                  ],
+                  "roles": [
+                    "Software Engineer"
+                  ]
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          }
+        },
+        "summary": "Save preferences and derive the find-jobs config from them.",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/sources/update": {
+      "get": {
+        "description": "State of the last or running sources update.",
+        "operationId": "get_api_sources_update",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "state": "idle"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          }
+        },
+        "summary": "State of the last or running sources update.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      },
+      "post": {
+        "description": "Reads public boards; returns immediately; poll GET /api/sources/update.",
+        "operationId": "post_api_sources_update",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {},
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "force": {
+                    "description": "Refresh even if recent.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "state": "running"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type"
+          }
+        },
+        "summary": "Refresh the board catalog and index (\"Update sources\").",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "network"
+      }
+    },
+    "/api/tailored-resumes": {
+      "get": {
+        "description": "Carries resume-derived text (the product). For a job's ids and links use GET /api/jobs?url=.",
+        "operationId": "get_api_tailored_resumes",
+        "parameters": [
+          {
+            "description": "Only this resume identity.",
+            "in": "query",
+            "name": "profile_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only this job.",
+            "in": "query",
+            "name": "job_identity",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [],
+                  "schema_version": "scout-tailored-resumes-list-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-tailored-resumes-list-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          }
+        },
+        "summary": "Stored tailored resumes, newest first.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      },
+      "post": {
+        "description": "Synchronous: blocks for the model call (one retry on a rejected answer).",
+        "operationId": "post_api_tailored_resumes",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "job": {
+                  "job_url": "https://boards.greenhouse.io/acme/jobs/101"
+                }
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "job": {
+                    "description": "The posting: {\"job_url\": \"<https url>\"} or {\"text\": \"<pasted posting>\"}.",
+                    "type": "object"
+                  },
+                  "model_target": {
+                    "description": "Which model target answers (claude or codex); omitted = the configured one.",
+                    "type": "string"
+                  },
+                  "resume": {
+                    "description": "Which resume: omitted = the selected profile; else {\"profile_id\": \"...\"} or pasted resume text.",
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "description": "Optional; must equal the request schema version when present.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "job"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "job": {
+                    "job_identity": "https://boards.greenhouse.io/acme/jobs/101"
+                  },
+                  "markdown": "# ...",
+                  "schema_version": "scout-tailor-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-tailor-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "model_denied",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "model_denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value, wrong_type, unknown_key"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "job_fetch_failed",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "job_fetch_failed, model_output_invalid"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "model_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "model_unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "tailor_timeout",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "tailor_timeout"
+          }
+        },
+        "summary": "Tailor the resume to one posting (markdown + structure, each line cited).",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "model"
+      }
+    },
+    "/api/tailored-resumes/pdf": {
+      "post": {
+        "description": "Returns application/pdf with Content-Disposition: attachment; changes nothing.",
+        "operationId": "post_api_tailored_resumes_pdf",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                "profile_id": "prof_1"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "job_identity": {
+                    "description": "The job identity.",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "description": "The resume identity.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "profile_id",
+                  "job_identity"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "tailored_resume_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "tailored_resume_not_found, target_unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "pdf_render_failed",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "pdf_render_failed"
+          }
+        },
+        "summary": "Render the stored tailored resume as a PDF (binary).",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/watchlist": {
+      "get": {
+        "description": "The watched company boards.",
+        "operationId": "get_api_watchlist",
+        "parameters": [
+          {
+            "description": "1 for counts only.",
+            "in": "query",
+            "name": "summary",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page start.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "entries": [],
+                  "schema_version": "scout-watchlist-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-watchlist-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, invalid_value"
+          }
+        },
+        "summary": "The watched company boards.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      },
+      "post": {
+        "description": "Add a company board by its posting or board URL.",
+        "operationId": "post_api_watchlist",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "url": "https://boards.greenhouse.io/acme"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "url": {
+                    "description": "A board or posting URL on a supported ATS.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "created": true,
+                  "entry": {},
+                  "schema_version": "scout-watchlist-add-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-watchlist-add-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, invalid_value"
+          }
+        },
+        "summary": "Add a company board by its posting or board URL.",
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
+    "/llms.txt": {
+      "get": {
+        "description": "Localhost-only, Host-checked plain text. Writes need Content-Type: application/json.",
+        "operationId": "get_llms_txt",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "format": "plain",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          }
+        },
+        "summary": "Short plain-text guide for an agent: what this server is, how to call it, where the spec is.",
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8765"
+    }
+  ]
+}

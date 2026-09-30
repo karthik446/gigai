@@ -41,3 +41,8 @@ research/discovery_bakeoff/h1b_scratch/
 # now live outside the repo in the orchestrator's own local git repo, so
 # these generated reports are never committed here.
 /.local-reports/
+
+# Public docs site (gigai-docs/): Node deps and build output are never committed.
+gigai-docs/node_modules/
+gigai-docs/dist/
+gigai-docs/.astro/

@@ -1,0 +1,46 @@
+---
+// Version switcher + the default social icons. Reads <site root>/<product>/versions.json
+// (mike's format: [{version, title, aliases}]) at runtime, so old builds learn about new versions.
+import Default from '@astrojs/starlight/components/SocialIcons.astro';
+const version = process.env.DOCS_VERSION ?? "dev";
+const base = import.meta.env.BASE_URL;
+---
+<select id="docs-version" aria-label="Docs version" data-version={version} data-base={base}>
+  <option value={version} selected>{version}</option>
+</select>
+<Default />
+<script>
+  const sel = document.getElementById('docs-version') as HTMLSelectElement;
+  const current = sel.dataset.version!;
+  const base = sel.dataset.base!; // e.g. /gigai/0.1.10/
+  const productRoot = base.replace(/[^/]+\/$/, ''); // e.g. /gigai/
+  fetch(productRoot + 'versions.json')
+    .then((r) => (r.ok ? r.json() : []))
+    .then((versions: { version: string; title: string; aliases: string[] }[]) => {
+      if (!versions.length) return;
+      sel.innerHTML = '';
+      for (const v of versions) {
+        const o = document.createElement('option');
+        o.value = v.version;
+        o.textContent = v.title + (v.aliases.length ? ` (${v.aliases.join(', ')})` : '');
+        o.selected = v.version === current;
+        sel.append(o);
+      }
+      const latest = versions.find((v) => v.aliases.includes('latest'));
+      if (latest && latest.version !== current && current !== 'dev' && current !== 'next') {
+        const note = document.createElement('div');
+        note.className = 'old-version-note';
+        note.innerHTML = `You are reading the docs for ${current}. <a href="${productRoot}${latest.version}/">Latest is ${latest.version}.</a>`;
+        document.querySelector('.main-frame')?.prepend(note);
+      }
+    })
+    .catch(() => {});
+  sel.addEventListener('change', () => {
+    const rest = location.pathname.startsWith(base) ? location.pathname.slice(base.length) : '';
+    location.href = productRoot + sel.value + '/' + rest;
+  });
+</script>
+<style>
+  select { background: var(--sl-color-bg-nav); color: var(--sl-color-text); border: 1px solid var(--sl-color-gray-5); border-radius: 0.25rem; padding: 0.15rem 0.35rem; font-size: var(--sl-text-sm); }
+  :global(.old-version-note) { background: var(--sl-color-orange-low); color: var(--sl-color-orange-high); padding: 0.5rem 1rem; font-size: var(--sl-text-sm); }
+</style>
