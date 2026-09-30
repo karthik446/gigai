@@ -25,6 +25,8 @@ from dataclasses import dataclass, replace
 import re
 from typing import Literal
 
+from ..contracts import NotAssessedReason
+
 OPENAPI_VERSION = "3.1.0"
 SPEC_PATH = "/api/openapi.json"
 INDEX_PATH = "/api"
@@ -65,6 +67,13 @@ class RouteSpec:
     @property
     def key(self) -> tuple[str, str]:
         return (self.method, self.path)
+
+
+_NOT_ASSESSED_REASONS = ", ".join(reason.value for reason in NotAssessedReason)
+_STALE_NOTE = (
+    "job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the "
+    "state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed."
+)
 
 
 def _p(name: str, type_: str, description: str) -> Param:
@@ -151,7 +160,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         description=(
             "Read only; never calls a model or the network. Aggregates the newest run posting, its rank, every run or quick "
             "assessment of the job (with the requirement matrix), the questions still unanswered, stored tailored resumes, the job's "
-            "state with the events it accepts next, and the action links. The UI route `#/jobs/<posting url>` maps to this route."
+            "state with the events it accepts next, and the action links. The UI route `#/jobs/<posting url>` maps to this route. "
+            + _STALE_NOTE
         ),
     ),
     # --- health / config / setup -----------------------------------------------------
@@ -230,13 +240,18 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         schema_version="scout-find-jobs-run-results-response:1",
         params=(_RUN_ID, _q("limit", "integer", "Page size 1..500; without it the whole run with posting text."), _q("offset", "integer", "Page start (needs limit).")),
         errors=(_INVALID, _UNKNOWN_KEY, _NOT_FOUND),
+        description="Each row carries job_state. " + _STALE_NOTE,
     ),
     RouteSpec(
         "GET", "/api/runs/{run_id}/posting", "One posting of a run, complete with its text and assessment.", "read", "none",
         {"schema_version": "scout-find-jobs-run-posting:1", "run_id": "run_20260929T100000Z", "row": {}, "assessment": None, "not_assessed_reason": None, "carried_forward": None},
         schema_version="scout-find-jobs-run-posting:1",
         params=(_RUN_ID, _q("url", "string", "The posting's normalized_url.", required=True)), errors=(_INVALID, _UNKNOWN_KEY, _NOT_FOUND),
-        description="For a job across runs and quick assessments use GET /api/jobs?url= instead.",
+        description=(
+            "For a job across runs and quick assessments use GET /api/jobs?url= instead. "
+            f"not_assessed_reason is one of: {_NOT_ASSESSED_REASONS} (posting_incomplete: the requirement list looked cut off, so no verdict was given). "
+            + _STALE_NOTE
+        ),
     ),
     RouteSpec(
         "POST", "/api/runs/{run_id}/rank", "Rank a run's postings against the selected profile's resume (start / cancel / read).", "write", "model",

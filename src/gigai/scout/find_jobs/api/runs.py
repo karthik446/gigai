@@ -86,12 +86,22 @@ def run_assessment_facts(body: dict[str, object], run_started_at: str | None) ->
             continue
         from_run_date = entry.get("from_run_date")
         at = from_run_date if isinstance(from_run_date, str) and from_run_date else run_started_at
-        facts[entry["normalized_url"]] = AssessmentFact(at=at, verdict=_verdict_of(entry.get("result")))
+        result = entry.get("result")
+        carried_posting = result.get("posting") if isinstance(result, dict) else None
+        content = carried_posting.get("content_sha256") if isinstance(carried_posting, dict) else None
+        facts[entry["normalized_url"]] = AssessmentFact(
+            at=at, verdict=_verdict_of(result), content_sha256=content if isinstance(content, str) else None
+        )
     payload = body.get("payload")
     for entry in (payload.get("assessments") if isinstance(payload, dict) else None) or ():
         posting = entry.get("posting") if isinstance(entry, dict) else None
         if isinstance(posting, dict) and isinstance(posting.get("normalized_url"), str):
-            facts[posting["normalized_url"]] = AssessmentFact(at=run_started_at, verdict=_verdict_of(entry))
+            content = posting.get("content_sha256")
+            facts[posting["normalized_url"]] = AssessmentFact(
+                at=run_started_at,
+                verdict=_verdict_of(entry),
+                content_sha256=content if isinstance(content, str) else None,
+            )
     return facts
 
 
@@ -120,7 +130,13 @@ def attach_job_states(
         identity = posting.get("normalized_url") if isinstance(posting, dict) else None
         if not isinstance(identity, str) or not identity:
             continue
-        state = sources.state_for(identity, profile_id=profile_id, run_assessment=facts.get(identity))
+        content = posting.get("content_sha256")
+        state = sources.state_for(
+            identity,
+            profile_id=profile_id,
+            run_assessment=facts.get(identity),
+            current_content_sha256=content if isinstance(content, str) else None,
+        )
         row["job_state"] = state.to_json()
 
 

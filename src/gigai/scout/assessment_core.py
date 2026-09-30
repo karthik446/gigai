@@ -328,7 +328,7 @@ def assess_once(
         return AssessAttempt(
             False,
             None,
-            NotAssessedReason.FAILED,
+            NotAssessedReason.POSTING_INCOMPLETE,
             attempt.usage,
             attempt.attempts,
             POSTING_INCOMPLETE_MESSAGE,

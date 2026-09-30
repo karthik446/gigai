@@ -123,16 +123,31 @@ class JobStateError(ValueError):
         self.code = code
 
 
+#: ``assessment_stale.reason``: the posting's text is not the text the assessment was made on.
+STALE_POSTING_CHANGED = "posting_changed"
+
+
 @dataclass(frozen=True)
 class JobState:
-    """One job's derived state, as the API serves it."""
+    """One job's derived state, as the API serves it.
+
+    ``assessment_stale`` (ledger 32, additive) is ``"posting_changed"`` when the
+    state comes from a stored assessment whose posting text has since changed:
+    the verdict still reads, and the job should be re-assessed. ``None`` (and
+    absent from the JSON) whenever nothing says so, which includes every
+    assessment stored before the digest was comparable.
+    """
 
     state: str
     since: str | None
     next_events: tuple[str, ...]
+    assessment_stale: str | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {"state": self.state, "since": self.since, "next_events": list(self.next_events)}
+        value: dict[str, object] = {"state": self.state, "since": self.since, "next_events": list(self.next_events)}
+        if self.assessment_stale is not None:
+            value["assessment_stale"] = {"reason": self.assessment_stale}
+        return value
 
 
 @dataclass(frozen=True)
@@ -148,6 +163,8 @@ class AssessmentFact:
     at: str | None
     verdict: str | None
     since: str | None = None
+    #: ``PostingRow.content_sha256`` the assessment was made on; ``None`` when unknown.
+    content_sha256: str | None = None
 
 
 def next_events(state: str) -> tuple[str, ...]:
@@ -230,6 +247,7 @@ def derive_job_state(
     tailored_at: str | None = None,
     has_tailored_resume: bool = False,
     assessments: Iterable[AssessmentFact | None] = (),
+    current_content_sha256: str | None = None,
 ) -> JobState:
     """One job's state; see the module docstring for the precedence.
 
@@ -237,6 +255,8 @@ def derive_job_state(
     (or a ``tailored_at``) says a tailored resume is stored for the job and
     the resume identity, ``tailored_at`` when it was first written;
     ``assessments`` are the assessments known for it, in any order.
+    ``current_content_sha256`` is the posting's stored content digest now; an
+    assessment made on a different, known digest marks the state stale.
     """
 
     applied = application_state(events)
@@ -248,7 +268,14 @@ def derive_job_state(
     if assessment is None:
         return JobState(NOT_ASSESSED, None, next_events(NOT_ASSESSED))
     state = ASSESSED if assessment.verdict is None else _VERDICT_STATES.get(str(assessment.verdict), ASSESSED)
-    return JobState(state, assessment.since or assessment.at, next_events(state))
+    stale = None
+    if (
+        current_content_sha256
+        and assessment.content_sha256
+        and assessment.content_sha256 != current_content_sha256
+    ):
+        stale = STALE_POSTING_CHANGED
+    return JobState(state, assessment.since or assessment.at, next_events(state), stale)
 
 
 def check_transition(
@@ -348,6 +375,12 @@ def group_events(events: Iterable[Mapping[str, object]]) -> dict[str, list[Mappi
 def quick_assessment_fact(item: AssessResponse) -> AssessmentFact:
     """The quick store's item as an :class:`AssessmentFact`.
 
+    ``content_sha256`` is recomputed the way an ATS board row hashes itself
+    (title + text) from the text the item stored, and only for a posting read
+    from an ATS board row: any other fetch reads its text differently from a
+    run's row, so its digest would never match and would only raise a false
+    alarm. An item without stored text (an older record) carries none.
+
     ``since`` comes from the item's verdict history: the oldest entry of the
     unbroken run of entries, newest first, that carry the current verdict.
     """
@@ -360,7 +393,10 @@ def quick_assessment_fact(item: AssessResponse) -> AssessmentFact:
         if entry_verdict != verdict:
             break
         since = entry.at
-    return AssessmentFact(at=at, verdict=verdict, since=since)
+    content = None
+    if item.job.fetch_kind == "ats_board" and item.posting_text:
+        content = digest_imported_bytes("\n".join(part for part in (item.job.title, item.posting_text) if part).encode("utf-8"))
+    return AssessmentFact(at=at, verdict=verdict, since=since, content_sha256=content)
 
 
 # --- reading the stores ----------------------------------------------------------------
@@ -497,12 +533,15 @@ class JobStateSources:
         profile_id: str | None,
         run_assessment: AssessmentFact | None = None,
         quick: AssessResponse | None = None,
+        current_content_sha256: str | None = None,
     ) -> JobState:
         """The state of ``job_identity`` for the resume identity ``profile_id``.
 
         ``run_assessment`` is the run's own assessment of the posting when
         the caller has one; ``quick`` is the quick store's item when the
         caller already holds it (else it is read from the store).
+        ``current_content_sha256`` is the posting's stored content digest, when
+        the caller has the posting row (it marks an older assessment stale).
         """
 
         events = self.events_for(job_identity)
@@ -513,7 +552,7 @@ class JobStateSources:
             return derive_job_state(has_tailored_resume=True, tailored_at=tailored_at)
         item = quick if quick is not None else self.quick_assessment(job_identity, profile_id)
         facts = (run_assessment, None if item is None else quick_assessment_fact(item))
-        return derive_job_state(assessments=facts)
+        return derive_job_state(assessments=facts, current_content_sha256=current_content_sha256)
 
 
 __all__ = [
@@ -523,6 +562,7 @@ __all__ = [
     "JobState",
     "JobStateError",
     "JobStateSources",
+    "STALE_POSTING_CHANGED",
     "application_state",
     "check_transition",
     "current_application_event",

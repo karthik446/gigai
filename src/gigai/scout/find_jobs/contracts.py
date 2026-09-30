@@ -250,6 +250,9 @@ class NotAssessedReason(StrEnum):
     LOCATION_MISMATCH = "location_mismatch"
     SPONSORSHIP_EXCLUDED = "sponsorship_excluded"
     MODEL_OUTPUT_INVALID = "model_output_invalid"
+    # uat-bug-046: the assessment's requirement matrix was too thin to back a
+    # Matched, so the posting text is treated as cut off (Lever bug).
+    POSTING_INCOMPLETE = "posting_incomplete"
     # 0.1.8.1 r1 (B1 coordinator review): a finer-grained sub-case of
     # LOCATION_MISMATCH, used only for AcquireOutput.dropped_counts'
     # per-reason auditability -- a location that resolves to *only* region
