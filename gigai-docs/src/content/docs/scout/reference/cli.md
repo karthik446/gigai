@@ -86,6 +86,8 @@ Example:
 gigai scout resume add resume.md
 ```
 
+Works as the very first command on a fresh machine: writes the default GigAI settings (like 'gigai scout run'), installs Scout if needed, then imports the file. Never rewrites an existing config.
+
 ## `gigai scout resume tailor`
 
 Tailor a resume to ONE job posting right now: markdown, every line sourced.

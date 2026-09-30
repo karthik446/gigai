@@ -244,7 +244,9 @@ def resume_add_command(
 ) -> None:
     """Import FILE as the resume reference and create the record find-jobs reads.
 
-    Installs/approves/activates Scout first if it isn't yet (same idempotent
+    On a fresh machine it first writes the default GigAI settings (as `gigai
+    scout run` does), so it works as the very first command. Then it
+    installs/approves/activates Scout if it isn't yet (same idempotent
     step ``gigai scout install`` and ``gigai scout run`` perform), so this is
     a true one-step command on a freshly bound target. Rerunning is a no-op
     once Scout is installed: this both imports the reference (kind
@@ -266,6 +268,9 @@ def resume_add_command(
     """
 
     home_root = home_value or default_home_root()
+    # 0.1.10 (ledger 33b): as the very first command on a fresh HOME, set up
+    # exactly as `scout run` / `scout install` do (uat-bug-050).
+    _ensure_gigai_settings(home_root, as_json=as_json)
     try:
         resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
         install_result = install_scout(home_root=home_root, requested_target=resolved_target)
