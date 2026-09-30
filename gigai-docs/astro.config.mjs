@@ -26,6 +26,7 @@ export default defineConfig({
         ]),
       ],
       sidebar: [
+        'roadmap',
         { label: 'GigAI', items: ['index', 'install', 'concepts/architecture', 'concepts/gigs', 'concepts/runs', 'concepts/model-targets', 'concepts/review', 'agents', 'development', 'reference/cli'] },
         // One group per Gig: its own folder, its own sidebar entry, nothing else to move.
         {

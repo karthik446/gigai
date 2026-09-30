@@ -36,7 +36,8 @@ With Ollama the resume stays on this machine. See
 
 ## Links
 
-- [Documentation](https://karthik446.github.io/gigai/): quickstart, concepts, CLI and API reference, roadmap, known limitations
+- [Documentation](https://karthik446.github.io/gigai/): quickstart, concepts, CLI and API reference, known limitations
+- [Roadmap](https://karthik446.github.io/gigai/roadmap/): what is planned, without dates
 - [CHANGELOG](https://github.com/karthik446/gigai/blob/main/CHANGELOG.md) and [Releases](https://github.com/karthik446/gigai/releases)
 - [CONTRIBUTING](CONTRIBUTING.md) and [issues](https://github.com/karthik446/gigai/issues)
 

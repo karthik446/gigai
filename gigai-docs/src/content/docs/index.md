@@ -9,9 +9,12 @@ model call, review, and result inspectable rather than treating one model
 response as proof of correctness.
 
 A **Gig** is a self-contained goal-graph package built on top of GigAI core.
-The boundary is fixed in one direction only: **a Gig imports GigAI core;
-GigAI core never imports a Gig.** Gigs are portable, reviewable units of work,
-not plugins the runtime depends on.
+The dependency is meant to run in one direction only: **a Gig imports GigAI
+core, and GigAI core is meant not to import a Gig.** Today Scout ships in the
+same package and core still imports some Scout modules (the `gigai scout`
+command groups in `cli.py`, `run.py`, `default_init.py` and a few others), so
+this is the direction Gigs are built for, not yet a guarantee. Gigs are
+portable, reviewable units of work, not plugins the runtime depends on.
 
 ## What you get
 
@@ -34,7 +37,7 @@ not plugins the runtime depends on.
 ## Gigs
 
 Each Gig has its own section, with its own version line. Core pages link to a Gig
-only from this table (the docs mirror the code: core never imports a Gig).
+only from this table (the docs follow the same direction: a Gig imports core, not the reverse).
 
 | Gig | What it does | Version | Docs |
 | --- | --- | --- | --- |

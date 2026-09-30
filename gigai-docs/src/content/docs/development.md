@@ -21,7 +21,8 @@ network edges (Exa/ATS, the local model) are faked. It's localhost-only,
 makes no live provider calls, and takes a couple of minutes.
 
 - `src/gigai/`: core runtime: setup, config, journal, proposal/approval
-  lifecycle, catalog, package boundary. Never imports a Gig.
+  lifecycle, catalog, package boundary. Meant not to import a Gig (some Scout
+  imports remain today).
 - `src/gigai/scout/`: the Scout Gig: `find_jobs/` (acquire/assess/present),
   bundled goal-graph data, and `ui/` (the separate Vite/React checkout below).
 
