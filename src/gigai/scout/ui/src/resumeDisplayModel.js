@@ -27,6 +27,12 @@ export const KIND_PLACEHOLDERS = {
   phone: "+1 555 123 4567",
 };
 
+export const SPACING_MIN = 0.7;
+export const SPACING_MAX = 1.4;
+export const SPACING_DEFAULT = 1.0;
+export const SPACING_STEP = 0.05;
+export const AUTO_FIT_HELP = "Adjusts spacing (never font size) so your resume fills its pages; turn off to use the slider as set.";
+
 export const PRIVACY_NOTE = "Stored on this machine only; never sent to a model; added to your PDF locally.";
 
 const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -52,7 +58,34 @@ export function contactText(entry) {
   return value;
 }
 
-// The draft the form edits: {name, title, contact[], prefilled}. Saved values
+// A spacing value as sent: a number clamped to 0.7..1.4 and rounded to 2
+// decimals; anything that is not a finite number is the default.
+export function clampSpacing(value) {
+  const number = typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
+  if (!Number.isFinite(number)) {
+    return SPACING_DEFAULT;
+  }
+  return Math.round(Math.min(SPACING_MAX, Math.max(SPACING_MIN, number)) * 100) / 100;
+}
+
+// "1.00x" for the slider's readout.
+export function spacingLabel(value) {
+  return `${clampSpacing(value).toFixed(2)}x`;
+}
+
+// The slider is greyed (value kept) while Auto fit is on.
+export function spacingDisabled(draft) {
+  return !!(draft && draft.auto_fit !== false);
+}
+
+// The schematic preview: the vertical gap (px) between its grey lines for a
+// spacing value. Monotonic: a bigger value never gives a smaller gap.
+export const PREVIEW_LINES = 4;
+export function previewGap(value) {
+  return Math.round(clampSpacing(value) * 8 * 100) / 100;
+}
+
+// The draft the form edits: {name, title, contact[], spacing_scale, auto_fit, prefilled}. Saved values
 // are never overwritten by `suggested`; it only fills what is empty while
 // nothing is saved (the server also only sends it then, plus a title).
 export function draftFromResponse(response) {
@@ -79,7 +112,9 @@ export function draftFromResponse(response) {
       prefilled = true;
     }
   }
-  return { name, title, contact, prefilled };
+  const spacing_scale = typeof body.spacing_scale === "number" ? clampSpacing(body.spacing_scale) : SPACING_DEFAULT;
+  const auto_fit = typeof body.auto_fit === "boolean" ? body.auto_fit : true;
+  return { name, title, contact, spacing_scale, auto_fit, prefilled };
 }
 
 // The header exactly as it prints: {name, title, contactLine, items[]}.
@@ -136,6 +171,8 @@ export function buildPutBody(draft, profileId) {
   const body = {
     name: text(draft.name),
     contact: draft.contact.map((entry) => ({ kind: entry.kind, value: text(entry.value) })).filter((entry) => entry.value),
+    spacing_scale: clampSpacing(draft.spacing_scale),
+    auto_fit: draft.auto_fit !== false,
   };
   if (profileId) {
     body.titles = { [profileId]: text(draft.title) };

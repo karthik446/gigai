@@ -94,6 +94,8 @@ def test_finish_saves_the_step_for_the_saved_profile_only_when_opened_and_not_sk
     expected = {
         "name": "Jane Doe",
         "contact": [{"kind": "email", "value": "j@x.io"}],
+        "spacing_scale": 1.0,
+        "auto_fit": True,
         "titles": {"profile_1": "Staff Engineer"},
     }
     assert out["body"] == expected and out["bodySkipped"] is None

@@ -1583,3 +1583,10 @@ table.data-table th {
 .first-run-title { font-weight: 600; }
 .first-run-desc { font-size: 0.85rem; }
 .sources-strip .button { margin-left: 8px; }
+
+/* 0110-017: Resume display spacing control and its schematic preview */
+.checkbox-label { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.resume-display-preview-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+.resume-display-preview-row > .md-preview { flex: 1 1 260px; }
+.spacing-preview { display: flex; flex-direction: column; width: 120px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; }
+.spacing-preview-line { display: block; height: 4px; border-radius: 2px; background: var(--muted); opacity: 0.45; }
