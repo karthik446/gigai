@@ -42,7 +42,7 @@
   "paths": {
     "/api": {
       "get": {
-        "description": "Start here. Every route this server answers, with its effect and cost class; follow `openapi` for parameters, schemas and error codes.",
+        "description": "Index of every route (method, path, effect, one line) plus the spec and agent-guide links. Start here. Every route this server answers, with its effect and cost class; follow `openapi` for parameters, schemas and error codes.",
         "operationId": "get_api",
         "parameters": [],
         "responses": {
@@ -90,7 +90,10 @@
             "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
           }
         },
-        "summary": "Index of every route (method, path, effect, one line) plus the spec and agent-guide links.",
+        "summary": "List every route",
+        "tags": [
+          "Agents and meta"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
@@ -150,12 +153,15 @@
             "description": "target_unavailable"
           }
         },
-        "summary": "Every stored answer.",
+        "summary": "List stored answers",
+        "tags": [
+          "Assessment"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       },
       "post": {
-        "description": "Storing the answer is local; the model runs only when `reassess` is given.",
+        "description": "Answer an assessment question; with reassess the job is assessed again. Storing the answer is local; the model runs only when `reassess` is given.",
         "operationId": "post_api_answers",
         "parameters": [],
         "requestBody": {
@@ -173,7 +179,7 @@
                     "type": "string"
                   },
                   "question_id": {
-                    "description": "The question's id (<category>:<value>).",
+                    "description": "The question's id (`<category>:<value>`).",
                     "type": "string"
                   },
                   "reassess": {
@@ -259,7 +265,10 @@
             "description": "unknown_key, wrong_type, answer_invalid, reassess_unavailable"
           }
         },
-        "summary": "Answer an assessment question; with reassess the job is assessed again.",
+        "summary": "Answer an assessment question",
+        "tags": [
+          "Assessment"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "model"
       }
@@ -311,7 +320,10 @@
             "description": "target_unavailable"
           }
         },
-        "summary": "Every application event, by job.",
+        "summary": "List application events",
+        "tags": [
+          "Jobs"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       },
@@ -450,14 +462,17 @@
             "description": "unknown_key, invalid_value"
           }
         },
-        "summary": "Record an application event (applied, interview_scheduled, ...) for a job.",
+        "summary": "Record an application event",
+        "tags": [
+          "Jobs"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "none"
       }
     },
     "/api/assess": {
       "post": {
-        "description": "Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=.",
+        "description": "Assess one job (URL or pasted text) against a resume: verdict, requirement matrix, questions. Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=.",
         "operationId": "post_api_assess",
         "parameters": [],
         "requestBody": {
@@ -472,7 +487,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "job": {
-                    "description": "The posting: {\"job_url\": \"<https url>\"} or {\"text\": \"<pasted posting>\"}.",
+                    "description": "The posting: `{\"job_url\": \"<https url>\"}` or `{\"text\": \"<pasted posting>\"}`.",
                     "type": "object"
                   },
                   "model_target": {
@@ -644,7 +659,10 @@
             "description": "assess_timeout"
           }
         },
-        "summary": "Assess one job (URL or pasted text) against a resume: verdict, requirement matrix, questions.",
+        "summary": "Assess one job against a resume",
+        "tags": [
+          "Assessment"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "model"
       }
@@ -740,7 +758,10 @@
             "description": "bad_enum"
           }
         },
-        "summary": "Stored quick assessments, newest first, each with its job_state.",
+        "summary": "List stored assessments",
+        "tags": [
+          "Assessment"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
@@ -794,7 +815,10 @@
             "description": "config_missing"
           }
         },
-        "summary": "The find-jobs config, the pinned resume preview and the config digest a run request needs.",
+        "summary": "Get the find-jobs config",
+        "tags": [
+          "Settings"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
@@ -897,14 +921,17 @@
             "description": "wrong_type"
           }
         },
-        "summary": "Turn the Exa source on or off.",
+        "summary": "Turn the Exa source on or off",
+        "tags": [
+          "Sources"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "none"
       }
     },
     "/api/discover": {
       "post": {
-        "description": "Spends the Exa budget; returns immediately; read GET /api/discover/latest.",
+        "description": "Start a company-discovery pass (Exa). Spends the Exa budget; returns immediately; read GET /api/discover/latest.",
         "operationId": "post_api_discover",
         "parameters": [],
         "responses": {
@@ -975,7 +1002,10 @@
             "description": "discovery_unavailable"
           }
         },
-        "summary": "Start a company-discovery pass (Exa).",
+        "summary": "Start a company-discovery pass",
+        "tags": [
+          "Sources"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "network"
       }
@@ -1012,7 +1042,10 @@
             "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
           }
         },
-        "summary": "The latest discovery pass and whether one is running.",
+        "summary": "Get the latest discovery pass",
+        "tags": [
+          "Sources"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
@@ -1048,18 +1081,21 @@
             "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
           }
         },
-        "summary": "Liveness probe.",
+        "summary": "Check the server is alive",
+        "tags": [
+          "Agents and meta"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
     },
     "/api/jobs": {
       "get": {
-        "description": "Read only; never calls a model or the network. Aggregates the newest run posting, its rank, every run or quick assessment of the job (with the requirement matrix), the questions still unanswered, stored tailored resumes, the job's state with the events it accepts next, and the action links. The UI route #/jobs/<posting url> maps to this route.",
+        "description": "One job, complete: posting, rank, assessment + requirement matrix, open questions, tailored resumes, job state, action links. Read only; never calls a model or the network. Aggregates the newest run posting, its rank, every run or quick assessment of the job (with the requirement matrix), the questions still unanswered, stored tailored resumes, the job's state with the events it accepts next, and the action links. The UI route `#/jobs/<posting url>` maps to this route.",
         "operationId": "get_api_jobs",
         "parameters": [
           {
-            "description": "The posting URL, raw or normalized (the UI's #/jobs/<url> route maps here).",
+            "description": "The posting URL, raw or normalized (the UI's `#/jobs/<url>` route maps here).",
             "in": "query",
             "name": "url",
             "required": true,
@@ -1257,7 +1293,10 @@
             "description": "invalid_value, unknown_key"
           }
         },
-        "summary": "One job, complete: posting, rank, assessment + requirement matrix, open questions, tailored resumes, job state, action links.",
+        "summary": "Get everything known about one job",
+        "tags": [
+          "Jobs"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
         "x-gigai-host-checked": true
@@ -1265,7 +1304,7 @@
     },
     "/api/openapi.json": {
       "get": {
-        "description": "Every route with params, response schema_version, example, error codes, x-gigai-effect and x-gigai-external.",
+        "description": "This API as an OpenAPI 3.1 document (generated from the server's route table). Every route with params, response schema_version, example, error codes, x-gigai-effect and x-gigai-external.",
         "operationId": "get_api_openapi_json",
         "parameters": [],
         "responses": {
@@ -1299,7 +1338,10 @@
             "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
           }
         },
-        "summary": "This API as an OpenAPI 3.1 document (generated from the server's route table).",
+        "summary": "Get the OpenAPI document",
+        "tags": [
+          "Agents and meta"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
@@ -1352,7 +1394,10 @@
             "description": "not_found"
           }
         },
-        "summary": "Every profile and which is selected.",
+        "summary": "List profiles",
+        "tags": [
+          "Profiles and resume"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       },
@@ -1494,7 +1539,10 @@
             "description": "wrong_type"
           }
         },
-        "summary": "Create a profile.",
+        "summary": "Create a profile",
+        "tags": [
+          "Profiles and resume"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "none"
       }
@@ -1595,7 +1643,10 @@
             "description": "unsupported_media_type: writes need Content-Type: application/json."
           }
         },
-        "summary": "Select the profile that runs and assessments use.",
+        "summary": "Select the active profile",
+        "tags": [
+          "Profiles and resume"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "none"
       }
@@ -1748,7 +1799,10 @@
             "description": "wrong_type"
           }
         },
-        "summary": "Update a profile.",
+        "summary": "Update a profile",
+        "tags": [
+          "Profiles and resume"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "none"
       }
@@ -1855,14 +1909,17 @@
             "description": "unsupported_media_type: writes need Content-Type: application/json."
           }
         },
-        "summary": "Archive a profile, optionally moving its selection to another.",
+        "summary": "Archive a profile",
+        "tags": [
+          "Profiles and resume"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "none"
       }
     },
     "/api/resume-display": {
       "get": {
-        "description": "Returns personal values, so the Host header must match the bound server.",
+        "description": "The saved PDF header settings and the suggestion to prefill them. Returns personal values, so the Host header must match the bound server.",
         "operationId": "get_api_resume_display",
         "parameters": [],
         "responses": {
@@ -1900,7 +1957,10 @@
             "description": "forbidden_origin"
           }
         },
-        "summary": "The saved PDF header settings and the suggestion to prefill them.",
+        "summary": "Get the PDF header settings",
+        "tags": [
+          "Tailored resumes"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
         "x-gigai-host-checked": true
@@ -1992,14 +2052,17 @@
             "description": "unknown_key, wrong_type, invalid_value"
           }
         },
-        "summary": "Save the PDF header settings (name, contact line, per-profile titles).",
+        "summary": "Save the PDF header settings",
+        "tags": [
+          "Tailored resumes"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "none"
       }
     },
     "/api/resume/check": {
       "post": {
-        "description": "Local scan only; nothing is stored.",
+        "description": "Check resume text for personal data before it is sent to a model (local, no model). Local scan only; nothing is stored.",
         "operationId": "post_api_resume_check",
         "parameters": [],
         "requestBody": {
@@ -2079,7 +2142,10 @@
             "description": "wrong_type, invalid_value"
           }
         },
-        "summary": "Check resume text for personal data before it is sent to a model (local, no model).",
+        "summary": "Check resume text for personal data",
+        "tags": [
+          "Profiles and resume"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
@@ -2212,7 +2278,10 @@
             "description": "model_unavailable"
           }
         },
-        "summary": "Extract search preferences from a resume with the model.",
+        "summary": "Extract search preferences from a resume",
+        "tags": [
+          "Profiles and resume"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "model"
       }
@@ -2304,14 +2373,17 @@
             "description": "unknown_key, wrong_type, resume_input_invalid, resume_too_large"
           }
         },
-        "summary": "Store a resume (pasted text or a base64 file).",
+        "summary": "Store a resume",
+        "tags": [
+          "Profiles and resume"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "none"
       }
     },
     "/api/run": {
       "post": {
-        "description": "Reads the boards over the network and spends model calls on assessment; returns as soon as the run is allocated. Poll GET /api/runs/{run_id}.",
+        "description": "Start a find-jobs run (acquire, rank, assess up to the cap). Reads the boards over the network and spends model calls on assessment; returns as soon as the run is allocated. Poll GET /api/runs/{run_id}.",
         "operationId": "post_api_run",
         "parameters": [],
         "requestBody": {
@@ -2459,7 +2531,10 @@
             "description": "invalid_value, unknown_key"
           }
         },
-        "summary": "Start a find-jobs run (acquire, rank, assess up to the cap).",
+        "summary": "Start a find-jobs run",
+        "tags": [
+          "Runs"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "model"
       }
@@ -2577,7 +2652,10 @@
             "description": "invalid_value"
           }
         },
-        "summary": "Every run, newest first, with counts.",
+        "summary": "List runs",
+        "tags": [
+          "Runs"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
@@ -2640,7 +2718,10 @@
             "description": "not_found"
           }
         },
-        "summary": "One run's status, node receipts and progress.",
+        "summary": "Get one run's status",
+        "tags": [
+          "Runs"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
@@ -2754,14 +2835,17 @@
             "description": "unknown_key"
           }
         },
-        "summary": "Assess every unassessed posting of a finished run (start / cancel / read).",
+        "summary": "Assess every posting of a run",
+        "tags": [
+          "Runs"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "model"
       }
     },
     "/api/runs/{run_id}/posting": {
       "get": {
-        "description": "For a job across runs and quick assessments use GET /api/jobs?url= instead.",
+        "description": "One posting of a run, complete with its text and assessment. For a job across runs and quick assessments use GET /api/jobs?url= instead.",
         "operationId": "get_api_runs_run_id_posting",
         "parameters": [
           {
@@ -2854,7 +2938,10 @@
             "description": "invalid_value, unknown_key"
           }
         },
-        "summary": "One posting of a run, complete with its text and assessment.",
+        "summary": "Get one posting of a run",
+        "tags": [
+          "Runs"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
@@ -2947,7 +3034,10 @@
             "description": "invalid_value, unknown_key"
           }
         },
-        "summary": "A run's live progress (postings, boards, assessments); ?summary=1 drops posting text.",
+        "summary": "Get a run's live progress",
+        "tags": [
+          "Runs"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
@@ -3076,7 +3166,10 @@
             "description": "invalid_value, wrong_type, unknown_key"
           }
         },
-        "summary": "Rank a run's postings against the selected profile's resume (start / cancel / read).",
+        "summary": "Rank a run's postings",
+        "tags": [
+          "Runs"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "model"
       }
@@ -3187,7 +3280,10 @@
             "description": "invalid_value, unknown_key"
           }
         },
-        "summary": "A run's rows with assessments; with ?limit=N a page of them, without text.",
+        "summary": "List a run's results",
+        "tags": [
+          "Runs"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
@@ -3225,7 +3321,10 @@
             "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
           }
         },
-        "summary": "Which provider keys are set (never their values).",
+        "summary": "Show which provider keys are set",
+        "tags": [
+          "Settings"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
@@ -3282,7 +3381,10 @@
             "description": "prefs_missing"
           }
         },
-        "summary": "The saved preferences (the wizard's answers).",
+        "summary": "Get the saved preferences",
+        "tags": [
+          "Settings"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       },
@@ -3459,7 +3561,10 @@
             "description": "unsupported_media_type: writes need Content-Type: application/json."
           }
         },
-        "summary": "Save preferences and derive the find-jobs config from them.",
+        "summary": "Save preferences and derive the config",
+        "tags": [
+          "Settings"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "none"
       }
@@ -3495,12 +3600,15 @@
             "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
           }
         },
-        "summary": "State of the last or running sources update.",
+        "summary": "Get the board refresh status",
+        "tags": [
+          "Sources"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       },
       "post": {
-        "description": "Reads public boards; returns immediately; poll GET /api/sources/update.",
+        "description": "Refresh the board catalog and index (\"Update sources\"). Reads public boards; returns immediately; poll GET /api/sources/update.",
         "operationId": "post_api_sources_update",
         "parameters": [],
         "requestBody": {
@@ -3574,14 +3682,17 @@
             "description": "unknown_key, wrong_type"
           }
         },
-        "summary": "Refresh the board catalog and index (\"Update sources\").",
+        "summary": "Refresh the board catalog",
+        "tags": [
+          "Sources"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "network"
       }
     },
     "/api/tailored-resumes": {
       "get": {
-        "description": "Carries resume-derived text (the product). For a job's ids and links use GET /api/jobs?url=.",
+        "description": "Stored tailored resumes, newest first. Carries resume-derived text (the product). For a job's ids and links use GET /api/jobs?url=.",
         "operationId": "get_api_tailored_resumes",
         "parameters": [
           {
@@ -3654,12 +3765,15 @@
             "description": "target_unavailable"
           }
         },
-        "summary": "Stored tailored resumes, newest first.",
+        "summary": "List tailored resumes",
+        "tags": [
+          "Tailored resumes"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       },
       "post": {
-        "description": "Synchronous: blocks for the model call (one retry on a rejected answer).",
+        "description": "Tailor the resume to one posting (markdown + structure, each line cited). Synchronous: blocks for the model call (one retry on a rejected answer).",
         "operationId": "post_api_tailored_resumes",
         "parameters": [],
         "requestBody": {
@@ -3674,7 +3788,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "job": {
-                    "description": "The posting: {\"job_url\": \"<https url>\"} or {\"text\": \"<pasted posting>\"}.",
+                    "description": "The posting: `{\"job_url\": \"<https url>\"}` or `{\"text\": \"<pasted posting>\"}`.",
                     "type": "object"
                   },
                   "model_target": {
@@ -3833,14 +3947,17 @@
             "description": "tailor_timeout"
           }
         },
-        "summary": "Tailor the resume to one posting (markdown + structure, each line cited).",
+        "summary": "Tailor the resume to one posting",
+        "tags": [
+          "Tailored resumes"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "model"
       }
     },
     "/api/tailored-resumes/pdf": {
       "post": {
-        "description": "Returns application/pdf with Content-Disposition: attachment; changes nothing.",
+        "description": "Render the stored tailored resume as a PDF (binary). Returns application/pdf with Content-Disposition: attachment; changes nothing.",
         "operationId": "post_api_tailored_resumes_pdf",
         "parameters": [],
         "requestBody": {
@@ -3953,7 +4070,10 @@
             "description": "pdf_render_failed"
           }
         },
-        "summary": "Render the stored tailored resume as a PDF (binary).",
+        "summary": "Render a tailored resume as a PDF",
+        "tags": [
+          "Tailored resumes"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       }
@@ -4058,7 +4178,10 @@
             "description": "unknown_key, invalid_value"
           }
         },
-        "summary": "The watched company boards.",
+        "summary": "List watched company boards",
+        "tags": [
+          "Sources"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none"
       },
@@ -4167,14 +4290,17 @@
             "description": "unknown_key, invalid_value"
           }
         },
-        "summary": "Add a company board by its posting or board URL.",
+        "summary": "Watch a company board",
+        "tags": [
+          "Sources"
+        ],
         "x-gigai-effect": "write",
         "x-gigai-external": "none"
       }
     },
     "/llms.txt": {
       "get": {
-        "description": "Localhost-only, Host-checked plain text. Writes need Content-Type: application/json.",
+        "description": "Short plain-text guide for an agent: what this server is, how to call it, where the spec is. Localhost-only, Host-checked plain text. Writes need Content-Type: application/json.",
         "operationId": "get_llms_txt",
         "parameters": [],
         "responses": {
@@ -4200,7 +4326,10 @@
             "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
           }
         },
-        "summary": "Short plain-text guide for an agent: what this server is, how to call it, where the spec is.",
+        "summary": "Get the agent guide",
+        "tags": [
+          "Agents and meta"
+        ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
         "x-gigai-host-checked": true
@@ -4210,6 +4339,32 @@
   "servers": [
     {
       "url": "http://127.0.0.1:8765"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Agents and meta"
+    },
+    {
+      "name": "Runs"
+    },
+    {
+      "name": "Jobs"
+    },
+    {
+      "name": "Assessment"
+    },
+    {
+      "name": "Tailored resumes"
+    },
+    {
+      "name": "Profiles and resume"
+    },
+    {
+      "name": "Sources"
+    },
+    {
+      "name": "Settings"
     }
   ]
 }

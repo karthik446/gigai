@@ -21,7 +21,7 @@ gigai version, so agents can cache it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
 from typing import Literal
 
@@ -58,6 +58,7 @@ class RouteSpec:
     content_type: str = "application/json"
     host_checked: bool = False  # GET routes that return personal values also check Host
     description: str = ""
+    tag: str = ""  # the docs grouping; set from _META below, one of TAGS
     # Body keys the handler accepts as a top-level object (drives unknown_key's allowed keys).
     open_body: bool = False  # True: the handler accepts keys this table does not enumerate
 
@@ -87,7 +88,7 @@ _INVALID = (422, "invalid_value")
 _WRONG_TYPE = (422, "wrong_type")
 _MODEL_ERRORS = ((503, "model_unavailable"), (403, "model_denied"), (502, "model_output_invalid"))
 _JOB_INPUT = (
-    _b("job", "object", 'The posting: {"job_url": "<https url>"} or {"text": "<pasted posting>"}.', required=True),
+    _b("job", "object", 'The posting: `{"job_url": "<https url>"}` or `{"text": "<pasted posting>"}`.', required=True),
     _b("resume", "object", "Which resume: omitted = the selected profile; else {\"profile_id\": \"...\"} or pasted resume text."),
     _b("model_target", "string", "Which model target answers (claude or codex); omitted = the configured one."),
     _b("schema_version", "string", "Optional; must equal the request schema version when present."),
@@ -96,7 +97,7 @@ _JOB_URL = "https://boards.greenhouse.io/acme/jobs/101"
 _IDENTITY_KEY: dict[str, object] = {"profile_id": "prof_1", "job_identity": _JOB_URL}
 _ROW_ERRORS = (_INVALID, _WRONG_TYPE, _UNKNOWN_KEY)
 
-ROUTES: tuple[RouteSpec, ...] = (
+_ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     # --- discovery of the API itself -------------------------------------------------
     RouteSpec(
         "GET", "/api", "Index of every route (method, path, effect, one line) plus the spec and agent-guide links.",
@@ -144,13 +145,13 @@ ROUTES: tuple[RouteSpec, ...] = (
             },
         },
         schema_version="scout-job-response:1",
-        params=(_q("url", "string", "The posting URL, raw or normalized (the UI's #/jobs/<url> route maps here).", required=True),),
+        params=(_q("url", "string", "The posting URL, raw or normalized (the UI's `#/jobs/<url>` route maps here).", required=True),),
         errors=(_INVALID, _UNKNOWN_KEY, _NOT_FOUND, _NO_TARGET, (403, "forbidden_origin")),
         host_checked=True,
         description=(
             "Read only; never calls a model or the network. Aggregates the newest run posting, its rank, every run or quick "
             "assessment of the job (with the requirement matrix), the questions still unanswered, stored tailored resumes, the job's "
-            "state with the events it accepts next, and the action links. The UI route #/jobs/<posting url> maps to this route."
+            "state with the events it accepts next, and the action links. The UI route `#/jobs/<posting url>` maps to this route."
         ),
     ),
     # --- health / config / setup -----------------------------------------------------
@@ -307,7 +308,7 @@ ROUTES: tuple[RouteSpec, ...] = (
     RouteSpec(
         "POST", "/api/answers", "Answer an assessment question; with reassess the job is assessed again.", "write", "model",
         {"answers": []}, params=(
-            _b("question_id", "string", "The question's id (<category>:<value>).", required=True), _b("answer", "string", "Your answer.", required=True),
+            _b("question_id", "string", "The question's id (`<category>:<value>`).", required=True), _b("answer", "string", "Your answer.", required=True),
             _b("reassess", "string", "A job identity to assess again with the answer."),
         ),
         request_example={"question_id": "auth:work_authorization", "answer": "Yes"},
@@ -402,6 +403,68 @@ ROUTES: tuple[RouteSpec, ...] = (
     ),
     RouteSpec("GET", "/api/sources/update", "State of the last or running sources update.", "read", "none", {"state": "idle"}),
 )
+
+TAGS: tuple[str, ...] = ("Agents and meta", "Runs", "Jobs", "Assessment", "Tailored resumes", "Profiles and resume", "Sources", "Settings")
+
+# (summary <= 80 chars, imperative; tag). The long sentence written on each entry above becomes the
+# start of its description, so the docs page shows a short title and the full explanation.
+_META: dict[tuple[str, str], tuple[str, str]] = {
+    ("GET", "/api"): ("List every route", "Agents and meta"),
+    ("GET", SPEC_PATH): ("Get the OpenAPI document", "Agents and meta"),
+    ("GET", LLMS_PATH): ("Get the agent guide", "Agents and meta"),
+    ("GET", "/api/health"): ("Check the server is alive", "Agents and meta"),
+    ("GET", "/api/jobs"): ("Get everything known about one job", "Jobs"),
+    ("GET", "/api/config"): ("Get the find-jobs config", "Settings"),
+    ("GET", "/api/setup"): ("Get the saved preferences", "Settings"),
+    ("PUT", "/api/setup"): ("Save preferences and derive the config", "Settings"),
+    ("PUT", "/api/config/sources"): ("Turn the Exa source on or off", "Sources"),
+    ("GET", "/api/secrets/status"): ("Show which provider keys are set", "Settings"),
+    ("POST", "/api/run"): ("Start a find-jobs run", "Runs"),
+    ("GET", "/api/runs"): ("List runs", "Runs"),
+    ("GET", "/api/runs/{run_id}"): ("Get one run's status", "Runs"),
+    ("GET", "/api/runs/{run_id}/progress"): ("Get a run's live progress", "Runs"),
+    ("GET", "/api/runs/{run_id}/results"): ("List a run's results", "Runs"),
+    ("GET", "/api/runs/{run_id}/posting"): ("Get one posting of a run", "Runs"),
+    ("POST", "/api/runs/{run_id}/rank"): ("Rank a run's postings", "Runs"),
+    ("POST", "/api/runs/{run_id}/assess-all"): ("Assess every posting of a run", "Runs"),
+    ("POST", "/api/discover"): ("Start a company-discovery pass", "Sources"),
+    ("GET", "/api/discover/latest"): ("Get the latest discovery pass", "Sources"),
+    ("GET", "/api/profiles"): ("List profiles", "Profiles and resume"),
+    ("POST", "/api/profiles"): ("Create a profile", "Profiles and resume"),
+    ("PUT", "/api/profiles/{profile_id}"): ("Update a profile", "Profiles and resume"),
+    ("POST", "/api/profiles/{profile_id}/archive"): ("Archive a profile", "Profiles and resume"),
+    ("POST", "/api/profiles/selection"): ("Select the active profile", "Profiles and resume"),
+    ("POST", "/api/assess"): ("Assess one job against a resume", "Assessment"),
+    ("GET", "/api/assessments"): ("List stored assessments", "Assessment"),
+    ("POST", "/api/answers"): ("Answer an assessment question", "Assessment"),
+    ("GET", "/api/answers"): ("List stored answers", "Assessment"),
+    ("POST", "/api/applications"): ("Record an application event", "Jobs"),
+    ("GET", "/api/applications"): ("List application events", "Jobs"),
+    ("POST", "/api/tailored-resumes"): ("Tailor the resume to one posting", "Tailored resumes"),
+    ("GET", "/api/tailored-resumes"): ("List tailored resumes", "Tailored resumes"),
+    ("POST", "/api/tailored-resumes/pdf"): ("Render a tailored resume as a PDF", "Tailored resumes"),
+    ("GET", "/api/resume-display"): ("Get the PDF header settings", "Tailored resumes"),
+    ("PUT", "/api/resume-display"): ("Save the PDF header settings", "Tailored resumes"),
+    ("POST", "/api/resume/extract"): ("Extract search preferences from a resume", "Profiles and resume"),
+    ("POST", "/api/resume/check"): ("Check resume text for personal data", "Profiles and resume"),
+    ("POST", "/api/resumes"): ("Store a resume", "Profiles and resume"),
+    ("GET", "/api/watchlist"): ("List watched company boards", "Sources"),
+    ("POST", "/api/watchlist"): ("Watch a company board", "Sources"),
+    ("POST", "/api/sources/update"): ("Refresh the board catalog", "Sources"),
+    ("GET", "/api/sources/update"): ("Get the board refresh status", "Sources"),
+}
+
+
+def _finish(route: RouteSpec) -> RouteSpec:
+    summary, tag = _META[route.key]
+    assert len(summary) <= 80 and tag in TAGS, route.key
+    detail = route.summary if route.summary.endswith((".", "?", "!")) else route.summary + "."
+    description = f"{detail} {route.description}".strip()
+    return replace(route, summary=summary, tag=tag, description=description)
+
+
+ROUTES: tuple[RouteSpec, ...] = tuple(_finish(route) for route in _ROUTE_ENTRIES)
+
 
 _BY_KEY: dict[tuple[str, str], RouteSpec] = {route.key: route for route in ROUTES}
 
@@ -500,6 +563,7 @@ def _operation(route: RouteSpec) -> dict[str, object]:
     operation: dict[str, object] = {
         "operationId": _operation_id(route),
         "summary": route.summary,
+        "tags": [route.tag],
         "description": route.description or route.summary,
         "x-gigai-effect": route.effect,
         "x-gigai-external": route.external,
@@ -559,6 +623,7 @@ def openapi_document(*, version: str = "0.1.10") -> dict[str, object]:
             ),
         },
         "servers": [{"url": "http://127.0.0.1:8765"}],
+        "tags": [{"name": tag} for tag in TAGS],
         "paths": paths,
         "components": {
             "schemas": {

@@ -146,3 +146,44 @@ def test_with_allowed_keys_leaves_nested_and_unrelated_errors_alone() -> None:
     top = {"error": {"code": "unknown_key", "message": "assess_request contains unknown key(s): ['x']"}}
     served = openapi.with_allowed_keys("POST", "/api/assess", top)
     assert "job" in served["error"]["allowed_keys"] and served["error"]["message"].startswith("assess_request contains")
+
+
+def test_every_operation_has_a_short_summary_a_known_tag_a_description_and_an_example() -> None:
+    document = openapi.openapi_document(version="0.1.10")
+    assert [tag["name"] for tag in document["tags"]] == list(openapi.TAGS)
+    seen_tags: set[str] = set()
+    for path, item in document["paths"].items():
+        for method, operation in item.items():
+            where = f"{method.upper()} {path}"
+            assert 0 < len(operation["summary"]) <= 80, f"{where}: summary must be one short line"
+            assert operation["summary"] != operation["description"], f"{where}: description adds nothing to the summary"
+            assert len(operation["tags"]) == 1 and operation["tags"][0] in openapi.TAGS, f"{where}: tag not in the fixed list"
+            seen_tags.update(operation["tags"])
+            assert operation["description"].strip(), where
+            ok = operation["responses"]["200"]["content"]
+            assert any("example" in media for media in ok.values()) or "application/json" not in ok, f"{where}: no example"
+    assert seen_tags == set(openapi.TAGS), f"unused tags: {set(openapi.TAGS) - seen_tags}"
+    assert len({route.summary for route in openapi.ROUTES}) == len(openapi.ROUTES), "summaries must be unique (they are page titles)"
+
+
+def test_placeholders_in_descriptions_are_code_spans() -> None:
+    """``<url>`` outside backticks is read as HTML by the docs renderer and vanishes."""
+
+    document = openapi.openapi_document(version="0.1.10")
+    texts: list[str] = []
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "description" and isinstance(value, str):
+                    texts.append(value)
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(document)
+    for text in texts:
+        bare = re.sub(r"`[^`]*`", "", text)
+        assert not re.search(r"<[A-Za-z][^>]*>", bare), f"unescaped placeholder in: {text}"
