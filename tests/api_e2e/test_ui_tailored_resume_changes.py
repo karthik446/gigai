@@ -208,6 +208,7 @@ process.stdout.write(JSON.stringify({{
   rows: content.map((l) => ({{ display: l.display, heading: l.heading, id: l.id, origin: l.origin, action: lineAction(l), reason: reasonLabel(l.reason), lost: lostLabels(l.alternative) }})),
   stats, summary: changeSummary(stats),
   reasons: [reasonLabel({{ kind: "summary" }}), reasonLabel({{ kind: "answer" }}), reasonLabel({{ kind: "surface", requirement: "M3" }}), reasonLabel(null)],
+  phrases: ["A working practice of testing", "AWS experience", "SQL tuning", "I led the team", "already lower"].map((p) => reasonLabel({{ kind: "surface", posting_phrase: p }})).concat([reasonLabel({{ kind: "surface", requirement: "M3", posting_phrase: "Event-driven design" }})]),
 }}));
 """
 
@@ -224,6 +225,7 @@ def test_each_line_offers_the_one_button_its_origin_allows_and_headings_are_not_
     assert older["action"] is None and older["origin"] == "model"
     assert all(row["action"] is None for row in out["rows"] if row["heading"])
     assert out["reasons"] == ["for the summary", "from your answer", "for M3", ""]
+    assert out["phrases"] == ["for a working practice of testing", "for AWS experience", "for SQL tuning", "for I led the team", "for already lower", "for M3: event-driven design"]
     # 4 bullets are the rewritable lines; the header and the entry heading are not.
     assert out["stats"]["total"] == 4 and out["stats"]["keptOriginal"] == 1 and out["stats"]["rewritten"] == 1
     assert out["summary"].startswith("1 of 4 lines rewritten · 1 kept as your original (the rewrite dropped facts) · 2 copied")
