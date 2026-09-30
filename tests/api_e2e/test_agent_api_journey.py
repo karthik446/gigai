@@ -185,7 +185,7 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         top = client.post("/api/assess", json={"job": {"job_url": _URL}, "bogus": 1})
         assert top.status_code == 422 and "job" in top.json()["error"]["allowed_keys"] and "model_target" in top.json()["error"]["allowed_keys"]
         nested = client.post("/api/assess", json={"job": {"job_url": _URL, "bogus": 1}})
-        assert nested.status_code == 422 and "allowed_keys" not in nested.json()["error"], "a nested-object error keeps its own message"
+        assert nested.status_code == 422 and nested.json()["error"]["allowed_keys"] == ["company", "job_text", "job_url", "title"], "a nested-object error lists that object's own keys, not the route's"
 
         assert client.get("/api/health").json() == {"status": "ok"}, "existing response shapes are unchanged"
         assert client.get("/api/nope").json() == {"error": {"code": "not_found", "message": "no such route"}}

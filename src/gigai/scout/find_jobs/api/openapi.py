@@ -524,32 +524,41 @@ def allowed_keys(route: RouteSpec) -> list[str]:
     return sorted(param.name for param in route.params if param.where == where)
 
 
+_ALLOWED_SUFFIX = re.compile(r" \(allowed: ([^()]*)\)$")
+
+
 def with_allowed_keys(method: str, path: str, payload: dict[str, object]) -> dict[str, object]:
     """Name the allowed keys in an ``unknown_key`` error (and a profile/setup ``field_errors._`` one).
 
     Additive: ``error.allowed_keys`` is a new field and ``" (allowed: ...)"`` is appended
     to the message that already listed the unknown ones. A nested-object ``unknown_key``
-    (a message that does not start ``unknown ...`` or name the route's own request object)
-    is left as it was, because the top-level keys would be the wrong list for it.
+    already carries its own object's ``" (allowed: ...)"`` suffix from the contract parser;
+    it keeps that message and gains ``allowed_keys`` parsed from it (the route's top-level
+    keys would be the wrong list). A top-level one has the parser's suffix replaced by the route's.
     """
 
     error = payload.get("error")
     if not isinstance(error, dict):
         return payload
+    message = error.get("message")
+    field_errors = error.get("field_errors")
+    top_level_unknown = isinstance(field_errors, dict) and isinstance(field_errors.get("_"), str) and field_errors["_"].startswith("unknown field(s)")
+    own = _ALLOWED_SUFFIX.search(message) if isinstance(message, str) else None
+    is_unknown = error.get("code") == "unknown_key" and isinstance(message, str)
+    top_level = is_unknown and (message.startswith("unknown ") or message.startswith(("assess_request ", "tailor_request ", "rank_request ", "run_request ")))  # type: ignore[union-attr]
+    if is_unknown and not top_level:
+        if own is None:
+            return payload
+        return {**payload, "error": {**error, "allowed_keys": own.group(1).split(", ")}}
     route = route_for(method, path)
     if route is None or route.open_body:
         return payload
     keys = allowed_keys(route)
     if not keys:
         return payload
-    message = error.get("message")
-    field_errors = error.get("field_errors")
-    top_level_unknown = isinstance(field_errors, dict) and isinstance(field_errors.get("_"), str) and field_errors["_"].startswith("unknown field(s)")
-    if error.get("code") == "unknown_key" and isinstance(message, str):
-        top_level = message.startswith("unknown ") or message.startswith(("assess_request ", "tailor_request ", "rank_request ", "run_request "))
-        if not top_level:
-            return payload
-        return {**payload, "error": {**error, "message": f"{message} (allowed: {', '.join(keys)})", "allowed_keys": keys}}
+    if is_unknown:
+        base = message[: own.start()] if own else message  # type: ignore[index]
+        return {**payload, "error": {**error, "message": f"{base} (allowed: {', '.join(keys)})", "allowed_keys": keys}}
     if top_level_unknown:
         note = field_errors["_"]  # type: ignore[index]
         return {**payload, "error": {**error, "field_errors": {**field_errors, "_": f"{note} (allowed: {', '.join(keys)})"}, "allowed_keys": keys}}  # type: ignore[dict-item]

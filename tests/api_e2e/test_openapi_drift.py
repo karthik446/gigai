@@ -138,9 +138,12 @@ def test_route_for_matches_parametric_paths_and_allowed_keys_come_from_the_table
     assert openapi.allowed_keys(openapi.route_for("GET", "/api/runs/r/results")) == ["limit", "offset"]
 
 
-def test_with_allowed_keys_leaves_nested_and_unrelated_errors_alone() -> None:
-    nested = {"error": {"code": "unknown_key", "message": "job contains unknown key(s): ['x']"}}
-    assert openapi.with_allowed_keys("POST", "/api/assess", nested) == nested
+def test_with_allowed_keys_lifts_a_nested_objects_own_keys_and_leaves_unrelated_errors_alone() -> None:
+    bare = {"error": {"code": "unknown_key", "message": "job contains unknown key(s): ['x']"}}
+    assert openapi.with_allowed_keys("POST", "/api/assess", bare) == bare
+    nested = {"error": {"code": "unknown_key", "message": "job contains unknown key(s): ['x'] (allowed: a, b)"}}
+    served_nested = openapi.with_allowed_keys("POST", "/api/assess", nested)["error"]
+    assert served_nested["allowed_keys"] == ["a", "b"] and served_nested["message"] == nested["error"]["message"]
     other = {"error": {"code": "not_found", "message": "no such route"}}
     assert openapi.with_allowed_keys("GET", "/api/jobs", other) == other
     top = {"error": {"code": "unknown_key", "message": "assess_request contains unknown key(s): ['x']"}}
