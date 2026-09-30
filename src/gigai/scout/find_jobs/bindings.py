@@ -376,7 +376,7 @@ TEST_MODEL_EXTRACT_REPLY: dict[str, object] = {
 #: the fixture never imports that module; ``test_tailored_resume.py`` asserts
 #: the two stay identical). Its presence means "this is a tailoring, not an
 #: assessment": the fixture answers with a structurally valid tailored resume
-#: built FROM THE PROMPT ITSELF (the ``R1: ...`` resume line it carries, and
+#: built FROM THE PROMPT ITSELF (the first ``R<n>: ...`` resume line it carries, and
 #: the ``A cloud:gcp: ...`` answer when one is rendered), so the answer is
 #: valid against whatever resume a journey imported. The garbage/sleep
 #: markers above still apply first (they sit in the posting text, which the
@@ -408,34 +408,44 @@ def _test_model_prompt_source(prompt: str, prefix: str) -> str | None:
     return None
 
 
-def _test_model_tailor_reply(prompt: str) -> dict[str, object]:
-    """The fixture's tailored resume for ``prompt`` (see ``TEST_MODEL_TAILOR_MARKER``)."""
+#: A numbered resume line in a tailor prompt (``R7: Built Python services``).
+_TEST_MODEL_RESUME_LINE = re.compile(r"^R(\d+): (.*)$", re.MULTILINE)
 
-    first_line = _test_model_prompt_source(prompt, "R1: ") or "Resume line one."
+
+def _test_model_tailor_reply(prompt: str) -> dict[str, object]:
+    """The fixture's tailored resume for ``prompt`` (see ``TEST_MODEL_TAILOR_MARKER``).
+
+    Headerless (0110-003 P1), and built on the FIRST ``R<n>: `` line the
+    prompt lists: the privacy strip withholds name/contact lines, so R1 may
+    be missing and the first listed line keeps its original number.
+    """
+
+    first = _TEST_MODEL_RESUME_LINE.search(prompt)
+    number = int(first.group(1)) if first else 1
+    first_line = first.group(2).strip() if first else "Resume line one."
     if TEST_MODEL_FABRICATE_MARKER in prompt:
         return {
-            "header": [{"copy": 1}],
             "sections": [
                 {
                     "heading": "summary",
                     "lines": [
-                        {"text": TEST_MODEL_FABRICATED_NUMBER_LINE, "refs": [{"kind": "resume", "line": 1}]},
-                        {"text": TEST_MODEL_FABRICATED_TERM_LINE, "refs": [{"kind": "resume", "line": 1}]},
+                        {"text": TEST_MODEL_FABRICATED_NUMBER_LINE, "refs": [{"kind": "resume", "line": number}]},
+                        {"text": TEST_MODEL_FABRICATED_TERM_LINE, "refs": [{"kind": "resume", "line": number}]},
                         {"text": first_line, "refs": [{"kind": "resume", "line": 999}]},
                     ],
                 }
             ],
         }
     sections: list[dict[str, object]] = [
-        {"heading": "summary", "lines": [{"text": first_line, "refs": [{"kind": "resume", "line": 1}]}]},
-        {"heading": "skills", "lines": [{"copy": 1}]},
+        {"heading": "summary", "lines": [{"text": first_line, "refs": [{"kind": "resume", "line": number}]}]},
+        {"heading": "skills", "lines": [{"copy": number}]},
     ]
     gcp_answer = _test_model_prompt_source(prompt, "A cloud:gcp: ")
     if gcp_answer:
         sections.append(
             {"heading": "other", "lines": [{"text": gcp_answer, "refs": [{"kind": "answer", "question_id": "cloud:gcp"}]}]}
         )
-    return {"header": [{"copy": 1}], "sections": sections}
+    return {"sections": sections}
 
 
 #: SCOPE-ADD-3 C1 follow-up: the first line of every rank-v1 prompt

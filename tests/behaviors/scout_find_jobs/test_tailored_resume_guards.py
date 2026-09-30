@@ -325,13 +325,16 @@ def test_a_three_line_continuation_joins_all_three_lines() -> None:
 
 def test_the_stored_refs_carry_the_expansion_and_round_trip_while_copy_lines_and_unexpanded_refs_are_unchanged() -> None:
     payload = _summary_payload(("Experienced in on-call and incident response; 12 years of Ansible.", 5), ("Not an application engineer.", 6), header=5)
+    payload["sections"].append({"heading": "skills", "lines": [{"copy": 5}]})  # type: ignore[union-attr]
     result = validate_tailored_output(payload, _WRAP_JOB, _WRAP_CTX)
     stored = result.to_json()
     lines = stored["sections"][0]["lines"]
     assert lines[0]["refs"] == [{"kind": "resume", "line": 5, "text": _R5_R6, "continued_lines": [6]}]
     assert lines[1]["refs"] == [{"kind": "resume", "line": 6, "text": _WRAP_LINES[5]}]  # no continued_lines key when nothing was joined
-    # A copy line is one resume line verbatim, never the span (header copies R5 here).
-    assert stored["header"][0] == {"kind": "copy", "text": _WRAP_LINES[4], "refs": [{"kind": "resume", "line": 5, "text": _WRAP_LINES[4]}]}
+    # A copy line is one resume line verbatim, never the span (a skills line copies R5 here;
+    # the header copy of R5 is discarded: tailored output is headerless, 0110-003 P1).
+    assert stored["sections"][1]["lines"][0] == {"kind": "copy", "text": _WRAP_LINES[4], "refs": [{"kind": "resume", "line": 5, "text": _WRAP_LINES[4]}]}
+    assert stored["header"] == []
     assert TailoredResume.from_json(stored) == result
     with pytest.raises(Exception, match="continued_lines"):
         TailoredResume.from_json({**stored, "sections": [{"heading": "summary", "lines": [{"kind": "rewritten", "text": "x", "refs": [{"kind": "resume", "line": 5, "text": "x", "continued_lines": [4]}]}]}]})

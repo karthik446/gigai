@@ -116,19 +116,20 @@ def test_fake_model_run_goes_end_to_end_through_the_shipped_path(tmp_path: Path)
     for row in rows:
         assert row["ok"] is True and row["attempts"] == 1 and row["retried"] is False
         assert row["attempt_errors"] == [None] and row["attempt_guards"] == [None]
-        # The fixture: header copy R1, summary = R1 rewritten, skills copy R1.
+        # The fixture (headerless, 0110-003 P1): summary = the first listed R line rewritten, skills copy of it.
+        # Every eval resume opens "# <Name> — <Headline>": R1 is listed with the name removed.
         assert row["sections"] == ["summary", "skills"]
-        assert row["copy_lines"] == 2 and row["rewritten_lines"] == 1
-        header, summary, skills = row["lines"]
-        assert header["where"] == "header[1]" and header["kind"] == "copy" and header["verbatim"] is True and "judge" not in header
+        assert row["copy_lines"] == 1 and row["rewritten_lines"] == 1
+        summary, skills = row["lines"]
+        assert skills["where"] == "skills line 1" and skills["kind"] == "copy" and skills["verbatim"] is True and "judge" not in skills
         assert summary["where"] == "summary line 1" and summary["kind"] == "rewritten" and summary["claim"] == 1
-        assert summary["sources"] == [{"label": "R1", "text": header["text"]}]  # every accepted line lists its cited source text
+        assert summary["sources"] == [{"label": "R1", "text": skills["text"]}]  # every accepted line lists its cited source text
         assert summary["guard_hit"] is False and summary["judge"] == {"supported": True, "unsupported_span": None, "severity": None}
-        assert summary["severity"] is None and header["severity"] is None
-        assert skills["kind"] == "copy" and skills["verbatim"] is True
+        assert summary["severity"] is None and skills["severity"] is None
+        assert summary["text"].startswith("# ") and summary["text"][2:] in skills["text"] and summary["text"] != skills["text"]
         assert row["fabricated_lines"] == [] and row["judge_calls"] == 1 and row["judge_attempts"] == 1 and row["judge_ok"] is True
         assert row["judge_stopped_at_cap"] is False and row["unjudged_lines"] == 0
-        assert row["markdown"].startswith("# ") and "<!-- R1 -->" in row["markdown"]
+        assert row["markdown"].startswith("## Summary\n") and "<!-- R1 -->" in row["markdown"]
         assert row["usage"] == {"input_tokens": 10, "output_tokens": 18, "total_tokens": 28}
         assert row["judge_usage"] == {"input_tokens": 10, "output_tokens": 18, "total_tokens": 28}
 
@@ -139,7 +140,7 @@ def test_fake_model_run_goes_end_to_end_through_the_shipped_path(tmp_path: Path)
 
     metrics = report["metrics"]
     assert metrics["calls"] == {"max_calls": 6, "made": 6, "tailor_calls": 3, "judge_calls": 3, "stopped_at_cap": True, "rows_planned": len(planned), "rows_done": 3, "rows_not_done": run["rows_not_done"]}
-    assert metrics["lines"] == {"total": 9, "copy": 6, "rewritten": 3, "answer_refs": 0, "expanded_refs": 0}
+    assert metrics["lines"] == {"total": 6, "copy": 3, "rewritten": 3, "answer_refs": 0, "expanded_refs": 0}
     fab = metrics["fabrication"]
     assert fab["fabricated_claims"] == 0 and fab["fabrication_rate"] == 0.0 and fab["lines"] == []
     assert fab["hard_fabrications"] == 0 and fab["precision_lines"] == 0 and fab["precision_rate"] == 0.0
@@ -156,7 +157,7 @@ def test_fake_model_run_goes_end_to_end_through_the_shipped_path(tmp_path: Path)
     sample = metrics["samples"]["clean_fit"]
     assert sample["resume_id"] == rows[0]["resume_id"] and metrics["samples"]["pending"] is None
     rendered = sample["markdown_with_sources"]
-    assert rendered.count("> R1: ") == 3 and "> judge: supported" in rendered and "> check: copy line, verbatim=True" in rendered
+    assert rendered.count("> R1: ") == 2 and "> judge: supported" in rendered and "> check: copy line, verbatim=True" in rendered
     assert "WARNING" not in rendered
     # The raw dump: one prompt + one output per attempt, plus the index.
     names = sorted(path.name for path in dump.iterdir())
@@ -181,7 +182,9 @@ def test_no_judge_run_and_answers_reach_the_row(tmp_path: Path) -> None:
     from gigai.scout.question_ids import normalize_question_id
 
     assert row["answers"] == sorted({normalize_question_id(item.question_id) for item in answers[label.resume_id]})
-    assert row["judge_calls"] == 0 and row["lines"][1]["judge"] is None and row["unjudged_lines"] == 1
+    # Headerless fixture (0110-003 P1): the rewritten summary line is the row's first line.
+    assert row["lines"][0]["kind"] == "rewritten"
+    assert row["judge_calls"] == 0 and row["lines"][0]["judge"] is None and row["unjudged_lines"] == 1
     assert report["metrics"]["fabrication"]["judge_enabled"] is False
     assert report["metrics"]["calls"]["made"] == 1 and report["metrics"]["bars"]["hard_fabrications_bar_met"] is True
     assert report["metrics"]["bars"]["precision_rate_bar_met"] is True and report["metrics"]["fabrication"]["precision_rate"] == 0.0
@@ -277,7 +280,7 @@ def test_the_cap_stops_the_run_before_a_judge_call_and_lists_the_rows_not_done(t
     first, second = report["rows"]
     assert first["judge_ok"] is True and second["judge_ok"] is None
     assert second["ok"] is True and second["judge_stopped_at_cap"] is True and second["judge_calls"] == 0 and second["unjudged_lines"] == 1
-    assert second["lines"][1]["judge"] is None and second["fabricated_lines"] == []
+    assert second["lines"][0]["kind"] == "rewritten" and second["lines"][0]["judge"] is None and second["fabricated_lines"] == []
     metrics = report["metrics"]
     assert metrics["calls"]["made"] == 3 and metrics["calls"]["rows_done"] == 2 and metrics["calls"]["stopped_at_cap"] is True
     assert metrics["fabrication"]["judge_stopped_at_cap"] == 1 and metrics["fabrication"]["unjudged_rewritten_lines"] == 1
@@ -378,7 +381,13 @@ def test_the_fake_judge_answers_one_verdict_per_claim_block() -> None:
 
 
 def _tailor_reply(*lines: str) -> dict:
-    return {"header": [{"copy": 1}], "sections": [{"heading": "summary", "lines": [{"text": text, "refs": [{"kind": "resume", "line": 1}]} for text in lines]}]}
+    # Headerless (0110-003 P1): the copy line these rows check sits in a leading skills section.
+    return {
+        "sections": [
+            {"heading": "skills", "lines": [{"copy": 1}]},
+            {"heading": "summary", "lines": [{"text": text, "refs": [{"kind": "resume", "line": 1}]} for text in lines]},
+        ]
+    }
 
 
 _LABEL = assess_harness.Label("r", "p", "pending_user_answers", (), False, False, False, "test", "")
@@ -396,8 +405,8 @@ def test_a_planted_unsupported_line_is_flagged_through_the_batch() -> None:
     budget = harness.CallBudget(max_calls=25)
     row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _POSTING, _RESUME_FIXTURE, (), budget=budget)
     assert row["ok"] is True and row["judge_ok"] is True and row["judge_calls"] == 1 and budget.made == 2
-    header, first, second = row["lines"]
-    assert header["kind"] == "copy" and header["verbatim"] is True and header["severity"] is None
+    copied, first, second = row["lines"]
+    assert copied["where"] == "skills line 1" and copied["kind"] == "copy" and copied["verbatim"] is True and copied["severity"] is None
     assert first["claim"] == 1 and first["judge"] == {"supported": True, "unsupported_span": None, "severity": None} and first["fabricated"] is False and first["severity"] is None
     assert second["claim"] == 2 and second["judge"] == {"supported": False, "unsupported_span": "large platform team", "severity": "hard"} and second["fabricated"] is True
     assert second["severity"] == "hard"
@@ -414,7 +423,7 @@ def test_a_planted_unsupported_line_is_flagged_through_the_batch() -> None:
 
 
 def test_a_planted_hard_line_and_a_planted_precision_line_land_in_their_own_buckets_and_both_are_listed_with_sources() -> None:
-    # Three accepted lines: the header copy, a precision-drift summary line
+    # Three accepted lines: the skills copy, a precision-drift summary line
     # ("auditable" -> "audited") and a hard one (an ownership the source never
     # gives). The judge returns both severities; the harness counts one under
     # each metric, computes precision_rate over ALL accepted lines (1 of 3),
@@ -433,7 +442,8 @@ def test_a_planted_hard_line_and_a_planted_precision_line_land_in_their_own_buck
     budget = harness.CallBudget(max_calls=25)
     row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _POSTING, _RESUME_FIXTURE, (), budget=budget)
     assert row["ok"] is True and row["judge_ok"] is True and budget.made == 2
-    header, precise, hard = row["lines"]
+    copied, precise, hard = row["lines"]
+    assert copied["kind"] == "copy" and copied["severity"] is None
     assert precise["severity"] == "precision" and precise["fabricated"] is True and precise["judge"]["severity"] == "precision"
     assert hard["severity"] == "hard" and hard["fabricated"] is True
     assert row["fabricated_lines"] == [precise, hard]
@@ -528,7 +538,7 @@ def test_an_answer_ref_is_offered_and_accepted_under_its_canonical_id() -> None:
     answers = (harness.FixedAnswer("language:java_cpp_go", "Go: yes, daily. Java and C++: no."),)
     binding = _ScriptedBinding(
         [
-            {"header": [{"copy": 1}], "sections": [{"heading": "summary", "lines": [{"text": "Go daily; no Java or C++.", "refs": [{"kind": "answer", "question_id": "language:cpp_go_java"}]}]}]},
+            {"sections": [{"heading": "skills", "lines": [{"copy": 1}]}, {"heading": "summary", "lines": [{"text": "Go daily; no Java or C++.", "refs": [{"kind": "answer", "question_id": "language:cpp_go_java"}]}]}]},
             {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None}]},
         ]
     )
@@ -569,16 +579,16 @@ def test_a_cited_wrapped_resume_line_reaches_the_guards_the_row_and_the_judge_as
     # The prompt's numbering is unchanged: two lines, R1 and R2.
     assert "R1: Software engineer with Python service experience and\nR2: Go services in production for 12 years." in binding.prompts[0]
     assert row["ok"] is True and row["attempts"] == 1 and "go" in row["guard_terms"]
-    header, summary = row["lines"]
-    assert header["sources"] == [{"label": "R1", "text": "Software engineer with Python service experience and"}]  # a copy line never expands
-    assert header["verbatim"] is True
+    copied, summary = row["lines"]
+    assert copied["sources"] == [{"label": "R1", "text": "Software engineer with Python service experience and"}]  # a copy line never expands
+    assert copied["verbatim"] is True
     assert summary["sources"] == [{"label": "R1", "text": joined, "continued_lines": [2]}]
     assert summary["guard_hit"] is False and summary["numeric_hits"] == [] and summary["term_hits"] == []
     assert "CLAIM 1:\nPython and Go services for 12 years.\nSOURCES FOR CLAIM 1:\nR1: " + joined + "\n" in binding.prompts[1] + "\n"
     metrics = harness.summarize([row], planned=1, max_calls=25, judge=True, calls=budget.calls)
     assert metrics["lines"]["expanded_refs"] == 1 and metrics["fabrication"]["fabricated_claims"] == 0
     assert "  > R1+R2: " + joined in metrics["samples"]["pending"]["markdown_with_sources"]
-    assert "# Software engineer with Python service experience and <!-- R1 -->" in row["markdown"]
+    assert "## Skills\n\n- Software engineer with Python service experience and <!-- R1 -->" in row["markdown"]
 
 
 def test_a_verdict_count_mismatch_is_a_judge_failure_after_one_retry() -> None:

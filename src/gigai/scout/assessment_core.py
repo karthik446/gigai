@@ -42,6 +42,7 @@ from ..adapters.port import ModelInvocationError, NormalizedUsage
 from ..canonical import digest_imported_bytes
 from .find_jobs.contracts import FindJobsContractError, NotAssessedReason
 from .question_ids import normalize_question_id
+from .resume_privacy import model_resume
 
 _INSTRUCTIONS_RESOURCE = "scout/data/instructions/assess.md"
 _ROLE = "reviewer"
@@ -192,7 +193,7 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
         "location": job.location or "unspecified",
         "visa_required": "yes" if ctx.visa_sponsorship_required else "no",
         "posting_text": job.posting_text[:_MAX_PROMPT_POSTING_TEXT],
-        "resume_text": ctx.resume_text[:_MAX_PROMPT_RESUME_TEXT],
+        "resume_text": model_resume(ctx.resume_text).text[:_MAX_PROMPT_RESUME_TEXT],
         "validation_error": (validation_error or "")[:_MAX_PROMPT_VALIDATION_ERROR],
         "countries": ", ".join(ctx.countries) if ctx.countries else "any",
         "titles": ", ".join(ctx.titles) if ctx.titles else "unspecified",

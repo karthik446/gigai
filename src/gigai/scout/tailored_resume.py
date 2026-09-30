@@ -16,14 +16,23 @@ The guardrail (the packet's reason to exist): every line of the output
 traces to the pinned resume or an answer, enforced in code, never trusted
 from the model:
 
-- STRUCTURE: ``header`` + ``sections[]``; experience/projects/education
-  sections hold ``entries[]`` of ``{heading_ref, bullets[]}``.
-- COPY-ONLY lines ``{"copy": <resume line n>}``: header lines and entry
-  headings (employer, title, dates, location, degree) are inserted by code
-  verbatim from the resume; the model only picks the line.  Only bullets,
-  the summary (and, optionally, skills lines) are rewritten.
+- PRIVACY (0110-003 P1): the prompt carries only the lines
+  ``resume_privacy.model_resume`` keeps (no name/contact lines, inline
+  contact redacted), under their ORIGINAL ``R<n>`` numbers (gaps are
+  fine); a copy or citation of a withheld line is rejected.  The output is
+  HEADERLESS: the PDF header comes from the local display settings, never
+  from the model.  A stray ``header`` key in the answer is accepted and
+  discarded (no retry spent); ``TailoredResume.header`` stays in the
+  contract (empty for new results) so older stored results still parse.
+- STRUCTURE: ``sections[]``; experience/projects/education sections hold
+  ``entries[]`` of ``{heading_ref, bullets[]}``.
+- COPY-ONLY lines ``{"copy": <resume line n>}``: entry headings (employer,
+  title, dates, location, degree) are inserted by code verbatim from the
+  resume; the model only picks the line.  Only bullets, the summary (and,
+  optionally, skills lines) are rewritten.
 - PROVENANCE: every rewritten line cites 1-4 sources; a resume ref must be
-  in ``1..len(resume_lines)``; an answer ref's id, after
+  a line the prompt showed (in ``1..len(resume_lines)`` and not withheld);
+  an answer ref's id, after
   ``normalize_question_id``, must be a ``read_answers`` key.  A resume ref
   whose line ends mid-sentence is EXPANDED to its continuation lines
   (``resume_continuations``, tailor-r2): the ref's ``text`` is the joined
@@ -87,6 +96,7 @@ from .find_jobs.discovery.storage import atomic_write, project_id
 from .find_jobs.job_input import job_fetch_client, resolve_job
 from .find_jobs.resume_input import resolve_profile, resolve_resume, resume_for_profile
 from .question_ids import normalize_question_id
+from .resume_privacy import ModelResume, model_resume
 from .quick_assess import (
     EPHEMERAL_RESUME_KEY,
     QuickAssessError,
@@ -119,7 +129,6 @@ _MATRIX_PLACEHOLDER = "{{matrix}}"
 
 # --- bounds (orchestrator review, required change 4) ---------------------------------
 MAX_SECTIONS = 8
-MAX_HEADER_LINES = 8
 MAX_ENTRIES_PER_SECTION = 20
 MAX_TOTAL_LINES = 120
 MAX_TEXT_CHARS = 400
@@ -326,6 +335,38 @@ class TailorContext:
     #: entry it belongs to.  Empty (the default) means no line is in an entry,
     #: so the cross-entry guard never fires.
     entries: Mapping[int, int] = field(default_factory=dict)
+    #: ``resume_privacy.model_resume(resume_text)``: the lines a model may see
+    #: and the withheld line numbers.  ``None`` (the default) derives it from
+    #: ``resume_lines``, so a context is never built without the strip;
+    #: ``tailor_context`` passes the one made from the raw resume text.
+    model: ModelResume | None = None
+
+    def __post_init__(self) -> None:
+        if self.model is None:
+            object.__setattr__(self, "model", model_resume("\n".join(self.resume_lines)))
+
+    @property
+    def withheld(self) -> frozenset[int]:
+        assert self.model is not None
+        return self.model.withheld
+
+
+def tailor_context(
+    resume_text: str,
+    *,
+    answers: Mapping[str, AnswerSource] | None = None,
+    matrix: tuple[MatrixRow, ...] = (),
+) -> TailorContext:
+    """The context ``run_tailored_resume`` tailors with: every source derived from the raw resume text."""
+
+    return TailorContext(
+        resume_lines=resume_lines(resume_text),
+        answers=dict(answers or {}),
+        matrix=matrix,
+        continuations=resume_continuations(resume_text),
+        entries=resume_entries(resume_text),
+        model=model_resume(resume_text),
+    )
 
 
 @dataclass(frozen=True)
@@ -390,7 +431,9 @@ def render_tailor_prompt(job: TailorJob, ctx: TailorContext, validation_error: s
     substitute in one pass (substituted text is never rescanned).
     """
 
-    numbered = "\n".join(f"R{index}: {line}" for index, line in enumerate(ctx.resume_lines, 1))
+    assert ctx.model is not None
+    # Only the lines the privacy strip keeps, under their original numbers.
+    numbered = "\n".join(f"R{index}: {line}" for index, line in ctx.model.lines)
     answers = "\n".join(
         f"A {item.question_id}: {item.answer[:_MAX_PROMPT_ANSWER_TEXT]}" for item in ctx.answers.values()
     )
@@ -891,6 +934,8 @@ def _copy_line(raw: object, where: str, ctx: TailorContext) -> TailoredLine:
         _reject(f"{where} copy must be a resume line number")
     if not 1 <= number <= len(ctx.resume_lines):
         _reject(f"{where} copies resume line {number}; the resume has {len(ctx.resume_lines)} lines")
+    if number in ctx.withheld:
+        _reject(f"{where} copies resume line {number}, which is not available (only the listed R lines can be used)")
     text = ctx.resume_lines[number - 1]
     return TailoredLine("copy", text, (SourceRef("resume", number, None, text),))
 
@@ -903,7 +948,9 @@ def _resume_ref(number: int, ctx: TailorContext) -> SourceRef:
     """
 
     continued = tuple(
-        item for item in ctx.continuations.get(number, ()) if number < item <= len(ctx.resume_lines)
+        item
+        for item in ctx.continuations.get(number, ())
+        if number < item <= len(ctx.resume_lines) and item not in ctx.withheld
     )
     text = " ".join(ctx.resume_lines[item - 1] for item in (number, *continued))
     return SourceRef("resume", number, None, text, continued)
@@ -927,6 +974,8 @@ def _refs(raw: object, where: str, ctx: TailorContext) -> tuple[SourceRef, ...]:
                 _reject(f"{where} has a resume ref without a line number")
             if not 1 <= number <= len(ctx.resume_lines):
                 _reject(f"{where} cites resume line {number}; the resume has {len(ctx.resume_lines)} lines")
+            if number in ctx.withheld:
+                _reject(f"{where} cites resume line {number}, which is not available (only the listed R lines can be used)")
             refs.append(_resume_ref(number, ctx))
         elif kind == "answer":
             raw_id = item.get("question_id")
@@ -1016,23 +1065,17 @@ def validate_tailored_output(decoded: Mapping[str, object], job: TailorJob, ctx:
 
     Raises ``TailorValidationError`` naming the first offending line and the
     reason; ``invoke_json_once`` feeds the message back on the one retry.
+    The output is headerless (0110-003 P1): a ``header`` key the model sends
+    anyway is accepted and discarded, whatever it holds, and never costs the
+    retry; the result's ``header`` is always empty.
     """
 
     if not isinstance(decoded, Mapping):
         _reject("the answer is not a JSON object")
     unknown = set(decoded) - {"header", "sections"}
     if unknown:
-        _reject(f"the answer has unknown top-level key(s) {sorted(unknown)}; only header and sections are allowed")
+        _reject(f"the answer has unknown top-level key(s) {sorted(unknown)}; only sections is allowed")
     terms = guard_terms(job, ctx)
-
-    raw_header = decoded.get("header", [])
-    if raw_header is None:
-        raw_header = []
-    if type(raw_header) is not list:
-        _reject("header must be a list of copy lines")
-    if len(raw_header) > MAX_HEADER_LINES:
-        _reject(f"header has {len(raw_header)} copy lines; at most {MAX_HEADER_LINES} allowed")
-    header = tuple(_copy_line(item, f"header[{index}]", ctx) for index, item in enumerate(raw_header, 1))
 
     raw_sections = decoded.get("sections")
     if type(raw_sections) is not list:
@@ -1110,7 +1153,7 @@ def validate_tailored_output(decoded: Mapping[str, object], job: TailorJob, ctx:
             if total > MAX_TOTAL_LINES:
                 _reject(f"the sections hold more than {MAX_TOTAL_LINES} lines in total; at most {MAX_TOTAL_LINES} allowed")
             sections.append(TailoredSection(heading, lines, ()))
-    return TailoredResume(header, tuple(sections))
+    return TailoredResume((), tuple(sections))
 
 
 # --- markdown, rendered by code -----------------------------------------------------------
@@ -1511,7 +1554,7 @@ def run_tailored_resume(
     active = config if config is not None else load_config(home_root)
     binding = _resolve_binding(active, model_target, home_root=home_root)
     tailor_job = TailorJob(title=job.title, company=job.company, location=job.location, posting_text=job.text)
-    ctx = TailorContext(resume_lines=lines, answers=answers, matrix=matrix, continuations=resume_continuations(resume.text), entries=resume_entries(resume.text))
+    ctx = tailor_context(resume.text, answers=answers, matrix=matrix)
     try:
         attempt = tailor_once(binding, tailor_job, ctx)
     finally:
@@ -1565,7 +1608,6 @@ def run_tailored_resume(
 __all__ = [
     "ENTRY_SECTIONS",
     "EPHEMERAL_RESUME_KEY",
-    "MAX_HEADER_LINES",
     "MAX_REFS_PER_LINE",
     "MAX_SECTIONS",
     "MAX_TEXT_CHARS",
@@ -1606,6 +1648,7 @@ __all__ = [
     "resume_entries",
     "resume_lines",
     "run_tailored_resume",
+    "tailor_context",
     "tailor_once",
     "tailored_resume_dir",
     "tailored_resume_path",

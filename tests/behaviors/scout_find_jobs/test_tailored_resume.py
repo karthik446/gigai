@@ -29,7 +29,6 @@ from gigai.scout.find_jobs.contracts import ModelTarget, NotAssessedReason
 from gigai.scout.profile_records import selected_profile
 from gigai.scout.quick_assess import run_quick_assessment
 from gigai.scout.tailored_resume import (
-    MAX_HEADER_LINES,
     MAX_REFS_PER_LINE,
     MAX_SECTIONS,
     MAX_TEXT_CHARS,
@@ -87,6 +86,7 @@ _JOB = TailorJob(title="Staff AI Engineer", company="Acme", location="Remote", p
 _GCP = AnswerSource(question_id="cloud:gcp", answer="Yes, two years on GCP.", revision_id="rev_1", prompt="Have you run workloads on GCP?")
 _CTX = TailorContext(resume_lines=_LINES, answers={"cloud:gcp": _GCP})
 
+# 0110-003 P1: a stray "header" (here copying the withheld name/contact lines) is accepted and discarded.
 _VALID: dict[str, object] = {
     "header": [{"copy": 1}, {"copy": 2}],
     "sections": [
@@ -225,7 +225,10 @@ def test_matrix_requirement_names_replace_the_posting_tokens_when_an_assessment_
 def test_prompt_numbers_the_sources_and_drops_empty_paragraphs() -> None:
     ctx = TailorContext(resume_lines=_LINES, answers={"cloud:gcp": _GCP}, matrix=(MatrixRow("Python", "met"),))
     prompt = render_tailor_prompt(_JOB, ctx)
-    assert "R1: # Jane Doe\nR2: jane@example.test | Denver, CO\nR3: ## Experience" in prompt
+    # 0110-003 P1: the name/contact lines are withheld; the kept lines keep their original numbers.
+    assert "RESUME LINES:\nR3: ## Experience\nR4: Acme Corp" in prompt
+    assert "Jane" not in prompt and "jane@example.test" not in prompt and "Denver" not in prompt
+    assert "R1:" not in prompt and "R2:" not in prompt
     assert f"R{len(_LINES)}: Python, Kubernetes, PostgreSQL" in prompt
     assert "A cloud:gcp: Yes, two years on GCP." in prompt
     assert "M1: Python [met]" in prompt
@@ -252,9 +255,9 @@ def test_substituted_text_is_never_rescanned_for_placeholders() -> None:
 
 def test_a_valid_answer_yields_copy_lines_verbatim_and_rewritten_lines_with_source_text() -> None:
     result = validate_tailored_output(_VALID, _JOB, _CTX)
-    assert [line.kind for line in result.header] == ["copy", "copy"]
-    assert [line.text for line in result.header] == ["# Jane Doe", "jane@example.test | Denver, CO"]
-    assert result.header[0].refs[0].to_json() == {"kind": "resume", "line": 1, "text": "# Jane Doe"}
+    # Headerless (0110-003 P1): the model's header copies are discarded, never validated or stored.
+    assert result.header == () and result.to_json()["header"] == []
+    assert _CTX.withheld == frozenset({1, 2})
     experience = result.sections[1]
     assert experience.entries[0].heading[0].text == "Acme Corp — Senior Engineer (2019–2023)"
     assert experience.entries[0].heading[0].kind == "copy"
@@ -269,7 +272,10 @@ def test_a_valid_answer_yields_copy_lines_verbatim_and_rewritten_lines_with_sour
 @pytest.mark.parametrize(
     ("payload", "message"),
     [
-        ({"header": [{"copy": 99}], "sections": [{"heading": "skills", "lines": [{"copy": 8}]}]}, "header[1] copies resume line 99; the resume has 8 lines"),
+        ({"sections": [{"heading": "skills", "lines": [{"copy": 99}]}]}, "skills line 1 copies resume line 99; the resume has 8 lines"),
+        ({"sections": [{"heading": "skills", "lines": [{"copy": 1}]}]}, "skills line 1 copies resume line 1, which is not available (only the listed R lines can be used)"),
+        ({"sections": [{"heading": "experience", "entries": [{"heading_ref": [{"copy": 2}], "bullets": []}]}]}, "experience entry 1 heading[1] copies resume line 2, which is not available (only the listed R lines can be used)"),
+        (_one_line("Based in Denver.", [{"kind": "resume", "line": 2}]), "summary line 1 cites resume line 2, which is not available (only the listed R lines can be used)"),
         (_one_line("Six years of Python.", [{"kind": "resume", "line": 98}]), "summary line 1 cites resume line 98; the resume has 8 lines"),
         (_one_line("Two years on GCP.", [{"kind": "answer", "question_id": "cloud:aws"}]), 'summary line 1 cites "cloud:aws", which is not an answered question'),
         (_one_line("Six years of Python.", []), "summary line 1 has no refs; every rewritten line cites 1 to 4 sources"),
@@ -277,14 +283,13 @@ def test_a_valid_answer_yields_copy_lines_verbatim_and_rewritten_lines_with_sour
         (_one_line("Led 12 engineers.", [{"kind": "resume", "line": 5}, {"kind": "answer", "question_id": "cloud:gcp"}]), 'summary line 1 contains the number "12" that appears in none of its cited sources (R5, A cloud:gcp)'),
         (_one_line("Deep Terraform experience.", [{"kind": "resume", "line": 6}]), 'summary line 1 contains the posting term "terraform" that appears in none of its cited sources (R6)'),
         ({"header": [{"copy": 1}], "sections": [{"heading": "experience", "entries": [{"heading_ref": [{"text": "Acme Corp", "refs": [{"kind": "resume", "line": 4}]}], "bullets": []}]}]}, 'experience entry 1 heading[1] must be a copy line ({"copy": <resume line number>})'),
-        ({"header": [{"text": "Jane", "refs": []}], "sections": [{"heading": "skills", "lines": [{"copy": 8}]}]}, 'header[1] must be a copy line ({"copy": <resume line number>})'),
         ({"header": [], "sections": [{"heading": "experience", "entries": [{"heading_ref": [{"copy": 4}], "bullets": [{"text": "Ran k8s.", "refs": [{"kind": "resume", "line": 999}]}]}]}]}, "experience entry 1 bullet 1 cites resume line 999; the resume has 8 lines"),
         ({"header": [], "sections": [{"heading": "experience", "lines": [{"copy": 4}]}]}, "experience section must hold entries (heading_ref + bullets), not lines"),
         ({"header": [], "sections": [{"heading": "summary", "entries": []}]}, "summary section must hold lines, not entries"),
         ({"header": [], "sections": [{"heading": "career", "lines": [{"copy": 4}]}]}, "sections[1] heading must be one of summary, experience, skills, education, projects, other"),
         ({"header": [], "sections": [{"heading": "skills", "lines": [{"copy": 8}]}, {"heading": "skills", "lines": [{"copy": 8}]}]}, "sections[2] repeats the skills heading; each section appears at most once"),
         ({"header": [], "sections": []}, "sections has 0 items; at least 1 section is required"),
-        ({"header": [], "sections": [{"heading": "skills", "lines": [{"copy": 8}]}], "markdown": "# no"}, "the answer has unknown top-level key(s) ['markdown']; only header and sections are allowed"),
+        ({"header": [], "sections": [{"heading": "skills", "lines": [{"copy": 8}]}], "markdown": "# no"}, "the answer has unknown top-level key(s) ['markdown']; only sections is allowed"),
     ],
 )
 def test_the_validator_names_the_offending_line_and_the_reason(payload: dict[str, object], message: str) -> None:
@@ -299,8 +304,10 @@ def test_answer_refs_are_matched_after_normalizing_the_question_id() -> None:
 def test_bounds_are_enforced_with_count_and_limit_messages() -> None:
     too_many_sections = {"header": [], "sections": [{"heading": "skills", "lines": [{"copy": 8}]}] * (MAX_SECTIONS + 1)}
     assert _reject(too_many_sections) == f"sections has {MAX_SECTIONS + 1} items; at most {MAX_SECTIONS} allowed"
-    header = {"header": [{"copy": 1}] * (MAX_HEADER_LINES + 1), "sections": [{"heading": "skills", "lines": [{"copy": 8}]}]}
-    assert _reject(header) == f"header has {MAX_HEADER_LINES + 1} copy lines; at most {MAX_HEADER_LINES} allowed"
+    # No header bound any more: whatever "header" holds is discarded without a rejection (no retry spent).
+    for header in ([{"copy": 1}] * 50, [{"text": "Jane", "refs": []}], "Jane Doe", None, [{"copy": 99}]):
+        stray = {"header": header, "sections": [{"heading": "skills", "lines": [{"copy": 8}]}]}
+        assert validate_tailored_output(stray, _JOB, _CTX).header == ()
     long_text = _one_line("x" * (MAX_TEXT_CHARS + 1), [{"kind": "resume", "line": 5}])
     assert _reject(long_text) == f"summary line 1 text has {MAX_TEXT_CHARS + 1} characters; at most {MAX_TEXT_CHARS} allowed"
     refs = _one_line("Python.", [{"kind": "resume", "line": 5}] * (MAX_REFS_PER_LINE + 1))
@@ -319,9 +326,6 @@ def test_markdown_is_rendered_from_the_validated_json_with_refs_per_line() -> No
     result = validate_tailored_output(_VALID, _JOB, _CTX)
     markdown = render_markdown(result)
     assert markdown == (
-        "# Jane Doe <!-- R1 -->\n"
-        "jane@example.test | Denver, CO <!-- R2 -->\n"
-        "\n"
         "## Summary\n"
         "\n"
         "- Engineer with six years of Python services; ran Kubernetes clusters with PostgreSQL. <!-- R5, R6 -->\n"

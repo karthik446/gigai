@@ -1,8 +1,9 @@
 """Q3: the tailored-resume journey over HTTP against the real supervised server.
 
 (a) job_url (single-job fixture) + selected profile -> 200 with the
-structured output: a header copy line that is the resume line verbatim,
-every rewritten line carrying refs with the cited source text, non-empty
+structured output: no header (tailored output is headerless, 0110-003 P1),
+a skills copy line that is the resume line verbatim, every rewritten line
+carrying refs with the cited source text, non-empty
 ``markdown`` and a sibling ``.md`` on disk; (b) ``POST /api/answers
 cloud:gcp`` then tailor again -> a line cites ``answer cloud:gcp`` and
 ``created_at`` survives; (c) the fabricate marker -> 502
@@ -63,9 +64,11 @@ def _assert_structured(payload: dict) -> None:
     assert "text" not in payload["job"]
     result = payload["result"]
     assert result["schema_version"] == "scout-tailored-resume:1"
-    assert result["header"], "a header copy line is expected"
-    for line in result["header"]:
-        assert line["kind"] == "copy" and line["refs"][0]["kind"] == "resume"
+    assert result["header"] == [], "tailored output is headerless (0110-003 P1)"
+    copies = [line for section in result["sections"] for line in section.get("lines", []) if line["kind"] == "copy"]
+    assert copies, "a copy line is expected"
+    for line in copies:
+        assert line["refs"][0]["kind"] == "resume"
         assert line["text"] == line["refs"][0]["text"], "a copy line is the resume line verbatim"
     headings = [section["heading"] for section in result["sections"]]
     assert headings and len(set(headings)) == len(headings)
@@ -107,13 +110,14 @@ def test_tailored_resumes_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         _assert_structured(a)
         assert a["job"]["fetch_kind"] == "ats_single" and a["job"]["title"] == "Software Engineer" and a["job"]["company"] == "Acme"
         assert a["resume"]["profile_id"], "the selected profile's resume is the default"
-        assert a["result"]["header"][0]["text"] == _RESUME_LINE
-        assert a["result"]["header"][0]["refs"] == [{"kind": "resume", "line": 1, "text": _RESUME_LINE}]
+        skills = next(section for section in a["result"]["sections"] if section["heading"] == "skills")
+        assert skills["lines"][0]["text"] == _RESUME_LINE
+        assert skills["lines"][0]["refs"] == [{"kind": "resume", "line": 1, "text": _RESUME_LINE}]
         summary = a["result"]["sections"][0]
         assert summary["heading"] == "summary" and summary["lines"][0]["kind"] == "rewritten"
         assert summary["lines"][0]["refs"] == [{"kind": "resume", "line": 1, "text": _RESUME_LINE}]
         assert a["sources"] == {"resume_content_sha256": a["resume"]["content_sha256"], "resume_line_count": 1, "answers": [], "assessment_stored_path": None}
-        assert a["markdown"].startswith(f"# {_RESUME_LINE} <!-- R1 -->\n")
+        assert a["markdown"].startswith(f"## Summary\n\n- {_RESUME_LINE} <!-- R1 -->\n")
         assert a["producer"]["model_target"] == "ollama_local" and a["producer"]["callable"] == "scout.tailor"
         assert a["created_at"] == a["updated_at"]
         stored = Path(a["stored_path"])
