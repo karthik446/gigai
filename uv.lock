@@ -82,7 +82,7 @@ wheels = [
 
 [[package]]
 name = "gigai"
-version = "0.1.10.1"
+version = "0.1.10.2"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

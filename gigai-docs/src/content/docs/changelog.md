@@ -22,6 +22,15 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.1.10.2
+
+#### Fixed
+
+- **A new profile can have its own resume.** The new-profile form in Settings
+  lets you paste a resume (the default), upload one, or choose an existing one,
+  instead of silently reusing the selected profile's resume. The profiles list
+  shows which resume each profile uses and flags two profiles that share one.
+
 ### 0.1.10.1
 
 #### Fixed
