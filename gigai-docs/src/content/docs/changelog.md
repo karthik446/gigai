@@ -22,6 +22,23 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.1.10.1
+
+#### Fixed
+
+- **The PDF skills section no longer repeats itself.** Your skills show as
+  de-duplicated tag chips, and the text is real, selectable text.
+- **Fewer awkward page breaks in the PDF.** An entry no longer leaves a single
+  bullet alone at the top of the next page, and a resume that barely overflows
+  one page is fitted onto it.
+- **The tailored resume text prints a wrapped line once.** A hard-wrapped line
+  of your resume is no longer repeated in the `.md` text, the API markdown or
+  the stored result, and a resume saved by 0.1.10 renders once too. The list in
+  **Show changes** shows a resume saved before this release as it was stored,
+  so it may still repeat lines: tailor again to refresh it.
+- **The reason label in Show changes starts with a lower-case letter**
+  ("for a working practice ..."), while acronyms such as AWS keep their case.
+
 ### 0.1.10
 
 #### Added

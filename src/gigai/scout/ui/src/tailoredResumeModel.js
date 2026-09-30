@@ -279,11 +279,20 @@ export function sourceLabel(ref, promptFor) {
 
 // "for M3: event-driven" / "for the summary" / "from your answer": why the
 // model rewrote a line, from the line's own `reason` (never invented here).
+// A quoted posting phrase reads mid-sentence after "for": lowercase its first
+// letter only when the first word is upper-case then lower-case only (not
+// "I"), so acronyms such as "AWS" and "SQL" keep their case.
+function lowerFirstWord(phrase) {
+  const first = /^[A-Z][a-z]*(?![A-Za-z])/.exec(phrase);
+  return first && first[0] !== "I" ? phrase[0].toLowerCase() + phrase.slice(1) : phrase;
+}
+
 export function reasonLabel(reason) {
   if (!reason || typeof reason !== "object") {
     return "";
   }
-  const detail = [reason.requirement, reason.posting_phrase].filter((part) => typeof part === "string" && part).join(": ");
+  const phrase = typeof reason.posting_phrase === "string" ? lowerFirstWord(reason.posting_phrase) : reason.posting_phrase;
+  const detail = [reason.requirement, phrase].filter((part) => typeof part === "string" && part).join(": ");
   if (detail) {
     return `for ${detail}`;
   }

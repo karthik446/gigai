@@ -440,10 +440,10 @@
         {
          "kind": "resume",
          "line": 42,
-         "text": "**Clinic Shift Board** \u2014 Volunteer scheduling tool for a community clinic \u00b7 board.example.test"
+         "text": "**Clinic Shift Board** — Volunteer scheduling tool for a community clinic · board.example.test"
         }
        ],
-       "text": "**Clinic Shift Board** \u2014 Volunteer scheduling tool for a community clinic \u00b7 board.example.test"
+       "text": "**Clinic Shift Board** — Volunteer scheduling tool for a community clinic · board.example.test"
       }
      ]
     }
@@ -454,7 +454,7 @@
    "heading": "skills",
    "lines": [
     {
-     "kind": "rewritten",
+     "kind": "copy",
      "refs": [
       {
        "continued_lines": [
@@ -463,26 +463,13 @@
        ],
        "kind": "resume",
        "line": 46,
-       "text": "SQL (Oracle, SQL Server) \u00b7 Python/PowerShell scripting \u00b7 HL7 interfaces/interface engines \u00b7 ServiceNow/ITIL \u00b7 Tableau/report writing \u00b7"
-      },
-      {
-       "continued_lines": [
-        48
-       ],
-       "kind": "resume",
-       "line": 47,
-       "text": "Active Directory/Citrix \u00b7 Vendor management/contract renewals \u00b7 Go-live planning/downtime procedures \u00b7"
-      },
-      {
-       "kind": "resume",
-       "line": 48,
-       "text": "Staff training/documentation \u00b7 HIPAA privacy/access reviews \u00b7 Visio/process mapping"
+       "text": "SQL (Oracle, SQL Server) · Python/PowerShell scripting · HL7 interfaces/interface engines · ServiceNow/ITIL · Tableau/report writing · Active Directory/Citrix · Vendor management/contract renewals · Go-live planning/downtime procedures · Staff training/documentation · HIPAA privacy/access reviews · Visio/process mapping · servicenow/itil"
       }
      ],
-     "text": "SQL on Oracle and SQL Server; Python and PowerShell scripting; HL7 interfaces and interface engines."
+     "text": "SQL (Oracle, SQL Server) · Python/PowerShell scripting · HL7 interfaces/interface engines · ServiceNow/ITIL · Tableau/report writing · Active Directory/Citrix · Vendor management/contract renewals · Go-live planning/downtime procedures · Staff training/documentation · HIPAA privacy/access reviews · Visio/process mapping · servicenow/itil"
     },
     {
-     "kind": "rewritten",
+     "kind": "copy",
      "refs": [
       {
        "continued_lines": [
@@ -490,26 +477,21 @@
        ],
        "kind": "resume",
        "line": 47,
-       "text": "Active Directory/Citrix \u00b7 Vendor management/contract renewals \u00b7 Go-live planning/downtime procedures \u00b7"
-      },
-      {
-       "kind": "resume",
-       "line": 48,
-       "text": "Staff training/documentation \u00b7 HIPAA privacy/access reviews \u00b7 Visio/process mapping"
+       "text": "Active Directory/Citrix · Vendor management/contract renewals · Go-live planning/downtime procedures · Staff training/documentation · HIPAA privacy/access reviews · Visio/process mapping · servicenow/itil"
       }
      ],
-     "text": "ServiceNow and ITIL; Tableau and report writing; Active Directory and Citrix; vendor management."
+     "text": "Active Directory/Citrix · Vendor management/contract renewals · Go-live planning/downtime procedures · Staff training/documentation · HIPAA privacy/access reviews · Visio/process mapping · servicenow/itil"
     },
     {
-     "kind": "rewritten",
+     "kind": "copy",
      "refs": [
       {
        "kind": "resume",
        "line": 48,
-       "text": "Staff training/documentation \u00b7 HIPAA privacy/access reviews \u00b7 Visio/process mapping"
+       "text": "Staff training/documentation · HIPAA privacy/access reviews · Visio/process mapping · servicenow/itil"
       }
      ],
-     "text": "Go-live planning, downtime procedures, staff training, HIPAA access reviews, Visio process maps."
+     "text": "Staff training/documentation · HIPAA privacy/access reviews · Visio/process mapping · servicenow/itil"
     }
    ]
   }
