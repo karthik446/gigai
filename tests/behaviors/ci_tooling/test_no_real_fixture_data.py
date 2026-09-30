@@ -24,10 +24,14 @@ SELF = Path(__file__).resolve()
 
 def _tracked_text_files() -> list[Path]:
     """Tracked files plus untracked-not-ignored ones (a new fixture is checked before it is committed)."""
-    out = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-        cwd=ROOT, check=True, capture_output=True,
-    ).stdout.decode().split("\0")
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=ROOT, check=True, capture_output=True,
+        ).stdout.decode().split("\0")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # The offline container image ships no .git (containers/debian-offline/Dockerfile, .dockerignore).
+        pytest.skip("not a git checkout: the offline container build context excludes .git")
     files = []
     for rel in filter(None, out):
         path = ROOT / rel

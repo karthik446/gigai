@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from gigai.scout.find_jobs import model_rank, rank_digest
 from gigai.scout.find_jobs.contracts import ModelTarget
 from gigai.scout.find_jobs.rank_run import RUN_MAX_CALLS
@@ -17,12 +19,19 @@ README = ROOT / "README.md"
 DOCS = ROOT / "gigai-docs" / "src" / "content" / "docs"
 
 
+def _need_docs() -> None:
+    if not DOCS.is_dir():
+        pytest.skip("gigai-docs is excluded from the offline container build context")
+
+
 def _page(rel: str) -> str:
+    _need_docs()
     return (DOCS / rel).read_text(encoding="utf-8")
 
 
 def _text() -> str:
     """Every hand-written page of the docs site (generated reference pages excluded)."""
+    _need_docs()
     generated = {"changelog.md", "reference/cli.md", "scout/reference/cli.md"}
     pages = sorted(p for p in DOCS.rglob("*.md") if p.relative_to(DOCS).as_posix() not in generated)
     return "\n\n".join(p.read_text(encoding="utf-8") for p in pages)
@@ -270,5 +279,6 @@ def test_the_short_readme_keeps_its_promises_and_points_at_the_docs() -> None:
     for link in ("https://karthik446.github.io/gigai/", "CHANGELOG", "Releases", "CONTRIBUTING"):
         assert link in readme, link
     # everything the README used to carry is on the site
+    _need_docs()
     for rel in ("scout/privacy.md", "scout/quickstart.md", "scout/resume.md", "scout/limitations.md", "scout/roadmap.md", "agents.md", "scout/agents.md"):
         assert (DOCS / rel).is_file(), rel

@@ -3,7 +3,7 @@ FROM python:3.11-slim-bookworm
 COPY --from=ghcr.io/astral-sh/uv:0.5.25 /uv /uvx /bin/
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends git \
+    && apt-get install --yes --no-install-recommends git lsof \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 gigai \
     && useradd --uid 10001 --gid gigai --create-home --shell /usr/sbin/nologin gigai
