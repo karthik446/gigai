@@ -133,7 +133,7 @@ def test_the_contact_hint_shows_only_with_no_contact_items() -> None:
 
 def test_the_note_and_the_download_file_name() -> None:
     out = _run()
-    assert out["note"] == "Stored on this machine only; added to your PDF locally."
+    assert out["note"] == "Stored on this machine only; never sent to a model; added to your PDF locally."
     assert out["fileName"] == "jane-doe-resume-acme.pdf" and out["fileNameFallback"] == "resume.pdf"
 
 

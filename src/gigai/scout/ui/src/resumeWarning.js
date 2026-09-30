@@ -1,8 +1,12 @@
 // 0.1.10-001: the personal-info warning shown wherever a resume enters
 // Scout, and the local heads-up. Pure. The wording matches the README's
-// "Privacy and security" section and gigai.scout.resume_pii.RESUME_WARNING.
+// "Privacy and security" section and gigai.scout.resume_pii.RESUME_WARNING
+// (the general wording is pinned to it by test_ui_resume_warning_model).
 
-const LEAD = "Remove your personal info before adding a resume: name, email, phone, street address and links.";
+const REMOVED = "Scout removes your name and contact lines (email, phone, address, links) before sending your resume to";
+const BACK = "and adds them back only in your PDF, on this machine.";
+const CAVEAT = "It can't catch personal details elsewhere in the text (a first line that holds both a title and your name, or contact details inside a sentence), so keep those out.";
+const WHERE = "Your contact line lives in Settings > Resume display.";
 const PROVIDERS = {
   codex_cli: "OpenAI",
   claude_cli: "Anthropic",
@@ -13,18 +17,15 @@ const PROVIDERS = {
 // `default_model_target` / the wizard's pick). Unknown or unset: the
 // general wording, naming every provider.
 export function resumeWarningText(modelTarget) {
+  let sentTo;
   if (modelTarget === "ollama_local") {
-    return (
-      `${LEAD} Scout sends your resume text to the model you pick to assess postings and tailor your resume, ` +
-      "and it does not remove personal info for you yet. With Ollama it stays on this machine, " +
-      "but keep it out anyway if you might switch models."
-    );
+    sentTo = "your Ollama model (it stays on this machine)";
+  } else if (PROVIDERS[modelTarget]) {
+    sentTo = PROVIDERS[modelTarget];
+  } else {
+    sentTo = "the model you pick (Codex -> OpenAI, Claude -> Anthropic, OpenRouter -> your provider)";
   }
-  const provider = PROVIDERS[modelTarget];
-  const sentTo = provider
-    ? `Scout sends your resume text to ${provider}`
-    : "Scout sends your resume text to the model you pick (Codex -> OpenAI, Claude -> Anthropic, OpenRouter -> your provider)";
-  return `${LEAD} ${sentTo} to assess postings and tailor your resume, and it does not remove personal info for you yet.`;
+  return `${REMOVED} ${sentTo}, ${BACK} ${CAVEAT} ${WHERE}`;
 }
 
 // `found` is POST /api/resume/check's list. Nothing found says nothing:

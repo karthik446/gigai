@@ -73,12 +73,15 @@ def test_the_resume_digest_claims_match_what_the_digest_contains() -> None:
         assert private not in digest, private
     privacy = _privacy()
     assert "the job titles, skills and domain found in your resume, and an experience-years figure" in privacy
-    # uat-bug-047: no promise of removal; the reader is told to supply a resume without personal info.
+    # 0.1.10-003: the model-bound strip shipped (resume_privacy.model_resume); the ranking digest wording stays hedged.
     assert "Scout leaves contact lines (name, email, phone, address, links) out of the ranking digest where it can recognize them" in privacy
-    assert "but do not rely on it: remove personal info from the resume you add" in privacy
+    assert "keep other personal details out of the resume you add" in privacy
     for promise in ("are never sent for ranking", "they are stripped", "are stripped from the digest"):
         assert promise not in privacy, promise
-    assert "**Assessment and tailoring** send your resume text" in privacy
+    assert "**Assessment and tailoring** send your resume text with the name and contact lines removed" in privacy
+    assert "It can't catch personal details elsewhere in the text" in privacy and "keep those out" in privacy
+    assert "contact details inside a sentence" in privacy and "title and your name" in privacy
+    assert "does not remove personal info" not in privacy and "Remove your personal info before adding" not in privacy
     assert "characters copied from the start of your resume" not in privacy
 
 
@@ -190,8 +193,9 @@ def test_the_quickstart_is_first_numbered_and_asks_for_a_resume_without_personal
     quickstart = _flat(text.split("## Quickstart (Scout)", 1)[1].split("\n## ", 1)[0])
     for step in ("**1. Requirements**", "**2. Prepare your resume", "**3. Install**", "**4. Run**"):
         assert step in quickstart, step
-    assert "with your name, email, phone, street address and links/URLs removed" in quickstart
-    assert "Scout does not yet remove personal info for you" in quickstart
+    assert "**2. Prepare your resume**" in quickstart
+    assert "Scout removes your name and contact lines" in quickstart and "can't catch personal details elsewhere in the text" in quickstart
+    assert "does not yet remove personal info" not in quickstart
     for command in ("uv tool install gigai", "gigai --version", "gigai scout run"):
         assert command in quickstart, command
     # uat-bug-050: `gigai scout run` writes the default settings itself, so the
@@ -213,21 +217,20 @@ def test_the_quickstart_is_first_numbered_and_asks_for_a_resume_without_personal
     flat = _flat(text).replace("> ", "")
     assert "accepts `.txt`, `.md` and `.markdown` files up to 1 MB" in flat and "0.1.8.x limit" not in flat
     assert "## Roadmap / TODO" in text and "### Known limitations" in text and "(CONTRIBUTING.md)" in text
-    assert "- [ ] Remove personal info from resumes automatically before any model call" in text
+    assert "- [ ] Catch personal details the name and contact-line removal misses" in text
+    assert "Remove personal info from resumes automatically" not in text
 
 
-def test_resume_display_ships_and_only_the_model_privacy_guarantee_stays_on_the_roadmap() -> None:
-    """0.1.10-003: Download PDF and Resume display are shipped (present tense); the never-sent guarantee is still a roadmap item."""
+def test_resume_display_ships_and_the_never_sent_guarantee_moved_out_of_the_roadmap() -> None:
+    """0.1.10-003: Download PDF, Resume display and the never-sent guarantee are shipped (present tense), not roadmap items."""
     text = _text()
     roadmap = _flat(text.split("## Roadmap / TODO", 1)[1].split("\n## ", 1)[0])
     assert "Download PDF for tailored resumes" not in roadmap and "- [ ] Resume display settings" not in roadmap
     shipped = _flat(text.split("## Roadmap / TODO", 1)[0])
     assert "**Download PDF** saves it as a PDF" in shipped and "**Resume display**" in shipped
-    assert "stored only on your computer and added to the PDF locally" in shipped
-    assert (
-        "- [ ] Keep the Resume display fields (name, title, contact line) out of everything sent to a model or the network "
-        "(0.1.10): a test will check that none of them appear in any model or network payload"
-    ) in roadmap
+    assert "stored only on your computer, never sent to a model, and added to the PDF locally" in shipped
+    assert "Keep the Resume display fields" not in roadmap
+    assert "The Resume display fields (name, title, contact line) are never sent to a model or the network" in _privacy()
     assert "Alpine/musl Linux isn't supported yet: the PDF renderer (Typst) has no musl wheel, so installing there fails." in _flat(text)
     assert "jev" not in roadmap.lower()
 

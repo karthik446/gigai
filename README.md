@@ -24,13 +24,13 @@ One path from zero to a running Scout: find jobs, assess them, tailor a resume.
 - Exa search is optional and off; you do not need it.
 - Internet access for **Update sources** (it reads public job boards).
 
-**2. Prepare your resume, with your personal info removed**
+**2. Prepare your resume**
 
-Use a Markdown (`.md`) or plain-text (`.txt`) file, **with your name, email,
-phone, street address and links/URLs removed** (and anything else you would not
-paste into Codex or Claude). Assessment and tailoring send your resume text to
-the model provider you picked, and Scout does not yet remove personal info for
-you. A PDF or DOCX resume must be converted first:
+Use a Markdown (`.md`) or plain-text (`.txt`) file. Scout removes your name and
+contact lines (email, phone, address, links) before it sends your resume to the
+model provider you picked, but it can't catch personal details elsewhere in the
+text, so **keep those out** (anything else you would not paste into Codex or
+Claude). A PDF or DOCX resume must be converted first:
 
 ```bash
 pdftotext resume.pdf resume.txt          # Linux, or macOS with poppler
@@ -74,7 +74,7 @@ your roles, location and work mode. Then:
    PDF. Under Settings > Profiles, **Resume display** holds the name, title
    and contact line (location, work authorization, LinkedIn, GitHub, other
    links, email, phone) printed at the top of the PDF; they are stored only
-   on your computer and added to the PDF locally.
+   on your computer, never sent to a model, and added to the PDF locally.
 
 `gigai scout stop` stops Scout; `gigai scout run --port 9000` picks another
 port if 8765 is taken. More detail for scripts and agents is under
@@ -116,15 +116,19 @@ special runtime treatment.
 
 ## Privacy and security
 
-**Remove your personal info before adding a resume:** name, email, phone,
-street address and links. Scout sends your resume text to the model you pick
-(Codex -> OpenAI, Claude -> Anthropic, OpenRouter -> your provider) to assess
-postings and tailor your resume, and it does not remove personal info for you
-yet. With Ollama it stays on this machine, but keep it out anyway if you might
-switch models. The setup wizard, the Assessments page, Settings > Profiles and
-`gigai scout resume add` all show this warning, and the wizard also runs a
-local check (no model) that lists any email, phone, linkedin.com/github.com
-link or street address it spots; it can miss things.
+**Scout removes your name and contact lines (email, phone, address, links)
+before sending your resume to the model you pick** (Codex -> OpenAI, Claude ->
+Anthropic, OpenRouter -> your provider), and adds them back only in your PDF,
+on this machine. It can't catch personal details elsewhere in the text (a first
+line that holds both a title and your name, or contact details inside a
+sentence), so keep those out. With Ollama the resume stays on this machine. The
+contact line printed on your PDF lives in Settings > Resume display. The setup
+wizard, the Assessments page, Settings > Profiles and `gigai scout resume add`
+all show this note, and the wizard also runs a local check (no model) that lists
+any email, phone, linkedin.com/github.com link or street address it spots; it
+can miss things. The Resume display fields (name, title, contact line) are
+never sent to a model or the network: only the PDF renderer and the
+settings/PDF API read them.
 
 **Scout has no service of its own.** Ranking and assessment both run on
 the model target you configured (`ollama_local`, `codex_cli`, `claude_cli` or
@@ -139,10 +143,10 @@ or assessment. Scout runs `codex` with its shell tool and memories turned off, a
   resume**: your target titles, countries, visa need and location, the
   job titles, skills and domain found in your resume, and an experience-years
   figure. Scout leaves contact lines (name, email, phone, address, links) out
-  of the ranking digest where it can recognize them, but do not rely on it:
-  remove personal info from the resume you add. The full resume and the
+  of the ranking digest where it can recognize them; keep other personal
+  details out of the resume you add. The full resume and the
   full posting text are not sent for ranking.
-- **Assessment and tailoring** send your resume text: an assessment sends the posting text and your resume for each posting
+- **Assessment and tailoring** send your resume text with the name and contact lines removed: an assessment sends the posting text and your resume for each posting
   being assessed, including each posting "Assess all new" assesses. A pasted resume is used for that assessment only: its full text is never saved and never sent anywhere but your assessment model; the stored result keeps short evidence quotes on your machine.
 - **With a local Ollama target nothing leaves the machine.** Scout only
   talks to Ollama on a numeric loopback address (`127.0.0.1`).
@@ -422,8 +426,8 @@ so this is only needed when switching between Gigs.
 > textutil -convert txt resume.docx        # macOS built-in, .docx only
 > ```
 >
-> Remove your personal info from the file first: see the
-> [Quickstart](#quickstart-scout).
+> Scout removes your name and contact lines before a model sees the text, but
+> keep other personal details out: see the [Quickstart](#quickstart-scout).
 
 ### Exa search
 
@@ -478,8 +482,7 @@ stale.
 
 ## Roadmap / TODO
 
-- [ ] Keep the Resume display fields (name, title, contact line) out of everything sent to a model or the network (0.1.10): a test will check that none of them appear in any model or network payload
-- [ ] Remove personal info from resumes automatically before any model call (until then: add a resume without it)
+- [ ] Catch personal details the name and contact-line removal misses (a first line that holds a title and your name in one run, contact details inside body text)
 - [ ] Import PDF/DOCX resumes directly
 - [ ] Interview prep (0.1.10): research the company and likely interview questions through your own Codex or Claude CLI (no separate API key)
 - [ ] The setup wizard checks the chosen CLI is installed and logged in
