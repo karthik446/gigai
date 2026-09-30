@@ -57,7 +57,8 @@ the line and the reason (fed back on the single retry, then
 
 COPY BY DEFAULT, NO LOSS (0110-006): a copy line may stand for any summary,
 bullet, skills or other line (it expands to the lines it wraps onto, like a
-cited ref); a rewritten line is the exception and carries a ``reason``
+cited ref, and a later copy of one of those lines in the same container is
+dropped, 0110-015); a rewritten line is the exception and carries a ``reason``
 (``surface`` / ``summary`` / ``answer``, anchored to a matrix row ``M<n>``
 or a <=60-character phrase the posting contains).  After validation,
 ``apply_no_loss`` (inside ``tailor_once``'s validate step, so no retry is
@@ -1189,6 +1190,29 @@ def _resume_ref(number: int, ctx: TailorContext) -> SourceRef:
     return SourceRef("resume", number, None, text, continued)
 
 
+def _drop_covered_copies(lines: Sequence[TailoredLine]) -> tuple[TailoredLine, ...]:
+    """One container's lines without the copies an earlier copy's wrapped span already holds (0110-015).
+
+    A copy line is stored EXPANDED to its continuation lines (``_resume_ref``),
+    so a model that copies every physical line of a hard-wrapped paragraph
+    (R46, R47, R48) would store line 1 = R46..R48, line 2 = R47..R48,
+    line 3 = R48 and every consumer would print the paragraph's tail again.
+    A copy whose resume line is a continuation of an earlier copy in the
+    same container adds nothing and is dropped; every other line keeps the
+    model's order (ids are assigned later, on the lines that remain).
+    """
+
+    out: list[TailoredLine] = []
+    continued: set[int] = set()
+    for line in lines:
+        if line.kind == "copy" and line.refs:
+            if line.refs[0].line in continued:
+                continue
+            continued.update(line.refs[0].continued_lines)
+        out.append(line)
+    return tuple(out)
+
+
 def _refs(raw: object, where: str, ctx: TailorContext) -> tuple[SourceRef, ...]:
     if type(raw) is not list or not raw:
         _reject(f"{where} has no refs; every rewritten line cites 1 to {MAX_REFS_PER_LINE} sources")
@@ -1383,8 +1407,8 @@ def validate_tailored_output(decoded: Mapping[str, object], job: TailorJob, ctx:
                     raw_bullets = []
                 if type(raw_bullets) is not list:
                     _reject(f"{where} bullets must be a list")
-                bullets = tuple(
-                    _rewritten_line(item, f"{where} bullet {offset}", ctx, terms) for offset, item in enumerate(raw_bullets, 1)
+                bullets = _drop_covered_copies(
+                    [_rewritten_line(item, f"{where} bullet {offset}", ctx, terms) for offset, item in enumerate(raw_bullets, 1)]
                 )
                 total += len(heading_lines) + len(bullets)
                 if total > MAX_TOTAL_LINES:
@@ -1397,8 +1421,8 @@ def validate_tailored_output(decoded: Mapping[str, object], job: TailorJob, ctx:
                 _reject(f"{heading} section must hold lines, not entries")
             if type(raw_lines) is not list or not raw_lines:
                 _reject(f"{heading} section must hold at least 1 line")
-            lines = tuple(
-                _rewritten_line(item, f"{heading} line {offset}", ctx, terms) for offset, item in enumerate(raw_lines, 1)
+            lines = _drop_covered_copies(
+                [_rewritten_line(item, f"{heading} line {offset}", ctx, terms) for offset, item in enumerate(raw_lines, 1)]
             )
             total += len(lines)
             if total > MAX_TOTAL_LINES:
@@ -1822,9 +1846,33 @@ def _refs_comment(line: TailoredLine) -> str:
     return "<!-- " + ", ".join(ref.label() for ref in line.refs) + " -->"
 
 
+def _resume_numbers(line: TailoredLine) -> set[int]:
+    """The resume line numbers a line cites, wrapped continuations included."""
+
+    return {number for ref in line.refs if ref.kind == "resume" for number in (ref.line, *ref.continued_lines)}  # type: ignore[misc]
+
+
+def _printed_lines(lines: Sequence[TailoredLine]) -> list[TailoredLine]:
+    """One container's lines as printed: a copy whose text the line printed
+    before it already holds, citing only resume lines that line cites, is
+    skipped (0110-015: an older stored result may carry a hard-wrapped
+    paragraph copied line by line, each copy expanded to the paragraph's tail)."""
+
+    out: list[TailoredLine] = []
+    for line in lines:
+        if line.kind == "copy" and out:
+            numbers = _resume_numbers(line)
+            previous = out[-1]
+            if numbers and numbers <= _resume_numbers(previous) and _flat(line.text) in _flat(previous.text):
+                continue
+        out.append(line)
+    return out
+
+
 def render_markdown(result: TailoredResume) -> str:
     """The ``.md`` text, from the validated JSON only; each line keeps its refs
-    in a trailing HTML comment (``<!-- R12, A cloud:gcp -->``)."""
+    in a trailing HTML comment (``<!-- R12, A cloud:gcp -->``).  No copy line
+    repeats text the line above it already printed (``_printed_lines``)."""
 
     out: list[str] = []
     for index, line in enumerate(result.header):
@@ -1844,11 +1892,11 @@ def render_markdown(result: TailoredResume) -> str:
                     out.append((f"### {shown}" if index == 0 else shown) + " " + _refs_comment(line))
                 if entry.bullets:
                     out.append("")
-                for line in entry.bullets:
+                for line in _printed_lines(entry.bullets):
                     out.append(f"- {shown_text(line)} {_refs_comment(line)}")
                 out.append("")
         else:
-            for line in section.lines:
+            for line in _printed_lines(section.lines):
                 out.append(f"- {shown_text(line)} {_refs_comment(line)}")
             out.append("")
     while out and out[-1] == "":
