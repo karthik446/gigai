@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.1.10",
+    "title": "0.1.10",
+    "aliases": [
+      "latest"
+    ]
+  },
+  {
     "version": "next",
     "title": "next (karthik446/gigai-v0.1.10)",
     "aliases": []
