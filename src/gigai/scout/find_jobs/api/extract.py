@@ -55,6 +55,7 @@ from ....config import GigAIConfig, load_config
 from ....model_targets import ModelTargetResolutionError
 from ....private_records import PrivateRecordError, read_record
 from ....workpad import resolve_workpad
+from ...resume_pii import detect_contact_details
 from ...quick_assess import _default_model_target, _ObservedBinding, _ObservedPort, _seam_deadline_seconds
 from ..assess_contracts import AssessResumeInput, ResolvedResume
 from ..contracts import FindJobsContractError, ModelTarget
@@ -452,6 +453,50 @@ class ResumeExtractRoutesMixin:
                 "resolved_target": resolved_target,
                 "resume": {"profile_id": resume.profile_id, "content_sha256": resume.content_sha256},
             },
+        )
+
+    def _handle_post_resume_check(self) -> None:
+        """0.1.10-001: ``POST /api/resume/check`` -- the local contact-details heads-up.
+
+        Body: exactly one of ``resume_text`` or ``resume_ref``. No model call,
+        nothing stored; answers the labels ``resume_pii`` found (``[]`` when
+        none -- which never means the resume is clean).
+        """
+
+        body = self._read_json_body()
+        if body is None:
+            return
+        if not isinstance(body, Mapping) or set(body) not in ({"resume_text"}, {"resume_ref"}):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "resume_input_invalid", "pass exactly one of resume_text or resume_ref")
+            return
+        try:
+            if "resume_text" in body:
+                text = body["resume_text"]
+                if not isinstance(text, str):
+                    raise ResumeExtractError("wrong_type", "resume_text must be a string")
+            else:
+                ref = _parse_resume_ref(body["resume_ref"])
+                backend = self._backend
+                target = getattr(backend, "target", None)
+                if target is None:
+                    self._error(HTTPStatus.NOT_FOUND, "target_unavailable", "a target path is required")
+                    return
+                try:
+                    resolved_gig = resolve_workpad(
+                        home_root=backend.home_root, requested_target=target, gig_id=None, allow_semantic_state=True
+                    )
+                except Exception:  # noqa: BLE001 - no bound gig: a typed 404, never a 500
+                    self._error(HTTPStatus.NOT_FOUND, "resume_unavailable", "no Scout gig is available for this folder")
+                    return
+                text = read_stored_resume(
+                    ref, home_root=backend.home_root, target=target, gig_id=resolved_gig.gig_id
+                ).text
+        except ResumeExtractError as exc:
+            self._error(_status_for(exc.code), exc.code, str(exc))
+            return
+        self._write_json(
+            HTTPStatus.OK,
+            {"schema_version": "scout-resume-check-response:1", "found": detect_contact_details(text)},
         )
 
 

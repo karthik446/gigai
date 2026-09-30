@@ -1,3 +1,4 @@
+import ResumeWarning from "../components/ResumeWarning.jsx";
 import { useEffect, useState } from "react";
 import { ApiError, postAssess } from "../api.js";
 import Breadcrumb from "../components/Breadcrumb.jsx";
@@ -173,6 +174,7 @@ export default function AssessView({ profiles, selectedProfileId, config, config
                 <label className="form-label" htmlFor="quick-assess-resume-text">
                   {others.length > 0 ? "Or paste a resume" : "Paste a resume"} (used for this assessment only, never stored)
                 </label>
+                <ResumeWarning modelTarget={config && config.config ? config.config.default_model_target : undefined} />
                 <textarea
                   id="quick-assess-resume-text"
                   className="text-input"

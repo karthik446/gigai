@@ -44,6 +44,7 @@ JOURNEYS: dict[Route, str] = {
     Route("POST", "/api/answers"): "test_answers_journey.py",
     Route("GET", "/api/answers"): "test_answers_journey.py",
     Route("POST", "/api/resume/extract"): "test_extract_journey.py",
+    Route("POST", "/api/resume/check"): "test_resume_pii_check_journey.py",
     Route("POST", "/api/resumes"): "test_wizard_stores_resume_journey.py",
     Route("GET", "/api/secrets/status"): "test_wizard_stores_resume_journey.py",
     Route("PUT", "/api/config/sources"): "test_exa_optional_journey.py",

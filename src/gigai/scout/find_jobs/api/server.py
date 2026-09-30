@@ -1699,6 +1699,9 @@ def _make_handler(
                 if path == "/api/resume/extract":
                     self._handle_post_resume_extract()
                     return
+                if path == "/api/resume/check":
+                    self._handle_post_resume_check()
+                    return
                 if path == "/api/resumes":
                     self._handle_post_resumes()
                     return

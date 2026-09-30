@@ -112,6 +112,15 @@ special runtime treatment.
 
 ## Privacy and security
 
+**Remove your personal info before adding a resume:** name, email, phone,
+street address and links. Scout sends your resume text to the model you pick
+(Codex -> OpenAI, Claude -> Anthropic, OpenRouter -> your provider) to assess
+postings and tailor your resume, and it does not remove personal info for you
+yet. With Ollama it stays on this machine, but keep it out anyway if you might
+switch models. The setup wizard, the Assessments page, Settings > Profiles and
+`gigai scout resume add` all show this warning, and the wizard also runs a
+local check (no model) that lists any email, phone, linkedin.com/github.com
+link or street address it spots; it can miss things.
 **Scout has no service of its own.** Ranking and assessment both run on
 the model target you configured (`ollama_local`, `codex_cli`, `claude_cli` or
 `openrouter_api`, whichever the search's `default_model_target` names). There
