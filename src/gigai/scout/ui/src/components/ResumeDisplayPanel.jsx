@@ -1,19 +1,28 @@
 import { useEffect, useState } from "react";
 import { getResumeDisplay, putResumeDisplay } from "../api.js";
 import {
+  AUTO_FIT_HELP,
   KIND_LABELS,
   KIND_PLACEHOLDERS,
   MAX_CONTACT,
+  PREVIEW_LINES,
   PRIVACY_NOTE,
+  SPACING_MAX,
+  SPACING_MIN,
+  SPACING_STEP,
   addEntry,
   availableKinds,
   buildPutBody,
   draftFromResponse,
   moveEntry,
+  previewGap,
   previewHeader,
   removeEntry,
   setEntryKind,
   setEntryValue,
+  clampSpacing,
+  spacingDisabled,
+  spacingLabel,
 } from "../resumeDisplayModel.js";
 
 // The fields, reorder controls and live preview, shared by this panel and the
@@ -73,11 +82,37 @@ export function ResumeDisplayFields({ draft, onChange }) {
           ))}
         </div>
       )}
+      <div className="form-group" data-role="spacing-control">
+        <label className="form-label" htmlFor="resume-display-spacing">
+          Spacing <span data-role="spacing-value">{spacingLabel(draft.spacing_scale)}</span>
+        </label>
+        <input
+          id="resume-display-spacing"
+          type="range"
+          min={SPACING_MIN}
+          max={SPACING_MAX}
+          step={SPACING_STEP}
+          value={clampSpacing(draft.spacing_scale)}
+          disabled={spacingDisabled(draft)}
+          onChange={(event) => onChange({ spacing_scale: clampSpacing(event.target.value) })}
+        />
+        <label className="checkbox-label" htmlFor="resume-display-auto-fit">
+          <input id="resume-display-auto-fit" type="checkbox" checked={draft.auto_fit !== false} onChange={(event) => onChange({ auto_fit: event.target.checked })} /> Auto fit
+        </label>
+        <p className="muted">{AUTO_FIT_HELP}</p>
+      </div>
       <h3>Preview</h3>
-      <div className="md-preview" data-role="resume-display-preview" style={{ whiteSpace: "normal" }}>
-        <div style={{ fontWeight: 700, fontSize: "1.1rem" }}>{preview.name || <span className="muted">Your name</span>}</div>
-        {preview.title && <div>{preview.title}</div>}
-        {preview.contactLine && <div className="muted">{preview.contactLine}</div>}
+      <div className="resume-display-preview-row">
+        <div className="md-preview" data-role="resume-display-preview" style={{ whiteSpace: "normal" }}>
+          <div style={{ fontWeight: 700, fontSize: "1.1rem" }}>{preview.name || <span className="muted">Your name</span>}</div>
+          {preview.title && <div>{preview.title}</div>}
+          {preview.contactLine && <div className="muted">{preview.contactLine}</div>}
+        </div>
+        <div className="spacing-preview" data-role="spacing-preview" aria-hidden="true" style={{ gap: previewGap(draft.spacing_scale) }}>
+          {Array.from({ length: PREVIEW_LINES }, (_unused, index) => (
+            <span key={index} className="spacing-preview-line" style={index === PREVIEW_LINES - 1 ? { width: "60%" } : undefined} />
+          ))}
+        </div>
       </div>
     </>
   );

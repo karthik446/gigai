@@ -58,7 +58,18 @@ console.log(JSON.stringify({
   headerEmpty: m.headerLine({ name: "", title: "", contact: [] }),
   savedLine: m.savedHeaderLine({ saved: true, name: "Jane", title: "Staff", contact: [c("email", "j@x.io")] }),
   unsavedLine: m.savedHeaderLine({ saved: false, name: "", title: "", contact: [], suggested: { name: "Jane", title: "x", contact: [c("email", "j@x.io")] } }),
+  putSpacing: m.buildPutBody({ name: "J", title: "", contact: [], spacing_scale: 1.234, auto_fit: false }, null),
+  putClampLow: m.buildPutBody({ name: "J", title: "", contact: [], spacing_scale: 0.2, auto_fit: false }, null).spacing_scale,
+  putClampHigh: m.buildPutBody({ name: "J", title: "", contact: [], spacing_scale: 9, auto_fit: false }, null).spacing_scale,
+  putClampBad: m.buildPutBody({ name: "J", title: "", contact: [], spacing_scale: "x" }, null).spacing_scale,
+  getLacks: m.draftFromResponse({ saved: true, name: "J", title: "", contact: [] }),
+  getHas: m.draftFromResponse({ saved: true, name: "J", title: "", contact: [], spacing_scale: 0.85, auto_fit: false }),
+  disabledOn: m.spacingDisabled({ auto_fit: true }),
+  disabledOff: m.spacingDisabled({ auto_fit: false }),
+  label: [m.spacingLabel(1), m.spacingLabel(0.7), m.spacingLabel(1.4)],
+  gaps: [0.7, 0.75, 0.9, 1, 1.2, 1.4].map((v) => m.previewGap(v)),
   note: m.PRIVACY_NOTE,
+  help: m.AUTO_FIT_HELP,
   fileName: api.pdfFileName('attachment; filename="jane-doe-resume-acme.pdf"'),
   fileNameFallback: api.pdfFileName(null),
 }));
@@ -117,18 +128,20 @@ def test_the_put_body_saves_this_profiles_title_and_only_non_empty_values() -> N
     assert out["putBody"] == {
         "name": "Jane",
         "contact": [{"kind": "email", "value": "j@x.io"}, {"kind": "link", "value": "example.com"}],
+        "spacing_scale": 1.0,
+        "auto_fit": True,
         "titles": {"p1": "Staff"},
     }
     assert "titles" not in out["putNoProfile"]
-    assert out["putClearsTitle"] == {"name": "", "contact": [], "titles": {"p1": ""}}
+    assert out["putClearsTitle"] == {"name": "", "contact": [], "spacing_scale": 1.0, "auto_fit": True, "titles": {"p1": ""}}
 
 
 def test_suggested_prefills_once_and_never_overwrites_saved_values() -> None:
     out = _run()
-    assert out["prefillUnsaved"] == {"name": "Jane Doe", "title": "Engineer", "contact": [{"kind": "email", "value": "j@x.io"}], "prefilled": True}
+    assert out["prefillUnsaved"] == {"name": "Jane Doe", "title": "Engineer", "contact": [{"kind": "email", "value": "j@x.io"}], "spacing_scale": 1.0, "auto_fit": True, "prefilled": True}
     # saved name/contact stay; only an empty title takes the suggestion
-    assert out["prefillSaved"] == {"name": "Saved Name", "title": "Staff Engineer", "contact": [{"kind": "email", "value": "saved@x.io"}], "prefilled": True}
-    assert out["prefillNone"] == {"name": "", "title": "", "contact": [], "prefilled": False}
+    assert out["prefillSaved"] == {"name": "Saved Name", "title": "Staff Engineer", "contact": [{"kind": "email", "value": "saved@x.io"}], "spacing_scale": 1.0, "auto_fit": True, "prefilled": True}
+    assert out["prefillNone"] == {"name": "", "title": "", "contact": [], "spacing_scale": 1.0, "auto_fit": True, "prefilled": False}
 
 
 def test_the_contact_hint_shows_only_with_no_contact_items() -> None:
@@ -189,3 +202,45 @@ def test_one_form_serves_the_panel_and_the_wizard_step() -> None:
     screen = (UI_SRC / "wizard" / "ResumeDisplayScreen.jsx").read_text(encoding="utf-8")
     assert "export function ResumeDisplayFields" in panel and panel.count("<ResumeDisplayFields") == 1
     assert "ResumeDisplayFields" in screen and "putResumeDisplay" not in screen
+
+
+def test_the_put_body_carries_spacing_and_auto_fit_as_rounded_numbers() -> None:
+    out = _run()
+    assert out["putSpacing"]["spacing_scale"] == 1.23 and out["putSpacing"]["auto_fit"] is False
+    assert isinstance(out["putSpacing"]["spacing_scale"], float)
+
+
+def test_spacing_is_clamped_to_the_servers_range_before_sending() -> None:
+    from gigai.scout.resume_display import SPACING_MAX, SPACING_MIN
+
+    out = _run()
+    assert (SPACING_MIN, SPACING_MAX) == (0.7, 1.4)
+    assert out["putClampLow"] == 0.7 and out["putClampHigh"] == 1.4 and out["putClampBad"] == 1.0
+
+
+def test_a_get_without_the_fields_loads_the_defaults_and_saved_values_load() -> None:
+    out = _run()
+    assert (out["getLacks"]["spacing_scale"], out["getLacks"]["auto_fit"]) == (1.0, True)
+    assert (out["getHas"]["spacing_scale"], out["getHas"]["auto_fit"]) == (0.85, False)
+
+
+def test_the_slider_is_disabled_exactly_while_auto_fit_is_on() -> None:
+    out = _run()
+    assert out["disabledOn"] is True and out["disabledOff"] is False
+    assert out["label"] == ["1.00x", "0.70x", "1.40x"]
+
+
+def test_the_preview_gap_grows_with_the_spacing_value() -> None:
+    gaps = _run()["gaps"]
+    assert gaps == sorted(gaps) and len(set(gaps)) == len(gaps)
+
+
+def test_the_form_has_the_slider_the_auto_fit_toggle_and_the_schematic_preview() -> None:
+    panel = (UI_SRC / "components" / "ResumeDisplayPanel.jsx").read_text(encoding="utf-8")
+    assert 'type="range"' in panel and "SPACING_MIN" in panel and "SPACING_STEP" in panel
+    assert "disabled={spacingDisabled(draft)}" in panel and 'type="checkbox"' in panel and "Auto fit" in panel
+    assert "AUTO_FIT_HELP" in panel and 'data-role="spacing-preview"' in panel and "previewGap(" in panel
+    assert _run()["help"] == "Adjusts spacing (never font size) so your resume fills its pages; turn off to use the slider as set."
+    assert panel.count("<ResumeDisplayFields") == 1
+    css = (UI_SRC / "styles.css").read_text(encoding="utf-8")
+    assert ".spacing-preview" in css

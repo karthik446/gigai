@@ -51,6 +51,7 @@ def test_resume_display_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         assert first.status_code == 200, first.text
         body = first.json()
         assert body["saved"] is False and body["name"] == "" and body["contact"] == []
+        assert body["spacing_scale"] == 1.0 and body["auto_fit"] is True  # 0110-017 defaults before any save
         assert body["suggested"]["name"] == "Kar Ohm"
         assert {"kind": "email", "value": "kar@example.test"} in body["suggested"]["contact"]
         assert not (home / "scout" / "resume-display.json").exists()
@@ -75,6 +76,14 @@ def test_resume_display_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         assert client.get("/api/resume-display", params={"profile_id": profile_id}).json()["title"] == "Staff Engineer"
         assert client.put("/api/resume-display", json={"titles": {profile_id: ""}}).json()["titles"] == {}
 
+        # 0110-017: the PDF spacing slider and auto fit, saved in the same file; other keys are kept.
+        spaced = client.put("/api/resume-display", json={"spacing_scale": 1.2, "auto_fit": False})
+        assert spaced.status_code == 200, spaced.text
+        assert spaced.json()["spacing_scale"] == 1.2 and spaced.json()["auto_fit"] is False and spaced.json()["name"] == "Kar Ohm"
+        again = client.get("/api/resume-display").json()
+        assert again["spacing_scale"] == 1.2 and again["auto_fit"] is False
+        assert client.put("/api/resume-display", json={"name": "Kar Ohm"}).json()["spacing_scale"] == 1.2  # left out: kept
+
         # (c) validation.
         for payload, code in (
             ({"name": 3}, "wrong_type"),
@@ -83,6 +92,12 @@ def test_resume_display_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
             ({"contact": [{"kind": "email"}]}, "wrong_type"),
             ({"titles": {"p": 1}}, "wrong_type"),
             ({"nope": 1}, "unknown_key"),
+            ({"spacing_scale": 1.5}, "invalid_value"),
+            ({"spacing_scale": 0.69}, "invalid_value"),
+            ({"spacing_scale": "1.0"}, "wrong_type"),
+            ({"spacing_scale": True}, "wrong_type"),
+            ({"auto_fit": "yes"}, "wrong_type"),
+            ({"auto_fit": 1}, "wrong_type"),
         ):
             response = client.put("/api/resume-display", json=payload)
             assert response.status_code == 422 and response.json()["error"]["code"] == code, (payload, response.text)

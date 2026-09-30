@@ -55,7 +55,8 @@ def test_name_first_pages_links_and_metadata() -> None:
     data = _pdf()
     assert data.startswith(b"%PDF")
     text = _text(data)
-    assert text.startswith("Riley Example\nClinical Applications Manager\nColumbus, Ohio | github.com/riley-example | riley@example.test | 555-010-0100")
+    # The name prints in capitals (the type scale, 0110-017); the metadata keeps it as saved.
+    assert text.startswith("RILEY EXAMPLE\nClinical Applications Manager\nColumbus, Ohio | github.com/riley-example | riley@example.test | 555-010-0100")
     assert len(PdfReader(io.BytesIO(data)).pages) <= 2
     assert set(_uris(data)) == {"https://github.com/riley-example", "mailto:riley@example.test"}
     meta = PdfReader(io.BytesIO(data)).metadata
@@ -80,13 +81,13 @@ def test_unicode_and_markup_characters_print_literally() -> None:
     line = TailoredLine("rewritten", "Ingeniero – 12+ años; “resilient” café ñ ü ł č #hash *star* $dollar", ())
     sections = (replace(section, lines=(line,) + section.lines[1:]),) + result.sections[1:]
     text = _text(_pdf(PdfHeader("José Álvarez-Müller"), replace(result, sections=sections)))
-    assert text.startswith("José Álvarez-Müller")
+    assert text.startswith("JOSÉ ÁLVAREZ-MÜLLER")
     assert "Ingeniero – 12+ años; “resilient” café ñ ü ł č #hash *star* $dollar" in text
 
 
 def test_name_only_and_empty_settings_render_without_empty_separator() -> None:
     text = _text(_pdf(PdfHeader(name="Only Name")))
-    assert text.startswith("Only Name\n") and "|" not in text.split("\n", 3)[1]
+    assert text.startswith("ONLY NAME\n") and "|" not in text.split("\n", 3)[1]
     empty = _pdf(PdfHeader())
     assert empty.startswith(b"%PDF") and "|" not in _text(empty).split("\n")[0]
     titled = _text(_pdf(PdfHeader("N", "T", ())))

@@ -100,3 +100,28 @@ def test_pdf_header_uses_saved_values_and_fallbacks() -> None:
     assert rd.pdf_header(None, "p1", "Legacy Name") == rd.PdfHeader(name="Legacy Name")
     assert rd.pdf_header(DisplaySettings(), None, "Legacy").name == "Legacy"
     assert rd.pdf_header(None, None) == rd.PdfHeader()
+
+
+def test_spacing_and_auto_fit_round_trip_and_old_files_read_as_defaults(tmp_path: Path) -> None:
+    """0110-017: spacing_scale (0.7..1.4, default 1.0) and auto_fit (default true) live in the same file."""
+    saved = rd.save_display(tmp_path, DisplaySettings("Zed", spacing_scale=1.25, auto_fit=False))
+    assert (saved.spacing_scale, saved.auto_fit) == (1.25, False)
+    raw = json.loads(rd.display_path(tmp_path).read_text())
+    assert raw["spacing_scale"] == 1.25 and raw["auto_fit"] is False
+    loaded = rd.load_display(tmp_path)
+    assert loaded is not None and (loaded.spacing_scale, loaded.auto_fit) == (1.25, False)
+
+    # A file written before 0110-017 has neither key: it reads, with the defaults.
+    old = {"schema_version": rd.SCHEMA_VERSION, "name": "Zed", "contact": [], "titles": {"p1": "Staff"}, "updated_at": "2026-09-29T00:00:00Z"}
+    rd.display_path(tmp_path).write_text(json.dumps(old))
+    loaded = rd.load_display(tmp_path)
+    assert loaded is not None and loaded.name == "Zed" and loaded.titles == {"p1": "Staff"}
+    assert (loaded.spacing_scale, loaded.auto_fit) == (rd.SPACING_DEFAULT, True) == (1.0, True)
+
+    # Hand-edited nonsense reads as the defaults, never as an out-of-range scale.
+    for spacing, auto_fit in ((3, "yes"), (0.2, None), ("1.2", 1), (True, 0)):
+        rd.display_path(tmp_path).write_text(json.dumps({**old, "spacing_scale": spacing, "auto_fit": auto_fit}))
+        loaded = rd.load_display(tmp_path)
+        assert loaded is not None and (loaded.spacing_scale, loaded.auto_fit) == (1.0, True), (spacing, auto_fit)
+    assert rd.valid_spacing(0.7) and rd.valid_spacing(1.4) and rd.valid_spacing(1)
+    assert not rd.valid_spacing(0.69) and not rd.valid_spacing(1.41) and not rd.valid_spacing(True) and not rd.valid_spacing(float("nan"))

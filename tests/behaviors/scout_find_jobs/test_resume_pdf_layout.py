@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 from pypdf import PdfReader
 
 from gigai.scout.resume_display import ContactItem, PdfHeader
@@ -24,8 +25,8 @@ def _result() -> TailoredResume:
     return TailoredResume.from_json(json.loads((FIXTURES / "resume_pdf_result.json").read_text()))
 
 
-def _pdf(result: TailoredResume, header: PdfHeader = HEADER) -> bytes:
-    return render_pdf(result, header, company="Northwind", timestamp=STAMP)
+def _pdf(result: TailoredResume, header: PdfHeader = HEADER, **layout: object) -> bytes:
+    return render_pdf(result, header, company="Northwind", timestamp=STAMP, **layout)
 
 
 def _lines(data: bytes) -> list[list[tuple[float, float, str, float]]]:
@@ -195,13 +196,128 @@ def test_no_entry_split_leaves_one_bullet_alone() -> None:
     assert splits, "no fixture size split an entry across pages"
 
 
-def test_one_page_when_it_overflows_by_a_small_amount() -> None:
-    """Rule: a small overflow is tightened onto one page; a real second page carries real content."""
-    saw_one = saw_two = False
-    for dropped in range(0, 12):
-        pages = _lines(_pdf(_filled(0, dropped)))
-        saw_one |= len(pages) == 1
-        if len(pages) > 1:
-            saw_two = True
-            assert len(pages[1]) >= 6, f"dropped={dropped}: page 2 holds only {len(pages[1])} lines (a small overflow should fit page 1)"
-    assert saw_one and saw_two
+# --- 0110-017: one spacing unit, the slider, auto fit ----------------------------------------------------
+
+UNIT = 1.71
+MARGIN_Y = 50.0
+PAGE_H = 792.0
+_K = 0.96875 - 0.2412109375  # Inter's ascender - descender (em): the template's line box model
+
+
+def _box(size: float, lh: float) -> tuple[float, float]:
+    """A line box ``lh`` tall around text of ``size``: (above the baseline, below it)."""
+    return (lh + _K * size) / 2, (lh - _K * size) / 2
+
+
+NAME, BODY, SECTION, ORG = _box(16.6, 16.6), _box(9.5, 14.3), _box(7.1, 7.1), _box(10.7, 14.3)
+
+
+def _index(page: list[tuple[float, float, str, float]], start: int, test: object) -> int:
+    return next(i for i in range(start, len(page)) if test(page[i]))  # type: ignore[operator]
+
+
+def test_every_vertical_gap_is_a_multiple_of_the_spacing_unit() -> None:
+    """Baseline to baseline = the upper line's box below its baseline + k units + the lower line's box above."""
+    for scale in (0.7, 1.0, 1.4):
+        page = _lines(_pdf(_result(), spacing_scale=scale, auto_fit=False))[0]
+        texts = [t.strip() for _, _, t, _ in page]
+        summary, experience = texts.index("SUMMARY"), texts.index("EXPERIENCE")
+        org = experience + 1
+        first_bullet = _index(page, org, lambda line: line[2].startswith("•"))
+        second_bullet = _index(page, first_bullet + 1, lambda line: line[2].startswith("•"))
+        next_org = _index(page, second_bullet, lambda line: abs(line[3]) > 10.5)  # the organisation size
+        pairs = (  # (upper line, lower line, upper box, lower box, units)
+            (0, 1, NAME, BODY, 6),  # after the name
+            (1, 2, BODY, BODY, 2),  # after the title
+            (2, summary, BODY, SECTION, 15),  # between sections (the header is the first)
+            (summary, summary + 1, SECTION, BODY, 8),  # after a section title
+            (experience - 1, experience, BODY, SECTION, 15),
+            (experience, org, SECTION, ORG, 8),
+            (org, org + 1, ORG, BODY, 0),  # the role line sits directly under the organisation
+            (org + 1, first_bullet, BODY, BODY, 2),  # after the role line
+            (second_bullet - 1, second_bullet, BODY, BODY, 1),  # between bullets
+            (next_org - 1, next_org, BODY, ORG, 7),  # between entries
+        )
+        for upper, lower, a, b, units in pairs:
+            gap = page[upper][0] - page[lower][0]
+            expected = a[1] + units * UNIT * scale + b[0]
+            assert abs(gap - expected) <= 0.1, f"scale {scale}: {texts[upper][:20]!r} -> {texts[lower][:20]!r} is {gap:.2f}pt, expected {units}s = {expected:.2f}pt"
+
+
+def test_slider_extremes_render_one_or_two_pages_without_overlap() -> None:
+    for scale in (0.7, 1.4):
+        data = _pdf(_result(), spacing_scale=scale, auto_fit=False)
+        pages = _lines(data)
+        assert data.startswith(b"%PDF") and 1 <= len(pages) <= 2
+        for page in pages:
+            ys = [y for y, *_ in page]
+            assert all(a - b > 8 for a, b in zip(ys, ys[1:])), f"scale {scale}: two text lines overlap: {ys}"
+        lines = _texts(data)
+        assert not sorted({l for l in lines if len(l) > 12 and lines.count(l) > 1}), f"scale {scale}: text printed twice"
+    assert _pdf(_result(), spacing_scale=0.7, auto_fit=False) != _pdf(_result(), spacing_scale=1.4, auto_fit=False)
+
+
+def _sized(entries: int, filler: int) -> TailoredResume:
+    """The fixture cut to its first ``entries`` roles, with ``filler`` synthetic summary lines (one paragraph)."""
+    result = _result()
+    lines = tuple(TailoredLine("copy", f"Filler paragraph {i} about scheduling and billing systems.", ()) for i in range(filler))
+    sections = []
+    for s in result.sections:
+        if s.heading == "experience":
+            s = replace(s, entries=s.entries[:entries])
+        elif s.heading == "summary":
+            s = replace(s, lines=s.lines + lines)
+        sections.append(s)
+    return replace(result, sections=tuple(sections))
+
+
+def _last_fill(data: bytes) -> tuple[int, float]:
+    """(pages, how far down the last page the last baseline sits, 0..1 of the text area)."""
+    pages = _lines(data)
+    return len(pages), (PAGE_H - MARGIN_Y - pages[-1][-1][0]) / (PAGE_H - 2 * MARGIN_Y)
+
+
+def test_auto_fit_spreads_a_long_two_page_resume_to_fill_page_two() -> None:
+    """(a) ~1.65 pages at 1.0x: auto fit fills page 2 to >= 80% (or everything lands on one page)."""
+    result = _sized(3, 21)
+    pages, fill = _last_fill(_pdf(result, spacing_scale=1.0, auto_fit=False))
+    assert pages == 2 and 0.55 <= fill <= 0.75, f"fixture drifted: {pages} pages, page 2 {fill:.2f} full at 1.0x"
+    pages, fill = _last_fill(_pdf(result))
+    assert pages == 1 or fill >= 0.8, f"auto fit left page 2 only {fill:.2f} full"
+
+
+def test_auto_fit_pulls_a_just_over_one_page_resume_onto_one_page() -> None:
+    """(b) ~1.06 pages at 1.0x: auto fit tightens the spacing (never below 0.7x, never smaller type) to one page."""
+    result = _sized(1, 8)
+    assert len(_lines(_pdf(result, spacing_scale=1.0, auto_fit=False))) == 2
+    data = _pdf(result)
+    assert len(_lines(data)) == 1
+    assert {round(size, 1) for page in _lines(data) for *_, size in page} == {round(size, 1) for page in _lines(_pdf(result, auto_fit=False)) for *_, size in page}
+
+
+def test_auto_fit_range_limit_on_a_one_and_a_half_page_resume() -> None:
+    """(c) ~1.5 pages at 1.0x: the loosest spacing (1.4x) is chosen and page 2 fills more than at 1.0x, but the
+    range (gaps are ~20% of a page) cannot reach 80% -- the documented limit, never smaller type."""
+    result = _sized(2, 22)
+    at_one = _last_fill(_pdf(result, spacing_scale=1.0, auto_fit=False))
+    auto = _pdf(result)
+    assert auto == _pdf(result, spacing_scale=1.4, auto_fit=False)
+    pages, fill = _last_fill(auto)
+    assert at_one[0] == pages == 2 and fill > at_one[1] + 0.1, (at_one, fill)
+
+
+def test_auto_fit_is_deterministic_and_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    import typst
+
+    calls: list[str] = []
+    for name in ("query", "compile"):
+        real = getattr(typst, name)
+        monkeypatch.setattr(typst, name, lambda *a, _real=real, _name=name, **k: (calls.append(_name), _real(*a, **k))[1])
+    for result in (_result(), _sized(1, 8), _sized(2, 22), _sized(3, 21)):
+        calls.clear()
+        first = _pdf(result)
+        assert len(calls) <= 8 and calls.count("compile") == 1, calls
+        assert _pdf(result) == first
+    calls.clear()
+    _pdf(_result(), spacing_scale=1.2, auto_fit=False)
+    assert calls == ["compile"]  # auto fit off: the slider's scale as given, one compile

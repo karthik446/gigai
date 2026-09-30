@@ -36,7 +36,7 @@
   "info": {
     "description": "Loopback-only HTTP API of `gigai scout`. Writes need Content-Type: application/json and a Host of the bound 127.0.0.1/localhost port. Errors are {\"error\": {\"code\", \"message\"}}. x-gigai-effect says whether a route changes stored state; x-gigai-external says whether it spends a model call or reads the network.",
     "title": "GigAI Scout local API",
-    "version": "0.1.10.1"
+    "version": "0.1.10.3"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1930,7 +1930,7 @@
     },
     "/api/resume-display": {
       "get": {
-        "description": "The saved PDF header settings and the suggestion to prefill them. Returns personal values, so the Host header must match the bound server.",
+        "description": "The saved PDF header settings and the suggestion to prefill them. Returns personal values, so the Host header must match the bound server. spacing_scale and auto_fit read as 1.0 and true until saved.",
         "operationId": "get_api_resume_display",
         "parameters": [],
         "responses": {
@@ -1938,9 +1938,11 @@
             "content": {
               "application/json": {
                 "example": {
+                  "auto_fit": true,
                   "contact": [],
                   "name": "",
                   "saved": false,
+                  "spacing_scale": 1.0,
                   "titles": {}
                 },
                 "schema": {
@@ -1977,20 +1979,26 @@
         "x-gigai-host-checked": true
       },
       "put": {
-        "description": "Save the PDF header settings (name, contact line, per-profile titles).",
+        "description": "Save the PDF display settings (name, contact line, per-profile titles, spacing). Keys left out keep their saved values. A spacing_scale outside 0.7..1.4 answers 422 invalid_value.",
         "operationId": "put_api_resume_display",
         "parameters": [],
         "requestBody": {
           "content": {
             "application/json": {
               "example": {
+                "auto_fit": true,
                 "contact": [],
                 "name": "Kar Ohm",
+                "spacing_scale": 1.0,
                 "titles": {}
               },
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "auto_fit": {
+                    "description": "Pick the spacing scale that ends the content near a page boundary (default true).",
+                    "type": "boolean"
+                  },
                   "contact": {
                     "description": "Contact items {kind, value}.",
                     "type": "array"
@@ -1998,6 +2006,10 @@
                   "name": {
                     "description": "The name printed on the PDF.",
                     "type": "string"
+                  },
+                  "spacing_scale": {
+                    "description": "The PDF spacing unit's scale, 0.7 to 1.4 (default 1.0); used when auto_fit is false.",
+                    "type": "number"
                   },
                   "titles": {
                     "description": "Title per profile id.",

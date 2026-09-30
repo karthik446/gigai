@@ -76,5 +76,8 @@ def test_every_resume_entry_surface_shows_the_warning() -> None:
     assert "Continue anyway" in wizard and 'data-role="resume-heads-up"' in wizard
     assert "<ResumeWarning" in (UI_SRC / "views" / "AssessView.jsx").read_text(encoding="utf-8")
     profiles = (UI_SRC / "views" / "ProfilesView.jsx").read_text(encoding="utf-8")
-    assert profiles.count("<ResumeWarning") == 2  # replace, and add-a-profile
+    assert profiles.count("<ResumeWarning") == 1  # replace; add-a-profile is NewProfileResume (0110-016)
+    new_profile = (UI_SRC / "components" / "NewProfileResume.jsx").read_text(encoding="utf-8")
+    assert "<NewProfileResume" in profiles
+    assert new_profile.index("<ResumeWarning") < new_profile.index('role="tablist"')
     assert 'className="callout warn"' in (UI_SRC / "components" / "ResumeWarning.jsx").read_text(encoding="utf-8")
