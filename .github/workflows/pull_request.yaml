@@ -1,11 +1,15 @@
 name: Pull request
 
+# The profile shows in the run title, so a later workflow (release.yml) can find
+# a green gate run for the same tree with `gh api .../runs` (display_title).
+run-name: Pull request (${{ inputs.profile || 'pr' }})
+
 on:
   pull_request:
   workflow_call:
     inputs:
       profile:
-        description: "CI profile: pr (ubuntu/3.11), release (macOS+ubuntu/3.12), or full (macOS+ubuntu x 3.11/3.12/3.13 + Debian offline)."
+        description: "CI profile: pr (ubuntu/3.11), release = the gate (pr + macOS smoke), or full = the post-release compatibility sweep (non-blocking: ubuntu 3.12/3.13 + macOS 3.13 + sharded Debian offline)."
         required: false
         type: string
         default: pr
@@ -83,12 +87,18 @@ jobs:
               entries='[{"os":"ubuntu-24.04","python":"3.11"}]'
               ;;
             release)
-              # Operator: everyone uses macOS, so that's the one to test at
-              # release; the broad matrix runs nightly / post-release instead.
-              entries='[{"os":"macos-latest","python":"3.12"},{"os":"ubuntu-24.04","python":"3.12"}]'
+              # ci-spike: one main target. The gate runs the same source
+              # suite as a PR (ubuntu/3.11, 4 shards) plus the macos-smoke job
+              # below; the OS x Python sweep runs after the release instead.
+              entries='[{"os":"ubuntu-24.04","python":"3.11"}]'
               ;;
             full)
-              entries='[{"os":"ubuntu-24.04","python":"3.11"},{"os":"ubuntu-24.04","python":"3.12"},{"os":"ubuntu-24.04","python":"3.13"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.12"},{"os":"macos-latest","python":"3.13"}]'
+              # ci-spike: the post-release sweep. ubuntu/3.11 is not repeated
+              # (the gate ran it). macOS runs one Python (3.13, the newest; the
+              # gate's smoke uses 3.12): GitHub allows 5 concurrent macOS jobs,
+              # so 4 shards fit in one wave. Add {"os":"macos-latest","python":"3.11"}
+              # here for an on-demand floor check (a second wave, ~+20 min).
+              entries='[{"os":"ubuntu-24.04","python":"3.12"},{"os":"ubuntu-24.04","python":"3.13"},{"os":"macos-latest","python":"3.13"}]'
               ;;
             *)
               echo "unknown profile: ${PROFILE}" >&2
@@ -123,6 +133,8 @@ jobs:
     # least twice its OS's slowest shard: macOS 55 (2 x 25.4 = 50.8), ubuntu
     # 25 (2 x 10.5 = 21).
     timeout-minutes: ${{ contains(matrix.os, 'macos') && 55 || 25 }}
+    # ci-spike: the sweep reports, it does not fail the run (see `sweep-summary`).
+    continue-on-error: ${{ (inputs.profile || 'pr') == 'full' }}
     env:
       # ci-shard-suite: tests/conftest.py keeps only the test files whose
       # path hashes into this shard (tests/support/sharding.py); xdist then
@@ -243,9 +255,16 @@ jobs:
   debian-offline:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') == 'full'
-    name: Debian 12 offline container
+    name: Debian 12 offline container (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
-    timeout-minutes: 50  # docker build + full suite; not yet measured end to end
+    # measured 2026-09-29 (run 36614963298): the whole suite in one container
+    # took 33.5 min; 4 shards of it are expected at ~9-10 min each.
+    timeout-minutes: 25
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -273,4 +292,69 @@ jobs:
           --env GIGAI_AUDIT_TARGET=/audit/target
           --env GIGAI_AUDIT_WORKPAD=/audit/workpad
           --env GIGAI_TEST_LATENCY_SCALE=3
+          --env GIGAI_TEST_SHARDS=4
+          --env GIGAI_TEST_SHARD=${{ matrix.shard }}
           gigai-debian-offline:${{ github.sha }}
+
+  # ci-spike: the gate's macOS check. Not the macOS suite (that is the sweep):
+  # build the wheel, install it, start/stop a Scout server, and run the files
+  # that failed on macOS in 0.1.8-0.1.9 (server health, port takeover, installed
+  # init scenarios, config/latency journey). ~5-8 min, one runner.
+  macos-smoke:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'release'
+    name: macOS smoke (Python 3.12)
+    runs-on: macos-latest
+    timeout-minutes: 25
+    env:
+      TEST_XDIST_MAX_WORKERS: "3"
+      GIGAI_TEST_LATENCY_SCALE: "7"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --extra test --python "3.12"
+      - name: Built wheel installs and starts
+        run: |
+          uv build --wheel --no-sources --out-dir "${RUNNER_TEMP}/dist"
+          uv venv --python 3.12 "${RUNNER_TEMP}/venv"
+          uv pip install --python "${RUNNER_TEMP}/venv/bin/python" "${RUNNER_TEMP}"/dist/*.whl
+          "${RUNNER_TEMP}/venv/bin/gigai" --version
+          "${RUNNER_TEMP}/venv/bin/gigai" --help >/dev/null
+      - name: macOS smoke tests
+        run: make test-macos-smoke
+
+  # ci-spike: the sweep's report. Runs after the sweep jobs whatever they did and
+  # lists what failed in the run summary; it never fails the run itself.
+  sweep-summary:
+    needs: [source-tests, debian-offline]
+    if: always() && (inputs.profile || 'pr') == 'full'
+    name: Compatibility sweep summary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ inputs.ref || github.sha }}
+        run: |
+          {
+            echo "## Compatibility sweep on ${SHA}"
+            echo
+            echo "| Job | Result | Minutes |"
+            echo "| --- | --- | --- |"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" --paginate \
+              --jq '.jobs[] | select(.name | test("All tests|Debian")) | select(.conclusion != "skipped") | "| \(.name) | \(.conclusion // .status) | \(if .completed_at then (((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601)) / 60 | floor) else "-" end) |"'
+            echo
+            echo "A failed row is a compatibility weakness to look at, not a release failure."
+          } >> "${GITHUB_STEP_SUMMARY}"
