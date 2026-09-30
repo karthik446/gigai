@@ -4,7 +4,7 @@
 //   <site>/[<product>/]<version>/...      the build (built with DOCS_BASE=<pages path>/<version>/)
 //   <site>/[<product>/]<alias>/...        redirect stubs, one per page, to the aliased version
 //   <site>/[<product>/]versions.json      [{version, title, aliases}]  (mike's format)
-//   <site>/[<product>/]index.html         redirect to <default alias>/
+//   <site>/[<product>/]index.html         redirect to <default alias>/, or the newest version until it exists
 //
 // <site> is a checkout of the gh-pages branch. On GitHub Pages the repo name is already the
 // path prefix (karthik446.github.io/gigai/), so --product is empty; set it only when several
@@ -94,5 +94,9 @@ if (a.delete) {
 versions.sort(cmp).sort((x, y) => PRE.has(x.version) - PRE.has(y.version));
 
 writeFileSync(manifestPath, JSON.stringify(versions, null, 2) + '\n');
-writeRedirect(join(root, 'index.html'), `${a.default}/`);
+// the root goes to the default alias, or, before that alias exists (first publish, no release yet),
+// to the newest version folder that does (a release before "next"/"dev"), so it never dangles
+const rootTarget = existsSync(join(root, a.default)) ? a.default : versions[0]?.version;
+if (rootTarget) writeRedirect(join(root, 'index.html'), `${rootTarget}/`);
+else rmSync(join(root, 'index.html'), { force: true });
 console.log(`${a.product || "versions"}: ${versions.map((v) => v.version + (v.aliases.length ? `[${v.aliases}]` : '')).join(', ')}`);
