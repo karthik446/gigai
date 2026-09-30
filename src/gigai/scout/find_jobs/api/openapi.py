@@ -132,7 +132,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "assessments": [{"source": "run", "run_id": "run_20260929T100000Z", "profile_id": None, "verdict": "matched_above_threshold", "matrix": [], "suggestions": [], "questions": []}],
             "open_questions": [{"question_id": "auth:work_authorization", "question": "Are you authorized to work in the US?", "requirement": None}],
             "answers": [],
-            "tailored_resumes": [{"profile_id": "prof_1", "job_identity": _JOB_URL, "company": "Acme", "title": "Software Engineer", "created_at": "2026-09-29T10:05:00Z", "updated_at": "2026-09-29T10:05:00Z", "links": {"pdf": {"method": "POST", "path": "/api/tailored-resumes/pdf", "body": {"profile_id": "prof_1", "job_identity": _JOB_URL}}}}],
+            "tailored_resumes": [{"profile_id": "prof_1", "job_identity": _JOB_URL, "company": "Acme", "title": "Software Engineer", "created_at": "2026-09-29T10:05:00Z", "updated_at": "2026-09-29T10:05:00Z", "links": {"pdf": {"method": "POST", "path": "/api/tailored-resumes/pdf", "body": {"profile_id": "prof_1", "job_identity": _JOB_URL}}, "line": {"method": "PUT", "path": "/api/tailored-resumes/lines", "body": {"profile_id": "prof_1", "job_identity": _JOB_URL, "updated_at": "2026-09-29T10:05:00Z", "line_id": "<L id from the resume>", "use": "original"}}}}],
             "job_state": {"state": "tailored", "since": "2026-09-29T10:05:00Z", "next_events": ["applied"]},
             "application_events": [],
             "links": {
@@ -342,10 +342,23 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     ),
     RouteSpec(
         "GET", "/api/tailored-resumes", "Stored tailored resumes, newest first.", "read", "none",
-        {"schema_version": "scout-tailored-resumes-list-response:1", "items": []},
-        schema_version="scout-tailored-resumes-list-response:1",
+        {"schema_version": "scout-tailored-resumes-response:1", "items": []},
+        schema_version="scout-tailored-resumes-response:1",
         params=(_q("profile_id", "string", "Only this resume identity."), _q("job_identity", "string", "Only this job.")), errors=(_NO_TARGET,),
         description="Carries resume-derived text (the product). For a job's ids and links use GET /api/jobs?url=.",
+    ),
+    RouteSpec(
+        "PUT", "/api/tailored-resumes/lines", "Show the original or the rewrite of one line of a stored tailored resume.", "write", "none",
+        {"schema_version": "scout-tailor-response:1", "job": {"job_identity": _JOB_URL}, "markdown": "# ..."}, schema_version="scout-tailor-response:1",
+        params=(
+            _b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True),
+            _b("updated_at", "string", "The updated_at of the tailored resume you read; a newer tailoring answers 409.", required=True),
+            _b("line_id", "string", "A line id (`L<n>`) from the tailored resume.", required=True),
+            _b("use", "string", "Which version to show.", required=True, enum=("original", "rewritten")),
+        ),
+        request_example={"profile_id": "prof_1", "job_identity": _JOB_URL, "updated_at": "2026-09-29T10:05:00Z", "line_id": "L3", "use": "original"},
+        errors=(_INVALID, (404, "tailored_resume_not_found"), (409, "tailored_resume_changed"), _NO_TARGET),
+        description="Idempotent: choosing what is already shown changes nothing. The PDF and the markdown follow the choice; updated_at is unchanged.",
     ),
     RouteSpec(
         "POST", "/api/tailored-resumes/pdf", "Render the stored tailored resume as a PDF (binary).", "read", "none", {"content_type": "application/pdf"},
@@ -442,6 +455,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/api/applications"): ("List application events", "Jobs"),
     ("POST", "/api/tailored-resumes"): ("Tailor the resume to one posting", "Tailored resumes"),
     ("GET", "/api/tailored-resumes"): ("List tailored resumes", "Tailored resumes"),
+    ("PUT", "/api/tailored-resumes/lines"): ("Keep the original or the rewrite of one line", "Tailored resumes"),
     ("POST", "/api/tailored-resumes/pdf"): ("Render a tailored resume as a PDF", "Tailored resumes"),
     ("GET", "/api/resume-display"): ("Get the PDF header settings", "Tailored resumes"),
     ("PUT", "/api/resume-display"): ("Save the PDF header settings", "Tailored resumes"),
@@ -658,7 +672,7 @@ def llms_text() -> str:
         "- Writes (POST/PUT) need Content-Type: application/json. Host must be 127.0.0.1:<port> or localhost:<port>; this server only answers loopback peers.\n"
         "- Errors are {\"error\": {\"code\", \"message\"}}; an unknown_key 422 lists allowed_keys.\n"
         "- Routes marked x-gigai-external model spend a model call (assess, tailor, rank, run); network reads the public internet. Prefer read routes first.\n"
-        "- Tailored resumes: POST /api/tailored-resumes, then POST /api/tailored-resumes/pdf {profile_id, job_identity} for the PDF.\n"
+        "- Tailored resumes: POST /api/tailored-resumes, then POST /api/tailored-resumes/pdf {profile_id, job_identity} for the PDF; PUT /api/tailored-resumes/lines picks the original or the rewrite of one line.\n"
     )
 
 

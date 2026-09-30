@@ -1796,6 +1796,9 @@ def _make_handler(
                 if path == "/api/resume-display":
                     self._handle_put_resume_display()
                     return
+                if path == "/api/tailored-resumes/lines":
+                    self._handle_put_tailored_resume_line()
+                    return
                 profile_id = _match_profile_id(path, suffix="")
                 if profile_id is not None:
                     self._handle_put_profile(profile_id)

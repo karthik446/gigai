@@ -230,6 +230,7 @@ class AgentRoutesMixin:
                 "updated_at": item.updated_at,
                 "links": {
                     "pdf": _link("POST", "/api/tailored-resumes/pdf", {"profile_id": item.resume.profile_id or "ephemeral", "job_identity": item.job.job_identity}),
+                    "line": _link("PUT", "/api/tailored-resumes/lines", {"profile_id": item.resume.profile_id or "ephemeral", "job_identity": item.job.job_identity, "updated_at": item.updated_at, "line_id": "<L id from the resume>", "use": "original"}),
                     "resume": _link("GET", f"/api/tailored-resumes?profile_id={quote(item.resume.profile_id or 'ephemeral', safe='')}&job_identity={quote(item.job.job_identity, safe='')}"),
                 },
             }

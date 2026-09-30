@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, getResumeDisplay, getTailoredResumes, postTailoredResume, postTailoredResumePdf } from "../api.js";
+import { ApiError, getResumeDisplay, getTailoredResumes, postTailoredResume, postTailoredResumePdf, putTailoredResumeLine } from "../api.js";
 import { dateTimeLabel } from "../jobModel.js";
 import { hasContactLine } from "../resumeDisplayModel.js";
 import { SETTINGS_HASH } from "../routing.js";
@@ -7,8 +7,11 @@ import {
   changeSummary,
   inlineSegments,
   latestStored,
+  lineAction,
+  lostLabels,
   previewLines,
   previewStats,
+  reasonLabel,
   sourcesHover,
   sourceLabel,
   statsLine,
@@ -132,7 +135,39 @@ function CleanCopy({ lines }) {
   );
 }
 
-function PreviewLine({ line, index, open, onToggle, promptFor, showChanges }) {
+// 0110-006: what the operator can decide about one line, under it: why the
+// model rewrote it (its reason), what a rejected rewrite dropped, and the one
+// button (Keep original / Use rewrite anyway / Undo). Model text goes in as
+// React text children, like everywhere else in the panel.
+function LineControls({ line, onChoose, busy }) {
+  const action = onChoose ? lineAction(line) : null;
+  const reason = line.kind === "rewritten" ? reasonLabel(line.reason) : "";
+  const fallback = line.origin === "fallback" && line.kind === "copy" && line.alternative && line.alternative.kind === "rewritten";
+  const lost = fallback ? lostLabels(line.alternative) : [];
+  if (!action && !reason && !fallback) {
+    return null;
+  }
+  return (
+    <div className="md-line line-controls" data-line-id={line.id || undefined}>
+      <span className="prov blank">·</span>
+      <span className="src-list">
+        {reason && <span className="src-item muted" data-role="reason">{reason}</span>}
+        {fallback && (
+          <span className="src-item muted" data-role="kept-original">
+            Kept your line: the rewrite dropped {lost.length > 0 ? lost.join("; ") : "a fact"}.
+          </span>
+        )}
+        {action && (
+          <button type="button" className="button small secondary" data-action={action.use} disabled={busy} onClick={() => onChoose(line.id, action.use)}>
+            {action.label}
+          </button>
+        )}
+      </span>
+    </div>
+  );
+}
+
+function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onChoose, busy }) {
   if (line.kind === "blank") {
     return (
       <div className="md-line blank">
@@ -207,11 +242,12 @@ function PreviewLine({ line, index, open, onToggle, promptFor, showChanges }) {
         )}
       </span>
     </div>
+    {showChanges && <LineControls line={line} onChoose={onChoose} busy={busy} />}
     </>
   );
 }
 
-export function Preview({ response, profileLabel, promptFor, initialView = "changes" }) {
+export function Preview({ response, profileLabel, promptFor, initialView = "changes", onChooseLine = null, choiceBusy = false, choiceError = null }) {
   const [open, setOpen] = useState(() => new Set());
   const [view, setView] = useState(initialView); // "changes" (default) | "clean"
   const lines = previewLines(response.result);
@@ -257,10 +293,15 @@ export function Preview({ response, profileLabel, promptFor, initialView = "chan
         <span className="muted">Hover or click a line to see its sources.</span>
       </div>
       )}
+      {choiceError && (
+        <div className="callout danger" role="alert" data-role="choice-error">
+          {choiceError}
+        </div>
+      )}
       {view === "changes" ? (
         <div className="md-preview" data-tailored-lines={stats.total} data-view="changes">
           {lines.map((line, index) => (
-            <PreviewLine key={index} line={line} index={index} open={open.has(index)} onToggle={toggle} promptFor={promptFor} showChanges />
+            <PreviewLine key={index} line={line} index={index} open={open.has(index)} onToggle={toggle} promptFor={promptFor} showChanges onChoose={onChooseLine} busy={choiceBusy} />
           ))}
         </div>
       ) : (
@@ -348,7 +389,7 @@ export function useTailoredResume({ jobIdentity, jobUrl, profileId }) {
       });
   }, [jobUrl, profileId]);
 
-  return { stored, loadingStored, tailoring, elapsed, error, outcome, tailor, jobIdentity, profileId, visible: Boolean(stored || tailoring || error) };
+  return { stored, setStored, loadingStored, tailoring, elapsed, error, outcome, tailor, jobIdentity, profileId, visible: Boolean(stored || tailoring || error) };
 }
 
 export default function TailoredResumePanel({ state, profileLabel, questionPrompts }) {
@@ -358,6 +399,8 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState(null);
   const [hasContact, setHasContact] = useState(true);
+  const [choosing, setChoosing] = useState(false);
+  const [choiceError, setChoiceError] = useState(null);
 
   // Empty settings still download (name only); the panel then points at the
   // settings section. A failed read just hides the hint.
@@ -382,6 +425,28 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
       .catch((err) => setDownloadError(err.detail || err.message || String(err)))
       .finally(() => setDownloading(false));
   }, [state.profileId, state.jobIdentity]);
+
+  // 0110-006: PUT one line's choice; the response replaces `stored`, so the
+  // clean copy and the PDF follow. A 409 means a newer tailoring replaced this
+  // one: reload the stored resume and say so.
+  const chooseLine = useCallback(
+    (lineId, use) => {
+      setChoosing(true);
+      setChoiceError(null);
+      putTailoredResumeLine({ profileId: state.profileId, jobIdentity: state.jobIdentity, updatedAt: stored.updated_at, lineId, use })
+        .then((response) => state.setStored(response))
+        .catch((err) => {
+          setChoiceError(err.detail || err.message || String(err));
+          if (err.code === "tailored_resume_changed") {
+            getTailoredResumes({ profileId: state.profileId, jobIdentity: state.jobIdentity })
+              .then((response) => state.setStored(latestStored(response.items)))
+              .catch(() => {});
+          }
+        })
+        .finally(() => setChoosing(false));
+    },
+    [stored, state],
+  );
 
   // uat-bug-043: the action sits above the requirement table and its status
   // sits by the button; when a run finishes (result or error) bring the panel
@@ -427,7 +492,7 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
           {errorView(error).hint && <div className="muted" style={{ marginTop: 4, fontSize: "0.82rem" }}>{errorView(error).hint}</div>}
         </div>
       )}
-      {stored && <Preview key={stored.updated_at || stored.stored_path} response={stored} profileLabel={profileLabel} promptFor={promptFor} />}
+      {stored && <Preview key={stored.updated_at || stored.stored_path} response={stored} profileLabel={profileLabel} promptFor={promptFor} onChooseLine={chooseLine} choiceBusy={choosing} choiceError={choiceError} />}
     </section>
   );
 }

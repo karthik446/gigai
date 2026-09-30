@@ -104,9 +104,17 @@ export function inlineSegments(text) {
   return out;
 }
 
-function contentLine(line, display, where, role, plain) {
+// 0110-006: the optional keys a line may carry (`id`, `origin`, `reason`,
+// `alternative`); an older stored line has none of them and shows no buttons.
+function contentLine(line, display, where, role, plain, heading = false) {
   const kind = line.kind === "copy" ? "copy" : "rewritten";
+  const alternative = line.alternative && typeof line.alternative === "object" ? line.alternative : null;
   const row = {
+    id: typeof line.id === "string" ? line.id : null,
+    origin: line.origin === "fallback" || line.origin === "user" ? line.origin : "model",
+    reason: line.reason && typeof line.reason === "object" ? line.reason : null,
+    alternative,
+    heading,
     kind,
     text: line.text,
     display,
@@ -134,7 +142,7 @@ export function previewLines(result) {
   const header = Array.isArray(result.header) ? result.header : [];
   header.forEach((line, index) => {
     const shown = displayText(line.text);
-    out.push(contentLine(line, index === 0 ? `# ${shown}` : shown, `header line ${index + 1}`, index === 0 ? "title" : "text", shown));
+    out.push(contentLine(line, index === 0 ? `# ${shown}` : shown, `header line ${index + 1}`, index === 0 ? "title" : "text", shown, true));
   });
   if (header.length > 0) {
     out.push({ kind: "blank" });
@@ -153,6 +161,7 @@ export function previewLines(result) {
               `${section.heading} entry ${entryIndex + 1} heading ${index + 1}`,
               index === 0 ? "entry" : "text",
               shown,
+              true,
             ),
           );
         });
@@ -160,7 +169,10 @@ export function previewLines(result) {
           out.push({ kind: "blank" });
         }
         (entry.bullets || []).forEach((line, index) => {
-          out.push(contentLine(line, `- ${line.text}`, `${section.heading} entry ${entryIndex + 1} bullet ${index + 1}`, "bullet", line.text));
+          // A copied bullet prints through displayText (a mirror of the
+          // server's _display), so a bullet that carries its own marker never shows `- - `.
+          const shown = line.kind === "copy" ? displayText(line.text) : line.text;
+          out.push(contentLine(line, `- ${shown}`, `${section.heading} entry ${entryIndex + 1} bullet ${index + 1}`, "bullet", shown));
         });
         out.push({ kind: "blank" });
       });
@@ -200,19 +212,30 @@ export function addedKeywords(lines) {
   return [...seen.values()];
 }
 
+// Entry headings and the header are not rewritable lines (the server's
+// tailor_line_stats leaves them out too), so they stay out of the counts.
+// `keptOriginal` is the copies the no-loss check put back (a fallback).
 export function previewStats(lines) {
-  const content = lines.filter((line) => line.kind === "copy" || line.kind === "rewritten");
+  const content = lines.filter((line) => (line.kind === "copy" || line.kind === "rewritten") && !line.heading);
   const copied = content.filter((line) => line.kind === "copy").length;
+  const keptOriginal = content.filter((line) => line.kind === "copy" && line.origin === "fallback").length;
   const rewritten = content.length - copied;
   const citingAnswers = content.filter((line) => line.refs.some((ref) => ref.kind === "answer")).length;
   const unsourced = content.filter((line) => line.refs.length === 0).length;
-  return { total: content.length, copied, rewritten, citingAnswers, unsourced, keywords: addedKeywords(content) };
+  return { total: content.length, copied, keptOriginal, rewritten, citingAnswers, unsourced, keywords: addedKeywords(content) };
 }
 
-// "N of M lines rewritten, K copied as-is; New words (not in the cited lines): a, b" -- the
-// counts are previewStats' (M = every content line, N + K = M).
+// "N of M lines rewritten · K kept as your original (the rewrite dropped facts) · C copied;
+// New words (not in the cited lines): a, b" -- the counts are previewStats' (M = every
+// rewritable line, N + K + C = M; the K part shows only when K > 0).
 export function changeSummary(stats) {
-  const base = `${stats.rewritten} of ${stats.total} line${stats.total === 1 ? "" : "s"} rewritten, ${stats.copied} copied as-is`;
+  const kept = stats.keptOriginal || 0;
+  const parts = [`${stats.rewritten} of ${stats.total} line${stats.total === 1 ? "" : "s"} rewritten`];
+  if (kept > 0) {
+    parts.push(`${kept} kept as your original (the rewrite dropped facts)`);
+  }
+  parts.push(`${stats.copied - kept} copied`);
+  const base = parts.join(" · ");
   const keywords = stats.keywords || [];
   return keywords.length > 0 ? `${base}; New words (not in the cited lines): ${keywords.join(", ")}` : base;
 }
@@ -252,6 +275,50 @@ export function sourceLabel(ref, promptFor) {
     return `Your answer · ${prompt || ref.question_id}`;
   }
   return ref.kind || "";
+}
+
+// "for M3: event-driven" / "for the summary" / "from your answer": why the
+// model rewrote a line, from the line's own `reason` (never invented here).
+export function reasonLabel(reason) {
+  if (!reason || typeof reason !== "object") {
+    return "";
+  }
+  const detail = [reason.requirement, reason.posting_phrase].filter((part) => typeof part === "string" && part).join(": ");
+  if (detail) {
+    return `for ${detail}`;
+  }
+  if (reason.kind === "answer") {
+    return "from your answer";
+  }
+  return reason.kind === "summary" ? "for the summary" : "";
+}
+
+// What the no-loss check found missing from a rewrite, as "rule: a, b" strings.
+export function lostLabels(alternative) {
+  const lost = alternative && typeof alternative.lost === "object" && alternative.lost ? alternative.lost : {};
+  return Object.entries(lost)
+    .filter(([, items]) => Array.isArray(items) && items.length > 0)
+    .map(([rule, items]) => `${rule}: ${items.join(", ")}`);
+}
+
+// The one button a line offers, or null: `{use, label}` for PUT /api/tailored-resumes/lines.
+//   shown rewrite with an original  -> Keep original
+//   fallback (the original is shown) -> Use rewrite anyway
+//   operator's choice                -> Undo
+export function lineAction(line) {
+  if (!line || !line.id || !line.alternative || line.heading) {
+    return null;
+  }
+  if (line.origin === "user") {
+    return { use: line.kind === "copy" ? "rewritten" : "original", label: "Undo" };
+  }
+  if (line.kind === "rewritten" && line.alternative.kind === "copy") {
+    return { use: "original", label: "Keep original" };
+  }
+  if (line.origin === "fallback" && line.kind === "copy" && line.alternative.kind === "rewritten") {
+    return { use: "rewritten", label: "Use rewrite anyway" };
+  }
+  return null;
 }
 
 // The hover text for one preview line: one "<label>: <cited text>" per ref.

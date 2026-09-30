@@ -1212,6 +1212,17 @@
                       "created_at": "2026-09-29T10:05:00Z",
                       "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
                       "links": {
+                        "line": {
+                          "body": {
+                            "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                            "line_id": "<L id from the resume>",
+                            "profile_id": "prof_1",
+                            "updated_at": "2026-09-29T10:05:00Z",
+                            "use": "original"
+                          },
+                          "method": "PUT",
+                          "path": "/api/tailored-resumes/lines"
+                        },
                         "pdf": {
                           "body": {
                             "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
@@ -3720,13 +3731,13 @@
               "application/json": {
                 "example": {
                   "items": [],
-                  "schema_version": "scout-tailored-resumes-list-response:1"
+                  "schema_version": "scout-tailored-resumes-response:1"
                 },
                 "schema": {
                   "additionalProperties": true,
                   "properties": {
                     "schema_version": {
-                      "const": "scout-tailored-resumes-list-response:1"
+                      "const": "scout-tailored-resumes-response:1"
                     }
                   },
                   "required": [
@@ -3953,6 +3964,166 @@
         ],
         "x-gigai-effect": "write",
         "x-gigai-external": "model"
+      }
+    },
+    "/api/tailored-resumes/lines": {
+      "put": {
+        "description": "Show the original or the rewrite of one line of a stored tailored resume. Idempotent: choosing what is already shown changes nothing. The PDF and the markdown follow the choice; updated_at is unchanged.",
+        "operationId": "put_api_tailored_resumes_lines",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                "line_id": "L3",
+                "profile_id": "prof_1",
+                "updated_at": "2026-09-29T10:05:00Z",
+                "use": "original"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "job_identity": {
+                    "description": "The job identity.",
+                    "type": "string"
+                  },
+                  "line_id": {
+                    "description": "A line id (`L<n>`) from the tailored resume.",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "description": "The resume identity.",
+                    "type": "string"
+                  },
+                  "updated_at": {
+                    "description": "The updated_at of the tailored resume you read; a newer tailoring answers 409.",
+                    "type": "string"
+                  },
+                  "use": {
+                    "description": "Which version to show.",
+                    "enum": [
+                      "original",
+                      "rewritten"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "profile_id",
+                  "job_identity",
+                  "updated_at",
+                  "line_id",
+                  "use"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "job": {
+                    "job_identity": "https://boards.greenhouse.io/acme/jobs/101"
+                  },
+                  "markdown": "# ...",
+                  "schema_version": "scout-tailor-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-tailor-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "tailored_resume_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "tailored_resume_not_found, target_unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "tailored_resume_changed",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "tailored_resume_changed"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value"
+          }
+        },
+        "summary": "Keep the original or the rewrite of one line",
+        "tags": [
+          "Tailored resumes"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
       }
     },
     "/api/tailored-resumes/pdf": {
