@@ -21,11 +21,19 @@ import sys
 import time
 from typing import Mapping, Sequence
 
+from tests.support.latency import latency_bound
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - non-POSIX hosts have no rusage
+    resource = None  # type: ignore[assignment]
+
 
 _SECRET_NAME = re.compile(r"(?:credential|password|secret|token|api_?key)", re.I)
 _SUBSTITUTE_NAME = re.compile(r"[a-z][a-z0-9_-]*\Z")
 _MANIFEST_CAPTURE_ATTEMPTS = 3
 _MANIFEST_CAPTURE_RETRY_SECONDS = 0.01
+_TIMELINE_TAIL_EVENTS = 10
 
 
 @dataclass(frozen=True)
@@ -229,6 +237,12 @@ class ScenarioSpec:
     allowed_subprocesses: tuple[Path, ...] = ()
     extra_env: tuple[tuple[str, str], ...] = ()
     stdin: str | None = None
+    # A hang guard, not a latency assertion: the bound on an unloaded
+    # developer machine. The harness widens it by GIGAI_TEST_LATENCY_SCALE
+    # (tests/support/latency.py) on shared CI runners. The default leaves
+    # every scenario that takes about a second locally (setup, open, doctor,
+    # a refused init) 8x or more headroom; a scenario that is measurably
+    # heavier declares its own bound with the same headroom.
     timeout_seconds: float = 10.0
 
     def __post_init__(self) -> None:
@@ -258,14 +272,21 @@ class ScenarioResult:
     fixtures_after: TreeManifest
     violations: tuple[str, ...]
     artifact: Path
+    # Timing evidence, so a process_timeout can be read as "slow" or "hung"
+    # from the artifact alone: the effective bound, the CPU the child tree
+    # consumed, and when the child spawned its own subprocesses.
+    timeout_seconds: float = 0.0
+    child_cpu_seconds: float | None = None
+    subprocess_timeline: Mapping[str, object] | None = None
 
 
 class ScenarioViolation(AssertionError):
     def __init__(self, result: ScenarioResult) -> None:
         self.result = result
+        timing = f"; timing: {_timing_summary(result)}" if result.timed_out else ""
         super().__init__(
             f"scenario {result.name!r} failed closed: {', '.join(result.violations)}; "
-            f"artifact=<scenario-artifacts>/{result.artifact.name}"
+            f"artifact=<scenario-artifacts>/{result.artifact.name}{timing}"
         )
 
 
@@ -284,12 +305,16 @@ class ScenarioHarness:
     def run(self, spec: ScenarioSpec) -> ScenarioResult:
         before = self._manifests()
         guard_log = self.roots.artifacts / f"{spec.name}-guard.jsonl"
-        environment = self._environment(spec, guard_log)
+        timing_log = self.roots.artifacts / f"{spec.name}-timing.jsonl"
+        environment = self._environment(spec, guard_log, timing_log)
         argv = (
             os.fspath(self.command.executable),
             *self.command.argv_prefix,
             *spec.argv,
         )
+        timeout_seconds = latency_bound(spec.timeout_seconds)
+        cpu_before = _children_cpu_seconds()
+        started_wall = time.time()
         started = time.monotonic_ns()
         timed_out = False
         try:
@@ -300,7 +325,7 @@ class ScenarioHarness:
                 capture_output=True,
                 text=True,
                 input=spec.stdin,
-                timeout=spec.timeout_seconds,
+                timeout=timeout_seconds,
                 check=False,
                 shell=False,
             )
@@ -313,6 +338,13 @@ class ScenarioHarness:
             stdout = _decode_timeout_stream(error.stdout)
             stderr = _decode_timeout_stream(error.stderr)
         duration_ns = time.monotonic_ns() - started
+        cpu_after = _children_cpu_seconds()
+        child_cpu_seconds = (
+            round(cpu_after - cpu_before, 3)
+            if cpu_before is not None and cpu_after is not None
+            else None
+        )
+        subprocess_timeline = _read_subprocess_timeline(timing_log, started_wall)
         after = self._manifests()
         guard_events = _read_guard_events(guard_log)
 
@@ -408,6 +440,9 @@ class ScenarioHarness:
             fixtures_after=after["fixtures"],
             violations=tuple(violations),
             artifact=artifact,
+            timeout_seconds=timeout_seconds,
+            child_cpu_seconds=child_cpu_seconds,
+            subprocess_timeline=subprocess_timeline,
         )
         self._write_artifact(result, spec)
         if violations:
@@ -422,7 +457,9 @@ class ScenarioHarness:
             "fixtures": TreeManifest.capture(self.roots.fixtures),
         }
 
-    def _environment(self, spec: ScenarioSpec, guard_log: Path) -> dict[str, str]:
+    def _environment(
+        self, spec: ScenarioSpec, guard_log: Path, timing_log: Path
+    ) -> dict[str, str]:
         allowed_reads = (
             *self.command.allowed_read_roots,
             self.roots.target,
@@ -466,6 +503,7 @@ class ScenarioHarness:
                 ]
             ),
             "GIGAI_HARNESS_GUARD_LOG": os.fspath(guard_log),
+            "GIGAI_HARNESS_TIMING_LOG": os.fspath(timing_log),
             "GIT_CONFIG_GLOBAL": "/dev/null",
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_OPTIONAL_LOCKS": "0",
@@ -714,6 +752,58 @@ def _read_guard_events(path: Path) -> tuple[dict[str, object], ...]:
     if not path.exists():
         return ()
     return tuple(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines())
+
+
+def _children_cpu_seconds() -> float | None:
+    """User + system CPU of every child this process has waited for so far."""
+
+    if resource is None:
+        return None
+    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return usage.ru_utime + usage.ru_stime
+
+
+def _read_subprocess_timeline(path: Path, started_wall: float) -> dict[str, object]:
+    """Summarize the guard's spawn log as offsets from the scenario start.
+
+    Spawns that continue up to the deadline mean the child was still working
+    (a bound too tight for the host); a last spawn long before the deadline
+    means it stopped making progress (a hang).
+    """
+
+    spawns: list[tuple[float, str, object]] = []
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                event = json.loads(line)
+                offset = round(float(event["at"]) - started_wall, 3)
+            except (ValueError, KeyError, TypeError):
+                # A killed child can leave a torn final line.
+                continue
+            spawns.append((offset, str(event.get("executable", "")), event.get("pid")))
+    spawns.sort(key=lambda spawn: spawn[0])
+    return {
+        "count": len(spawns),
+        "first_offset_seconds": spawns[0][0] if spawns else None,
+        "last_offset_seconds": spawns[-1][0] if spawns else None,
+        "tail": [
+            {"offset_seconds": offset, "executable": executable, "pid": pid}
+            for offset, executable, pid in spawns[-_TIMELINE_TAIL_EVENTS:]
+        ],
+    }
+
+
+def _timing_summary(result: ScenarioResult) -> str:
+    timeline = result.subprocess_timeline or {}
+    cpu = result.child_cpu_seconds
+    last = timeline.get("last_offset_seconds")
+    return (
+        f"elapsed={result.duration_ns / 1e9:.2f}s "
+        f"bound={result.timeout_seconds:.2f}s "
+        f"child_cpu={'unknown' if cpu is None else f'{cpu:.2f}s'} "
+        f"subprocesses={timeline.get('count', 0)} "
+        f"last_spawn_at={'none' if last is None else f'{last:.2f}s'}"
+    )
 
 
 def _decode_timeout_stream(value: bytes | str | None) -> str:

@@ -16,8 +16,28 @@ htmlcov/
 build/
 dist/
 *.egg-info/
+# ...except the packaged, committed Scout UI build (src/gigai/scout/ui/.gitignore
+# stopped ignoring it; this repo-root dist/ rule is unanchored and would
+# otherwise still shadow it).
+!src/gigai/scout/ui/dist/
+!src/gigai/scout/ui/dist/**
 
 # Editors and operating systems
 .DS_Store
 .idea/
 .vscode/
+
+# Orchestrator coordination state lives outside the repo (workspaces/gigai/orchestrator);
+# never commit a stray copy here.
+.orchestrator
+/orchestrator/
+
+# S24 discovery bake-off: raw DOL H-1B LCA disclosure file (~250MB) is scratch
+# input, never committed -- only a small derived sample under
+# research/discovery_bakeoff/h1b_sample/ is tracked.
+research/discovery_bakeoff/h1b_scratch/
+
+# Local scratch reports (evaluation harnesses, verification tiers): dev docs
+# now live outside the repo in the orchestrator's own local git repo, so
+# these generated reports are never committed here.
+/.local-reports/

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import httpx
 import pytest
 
+from gigai import secrets_store
 from gigai.scout.find_jobs.exa_client import (
     ATS_INCLUDE_DOMAINS,
     EXA_API_KEY_ENV_VAR,
@@ -33,6 +35,7 @@ def _config(**overrides: object) -> FindJobsConfig:
         "remote": True,
         "published_after": "2026-09-15T00:00:00Z",
         "sources": SourceToggles(exa=True, ats=True, hiringcafe=False),
+        "countries": ("US",),
     }
     values.update(overrides)
     return FindJobsConfig(**values)
@@ -42,8 +45,11 @@ def _client(handler) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
-def test_missing_api_key_raises_without_leaking(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_api_key_raises_without_leaking(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.delenv(EXA_API_KEY_ENV_VAR, raising=False)
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path))
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("no HTTP request should be made without an API key")
@@ -53,7 +59,65 @@ def test_missing_api_key_raises_without_leaking(monkeypatch: pytest.MonkeyPatch)
 
     assert excinfo.value.code == "exa_missing_key"
     assert EXA_API_KEY_ENV_VAR in str(excinfo.value)
+    assert "gigai secrets add exa" in str(excinfo.value)
     assert "sk-" not in str(excinfo.value)
+
+
+def test_api_key_used_from_secrets_store_when_env_unset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv(EXA_API_KEY_ENV_VAR, raising=False)
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path))
+    secrets_store.set(EXA_API_KEY_ENV_VAR, "dotenv-exa-key")
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config())
+
+    assert len(captured) == 1
+    assert captured[0].headers["x-api-key"] == "dotenv-exa-key"
+
+
+def test_env_api_key_wins_over_secrets_store(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path))
+    secrets_store.set(EXA_API_KEY_ENV_VAR, "dotenv-exa-key")
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "env-exa-key")
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config())
+
+    assert len(captured) == 1
+    assert captured[0].headers["x-api-key"] == "env-exa-key"
+
+
+def test_empty_env_api_key_falls_back_to_secrets_store(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path))
+    secrets_store.set(EXA_API_KEY_ENV_VAR, "dotenv-exa-key")
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "")
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config())
+
+    assert len(captured) == 1
+    assert captured[0].headers["x-api-key"] == "dotenv-exa-key"
 
 
 def test_request_shape_and_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,6 +160,7 @@ def test_request_shape_and_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["numResults"] == NUM_RESULTS
     assert body["includeDomains"] == list(ATS_INCLUDE_DOMAINS)
     assert body["startPublishedDate"] == "2026-09-15T00:00:00Z"
+    assert body["userLocation"] == "US"
     assert body["contents"] == {"text": {"maxCharacters": EXA_TEXT_MAX_CHARACTERS}}
 
     assert len(rows) == 2
@@ -206,7 +271,15 @@ def test_every_emitted_row_round_trips_through_json(monkeypatch: pytest.MonkeyPa
     assert lever_row.title == "https://jobs.lever.co/beta/abcde"
 
 
-def test_omits_start_published_date_when_not_set(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sends_rolling_window_cutoff_when_no_fixed_date_is_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Q1 (v0.1.9): ``startPublishedDate`` used to be omitted when
+    ``published_after`` was unset; it is now ALWAYS sent, as the rolling
+    window's cutoff (``filters.published_cutoff``: ``now - max_age_days``,
+    default 60 days). The exact value is pinned in ``test_rolling_window.py``
+    (injected ``now``); here: present, ``Z``-suffixed, and ~60 days back."""
+
+    from datetime import datetime, timedelta, timezone
+
     monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "secret-exa-key")
     captured: list[httpx.Request] = []
 
@@ -214,10 +287,57 @@ def test_omits_start_published_date_when_not_set(monkeypatch: pytest.MonkeyPatch
         captured.append(request)
         return httpx.Response(200, json={"results": []})
 
+    before = datetime.now(timezone.utc)
     ExaSearchClient().search(_client(handler), _config(published_after=None))
+    after = datetime.now(timezone.utc)
 
     body = json.loads(captured[0].content)
-    assert "startPublishedDate" not in body
+    sent = body["startPublishedDate"]
+    assert sent.endswith("Z")
+    parsed = datetime.fromisoformat(sent.replace("Z", "+00:00"))
+    assert before - timedelta(days=60) <= parsed <= after - timedelta(days=60)
+
+
+def test_omits_user_location_when_countries_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "secret-exa-key")
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config(countries=()))
+
+    body = json.loads(captured[0].content)
+    assert "userLocation" not in body
+
+
+def test_omits_user_location_when_multiple_countries(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "secret-exa-key")
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config(countries=("US", "CA")))
+
+    body = json.loads(captured[0].content)
+    assert "userLocation" not in body
+
+
+def test_sends_user_location_for_single_country(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "secret-exa-key")
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config(countries=("GB",)))
+
+    body = json.loads(captured[0].content)
+    assert body["userLocation"] == "GB"
 
 
 def test_multiple_merged_queries_issue_one_request_each(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -238,7 +358,7 @@ def test_multiple_merged_queries_issue_one_request_each(monkeypatch: pytest.Monk
     assert queries == {"software engineer", "platform engineer"}
 
 
-@pytest.mark.parametrize("status_code", [400, 401, 429, 500, 503])
+@pytest.mark.parametrize("status_code", [400, 401, 402, 429, 500, 503])
 def test_http_error_status_raises_redacted_error(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None:
     monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "super-secret-value")
 
@@ -249,7 +369,42 @@ def test_http_error_status_raises_redacted_error(monkeypatch: pytest.MonkeyPatch
         ExaSearchClient().search(_client(handler), _config())
 
     assert excinfo.value.code == f"exa_http_{status_code}"
+    assert str(status_code) in str(excinfo.value)
     assert "super-secret-value" not in str(excinfo.value)
+    assert "x-api-key" not in str(excinfo.value).lower()
+
+
+def test_402_error_names_payment_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "super-secret-value")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(402, json={"error": "payment required"})
+
+    with pytest.raises(ExaClientError) as excinfo:
+        ExaSearchClient().search(_client(handler), _config())
+
+    assert excinfo.value.code == "exa_http_402"
+    message = str(excinfo.value)
+    assert "402" in message
+    assert "payment required" in message.lower()
+    assert "out of credits" in message.lower()
+    assert "super-secret-value" not in message
+
+
+def test_429_error_names_rate_limited(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(EXA_API_KEY_ENV_VAR, "super-secret-value")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": "slow down"})
+
+    with pytest.raises(ExaClientError) as excinfo:
+        ExaSearchClient().search(_client(handler), _config())
+
+    assert excinfo.value.code == "exa_http_429"
+    message = str(excinfo.value)
+    assert "429" in message
+    assert "rate limited" in message.lower()
+    assert "super-secret-value" not in message
 
 
 def test_bad_json_response_raises_redacted_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -276,6 +431,49 @@ def test_missing_results_key_raises_redacted_error(monkeypatch: pytest.MonkeyPat
 
     assert excinfo.value.code == "exa_bad_json"
     assert "super-secret-value" not in str(excinfo.value)
+
+
+def test_search_uses_key_from_explicit_home_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # P1-8: `search()` must look up the key under the caller's explicit
+    # home_root, not the default GIGAI_HOME/~/.gigai fallback -- proved by
+    # pointing GIGAI_HOME at a decoy home that never has the key.
+    monkeypatch.delenv(EXA_API_KEY_ENV_VAR, raising=False)
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path / "decoy-home"))
+    chosen_home = tmp_path / "chosen-home"
+    secrets_store.set(EXA_API_KEY_ENV_VAR, "chosen-home-key", home_root=chosen_home)
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    ExaSearchClient().search(_client(handler), _config(), home_root=chosen_home)
+
+    assert len(captured) == 1
+    assert captured[0].headers["x-api-key"] == "chosen-home-key"
+
+
+def test_search_without_home_root_ignores_other_homes_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Backward compatibility: omitting home_root keeps today's behavior
+    # (env, then the default GIGAI_HOME) -- a key stashed under some other
+    # explicit home is not found.
+    monkeypatch.delenv(EXA_API_KEY_ENV_VAR, raising=False)
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path / "default-home"))
+    other_home = tmp_path / "other-home"
+    secrets_store.set(EXA_API_KEY_ENV_VAR, "other-home-key", home_root=other_home)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("no HTTP request should be made without an API key")
+
+    with pytest.raises(ExaClientError) as excinfo:
+        ExaSearchClient().search(_client(handler), _config())
+
+    assert excinfo.value.code == "exa_missing_key"
 
 
 def test_transport_failure_raises_redacted_error(monkeypatch: pytest.MonkeyPatch) -> None:

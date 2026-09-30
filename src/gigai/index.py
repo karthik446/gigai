@@ -12,6 +12,7 @@ import time
 from typing import Iterator
 
 from .canonical import canonical_json_bytes, parse_json_bytes, parse_json_front_matter
+from .workpad import ensure_run_local_artifact_excludes
 
 
 class JournalIndexError(RuntimeError):
@@ -68,6 +69,21 @@ def _authoritative_projection(
     """Replay committed journal authority into one deterministic projection."""
 
     if require_clean:
+        # Repair first: an existing workpad from before RUN_LOCAL_ARTIFACT_EXCLUDES
+        # existed (or one whose runs/*/raw or runs/*/progress predate this
+        # exclude) must not be permanently stuck divergent. This only ever adds
+        # missing lines to the untracked .git/info/exclude -- never rewrites the
+        # tracked .gitignore contract, never touches journal/commit content --
+        # and does no journal/database locking of its own, so it's safe ahead
+        # of the clean-authority check below.
+        #
+        # Side effect callers should know about: every `read_index` call --
+        # including `gigai doctor`'s journal.index check and the start of
+        # every `run.py`/`occurrence.py` operation -- can now write to
+        # `.git/info/exclude` on disk. `gigai doctor` is not a strictly
+        # read-only command as a result; the only writes it (transitively)
+        # performs are these additive exclude-line repairs.
+        ensure_run_local_artifact_excludes(root)
         _require_clean_authority(root)
     commits = tuple(
         line

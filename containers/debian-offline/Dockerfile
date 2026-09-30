@@ -10,7 +10,7 @@ RUN apt-get update \
 
 WORKDIR /workspace
 
-COPY --chown=gigai:gigai LICENSE MANIFEST.in README.md pyproject.toml uv.lock ./
+COPY --chown=gigai:gigai CHANGELOG.md LICENSE MANIFEST.in README.md pyproject.toml uv.lock ./
 COPY --chown=gigai:gigai docs ./docs
 COPY --chown=gigai:gigai research ./research
 COPY --chown=gigai:gigai src ./src

@@ -1,0 +1,392 @@
+{
+  "cap_dollars": null,
+  "effort": "low",
+  "latency_seconds": 29.515,
+  "request": {
+    "effort": "low",
+    "exclusion_count": 3,
+    "outputSchema": {
+      "properties": {
+        "companies": {
+          "items": {
+            "properties": {
+              "ats_provider": {
+                "enum": [
+                  "greenhouse",
+                  "lever",
+                  "ashby",
+                  "other",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "board_token": {
+                "type": "string"
+              },
+              "careers_url": {
+                "format": "uri",
+                "type": "string"
+              },
+              "company": {
+                "type": "string"
+              },
+              "source": {
+                "format": "uri",
+                "type": "string"
+              },
+              "sponsorship": {
+                "enum": [
+                  "yes",
+                  "no",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "sponsorship_evidence": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "company",
+              "careers_url",
+              "ats_provider",
+              "sponsorship",
+              "sponsorship_evidence",
+              "source"
+            ],
+            "type": "object"
+          },
+          "maxItems": 15,
+          "type": "array"
+        }
+      },
+      "required": [
+        "companies"
+      ],
+      "type": "object"
+    },
+    "query": "Find US companies hiring for staff or senior backend engineer roles (remote or Denver, Colorado area) that use Greenhouse, Lever, or Ashby as their applicant tracking system AND are documented to sponsor US work visas (H-1B). Only return companies where you can identify the company's OWN job board base URL on one of these three platforms (e.g. https://boards.greenhouse.io/<company>, https://jobs.lever.co/<company>, or https://jobs.ashbyhq.com/<company> -- the board root, not a link to a specific job posting or a third-party aggregator like LinkedIn, Indeed, or another job site). Skip a company if you cannot find its own board URL on one of those three ATS platforms. For each company give: the company name, the exact board URL, the ATS provider, and visa sponsorship evidence with a source URL (an H-1B filing record, careers page, or job posting). Exclude: Coupang, ClickHouse, Gen Digital."
+  },
+  "response": {
+    "completedAt": "2026-09-24T04:03:14.715Z",
+    "costDollars": {
+      "agentCompute": 0.01,
+      "emails": 0,
+      "phoneNumbers": 0,
+      "search": 0.015,
+      "total": 0.025
+    },
+    "createdAt": "2026-09-24T04:02:47.026Z",
+    "id": "agent_run_0ccd6a730d60497791e584695e215009",
+    "object": "agent_run",
+    "output": {
+      "grounding": [
+        {
+          "citations": [
+            {
+              "title": "Profound careers",
+              "url": "https://www.tryprofound.com/careers"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[0].careers_url"
+        },
+        {
+          "citations": [
+            {
+              "title": "Software Engineer, Backend at Profound",
+              "url": "https://jobs.ashbyhq.com/profound/043bb5b3-3f78-45d8-a115-fb10f4ed3b09"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[0].ats_provider"
+        },
+        {
+          "citations": [
+            {
+              "title": "Software Engineer, Fullstack",
+              "url": "https://www.tryprofound.com/careers/9b429dfb-bb80-4bd6-b996-e5dd3a96908e"
+            },
+            {
+              "title": "Profound H-1B company data",
+              "url": "https://bluedoor.sh/data/h1b-jobs/companies/profound"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[0].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "Grafana Labs careers",
+              "url": "https://grafana.com/careers/"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[1].careers_url"
+        },
+        {
+          "citations": [
+            {
+              "title": "Staff Backend Engineer at Grafana Labs",
+              "url": "https://job-boards.greenhouse.io/grafanalabs/jobs/6114603004"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[1].ats_provider"
+        },
+        {
+          "citations": [
+            {
+              "title": "Grafana Labs H-1B company data",
+              "url": "https://bluedoor.sh/data/h1b-jobs/companies/grafana-labs"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[1].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "Palantir Backend Software Engineer",
+              "url": "https://jobs.lever.co/palantir/fb2d3222-dbd8-4e03-8d39-47b820e9509c"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[2].ats_provider"
+        },
+        {
+          "citations": [
+            {
+              "title": "Palantir Technologies H-1B cases",
+              "url": "https://www.ellis.com/visa-sponsors/palantir-technologies-inc/h1b"
+            },
+            {
+              "title": "Palantir Senior Backend Software Engineer application",
+              "url": "https://jobs.lever.co/palantir/b5ad6660-8145-4be5-a7b5-cd60c8a45cdb/apply"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[2].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "Z\u016bm Senior Engineer, Backend Platform",
+              "url": "https://jobs.lever.co/ridezum/d458798c-7ab9-4979-bd5c-f791787e11d4/apply"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[3].ats_provider"
+        },
+        {
+          "citations": [
+            {
+              "title": "Z\u016bm H-1B cases",
+              "url": "https://www.ellis.com/visa-sponsors/zum-services-inc/h1b"
+            },
+            {
+              "title": "Z\u016bm Staff Engineer, Backend Platform application",
+              "url": "https://jobs.lever.co/ridezum/d02682b6-9e55-43b7-aff3-457af4d61a6a/apply"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[3].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "Instrumentl Senior Backend Engineer",
+              "url": "https://jobs.lever.co/Instrumentl/76f33356-fa76-44fc-9576-6186113ec086/apply"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[4].ats_provider"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Backend Engineer at Instrumentl",
+              "url": "https://www.remoterocketship.com/us/company/instrumentl/jobs/senior-backend-engineer-united-states-remote/"
+            },
+            {
+              "title": "Instrumentl Senior Backend Engineer application",
+              "url": "https://jobs.lever.co/Instrumentl/76f33356-fa76-44fc-9576-6186113ec086/apply"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[4].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "NimbleRx engineering job",
+              "url": "https://jobs.lever.co/nimblerx/c58f29bc-8086-472a-b548-c1be2bbc7aa9/apply"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[5].ats_provider"
+        },
+        {
+          "citations": [
+            {
+              "title": "NimbleRx H-1B cases",
+              "url": "https://www.ellis.com/visa-sponsors/nimblerx-inc/h1b"
+            },
+            {
+              "title": "NimbleRx engineering application",
+              "url": "https://jobs.lever.co/nimblerx/c58f29bc-8086-472a-b548-c1be2bbc7aa9/apply"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[5].sponsorship"
+        }
+      ],
+      "structured": {
+        "companies": [
+          {
+            "ats_provider": "ashby",
+            "board_token": "profound",
+            "careers_url": "https://jobs.ashbyhq.com/profound",
+            "company": "Profound",
+            "source": "https://www.tryprofound.com/careers/9b429dfb-bb80-4bd6-b996-e5dd3a96908e",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "The company\u2019s backend software-engineer posting states that it supports visa sponsorship for qualified international candidates; separate DOL-derived records document H-1B LCA filings, including software-engineer roles."
+          },
+          {
+            "ats_provider": "greenhouse",
+            "board_token": "grafanalabs",
+            "careers_url": "https://job-boards.greenhouse.io/grafanalabs",
+            "company": "Grafana Labs",
+            "source": "https://bluedoor.sh/data/h1b-jobs/companies/grafana-labs",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "Grafana Labs has documented DOL H-1B LCA filings, including a Senior Security Engineer filing; its current Staff Backend Engineer role is a US-remote engineering position."
+          },
+          {
+            "ats_provider": "lever",
+            "board_token": "palantir",
+            "careers_url": "https://jobs.lever.co/palantir",
+            "company": "Palantir Technologies",
+            "source": "https://www.ellis.com/visa-sponsors/palantir-technologies-inc/h1b",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "Palantir\u2019s Senior Backend Software Engineer application explicitly asks whether the candidate will require employment-visa sponsorship, including H-1B; DOL-derived records document hundreds of H-1B LCAs, including Software Engineer roles."
+          },
+          {
+            "ats_provider": "lever",
+            "board_token": "ridezum",
+            "careers_url": "https://jobs.lever.co/ridezum",
+            "company": "Z\u016bm",
+            "source": "https://www.ellis.com/visa-sponsors/zum-services-inc/h1b",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "Z\u016bm has active Staff Engineer, Backend Platform and Senior Engineer, Backend Platform postings whose applications address H-1B sponsorship; DOL-derived records document 58 H-1B LCAs, including Senior Engineer, Backend Platform."
+          },
+          {
+            "ats_provider": "lever",
+            "board_token": "Instrumentl",
+            "careers_url": "https://jobs.lever.co/Instrumentl",
+            "company": "Instrumentl",
+            "source": "https://www.remoterocketship.com/us/company/instrumentl/jobs/senior-backend-engineer-united-states-remote/",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "Instrumentl has a current Senior Backend Engineer role advertised for US/Canada remote work, and its application asks about employment-visa sponsorship including H-1B; an independent job listing documents that the company has sponsored H-1B visas in the past."
+          },
+          {
+            "ats_provider": "lever",
+            "board_token": "nimblerx",
+            "careers_url": "https://jobs.lever.co/nimblerx",
+            "company": "NimbleRx",
+            "source": "https://www.ellis.com/visa-sponsors/nimblerx-inc/h1b",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "NimbleRx\u2019s Lever engineering applications address H-1B sponsorship, and DOL-derived records document 13 H-1B LCAs, including Software Engineer and Senior Engineer roles."
+          }
+        ]
+      },
+      "text": "Identified six US companies with qualifying staff or senior backend-engineering hiring evidence, an identifiable Greenhouse, Lever, or Ashby board root, and documented H-1B sponsorship history or sponsorship evidence. Roles and postings are time-sensitive as of 2026-09-24; an H-1B filing history does not guarantee sponsorship for a particular requisition."
+    },
+    "request": {
+      "effort": "low",
+      "input": {
+        "exclusion": [
+          {
+            "company": "Coupang"
+          },
+          {
+            "company": "ClickHouse"
+          },
+          {
+            "company": "Gen Digital"
+          }
+        ]
+      },
+      "outputSchema": {
+        "properties": {
+          "companies": {
+            "items": {
+              "properties": {
+                "ats_provider": {
+                  "enum": [
+                    "greenhouse",
+                    "lever",
+                    "ashby",
+                    "other",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "board_token": {
+                  "type": "string"
+                },
+                "careers_url": {
+                  "format": "uri",
+                  "type": "string"
+                },
+                "company": {
+                  "type": "string"
+                },
+                "source": {
+                  "format": "uri",
+                  "type": "string"
+                },
+                "sponsorship": {
+                  "enum": [
+                    "yes",
+                    "no",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "sponsorship_evidence": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "company",
+                "careers_url",
+                "ats_provider",
+                "sponsorship",
+                "sponsorship_evidence",
+                "source"
+              ],
+              "type": "object"
+            },
+            "maxItems": 15,
+            "type": "array"
+          }
+        },
+        "required": [
+          "companies"
+        ],
+        "type": "object"
+      },
+      "query": "Find US companies hiring for staff or senior backend engineer roles (remote or Denver, Colorado area) that use Greenhouse, Lever, or Ashby as their applicant tracking system AND are documented to sponsor US work visas (H-1B). Only return companies where you can identify the company's OWN job board base URL on one of these three platforms (e.g. https://boards.greenhouse.io/<company>, https://jobs.lever.co/<company>, or https://jobs.ashbyhq.com/<company> -- the board root, not a link to a specific job posting or a third-party aggregator like LinkedIn, Indeed, or another job site). Skip a company if you cannot find its own board URL on one of those three ATS platforms. For each company give: the company name, the exact board URL, the ATS provider, and visa sponsorship evidence with a source URL (an H-1B filing record, careers page, or job posting). Exclude: Coupang, ClickHouse, Gen Digital."
+    },
+    "status": "completed",
+    "stopReason": "schema_satisfied",
+    "usage": {
+      "agentComputeUnits": 0.1,
+      "emails": 0,
+      "phoneNumbers": 0,
+      "searches": 3
+    }
+  },
+  "run_label": "low_strict_v4_boardurl"
+}

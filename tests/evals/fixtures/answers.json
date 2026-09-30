@@ -1,0 +1,118 @@
+{
+ "schema": "gigai-tailor-eval-answers:1",
+ "notes": "Q3 (v0.1.9): per resume, one fixed answer for every expected_question_id labels.csv lists for that resume, so the tailor eval exercises answer refs (A <question_id>) as citable sources. Answers are fixed text written by the packet author, not model output; a negative answer is a fact the model must not cite as a claim (the judge's job to catch). assess-prompt-v3 (2026-09-25): question_ids are in normalize_question_id canonical form, matching labels.csv (a label equals its own normalization).",
+ "answers": {
+  "cf-analytics-engineer-pl": [],
+  "cf-analytics-intern-sf": [],
+  "cf-principal-sre-us": [],
+  "cf-senior-analytics-engineer-us": [],
+  "cf-senior-backend-auth-ca": [],
+  "cf-senior-ml-fraud-ca": [],
+  "r1-ml-staff": [
+   {
+    "question_id": "tooling:lifecycle_ml",
+    "answer": "Yes. I have used MLflow for experiment tracking and model registry, and Kubeflow pipelines for training jobs."
+   },
+   {
+    "question_id": "tooling:ai_developer",
+    "answer": "Yes, I use AI coding assistants daily for drafting code and reviewing diffs."
+   }
+  ],
+  "r2-fullstack-staff": [
+   {
+    "question_id": "years:analytics_cross_functional",
+    "answer": "About four years working with product and analytics partners on experiments."
+   },
+   {
+    "question_id": "skill:advanced_python",
+    "answer": "Yes: async services, typing, packaging and profiling in Python."
+   },
+   {
+    "question_id": "skill:experimentation_statistical",
+    "answer": "Yes, I have designed and analyzed A/B tests with a data science partner."
+   },
+   {
+    "question_id": "language:kotlin_or_python",
+    "answer": "Python: yes, it is my primary language. Kotlin: no."
+   }
+  ],
+  "r3-backend-senior": [
+   {
+    "question_id": "cloud:aws",
+    "answer": "Yes, I have run production services on AWS (EC2, S3, RDS)."
+   },
+   {
+    "question_id": "tooling:experimentation_platforms",
+    "answer": "No hands-on experience with a dedicated experimentation platform."
+   },
+   {
+    "question_id": "database:mysql",
+    "answer": "Some: MySQL for a reporting service; most of my work has been on PostgreSQL."
+   },
+   {
+    "question_id": "pattern:backend_for_frontend",
+    "answer": "Yes, I built a backend-for-frontend layer for a mobile client."
+   },
+   {
+    "question_id": "language:kotlin_or_python",
+    "answer": "Python: yes, it is my primary language. Kotlin: no."
+   }
+  ],
+  "r4-dataeng-senior": [
+   {
+    "question_id": "skill:ml_models_statistical",
+    "answer": "Yes, I have built regression and gradient-boosted models for forecasting pipelines."
+   },
+   {
+    "question_id": "skill:causal_experiments_inference",
+    "answer": "Some: I have analyzed A/B tests and one difference-in-differences study with a data science partner."
+   },
+   {
+    "question_id": "tooling:deployment_ml_model",
+    "answer": "Yes, I have deployed batch-scoring models as scheduled jobs in a data pipeline."
+   },
+   {
+    "question_id": "workflow:git_pull_requests",
+    "answer": "Yes, every change I ship goes through Git pull requests with review."
+   },
+   {
+    "question_id": "location:francisco_san",
+    "answer": "No. I work fully remote and cannot be in the San Francisco office for a hybrid schedule."
+   }
+  ],
+  "r5-platform-sre-senior": [
+   {
+    "question_id": "language:cpp_go_java",
+    "answer": "Go: yes, daily. Java and C++: no."
+   },
+   {
+    "question_id": "industry:infrastructure_trading",
+    "answer": "No trading-infrastructure experience."
+   },
+   {
+    "question_id": "years:backend_systems",
+    "answer": "Seven years building backend systems in production."
+   },
+   {
+    "question_id": "location:austin_in_london_office_seattle",
+    "answer": "No, I cannot work in-office in Austin, Seattle or London."
+   },
+   {
+    "question_id": "tooling:bare_metal_provisioning",
+    "answer": "Yes, I have provisioned bare-metal hosts with PXE boot and Ansible."
+   },
+   {
+    "question_id": "eligible:control_export_us",
+    "answer": "Yes, I am a US person for export-control purposes."
+   },
+   {
+    "question_id": "seniority:principal",
+    "answer": "I have not held a principal title; my current level is senior."
+   },
+   {
+    "question_id": "language:go_python_ruby",
+    "answer": "Go and Python: yes. Ruby: no."
+   }
+  ]
+ }
+}

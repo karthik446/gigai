@@ -20,6 +20,7 @@ from tests.scenarios import (
     ScenarioSpec,
     copy_fixture_repository,
 )
+from tests.support.latency import latency_bound
 
 
 _SETUP_REMOTE_MODEL_ARGS = (
@@ -32,6 +33,17 @@ _SETUP_REMOTE_MODEL_ARGS = (
     "--create-model-target",
     "remote",
 )
+
+# compat-macos312: a successful init journals every bundled default instance
+# into its private workpad repository, about 187 git subprocesses. Measured on
+# an unloaded developer Mac it takes 2.6 s (Python 3.13) to 3.4 s (3.12); every
+# other installed scenario takes about a second. Under CPU contention the same
+# work finished in 16-18 s, past the harness's 10 s default, which is how it
+# timed out on shared CI runners. 30 s gives it the ~9x headroom the default
+# gives the others; the harness widens it by GIGAI_TEST_LATENCY_SCALE on CI.
+_FULL_INIT_TIMEOUT_SECONDS = 30.0
+# Two racing inits run one after the other behind the target init lock.
+_CONCURRENT_INIT_TIMEOUT_SECONDS = 2 * _FULL_INIT_TIMEOUT_SECONDS
 
 
 @pytest.fixture
@@ -148,6 +160,7 @@ def test_installed_git_init_has_exact_path_free_delta_and_idempotent_rerun(
             expected_home_changes=frozenset({"registry.sqlite"}),
             allowed_target_change_prefixes=(".gigai/packages", "@git"),
             allowed_subprocesses=(_git_executable(),),
+            timeout_seconds=_FULL_INIT_TIMEOUT_SECONDS,
         )
     )
     binding_bytes = (roots.target / ".gigai" / "project.toml").read_bytes()
@@ -157,6 +170,7 @@ def test_installed_git_init_has_exact_path_free_delta_and_idempotent_rerun(
             name="git-init-rerun",
             argv=("init", "--username", "installed-scenario", "--json"),
             allowed_subprocesses=(_git_executable(),),
+            timeout_seconds=_FULL_INIT_TIMEOUT_SECONDS,
         )
     )
 
@@ -204,6 +218,7 @@ def test_installed_init_preserves_dirty_python_and_non_python_targets(
             expected_home_changes=frozenset({"registry.sqlite"}),
             allowed_target_change_prefixes=(".gigai/packages", "@git"),
             allowed_subprocesses=(_git_executable(),),
+            timeout_seconds=_FULL_INIT_TIMEOUT_SECONDS,
         )
     )
 
@@ -234,6 +249,7 @@ def test_installed_explicit_non_git_init_is_registry_only(
             expected_home_changes=frozenset({"registry.sqlite"}),
             allowed_target_change_prefixes=(".gigai/packages",),
             allowed_subprocesses=(_git_executable(),),
+            timeout_seconds=_FULL_INIT_TIMEOUT_SECONDS,
         )
     )
 
@@ -531,7 +547,10 @@ def test_two_installed_init_processes_converge_without_lock_or_duplicate(
         )
         for _ in range(2)
     ]
-    completed = [process.communicate(timeout=15) for process in processes]
+    completed = [
+        process.communicate(timeout=latency_bound(_CONCURRENT_INIT_TIMEOUT_SECONDS))
+        for process in processes
+    ]
 
     assert [process.returncode for process in processes] == [0, 0]
     payloads = [json.loads(stdout) for stdout, _ in completed]

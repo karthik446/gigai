@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping
 
 from ..config import CredentialReference, GigAIConfig
@@ -64,8 +65,17 @@ def resolve_model_adapter(
     *,
     executable_overrides: Mapping[str, str] | None = None,
     transport_overrides: Mapping[str, object] | None = None,
+    home_root: Path | None = None,
 ) -> ModelAdapterBinding:
-    """Resolve ``configuration -> target -> endpoint -> concrete adapter``."""
+    """Resolve ``configuration -> target -> endpoint -> concrete adapter``.
+
+    ``home_root`` (P1-8 follow-up) selects which operator home's secrets
+    store a remote (``openai_api``/``openrouter_api``) adapter's credential
+    resolver falls back to when the environment variable isn't set; it has
+    no effect on ``deterministic``/``codex_cli``/``claude_cli``/
+    ``ollama_local`` targets (none resolve a credential). Omitting it keeps
+    today's default resolver (env, then the default home).
+    """
 
     target = resolve_model_target(config, target_name)
     endpoint = target.endpoint
@@ -109,6 +119,7 @@ def resolve_model_adapter(
             port=OpenAIAPIAdapter(
                 credential=credential,
                 base_url=endpoint.base_url,
+                home_root=home_root,
             ),
         )
     if endpoint.adapter == "openrouter_api":
@@ -117,6 +128,7 @@ def resolve_model_adapter(
             port=OpenRouterAPIAdapter(
                 credential=credential,
                 base_url=endpoint.base_url,
+                home_root=home_root,
             ),
         )
     raise AdapterFactoryError(

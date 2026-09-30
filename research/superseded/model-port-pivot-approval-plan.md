@@ -128,6 +128,7 @@ Implementation begins only after those contracts are reviewed and committed.
 ## Retention
 
 This is an approved planning record, not a durable implementation contract. It
-remains under `docs/development/plans/` while G11 is in progress. When G11
+remains in the dev-docs `plans/` area (kept in the maintainers' local
+orchestrator docs) while G11 is in progress. When G11
 completes, move it with G11's durable evidence so the active development root
 contains only current contracts and evidence.

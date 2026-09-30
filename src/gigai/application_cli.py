@@ -17,6 +17,29 @@ def application_group():
     """Record and inspect journal-authoritative application history."""
 
 
+def _normalized_external_ref(data):
+    """``data`` with an http(s) ``external_ref`` normalized; anything else verbatim.
+
+    uat-bug-018: Scout joins an event to a posting by exact match on the
+    posting's normalized URL, so a URL typed with a tracking parameter or a
+    trailing slash would never join. A ref that is not an http(s) URL (a
+    pasted posting's ``text:sha256:...``, any other opaque string), or a URL
+    the normalizer refuses, is recorded as given.
+    """
+    ref = data.get("external_ref") if isinstance(data, dict) else None
+    if not isinstance(ref, str) or not ref.lower().startswith(("http://", "https://")):
+        return data
+    # Imported here: the posting URL rule is Scout's, and only this command
+    # needs it.
+    from .scout.find_jobs.contracts import normalize_url
+
+    try:
+        normalized = normalize_url(ref)
+    except ValueError:
+        return data
+    return {**data, "external_ref": normalized}
+
+
 def _emit(payload, as_json):
     click.echo(
         json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -39,7 +62,7 @@ def _emit(payload, as_json):
 @click.option("--json", "as_json", is_flag=True)
 def record(gig, input_path, confirm, target, home, as_json):
     try:
-        data = parse_json_bytes(input_path.read_bytes())
+        data = _normalized_external_ref(parse_json_bytes(input_path.read_bytes()))
         resolved = resolve_workpad(
             home_root=home or default_home_root(),
             requested_target=target,

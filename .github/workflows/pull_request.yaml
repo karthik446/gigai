@@ -38,6 +38,9 @@ jobs:
     name: Detect implementation changes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
       code_changed: ${{ steps.detect.outputs.code_changed }}
     steps:
@@ -48,38 +51,15 @@ jobs:
       - id: detect
         env:
           EVENT_NAME: ${{ github.event_name }}
+          PR_ACTION: ${{ github.event.action }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
           PROFILE: ${{ inputs.profile || 'pr' }}
           SHA: ${{ github.sha }}
-        run: |
-          if [ "${PROFILE}" != "pr" ]; then
-            code_changed=true
-            changed="${PROFILE} compatibility profile"
-          elif [ "${EVENT_NAME}" = "pull_request" ]; then
-            changed="$(git diff --name-only "${BASE_SHA}...${SHA}")"
-            code_changed=false
-            if [ -n "${changed}" ]; then
-              while IFS= read -r path; do
-                case "${path}" in
-                  *.md|*.markdown) ;;
-                  *) code_changed=true; break ;;
-                esac
-              done <<< "${changed}"
-            fi
-          else
-            changed="$(git diff --name-only "${SHA}^" "${SHA}")"
-            code_changed=false
-            if [ -n "${changed}" ]; then
-              while IFS= read -r path; do
-                case "${path}" in
-                  *.md|*.markdown) ;;
-                  *) code_changed=true; break ;;
-                esac
-              done <<< "${changed}"
-            fi
-          fi
-          echo "code_changed=${code_changed}" >> "${GITHUB_OUTPUT}"
-          echo "implementation changes: ${code_changed}"
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          WORKFLOW_FILE: pull_request.yaml
+        run: python3 tools/ci_changes.py
 
   source-matrix:
     needs: changes
@@ -93,38 +73,86 @@ jobs:
       - id: matrix
         env:
           PROFILE: ${{ inputs.profile || 'pr' }}
+          # ci-shard-suite: every OS x Python entry below runs as this many
+          # source-tests jobs. The only place the number is written: each
+          # job's name and GIGAI_TEST_SHARDS read it back from the matrix.
+          SHARDS: "4"
         run: |
           case "${PROFILE}" in
             pr)
-              include='[{"os":"ubuntu-24.04","python":"3.11"}]'
+              entries='[{"os":"ubuntu-24.04","python":"3.11"}]'
               ;;
             release)
               # Operator: everyone uses macOS, so that's the one to test at
               # release; the broad matrix runs nightly / post-release instead.
-              include='[{"os":"macos-latest","python":"3.12"},{"os":"ubuntu-24.04","python":"3.12"}]'
+              entries='[{"os":"macos-latest","python":"3.12"},{"os":"ubuntu-24.04","python":"3.12"}]'
               ;;
             full)
-              include='[{"os":"ubuntu-24.04","python":"3.11"},{"os":"ubuntu-24.04","python":"3.12"},{"os":"ubuntu-24.04","python":"3.13"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.12"},{"os":"macos-latest","python":"3.13"}]'
+              entries='[{"os":"ubuntu-24.04","python":"3.11"},{"os":"ubuntu-24.04","python":"3.12"},{"os":"ubuntu-24.04","python":"3.13"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.12"},{"os":"macos-latest","python":"3.13"}]'
               ;;
             *)
               echo "unknown profile: ${PROFILE}" >&2
               exit 1
               ;;
           esac
+          # The runner's own python3, as in the changes job: no checkout here.
+          include="$(ENTRIES="${entries}" python3 -c '
+          import json, os
+          shards = int(os.environ["SHARDS"])
+          include = [
+              {**entry, "shard": shard, "shards": shards}
+              for entry in json.loads(os.environ["ENTRIES"])
+              for shard in range(1, shards + 1)
+          ]
+          print(json.dumps(include, separators=(",", ":")))
+          ')"
           echo "include=${include}" >> "${GITHUB_OUTPUT}"
 
   source-tests:
     needs: source-matrix
-    name: Source suite (Python ${{ matrix.python }} on ${{ matrix.os }})
+    name: All tests (source) (Python ${{ matrix.python }} on ${{ matrix.os }}, shard ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45  # measured 2026-09-23: ubuntu 16.4m, macOS >20m (20 killed the v0.1.8 release)
+    # measured 2026-09-23: ubuntu 16.4m, macOS >20m (20 killed the v0.1.8 release).
+    # measured 2026-09-28 (run 36389735708, 'full' profile on b9b4c02): all three
+    # macOS jobs were cancelled by the 45-minute timeout at ~78% with zero
+    # failures, so macOS needs ~60m; ubuntu finished green inside 45.
+    # ci-shard-suite: those are whole-suite times. Each job now runs one of
+    # 4 shards. uat-bug-037, measured per shard on run 36591142550 ('full'
+    # profile on 07c0234): macOS max 25.4m (3.13 shard 4), ubuntu max 10.5m
+    # (3.12 shard 4). Each limit is the smallest multiple of 5 that is at
+    # least twice its OS's slowest shard: macOS 55 (2 x 25.4 = 50.8), ubuntu
+    # 25 (2 x 10.5 = 21).
+    timeout-minutes: ${{ contains(matrix.os, 'macos') && 55 || 25 }}
     env:
+      # ci-shard-suite: tests/conftest.py keeps only the test files whose
+      # path hashes into this shard (tests/support/sharding.py); xdist then
+      # runs inside the shard exactly as it did for the whole suite. Both
+      # unset, as in a developer's own `make test-source`, runs everything.
+      GIGAI_TEST_SHARDS: ${{ matrix.shards }}
+      GIGAI_TEST_SHARD: ${{ matrix.shard }}
+      # ci-shard-suite, measurement only: print each shard's 60 slowest
+      # tests, so shard time can be read per file from the job log. Nothing
+      # else in the source lane passes --durations (`make test-source` runs
+      # pytest with the xdist options alone); selection and xdist are as before.
+      PYTEST_ADDOPTS: "--durations=60"
       TEST_XDIST_WORKERS: auto
       # ubuntu-24.04 runners are 4 vCPU; macos-latest runners are 3 vCPU.
       # _xdist_options() clamps to min(requested, max, os.cpu_count()) anyway,
       # so this cap is a documented ceiling, not the binding constraint.
       TEST_XDIST_MAX_WORKERS: ${{ contains(matrix.os, 'macos') && '3' || '4' }}
       TEST_XDIST_DIST: worksteal
+      # ci-fix-pr37-r2: shared runners are slower/noisier than a laptop --
+      # observed 1.3s against a 1.0s wall-clock latency bound with no code
+      # regression. tests/support/latency.py scales any bound built with
+      # latency_bound() by this factor; it stays 1.0 (no change) everywhere
+      # this var is unset, including a developer's own `make test-source`.
+      # uat-bug-037: macOS runners get 7. A cold GET /api/config is 147 git
+      # launches (tests/behaviors/scout_find_jobs/test_config_latency.py
+      # counts them), and a launch there costs several times what it does on
+      # ubuntu: run 36591142550 measured 3.007s against the 3.0s bound
+      # (1.0s x 3). 7 is the smallest whole scale with 2x headroom over
+      # that (2 x 3.007 = 6.01s). ubuntu stays 3.
+      GIGAI_TEST_LATENCY_SCALE: ${{ contains(matrix.os, 'macos') && '7' || '3' }}
     strategy:
       fail-fast: false
       matrix:
@@ -141,13 +169,13 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - run: uv sync --locked --extra test --python "${{ matrix.python }}"
-      - name: Full source suite
+      - name: Source suite (shard ${{ matrix.shard }}/${{ matrix.shards }})
         run: make test-source
 
   behavior:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true'
-    name: Deterministic G28 behavior evaluation
+    name: Eval scoring check (frozen cases)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -167,7 +195,7 @@ jobs:
   wheel:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true'
-    name: Built-wheel resources
+    name: Wheel install + packaging checks
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -183,6 +211,34 @@ jobs:
           cache-dependency-glob: uv.lock
       - run: uv sync --locked --extra test --python "3.11"
       - run: make test-wheel
+
+  scout-ui-freshness:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
+    name: Scout UI bundle is up to date
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-node@v5
+        with:
+          # No "engines" field in src/gigai/scout/ui/package.json yet; pin to
+          # Node 22 LTS until one is added.
+          node-version: "22"
+      - name: Install UI dependencies
+        working-directory: src/gigai/scout/ui
+        run: yarn --frozen-lockfile install
+      - name: Build UI
+        working-directory: src/gigai/scout/ui
+        run: yarn build
+      - name: Fail if the built bundle differs from the committed one
+        run: |
+          if ! git diff --exit-code src/gigai/scout/ui/dist; then
+            echo "::error::src/gigai/scout/ui/dist is stale; run 'yarn build' in src/gigai/scout/ui and commit the result" >&2
+            exit 1
+          fi
 
   debian-offline:
     needs: changes
@@ -216,4 +272,5 @@ jobs:
           --env GIGAI_AUDIT_HOME=/audit/home
           --env GIGAI_AUDIT_TARGET=/audit/target
           --env GIGAI_AUDIT_WORKPAD=/audit/workpad
+          --env GIGAI_TEST_LATENCY_SCALE=3
           gigai-debian-offline:${{ github.sha }}

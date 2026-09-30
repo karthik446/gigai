@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+import time
 from typing import Any
 
 
@@ -29,6 +30,32 @@ _ALLOWED_WRITE_ROOTS = _paths("GIGAI_HARNESS_ALLOWED_WRITE_ROOTS")
 _FORBIDDEN_READ_ROOTS = _paths("GIGAI_HARNESS_FORBIDDEN_READ_ROOTS")
 _ALLOWED_EXECUTABLES = _paths("GIGAI_HARNESS_ALLOWED_EXECUTABLES")
 _EVENT_LOG = Path(os.environ["GIGAI_HARNESS_GUARD_LOG"])
+_TIMING_LOG = os.environ.get("GIGAI_HARNESS_TIMING_LOG")
+
+
+def _record_spawn(executable: Path) -> None:
+    """Append one permitted spawn to the timing log; never fail the child."""
+
+    if _TIMING_LOG is None:
+        return
+    line = json.dumps(
+        {"at": time.time(), "executable": executable.name, "pid": os.getpid()},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    _STATE.recording = True
+    try:
+        descriptor = os.open(
+            _TIMING_LOG, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600
+        )
+        try:
+            os.write(descriptor, (line + "\n").encode("utf-8"))
+        finally:
+            os.close(descriptor)
+    except OSError:
+        pass
+    finally:
+        _STATE.recording = False
 
 
 def _resolved(value: Any) -> Path | None:
@@ -107,6 +134,8 @@ def _audit(event: str, args: tuple[Any, ...]) -> None:
         executable = _resolved(args[0])
         if executable is None or executable not in _ALLOWED_EXECUTABLES:
             _record_and_deny("undeclared_subprocess", event, executable)
+        else:
+            _record_spawn(executable)
 
     if event in {"os.posix_spawn", "os.posix_spawnp"} and args:
         executable = _resolved(args[0])

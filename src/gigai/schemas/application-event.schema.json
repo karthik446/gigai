@@ -2,13 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:gigai:schema:application-event:1",
   "type": "object", "additionalProperties": false,
-  "required": ["event_id","project_id","gig_id","opportunity_ref","event_kind","occurred_at","timezone","recorded_at","document_refs","notes","supersedes","request_evidence","requested_event_sha256","operation_key","payload_sha256","actor","schema_version"],
+  "required": ["event_id","project_id","gig_id","event_kind","occurred_at","timezone","recorded_at","document_refs","notes","supersedes","request_evidence","requested_event_sha256","operation_key","payload_sha256","actor","schema_version"],
+  "oneOf": [
+    {"required":["opportunity_ref"],"not":{"required":["external_ref"]}},
+    {"required":["external_ref"],"not":{"required":["opportunity_ref"]}}
+  ],
   "properties": {
     "schema_version": {"const":"1.0"},
     "event_id": {"type":"string","pattern":"^event_[0-9a-f-]{36}$"},
     "project_id": {"$ref":"urn:gigai:schema:common:1#/$defs/project_id"},
     "gig_id": {"$ref":"urn:gigai:schema:common:1#/$defs/gig_id"},
     "opportunity_ref": {"type":"string","minLength":1,"maxLength":240},
+    "external_ref": {"type":"string","minLength":1,"maxLength":2048},
     "event_kind": {"enum":["saved","applied","interview_scheduled","offer_received","rejected","withdrawn"]},
     "occurred_at": {"type":"string","format":"date-time"}, "timezone":{"type":"string","minLength":1,"maxLength":80},
     "recorded_at": {"type":"string","format":"date-time"},

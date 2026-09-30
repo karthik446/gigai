@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import ast
+import inspect
+from pathlib import Path
+
 from gigai.application_events import _digest, _scope
 from gigai.canonical import canonical_json_bytes
 from gigai.validators import validate_serialized_contract
@@ -436,3 +440,190 @@ def test_same_key_retry_refuses_inconsistent_committed_receipt_semantically(tmp_
     assert head_after == head_before
     assert (workpad / receipt_path).is_file()
     assert (workpad / event_path).exists() is (mode != "missing-event")
+
+
+def _application_ext(resolved, key, *, external="https://boards.greenhouse.io/acme/jobs/12345", kind="saved", occurred="2026-09-10T12:00:00-06:00", notes=None, documents=None, supersedes=None, event_id=None):
+    data = {"operation_key": key, "external_ref": external, "event_kind": kind, "occurred_at": occurred, "timezone": "America/Denver", "document_refs": documents or [], "notes": notes, "supersedes": supersedes}
+    if event_id is not None:
+        data["event_id"] = event_id
+    return record_application(resolved=resolved, data=data, confirm=True)
+
+
+# --- A1: external_ref (find-jobs postings, no opportunity_ref) ---
+#
+# REQUIRED (1): every core reader of an event's opportunity_ref field, with
+# ONE test per reader for an event carrying only external_ref.
+#
+#   reader                                                          | test
+#   -----------------------------------------------------------------------
+#   application_events._scope (digest scope)                       | test_external_ref_event_records_and_replays_from_disposable_journal
+#   application_events._validate_input (exactly-one-of gate)        | test_both_refs_or_neither_are_rejected_with_typed_codes
+#   application_events.record_application (event assembly)         | test_external_ref_event_records_and_replays_from_disposable_journal
+#   application_events._redeem_documents (scout_document cross-check,
+#     plain document_refs' own opportunity_ref cross-check)         | test_external_ref_event_records_and_replays_from_disposable_journal
+#   application_events.validate_application_links                  | test_external_ref_event_records_and_replays_from_disposable_journal (via read path) + scout projection test
+#   application_events.record_application (supersedes/correction    | test_external_ref_correction_matches_same_external_ref
+#     same-ref check)                                               |
+#   application_events.read_application (grouping/current_status)   | test_external_ref_event_records_and_replays_from_disposable_journal
+
+
+def test_external_ref_event_records_and_replays_from_disposable_journal(tmp_path) -> None:
+    home, target, _project, gig, _workpad, _other = _bound_defaults(tmp_path)
+    request = tmp_path / "application.json"
+    request.write_text(
+        json.dumps(
+            {
+                "operation_key": "a1-cli-external",
+                "external_ref": "https://boards.greenhouse.io/acme/jobs/12345",
+                "event_kind": "applied",
+                "occurred_at": "2026-09-10T12:00:00-06:00",
+                "timezone": "America/Denver",
+                "document_refs": [],
+                "notes": "sent via find-jobs",
+            }
+        )
+    )
+    runner = CliRunner()
+    first = runner.invoke(
+        cli,
+        ["application", "record", "--gig", gig, "--home", str(home), "--target", str(target), "--input", str(request), "--confirm", "--json"],
+    )
+    assert first.exit_code == 0, first.output
+    second = runner.invoke(
+        cli,
+        ["application", "record", "--gig", gig, "--home", str(home), "--target", str(target), "--input", str(request), "--confirm", "--json"],
+    )
+    assert second.exit_code == 0, second.output
+    assert json.loads(second.output)["status"] == "already_recorded"
+    history = runner.invoke(
+        cli,
+        ["application", "status", "--gig", gig, "--home", str(home), "--target", str(target), "--opportunity", "https://boards.greenhouse.io/acme/jobs/12345", "--json"],
+    )
+    assert history.exit_code == 0, history.output
+    payload = json.loads(history.output)
+    assert payload["current_status"] == "applied"
+    assert payload["events"][0]["external_ref"] == "https://boards.greenhouse.io/acme/jobs/12345"
+    assert "opportunity_ref" not in payload["events"][0]
+
+
+def test_old_opportunity_only_events_still_validate_and_read_unchanged(tmp_path) -> None:
+    """(2): a pre-A1 event (opportunity_ref only, no external_ref key at all)
+    still validates against the strict schema and reads back unchanged."""
+    home, target, _project, gig, _workpad, _other = _bound_defaults(tmp_path)
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig, allow_semantic_state=True)
+    result = _application(resolved, "a1-legacy-opportunity")
+    assert result["status"] == "recorded"
+    assert "external_ref" not in result["event"]
+    assert result["event"]["opportunity_ref"] == "opportunity_00000000000000000000000000000001"
+    replayed = read_application(resolved=resolved, opportunity_ref="opportunity_00000000000000000000000000000001")
+    assert replayed["current_status"] == "saved"
+    assert replayed["events"][0]["opportunity_ref"] == "opportunity_00000000000000000000000000000001"
+
+
+def test_both_refs_or_neither_are_rejected_with_typed_codes(tmp_path) -> None:
+    """(3): both present -> application_ref_conflict; neither -> application_ref_missing."""
+    home, target, _project, gig, _workpad, _other = _bound_defaults(tmp_path)
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig, allow_semantic_state=True)
+    base = {"event_kind": "saved", "occurred_at": "2026-09-10T12:00:00-06:00", "timezone": "America/Denver", "document_refs": []}
+    with pytest.raises(ApplicationEventError) as both:
+        record_application(
+            resolved=resolved,
+            data={**base, "operation_key": "a1-both", "opportunity_ref": "opportunity_00000000000000000000000000000001", "external_ref": "https://example.invalid/job"},
+            confirm=True,
+        )
+    assert both.value.code == "application_ref_conflict"
+    with pytest.raises(ApplicationEventError) as neither:
+        record_application(resolved=resolved, data={**base, "operation_key": "a1-neither"}, confirm=True)
+    assert neither.value.code == "application_ref_missing"
+
+
+def test_external_ref_correction_matches_same_external_ref(tmp_path) -> None:
+    home, target, _project, gig, _workpad, _other = _bound_defaults(tmp_path)
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig, allow_semantic_state=True)
+    first = _application_ext(resolved, "a1-corr-first")
+    child = _application_ext(resolved, "a1-corr-child", kind="applied", supersedes=first["event"]["event_id"])
+    assert child["status"] == "recorded"
+    with pytest.raises(ApplicationEventError) as foreign:
+        _application_ext(
+            resolved, "a1-corr-foreign", supersedes=child["event"]["event_id"],
+            external="https://boards.greenhouse.io/other/jobs/999",
+        )
+    assert foreign.value.code == "application_correction_invalid"
+
+
+def test_external_ref_is_bounded_opaque_string(tmp_path) -> None:
+    home, target, _project, gig, _workpad, _other = _bound_defaults(tmp_path)
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig, allow_semantic_state=True)
+    with pytest.raises(ApplicationEventError) as empty:
+        record_application(
+            resolved=resolved,
+            data={"operation_key": "a1-empty", "external_ref": "", "event_kind": "saved", "occurred_at": "2026-09-10T12:00:00-06:00", "timezone": "America/Denver", "document_refs": []},
+            confirm=True,
+        )
+    assert empty.value.code == "application_external_ref_invalid"
+    with pytest.raises(ApplicationEventError) as too_long:
+        record_application(
+            resolved=resolved,
+            data={"operation_key": "a1-too-long", "external_ref": "x" * 2049, "event_kind": "saved", "occurred_at": "2026-09-10T12:00:00-06:00", "timezone": "America/Denver", "document_refs": []},
+            confirm=True,
+        )
+    assert too_long.value.code == "application_external_ref_invalid"
+
+
+def test_application_event_schema_accepts_external_ref_and_still_rejects_both_or_neither() -> None:
+    base = {
+        "schema_version": "1.0", "event_id": "event_00000000-0000-4000-8000-000000000301",
+        "project_id": "project_00000000-0000-4000-8000-000000000001", "gig_id": "gig_00000000-0000-4000-8000-000000000002",
+        "event_kind": "saved", "occurred_at": "2026-09-10T12:00:00-06:00", "timezone": "America/Denver",
+        "recorded_at": "2026-09-10T18:00:00Z", "document_refs": [], "notes": None, "supersedes": None,
+        "request_evidence": {"kind": "direct_event_command", "scope_digest": "sha256:" + "a" * 64, "actor": {"kind": "operator", "id": "local-user"}, "recorded_at": "2026-09-10T18:00:00Z", "command": "gigai application record"},
+        "requested_event_sha256": "sha256:" + "a" * 64, "operation_key": "schema-check", "payload_sha256": "sha256:" + "a" * 64,
+        "actor": {"kind": "operator", "id": "local-user"},
+    }
+    only_external = {**base, "external_ref": "https://boards.greenhouse.io/acme/jobs/1"}
+    assert validate_serialized_contract("application-event.schema.json", canonical_json_bytes(only_external)).valid
+    only_opportunity = {**base, "opportunity_ref": "opportunity_00000000000000000000000000000001"}
+    assert validate_serialized_contract("application-event.schema.json", canonical_json_bytes(only_opportunity)).valid
+    both = {**base, "opportunity_ref": "opportunity_00000000000000000000000000000001", "external_ref": "https://boards.greenhouse.io/acme/jobs/1"}
+    assert not validate_serialized_contract("application-event.schema.json", canonical_json_bytes(both)).valid
+    neither = dict(base)
+    assert not validate_serialized_contract("application-event.schema.json", canonical_json_bytes(neither)).valid
+
+
+def test_core_application_events_has_no_scout_import_and_new_ref_field_names_no_posting_concept() -> None:
+    """(4): application_events.py/its schema never import or name Scout.
+
+    Pre-existing Scout-related strings in this file are out of scope debt
+    (this walks only the module's import statements, and only the new
+    external_ref lines' own text). ast.walk over Import/ImportFrom nodes
+    catches any import shape, not just a literal "gigai.scout" substring.
+    """
+    import gigai.application_events as events_module
+
+    source_file = inspect.getsourcefile(events_module)
+    assert source_file is not None
+    source_path = Path(source_file)
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            assert not any(alias.name == "gigai.scout" or alias.name.startswith("gigai.scout.") for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            assert module != "gigai.scout" and not module.startswith("gigai.scout.")
+
+    banned = ("posting", "scout", "normalized_url")
+    for line in source_path.read_text(encoding="utf-8").splitlines():
+        if "external_ref" not in line and "_ref_field" not in line and "_event_ref" not in line:
+            continue
+        lowered = line.lower()
+        assert not any(word in lowered for word in banned), line
+
+    schema_path = source_path.parent / "schemas" / "application-event.schema.json"
+    schema_text = schema_path.read_text(encoding="utf-8")
+    external_ref_start = schema_text.index('"external_ref"')
+    # The external_ref property value ends at its own closing brace: this
+    # schema is single-line JSON, so bound the slice to that one property.
+    external_ref_end = schema_text.index("}", external_ref_start) + 1
+    external_ref_property = schema_text[external_ref_start:external_ref_end].lower()
+    for word in banned:
+        assert word not in external_ref_property, external_ref_property

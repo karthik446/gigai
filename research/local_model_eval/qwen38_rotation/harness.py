@@ -240,7 +240,7 @@ def run(args: argparse.Namespace) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--report", default="docs/development/evidence/v0.1.7/Scout/QWEN-rotation-trial.md")
+    parser.add_argument("--report", default=".local-reports/Scout/QWEN-rotation-trial.md")
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--overall-timeout", type=int, default=600)
     args = parser.parse_args()

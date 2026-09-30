@@ -1,0 +1,1277 @@
+"""``gigai scout install|resume`` — one-step Scout setup for a bound project.
+
+Each command wraps a sequence that previously required the internal
+``initialize_defaults``/``approve``/``record create`` path by hand (see the
+v0.1.8 UAT log, rows U6/U14/U15): install binds, approves, and activates
+Scout in one call; ``resume add`` imports a resume reference and creates the
+``g45_reference`` record wrapper find-jobs needs, in one call. Both are
+idempotent for the same inputs.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import click
+
+from ..canonical import canonical_json_bytes
+from ..private_records import PrivateRecordError
+from ..setup import default_home_root
+from ..workpad import WorkpadError
+from .find_jobs.contracts import FindJobsConfig, ModelTarget, SourceToggles
+from .find_jobs.discovery import (
+    DiscoveryBudgetExceeded,
+    DiscoveryPrefsError,
+    latest_discovery,
+    load_prefs,
+    run_discovery,
+)
+from .interview_prep import InterviewPrepError, build_prep
+from .resume_import import import_resume_file
+from .target_resolution import ScoutTargetError, _display_path, resolve_scout_target
+from .template import ScoutInstallError, install_scout
+
+if TYPE_CHECKING:
+    from .run_supervisor import OtherScoutServer
+
+
+def _resolved_target(
+    target_value: Path | None,
+    home_root: Path,
+    *,
+    username: str | None = None,
+    as_json: bool = False,
+) -> Path:
+    """Resolve the folder a Scout command should act on.
+
+    Delegates to the shared resolver (``--target``, else ``<home>/scout``,
+    created when missing; the cwd never matters, uat-bug-017) so every
+    ``gigai scout ...`` command shares one resolution order instead of
+    each re-deriving it. Unlike the old per-command helper this always
+    returns a usable path; a genuinely unresolvable case raises
+    ``ScoutTargetError``, which callers catch alongside their other target
+    errors. When resolution creates ``<home>/scout``, prints which username
+    was used, and the first time it sees a Scout project registered
+    elsewhere, a notice naming it (both plain text only -- ``--json`` output
+    stays parseable, and the notice waits for the next plain-text command).
+    """
+
+    def _announce(created: Path, resolved_username: str) -> None:
+        if as_json:
+            return
+        click.echo(f"No Scout target found; created {created} (owner: {resolved_username}).")
+
+    def _notice(message: str) -> None:
+        click.echo(message, err=True)
+
+    return resolve_scout_target(
+        home_root=home_root,
+        requested_target=target_value,
+        requested_username=username,
+        on_created=_announce,
+        notify=None if as_json else _notice,
+    )
+
+
+# uat-bug-033: required: one model target; optional: Exa. A NEW starter config
+# writes sources.exa = false (the bundled company list and board index are the
+# source); Exa is an extra the operator turns on in Settings. An EXISTING
+# find-jobs.json keeps whatever it saved: `sources.exa` is a required key of
+# the contract (never defaulted on read), so no old file changes meaning.
+STARTER_FIND_JOBS_CONFIG = FindJobsConfig(
+    roles=("REPLACE_WITH_YOUR_ROLE (e.g. software engineer)",),
+    merged_queries=("REPLACE_WITH_YOUR_ROLE (e.g. software engineer)",),
+    # uat-bug-028: no location (no area preference) rather than placeholder
+    # text: an area is set in the setup wizard, and the placeholder is
+    # refused on save (and read as no location in an older file).
+    location=None,
+    remote=True,
+    published_after=None,
+    sources=SourceToggles(exa=False, ats=True, hiringcafe=False),
+    # uat-bug-049: the starter's model target is the contract default
+    # (ollama_local, a local target), so its cap is "all" like a new wizard
+    # config with a local target; an existing file is never rewritten.
+    default_assess_cap="all",
+)
+
+
+def _emit(payload: dict[str, object], as_json: bool, plain: str) -> None:
+    click.echo(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")) if as_json else plain
+    )
+
+
+def _fail(exc: Exception, *, as_json: bool, fallback: str) -> None:
+    code = getattr(exc, "code", fallback)
+    if as_json:
+        click.echo(
+            json.dumps(
+                {"status": "error", "error": {"code": code, "message": str(exc)}},
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        raise click.exceptions.Exit(1)
+    raise click.ClickException(str(exc))
+
+
+def _ensure_gigai_settings(home_root: Path, *, as_json: bool) -> None:
+    """On a fresh machine, write the settings `gigai setup` writes by default.
+
+    uat-bug-050: `gigai scout run` / `install` are the first commands a new
+    user types. With no ``<home>/config.toml`` they used to stop at "run
+    'gigai setup'"; now they write exactly what an Enter-through ``gigai
+    setup`` writes and carry on. An existing config.toml (valid, invalid, or
+    older) is never touched here: it is loaded and reported as before.
+    """
+
+    config_file = home_root.expanduser().resolve(strict=False) / "config.toml"
+    if config_file.exists() or config_file.is_symlink():
+        return
+    # Imported here: gigai.cli imports this module to register `gigai scout`.
+    from ..cli import write_default_setup
+
+    write_default_setup(home_root, as_json=as_json)
+    if not as_json:
+        click.echo(f"Created GigAI settings with defaults at {_display_path(config_file)}")
+
+
+def write_starter_find_jobs_config(target_root: Path) -> bool:
+    """Write a placeholder ``find-jobs.json`` if one doesn't already exist.
+
+    Returns ``True`` if the file was written, ``False`` if it already existed
+    (an existing file is never overwritten). The written file validates
+    against ``FindJobsConfig.from_json`` like any other find-jobs.json.
+    """
+
+    path = target_root / "find-jobs.json"
+    if path.exists():
+        return False
+    encoded = canonical_json_bytes(STARTER_FIND_JOBS_CONFIG.to_json())
+    # Round-trip through from_json so a contract change here fails loudly
+    # (as a test failure) instead of shipping an unparsable starter file.
+    FindJobsConfig.from_json(json.loads(encoded))
+    path.write_bytes(encoded)
+    return True
+
+
+@click.group("scout", help="Install and configure the Scout gig for this project.")
+def scout_group() -> None:
+    pass
+
+
+@scout_group.command("install")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option(
+    "--username",
+    "username",
+    help=(
+        "Workspace-owner display name to use if this creates a new default "
+        "Scout target (<home>/scout). Ignored otherwise; see `gigai init "
+        "--username`."
+    ),
+)
+@click.option("--json", "as_json", is_flag=True)
+def install_command(
+    target_value: Path | None, home_value: Path | None, username: str | None, as_json: bool
+) -> None:
+    """Bind, approve, and activate Scout for the bound project; safe to rerun."""
+
+    home_root = home_value or default_home_root()
+    _ensure_gigai_settings(home_root, as_json=as_json)
+    try:
+        resolved_target = _resolved_target(target_value, home_root, username=username, as_json=as_json)
+        result = install_scout(home_root=home_root, requested_target=resolved_target)
+    except (ScoutTargetError, ScoutInstallError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_install_failed")
+        return
+
+    wrote_config = False
+    try:
+        target_root = resolved_target.expanduser().resolve(strict=True)
+        wrote_config = write_starter_find_jobs_config(target_root)
+    except OSError as exc:
+        _fail(exc, as_json=as_json, fallback="scout_install_failed")
+        return
+
+    changed = result.bound or result.approved or result.activated or wrote_config
+    payload = {
+        "ok": True,
+        "gig_id": result.gig_id,
+        "bound": result.bound,
+        "approved": result.approved,
+        "activated": result.activated,
+        "wrote_starter_config": wrote_config,
+        "changed": changed,
+    }
+    if as_json:
+        _emit(payload, True, "")
+        return
+    if changed:
+        click.echo(
+            f"Scout ({result.gig_id}) is installed, approved, and active. "
+            "Next: `gigai scout resume add <file>`."
+        )
+    else:
+        click.echo(f"Scout ({result.gig_id}) was already installed, approved, and active.")
+
+
+@scout_group.group("resume")
+def resume_group() -> None:
+    """Manage the resume Scout uses for find-jobs runs."""
+
+
+@resume_group.command("add")
+@click.argument("file", type=click.Path(path_type=Path, dir_okay=False, exists=True))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--gig", "gig_id", help="Explicit Gig ID; defaults to the project's active Gig.")
+@click.option("--profile", "profile_id", help="Scout profile ID to attach this resume to; defaults to the SELECTED profile.")
+@click.option("--json", "as_json", is_flag=True)
+def resume_add_command(
+    file: Path,
+    target_value: Path | None,
+    home_value: Path | None,
+    gig_id: str | None,
+    profile_id: str | None,
+    as_json: bool,
+) -> None:
+    """Import FILE as the resume reference and create the record find-jobs reads.
+
+    Installs/approves/activates Scout first if it isn't yet (same idempotent
+    step ``gigai scout install`` and ``gigai scout run`` perform), so this is
+    a true one-step command on a freshly bound target. Rerunning is a no-op
+    once Scout is installed: this both imports the reference (kind
+    ``resume``) and creates the ``g45_reference`` record wrapper (family)
+    find-jobs' resume resolution requires, in one call. Rerunning with the
+    same file bytes is a no-op: the reference import dedupes by content
+    digest and the record uses a digest-derived operation key.
+
+    S25 F1-b2 (operator decision): without ``--profile``, the imported
+    resume is ATTACHED to the gig's SELECTED profile -- its ``resume_ref``
+    moves to the newly imported resume (``profile_records.write_profile``,
+    a revision bump) -- and this command PRINTS which profile it attached
+    to (label + profile_id; ``profile_id`` alone in ``--json`` output). A
+    given ``--profile`` attaches to that profile instead of the selected
+    one. When no profile can be resolved yet (no ``find-jobs.json``/no prior
+    resume to migrate from), the import still succeeds exactly as before
+    F1-b2 -- there is simply nothing to attach to yet; a later migration or
+    profile creation will pin this resume as its own initial ``resume_ref``.
+    """
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        install_result = install_scout(home_root=home_root, requested_target=resolved_target)
+        installed_scout = install_result.bound or install_result.approved or install_result.activated
+        # Matches ensure_scout_ready()'s install_scout -> write starter config
+        # sequence in run_supervisor.py, so `resume add` alone (before `scout
+        # run`) leaves the target in the same state `scout run` would.
+        target_root = resolved_target.expanduser().resolve(strict=True)
+        write_starter_find_jobs_config(target_root)
+        # uat-bug-020: the import itself (reference + record, and their
+        # operation keys) is resume_import.import_resume_file, shared with
+        # the setup wizard's POST /api/resumes.
+        resume = import_resume_file(
+            home_root=home_root,
+            requested_target=resolved_target,
+            source=file,
+            gig_id=gig_id,
+        )
+
+        attached_profile = _attach_resume_to_profile(
+            home_root=home_root,
+            target_root=target_root,
+            gig_id=gig_id,
+            profile_id=profile_id,
+            record_id=resume.record_id,
+            revision_id=resume.revision_id,
+            content_sha256=resume.content_sha256,
+        )
+    except (ScoutTargetError, ScoutInstallError, PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_resume_add_failed")
+        return
+
+    payload = {
+        "ok": True,
+        "scout_installed": installed_scout,
+        "gig_id": install_result.gig_id,
+        "reference_id": resume.reference_id,
+        "reference_created": resume.reference_created,
+        "record_id": resume.record_id,
+        "revision_id": resume.revision_id,
+        "record_created": resume.record_created,
+        "profile_id": attached_profile.profile_id if attached_profile is not None else None,
+    }
+    if as_json:
+        _emit(payload, True, "")
+        return
+    if installed_scout:
+        click.echo(f"Scout ({install_result.gig_id}) was installed, approved, and activated.")
+    click.echo(
+        f"Resume reference {resume.reference_id} and record {resume.record_id} are ready. "
+        "Next: `gigai scout run`."
+    )
+    if attached_profile is not None:
+        click.echo(f"Attached to profile {attached_profile.label} ({attached_profile.profile_id})")
+
+
+def _attach_resume_to_profile(
+    *,
+    home_root: Path,
+    target_root: Path,
+    gig_id: str | None,
+    profile_id: str | None,
+    record_id: str,
+    revision_id: str,
+    content_sha256: str,
+):
+    """Move a profile's ``resume_ref`` to the just-imported resume; ``None`` if there's no profile yet.
+
+    ``profile_id=None`` (the default) attaches to the gig's SELECTED
+    profile (migrating a default profile on first read, like every other
+    F1-b2 profile-aware path); a given ``profile_id`` attaches to that
+    committed profile instead, refusing one that isn't committed in this
+    gig. Returns ``None`` (no attach) only when no profile exists yet at
+    all and none was explicitly named -- the import above still succeeded.
+    """
+
+    from ..workpad import resolve_workpad
+    from .find_jobs.contracts import PinnedResume
+    from . import profile_records
+
+    resolved = resolve_workpad(
+        home_root=home_root, requested_target=target_root, gig_id=gig_id, allow_semantic_state=True
+    )
+    resume_ref = PinnedResume(record_id=record_id, revision_id=revision_id, content_sha256=content_sha256)
+
+    if profile_id is None:
+        target_profile = profile_records.selected_profile(resolved, home_root=home_root, target=target_root)
+        if target_profile is None:
+            return None
+    else:
+        profiles = {item.profile_id: item for item in profile_records.list_profiles(resolved)}
+        target_profile = profiles.get(profile_id)
+        if target_profile is None:
+            raise ScoutTargetError(f"profile {profile_id!r} is not committed in this gig")
+
+    return profile_records.write_profile(resolved, profile_id=target_profile.profile_id, resume_ref=resume_ref)
+
+
+@resume_group.command("tailor")
+@click.option("--job-url", "job_url", help="Public job posting URL to fetch and tailor the resume to.")
+@click.option("--job-text", "job_text_file", help="File with the posting text (or - for stdin).")
+@click.option("--profile", "profile_id", help="Scout profile ID whose pinned resume to tailor (default: the selected profile).")
+@click.option("--resume", "resume_file", help="Resume text FILE (or - for stdin), used for this call only; never imported.")
+@click.option("--resume-text", "resume_text", help="Resume text inline, used for this call only; never imported.")
+@click.option("--title", "title", help="Job title override (pasted text has none).")
+@click.option("--company", "company", help="Company override (pasted text has none).")
+@click.option("--model-target", "model_target", type=click.Choice([item.value for item in ModelTarget]), help="Adapter kind to tailor with (default: find-jobs.json's default_model_target).")
+@click.option("--out", "out_file", type=click.Path(path_type=Path, dir_okay=False), help="Also write the markdown to FILE.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def resume_tailor_command(
+    job_url: str | None,
+    job_text_file: str | None,
+    profile_id: str | None,
+    resume_file: str | None,
+    resume_text: str | None,
+    title: str | None,
+    company: str | None,
+    model_target: str | None,
+    out_file: Path | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Tailor a resume to ONE job posting right now (Q3) -- markdown, every line sourced.
+
+    Pass exactly one of --job-url / --job-text, and at most one of --profile /
+    --resume / --resume-text (none means the selected profile's resume). Every
+    line of the output is either a resume line copied verbatim or a rewrite
+    that cites the resume lines / answered questions it came from; the
+    validator rejects any number or posting skill the cited sources do not
+    state (one retry, then an error). Synchronous: one model call plus at
+    most one retry. Prints the markdown path (and copies the markdown to
+    --out FILE when given).
+    """
+
+    from .find_jobs.assess_contracts import AssessJobInput, AssessResumeInput
+    from .find_jobs.contracts import FindJobsContractError
+    from .quick_assess import QuickAssessError
+    from .tailored_resume import TailorRequest, run_tailored_resume
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        target = resolved_target.expanduser().resolve(strict=True)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_resume_tailor_failed")
+        return
+
+    if job_url and job_text_file:
+        _fail(ValueError("pass exactly one of --job-url or --job-text"), as_json=as_json, fallback="job_input_invalid")
+        return
+    if sum(1 for item in (profile_id, resume_file, resume_text) if item) > 1:
+        _fail(ValueError("pass at most one of --profile, --resume or --resume-text"), as_json=as_json, fallback="resume_input_invalid")
+        return
+    try:
+        job_text = _read_text_option(job_text_file, flag="--job-text") if job_text_file else None
+        if resume_file:
+            resume_text = _read_text_option(resume_file, flag="--resume")
+    except OSError as exc:
+        _fail(exc, as_json=as_json, fallback="input_file_unreadable")
+        return
+
+    try:
+        request = TailorRequest(
+            job=AssessJobInput(job_url=job_url or None, job_text=job_text or None, title=title, company=company),
+            resume=AssessResumeInput(profile_id=profile_id or None, resume_text=resume_text or None),
+            model_target=None if model_target is None else ModelTarget(model_target),
+        )
+    except FindJobsContractError as exc:
+        _fail(exc, as_json=as_json, fallback="invalid_value")
+        return
+
+    if not as_json:
+        click.echo("Tailoring (one model call plus at most one retry; this can take a minute)...")
+    try:
+        response = run_tailored_resume(request, home_root=home_root, target=target)
+    except QuickAssessError as exc:
+        _fail(exc, as_json=as_json, fallback="scout_resume_tailor_failed")
+        return
+
+    out_path: Path | None = None
+    if out_file is not None:
+        out_path = out_file.expanduser()
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(response.markdown, encoding="utf-8")
+        except OSError as exc:
+            _fail(exc, as_json=as_json, fallback="output_file_unwritable")
+            return
+
+    if as_json:
+        _emit({"ok": True, **response.to_json(), "out_path": None if out_path is None else str(out_path)}, True, "")
+        return
+    job = response.job
+    heading = job.title or "(untitled posting)"
+    if job.company:
+        heading += f" at {job.company}"
+    result = response.result
+    rewritten = len(result.rewritten_lines())
+    click.echo(f"Tailored resume for {heading}:")
+    click.echo(f"  Resume: {response.resume.profile_id or 'pasted resume (not stored as a profile)'}")
+    click.echo(f"  Sections: {', '.join(section.heading for section in result.sections)}")
+    click.echo(f"  Lines: {result.line_count()} ({rewritten} rewritten, every one citing its resume lines / answers)")
+    click.echo(f"  Model: {response.producer.model_target.value} ({response.producer.adapter})")
+    click.echo(f"  Markdown: {response.markdown_path}")
+    click.echo(f"  Stored at {response.stored_path}")
+    if out_path is not None:
+        click.echo(f"  Copied to {out_path}")
+
+
+def _other_server_label(other: OtherScoutServer) -> str:
+    """The folder another project's Scout server serves, the way the operator types it."""
+
+    if other.target is None:
+        return f"project {other.project_id}"
+    return _display_path(Path(other.target))
+
+
+@scout_group.command("run")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--port", "port", type=int, default=None, help="Loopback port (default 8765).")
+@click.option("--no-browser", "no_browser", is_flag=True, help="Don't open a browser tab.")
+@click.option(
+    "--foreground",
+    "foreground",
+    is_flag=True,
+    help="Run the server in this process (Ctrl-C stops it) instead of detaching it.",
+)
+@click.option("--json", "as_json", is_flag=True)
+def run_command(
+    target_value: Path | None,
+    home_value: Path | None,
+    port: int | None,
+    no_browser: bool,
+    foreground: bool,
+    as_json: bool,
+) -> None:
+    """Install/activate Scout if needed, then start (or reuse) its API + UI.
+
+    Backgrounded by default: prints the URL and log path and returns. Use
+    `gigai scout status` / `gigai scout stop` to check on or stop it, or pass
+    --foreground to run it in this process instead (Ctrl-C stops it).
+    """
+
+    from . import run_supervisor
+
+    def _stopped_other(other: OtherScoutServer) -> None:
+        if as_json:
+            return
+        click.echo(
+            f"Stopped the Scout server for {_other_server_label(other)} (pid {other.pid}) "
+            f"so this one can use port {other.port}."
+        )
+
+    home_root = home_value or default_home_root()
+    _ensure_gigai_settings(home_root, as_json=as_json)
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        result = run_supervisor.start(
+            home_root=home_root,
+            requested_target=resolved_target,
+            port=port,
+            foreground=foreground,
+            open_browser=not no_browser,
+            on_stopped_other=_stopped_other,
+        )
+    except (ScoutTargetError, run_supervisor.ScoutRunError, WorkpadError, ScoutInstallError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_run_failed")
+        return
+
+    payload = {
+        "ok": True,
+        "reused": result.reused,
+        "cleaned_stale": result.cleaned_stale,
+        "restarted_from_version": result.restarted_from_version,
+        "stopped_other": result.stopped_other.to_json() if result.stopped_other is not None else None,
+        **result.state.to_json(),
+    }
+    if as_json:
+        _emit(payload, True, "")
+        return
+    if result.cleaned_stale:
+        click.echo("Cleaned up a stale Scout run state (its process was no longer running).")
+    if result.restarted_from_version is not None:
+        click.echo(f"Restarted Scout: it was running {result.restarted_from_version} from before your upgrade.")
+    if result.reused:
+        click.echo(f"Scout is already running at {result.state.url} (log: {result.state.log_path}).")
+    else:
+        click.echo(f"Scout is running at {result.state.url} (log: {result.state.log_path}).")
+
+
+@scout_group.command("stop")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def stop_command(target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Stop this project's running Scout instance, if any. Safe to rerun."""
+
+    from . import run_supervisor
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        stopped = run_supervisor.stop(home_root=home_root, requested_target=resolved_target)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_stop_failed")
+        return
+
+    payload = {"ok": True, "stopped": stopped}
+    if as_json:
+        _emit(payload, True, "")
+        return
+    click.echo("Stopped Scout." if stopped else "Scout was not running.")
+
+
+@scout_group.command("status")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def status_command(target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Show whether this project's Scout instance is running, stopped, or crashed."""
+
+    from . import run_supervisor
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        current = run_supervisor.status(home_root=home_root, requested_target=resolved_target)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_status_failed")
+        return
+
+    payload = {"ok": True, **current.to_json()}
+    if as_json:
+        _emit(payload, True, "")
+        return
+    if current.state == "running":
+        click.echo(f"running: {current.url} (pid {current.pid}, log: {current.log_path})")
+        if current.outdated:
+            old = current.outdated_version or "an earlier build"
+            click.echo(f"running an old version ({old}); run `gigai scout run` to restart")
+    elif current.state == "crashed":
+        click.echo(
+            f"crashed: last known pid {current.pid} is no longer running "
+            f"(log: {current.log_path}). Run `gigai scout run` to restart it."
+        )
+    else:
+        click.echo("stopped")
+    for other in current.other_servers:
+        click.echo(
+            f"The Scout server for {_other_server_label(other)} is running at {other.url} "
+            f"(pid {other.pid}); `gigai scout run` stops it when it holds the port this one needs."
+        )
+
+
+def _relative_days_ago(iso_timestamp: str) -> str:
+    from datetime import UTC, datetime
+
+    try:
+        then = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return iso_timestamp
+    delta = datetime.now(UTC) - then
+    days = delta.days
+    if days <= 0:
+        return "today"
+    if days == 1:
+        return "1 day ago"
+    return f"{days} days ago"
+
+
+@scout_group.command("discover")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--runs", "runs", type=int, default=3, help="Number of OpenAI web_search runs to merge (default 3).")
+@click.option("--status", "show_status", is_flag=True, help="Show the last discovery run instead of starting a new one.")
+@click.option("--json", "as_json", is_flag=True)
+def discover_command(
+    target_value: Path | None,
+    home_value: Path | None,
+    runs: int,
+    show_status: bool,
+    as_json: bool,
+) -> None:
+    """Run the weekly company-discovery engine (OpenAI web_search + H-1B baseline).
+
+    Runs in the foreground -- this can take 5-30 minutes (OpenAI web_search
+    latency under TPM backoff). Prints a summary of new watchlist boards,
+    cost, and where results are stored. Requires `gigai scout discover`'s
+    prefs to already be set (the setup interview -- packet S2-B); use
+    `--status` to see the last run without starting a new one.
+    """
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_discover_failed")
+        return
+    target = resolved_target.expanduser().resolve(strict=True)
+
+    if show_status:
+        try:
+            result = latest_discovery(home_root=home_root, target=target)
+        except (WorkpadError, OSError, ValueError) as exc:
+            _fail(exc, as_json=as_json, fallback="scout_discover_status_failed")
+            return
+        if result is None:
+            payload: dict[str, object] = {"ok": True, "has_run": False}
+            if as_json:
+                _emit(payload, True, "")
+                return
+            click.echo("No discovery run yet. Run `gigai scout discover` to start one.")
+            return
+        payload = {"ok": True, "has_run": True, **result.to_json()}
+        if as_json:
+            _emit(payload, True, "")
+            return
+        when = _relative_days_ago(result.started_at)
+        click.echo(
+            f"Last discovery run: {result.status} ({when}), "
+            f"{len(result.new_boards)} new board(s), cost ${result.cost_usd:.4f}."
+        )
+        return
+
+    try:
+        prefs = load_prefs(home_root=home_root, target=target)
+    except (DiscoveryPrefsError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_discover_failed")
+        return
+    if prefs is None:
+        _fail(
+            DiscoveryPrefsError(
+                "discovery_prefs_missing",
+                "no discovery preferences set yet; run the Scout setup interview first",
+            ),
+            as_json=as_json,
+            fallback="scout_discover_failed",
+        )
+        return
+
+    def _on_progress(event: dict) -> None:
+        if as_json:
+            return
+        stage = event.get("stage", "")
+        if stage == "discovery_start":
+            click.echo(f"Starting discovery ({event.get('runs')} OpenAI run(s))...")
+        elif stage == "openai_call":
+            click.echo(f"OpenAI web_search run {event.get('run_index', 0) + 1}/{event.get('of')}...")
+        elif stage == "openai_retry":
+            click.echo(f"  rate limited, waiting {event.get('wait_seconds', 0):.0f}s...")
+        elif stage == "h1b_download_start":
+            size = event.get("size_bytes")
+            size_text = f"{size / 1_000_000:.1f}MB" if isinstance(size, int) else "unknown size"
+            click.echo(f"Downloading DOL H-1B disclosure file ({size_text})...")
+        elif stage == "merge_board_check":
+            click.echo(f"Checking board {event.get('index', 0) + 1}/{event.get('of')}: {event.get('company')}")
+
+    try:
+        result = run_discovery(home_root=home_root, target=target, prefs=prefs, runs=runs, on_progress=_on_progress)
+    except (DiscoveryBudgetExceeded, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_discover_failed")
+        return
+
+    payload = {"ok": True, **result.to_json()}
+    if as_json:
+        _emit(payload, True, "")
+        return
+    click.echo(f"Discovery {result.status}: {len(result.new_boards)} new board(s) added to the watchlist.")
+    for board in result.new_boards:
+        click.echo(f"  + {board['company']} ({board['provider']}:{board['board_token']})")
+    click.echo(f"Cost: ${result.cost_usd:.4f}. Stored under discovery/runs/{result.discovery_id}.json (GigAI home).")
+    if result.skipped:
+        skipped_text = ", ".join(f"{reason}: {count}" for reason, count in sorted(result.skipped.items()))
+        click.echo(f"Skipped: {skipped_text}")
+    for source in result.sources:
+        if source.error:
+            click.echo(f"Warning: {source.name} had an error: {source.error}")
+        if source.skip_reason:
+            click.echo(f"Note: {source.name} was skipped: {source.skip_reason}")
+
+
+@scout_group.command("prep", hidden=True)
+@click.argument("posting_url")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--run", "run_id", help="Find-jobs run ID to resolve the posting from (default: newest run that has it).")
+@click.option("--profile", "profile_id", help="Scout profile ID to prepare against (default: the selected profile).")
+@click.option("--refresh", is_flag=True, help="Re-run prep even if one is already stored for this posting and resume revision.")
+@click.option("--budget", "budget_usd", type=float, default=0.50, show_default=True, help="Max USD to spend on company-research web search.")
+@click.option("--json", "as_json", is_flag=True)
+def prep_command(
+    posting_url: str,
+    target_value: Path | None,
+    home_value: Path | None,
+    run_id: str | None,
+    profile_id: str | None,
+    refresh: bool,
+    budget_usd: float,
+    as_json: bool,
+) -> None:
+    """Prepare for an interview at POSTING_URL (a find-jobs-acquired posting).
+
+    Foreground -- company research (OpenAI web_search, ~seconds) plus one
+    model call for likely question categories. Idempotent per (profile,
+    posting, resume revision); pass --refresh to re-run. The resume is sent
+    only to the question-category model call, never to the company-research
+    web search. Prints a summary and where the prep is stored. Without
+    --profile, prepares against the SELECTED profile (S25 F1-b2).
+    """
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_prep_failed")
+        return
+    target = resolved_target.expanduser().resolve(strict=True)
+
+    def _on_progress(event: dict) -> None:
+        if as_json:
+            return
+        stage = event.get("stage", "")
+        if stage == "resolve_posting":
+            click.echo("Resolving posting from find-jobs acquire output...")
+        elif stage == "company_research":
+            click.echo("Researching company (OpenAI web_search)...")
+        elif stage == "openai_retry":
+            click.echo(f"  rate limited, waiting {event.get('wait_seconds', 0):.0f}s...")
+        elif stage == "role_research":
+            click.echo("Reading role research from the posting text...")
+        elif stage == "question_categories":
+            click.echo("Predicting likely question categories...")
+
+    try:
+        prep = build_prep(
+            home_root=home_root, target=target, posting_url=posting_url,
+            run_id=run_id, refresh=refresh, budget_usd=budget_usd,
+            profile_id=profile_id, on_progress=_on_progress,
+        )
+    except InterviewPrepError as exc:
+        _fail(exc, as_json=as_json, fallback="scout_prep_failed")
+        return
+
+    prep_json = prep.to_json()
+    payload = {"ok": True, **prep_json}
+    if as_json:
+        _emit(payload, True, "")
+        return
+    click.echo(f"Interview prep for {prep.title} at {prep.company}:")
+    if prep.company_research.skipped:
+        click.echo(f"  Company research skipped: {prep.company_research.skipped}")
+    else:
+        click.echo(f"  Company research: {len(prep.company_research.claims)} sourced claim(s), ${prep.company_research.cost_usd:.4f}")
+    click.echo(f"  Role research: {len(prep.role_research.responsibilities)} responsibilit(y/ies), {len(prep.role_research.requirements)} requirement(s)")
+    click.echo(f"  Likely question categories ({prep.model_target}):")
+    for category in prep.question_categories:
+        click.echo(f"    - {category.category}: {category.why}")
+    if prep.prep_notes.matrix_source == "assess":
+        click.echo(f"  Prep notes: {len(prep.prep_notes.resume_points)} resume point(s) to lead with, {len(prep.prep_notes.gaps)} gap(s) to prepare for.")
+    else:
+        click.echo("  Prep notes: no assess matrix found for this posting yet; run `gigai scout run` to assess it for richer notes.")
+    click.echo(f"  Total cost: ${prep.cost_usd:.4f}. Stored under scout/interview_prep/ (GigAI home).")
+
+
+
+def _read_text_option(value: str, *, flag: str) -> str:
+    """Read ``FILE`` (or ``-`` for stdin) for a ``--job-text``/``--resume`` flag."""
+
+    if value == "-":
+        return click.get_text_stream("stdin").read()
+    path = Path(value).expanduser()
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise OSError(f"{flag}: cannot read {path}: {exc.strerror or exc}") from exc
+
+
+@scout_group.command("assess")
+@click.option("--job-url", "job_url", help="Public job posting URL to fetch and assess.")
+@click.option("--job-text", "job_text_file", help="File with the posting text (or - for stdin).")
+@click.option("--profile", "profile_id", help="Scout profile ID whose pinned resume to assess against (default: the selected profile).")
+@click.option("--resume", "resume_file", help="Resume text FILE (or - for stdin), used for this call only; never stored.")
+@click.option("--resume-text", "resume_text", help="Resume text inline, used for this call only; never stored.")
+@click.option("--visa/--no-visa", "visa", default=None, help="Override find-jobs.json's visa-sponsorship-required flag.")
+@click.option("--title", "title", help="Job title override (pasted text has none).")
+@click.option("--company", "company", help="Company override (pasted text has none).")
+@click.option("--model-target", "model_target", type=click.Choice([item.value for item in ModelTarget]), help="Adapter kind to assess with (default: find-jobs.json's default_model_target).")
+@click.option("--origin", "origin", type=click.Choice(["quick_assess", "job_page"]), default="quick_assess", show_default=True, help="Where this assessment was started; the UI lists quick_assess ones under Assessments.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def assess_command(
+    job_url: str | None,
+    job_text_file: str | None,
+    profile_id: str | None,
+    resume_file: str | None,
+    resume_text: str | None,
+    visa: bool | None,
+    title: str | None,
+    company: str | None,
+    model_target: str | None,
+    origin: str,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Assess ONE job against a resume right now -- no find-jobs run.
+
+    Pass exactly one of --job-url / --job-text, and at most one of --profile /
+    --resume / --resume-text (none means the selected profile's resume). A
+    pasted resume is used for this call only and never imported or stored.
+    Synchronous: the configured model is called once (plus one retry on a
+    malformed answer). Prints the verdict, the requirement matrix, the
+    questions with their ids, and where the result is stored.
+    """
+
+    from .find_jobs.assess_contracts import AssessJobInput, AssessPreferences, AssessRequest, AssessResumeInput
+    from .find_jobs.contracts import FindJobsContractError
+    from .quick_assess import QuickAssessError, run_quick_assessment
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        target = resolved_target.expanduser().resolve(strict=True)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_assess_failed")
+        return
+
+    if job_url and job_text_file:
+        _fail(ValueError("pass exactly one of --job-url or --job-text"), as_json=as_json, fallback="job_input_invalid")
+        return
+    if sum(1 for item in (profile_id, resume_file, resume_text) if item) > 1:
+        _fail(ValueError("pass at most one of --profile, --resume or --resume-text"), as_json=as_json, fallback="resume_input_invalid")
+        return
+    try:
+        job_text = _read_text_option(job_text_file, flag="--job-text") if job_text_file else None
+        if resume_file:
+            resume_text = _read_text_option(resume_file, flag="--resume")
+    except OSError as exc:
+        _fail(exc, as_json=as_json, fallback="input_file_unreadable")
+        return
+
+    try:
+        request = AssessRequest(
+            job=AssessJobInput(job_url=job_url or None, job_text=job_text or None, title=title, company=company),
+            resume=AssessResumeInput(profile_id=profile_id or None, resume_text=resume_text or None),
+            preferences=None if visa is None else AssessPreferences(visa_sponsorship_required=visa),
+            model_target=None if model_target is None else ModelTarget(model_target),
+            origin=origin,
+        )
+    except FindJobsContractError as exc:
+        _fail(exc, as_json=as_json, fallback="invalid_value")
+        return
+
+    if not as_json:
+        click.echo("Assessing (one model call; this can take up to a minute)...")
+    try:
+        response = run_quick_assessment(request, home_root=home_root, target=target)
+    except QuickAssessError as exc:
+        _fail(exc, as_json=as_json, fallback="scout_assess_failed")
+        return
+
+    if as_json:
+        _emit({"ok": True, **response.to_json()}, True, "")
+        return
+    result = response.result
+    job = response.job
+    heading = job.title or "(untitled posting)"
+    if job.company:
+        heading += f" at {job.company}"
+    click.echo(f"Assessment for {heading}:")
+    click.echo(f"  Verdict: {result.verdict.value if result.verdict is not None else 'none returned'}")
+    if result.not_a_match_reason:
+        click.echo(f"  Reason: {result.not_a_match_reason}")
+    if result.sponsorship is not None:
+        click.echo(f"  Sponsorship: {result.sponsorship.value}")
+    resume_label = response.resume.profile_id or "pasted resume (not stored)"
+    click.echo(f"  Resume: {resume_label}")
+    prefs = response.preferences
+    click.echo(
+        f"  Preferences: visa required = {'yes' if prefs.visa_sponsorship_required else 'no'}; "
+        f"countries = {', '.join(prefs.countries or ()) or 'any'}; titles = {', '.join(prefs.titles or ()) or 'unspecified'}"
+    )
+    click.echo("  Requirements:")
+    for row in result.matrix:
+        klass = f" [{row.requirement_class.value}]" if row.requirement_class is not None else ""
+        evidence = f" -- {'; '.join(row.resume_evidence)}" if row.resume_evidence else ""
+        click.echo(f"    {row.status.value:8} {row.requirement}{klass}{evidence}")
+    if result.structured_questions:
+        click.echo("  Questions:")
+        for question in result.structured_questions:
+            click.echo(f"    {question.question_id}: {question.question}")
+    elif result.questions:
+        click.echo("  Questions:")
+        for text in result.questions:
+            click.echo(f"    - {text}")
+    if result.suggestions:
+        click.echo("  Suggestions:")
+        for suggestion in result.suggestions:
+            click.echo(f"    - {suggestion}")
+    click.echo(f"  Model: {response.producer.model_target.value} ({response.producer.adapter})")
+    click.echo(f"  Stored at {response.stored_path}")
+
+
+@scout_group.command("answer")
+@click.argument("question_id")
+@click.option("--answer-text", "answer_text", help="Answer text inline.")
+@click.option("--answer-file", "answer_file", help="Answer text FILE (or - for stdin).")
+@click.option("--reassess", "reassess", help="Job URL or job_identity to re-assess with this answer applied.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def answer_command(
+    question_id: str,
+    answer_text: str | None,
+    answer_file: str | None,
+    reassess: str | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Answer QUESTION_ID once; the answer is reused across every posting.
+
+    Pass exactly one of --answer-text / --answer-file. The answer is written
+    to this gig's ``experience_qa`` records (a fresh record, or an append,
+    with automatic rollover at 32 answers per record) and reused by every
+    later ``gigai scout assess`` call whose prompt renders a matching
+    question_id (the normalizer makes a drifted id from a different call
+    still match the same real-world fact). Pass --reassess JOB_URL_OR_ID to
+    re-run the whole assessment for that job immediately, with this answer
+    applied.
+    """
+
+    from ..private_records import PrivateRecordError
+    from .experience_answers import record_answer
+    from .find_jobs.assess_contracts import AssessJobInput, AssessRequest, AssessResumeInput
+    from .find_jobs.contracts import FindJobsContractError
+    from .question_ids import normalize_question_id
+    from .quick_assess import QuickAssessError, find_quick_assessment_by_job_identity, run_quick_assessment
+
+    if bool(answer_text) == bool(answer_file):
+        _fail(ValueError("pass exactly one of --answer-text or --answer-file"), as_json=as_json, fallback="answer_invalid")
+        return
+    try:
+        answer = answer_text if answer_text is not None else _read_text_option(answer_file, flag="--answer-file")  # type: ignore[arg-type]
+    except OSError as exc:
+        _fail(exc, as_json=as_json, fallback="input_file_unreadable")
+        return
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        target = resolved_target.expanduser().resolve(strict=True)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_answer_failed")
+        return
+
+    try:
+        result = record_answer(home_root=home_root, requested_target=target, question_id=question_id, prompt=question_id, answer=answer)
+    except PrivateRecordError as exc:
+        _fail(exc, as_json=as_json, fallback="answer_invalid")
+        return
+
+    normalized_question_id = normalize_question_id(question_id)
+    reassessed_payload: dict[str, object] | None = None
+    if reassess:
+        try:
+            previous = find_quick_assessment_by_job_identity(home_root, target, reassess)
+            job_identity = reassess
+            if previous is None:
+                # Accept a raw job URL too (not only a stored job_identity):
+                # normalize it the same way resolve_job would, by reusing
+                # its own normalization through a throwaway resolution.
+                from .find_jobs.contracts import normalize_url
+
+                job_identity = normalize_url(reassess)
+                previous = find_quick_assessment_by_job_identity(home_root, target, job_identity)
+            if previous is None:
+                raise QuickAssessError("reassess_not_found", f"no stored assessment for {reassess!r}")
+            if previous.job.source_url is None:
+                raise QuickAssessError("reassess_unavailable", "this job was assessed from pasted text, which is never stored; run `gigai scout assess` again")
+            request = AssessRequest(
+                job=AssessJobInput(job_url=previous.job.source_url, title=previous.job.title or None, company=previous.job.company or None),
+                resume=AssessResumeInput(profile_id=previous.resume.profile_id),
+            )
+            response = run_quick_assessment(request, home_root=home_root, target=target)
+        except (QuickAssessError, FindJobsContractError) as exc:
+            _fail(exc, as_json=as_json, fallback="scout_answer_failed")
+            return
+        reassessed_payload = response.to_json()
+
+    payload = {
+        "ok": True,
+        "record_id": result.record_id,
+        "revision_id": result.revision_id,
+        "question_id": normalized_question_id,
+        "reassessed": reassessed_payload,
+    }
+    if as_json:
+        _emit(payload, True, "")
+        return
+    click.echo(f"Recorded answer for {normalized_question_id} at {result.revision_id}.")
+    if reassessed_payload is not None:
+        result_json = reassessed_payload.get("result")
+        verdict = result_json.get("verdict") if isinstance(result_json, dict) else None
+        click.echo(f"  Re-assessed: verdict = {verdict}")
+
+
+# --- Q1 (v0.1.9, SCOPE-ADD-2): `gigai scout watchlist add <url>` -----------
+
+
+@scout_group.group("watchlist")
+def watchlist_group() -> None:
+    """Manage the ATS boards Scout polls directly (the watchlist)."""
+
+
+@watchlist_group.command("add")
+@click.argument("url")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def watchlist_add_command(url: str, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Add a company by its Greenhouse / Lever / Ashby board (or job) URL.
+
+    Every later find-jobs run polls the board directly, so a posting no
+    search engine surfaced (the UAT Kong case) is found as long as it is
+    inside the publication window. Idempotent: adding a board twice keeps
+    the one original entry. Any other host is refused.
+    """
+
+    from .find_jobs.watchlist import WatchlistUrlError, add_company_from_url, list_active, watchlist_entry_from_url
+
+    # The URL rule is pure: refuse a foreign host before resolving any
+    # target/gig at all, so a bad URL never surfaces as a workpad error.
+    try:
+        watchlist_entry_from_url(url)
+    except WatchlistUrlError as exc:
+        _fail(exc, as_json=as_json, fallback="watchlist_url_invalid")
+        return
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        target = resolved_target.expanduser().resolve(strict=True)
+        before = {item.watchlist_id for item in list_active(home_root, target)}
+        entry = add_company_from_url(url, home_root, target)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_watchlist_add_failed")
+        return
+
+    created = entry.watchlist_id not in before
+    payload = {
+        "ok": True,
+        "created": created,
+        "company": entry.company,
+        "provider": entry.provider.value,
+        "board_token": entry.board_token,
+        "watchlist_id": entry.watchlist_id,
+        "board_url": entry.first_seen.source_url,
+    }
+    if as_json:
+        _emit(payload, True, "")
+        return
+    verb = "Added" if created else "Already watching"
+    click.echo(f"{verb} {entry.company} ({entry.provider.value} board '{entry.board_token}').")
+
+
+# --- N11-C (v0.1.9): `gigai scout sources update|status` -------------------
+
+
+@scout_group.group("sources")
+def sources_group() -> None:
+    """Refresh the company boards Scout searches (stored on this machine)."""
+
+
+def _sources_progress_line(snapshot: dict[str, object]) -> str:
+    boards = snapshot.get("boards")
+    postings = snapshot.get("postings")
+    boards = boards if isinstance(boards, dict) else {}
+    postings = postings if isinstance(postings, dict) else {}
+    failed = f", {boards.get('failed')} failed" if boards.get("failed") else ""
+    return (
+        f"Boards {boards.get('checked', 0)} of {boards.get('total', 0)}{failed}: "
+        f"{postings.get('new', 0)} new, {postings.get('changed', 0)} changed, {postings.get('removed', 0)} removed"
+    )
+
+
+@sources_group.command("update")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option(
+    "--budget-seconds",
+    "budget_seconds",
+    type=click.FloatRange(min=0),
+    default=None,
+    help="Stop after this many seconds (0 = no limit). Default: GIGAI_SCOUT_ACQUIRE_BUDGET_SECONDS, else 1200.",
+)
+@click.option("--force", is_flag=True, help="Start even when another update looks like it is still running.")
+@click.option("--json", "as_json", is_flag=True)
+def sources_update_command(
+    target_value: Path | None,
+    home_value: Path | None,
+    budget_seconds: float | None,
+    force: bool,
+    as_json: bool,
+) -> None:
+    """Check every company board on the watchlist and store what changed.
+
+    One polite conditional request per board (catalog companies and the
+    ones you added), so an unchanged board costs almost nothing. New,
+    changed and removed postings are recorded per company under
+    <home>/cache/scout/companies/ (plain JSON; safe to delete, the next
+    update rebuilds it). A find-jobs search reads that store and does not
+    check the boards itself. If the time budget stops an update, run it
+    again: it continues with the boards it has not reached yet.
+    """
+
+    from dataclasses import replace
+    import time
+
+    from .find_jobs.market_acquisition import AcquireLimits
+    from .find_jobs.sources_update import (
+        STATUS_FAILED,
+        STATUS_PARTIAL,
+        SourcesUpdateError,
+        default_http_client,
+        load_effective_config,
+        run_sources_update,
+    )
+
+    home_root = home_value or default_home_root()
+    limits = AcquireLimits.from_environment()
+    if budget_seconds is not None:
+        limits = replace(limits, time_budget_seconds=budget_seconds if budget_seconds > 0 else None)
+
+    printed_at = [0.0]
+
+    def _progress(snapshot: dict[str, object]) -> None:
+        # The snapshot is rewritten every second; a line every five is enough.
+        if as_json or snapshot.get("status") != "running" or time.monotonic() - printed_at[0] < 5.0:
+            return
+        printed_at[0] = time.monotonic()
+        click.echo(_sources_progress_line(snapshot))
+
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        target = resolved_target.expanduser().resolve(strict=True)
+        client = default_http_client()
+        try:
+            result = run_sources_update(
+                home_root=home_root,
+                target=target,
+                client=client,
+                config=load_effective_config(home_root, target),
+                limits=limits,
+                on_progress=_progress,
+                force=force,
+            )
+        finally:
+            client.close()
+    except (SourcesUpdateError, ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_sources_update_failed")
+        return
+
+    snapshot = result.to_json()
+    if as_json:
+        _emit(snapshot, True, "")
+    else:
+        boards = snapshot["boards"]
+        assert isinstance(boards, dict)
+        click.echo(result.summary)
+        click.echo(
+            f"Checked {boards['checked']} of {boards['total']} boards "
+            f"({boards['cached']} unchanged, {boards['failed']} did not answer) in {snapshot['elapsed_seconds']:.0f}s."
+        )
+        if result.status == STATUS_PARTIAL:
+            click.echo(f"{snapshot['remaining']} boards are left: run `gigai scout sources update` again to continue.")
+    if result.status == STATUS_FAILED:
+        raise click.exceptions.Exit(1)
+
+
+@sources_group.command("status")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def sources_status_command(home_value: Path | None, as_json: bool) -> None:
+    """Show the last sources update and whether a search can use the stored postings."""
+
+    from .find_jobs.sources_update import read_status
+
+    status = read_status(home_value or default_home_root())
+    if as_json:
+        _emit(status, True, "")
+        return
+    update = status["update"]
+    index = status["index"]
+    assert isinstance(index, dict)
+    if isinstance(update, dict):
+        click.echo(f"Last update {update['status']} ({update.get('finished_at') or update.get('updated_at')}): {update['summary']}")
+        if update["status"] == "running":
+            click.echo(_sources_progress_line(update))
+    else:
+        click.echo("No sources update has run yet.")
+    click.echo(f"Stored companies: {index['companies_indexed']} ({index['status']}).")
+    if index["message"]:
+        click.echo(str(index["message"]))
+
+
+__all__ = ["scout_group", "write_starter_find_jobs_config", "STARTER_FIND_JOBS_CONFIG"]

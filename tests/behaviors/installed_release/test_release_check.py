@@ -8,14 +8,18 @@ import zipfile
 
 import pytest
 
-from tools import release_check
+from tools import release_check, release_notes
 
 
-def test_pypi_publish_jobs_receive_only_distributions() -> None:
+def _read_release_workflow() -> str:
     workflow_path = Path(__file__).resolve().parents[3] / ".github/workflows/release.yml"
     if not workflow_path.is_file():
         pytest.skip("release workflow is excluded from the offline container build context")
-    workflow = workflow_path.read_text(encoding="utf-8")
+    return workflow_path.read_text(encoding="utf-8")
+
+
+def test_pypi_publish_jobs_receive_only_distributions() -> None:
+    workflow = _read_release_workflow()
 
     assert workflow.count("name: Prepare package-only publisher input") == 2
     assert workflow.count("cp dist/*.whl dist/*.tar.gz publish/") == 2
@@ -24,6 +28,55 @@ def test_pypi_publish_jobs_receive_only_distributions() -> None:
     assert "--index https://test.pypi.org/simple" in workflow
     assert "--index https://pypi.org/simple" in workflow
     assert "--index-strategy unsafe-best-match" in workflow
+
+
+def test_release_job_graph_does_not_let_verify_pypi_block_the_release() -> None:
+    graph = release_notes.parse_workflow_job_needs(_read_release_workflow())
+
+    expected_jobs = {
+        "preflight",
+        "build",
+        "publish-pypi",
+        "verify-pypi",
+        "github-release",
+        "post-release-compatibility",
+        "verify-testpypi",
+    }
+    assert expected_jobs <= graph.keys(), sorted(expected_jobs - graph.keys())
+
+    # The Release is created right after publish-pypi succeeds; a slow or
+    # flaky post-publish install check must not be able to withhold it.
+    assert "verify-pypi" not in graph["github-release"]
+    assert set(graph["github-release"]) == {"preflight", "build", "publish-pypi"}
+
+    # verify-pypi becomes a post-release check gated on the Release existing.
+    assert "github-release" in graph["verify-pypi"]
+
+    # publish-pypi is gated on the TestPyPI publish step, not on the
+    # (post-publish, continue-on-error) TestPyPI install check.
+    assert set(graph["publish-pypi"]) == {"preflight", "publish-testpypi"}
+    assert "verify-testpypi" not in graph["publish-pypi"]
+
+    # verify-testpypi is a post-publish check that nothing waits on.
+    assert set(graph["verify-testpypi"]) == {"preflight", "publish-testpypi"}
+    assert all("verify-testpypi" not in needs for needs in graph.values())
+
+    # The full post-release compatibility matrix must not wait on the
+    # post-release install check either.
+    assert "verify-pypi" not in graph["post-release-compatibility"]
+
+
+def test_reusable_workflow_callers_grant_the_called_jobs_permissions() -> None:
+    # pull_request.yaml's `changes` job requests `actions: read` (it looks up
+    # the previous PR run via `gh api`) in addition to `contents: read`.
+    # release.yml's top-level `permissions:` is `contents: read` only, so the
+    # two jobs that call pull_request.yaml via `uses:` must each grant
+    # `actions: read` at the job level, or GitHub refuses to start the called
+    # workflow.
+    jobs = release_notes.parse_workflow_jobs(_read_release_workflow())
+
+    for caller in ("ci", "post-release-compatibility"):
+        assert jobs[caller].permissions == {"contents": "read", "actions": "read"}, caller
 
 
 def _write_project(path: Path, version: str = "0.1.0") -> Path:

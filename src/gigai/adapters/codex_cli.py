@@ -13,37 +13,67 @@ from .port import InvocationRequest, InvocationResult, ModelInvocationError, Nor
 from .process import run_json_process
 
 
+# SCOPE-ADD-3 C1 (operator decision A): the reasoning efforts codex's
+# ``model_reasoning_effort`` config key takes. Anything else is not passed.
+_CODEX_EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh"})
+
+
 class CodexCLIAdapter:
-    """Invoke Codex through its explicit, read-only, ephemeral exec surface."""
+    """Invoke Codex through its explicit, read-only, ephemeral exec surface.
+
+    ``honours_reasoning_effort`` (SCOPE-ADD-3 C1, opt-in): only a copy made by
+    :meth:`effort_copy` passes ``request.reasoning_effort`` on as ``-c
+    model_reasoning_effort=<effort>``. The ranker makes that copy; every other
+    caller (assess, quick assess) keeps the default instance, whose argv is
+    unchanged byte for byte whatever the request's effort says.
+    """
 
     executable_name = "codex"
     adapter_name = "codex_cli"
 
-    def __init__(self, *, executable: str | None = None, timeout_seconds: float = 120.0) -> None:
+    def __init__(
+        self, *, executable: str | None = None, timeout_seconds: float = 120.0, honours_reasoning_effort: bool = False
+    ) -> None:
         self._executable = executable or shutil.which(self.executable_name)
         self._timeout_seconds = timeout_seconds
+        self.honours_reasoning_effort = honours_reasoning_effort
         if self._executable is None:
             raise ModelInvocationError("codex executable is not available on PATH")
+
+    def effort_copy(self) -> "CodexCLIAdapter":
+        """The same executable and timeout, passing the request's reasoning effort on."""
+
+        return CodexCLIAdapter(
+            executable=self._executable, timeout_seconds=self._timeout_seconds, honours_reasoning_effort=True
+        )
+
+    def argv(self, request: InvocationRequest, directory: str) -> tuple[str, ...]:
+        """The exact child argv for ``request`` run in ``directory`` (the prompt goes on stdin)."""
+
+        assert self._executable is not None
+        argv = [
+            self._executable,
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "--skip-git-repo-check",
+            "--cd",
+            directory,
+        ]
+        if request.model != "default":
+            argv.extend(("--model", request.model))
+        if self.honours_reasoning_effort and request.reasoning_effort in _CODEX_EFFORTS:
+            argv.extend(("-c", f"model_reasoning_effort={request.reasoning_effort}"))
+        argv.append("-")
+        return tuple(argv)
 
     def invoke(self, request: InvocationRequest) -> InvocationResult:
         require_capabilities(("text",), request.required_capabilities, target_name=request.target_name)
         with tempfile.TemporaryDirectory(prefix="gigai-codex-") as directory:
-            argv = [
-                self._executable,
-                "exec",
-                "--json",
-                "--ephemeral",
-                "--sandbox",
-                "read-only",
-                "--skip-git-repo-check",
-                "--cd",
-                directory,
-            ]
-            if request.model != "default":
-                argv.extend(("--model", request.model))
-            argv.append("-")
             output = run_json_process(
-                tuple(argv),
+                self.argv(request, directory),
                 prompt=request.prompt,
                 cwd=Path(directory),
                 timeout_seconds=self._timeout_seconds,

@@ -6,22 +6,71 @@
 const STATUS_MESSAGES = {
   400: "The run request was malformed. Reload and try again.",
   403: "This action was refused: consent was missing, stale, or the target isn't allowed from this UI.",
-  404: "That run could not be found.",
   409: "The configuration changed since it was loaded. Reload the config and try again.",
   422: "The server rejected this request as invalid. Reload and try again.",
+  503: "This feature is not available yet.",
   504: "The server timed out handling this request. It may still be running; try checking status again shortly.",
 };
 
+// uat-bug-006-r2: a 404 is only "that run could not be found" for a
+// run-scoped route (/api/runs/{id}[/...]) -- every 404 IS "not_found"
+// server-side (present_api.py's server.py uses that one code for both a
+// route that doesn't exist at all, "no such route", and a run id that
+// doesn't exist, "run not found"), so the code alone can't tell them apart.
+// A stale/pre-upgrade Scout server serving an older route table 404s on
+// routes like /api/profiles or /api/runs itself (not a specific run) --
+// showing "That run could not be found." there is actively misleading (the
+// operator's actual repro: a same-version reinstall left an old server
+// running, and the UI told them a run was missing when no run was ever
+// requested). A generic route-level 404 shows the server's own message, or
+// a hint to restart Scout when the server has none.
+const RUN_SCOPED_PATH = /^\/api\/runs\/[^/]+(\/|$)/;
+
+function messageFor404(path, detail) {
+  if (RUN_SCOPED_PATH.test(path)) {
+    return "That run could not be found.";
+  }
+  return detail || "The Scout server is out of date: run `gigai scout run` to restart it.";
+}
+
+// Error codes whose backend message is specific enough to show as-is,
+// instead of the generic per-status text above. config_missing in
+// particular used to fall through to the 404 default ("That run could not
+// be found."), which is wrong: no run is missing, the config file is.
+// prefs_missing/discovery_unavailable/discovery_running are the S2-B setup/
+// discover routes' own named error codes, same reasoning.
+// posting_requirements_unreadable (uat-bug-029, POST /api/assess 422): "Couldn't
+// read this posting's requirements", which the pages show as a note, not an
+// error (rankModel.isRequirementsUnreadable).
+const CODES_WITH_OWN_MESSAGE = new Set([
+  "config_missing",
+  "prefs_missing",
+  "discovery_unavailable",
+  "discovery_running",
+  "posting_requirements_unreadable",
+]);
+
 class ApiError extends Error {
-  constructor(status, message) {
+  // `extra` carries any additional error-body fields beyond code/message --
+  // PUT /api/setup's `field_errors` and GET /api/setup's 404 `prefill`, so
+  // callers don't have to re-parse the response body to reach them.
+  constructor(status, message, code, extra) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
+    Object.assign(this, extra || {});
   }
 }
 
-function messageForStatus(status, fallback) {
-  return STATUS_MESSAGES[status] || fallback || `Request failed with status ${status}.`;
+function messageForStatus(path, status, code, detail) {
+  if (code && CODES_WITH_OWN_MESSAGE.has(code) && detail) {
+    return detail;
+  }
+  if (status === 404) {
+    return messageFor404(path, detail);
+  }
+  return STATUS_MESSAGES[status] || detail || `Request failed with status ${status}.`;
 }
 
 async function request(method, path, body) {
@@ -47,8 +96,14 @@ async function request(method, path, body) {
   }
 
   if (!response.ok) {
-    const detail = payload && typeof payload.message === "string" ? payload.message : undefined;
-    throw new ApiError(response.status, messageForStatus(response.status, detail));
+    const errorBody = payload && typeof payload.error === "object" ? payload.error : null;
+    const code = errorBody && typeof errorBody.code === "string" ? errorBody.code : undefined;
+    const detail = errorBody && typeof errorBody.message === "string" ? errorBody.message : undefined;
+    const { code: _code, message: _message, ...extra } = errorBody || {};
+    // Q4b-ui: `detail` is the server's own message verbatim, for callers
+    // that render it (the tailored-resume panel: model_output_invalid names
+    // the line that failed a guard) instead of the per-status text above.
+    throw new ApiError(response.status, messageForStatus(path, response.status, code, detail), code, { ...extra, detail });
   }
 
   return payload;
@@ -66,8 +121,136 @@ export function getRunStatus(runId) {
   return request("GET", `/api/runs/${encodeURIComponent(runId)}`);
 }
 
-export function getRunResults(runId) {
-  return request("GET", `/api/runs/${encodeURIComponent(runId)}/results`);
+// run-reads-fast (uat-bug-022): a run's results are read a page at a time
+// (find_jobs/api/run_reads.py). A page is the no-query response's shape for
+// `limit` rows from `offset`, in the grid's own order, plus `total` /
+// `limit` / `offset`, the run's `counts` and `created_at`. No posting
+// carries its `text` (getRunPosting reads one posting whole), and each row
+// has `rank_score` (the score stored for it, RankScore) and `rank` (the
+// model's line: score, reasons, blockers), each null when there is none.
+// The read never calls a model.
+//
+// The server sends `carried_forward_assessments` beside `payload`, and the
+// cards are built from `payload` alone (boardRows.rowsFromResults reads
+// `payload.carried_forward_assessments`): a page is answered with the list
+// in both places, so a posting a run found unchanged shows the assessment
+// it carried forward.
+export const RESULTS_PAGE_SIZE = 100;
+
+export async function getRunResultsPage(runId, { limit = RESULTS_PAGE_SIZE, offset = 0 } = {}) {
+  const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  const response = await request("GET", `/api/runs/${encodeURIComponent(runId)}/results?${query}`);
+  const carried = response.carried_forward_assessments || [];
+  return { ...response, carried_forward_assessments: carried, payload: { ...response.payload, carried_forward_assessments: carried } };
+}
+
+// Two pages of one run as one response: the later page's rows, assessments,
+// not-assessed rows and carried-forward assessments after the earlier one's.
+export function mergeRunResultsPages(earlier, later) {
+  const carried = earlier.carried_forward_assessments.concat(later.carried_forward_assessments);
+  return {
+    ...earlier,
+    payload: {
+      ...earlier.payload,
+      rows: earlier.payload.rows.concat(later.payload.rows),
+      assessments: earlier.payload.assessments.concat(later.payload.assessments),
+      not_assessed: earlier.payload.not_assessed.concat(later.payload.not_assessed),
+      carried_forward_assessments: carried,
+    },
+    carried_forward_assessments: carried,
+  };
+}
+
+// Every page of a run's results, merged. `onPage(response)` is called after
+// each page with everything read so far, so a caller can draw the first page
+// (the top of the grid) while the rest loads; returning false from it stops
+// the read (the caller moved to another run).
+export async function getRunResults(runId, { pageSize = RESULTS_PAGE_SIZE, onPage } = {}) {
+  let merged = await getRunResultsPage(runId, { limit: pageSize, offset: 0 });
+  let wanted = !onPage || onPage(merged) !== false;
+  while (wanted && merged.payload.rows.length < merged.total) {
+    const page = await getRunResultsPage(runId, { limit: pageSize, offset: merged.payload.rows.length });
+    if (page.payload.rows.length === 0) {
+      break; // the run has fewer rows than the first page said: never loop on an empty page
+    }
+    merged = mergeRunResultsPages(merged, page);
+    wanted = !onPage || onPage(merged) !== false;
+  }
+  return merged;
+}
+
+// N33: the Jobs page's own reader. It asks for `pageSize` rows at a time,
+// only when the page wants them: `ensure(count)` reads pages until `count`
+// rows (or the run's `total`) are in, each page from where the last ended,
+// so earlier pages are never asked for again. Calls queue, so two waiting
+// for rows never read the same page twice. `onPage(response)` gets everything
+// read so far after each page (the merged response); returning false stops
+// reading (another run is shown). `ensure` answers the merged response.
+export const JOBS_PAGE_ROWS = 50;
+
+export function createResultsPager(runId, { pageSize = JOBS_PAGE_ROWS, fetchPage = getRunResultsPage, onPage } = {}) {
+  let merged = null;
+  let stopped = false;
+  let queue = Promise.resolve();
+  const loaded = () => (merged ? merged.payload.rows.length : 0);
+
+  async function read(count) {
+    while (!stopped && (merged === null || (loaded() < count && loaded() < merged.total))) {
+      const page = await fetchPage(runId, { limit: pageSize, offset: loaded() });
+      if (stopped) {
+        break;
+      }
+      if (merged === null) {
+        merged = page;
+      } else if (page.payload.rows.length === 0) {
+        break; // the run has fewer rows than it said: never loop on an empty page
+      } else {
+        merged = mergeRunResultsPages(merged, page);
+      }
+      if (onPage && onPage(merged) === false) {
+        stopped = true;
+      }
+    }
+    return merged;
+  }
+
+  return {
+    ensure(count) {
+      const result = queue.then(() => read(count));
+      queue = result.catch(() => {});
+      return result;
+    },
+    stop() {
+      stopped = true;
+    },
+    loaded,
+    total: () => (merged ? merged.total : null),
+  };
+}
+
+// The stored scores of a results response, in POST /rank's `scores` shape
+// (jobModel.buildJobs' `rankScores`). An older response whose rows carry
+// no `rank_score` (or no rows) reads as none.
+export function storedRankScores(response) {
+  const rows = (response && response.payload && response.payload.rows) || [];
+  return rows.map((row) => row && row.rank_score).filter(Boolean);
+}
+
+// One posting of a run, complete: {row: {posting (with its text), outcome,
+// rank_score, h1b?, job_state?}, assessment, not_assessed_reason,
+// carried_forward}. `normalizedUrl` is the posting's normalized_url.
+export function getRunPosting(runId, normalizedUrl) {
+  const query = new URLSearchParams({ url: normalizedUrl });
+  return request("GET", `/api/runs/${encodeURIComponent(runId)}/posting?${query}`);
+}
+
+// B4: the non-authoritative live-progress view (steps + postings +
+// assessments as they happen). Never the final-results authority -- see
+// present_api.py's run_progress docstring -- but lets the UI render cards
+// well before the sealed outputs exist. run-reads-fast: read as its summary,
+// which has no posting text and no list of skipped boards.
+export function getRunProgress(runId) {
+  return request("GET", `/api/runs/${encodeURIComponent(runId)}/progress?summary=1`);
 }
 
 // Builds the fixed-shape consent envelope (D5). Every field except the two
@@ -94,6 +277,181 @@ export function buildRunRequest({ configDigest, selectionCap, modelTarget }) {
     selection_rule: "new_or_edited_role_match",
     model_target: modelTarget,
   };
+}
+
+// S2-B: the setup interview + "Discover companies" panel routes
+// (present_api.py's GET/PUT /api/setup, POST /api/discover, GET
+// /api/discover/latest). A 404 from getSetup carries `prefill` on the
+// thrown ApiError (see present_api.py's _handle_get_setup); a 400 from
+// putSetup carries `field_errors`, one message per invalid field.
+export function getSetup() {
+  return request("GET", "/api/setup");
+}
+
+export function putSetup(prefsFields) {
+  return request("PUT", "/api/setup", prefsFields);
+}
+
+// uat-bug-033: {exa: bool} -> {sources: {exa}}. Only the optional Exa source
+// changes in find-jobs.json.
+export function putConfigSources(fields) {
+  return request("PUT", "/api/config/sources", fields);
+}
+
+// {keys: {exa, openrouter, openai: true|false}}: whether each key is set.
+export function getSecretsStatus() {
+  return request("GET", "/api/secrets/status");
+}
+
+export function startDiscovery() {
+  return request("POST", "/api/discover", {});
+}
+
+export function getDiscoverLatest() {
+  return request("GET", "/api/discover/latest");
+}
+
+// F1: profiles (S25). GET lists every profile + which one is selected;
+// POST creates one; PUT edits one; archive/selection are their own routes
+// (see find_jobs/api/profiles.py -- this module mirrors that contract).
+export function getProfiles() {
+  return request("GET", "/api/profiles");
+}
+
+export function createProfile(fields) {
+  return request("POST", "/api/profiles", fields);
+}
+
+export function updateProfile(profileId, fields) {
+  return request("PUT", `/api/profiles/${encodeURIComponent(profileId)}`, fields);
+}
+
+export function archiveProfile(profileId, replacementProfileId) {
+  return request("POST", `/api/profiles/${encodeURIComponent(profileId)}/archive`, {
+    ...(replacementProfileId ? { replacement_profile_id: replacementProfileId } : {}),
+  });
+}
+
+export function selectProfile(profileId) {
+  return request("POST", "/api/profiles/selection", { profile_id: profileId });
+}
+
+// P5: one standalone ("quick") assessment -- URL or pasted text, a profile
+// or a pasted resume. Synchronous: the handler blocks for the model call
+// (present_api's docstring); a 504 assess_timeout surfaces through ApiError
+// like any other error code.
+export function postAssess(request_) {
+  return request("POST", "/api/assess", request_);
+}
+
+export function getAssessments(params) {
+  const query = new URLSearchParams();
+  if (params && params.profileId) {
+    query.set("profile_id", params.profileId);
+  }
+  if (params && params.verdict) {
+    query.set("verdict", params.verdict);
+  }
+  const qs = query.toString();
+  return request("GET", `/api/assessments${qs ? `?${qs}` : ""}`);
+}
+
+// P3: the Q&A loop. POST upserts one answered question and optionally
+// re-assesses the named job (by job_identity) with every answered question
+// applied; GET lists every answered question recorded so far.
+export function postAnswer(fields) {
+  return request("POST", "/api/answers", fields);
+}
+
+export function getAnswers() {
+  return request("GET", "/api/answers");
+}
+
+// SCOPE-ADD-3: the ranking pass for one run's postings, by the run's own
+// model target (rankModel.createRankPass). `{}` only READS (the scores so
+// far, `rank_status` and `rank_record`); `{start: true}` is the Rank /
+// Re-rank click (starts a pass, or joins the one running); `{cancel: true}`
+// stops it. An older server's answer may carry a `usage` block or no
+// `rank_record`: both are ignored.
+export function postRank(runId, fields) {
+  return request("POST", `/api/runs/${encodeURIComponent(runId)}/rank`, fields || {});
+}
+
+// uat-bug-042: "Assess all new" for one run: {} reads the plan, the newest job
+// and the run's live counts; {start: true} starts or joins; {cancel: true}
+// stops (what finished is kept). See assessAllModel.js.
+export function postAssessAll(runId, fields) {
+  return request("POST", `/api/runs/${encodeURIComponent(runId)}/assess-all`, fields || {});
+}
+
+// P9c: every find-jobs run for this target (newest first), with per-run
+// counts (found/new/assessed/matched) -- the dashboard's "last run"/"new
+// since last run", the Profiles run-history table, and the Find-jobs
+// past-run picker. Optionally scoped to one profile. run-reads-fast:
+// `status` keeps the runs with that status and `limit` the newest N, so
+// {profileId, status: "succeeded", limit: 1} is the run the Jobs page opens
+// on, read without the history behind it.
+export function getRuns(params) {
+  const query = new URLSearchParams();
+  if (params && params.profileId) {
+    query.set("profile_id", params.profileId);
+  }
+  if (params && params.status) {
+    query.set("status", params.status);
+  }
+  if (params && params.limit) {
+    query.set("limit", String(params.limit));
+  }
+  const qs = query.toString();
+  return request("GET", `/api/runs${qs ? `?${qs}` : ""}`);
+}
+
+// P9c: the application pipeline + needs-action panels, and the posting
+// card's "Mark applied" action. GET lists every recorded application event
+// (incl. `linked_posting`, A1's find-jobs join, `null` when unmatched);
+// POST records one via external_ref = the posting's normalized_url.
+export function getApplications() {
+  return request("GET", "/api/applications");
+}
+
+export function postApplication(fields) {
+  return request("POST", "/api/applications", fields);
+}
+
+// Q3/Q4b-ui: one tailored resume for one posting (find_jobs/api/
+// tailored_resumes.py). POST is synchronous (~20-30 s: one model call, one
+// retry on a rejected draft); its errors are 422 (bad request), 502
+// model_output_invalid (the draft failed a guard; the message names the
+// line), 504 tailor_timeout. GET lists the stored ones, newest first,
+// optionally filtered by profile_id and/or job_identity.
+export function postTailoredResume(request_) {
+  return request("POST", "/api/tailored-resumes", request_);
+}
+
+export function getTailoredResumes(params) {
+  const query = new URLSearchParams();
+  if (params && params.profileId) {
+    query.set("profile_id", params.profileId);
+  }
+  if (params && params.jobIdentity) {
+    query.set("job_identity", params.jobIdentity);
+  }
+  const qs = query.toString();
+  return request("GET", `/api/tailored-resumes${qs ? `?${qs}` : ""}`);
+}
+
+// uat-batch2 (N11-C): "Update sources" (find_jobs/api/sources.py). POST
+// starts a background update and answers 202 {update_id, status: "running"}
+// at once (409 sources_update_running while one runs, 404
+// target_unavailable with no target); GET is polled for its progress and
+// carries `index`, what the Jobs page needs to know about the stored
+// postings. `force` starts over a stuck update.
+export function startSourcesUpdate({ force = false } = {}) {
+  return request("POST", "/api/sources/update", force ? { force: true } : {});
+}
+
+export function getSourcesUpdate() {
+  return request("GET", "/api/sources/update");
 }
 
 export { ApiError };

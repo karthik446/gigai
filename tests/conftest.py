@@ -6,13 +6,24 @@ function and statically reachable local helpers do not use filesystem,
 persistence, process, network, CLI, concurrency, or mutable-workpad seams.
 Unrecognized shapes fall into the integration lane rather than being promoted
 by speed or filename.
+
+ci-shard-suite: the one exception to "never changes selection" is opt-in.
+When GIGAI_TEST_SHARDS and GIGAI_TEST_SHARD are both set (CI's source-tests
+jobs), only the test files of that shard stay selected and the rest are
+reported as deselected; tests/support/sharding.py owns the rule.  With either
+unset, selection is untouched.
 """
 
 from __future__ import annotations
 
 import ast
+import os
 from functools import lru_cache
 from pathlib import Path
+
+import pytest
+
+from tests.support.sharding import ShardUsageError, requested_shard, split_items
 
 _INTEGRATION_TOKENS = frozenset(
     {
@@ -137,12 +148,58 @@ def classify_source(path_string: str, function_name: str) -> str:
     return "fast_unit"
 
 
-def pytest_collection_modifyitems(config, items) -> None:
+def _requested_shard(environ) -> tuple[int, int] | None:
+    try:
+        return requested_shard(os.environ if environ is None else environ)
+    except ShardUsageError as exc:
+        raise pytest.UsageError(str(exc)) from exc
+
+
+def _apply_shard(config, items, environ=None) -> None:
+    """Keep only this shard's test files; see tests/support/sharding.py."""
+
+    requested = _requested_shard(environ)
+    if requested is None:
+        return
+    shard, shards = requested
+    try:
+        kept, deselected = split_items(
+            items, shard=shard, shards=shards, root=config.rootpath
+        )
+    except ShardUsageError as exc:
+        raise pytest.UsageError(str(exc)) from exc
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = kept
+
+
+def pytest_configure(config) -> None:
+    # Bad shard values stop the run here, before collection and before xdist
+    # starts a worker, as one usage error rather than one per worker.
     del config
+    _requested_shard(None)
+
+
+def pytest_report_header(config) -> str | None:
+    del config
+    requested = _requested_shard(None)
+    if requested is None:
+        return None
+    shard, shards = requested
+    return f"gigai shard: {shard}/{shards} (test files by sha1 of repo-relative path)"
+
+
+def pytest_collection_modifyitems(config, items) -> None:
+    _apply_shard(config, items)
     for item in items:
         function_name = item.name.split("[", 1)[0]
         lane = classify_source(str(item.path), function_name)
         item.add_marker(lane)
 
 
-__all__ = ["classify_source", "pytest_collection_modifyitems"]
+__all__ = [
+    "classify_source",
+    "pytest_collection_modifyitems",
+    "pytest_configure",
+    "pytest_report_header",
+]

@@ -1,7 +1,8 @@
 # Scout local-boundary demonstration
 
 This is a bounded synthetic-only empirical spike for the proposed boundary in
-`docs/development/evidence/v0.1.7/Scout/SCOUT-local-proposals-privacy-spike.md`.
+SCOUT-local-proposals-privacy-spike.md (kept in the maintainers' local
+orchestrator docs).
 It is not production code and does not change GigAI authority. The scripts never
 open `.gigai` workpads, resumes, chats, credentials, or environment secrets.
 

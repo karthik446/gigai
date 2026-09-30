@@ -50,7 +50,9 @@ from .scout.documents_cli import document_group
 from .scout.answer_cli import answer_group
 from .scout.acquisition_cli import acquisition_group
 from .scout.interview_cli import interview_group
+from .scout.scout_cli import scout_group
 from .private_transfer_cli import transfer_group
+from .secrets_cli import secrets_group
 from .index import JournalIndexError, JournalProjection, read_index
 from .listing import GigListingError, list_gigs
 from .invocation import InvocationValidationError, load_invocation_bytes
@@ -98,6 +100,7 @@ from .occurrence import (
 )
 from .question_generation import G27_DISCOVERY_PROMPT, generate_model_questions
 from .setup import (
+    SetupResult,
     build_config,
     detect_editor_argv,
     default_home_root,
@@ -120,7 +123,13 @@ from .private_records import (
     read_record,
 )
 from .target_binding import TargetBindingError, resolve_target
-from .workpad import ResolvedWorkpad, WorkpadError, open_locations, resolve_workpad
+from .workpad import (
+    ResolvedWorkpad,
+    WorkpadError,
+    open_locations,
+    resolve_workpad,
+    select_active_workpad,
+)
 
 
 class InvocationGroup(click.Group):
@@ -944,6 +953,97 @@ def setup_command(
 ) -> None:
     """Run terminal setup, or update config non-interactively."""
 
+    result = _run_terminal_setup(
+        non_interactive=non_interactive,
+        home_value=home_value,
+        workpad_root=workpad_root,
+        editor=editor,
+        editor_arg=editor_arg,
+        open_with_target=open_with_target,
+        credential_ref=credential_ref,
+        clear_credentials=clear_credentials,
+        endpoint_spec=endpoint_spec,
+        model_target_spec=model_target_spec,
+        create_model_target=create_model_target,
+        target_output_limit_spec=target_output_limit_spec,
+        target_reasoning_effort_spec=target_reasoning_effort_spec,
+        as_json=as_json,
+    )
+    payload = {
+        "schema_version": result.config.schema_version,
+        "home_root": os.fspath(result.config.home_root),
+        "workpad_root": os.fspath(result.config.workpad_root),
+        "config_changed": result.config_changed,
+        "standard_pack_changed": result.pack_changed,
+        "mount_checks": [
+            {"id": check.id, "status": check.status} for check in result.mount_checks
+        ],
+    }
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        changed = "updated" if result.config_changed else "unchanged"
+        click.echo(f"GigAI setup complete; configuration {changed}.")
+        click.echo(
+            "Authoritative workpad root: "
+            + _display_local_path(result.config.workpad_root)
+        )
+
+
+def write_default_setup(home_value: Path | None, *, as_json: bool) -> SetupResult:
+    """Write what `gigai setup` writes when every prompt takes its default.
+
+    uat-bug-050: `gigai scout run` / `gigai scout install` call this on a
+    missing config.toml so a fresh machine needs no separate setup step. It
+    is the same terminal-setup path with each prompt answered by its default
+    (no stdin, no summary), so the bytes match an Enter-through `gigai setup`.
+    """
+
+    return _run_terminal_setup(
+        non_interactive=False,
+        home_value=home_value,
+        workpad_root=None,
+        editor=None,
+        editor_arg=(),
+        open_with_target=None,
+        credential_ref=(),
+        clear_credentials=False,
+        endpoint_spec=(),
+        model_target_spec=(),
+        create_model_target=None,
+        target_output_limit_spec=(),
+        target_reasoning_effort_spec=(),
+        as_json=as_json,
+        accept_defaults=True,
+    )
+
+
+def _run_terminal_setup(
+    *,
+    non_interactive: bool,
+    home_value: Path | None,
+    workpad_root: Path | None,
+    editor: str | None,
+    editor_arg: tuple[str, ...],
+    open_with_target: bool | None,
+    credential_ref: tuple[str, ...],
+    clear_credentials: bool,
+    endpoint_spec: tuple[str, ...],
+    model_target_spec: tuple[str, ...],
+    create_model_target: str | None,
+    target_output_limit_spec: tuple[str, ...],
+    target_reasoning_effort_spec: tuple[str, ...],
+    as_json: bool,
+    accept_defaults: bool = False,
+) -> SetupResult:
+    """Resolve and apply one setup; `accept_defaults` answers every prompt with its default."""
+
+    def prompt_text(label: str, *, default: str) -> str:
+        return default if accept_defaults else _setup_text_prompt(label, default=default)
+
+    def prompt_confirm(label: str, *, default: bool) -> bool:
+        return default if accept_defaults else _setup_confirm(label, default=default)
+
     _require_supported_platform()
     requested_home = (
         (home_value or default_home_root()).expanduser().resolve(strict=False)
@@ -985,7 +1085,7 @@ def setup_command(
     else:
         requested_home = (
             Path(
-                _setup_text_prompt(
+                prompt_text(
                     "GigAI home",
                     default=_display_local_path(requested_home),
                 )
@@ -1012,7 +1112,7 @@ def setup_command(
         )
         resolved_workpad = (
             Path(
-                _setup_text_prompt(
+                prompt_text(
                     "Authoritative workpad root",
                     default=_display_local_path(default_workpad),
                 )
@@ -1039,7 +1139,7 @@ def setup_command(
                 default_editor = detected_editor[0]
         try:
             resolved_editor = resolve_editor_argv(
-                _setup_text_prompt(
+                prompt_text(
                     "Editor program (used to open workpads)",
                     default=default_editor or "",
                 ),
@@ -1053,7 +1153,7 @@ def setup_command(
             )
         except ValueError as exc:
             _raise_cli_error(str(exc), as_json=as_json, code="setup_editor_invalid")
-        resolved_open = _setup_confirm(
+        resolved_open = prompt_confirm(
             "Open workpads with their target later?",
             default=(
                 open_with_target
@@ -1124,7 +1224,7 @@ def setup_command(
                         endpoint=endpoint_name,
                         model="default",
                         capabilities=("text",),
-                        max_output_tokens=512,
+                        max_output_tokens=_DEFAULT_MODEL_TARGET_OUTPUT_TOKENS,
                     )
                 )
                 target_names.add(target_name)
@@ -1227,7 +1327,7 @@ def setup_command(
             endpoints=endpoints,
             detected_models=discovery_snapshot.models,
         )
-        if not non_interactive and create_model_target is None:
+        if not non_interactive and not accept_defaults and create_model_target is None:
             selected_create_target = _select_terminal_create_target(
                 options=runtime_options,
                 default=selected_create_target,
@@ -1276,7 +1376,7 @@ def setup_command(
                     )
                 )
             profiles = tuple(profiles_list)
-        if not non_interactive:
+        if not non_interactive and not accept_defaults:
             click.secho("\nGigAI setup", bold=True, fg="cyan")
             click.echo(
                 "  GigAI home: "
@@ -1317,26 +1417,7 @@ def setup_command(
         persist_discovery_snapshot(result.config.home_root, discovery_snapshot)
     except (ConfigurationError, OSError, ValueError) as exc:
         _raise_cli_error(str(exc), as_json=as_json, code="setup_invalid")
-
-    payload = {
-        "schema_version": result.config.schema_version,
-        "home_root": os.fspath(result.config.home_root),
-        "workpad_root": os.fspath(result.config.workpad_root),
-        "config_changed": result.config_changed,
-        "standard_pack_changed": result.pack_changed,
-        "mount_checks": [
-            {"id": check.id, "status": check.status} for check in result.mount_checks
-        ],
-    }
-    if as_json:
-        click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
-    else:
-        changed = "updated" if result.config_changed else "unchanged"
-        click.echo(f"GigAI setup complete; configuration {changed}.")
-        click.echo(
-            "Authoritative workpad root: "
-            + _display_local_path(result.config.workpad_root)
-        )
+    return result
 
 
 def _run_browser_setup(
@@ -1775,7 +1856,11 @@ def _browser_preview_config(config, detected_models):
         if provider not in endpoint_names:
             endpoints.append(Endpoint(provider, adapter, credential=credential_name))
         if f"{provider}-default" not in target_names:
-            targets.append(ModelTarget(f"{provider}-default", provider, model, ("text",), 512))
+            targets.append(
+                ModelTarget(
+                    f"{provider}-default", provider, model, ("text",), _DEFAULT_MODEL_TARGET_OUTPUT_TOKENS
+                )
+            )
 
     for detected in detected_models:
         if detected.executable is None or detected.name in endpoint_names:
@@ -1784,7 +1869,11 @@ def _browser_preview_config(config, detected_models):
         target_name = f"{detected.name}-default"
         endpoints.append(Endpoint(detected.name, adapter))
         if target_name not in target_names:
-            targets.append(ModelTarget(target_name, detected.name, "default", ("text",), 512))
+            targets.append(
+                ModelTarget(
+                    target_name, detected.name, "default", ("text",), _DEFAULT_MODEL_TARGET_OUTPUT_TOKENS
+                )
+            )
 
     return build_config(
         home_root=config.home_root,
@@ -1859,7 +1948,15 @@ def _browser_provider_config(config, draft: SetupDraft):
             continue
         credentials.append(CredentialReference(credential_name, "environment", environment_name))
         endpoints.append(Endpoint(provider, adapter, credential=credential_name))
-        targets.append(ModelTarget(f"{provider}-default", provider, model or default_model, ("text",), 512))
+        targets.append(
+            ModelTarget(
+                f"{provider}-default",
+                provider,
+                model or default_model,
+                ("text",),
+                _DEFAULT_MODEL_TARGET_OUTPUT_TOKENS,
+            )
+        )
     return tuple(credentials), tuple(endpoints), tuple(targets)
 
 
@@ -3590,6 +3687,66 @@ def gigs_command(
         )
 
 
+@cli.group("gig")
+def gig_group() -> None:
+    """Select which registered Gig is active for the bound project."""
+
+
+@gig_group.command("use")
+@click.argument("gig_id")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def gig_use_command(
+    gig_id: str,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Make one already-installed, approved Gig the active Gig for this project."""
+
+    _require_supported_platform()
+    home_root = home_value or default_home_root()
+    try:
+        listing = list_gigs(
+            home_root=home_root, requested_target=target_value, all_projects=False
+        )
+    except GigListingError as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=exc.code)
+        return
+    entry = next((item for item in listing.entries if item.gig_id == gig_id), None)
+    if entry is None:
+        _raise_cli_error(
+            f"{gig_id} is not a registered Gig for this project; "
+            "install it first (for example, `gigai scout install`)",
+            as_json=as_json,
+            code="gig_not_installed",
+        )
+        return
+    if entry.status != "Approved":
+        _raise_cli_error(
+            f"{gig_id} is not approved yet; run `gigai approve <proposal_id>` "
+            "(or `gigai scout install` for Scout) before selecting it",
+            as_json=as_json,
+            code="gig_not_approved",
+        )
+        return
+    try:
+        select_active_workpad(
+            home_root=home_root,
+            requested_target=target_value,
+            gig_id=gig_id,
+            allow_semantic_state=True,
+        )
+    except (WorkpadError, OSError, ValueError) as exc:
+        _raise_cli_error(str(exc), as_json=as_json, code=getattr(exc, "code", "gig_use_failed"))
+        return
+    if as_json:
+        click.echo(json.dumps({"ok": True, "gig_id": gig_id, "active": True}, sort_keys=True, separators=(",", ":")))
+    else:
+        click.echo(f"{gig_id} is now the active Gig for this project.")
+
+
 @cli.command("proposals")
 @_projection_options
 def proposals_command(
@@ -3963,6 +4120,23 @@ def _parse_endpoint_spec(value: str) -> Endpoint:
     )
 
 
+# uat-bug-005 part B: a find-jobs assessment's own output schema (5-12
+# requirement-matrix rows plus suggestions/questions, see
+# proposal_execution._assess_prompt) can run well past a few hundred tokens.
+# ollama_local and openrouter_api both genuinely cap generation at a
+# target's own max_output_tokens (see adapters/ollama_local.py's
+# "num_predict" and adapters/openrouter_api.py's "max_tokens"), so a target
+# defaulted too low truncates a real assessment; codex_cli/claude_cli never
+# read this field at all, so raising it for them is inert, never surprising.
+# 4096 matches what an explicit `--model-target NAME=ENDPOINT:MODEL` has
+# always defaulted to (`_parse_model_target_spec` below) -- setup's own
+# auto-discovered targets (codex/claude CLI detection, the browser preview's
+# openai/openrouter defaults) previously used a separate, lower 512 default,
+# which is what made the pre-0.1.9 README tell operators to raise it by hand
+# via `--target-output-limit`. One shared default removes that surprise.
+_DEFAULT_MODEL_TARGET_OUTPUT_TOKENS = 4096
+
+
 def _parse_target_output_limits(values: tuple[str, ...]) -> dict[str, int]:
     limits: dict[str, int] = {}
     for value in values:
@@ -4019,7 +4193,7 @@ def _parse_model_target_spec(
             raise click.BadParameter(
                 "local model digests use @sha256:<64 lowercase hex digits>"
             )
-    maximum = output_limits.get(name, 4096)
+    maximum = output_limits.get(name, _DEFAULT_MODEL_TARGET_OUTPUT_TOKENS)
     return ModelTarget(
         name=name,
         endpoint=endpoint,
@@ -4047,7 +4221,13 @@ cli.add_command(answer_group)
 cli.add_command(acquisition_group)
 cli.add_command(acquisition_group, name="scout-import")
 cli.add_command(interview_group)
+# Debt: this registration seam (a core module importing and registering a
+# gig's Click group) is the accepted pattern for now, matching every other
+# scout_*_cli group above; a real gig-plugin registration mechanism is
+# 0.2.0 roadmap Workstream 3 scope, not built here.
+cli.add_command(scout_group)
 cli.add_command(transfer_group)
+cli.add_command(secrets_group)
 # Keep existing G45 wrapper create/read behavior while exposing native CRUD.
 # Registering this independently named group as "record" would silently replace
 # the existing Click group and break its accepted command surface.

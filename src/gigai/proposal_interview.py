@@ -15,6 +15,7 @@ from typing import Callable, Mapping
 import uuid
 
 from .canonical import canonical_json_digest
+from .http_server import NoLookupThreadingHTTPServer
 
 
 STATES = frozenset(
@@ -780,7 +781,7 @@ class InterviewHTTPServer:
                 except (ProposalInterviewError, json.JSONDecodeError, TypeError, ValueError, OSError, RuntimeError) as exc:
                     self._json(409, {"error": str(exc)})
 
-        self._server = http.server.ThreadingHTTPServer((host, 0), Handler)
+        self._server = NoLookupThreadingHTTPServer((host, 0), Handler)
         self._server.daemon_threads = True
         self._thread: threading.Thread | None = None
 

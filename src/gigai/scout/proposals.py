@@ -530,21 +530,188 @@ def _validate_assessment_extensions(
                 findings.append(_finding(f"{field}[{index}]", "invalid_text", f"{field} item is invalid"))
 
 
-def parse_assessment_proposal(raw: Mapping[str, object]) -> AssessmentResult:
-    """Parse the frozen find-jobs assessment DTO without coercion."""
+_QUESTION_ID_RE = re.compile(r"\A[a-z0-9._-]+:[a-z0-9._-]+\Z")
+
+
+def _validate_structured_questions(items: object) -> None:
+    """P2 (v0.1.9) bounds for ``structured_questions``: same list cap as every
+    other assessment list (``_MAX_ITEMS``), same per-string cap as a plain
+    question (``_MAX_QUESTION``), plus the ``question_id`` shape check
+    (C10-compatible: fits ``experience_qa``'s own pattern too)."""
+
+    if items is None:
+        return
+    if not isinstance(items, list):
+        raise FindJobsContractError("invalid_value", "questions must be a list of objects")
+    if len(items) > _MAX_ITEMS:
+        raise FindJobsContractError(
+            "invalid_value", f"questions has {len(items)} items; at most {_MAX_ITEMS} allowed"
+        )
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise FindJobsContractError(
+                "invalid_value", "questions item must be an object with question_id, question and requirement"
+            )
+        question_id = item.get("question_id")
+        question = item.get("question")
+        requirement = item.get("requirement")
+        if type(question_id) is not str or not _QUESTION_ID_RE.fullmatch(question_id):
+            shown = question_id if type(question_id) is str else repr(question_id)
+            raise FindJobsContractError(
+                "invalid_value",
+                f"question_id {shown!r} is invalid: must be <category>:<value> with exactly one colon "
+                "and only lowercase letters, digits, '_', '.' or '-'",
+            )
+        if type(question) is not str or not question.strip() or len(question) > _MAX_QUESTION or "\x00" in question:
+            raise FindJobsContractError(
+                "invalid_value",
+                f"question text is invalid: must be a non-empty string under {_MAX_QUESTION} characters",
+            )
+        if requirement is not None and (type(requirement) is not str or len(requirement) > _MAX_TEXT or "\x00" in requirement):
+            raise FindJobsContractError(
+                "invalid_value", f"question requirement is invalid: must be a string under {_MAX_TEXT} characters"
+            )
+
+
+def _is_hard_unmet_row(row: object) -> bool:
+    """A matrix row counts toward the verdict's HARD-unmet gate (Terra
+    review P1) only when it is BOTH ``status == "unmet"`` AND HARD-class --
+    per assess.md's REQUIREMENT CLASSES paragraph and rule 1, only a HARD
+    requirement's explicit contradiction can drive ``not_a_match``; an
+    unmet NICE_TO_HAVE (rule: posting-phrased "bonus"/"plus"/"preferred")
+    or an ASKABLE row (rule 1: silence is reclassified ASKABLE, never
+    "unmet") must never force ``not_a_match`` or block a match. A row with
+    NO ``class`` at all is an OLD serialized result predating P2's
+    per-row classification -- treated as HARD (the conservative default:
+    unmet always meant hard before P2 added classes), so an old assessment's
+    verdict is checked exactly as strictly as it always was.
+    """
+
+    if not isinstance(row, Mapping) or row.get("status") != "unmet":
+        return False
+    row_class = row.get("class")
+    return row_class is None or row_class == "hard"
+
+
+def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
+    """P2 (v0.1.9): verdict must agree with the matrix/questions it came with
+    (plan section "P2"; rules 3-5 of the S29 r1 instructions), CLASS-AWARE
+    per Terra's review: only HARD-class unmet rows (or an unclassed old row,
+    treated as HARD) decide ``not_a_match`` or block a match -- an unmet
+    NICE_TO_HAVE or an ASKABLE row must never force ``not_a_match`` or block
+    ``matched_above_threshold``. Absent verdict (an old-shape or non-verdict
+    answer) is not checked -- this rule only binds a payload that actually
+    claims a verdict.
+
+    The full state table (assess.md rule 7, "verdict, computed from the
+    rows only" -- rules 3-5 of the S29 r1 wording before assess-prompt-v2):
+    - ``matched_above_threshold``: zero HARD-unmet rows AND zero structured
+      questions.
+    - ``pending_user_answers``: zero HARD-unmet rows AND at least one
+      structured question.
+    - ``not_a_match``: at least one HARD-unmet row.
+
+    Each violation message NAMES the violated rule and the count it found
+    ("verdict matched_above_threshold but 1 hard requirement is unmet (rule
+    7 ...)") so the one retry (``assessment_core.assess_once``, U22) feeds
+    the model something it can act on, not just "invalid_value".
+    """
+
+    verdict = raw.get("verdict")
+    if verdict is None:
+        return
+    matrix = raw.get("matrix")
+    rows = matrix if isinstance(matrix, list) else []
+    hard_unmet_rows = sum(1 for row in rows if _is_hard_unmet_row(row))
+    structured = raw.get("structured_questions")
+    question_count = len(structured) if isinstance(structured, list) else 0
+
+    hard_unmet = _count_phrase(hard_unmet_rows, "hard requirement is unmet", "hard requirements are unmet")
+    open_questions = _count_phrase(question_count, "question is open", "questions are open")
+    if verdict == "matched_above_threshold":
+        if hard_unmet_rows > 0:
+            raise FindJobsContractError(
+                "invalid_value",
+                f"verdict matched_above_threshold but {hard_unmet} "
+                "(rule 7: any hard row with status unmet -> not_a_match)",
+            )
+        if question_count > 0:
+            raise FindJobsContractError(
+                "invalid_value",
+                f"verdict matched_above_threshold but {open_questions} "
+                "(rule 7: any question -> pending_user_answers)",
+            )
+    elif verdict == "pending_user_answers":
+        if hard_unmet_rows > 0:
+            raise FindJobsContractError(
+                "invalid_value",
+                f"verdict pending_user_answers but {hard_unmet} "
+                "(rule 7: any hard row with status unmet -> not_a_match)",
+            )
+        if question_count < 1:
+            raise FindJobsContractError(
+                "invalid_value",
+                "verdict pending_user_answers but questions is empty "
+                "(rule 7: no hard unmet row and no question -> matched_above_threshold)",
+            )
+    elif verdict == "not_a_match":
+        if hard_unmet_rows < 1:
+            raise FindJobsContractError(
+                "invalid_value",
+                "verdict not_a_match but no hard requirement is unmet "
+                "(rule 7: not_a_match needs a hard row with status unmet)",
+            )
+
+
+def _count_phrase(count: int, singular: str, plural: str) -> str:
+    """``"1 hard requirement is unmet"`` / ``"3 hard requirements are unmet"``."""
+
+    return f"{count} {singular if count == 1 else plural}"
+
+
+def validate_assessment_bounds(raw: Mapping[str, object]) -> None:
+    """The strict pre-parse bounds every assessment answer must meet (P5: shared).
+
+    Matrix non-empty and capped, ``suggestions``/``questions`` capped and
+    clean strings, P2's structured-question bounds and verdict consistency.
+    Extracted from ``parse_assessment_proposal`` so the standalone quick
+    assessment (``quick_assess.py``, parsing an ``AssessmentBody``) and the
+    run path (parsing an ``AssessmentResult``) validate identically; raises
+    ``FindJobsContractError`` on the first violation.
+    """
     if not isinstance(raw, Mapping):
         raise FindJobsContractError("wrong_type", "assessment proposal must be an object")
     matrix = raw.get("matrix")
     suggestions = raw.get("suggestions")
     questions = raw.get("questions")
-    if not isinstance(matrix, list) or not matrix or len(matrix) > _MAX_ITEMS:
-        raise FindJobsContractError("invalid_value", "assessment_result.matrix is out of bounds")
+    # assess-prompt-v2 (review F1/F9): every message here names the violated
+    # bound WITH the number, since ``assessment_core.assess_once`` feeds the
+    # text straight back to the model on its one retry -- "matrix is out of
+    # bounds" gave a model that emitted 14 careful rows nothing to act on.
+    if not isinstance(matrix, list):
+        raise FindJobsContractError("invalid_value", f"matrix must be a list of 1 to {_MAX_ITEMS} rows")
+    if not matrix:
+        raise FindJobsContractError("invalid_value", "matrix has 0 rows; at least 1 row is required")
+    if len(matrix) > _MAX_ITEMS:
+        raise FindJobsContractError("invalid_value", f"matrix has {len(matrix)} rows; at most {_MAX_ITEMS} allowed")
     for field, items in (("suggestions", suggestions), ("questions", questions)):
-        if not isinstance(items, list) or len(items) > _MAX_ITEMS or any(
-            type(item) is not str or not item.strip() or len(item) > _MAX_QUESTION or "\x00" in item
-            for item in items
-        ):
-            raise FindJobsContractError("invalid_value", f"assessment_result.{field} is out of bounds")
+        if not isinstance(items, list):
+            raise FindJobsContractError("invalid_value", f"{field} must be a list")
+        if len(items) > _MAX_ITEMS:
+            raise FindJobsContractError("invalid_value", f"{field} has {len(items)} items; at most {_MAX_ITEMS} allowed")
+        for index, item in enumerate(items):
+            if type(item) is not str or not item.strip() or len(item) > _MAX_QUESTION or "\x00" in item:
+                raise FindJobsContractError(
+                    "invalid_value",
+                    f"{field}[{index}] is invalid: must be a non-empty string under {_MAX_QUESTION} characters",
+                )
+    _validate_structured_questions(raw.get("structured_questions"))
+    _validate_verdict_consistency(raw)
+
+
+def parse_assessment_proposal(raw: Mapping[str, object]) -> AssessmentResult:
+    """Parse the frozen find-jobs assessment DTO without coercion."""
+    validate_assessment_bounds(raw)
     try:
         return AssessmentResult.from_json(dict(raw))
     except FindJobsContractError:
@@ -1146,4 +1313,5 @@ __all__ = [
     "validate_and_bind_proposal",
     "validate_proposal_output",
     "parse_assessment_proposal",
+    "validate_assessment_bounds",
 ]

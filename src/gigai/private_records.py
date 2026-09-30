@@ -28,6 +28,7 @@ from .journal import (
     JournalSnapshot,
     JournalTransition,
     read_committed_artifact,
+    read_committed_snapshot,
     record_transition,
     run_with_journal_writer,
 )
@@ -190,16 +191,35 @@ def _read_json(root: Path, path: str, *, code: str) -> dict[str, object]:
     return payload
 
 
-def _private_snapshot(resolved: ResolvedWorkpad) -> JournalSnapshot:
+# A private record lives at ``records/<record_id>/``; naming that family by
+# its ID shape keeps a read off every other family that shares ``records/``,
+# however many files those hold.
+RECORD_DIRECTORY_PATTERN = (
+    EntityPrefix.RECORD.value
+    + r"_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+)
+
+
+def _read_snapshot(resolved: ResolvedWorkpad, *, prefixes: tuple[str, ...] = (), records: bool = False) -> JournalSnapshot:
+    """Committed private evidence, read without the journal writer lock."""
     try:
-        return run_with_journal_writer(
+        return read_committed_snapshot(
             workpad=resolved.path,
             project_id=resolved.project_id,
             gig_id=resolved.gig_id,
-            operation=lambda writer: writer.snapshot(("records/", "references/", "run-inputs/")),
+            prefixes=prefixes,
+            child_prefixes=(("records/", RECORD_DIRECTORY_PATTERN),) if records else (),
         )
     except JournalConflictError as exc:
         raise PrivateRecordError("private_record_not_authenticated", str(exc)) from exc
+
+
+def _private_snapshot(resolved: ResolvedWorkpad, *, operations: bool = False) -> JournalSnapshot:
+    """Every private record, reference and Run input (and, on request, the
+    operation receipts): the families this module publishes, nothing else
+    under ``records/``."""
+    prefixes = ("references/", "run-inputs/", *(("records/operations/",) if operations else ()))
+    return _read_snapshot(resolved, prefixes=prefixes, records=True)
 
 
 def _committed_json(resolved: ResolvedWorkpad, path: str, *, code: str, schema: str | None = None, snapshot: JournalSnapshot | None = None) -> dict[str, object]:
@@ -383,7 +403,7 @@ def list_imports(*, home_root: Path, requested_target: Path | None, family: str,
         if family == "reference" else ("run-inputs/input_", "/input.json", "run-input-record.schema.json")
     )
     result = []
-    snapshot = _private_snapshot(resolved)
+    snapshot = _read_snapshot(resolved, prefixes=("references/" if family == "reference" else "run-inputs/",))
     for path in sorted(item for item in snapshot.artifacts if item.startswith(prefix) and item.endswith(suffix)):
         record = _committed_json(resolved, path, code=f"{family}_not_found", schema=schema, snapshot=snapshot)
         if record.get("project_id") != resolved.project_id:
@@ -523,7 +543,7 @@ def read_record(*, home_root: Path, requested_target: Path | None, record_id: st
 
 def rebuild_scout_projection(*, resolved: ResolvedWorkpad) -> None:
     """Rebuild only SCOUT-owned tables and redacted context from committed files."""
-    selected = _private_snapshot(resolved)
+    selected = _private_snapshot(resolved, operations=True)
     journal_head = selected.head
     records: list[dict[str, object]] = []
     record_ids = {

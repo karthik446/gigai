@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from ..config import CredentialReference
@@ -20,12 +21,14 @@ class OpenAIAPIAdapter(HttpModelAdapter):
         credential: CredentialReference,
         base_url: str | None = None,
         credential_resolver: CredentialResolver | None = None,
+        home_root: Path | None = None,
         client: Any | None = None,
     ) -> None:
         super().__init__(
             credential=credential,
             base_url=base_url or self.default_base_url,
             credential_resolver=credential_resolver,
+            home_root=home_root,
             client=client,
         )
 

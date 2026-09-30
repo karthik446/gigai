@@ -41,8 +41,8 @@ explicit opt-in and is not affected by source xdist settings.
 
 ## Development goals and commits
 
-Phase 1 implementation is governed by the canonical
-[G00-G11 development goal graph](docs/development/goals/phase-1/README.md).
+Phase 1 implementation is governed by the canonical G00-G11 development goal
+graph (kept in the maintainers' local orchestrator docs, `docs/goals/phase-1/README.md`).
 Do not begin a goal before every dependency has committed completion evidence.
 
 Keep each goal in its own reviewable change set. A commit must not mix work

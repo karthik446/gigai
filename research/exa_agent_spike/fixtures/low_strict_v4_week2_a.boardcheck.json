@@ -1,0 +1,26 @@
+[
+  {
+    "board_token": "vrchat",
+    "careers_url": "https://jobs.lever.co/vrchat",
+    "company": "VRChat",
+    "error": null,
+    "is_usable_board": true,
+    "matching_role_us_count": 1,
+    "parses_as_ats": true,
+    "posting_count": 1,
+    "provider": "lever",
+    "resolved": true
+  },
+  {
+    "board_token": "docker",
+    "careers_url": "https://jobs.ashbyhq.com/docker",
+    "company": "Docker",
+    "error": null,
+    "is_usable_board": true,
+    "matching_role_us_count": 1,
+    "parses_as_ats": true,
+    "posting_count": 1,
+    "provider": "ashby",
+    "resolved": true
+  }
+]

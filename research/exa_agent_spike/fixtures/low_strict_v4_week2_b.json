@@ -1,0 +1,348 @@
+{
+  "cap_dollars": null,
+  "effort": "low",
+  "latency_seconds": 50.331,
+  "request": {
+    "effort": "low",
+    "exclusion_count": 23,
+    "outputSchema": {
+      "properties": {
+        "companies": {
+          "items": {
+            "properties": {
+              "ats_provider": {
+                "enum": [
+                  "greenhouse",
+                  "lever",
+                  "ashby",
+                  "other",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "board_token": {
+                "type": "string"
+              },
+              "careers_url": {
+                "format": "uri",
+                "type": "string"
+              },
+              "company": {
+                "type": "string"
+              },
+              "source": {
+                "format": "uri",
+                "type": "string"
+              },
+              "sponsorship": {
+                "enum": [
+                  "yes",
+                  "no",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "sponsorship_evidence": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "company",
+              "careers_url",
+              "ats_provider",
+              "sponsorship",
+              "sponsorship_evidence",
+              "source"
+            ],
+            "type": "object"
+          },
+          "maxItems": 15,
+          "type": "array"
+        }
+      },
+      "required": [
+        "companies"
+      ],
+      "type": "object"
+    },
+    "query": "Find US companies hiring for staff or senior backend engineer roles (remote or Denver, Colorado area) that use Greenhouse, Lever, or Ashby as their applicant tracking system AND are documented to sponsor US work visas (H-1B). Only return companies where you can identify the company's OWN job board base URL on one of these three platforms (e.g. https://boards.greenhouse.io/<company>, https://jobs.lever.co/<company>, or https://jobs.ashbyhq.com/<company> -- the board root, not a link to a specific job posting or a third-party aggregator like LinkedIn, Indeed, or another job site). Skip a company if you cannot find its own board URL on one of those three ATS platforms. For each company give: the company name, the exact board URL, the ATS provider, and visa sponsorship evidence with a source URL (an H-1B filing record, careers page, or job posting). Exclude: Coupang, ClickHouse, Gen Digital."
+  },
+  "response": {
+    "completedAt": "2026-09-24T04:17:59.856Z",
+    "costDollars": {
+      "agentCompute": 0.01,
+      "emails": 0,
+      "phoneNumbers": 0,
+      "search": 0.015,
+      "total": 0.025
+    },
+    "createdAt": "2026-09-24T04:17:12.911Z",
+    "id": "agent_run_dfa69a4d43ce4fc0912ef3208a7782b2",
+    "object": "agent_run",
+    "output": {
+      "grounding": [
+        {
+          "citations": [
+            {
+              "title": "Turnkey Ashby job board",
+              "url": "https://jobs.ashbyhq.com/turnkey"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[0].careers_url"
+        },
+        {
+          "citations": [
+            {
+              "title": "Engineering - Backend @ Turnkey",
+              "url": "https://jobs.ashbyhq.com/turnkey/346afd67-a6b9-4fb4-b3fb-19e54baf71e0"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[0].ats_provider"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Software Engineer \u2013 Backend at Turnkey",
+              "url": "https://www.remoterocketship.com/us/company/turnkey-2/jobs/senior-software-engineer-backend-united-states-remote/"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[0].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Software Engineer \u2013 Backend at Turnkey",
+              "url": "https://www.remoterocketship.com/us/company/turnkey-2/jobs/senior-software-engineer-backend-united-states-remote/"
+            },
+            {
+              "title": "Engineering - Backend @ Turnkey",
+              "url": "https://jobs.ashbyhq.com/turnkey/346afd67-a6b9-4fb4-b3fb-19e54baf71e0"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[0].sponsorship_evidence"
+        },
+        {
+          "citations": [
+            {
+              "title": "Sr. Software Engineer - Backend at Lively",
+              "url": "https://job-boards.greenhouse.io/lively43/jobs/5838065004"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[1].careers_url"
+        },
+        {
+          "citations": [
+            {
+              "title": "Sr. Software Engineer - Backend at Lively",
+              "url": "https://job-boards.greenhouse.io/lively43/jobs/5838065004"
+            }
+          ],
+          "confidence": "high",
+          "field": "structured.companies[1].ats_provider"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Software Engineer \u2013 Backend at Lively",
+              "url": "https://www.remoterocketship.com/us/company/livelyme/jobs/senior-software-engineer-backend-california-remote/"
+            },
+            {
+              "title": "Sr. Software Engineer - Backend at Lively",
+              "url": "https://job-boards.greenhouse.io/lively43/jobs/5838065004"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[1].sponsorship"
+        },
+        {
+          "citations": [
+            {
+              "title": "Senior Software Engineer \u2013 Backend at Lively",
+              "url": "https://www.remoterocketship.com/us/company/livelyme/jobs/senior-software-engineer-backend-california-remote/"
+            },
+            {
+              "title": "Sr. Software Engineer - Backend at Lively",
+              "url": "https://job-boards.greenhouse.io/lively43/jobs/5838065004"
+            }
+          ],
+          "confidence": "medium",
+          "field": "structured.companies[1].sponsorship_evidence"
+        }
+      ],
+      "structured": {
+        "companies": [
+          {
+            "ats_provider": "ashby",
+            "board_token": "turnkey",
+            "careers_url": "https://jobs.ashbyhq.com/turnkey",
+            "company": "Turnkey",
+            "source": "https://www.remoterocketship.com/us/company/turnkey-2/jobs/senior-software-engineer-backend-united-states-remote/",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "The company\u2019s US-remote backend role is documented as an H-1B visa sponsor; the listing states that Turnkey has sponsored H-1B visas in the past. The official ATS posting confirms the role is remote and limited to candidates physically based in the United States or Canada."
+          },
+          {
+            "ats_provider": "greenhouse",
+            "board_token": "lively43",
+            "careers_url": "https://job-boards.greenhouse.io/lively43",
+            "company": "Lively",
+            "source": "https://www.remoterocketship.com/us/company/livelyme/jobs/senior-software-engineer-backend-california-remote/",
+            "sponsorship": "yes",
+            "sponsorship_evidence": "The company\u2019s US backend role is documented by a job source as having a prior H-1B sponsorship record, including H-1B sponsorships in 2024 and 2025. The ATS posting identifies a senior backend engineer role in Denver, Colorado."
+          }
+        ]
+      },
+      "text": "Two qualifying companies were identified as of September 24, 2026: Turnkey, with a US-remote backend role on Ashby, and Lively, with a Denver senior backend role on Greenhouse. Sponsorship evidence is based on documented prior H-1B sponsorship history; prior sponsorship does not guarantee sponsorship for every specific opening."
+    },
+    "request": {
+      "effort": "low",
+      "input": {
+        "exclusion": [
+          {
+            "company": "Affirm"
+          },
+          {
+            "company": "Capital One"
+          },
+          {
+            "company": "ClickHouse"
+          },
+          {
+            "company": "Close"
+          },
+          {
+            "company": "Clubhouse"
+          },
+          {
+            "company": "Corelight"
+          },
+          {
+            "company": "Coupang"
+          },
+          {
+            "company": "Cresta"
+          },
+          {
+            "company": "Eight Sleep"
+          },
+          {
+            "company": "Engine"
+          },
+          {
+            "company": "Flex"
+          },
+          {
+            "company": "Gen Digital"
+          },
+          {
+            "company": "Grafana Labs"
+          },
+          {
+            "company": "Instrumentl"
+          },
+          {
+            "company": "LaunchDarkly"
+          },
+          {
+            "company": "NimbleRx"
+          },
+          {
+            "company": "Palantir Technologies"
+          },
+          {
+            "company": "Profound"
+          },
+          {
+            "company": "Remote"
+          },
+          {
+            "company": "Retell AI"
+          },
+          {
+            "company": "Solana Labs"
+          },
+          {
+            "company": "Worldpay"
+          },
+          {
+            "company": "Z\u016bm"
+          }
+        ]
+      },
+      "outputSchema": {
+        "properties": {
+          "companies": {
+            "items": {
+              "properties": {
+                "ats_provider": {
+                  "enum": [
+                    "greenhouse",
+                    "lever",
+                    "ashby",
+                    "other",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "board_token": {
+                  "type": "string"
+                },
+                "careers_url": {
+                  "format": "uri",
+                  "type": "string"
+                },
+                "company": {
+                  "type": "string"
+                },
+                "source": {
+                  "format": "uri",
+                  "type": "string"
+                },
+                "sponsorship": {
+                  "enum": [
+                    "yes",
+                    "no",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "sponsorship_evidence": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "company",
+                "careers_url",
+                "ats_provider",
+                "sponsorship",
+                "sponsorship_evidence",
+                "source"
+              ],
+              "type": "object"
+            },
+            "maxItems": 15,
+            "type": "array"
+          }
+        },
+        "required": [
+          "companies"
+        ],
+        "type": "object"
+      },
+      "query": "Find US companies hiring for staff or senior backend engineer roles (remote or Denver, Colorado area) that use Greenhouse, Lever, or Ashby as their applicant tracking system AND are documented to sponsor US work visas (H-1B). Only return companies where you can identify the company's OWN job board base URL on one of these three platforms (e.g. https://boards.greenhouse.io/<company>, https://jobs.lever.co/<company>, or https://jobs.ashbyhq.com/<company> -- the board root, not a link to a specific job posting or a third-party aggregator like LinkedIn, Indeed, or another job site). Skip a company if you cannot find its own board URL on one of those three ATS platforms. For each company give: the company name, the exact board URL, the ATS provider, and visa sponsorship evidence with a source URL (an H-1B filing record, careers page, or job posting). Exclude: Coupang, ClickHouse, Gen Digital."
+    },
+    "status": "completed",
+    "stopReason": "schema_satisfied",
+    "usage": {
+      "agentComputeUnits": 0.1,
+      "emails": 0,
+      "phoneNumbers": 0,
+      "searches": 3
+    }
+  },
+  "run_label": "low_strict_v4_week2_b"
+}

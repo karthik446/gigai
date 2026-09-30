@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from typing import Callable
@@ -38,6 +39,10 @@ EXCLUDE_ENTRY = b"/.gigai/\n"
 INIT_LOCK_NAME = "gigai-init.lock"
 INIT_LOCK_OWNER = "owner"
 INIT_LOCK_TIMEOUT_SECONDS = 10.0
+# A live owner is doing real work: a full init runs about 190 git processes
+# and takes tens of seconds on a loaded host. A waiter therefore outlasts the
+# base timeout while the owner's process is alive, up to this cap.
+INIT_LOCK_LIVE_OWNER_TIMEOUT_SECONDS = 120.0
 INCOMPLETE_LOCK_GRACE_SECONDS = INIT_LOCK_TIMEOUT_SECONDS
 
 
@@ -92,14 +97,24 @@ class TargetBindingResult:
 
 
 class TargetInitLock:
-    def __init__(self, path: Path, *, timeout: float = INIT_LOCK_TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        timeout: float = INIT_LOCK_TIMEOUT_SECONDS,
+        live_owner_timeout: float = INIT_LOCK_LIVE_OWNER_TIMEOUT_SECONDS,
+    ) -> None:
         self.path = path
         self.timeout = timeout
+        self.live_owner_timeout = max(timeout, live_owner_timeout)
         self._held = False
         self._owner = f"{os.getpid()} {uuid.uuid4().hex}\n"
 
     def __enter__(self) -> TargetInitLock:
-        deadline = time.monotonic() + self.timeout
+        started = time.monotonic()
+        deadline = started + self.timeout
+        live_owner_deadline = started + self.live_owner_timeout
+        announced = False
         while True:
             try:
                 self.path.mkdir(mode=0o700)
@@ -112,7 +127,18 @@ class TargetInitLock:
                         "target initialization lock path is not a private directory"
                     )
                 self._recover_abandoned_lock()
-                if time.monotonic() >= deadline:
+                live_owner = self._live_owner_pid()
+                if live_owner is not None and not announced:
+                    announced = True
+                    print(
+                        f"Another gigai init is running (pid {live_owner}); waiting…",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                now = time.monotonic()
+                if now >= live_owner_deadline or (
+                    now >= deadline and live_owner is None
+                ):
                     raise InitLockUnavailableError(
                         f"target initialization lock is unavailable at {self.path}"
                     )
@@ -157,6 +183,16 @@ class TargetInitLock:
             except OSError:
                 pass
             raise
+
+    def _live_owner_pid(self) -> int | None:
+        try:
+            owner = (self.path / INIT_LOCK_OWNER).read_text(encoding="ascii")
+        except (OSError, UnicodeError):
+            return None
+        fields = owner.split()
+        if len(fields) == 2 and fields[0].isdigit() and _process_is_alive(int(fields[0])):
+            return int(fields[0])
+        return None
 
     def _recover_abandoned_lock(self) -> None:
         owner_path = self.path / INIT_LOCK_OWNER

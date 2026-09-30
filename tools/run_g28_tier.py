@@ -11,7 +11,7 @@ import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_REPORT_DIR = ROOT / "docs/development/evidence/phase-5/G28/tier-reports"
+DEFAULT_REPORT_DIR = ROOT / ".local-reports/G28/tier-reports"
 MANIFEST = ROOT / "research/evals/g28/g26-g27-manifest.json"
 OBSERVATIONS = ROOT / "research/evals/g28/g26-g27-deterministic-observations.json"
 

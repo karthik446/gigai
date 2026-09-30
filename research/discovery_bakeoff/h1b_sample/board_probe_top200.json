@@ -1,0 +1,1808 @@
+{
+  "elapsed_seconds": 285.91,
+  "employers_probed": 200,
+  "results": [
+    {
+      "board_token": null,
+      "employer_name": "Amazon.com Services LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Google LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "COGNIZANT TECHNOLOGY SOLUTIONS US CORP",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "INFOSYS LIMITED",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Microsoft Corporation",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Meta Platforms, Inc",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Apple Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Amazon Development Center U.S., Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Fidelity Technology Group, LLC d/b/a Fidelity Investments",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Deloitte Consulting LLP",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "COMPUNNEL SOFTWARE GROUP, INC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Amazon Web Services, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "TATA CONSULTANCY SERVICES LIMITED",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "WAL-MART ASSOCIATES, INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "WIPRO LIMITED",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "JPMorgan Chase & Co.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Salesforce, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Accenture LLP",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Capgemini America Inc",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "NVIDIA Corporation",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "HCL AMERICA INC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Tata Consultancy Services Limited",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Mphasis Corporation",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "LTIMindtree Limited",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Ernst & Young U.S. LLP",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Cisco Systems, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "RANDSTAD DIGITAL, LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Citibank, N.A.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 6
+    },
+    {
+      "board_token": null,
+      "employer_name": "Oracle America, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Adobe Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "IBM Corporation",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "GP TECHNOLOGIES LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "CGI Technologies and Solutions Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Infinite Computer Solutions, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "UST Global Inc",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "PayPal, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Tesla, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Government Employee Insurance Company (GEICO)",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "TT Commerce & Global Services LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "LinkedIn Corporation",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Capital One Services, LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Morgan Stanley Services Group Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "KFORCE INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Intel Corporation",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "TECH MAHINDRA (AMERICAS), INC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 6
+    },
+    {
+      "board_token": null,
+      "employer_name": "Hewlett Packard Enterprise Company",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "CVS Shared Services Resources LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "VIRTUSA CORPORATION",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": "databricks",
+      "employer_name": "Databricks, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 28,
+      "provider": "greenhouse",
+      "slugs_tried": 1
+    },
+    {
+      "board_token": null,
+      "employer_name": "Uber Technologies, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "GOLDMAN SACHS SERVICES LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Hexaware Technologies, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Amazon Data Services, Inc",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "SAP America, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "eBay Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "ServiceNow, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "FORD MOTOR COMPANY",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Snowflake Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "AT&T SERVICES, INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "INNOVA SOLUTIONS, INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Qualcomm Technologies, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "HTC GLOBAL SERVICES INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "General Motors",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 6
+    },
+    {
+      "board_token": null,
+      "employer_name": "BANK OF AMERICA N.A.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 6
+    },
+    {
+      "board_token": null,
+      "employer_name": "Charles Schwab & Company, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "GlobalLogic Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Fiserv Solutions, LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Palo Alto Networks, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "The MathWorks, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "MSR TECHNOLOGY GROUP LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Federal Express Corporation",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Expedia, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Optum Services, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "GOLDMAN SACHS & CO. LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Barclays Services Corp.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "U.S. Bank National Association",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 6
+    },
+    {
+      "board_token": null,
+      "employer_name": "Insight Global, LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "ADP Technology Services, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "American Express Travel Related Services Company, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "FIS Management Services, LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Netflix, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Comcast Cable Communications, LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Visa Technology & Operations LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Quadrant Technologies LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "V-Soft Consulting Group, INC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "DoorDash, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "LINKEDIN CORPORATION",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Intuit Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Waymo LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Coforge Limited",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "American Airlines, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "HCL GLOBAL SYSTEMS INC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Skilltune Technologies INC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Elevance Health, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Cigna-Evernorth Services Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "CitiusTech Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Humana Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "T-Mobile USA, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Workday, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Lowe's Companies, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Rocket Limited Partnership",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Synechron Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "WELLS FARGO BANK, N.A.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 6
+    },
+    {
+      "board_token": null,
+      "employer_name": "State Street Bank and Trust Company",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Artech, LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Medline Industries, LP.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Bloomberg L.P.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 6
+    },
+    {
+      "board_token": null,
+      "employer_name": "INTRAEDGE, INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "CAPGEMINI AMERICA INC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "SATIN SOLUTIONS LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "NTT DATA Americas, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "CVS Pharmacy Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "BYTEDANCE INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Caremark LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Zoom Communications, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "SNAP INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Truist Bank",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 6
+    },
+    {
+      "board_token": null,
+      "employer_name": "UBS Business Solutions US LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Mastercard Technologies, LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Yahoo Holdings Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Populus Group LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "AUDIBLE, INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "BlackRock Financial Management, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "DB Global Technology, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "TikTok Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "PERSISTENT SYSTEMS, INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Siemens Industry Software Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "PricewaterhouseCoopers Advisory Services LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": "stripe",
+      "employer_name": "Stripe, LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 3,
+      "provider": "greenhouse",
+      "slugs_tried": 1
+    },
+    {
+      "board_token": null,
+      "employer_name": "RELX, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": "roblox",
+      "employer_name": "Roblox Corporation",
+      "is_usable_board": true,
+      "matching_role_us_count": 1,
+      "posting_count": 1,
+      "provider": "greenhouse",
+      "slugs_tried": 1
+    },
+    {
+      "board_token": null,
+      "employer_name": "Concentrix CVG Customer Management Group Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Pyramid Consulting, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "First Citizens Bank and Trust Co.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Advanced Micro Devices, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Nokia of America Corporation",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Akamai Technologies, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Visa U.S.A. Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Social Finance, LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Mastech Digital Technologies, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Pinterest, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "NATSOFT CORPORATION",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Cotiviti, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "PHOTON INFOTECH, INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Environmental Systems Research Institute, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "GOLDMAN SACHS BANK USA",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 6
+    },
+    {
+      "board_token": null,
+      "employer_name": "HubSpot, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "NetApp, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Autodesk, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Charter Communications, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "ByteDance Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "ERP Analysts, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Atlassian US, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Equifax Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Anthropic, PBC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 6
+    },
+    {
+      "board_token": null,
+      "employer_name": "Synechron, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Perficient, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Rockwell Collins Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "OpenAI OpCo, LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "L&T Technology Services Limited",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Brillio, LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "DIGIPULSE TECHNOLOGIES, INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Cadence Design Systems, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Itek Info Inc",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "ATOS SYNTEL INC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "U.S. BANK NATIONAL ASSOCIATION",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 6
+    },
+    {
+      "board_token": "zscaler",
+      "employer_name": "Zscaler, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 3,
+      "provider": "greenhouse",
+      "slugs_tried": 1
+    },
+    {
+      "board_token": null,
+      "employer_name": "F5, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Collabera LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Beacon Hill Solutions Group LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "HP Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Zensar Technologies, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "ZS Associates, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Aetna Resources LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Tek Leaders Inc",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "KPIT Technologies, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Amazon Data Services, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "FedEx Freight, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": "airbnb",
+      "employer_name": "Airbnb, Inc.",
+      "is_usable_board": true,
+      "matching_role_us_count": 2,
+      "posting_count": 2,
+      "provider": "greenhouse",
+      "slugs_tried": 1
+    },
+    {
+      "board_token": null,
+      "employer_name": "Zoox Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "SAGE IT INC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "AMAZON.COM SERVICES LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Avco Consulting, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Nutanix, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "Lucid USA, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Paycom Payroll, LLC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Cummins Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "SLK AMERICA INC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Robinhood Markets, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "SQUAD SOFTWARE, INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": "coinbase",
+      "employer_name": "Coinbase, Inc.",
+      "is_usable_board": true,
+      "matching_role_us_count": 3,
+      "posting_count": 5,
+      "provider": "greenhouse",
+      "slugs_tried": 1
+    },
+    {
+      "board_token": null,
+      "employer_name": "MIRACLE SOFTWARE SYSTEMS, INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Nordstrom, Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "BEACONFIRE STAFFING SOLUTIONS INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Wells Fargo Bank, N.A.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 6
+    },
+    {
+      "board_token": null,
+      "employer_name": "LTM Limited",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "MANHATTAN ASSOCIATES, INC.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "Collaborate Solutions Inc.",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 9
+    },
+    {
+      "board_token": null,
+      "employer_name": "VISTA APPLIED SOLUTIONS GROUP INC",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    },
+    {
+      "board_token": null,
+      "employer_name": "PERSISTENT SYSTEMS LIMITED",
+      "is_usable_board": false,
+      "matching_role_us_count": 0,
+      "posting_count": 0,
+      "provider": null,
+      "slugs_tried": 12
+    }
+  ],
+  "total_slug_attempts": 2013,
+  "usable_boards_found": 3
+}

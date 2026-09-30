@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "properties": {
+    "companies": {
+      "type": "array",
+      "maxItems": 15,
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "notes": {
+            "type": "string",
+            "description": "Free-text: careers/board URL, ATS provider if known, sponsorship status and evidence, and source URL, all in prose."
+          }
+        },
+        "required": ["name", "notes"]
+      }
+    }
+  },
+  "required": ["companies"]
+}

@@ -1,0 +1,115 @@
+{
+  "_provenance": "Small, shape-only snippets derived from the operator's real evidence run (run_d73cb030-62a3-4d5e-9629-a33977d90194, ~/.gigai/workpads/.../gig_015b1fc0-.../runs/...): title/location/address shapes only, no resume or credential content. The AMER/United States/India/Australia/Canada/Singapore Ashby rows and the Seoul/z-Test/Mountain View Greenhouse rows mirror real location strings seen in that run's outputs/acquire.json; the EMEA/APAC Ashby rows (0.1.8.1 r1) are small synthetic additions in the same shape, added for B1's region-token coverage per the coordinator's review since EMEA/APAC specifically weren't present in this particular evidence run. Used by test_replay_uat_0181_evidence_run_country_filter in test_acquire_network.py (0.1.8.1 B1 acceptance: replay the evidence run's raw payloads through acquire with countries=[\"US\"]).",
+  "ashby": {
+    "jobs": [
+      {
+        "id": "us-1",
+        "title": "Senior Software Engineer - Integrations - AI/ML",
+        "location": "United States",
+        "jobUrl": "https://jobs.ashbyhq.com/acme/us-1",
+        "publishedAt": "2026-08-13T06:40:24.278+00:00",
+        "descriptionPlain": "Build integrations for our AI/ML platform.",
+        "address": {"postalAddress": {"addressCountry": "United States", "addressLocality": "San Francisco"}},
+        "secondaryLocations": []
+      },
+      {
+        "id": "amer-1",
+        "title": "Senior Cloud Software Engineer - Efficiency Engineering",
+        "location": "AMER",
+        "jobUrl": "https://jobs.ashbyhq.com/acme/amer-1",
+        "publishedAt": "2026-08-13T06:40:24.278+00:00",
+        "descriptionPlain": "Build the foundational blocks of our cloud infrastructure.",
+        "address": null,
+        "secondaryLocations": []
+      },
+      {
+        "id": "in-1",
+        "title": "Senior Software Engineer - Identity & Authorization Platform",
+        "location": "India",
+        "jobUrl": "https://jobs.ashbyhq.com/acme/in-1",
+        "publishedAt": "2026-08-13T06:40:24.278+00:00",
+        "descriptionPlain": "Own identity and authorization for the platform.",
+        "address": {"postalAddress": {"addressCountry": "India", "addressLocality": "Bengaluru"}},
+        "secondaryLocations": []
+      },
+      {
+        "id": "au-1",
+        "title": "Senior Software Engineer (Backend) - AI/ML",
+        "location": "Australia",
+        "jobUrl": "https://jobs.ashbyhq.com/acme/au-1",
+        "publishedAt": "2026-08-13T06:40:24.278+00:00",
+        "descriptionPlain": "Backend software engineer for our AI/ML systems.",
+        "address": null,
+        "secondaryLocations": []
+      },
+      {
+        "id": "ca-1",
+        "title": "Senior Software Engineer - Integrations - Platform",
+        "location": "Canada",
+        "jobUrl": "https://jobs.ashbyhq.com/acme/ca-1",
+        "publishedAt": "2026-08-13T06:40:24.278+00:00",
+        "descriptionPlain": "Build integration software for our platform.",
+        "address": null,
+        "secondaryLocations": []
+      },
+      {
+        "id": "sg-1",
+        "title": "Senior Software Engineer - Platform Reliability",
+        "location": "Singapore",
+        "jobUrl": "https://jobs.ashbyhq.com/acme/sg-1",
+        "publishedAt": "2026-08-13T06:40:24.278+00:00",
+        "descriptionPlain": "Own platform reliability for our services.",
+        "address": null,
+        "secondaryLocations": []
+      },
+      {
+        "id": "emea-1",
+        "title": "Senior Software Engineer - Growth Platform",
+        "location": "EMEA",
+        "jobUrl": "https://jobs.ashbyhq.com/acme/emea-1",
+        "publishedAt": "2026-08-13T06:40:24.278+00:00",
+        "descriptionPlain": "Own growth platform engineering across the region.",
+        "address": null,
+        "secondaryLocations": []
+      },
+      {
+        "id": "apac-1",
+        "title": "Senior Software Engineer - Data Platform",
+        "location": "APAC",
+        "jobUrl": "https://jobs.ashbyhq.com/acme/apac-1",
+        "publishedAt": "2026-08-13T06:40:24.278+00:00",
+        "descriptionPlain": "Own data platform engineering across the region.",
+        "address": null,
+        "secondaryLocations": []
+      }
+    ]
+  },
+  "greenhouse": {
+    "jobs": [
+      {
+        "id": 900001,
+        "title": "Software Engineer - Ads Sales",
+        "absolute_url": "https://boards.greenhouse.io/acme/jobs/900001",
+        "location": {"name": "Seoul, South Korea"},
+        "updated_at": "2026-09-18T04:58:10-04:00",
+        "content": "&lt;p&gt;We build ad sales tooling for our Seoul office.&lt;/p&gt;"
+      },
+      {
+        "id": 900002,
+        "title": "Software Engineer - Cloud Infrastructure",
+        "absolute_url": "https://boards.greenhouse.io/acme/jobs/900002",
+        "location": {"name": "z-Test & Templates Only"},
+        "updated_at": "2026-09-18T04:58:10-04:00",
+        "content": "&lt;p&gt;Internal template posting, not a real role.&lt;/p&gt;"
+      },
+      {
+        "id": 900003,
+        "title": "Software Engineer - Payments",
+        "absolute_url": "https://boards.greenhouse.io/acme/jobs/900003",
+        "location": {"name": "Mountain View, USA"},
+        "updated_at": "2026-09-18T04:58:10-04:00",
+        "content": "&lt;p&gt;Build payments infrastructure from our Mountain View office.&lt;/p&gt;"
+      }
+    ]
+  }
+}

@@ -5,11 +5,13 @@ import json
 import threading
 import time
 from email.message import Message
+from pathlib import Path
 from typing import Any, Callable
 
 import httpx
 import pytest
 
+from gigai.run import ResumeDetails
 from gigai.scout.find_jobs.contracts import (
     FindJobsConfig,
     FindJobsContractError,
@@ -18,7 +20,14 @@ from gigai.scout.find_jobs.contracts import (
     RunResultsResponse,
     RunStatusResponse,
 )
-from gigai.scout.find_jobs.present_api import Backend, NotWiredBackend, _make_handler, main, serve
+from gigai.scout.find_jobs.present_api import (
+    Backend,
+    ConfigMissingError,
+    NotWiredBackend,
+    _make_handler,
+    main,
+    serve,
+)
 
 from .conftest import load_fixture
 
@@ -29,6 +38,15 @@ def _config() -> FindJobsConfig:
 
 def _resume() -> PinnedResume:
     return PinnedResume.from_json(load_fixture("fixture-api-config-response-v1.json")["resume_preview"])
+
+
+def _resume_metadata() -> tuple[str | None, str | None]:
+    # uat-bug-004: resume_label/resume_created_at are additive /api/config
+    # fields not modeled by the ConfigResponse contract (like
+    # resume_missing_hint before them), so they live here rather than in
+    # fixture-api-config-response-v1.json, which test_contracts.py round-trips
+    # through ConfigResponse.from_json under closed-object validation.
+    return ("kar-omada-staff-resume.md", "2026-09-23T12:00:00+00:00")
 
 
 def _run_status_response(run_id: str) -> RunStatusResponse:
@@ -61,6 +79,7 @@ class FakeBackend:
         *,
         config: FindJobsConfig | None = None,
         resume: PinnedResume | None = None,
+        resume_metadata: tuple[str | None, str | None] | None = None,
         known_run_id: str = "run_123e4567-e89b-42d3-a456-426614174002",
         pre_allocation_error: Exception | None = None,
         post_allocation_error: Exception | None = None,
@@ -68,6 +87,9 @@ class FakeBackend:
     ) -> None:
         self.config = config if config is not None else _config()
         self.resume = resume if resume is not None else _resume()
+        self.resume_metadata_value = (
+            resume_metadata if resume_metadata is not None else _resume_metadata()
+        )
         self.known_run_id = known_run_id
         self.pre_allocation_error = pre_allocation_error
         self.post_allocation_error = post_allocation_error
@@ -80,6 +102,22 @@ class FakeBackend:
 
     def resume_preview(self) -> PinnedResume | None:
         return self.resume
+
+    def resume_metadata(self) -> tuple[str | None, str | None] | None:
+        return self.resume_metadata_value
+
+    def resume_details(self) -> ResumeDetails | None:
+        # uat-bug-008: mirrors ScoutFindJobsBackend.resume_details -- one
+        # combined lookup instead of resume_preview()+resume_metadata().
+        # Built from the (possibly overridden, e.g. by _NoResumeBackend)
+        # methods themselves, not the raw self.resume/self.resume_metadata_value
+        # fields, so a subclass overriding just those two methods still gets
+        # a consistent resume_details().
+        pinned = self.resume_preview()
+        if pinned is None:
+            return None
+        label, created_at = self.resume_metadata() or (None, None)
+        return ResumeDetails(pinned=pinned, label=label, created_at=created_at)
 
     def start_run(
         self,
@@ -110,6 +148,11 @@ class FakeBackend:
             raise LookupError(run_id)
         return _run_results_response(run_id)
 
+    def carried_forward_assessments(self, run_id: str) -> tuple:
+        if run_id != self.known_run_id:
+            raise LookupError(run_id)
+        return ()
+
 
 @pytest.fixture
 def running_server(request: pytest.FixtureRequest):
@@ -138,6 +181,86 @@ def test_get_config_happy_path(running_server) -> None:
     assert body["config_digest"] == backend.config.digest()
 
 
+def test_get_config_carries_the_resume_label_and_created_date(running_server) -> None:
+    # uat-bug-004: the Configuration card shows the resume's label + created
+    # date instead of raw record/revision ids (those stay in resume_preview
+    # for a tooltip). Before this fix, /api/config carried only the ids.
+    client, backend = running_server
+    response = client.get("/api/config")
+    assert response.status_code == 200
+    body = response.json()
+    expected_label, expected_created_at = backend.resume_metadata_value
+    assert body["resume_label"] == expected_label == "kar-omada-staff-resume.md"
+    assert body["resume_created_at"] == expected_created_at == "2026-09-23T12:00:00+00:00"
+
+
+class _ConfigMissingBackend(FakeBackend):
+    """Models an unwritten ``find-jobs.json`` (0.1.8.1 UAT addendum)."""
+
+    def read_config(self) -> tuple[FindJobsConfig, bytes]:
+        raise ConfigMissingError(Path("/tmp/fixture-target/find-jobs.json"))
+
+
+class _NoResumeBackend(FakeBackend):
+    """Models a project with a config but no saved resume yet (U15)."""
+
+    def resume_preview(self) -> PinnedResume | None:
+        return None
+
+    def resume_metadata(self) -> tuple[str | None, str | None] | None:
+        return None
+
+
+def test_get_health_ok(running_server) -> None:
+    client, _backend = running_server
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+@pytest.mark.parametrize("running_server", [_ConfigMissingBackend()], indirect=True)
+def test_get_config_missing_names_the_file_and_the_fix(running_server) -> None:
+    client, _backend = running_server
+    response = client.get("/api/config")
+    assert response.status_code == 404
+    body = response.json()
+    assert body["error"]["code"] == "config_missing"
+    message = body["error"]["message"]
+    # The old blanket 404 text ("That run could not be found.") is a UI-side
+    # fallback keyed off status code; the backend message here must be
+    # specific enough that the UI no longer needs that fallback for this case.
+    assert "find-jobs.json" in message
+    assert "gigai scout install" in message or "gigai scout run" in message
+
+
+@pytest.mark.parametrize("running_server", [_ConfigMissingBackend()], indirect=True)
+def test_post_run_with_missing_config_is_also_config_missing(running_server) -> None:
+    client, _backend = running_server
+    request_payload = load_fixture("fixture-api-run-request-v1.json")
+    response = client.post("/api/run", json=request_payload)
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "config_missing"
+
+
+@pytest.mark.parametrize("running_server", [_NoResumeBackend()], indirect=True)
+def test_get_config_with_no_resume_carries_an_explicit_hint(running_server) -> None:
+    client, _backend = running_server
+    response = client.get("/api/config")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["resume_preview"] is None
+    assert body["resume_missing_hint"] == "gigai scout resume add <file>"
+    assert body["resume_label"] is None
+    assert body["resume_created_at"] is None
+
+
+def test_get_config_with_a_resume_has_no_hint(running_server) -> None:
+    client, _backend = running_server
+    response = client.get("/api/config")
+    assert response.status_code == 200
+    assert response.json()["resume_missing_hint"] is None
+
+
 def test_post_run_happy_path_returns_202(running_server) -> None:
     client, backend = running_server
     request_payload = load_fixture("fixture-api-run-request-v1.json")
@@ -164,7 +287,95 @@ def test_get_run_results_happy_path(running_server) -> None:
     client, backend = running_server
     response = client.get(f"/api/runs/{backend.known_run_id}/results")
     assert response.status_code == 200
-    assert response.json() == _run_results_response(backend.known_run_id).to_json()
+    # uat-bug-009: resume_label/resume_created_at are additive fields next to
+    # RunResultsResponse's own sealed to_json() (this fixture's pinned_resume
+    # is null, so both stay None -- see the carry-through test below for the
+    # case where they're populated).
+    expected = dict(_run_results_response(backend.known_run_id).to_json())
+    expected["resume_label"] = None
+    expected["resume_created_at"] = None
+    expected["carried_forward_assessments"] = []
+    expected["rank_scores"] = []
+    assert response.json() == expected
+
+
+def test_get_run_results_carries_the_resume_label_and_created_date(running_server) -> None:
+    # uat-bug-009: the run view's "Resume used" card showed the raw
+    # `record_… (revision_…)` ids, the same bug uat-bug-004 already fixed for
+    # the Configuration card. resume_label/resume_created_at are attached
+    # whenever the run's own pinned_resume matches backend.resume_preview()
+    # (the same record_id/revision_id resume_metadata() describes).
+    client, backend = running_server
+    fixture = json.loads(json.dumps(load_fixture("fixture-api-run-results-response-v1.json")))
+    fixture["run_id"] = backend.known_run_id
+    fixture["payload"]["run_id"] = backend.known_run_id
+    fixture["payload"]["pinned_resume"] = backend.resume.to_json()
+    backend_response = RunResultsResponse.from_json(fixture)
+
+    class _WithPinnedResumeBackend(FakeBackend):
+        def run_results(self, run_id: str) -> RunResultsResponse:
+            if run_id != self.known_run_id:
+                raise LookupError(run_id)
+            return backend_response
+
+    pinned_backend = _WithPinnedResumeBackend()
+    server = serve(backend=pinned_backend, bind=("127.0.0.1", 0))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address[0], server.server_address[1]
+        with httpx.Client(base_url=f"http://{host}:{port}") as inner_client:
+            response = inner_client.get(f"/api/runs/{pinned_backend.known_run_id}/results")
+        assert response.status_code == 200
+        body = response.json()
+        expected_label, expected_created_at = pinned_backend.resume_metadata_value
+        assert body["resume_label"] == expected_label == "kar-omada-staff-resume.md"
+        assert body["resume_created_at"] == expected_created_at == "2026-09-23T12:00:00+00:00"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_get_run_results_does_not_label_an_older_runs_different_pinned_resume(running_server) -> None:
+    # A run pinned to a resume that is NOT the newest one must never show the
+    # newest resume's label/date -- resume_metadata() always resolves the
+    # newest, so the handler must verify the ids agree before attaching them.
+    client, backend = running_server
+    fixture = json.loads(json.dumps(load_fixture("fixture-api-run-results-response-v1.json")))
+    fixture["run_id"] = backend.known_run_id
+    fixture["payload"]["run_id"] = backend.known_run_id
+    fixture["payload"]["pinned_resume"] = {
+        "record_id": "record_00000000-0000-4000-8000-000000000099",
+        "revision_id": "revision_00000000-0000-4000-8000-000000000099",
+        "content_sha256": "sha256:" + "0" * 64,
+    }
+    backend_response = RunResultsResponse.from_json(fixture)
+
+    class _OlderPinnedResumeBackend(FakeBackend):
+        def run_results(self, run_id: str) -> RunResultsResponse:
+            if run_id != self.known_run_id:
+                raise LookupError(run_id)
+            return backend_response
+
+    older_backend = _OlderPinnedResumeBackend()
+    response = client.get(f"/api/runs/{backend.known_run_id}/results")
+    assert response.status_code == 200  # sanity: default fixture still serves
+    server = serve(backend=older_backend, bind=("127.0.0.1", 0))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address[0], server.server_address[1]
+        with httpx.Client(base_url=f"http://{host}:{port}") as inner_client:
+            response = inner_client.get(f"/api/runs/{older_backend.known_run_id}/results")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["resume_label"] is None
+        assert body["resume_created_at"] is None
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_get_run_status_404_for_unknown_run(running_server) -> None:

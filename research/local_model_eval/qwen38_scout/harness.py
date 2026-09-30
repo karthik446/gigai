@@ -472,7 +472,7 @@ def render_report(identity: dict[str, Any], hardware: dict[str, Any], summary: d
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--report", default="docs/development/v0.1.8/spikes/evidence/qwen38-scout-local-eval.md")
+    parser.add_argument("--report", default=".local-reports/spikes/qwen38-scout-local-eval.md")
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--overall-timeout", type=int, default=2400)
     parser.add_argument("--label", default="")

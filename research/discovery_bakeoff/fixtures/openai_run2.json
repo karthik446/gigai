@@ -1,0 +1,364 @@
+{
+  "actual_cost_dollars": 0.0662,
+  "latency_seconds": 222.883,
+  "model": "gpt-6-luna",
+  "request": {
+    "input": "Find US companies hiring for staff or senior backend engineer roles (remote or Denver, Colorado area) that use Greenhouse, Lever, or Ashby as their applicant tracking system AND are documented to sponsor US work visas (H-1B). Only return companies where you can identify the company's OWN job board base URL on one of these three platforms (e.g. https://boards.greenhouse.io/<company>, https://jobs.lever.co/<company>, or https://jobs.ashbyhq.com/<company> -- the board root, not a link to a specific job posting or a third-party aggregator like LinkedIn, Indeed, or another job site). Skip a company if you cannot find its own board URL on one of those three ATS platforms. For each company give: the company name, the exact board URL, the ATS provider, and visa sponsorship evidence with a source URL (an H-1B filing record, careers page, or job posting). Exclude: Affirm, Capital One, ClickHouse, Close, Clubhouse, Corelight, Coupang, Cresta, Eight Sleep, Engine, Flex, Gen Digital, Grafana Labs, Instrumentl, LaunchDarkly, NimbleRx, Palantir Technologies, Profound, Remote, Retell AI, Solana Labs, Worldpay, Z\u016bm.",
+    "model": "gpt-6-luna",
+    "tools": [
+      {
+        "type": "web_search"
+      }
+    ]
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790229075,
+    "created_at": 1790229042,
+    "error": null,
+    "frequency_penalty": 0.0,
+    "id": "resp_0717b7c88fb800b9006ab4ba32aaf887d186f509d687797d4e",
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": null,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-luna",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [],
+        "encrypted_content": "gAAAAABqtLpU4AlqF5ya81Kjyl_QjbUl2JT-ZDqL8aHUGTRghsZ8KFGHffOWtEskUr41S3bTjmlvvhy0gUKhl3n5Ic-Kv1WjKJj1v8kY4vWzAHBWoH2Z6HbK-vRiELn-hqBG3ujn5B32S8gXTWfckDQTzrwS47mEyqGHrfa2C0QR15cblnKzuskzARiyH2MccbXZAKAY9jm6h9ODubG1vo3DrjG9A9tcA_5NSHzuApgAABtLysWcgJzWT2MabSUctSgpvMOV_dWNGsCugSFZ1BdYc0RWzT-hX0JDrudJWlLkOOi43Q73cIJb-xRLpK7wCnY80HoHCqxAj70HfPsZt0vdgrzcuSya1uBezBeLgH4xrJ8MXpBTarx3iZjb31kxV0GMhoXgGjeo3EtRgwgv7QpBgJGccUdx1gThRsIFFOVKUrds3JAJ2Wqk3-8C6ZMf2EpRiQbpYkSRiv9x4-c6sHEdh6AFLzyN7fal8WOGAkqwkk8QKBnxD9iPYMtQACYVeftqVDL_tm6TRvQ4VC1OB13QwiuEusoTtGnGHdIxwVFSjNiuCfk9Z5dA_fS936rMRjq2lraFyMHTZGZWTBoRpd7acW3VirMZJRdneZare8c91bMNfIiuW9kTovgWD4f1rkcRr4UkOzPgJWTkEYer-T8UwH8bWd2bZ1EHtSuk8bLl1MUlgyxe5uOqBnwiURIla828PWSFC8zhi7p2J-TI6Cy7OVgQ9YxpAvwJe-mbd3TVgC6lhJTBa2aZP1PwTFXiTWbkcs2Rs-jASd9pRTn7w83kJrBpQrD8H5CxK0Ucxi_UD-_m8906m-8iy3euHWRK7qShHtQG5jqNw4FBOIfh-eyKo5tJTrQDWhu5pmyZ51hOz91S5RPmqzV82xia4X5VJZKahxHoYcnSleieASTLI5MOa4TNfDo2lddWPP0W6yAxp2RwgZzaHQfG0q7aPth7Ivqqfwuf73mgSQIjzGOR0B4WOd7xG_8O8yT7sFx8jyW7Bed7IsHI3ssdyBmjNNHcTgRPBhN-rZY91HorLShomNjWutm0KZGjZUvNdOFaSHK_LJ2Jsurq-foYBcfwau8Tc9vPH6h_PiKsbNVKTESLrIsMBp0klFaKXRzMhiRf_oDdMSkm4MP2JmvAi1_a2QhDvL2m-DmYGMQ0tVkUOSjXokks_5xz187wo7p-jNm2bAwOxAhSoDqfGMxoT7XrcafkPJks6_vH4IfZkqwbdXlXj__M9bPJ-8t0XhjZX6M0mxFRsseDrFmmTxCfMQFJdV5uGQWo3G2ELHuZu_cXqgvOreEPwtAzcNkmfusHjlXAkB7BO_w4caRMvgVAxQLNCBvIjphMNhaDtPvd5vFFfSWvE8JMkVBmx-Y7eLD8abj_YH71J9Zuh8ODPSq8E5pGh4vaCWlExX-UCkospxM_DQs-iGuPpnULqW0FGMOf7LOJeuebhUMRayywrKxJ-AYqClhAnB0WQ9A7L1S1ZDIMtL-3_9MilQ6uCjXtgFqnd4acYuCgBDS6TAACuAl0qMZYuqHl9GgU51HPTRXcrYlebihEIRji1qrPnjcfo7j5Q5PnO-eE8mVj51Pg3Mkdi_eiHXPPMjfUiKOmXYUP5Mo6K_Jo-NaFqAlPxrJQTIL53vZ0rDaPYemRikgWWgOugSbq572TeliwQKfp8foLcpzzfVACWbr-wQSmEIriMr2lZZLWZQrFhpLk9Hnna1Y=",
+        "id": "rs_0717b7c88fb800b9006ab4ba33745487d1be83fc9128163ed3",
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "action": {
+          "queries": [
+            "site:jobs.ashbyhq.com \"Senior Backend Engineer\" \"visa sponsorship\"",
+            "site:boards.greenhouse.io \"Senior Backend Engineer\" \"H-1B\" remote",
+            "site:jobs.lever.co \"Senior Backend Engineer\" \"visa sponsorship\" remote",
+            "Denver senior backend engineer H1B sponsorship greenhouse jobs"
+          ],
+          "query": "site:jobs.ashbyhq.com \"Senior Backend Engineer\" \"visa sponsorship\"",
+          "type": "search"
+        },
+        "id": "ws_0717b7c88fb800b9006ab4ba34448887d1b1b4968db2b35138",
+        "status": "completed",
+        "type": "web_search_call"
+      },
+      {
+        "content": [],
+        "encrypted_content": "gAAAAABqtLpUmMG1oEx-2AInss-2j1QfL6hZtc4nAEYY1pfFgrnTqLukV5G98g-OeHvYHLcDMtSR52M3D4WMeQcEmix5oq-uHiarn-JpamhLQPV_gObYXTiXJHb-e1ItXtD9Hx_h_IEHo_eg0s1RKuGVgd-_GSvL871XlbuvspB8bvY5WVWfcyXNtTzhKvEP5u49SPnBPb1FE7ZY1oPGdCXB2jDbitijCCMDuzDXQhEwcwt3aDn0HPjtJW6ye-_ONtaphOCpYRGfHhsL3ILOCPa8oxGRMv2gQqndnkRH6sn5zyu4QpsEuZq6atXwLFxGs2tEevaRtWfxMJobg7h3KFR5ifJg9SiJxOm-WDogBf7ptyPp3lfSVKWMGxihzqqqIp4cfBTl3s2vLzYAbINPsbMrz7AADi9mij3IDdArpk-vK1m4Hi7TQsF6MxJSogIPc6vql4OL7Y0YwnyhCRby2tck8q8iLoY0x9lKKUtft-DdkdnAngl6A5ZKBcoosXikyqES0Zh5RXsv1YkLwpEYmdmbWTBrDewrLmAy0BNFnT2VHX3UQ3KeiOHpJVsIeHGlBcx-_YCAcfXSpSB75BH37Z9r2Gt-eEixkXLOf6KJPUFSZC8cLqM1L2NsbvSryp6K3zNXsBLjyjp0wctmB-46VVi6iSZ2wQjRxg3oZcPnWGDtfQNIf1jM0RN1pWNT7UreHu9QPX4tLCi71vAw9Kb8aUEuBM1AqK-opyejZ-aV6VB0CILhuxJQQycT4bR6Q6snUUpfgc2NG5h2HbW4v7qI-p-QU_okcLzuBgNqf0XEjqZ4y9oXHU7hJxUhSm9XaLWEW_nEX75xm48pcNdrLUPnsukas7XV4TLfOyrht8X1DrI0PLgZrta_dPB5nXgWC-OlzrSaTSwrbpE4FjelcyuTMQfe8d1adf8BXgSH77yV5Vl1Gstit-hBKwUWqFyrRL_Z59sY4zFNVeffY7c2EZ88wvzJPN1whLkThYRwXxI2jJKDxcr-fl-WaWZ7BdoilzrQEaCkkqSg20QpQY3Y1E8wqdhHKOtYPAIB710bF9tR0wlTQoy2BIM4ks5FSbeKC1pnB2ywWnl8sNcUfgdE7XG4ZC55aidoQgzsz1QXKe0gxntnd1FVraeJWb0MovZkYJX1a799_bae82xQIbUAMQDpHUMqtAJz2NWR4Ea34RJzNoNaWok2iLHRjlWyYsiBYBjb7v-Aa3KU6Mpyz5g6PwEu9RAqu1f7JRwUl4TgttL4SeL8GaceNeJbncAyzDNvfP2UJrJpeI9d46m5KgZ1STfb0HNPmd243pXlwom2ta-_MJaeTZk_oGe5yYmW9-dcyh1DHNJ3B-p4BkJsesg76jn5tnI-s09Kt_7lFzlz_4Ymf_rSHHyHhfTK1eD_gKBnZOLKv5oLsoro6gxRvNsKfaMkb_JhxxsrJXewrrQg7NcFfd3xWdTZusD7o9N5AQo8dXTLYn_49Yi-7G8sBURnIq0yLgvGR0Oer6KdGvOQXrvE9XlaiOI-9Zs4QZWZTVJrw7-gBpcpP8BpkUNuAZ6v5MxjfTvIG83g-SgjtXalhymnFLr0Kp2bygZ35gYhQAYBM7h6FtaMd1RwGSPif4iijLBX8N0fb6LA4RP8f7YOOZIEf4tjgzvNmsruVNaA75eXdEG7zvCtHa5nVagyZFrGWzaCe5wR127LL4RhGCtL9p051q2g8yn5w7uFMC3nXuccsHPVGRhrX0oj_eWAjtkkuxqGVslf7I1nVVucSTCLzZ85zORA9xxP0PkXyNPiQxqV7LXvYKoZFgxy-cdsl2Sfwl2RaSP_6qQABiuTlmR33aPiIhHL5lyO4RdMLnFMaGTcWJJ4f9O5kiw-ceg6VtXGhl7gUTq5K26qfLkuWA9WoCn0UA_aWza8fb2K6pIijyWDIpROkiinFHW91BINdht-uGXTMm9U0bdo5a5qPt8I06RuvSwcMVgE88676aUAVKWVlqWU1QixmHjMCeAWyt0Zus9rLRR-Om_ergTqvg==",
+        "id": "rs_0717b7c88fb800b9006ab4ba371c4087d1a9ced8779f900c7a",
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "action": {
+          "queries": [
+            "site:jobs.ashbyhq.com \"Senior Backend Engineer\" \"Remote\" H-1B sponsor",
+            "site:boards.greenhouse.io \"Senior Backend Engineer\" \"Remote\" \"visa sponsorship\" US",
+            "site:jobs.lever.co \"Staff Backend Engineer\" \"Remote\" H1B sponsorship",
+            "site:jobs.ashbyhq.com \"Staff Backend Engineer\" \"United States\" senior visa"
+          ],
+          "query": "site:jobs.ashbyhq.com \"Senior Backend Engineer\" \"Remote\" H-1B sponsor",
+          "type": "search"
+        },
+        "id": "ws_0717b7c88fb800b9006ab4ba37dcec87d18b8f4274565e558c",
+        "status": "completed",
+        "type": "web_search_call"
+      },
+      {
+        "content": [],
+        "encrypted_content": "gAAAAABqtLpUPEhINJhMAjjZ_-HH5d9oAJ7EB9vnHPPhzfLgK0cXlwlyw6-ZwmfYwLbSbBi_4SjeEIibeNCNVl-C6jxNCfPTMBU0ffrD1vIun-galiHiTZK0Vgbp4h2Q9BjDlC5VTQsjWAziduzZylKzBBj21Mf9rEi6RXGgBRigO9hAQXf5FJw8fgx51VVi77AQLH1edqXtMD_2otqPTdtHgWprYLyFsjFIyJZeci6B8jXKelARZwBKvIPltkqZmY3x8EOFBoWknLdcKgOAe75bBc1Wyulr5iaJdqUOOJtpw2sSMTDyFiwoEm8uw27CImuSNQu86XUCs5Caj_A5j9fTHe06UgOpM4N-HdBU1xxN23KwCTxSHMkQRLodkuUcz4KApv5cC1idu1thih_Y1vjHPZhh-Ih06meks-SVkjugph0tndz-MygjN776HJPLrQpOqjq8-zPAqjSW7K0f7p8y9mmP3YVqTPfinHOJaTtTX1zkRMofIKv_XFk5EE1TS4WTFmsmbU11eLnS5DjllkqpAkpWwXQTrrMbFXQ5iPPeI5REgXmlTM35h-24iZx5ldK1jvby1RyTVOF1V6-chjVFfR3HuR5nFESe49Ttb9cSAczwonPgNDWuPiPpyQwTugAsEOivklCptkLO-Jzup0bRDOIuWgq2FdptFUPyQQlyjVmvDz7Af8j0MzeCRuA8qU1pRyIjvupXI1zPmMdQ6pVXHdiThwgCa3wVju7HpduEbkWjJ8N_KI01_xNdGnY_-2PLZHXd5oMuKcXKNYi91dwrF2UuDiIOSDL89SUq_lRFyQ4jiimde_ESXmTaNYp5QnWPBlBBwvkFlMu8c7Nb8uaT_f8HcRBzFbAFfdK3jsJd5SpxuYawWtSr0jfVTaMRzEEhOvMbGNyG1irpiSks2LFaWMVrBZX1nSNWelWv9zuFWobWii27tQYyryWQZWm23u5X7QG2u_he3Sb1Mv2kur94p20dkby52Ep1OoUkMnIFA3zQlyw-jd3Yi4Xk1a91alZOSiHKvU9HV2aE0Rm8uYZMkh7nowuBfDm4B5mUDwCn0EJddcbOMP5MSiHIjMfMUrtRg4FwRsJ1VwNlPvY6jMLqYgRwgXNswurDkeezBnexwpoAG2sfhMV5HfJQmbz88jWG9d07nFaSkOo3AzeKj9SiNi8OC4T4aPdsPOKIou4QvXuhqb2zppGEg3RNmHzkIzmFhhNuazYx5-Y0-yx27Dh9Neiw8C2DtmAe0xairfWhtbyNACIS5X76-pqs0rvwJtEY6JmF9oUBOskY2Lx4nwqmTjcJ1El__dQVrCOYzlAF1cs-0RavCmx21bHOPpVVENc2zeTJs9XfEErVeQsQShAgLa3WMryrlOge0b9Il8ijv5acKK3c4YU8TaBRmD9XEnRTthbcIwFVEK4atoJaBxUlf-aWd4uDBD3K4x0amQsFUeR-C97rNe93st7WailewzzxGEwpZwpuVBW0YsAEvJyeO1yEuV90491z2-bEKsqQ0sQSNsJ69k6CHJaN5wTWFwl8Qr9l3dF2PS6AD1dyOzI_taf8_9lo4efjFg2XgRw1sdJj_eBssDOW5tMFqsbZH2g1DMaV_zN0DL6g_eShlnYNOsKZxlof5dCqUHxnsa-wMLDAsEFBNeuNdKRDtYkKzYj-hODpqRDp-Qle1R9g7MqAhA-OVhPpOJDhxzMn2168Nj8_iohCq1GZ2rzKse3KVoVxZUzyTr7j1aPDUQ005QbqgVinAO87SE6qsyiiHYOvEZLy9JlYygxMGMGbHvVhUo0ARu78XYI8XrUgirfQ8p2QHYr6IT3IsQ-Iub--thyVkyEqyk9T6ZUfYawmJhTjsuht_dbr6VilH4GTnO1Vs6JC43kk6ZSDhlri8lxoXD7lAvWo7-IZJJCkDF3W9CF3CgV92ELJxhNWXiBAZYvsc7jf77hg5E1sBo3iBkPVe7DBpg-DoN5EEJ6GtlIYC49dRYbSpv2TpnCeKQj2F2IhP2Bq7-sV6x4KpULPBgf5rDY-LRDQdTySjus3Zg1Tjdr_hV7G0newhIAP9SK1lQpK919I9ObXGScJtOhVP4uasdSOvn7-oEbHAAEqkzDUVIirE6QWXpP-faSR",
+        "id": "rs_0717b7c88fb800b9006ab4ba397bc487d189a936cc7d0f7442",
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "action": {
+          "queries": [
+            "Docker Inc H-1B visa sponsorship filings 2025",
+            "\"Docker\" \"H-1B Visa\" sponsor filings company",
+            "site:jobs.ashbyhq.com/docker \"Senior Backend Engineer\" remote sponsorship",
+            "\"Koyfin\" H-1B visa sponsorship filings"
+          ],
+          "query": "Docker Inc H-1B visa sponsorship filings 2025",
+          "type": "search"
+        },
+        "id": "ws_0717b7c88fb800b9006ab4ba3b475c87d1856b627fefaf6ad6",
+        "status": "completed",
+        "type": "web_search_call"
+      },
+      {
+        "content": [],
+        "encrypted_content": "gAAAAABqtLpUbeAEmyQPtQ6DMoXMsiwQK3cwK954A79QfGz88Vt0DHrWbqLN2uMSa_upsmOm7WFYn8ZGlZsmjSYs0cAx3zAmvekBhuwfq5O4bDCpxb7L3_7P72p4qo1-uSBNY-ikAbHIItdBIOgkPdZclvzoIDCw1z8jX7KhXd6mMHXm-xEzPlQtzBHfFsyQ48VV-oeHdMUd6BCj1DpPyHLtYNvhfUmRSKgLKLz20QiO5u-UqcvwoAc0An3sjq0pFz-hO2G4kWU76I_tiU95hJTZmx3imM7IJc5_ePbs8mFl_VUmd8I4-Dhf71UwJ8q5cmHOfLtzY_aGypDc5FmiTi6ONdrkzK5BNB0ByEMwhfDXO8iaJkyHxUpuad2mu0nylGJ-zdRvXH6FTpRFxtf2HaNtnjJglp-HogkqiwF1LUgxANruD8Jc-ig1SkBg9HXz6aXlR4EYxqYEPI3mOWaIsaZSPodshPEg1B0u_tEqxgmLZV7C25SKhgajs6MZf8q0j_zmtzvmptTnEgyYncMfvpTVUdSMYR6KUHnna32ZcEFB2WaT74K6gA8mU8TCFBwVqtTEa2yri2wpiSwhLQ01C1wvEUW4QE4q-tC3wEsqGbd4dYzZXJbWefdlMzilBTCwPZLcb_Gr0ZX7QLFQa6SYBz4repqQZPiNbHaTcSlAoPqn-_cV513XENp5OvgHNcnqkea3d63Sx8kv6eEUFtI9HX68bvGgRyU3iySKcuai4eT-A8EWukr6DIDQeyl2uK9ujcElVL4N1pWwl7-pKoxP0f-relHB7_f3kZdlIU68FioZhpO6t96X5yRkL5L9yHMWYlBmlD0yIo18AyU5iiToCKoUsnaSR9qX1kxYDNFZjPszHNEwvWESnW8vFIJSGtFbhOrpzjszpHK2aGH4mWSI3fWJbt9m67_GYdRVthjmXwTkFAbAOh1ruUEe693xKy22pFWuggylA2c99IedQ4-W1UEx7C_t2mbTj2Mo6XifaGitJGHQC_3qaL8_x6cLvuNjcQdWMWkVXxQl30R7E258zk7fDfGghXMlYhkRq_1QudCWJmEW0cZr5xzgdXpLCTsql2XHzJMd0G0XqLc1EDKlwshKVWDfuAvau0wtJ4OyMPRT6PUq0wv6qRE7y-iL5xFsOtc8ZtUGN45ZMFLR9_1CDQ9qbxZj9gANqLir0fa5qiF4vshFZX_aVRHo8BqiicRsk3aaJxwRI37BFM1R5sNEc3GtFePUNVSFt907Av2I4jtZOgYzZuHQrteC7wCTwDFCPkNf3LNpXof0ayaowMP0wuDdVJHXwobBICJAxir9A7xoZkPuV4fYKh9wm87ExePQFN9MqnCQ3kTeOk4yCCCE3JtnMuIl1OEfNVS5SwAK07AJe_TMQkCEnfC8Gm4hf5kpaa114IxzpCZ8M8Ym05kH6sY3Uu3LTOtiz1tnBzezbfnRDFYvCgQxSisB9_Hnbyok_Ep9pksF75UCHQkdBSTr--kOazyHJ0_eJ15w93jbLjTF0fm7N7YCFrU8apDnY9KZQR0zwJ8YfsO58RNOzZW6j-_N9QEDwyUgy5LT6aaxqMMHb-Vx51hb2rxbgY0_78R5EF9H8KDtVEA6u3AFFR0B4adiK0yAJJmUoVC4RaRMBfFDbf53bs6jfyBnY7PyHZINFslFsOVJSzgCBaciyUGNHvl0tZjBi6PqW2NaJTS-j7FUa_3_nAx9_CtEwSTR_nWRgByMm9gxxTTNqnRqxIY5ZCAf7U8hfWbpBXPfzI_CvQdT01g0dAptm2NbeWh8sMzfoE-MKEtqAa4w",
+        "id": "rs_0717b7c88fb800b9006ab4ba40bcf487d193577cc8e36dde35",
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "action": {
+          "queries": [
+            "site:boards.greenhouse.io/gitlab \"Senior Backend Engineer\" remote",
+            "site:boards.greenhouse.io \"Senior Backend Engineer\" \"Remote\" \"Visa sponsorship\"",
+            "site:jobs.ashbyhq.com \"Staff Backend Engineer\" remote \"visa sponsorship\" -Docker",
+            "site:jobs.lever.co \"Senior Backend Engineer\" remote \"Visa sponsorship\" -Instrumentl"
+          ],
+          "query": "site:boards.greenhouse.io/gitlab \"Senior Backend Engineer\" remote",
+          "type": "search"
+        },
+        "id": "ws_0717b7c88fb800b9006ab4ba41a78c87d1817f9449d18a5350",
+        "status": "completed",
+        "type": "web_search_call"
+      },
+      {
+        "content": [],
+        "encrypted_content": "gAAAAABqtLpUV01-k9b-FDDcOqlX5Hr1KLMZErAkd8KmLF7p2oH3ATy7WvgfYZPU3_O3slCCvyzVbp4yuns6zYaQfOxv25PwRFMLNRZ0DuBA38Tz19_1eZ-eH4v1y7Bv-Nl9uPOPyS06blQPBp52U3WAV1-R7_oAmRX1vwmHgYExbC-JrgJw2NCI2uw0Ys0QwnmrFgo3j13o0SrMYnmKAmKR4IvyxxNhst7aPKF9OIbLd8HyJmDKh52oawQILTcFtF3WBnYt7sfkd5HORtTiZaqdB3ojZpHIubR_crYkt7VKuwHlyCdW5TVI4UtexHPx8UN2ZNx1176Kp2fp81xmJwkI6AevIUZ_U11VXpI9QjglsbgjYeLkp16kQiDc3GzDi7Ikn4S75cbDaevJMA7DB1CxmmSbGHOd69fy4t1pN5ZLaRUoxmzFSMrvWKtYF31KcPZgVMD9K2QCzgfRjqjkHZpX9LuSdhZB4ebk0mKTFl8zTAW7sjJnUdoZDywB2CFT6ggDKbXlw1whXTlj7RQVnzXahUM1yOf9EpbdvDH84HEVUsI9taj9OdHBGPzhTgPXdwO0grLj7hAXZkpXCdE9ZKNYqcTwUZXb5cXnarpSJLWrpyFkyq4mvjhPuQJAAzkKWHVUeTX1S3-2GpVplr7d3h9g9SwIQkTGF2ylQEq01A4id7QjuaI-pnL0F9h9LAKqGIFpTvQOkN-tKLulJAQTywZMtoY6-s7R2iD7blsKB8CTQ1B1E_5A_B8d2CxjzxMvS8zh3ZBoXnlzrC3KRYKqlCLnZW-bCdmxzLFkd1KiLKmAxG0g5I0FrXSssCSAJgBUzNy7kTNmf4NeCxKnkkheEsq5umZgexdkaC8JxXUGCX7-wPQ1n6FANC6kv2oC_AEcqVpZo0Z2uVYO9veTw4uFaD8005rNW9PIlTI2UrKM8Fq8_90_ybU-i9FB4yiIiQCATDNH9JgO9iBYinHCcv8P7dMutl0RHuMFivnW00kkRoAKdcR6FSccTjMxRMWaL3GN-VClDvVlL5reAoMl_WKDuSvu-SQsIesS_6USEOrbxHbl8HeURQFn2YIzLg7pTyYCbIRhc7hAXVJIoA4v5c06-aBhBy7mP18yMFaXso88TTiRosZ_gOJcEtAafZdnbWd-cibRK01n22nybh0YPhFZi0X0dmbAQHwg9OIzucEWJVNDmP2T09QDd6sSaQC29K5e_LSPqmOMDtE6IROBGkUyDcrozyWS6QURAVv4OMw3zT5El09qXrDPIw0WTtldDuctLvN0AtF2qUyJ0dQV-ujv8Ehv61MKfhwB41EHxAnqu65z4RIZauOmX5e1KT8PuCPjkr0UHKSsyyzD0EDQcS7fHQrR-zZugT5nkFbSEbLGv5tMaXer_vUBdPr9pOHhVONFqdw7rdCozPQfta-sHMTuJaw4EcOcIH1JCYxcdDD60lji5llaIk9YymYGfCg3ZtmyMzHpWU77lEVUSltC1Owh3R9Jpacdz6py1WYfHqn-wLzAHU1jT5xnl-KGl4yCJb2dCF2qfzcYTyuVjQdQZeE8BHtm17mmGxoeEi7ARlo7DmgFYYxzKi-d1uXZXvuTVCHwcg3Ia07_JtTcLerfVHNVWqE77EmGAYzmi8UnKgpJpFTSzsV3-GtTLQNBHPHjMB-gIJNcB3IxXvP_ArZyNwcwPQmswz99ZPA_wBQzlcO2EnvCLcn7clUzJY_OgsQUdQ-kkL_Wu0dO9uGlpqiRUa_86NY75uT7pB8FFScV-vYLmZE5OPTnZo4b4Hk44m-4GQAIeaZkS3iKcIedVDOMls8uNK8deoQPG36NPEkod-QdRXzQSpbLZbDKEN72UR18I-KFlD9hUGIdmTjEvFrnkAviz4-Prhc2B5hXN4-yTt1Q8CzyUM-1mGhX6fUAX6zvRinCyOpGHd6v0EyfawhJD5dJ_LspW-5nySmDd-QKrMp4CzYOZTn5MaJYcHI0_XPyBziQlQh1JaAqh9LDyzOvTpOjQhcBUQKJVp7XnGrJQChVM8_VbhgaWP2kgMd0wCEJTFNhosXaa83lfH3u",
+        "id": "rs_0717b7c88fb800b9006ab4ba440d1087d1a1207e99f0976c6f",
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "action": {
+          "queries": [
+            "site:jobs.ashbyhq.com \"Staff Backend Engineer\" \"Visa sponsorship\" \"United States\" remote",
+            "site:jobs.ashbyhq.com \"Senior Backend Engineer\" \"Visa sponsorship\" \"Remote\" United States",
+            "site:jobs.lever.co \"Senior Backend Engineer\" \"H-1B\" remote USA",
+            "site:boards.greenhouse.io \"Staff Backend Engineer\" remote sponsorship visa H-1B"
+          ],
+          "query": "site:jobs.ashbyhq.com \"Staff Backend Engineer\" \"Visa sponsorship\" \"United States\" remote",
+          "type": "search"
+        },
+        "id": "ws_0717b7c88fb800b9006ab4ba45217887d1bade27a7532a6f80",
+        "status": "completed",
+        "type": "web_search_call"
+      },
+      {
+        "content": [],
+        "encrypted_content": "gAAAAABqtLpU4-JMBzmwQR6oZIY0GIh1c0MDUZWf2yuH6zZTuCnfeyIK7_nQ_7YwoyD23qP-4RS8AjvzNjF1Ezz9jKyhdLD1lxGuAJHkJzyVK1iefS3AmooP6ESsBzFGtGMouwT7I1JA3MTDC4bwpi1TN64tBCgClYakqAm6ciEqwgPBRhbOw-2Um6T_L_m9jwV5GOY-R1N8SmlFbuP-uVHLDvmhovUTIt6P5o2rm-RG4T3EvdfdYSkRPlMHiGj6-gJbVBh_gBoQCCzI-YxaQNTaP-gIR1nyfq4K6BvVeYx6JOheiyvoVKEV4w7lPE9E6_6dX7eHgktmH17tgGgWSeDoIWFeLR7IlZb0uSV2TgnhSh0Rcm1zb-r1QqI4eiOwt9ByLQnVt51AMZ60OHmM-zeMh2ME-lQTWreBUAb1zgcXtZxVvs8Qdr3GDHcprl632eE3BIv5ARsozBiUfmhrnA2H4X9GxVujWZgM1T5Stpasw3HDpyd_TvOmAnRBtaAJZ5FBZJDC8R39he5GRh8U4wmxdoWWeshMV4YDjqeAF1oShwoqbuo_1WltgW7pDKvavqRSMhqcyGEy9r6utR2M24yvsmmfKMYG9SJ41IQrpFNU40beIiSu-WO3i_F2vRa8t9VkCxZBxQK_x-C1ereYvo7ic-4xUt-L9u8ObLILJcwvZUD7-8WFE5UZYFoFvLE29KlPvmDCxTbm8lxdURC7NG34KlY6iBp0ElfX5PxwxKv16QkEQ4baZnLIWsmws5jUvPzM0u-30hO65i-xL1q_L2cjPYv6KsnpzxDcCFKvky8SSRJRMlBObYBTofuqjBbT-Gz5fIppePq5qHnRLwo33UFz7cdhhGTlrpaLvtutQS9ZONHyHx_9FS9Fv74Jj1AfVy_9epTtccme8o6BHoRRRcLknESD7gLi3SV9cmsJCjO2LhSOpaO74Hxd4mH1SNHgWIjFc1AwfuOAoWAehgzEg0Zrw1f1ZiWrAPuSOv58HMxx6PdrJn6Q8zNviymaKrjYraHUiUGhmdZzlBGQl1bIFDmysp2XSQarC1R-eBkf2G-X0epkbJW4xd9Adc9Ixhqau64aIjT5VxmzZJVmQKUJxJXKHU7aoxoxiuJA62L3Yrlkw1kFk5zhROP7E_XsptYGwSRT5yWtcEh32pEJKjYYzHyzk_g7ytikgqfIkrA7U0BWW8tYxVAkz8iwFtN4aG93fIX6DC7_O2ANDTBD6rZOxgwZ8KtTV0h_gB-9NbHPs1cyruxWZPADGRBskI-ozTskSW3pDJOV7J-S6mbacMRfYhwHSnptmSaJPquS6nIO-G4blVFPY-V4NgM_3JR5E0lU1J51sfLi9g46sAIu61CvTdoqhNDAFYRRuP3UlgV1afYg4d5lutH1l_vTJfenOlwJx8z6pgWJrDoUnbR-Nhh-65QN1HKc8-7lyWhTo-JBCX7-8yNLrcpRIqRsywukTGdoQXaJX2NRmgSF2-Ztij_rF6dQca-oOsfhhZC43-b4E0CuDbLRVj0MsuxGDxwtEDfaArN7wWUkzpH69NLP2U3eYpEahEeUyH6rDnnM8-t6v5Mblc0zmeY--2H8BxGCedmsv-cdlKO39y_qNSRws82PRBuSvbeASYy9caAXTQACc70zap9DT2ZIMLAgTlRLe37bPOzjGhRjxOK0m9MrAhYcs_co1d84kbHRVqjCbXnyOZDPKAKls5bPvKe1NqyIC33scXK7l2ImavZqtPCZ6BbE0MwPq1r3LmDGdg==",
+        "id": "rs_0717b7c88fb800b9006ab4ba48442487d189702e888ceae06c",
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "action": {
+          "queries": [
+            "VRChat Inc H1B visa sponsor filings",
+            "VRChat H-1B LCA filings employer",
+            "VRChat Senior Staff Backend Engineer visa sponsorship remote 2026",
+            "site:jobs.lever.co/vrchat \"Senior / Staff Backend Engineer\""
+          ],
+          "query": "VRChat Inc H1B visa sponsor filings",
+          "type": "search"
+        },
+        "id": "ws_0717b7c88fb800b9006ab4ba498b3087d1860a4922fc877884",
+        "status": "completed",
+        "type": "web_search_call"
+      },
+      {
+        "content": [],
+        "encrypted_content": "gAAAAABqtLpU7xvRIF--7U4EYCxT7caIhJi-Ccad_bnPZ1iLIx4JhkM5yo0wmRkeEx8Xz8AHsBk-0iah5FWfn39uQWnXSvQ2YC_COOVxuE4lDmqOG3cBfTYNytNYiMbuhLE2gLUM8iBHxtz-YKw3RVoIUFzQ_oIn7F1GecrPekHqE7JTSZK3NVAWPeAptLDPUw4OzobPLZ4cSW3j9V_bpU2xDnvDrfcPduO9SP6vta031aeu3mZzzUiduVSp2TCVvQZgbvi5lsuwGtbdqiY-qyUSWVkG4Tt9mRMa2WI0HscK5_KS24ctK80kcGHQueA-baGWvlA9HKG00b90ptdoZ637Ax6JAEKlLziHfRDZTZnzuWj9xMKFPeFAn76L8PioeN1BZNEIbUM75O1_zh-DZqEjTm_NcEQIKRl8QRGnMBeIE58D7jY58wI9kMLwCXY2be6twe5ZzRShgblhpNWo-sYOLTvh6oqP8rXgL6FxrnmZqxHrIvBm-_50CXLLJib8k89N7Xk6lJsGW45hLej5aiYCJUTSYUS5dLR0r3FA2yDhSpy0YAUYr6TJTUioLcC7nqrlE-jEmv3FpV92yeuk3n26_RikaleRYoO47E6MVcIlP0kbB7fX3SP2X0ILkzW4Xy7doCYaJRAgx2FDZu3gi0g0w4vYbvmh8njJUvgn3QphutasGnf5A717-9Ia9MMZQ-xRHW3eA3mbwSpbYyYnWAZ4qcABoNi-SBQsWFTJvm2m-f08dIBwD9pPAt1oAVOrBZBzrsFTfGyFbJx44XsdKfyasv-H82gb-zU2GSBmdMENICDDX6zrQzc7-buLZxqI4TReKnhNCuejONGmQlauEHQeqei3tinaHhd22CVAPrvw9lTqHPBCEt8-cptzX7ygCB4aACHnhycR7inyy9MFK2jT3ezCemKMQ-Af20TXucOYAag5gtNPnUpiY_oMlkd8tPL10ZxJeZjJncjREZ30aSrjXXqzqN7psbg6LrZLxAa9NJoENJqvfJ7ySPnfyEymzfzAbIFDc3ha3edVvl5FEHU3xRJikiPP7u05vexJZGGHxqAd6allO3JDh0t6drk68HQHo5QhApVXK53EDMYT3dcfFmaF7UivqYukjc0RBjCzsq6DYDyO7X0Z66PH-pRsKNMD6ddisvDP8pYuHyFMwiozGvfNIXoz05b0VbES6nr1K54destJCzWRRn0ZvUnRJ1b7Rxo53zd6rmtHCZuFDPN0mnLARLHe-CW4Lf1xT0H5xTh1c4fpCvHen19AF-QwkY9eacTu-ISUY2LlijJrvBP7WB0Xeu8kMnwWQMDy79Y8VlMJ10rGLk9oXNJ0FUwC9hhhIbeRzyqB89K9FjO0aVRwF1l7-1M1WzTaj6xxl3722ZSsRH98VfkUzRZ8Dzj7BONN3R6mO0YUhZj3h5fKlPCNjzuGAvH3vpC4SsYPRCkW4-Emj-iBSx3UEyIQHwSsgYQpoR-xK9VXfWPlxdCeQtHFBNkxjLZCQ5jROsuqNv3rGZpMolbMhMmkAApnWmf_LYnoxK9r6p_60pm7vZWCLEy7BBdqeeq0zoALAqVIxiZWphJzaWDmh-xKw-OpD7i6ff50CK5cdTOPf74dAfNiXRV-55ATiG3aGlQhoDQtrZV1Yy1FSxqVPKq5mycPYkAh5TJgpW0xbNVA2U2rQzTKqeUlkgj_9kbayTHULqzCr78k9gI8ZieQ8djp1WRrIiOlmDkAZ6trsBEqQoWST3VnCOZ7alJvnTkPS7bqBo9Y18sqOpqwyGkoEq1bJ17MhfBfrm1uKp8nljGCAKCRJk7tBVoW-p4i5a2-prsrSAs9ydDi6ew3kKsSjKYo7-MOVv7Fk5kVHRL24fhCFM6DL-rYlUGuyzILyTft3SJO_WqOpG55_Xb35KYXigQF2wo0h-FYVbqd47745YZO57mvMOJmSErxEWHhq-J20CTRi9obMlCqji3upsemQbnlR9oc1Q-qGMxP98G9CfGQVTcd3iJPl_xRnaWr7pmnpr51Y7BfscnhG4qkYWvHI0NCycjKTD5NH6R_N0fmbWPZhEjpgz_KXebwUxi2-zYdfiBYjDcoxpH7CEcqWFqY0VGc7Ty4nwV5qLoYSRJ_qanIgk2HDzdZ9ff4zKdeFYUsXml1N_hbyT0wrFIR9A96sYZi3pPN8EKyw-RnbfiWwP44nhUaPCFyk4AH7WB6emaXBzz_4VFrVRv17ZcaI0-V7rrzf-25NjC1hzHLyoKXtsW2AAyTo6bgn7AfKk_8AS5dgOwKofoYVLEEWZ-YkJGW6qfxDCZOvTY5XMg5UNcRpxVyHNYH9jYqKXeBixYgTJOkyXCcf6dAjCCf4uKz3eIq1SioqC6EglZghVj2VIG_PFuiDHL9rgV1CCuMl2lUke9VvQihqURVUVj7XNMJ2R_w_-8b_f0qIiUm4Rv4pBXOO27tYYpi_2_shg0ZgmeZAEIDWhsfw3mFPSqD9xjX10LLugL3jK1k1Pvxxb4nKzrCoRVd5umhP6bMvNjNI6OkjKUJs2KhfHSCyZ2KiMxBH2yzieXmKuQmk6rtaVBl9_51UXataQvA5ROuzc44qShpnu0YRrdp7gu8nHLOa49A4Vmhj0EctK7V1ywsZe9qj1OALQkyhTe6xFw00EusLA08Qt2KtG8qP1gZnqE4A15947PEEXL0mv7zJdKT0FTWWd4_gPa5B-S7dZQJ31hY1c5-5CzOzxpAl6oCghN2Hv71XRBdS4SHUMH0WvXmWn0eZZ_ZJogEyLcF0DVVpxzFt5EHPO11uPw1F-KDcVRqRoBqVF94VTgKt7hV7VPho5xFueidJAWCIAf1cGVProkTReAJf_RHcL_CHd0RhgG0Q76woKS4EHcZzbdoPqgpKjtbxyHaywCA_Fu9IRJCYYmBKGYKiVXsXso6MkV6Ux8yym5lnZGLM0MA6owWewtDwDdSdwGRlFSgKPH7S4neY-HwlKC9IIhMUSQr8JzxcMezsWU3QPoa4WZVz95rJSU4WpLseBAvFAVYN-64XIUGps57zgT1cdhGlkTd9hE5tF7EjR2ynbUmziYlQV6vKEMsXYCeXuDK03YUmpeX7-ddga5J6XOHmaUu0gXMccObPKoOCPh5NfPJo2JrHiSahoHroca2O7im6WW_RMaMxJmS6d-nnONbKjXBEfKrJHfNI2raxsYPvRh_Zu809rKMBypV_eIdfptSAxKcyU5kUjk8gbJi459ZmGCjxSQ2V8bOIwcVfZs8YYGIL8XS2_9MXSUIOB8kdraDjk4vyU3Sq2gcPMbywzxkVU8rsACYW-8AsrodDxtEjC-wGkEQM55QyUskp2Ei__ZQc6TTBkObXNqWoIqnnKO-SX1ZC3I7yaDEZi34rPJ8vKvWFJJ89AtX6PLbMBGibfcNtaSZahsKS3I1LEOt_KAmgwMOVbo6doTAR4XlLVWMW2W5oYngO6cvBhHeGiqTpcG-iFiOlqDJ_o3IP1paNRxLhIz02cZxrp8J5WCyp5AzI2uFGuYvmK55IS0CObrspIrDDnPOFJzIRSIwMkgd6K6AjsYd5CPMvHsQwIVgoQf7R2dEOj3_nSVGYYisxyF7Tn3xMztgY1Qto9wF3AS0BAd_lxY1qUx7r6zqm4l-Mstlu2zAMDcXP5crLI15yNx9wCOsivFvEGFg1dy9B3DqXpQMA8W1HlAMbo6CKbZJSOfBXYtK4B09124KpfAnkip0MBC2GnL6YPt43YAawvO8m9M4-yKz0jDpSBN4XEgX638sRNH66IRVY1jB7Uy903J5UVo9AZqfSTCaLvFO9-HqSwU5LKjZ6NYZzYEy9i4fD9jpEgw-ysElm8HnhuVL58JesFuUJdTvryUB328E9sgTkOVsW0BRycoEpBctvkt1PFf11mfeh47f_XR7Rl2OppyriPOq4M__A_CvpOGbhk9Kc9VyiPt8CHgmM_7H8TDMae8S2yHnoUvSTCEyM55nvLZE5Y0nBxBsQ0BC2YEn1GxPsuIdYdbh0dw3EpQPk9qr69EZsQG4ddpoq_PaHoAqG4wJOwWMewbSrYhc5yqptDFNUnWii_DVmTPC9PuW41f1UZIAUMB8iz8Wkv4TKU6hbyk0HIcez65_gU8pQ87iyJUnJZI8i2TM23IauxpiZMdtlNs_EA8SNtiBux3eGxYhRivnMvX-0aZHloK4aVZvziKN4njeQsoN7YSBhVFrKFTKw-JL0LRQtrBr4oLl2kG9VehkqLqWa4cLOQD0j0RdkUw_C6yYdRI-baf4AwHRz_Fu9nOZ5wo2tBBNEakSqnBRMrqOgaGwvZ8S4vKyRBcx0bYEfGGjpXtSA7znY3Ko3wMg1RPNEkc-B0hfkKuotREkwX8zC7YRrsmlht1XLf1AhMdI3IxaMIt3VRfMJXxc3M5g-ibsSuiRWLKPsVMkHYDMoGla-EjDuGvWfyyj5nZo53ZSA1FWMaPDgdzzz-HVSJPIDY9VaKFJwB_-_XsfgGXe9KqIxqDR9mnz",
+        "id": "rs_0717b7c88fb800b9006ab4ba512b8487d1a8152b02b727cd57",
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [],
+        "encrypted_content": "gAAAAABqtLpUTkPoX_m3Q_9A6XHYpxNPleJ94BeL5vF_UyviLO7hrdPtzKz4xSTVNamkEvsNFARucuOvGgyl8MahFyVrLPYw3U4-EcOkWnEDHaUv9xZ3ZsxGSE_5qZxlVm6gLZH4l6wGUeZ4wG7z3fxqBb0iWEPV6T7sDwy4I-vS4UaXyPzg48VOxv0H1M9uRAoq7VL4ANABwf4wO2_HjzZvk95pD8ZvKgyfCMnNHNZhCFGy0efYD4oHlCfbGVlOXCduu1eIpkdPGdHhf2cSgnMeo1PgPHg7WjvbcC4oJncm1Xy4ifc78U4vFeZZdo4khcMbtoF0ndFbrczW0ITkMKoZeo4zOm4O9AiARKnm-stga4f3v7_INL3rRqC1Rx6O64-D7AOSk7JxzoUytVrNKXzZAKOpfWCdU6JJEoJZ5EUyiAnCLo_m4uGv8z5Rn99bvDOY3CRnuxf1gYtBKFm7pTna3z_nXcZ3yIk1oTlVmxH9gfjoDOzr-ciE4tX7Zz2UqxrsOcFYvygd3BcPFnmCYnoenkPL2RRHSjcFncvGvya3c2Wj6EnPTtR_dXMjTErYQcWjsskw-94hsSnWFAQo4d7J5DO87N6uHyhSbNQRKw45Qm9dvTxziadgCb595YFs-gHSZk3wtNKgWv2Vy-0MZg36CL1niQ7u7bBC4_i3MvVvksJoeLrPjWQcjHo5_zgN9Phz3ZqyUplpwB8SpHHPE8sPLKwKiNVE099l9ByTY3Vp64xmyidq5mHdJzqbBh4rPK3xhKhLC8m4D0xFWJe6EwkGcMqMKlPbAz9B8ULht_0gojTbsOF8gfROC5hq0yW9x0W_PQ--pdYxef3xUh8ppFhD-C5cjHlPz7yoLdQui0F6LGUvwVaD17166T9v3DttFHYBC5zQuVUNBpFhaYT-urI590-hZuML22qXW_oYJ74yQceYf9_n8FXE4dzjPEe4Oj1iuprKErW5tUrLLjtjVnPHXaFBLYDdcIc4QEALanOamnOY2vHXUL-bgOJXZjg3-h1C8agzMcauf5jsKoao9LISTlVC1rudmLAFN-oUjpknPwHCNv2xSn8iA0J1-arWjOWFcpc-mdNrgRixIin4aEOT6Aj_uelfxSSZRjgPSq3qecKzWgaZkH2XqDjxBZaFLwAcwi4UHKadTXFfZriqpgokaGTRw7X9cJZrFAklGnssA8JdTFS8SQVEHbcy3UX5_7zxAPhNABWRhrbKE7YJ7cd1-QI5jkqpedx9OHaOYUawkxWymSTrxSZOWJTI-1PXbGbpkiG2wzU6kb5FetBe7sNIJgNi_DEtE6hCfMdhVg91PHiL2DNvVCAw_-yv1hlZ8N7SIP_3bFx9zTrGeoMG2BK3dwjaQRSZIMM1DwpqQiGtyuY2osPgtGtsl06FsKC-ThLrTm8DAg7kXE0mpPeIXk0EkBnh418jOIghVcwz_Mu3_tDnEtzMM6sRQleY8ie6Jt4YXAYEzY4zFE1-30qQ5ZnrH9Lk3VTr9Vv5AtHFENNs_bZysNTcYMBioTbCxtiBO1uJcR_goIAF-Xby1QonLq7634fWkWggC_ED8xPDkCxUMGSKlAfSdpiM6fruu12YckswswvxFR6qbVDz_oi0hn79efcYgA6deYnEmRV74DSBoVW_CGMVz2IzHdKCxFMVvtjJU_Kr4kU_4W3U9UjOqUfY2tejq9Tf1eUb7nuzJzZ8Wx2SkWPJwjfj_4O1B_sguWOdN7AmweUEOrpAn3kj--xsIWX4JAitsaIaVR8Y1bCDrTIe1qCbJW7A5wKgSRvVQnOcNOXuUJIelwlMevVoo_wgEUJqjYRPcKVetcmfPR6ny7y7iN0wRQ03fOMbrrnQsXtsgrQ4DIoAwNWHHFkKAvjhbVStEeoKC0yMGs7AnA4NWdoFGbD1EU-x7B3GXKDfATpcb4j8xBFfa4k0GXs50W-GoEEvKwmrzg==",
+        "id": "rs_0717b7c88fb800b9006ab4ba53539887d18e726442a3847921",
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "{\"companies\":[{\"company\":\"Docker\",\"careers_url\":\"https://jobs.ashbyhq.com/docker\",\"ats_provider\":\"ashby\",\"sponsorship\":\"yes\",\"sponsorship_evidence\":\"Docker\u2019s current Staff Backend Engineer posting says it considers visa sponsorship case by case; its filing history also records H-1B LCAs. Prior filings do not guarantee sponsorship for this specific role. H-1B evidence: https://www.ellis.com/visa-sponsors/docker-inc/h1b\",\"source\":\"https://jobs.ashbyhq.com/docker/9d5c3e18-eaef-4ffb-b4f1-795742fcba98\"},{\"company\":\"VRChat\",\"careers_url\":\"https://jobs.lever.co/vrchat\",\"ats_provider\":\"lever\",\"sponsorship\":\"yes\",\"sponsorship_evidence\":\"VRChat\u2019s H-1B filing record reports one H-1B labor condition application in fiscal year 2025. This documents prior sponsorship, not a guarantee for this specific role. H-1B evidence: https://www.myvisajobs.com/employer/vrchat/\",\"source\":\"https://jobs.lever.co/vrchat/cf42256c-68a5-48f8-b5a6-569cb47fd929\"}]}",
+            "type": "output_text"
+          }
+        ],
+        "id": "msg_0717b7c88fb800b9006ab4ba538f5887d1960717ecd2aca4f4",
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0.0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": null,
+    "service_tier": "default",
+    "status": "completed",
+    "store": true,
+    "temperature": 1.0,
+    "text": {
+      "format": {
+        "description": null,
+        "name": "companies_result",
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "companies": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "ats_provider": {
+                    "enum": [
+                      "greenhouse",
+                      "lever",
+                      "ashby",
+                      "other",
+                      "unknown"
+                    ],
+                    "type": "string"
+                  },
+                  "careers_url": {
+                    "type": "string"
+                  },
+                  "company": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "sponsorship": {
+                    "enum": [
+                      "yes",
+                      "no",
+                      "unknown"
+                    ],
+                    "type": "string"
+                  },
+                  "sponsorship_evidence": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "company",
+                  "careers_url",
+                  "ats_provider",
+                  "sponsorship",
+                  "sponsorship_evidence",
+                  "source"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "companies"
+          ],
+          "type": "object"
+        },
+        "strict": true,
+        "type": "json_schema"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 6
+      }
+    },
+    "tools": [
+      {
+        "return_token_budget": "default",
+        "search_content_types": [
+          "text"
+        ],
+        "search_context_size": "medium",
+        "type": "web_search",
+        "user_location": {
+          "city": null,
+          "country": "US",
+          "region": null,
+          "timezone": null,
+          "type": "approximate"
+        }
+      }
+    ],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 50857,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 4744
+      },
+      "output_tokens": 2229,
+      "output_tokens_details": {
+        "reasoning_tokens": 1950
+      },
+      "total_tokens": 53086
+    },
+    "user": null
+  },
+  "run_label": "openai_run2",
+  "structured_output": {
+    "companies": [
+      {
+        "ats_provider": "ashby",
+        "careers_url": "https://jobs.ashbyhq.com/docker",
+        "company": "Docker",
+        "source": "https://jobs.ashbyhq.com/docker/9d5c3e18-eaef-4ffb-b4f1-795742fcba98",
+        "sponsorship": "yes",
+        "sponsorship_evidence": "Docker\u2019s current Staff Backend Engineer posting says it considers visa sponsorship case by case; its filing history also records H-1B LCAs. Prior filings do not guarantee sponsorship for this specific role. H-1B evidence: https://www.ellis.com/visa-sponsors/docker-inc/h1b"
+      },
+      {
+        "ats_provider": "lever",
+        "careers_url": "https://jobs.lever.co/vrchat",
+        "company": "VRChat",
+        "source": "https://jobs.lever.co/vrchat/cf42256c-68a5-48f8-b5a6-569cb47fd929",
+        "sponsorship": "yes",
+        "sponsorship_evidence": "VRChat\u2019s H-1B filing record reports one H-1B labor condition application in fiscal year 2025. This documents prior sponsorship, not a guarantee for this specific role. H-1B evidence: https://www.myvisajobs.com/employer/vrchat/"
+      }
+    ]
+  },
+  "usage": {
+    "input_tokens": 50857,
+    "input_tokens_details": {
+      "cache_write_tokens": 0,
+      "cached_tokens": 4744
+    },
+    "output_tokens": 2229,
+    "output_tokens_details": {
+      "reasoning_tokens": 1950
+    },
+    "total_tokens": 53086
+  },
+  "web_search_calls": 6
+}

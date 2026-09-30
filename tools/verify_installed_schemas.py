@@ -10,7 +10,7 @@ import json
 EXPECTED_SHA256 = {
     "scout-public-import-input.schema.json": "074aba64851bd1578e0fdee0bdba3629539b4a0ab5bb71beea191fc578eee374",
     "scout-public-import-progress.schema.json": "1c27e5f098de39c27f6014c5bcbce6677d0e2680742671c9bf338c0b4807d8ef",
-    "application-event.schema.json": "310347dea9d43f0ba496c8a9c86abf41108f98eb2e7b1e940ce5ac71f215bd54",
+    "application-event.schema.json": "5e72b8030bcb0c32f0f21085e6f20d8bc7fcc8c17477f2cc37a739d8a62bd1e7",
     "external-recording-run-v2.schema.json": "6ca64700fd31945de68c138a5f4f6b739077be19da5cd340e6545fa1ee3a862e",
     "external-recording-plan-v2.schema.json": "e341a79cf759505ced0833b88ab27ccb3e8ee79f2f92990f0204984fe9fadaf0",
     "external-recording-invocation-v2.schema.json": "b6177225a1505a3dbd9a2047b1b1f015ea29c6f21a42c52e086047a539df929a",
@@ -90,6 +90,8 @@ EXPECTED_SHA256 = {
     "scout-interview-preparation.schema.json": "a2e7548187730e41a6de490244b1f36955f2e7c97227d85090ddc40742b0217f",
     "scout-private-transfer-manifest.schema.json": "a06f2be2b90fe695fd57213168e7da648055d7ccb4f0830732ad4c7f92a7d040",
     "scout-definition-export-manifest.schema.json": "8ff08ba0e111e0d79d188407d0a75c83b670cf94f7637abf3b06caad8c6a5a05",
+    "scout-profile.schema.json": "5ffbc4b8c95d5b9483ec692918c2f9ece800b9a7a9f0d9b585fd57ff040a56d5",
+    "scout-profile-selection.schema.json": "8c0bb60b4f6da2fbcd3b3c5faf1a6e0cac6058ec653c9163f04b1b2a1f1d4ffd",
 }
 
 # Historical validators intentionally expose this frozen 64-resource identity;

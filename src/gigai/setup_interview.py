@@ -13,6 +13,7 @@ import threading
 from pathlib import Path
 from typing import Callable, Mapping
 
+from .http_server import NoLookupThreadingHTTPServer
 from .model_discovery import DetectedModel
 
 
@@ -168,7 +169,7 @@ class SetupHTTPServer:
                         owner.error = str(exc)
                     self._json(409, {"error": str(exc)})
 
-        self._server = http.server.ThreadingHTTPServer((host, 0), Handler)
+        self._server = NoLookupThreadingHTTPServer((host, 0), Handler)
         self._server.daemon_threads = True
         self._thread: threading.Thread | None = None
 

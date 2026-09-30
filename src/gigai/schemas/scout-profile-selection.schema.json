@@ -1,0 +1,15 @@
+{
+  "$id": "urn:gigai:scout:profile-selection:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SCOUT per-gig selected-profile pointer write",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "seq", "selected_profile_id", "updated_at", "parent_seq"],
+  "properties": {
+    "schema_version": {"const": "scout-profile-selection:1"},
+    "seq": {"type": "integer", "minimum": 1},
+    "selected_profile_id": {"type": "string", "pattern": "^profile_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "parent_seq": {"type": ["integer", "null"], "minimum": 1}
+  }
+}

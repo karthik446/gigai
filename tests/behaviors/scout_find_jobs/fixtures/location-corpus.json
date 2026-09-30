@@ -1,0 +1,490 @@
+{
+  "_provenance": "PR #37 review P0-1 regression corpus (worker task p0-country-words, 2026-09-24). De-duplicated `location` strings only (no other posting data) collected from three sources: (1) the operator's UAT evidence run's raw ATS payloads, read-only, ~/.gigai/workpads/projects/project_e12ab112-.../gigs/gig_015b1fc0-.../runs/run_d73cb030-62a3-4d5e-9629-a33977d90194/raw/{greenhouse,ashby} (greenhouse `location.name`; ashby top-level `location` plus each `secondaryLocations[].location`); (2) the committed fixture-uat-0181-replay-postings.json fixture's ashby/greenhouse job location fields; (3) research/exa_agent_spike and research/discovery_bakeoff board-check (`*.boardcheck.json`) fixtures were checked and contain no `location` field at all (board-resolution records only: board_token/company/resolved/posting_count), so they contribute nothing to this corpus. `expected_countries` and `expected_us_match` are hand-labelled against each string's actual place-name content (not generated from the code under test) -- see test_location_corpus_matches_hand_labels in test_filters.py. None of these 73 real evidence-run strings happen to contain the specific P0-1 false-positive words (\"and\"/\"per\"/\"EST\"/\"be\"); the P0-1 before/after table lives in .orchestrator/workers/p0-country-words.md instead, built from the coordinator's reported repro strings plus the task's required new US-form additions, none of which appeared verbatim in this run's raw payloads.",
+  "locations": [
+    {
+      "location": "AMER",
+      "expected_countries": [],
+      "expected_us_match": false
+    },
+    {
+      "location": "APAC",
+      "expected_countries": [],
+      "expected_us_match": false
+    },
+    {
+      "location": "APJ",
+      "expected_countries": [],
+      "expected_us_match": false
+    },
+    {
+      "location": "ASSIGN LOCATION",
+      "expected_countries": [],
+      "expected_us_match": null
+    },
+    {
+      "location": "AUS - Remote",
+      "expected_countries": [
+        "AU"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Aichi",
+      "expected_countries": [],
+      "expected_us_match": null
+    },
+    {
+      "location": "Aichi; Fukuoka; Osaka, Japan; Tokyo, Japan",
+      "expected_countries": [
+        "JP"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Australia",
+      "expected_countries": [
+        "AU"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Beijing, China",
+      "expected_countries": [
+        "CN"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Bengaluru",
+      "expected_countries": [
+        "IN"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Bengaluru; Hyderabad",
+      "expected_countries": [
+        "IN"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "CZE - Brno",
+      "expected_countries": [
+        "CZ"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "CZE - Prague",
+      "expected_countries": [
+        "CZ"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Canada",
+      "expected_countries": [
+        "CA"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Chiba, Japan",
+      "expected_countries": [
+        "JP"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Chicago",
+      "expected_countries": [],
+      "expected_us_match": null
+    },
+    {
+      "location": "Delhi",
+      "expected_countries": [
+        "IN"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Denmark",
+      "expected_countries": [
+        "DK"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "EMEA",
+      "expected_countries": [],
+      "expected_us_match": false
+    },
+    {
+      "location": "France",
+      "expected_countries": [
+        "FR"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Fukuoka",
+      "expected_countries": [],
+      "expected_us_match": null
+    },
+    {
+      "location": "GBR - London",
+      "expected_countries": [
+        "GB"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Germany",
+      "expected_countries": [
+        "DE"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Hyderabad",
+      "expected_countries": [
+        "IN"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "IND - Chennai",
+      "expected_countries": [
+        "IN"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "IND - Pune",
+      "expected_countries": [
+        "IN"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "IRL - Dublin",
+      "expected_countries": [
+        "IE"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "India",
+      "expected_countries": [
+        "IN"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Israel",
+      "expected_countries": [
+        "IL"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Italy",
+      "expected_countries": [
+        "IT"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "JPN - Tokyo",
+      "expected_countries": [
+        "JP"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Japan",
+      "expected_countries": [
+        "JP"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "LatAm",
+      "expected_countries": [],
+      "expected_us_match": false
+    },
+    {
+      "location": "MYS - Kuala Lumpur",
+      "expected_countries": [
+        "MY"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Mexico City",
+      "expected_countries": [
+        "MX"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Mountain View, USA",
+      "expected_countries": [
+        "US"
+      ],
+      "expected_us_match": true
+    },
+    {
+      "location": "Mountain View, USA; Seattle, USA",
+      "expected_countries": [
+        "US"
+      ],
+      "expected_us_match": true
+    },
+    {
+      "location": "Mountain View, USA; Seattle, USA; Seoul, South Korea",
+      "expected_countries": [
+        "KR",
+        "US"
+      ],
+      "expected_us_match": true
+    },
+    {
+      "location": "New York",
+      "expected_countries": [
+        "US"
+      ],
+      "expected_us_match": true
+    },
+    {
+      "location": "Osaka, Japan",
+      "expected_countries": [
+        "JP"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Portugal",
+      "expected_countries": [
+        "PT"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Riverside, USA",
+      "expected_countries": [
+        "US"
+      ],
+      "expected_us_match": true
+    },
+    {
+      "location": "San Francisco",
+      "expected_countries": [],
+      "expected_us_match": null
+    },
+    {
+      "location": "Seattle",
+      "expected_countries": [],
+      "expected_us_match": null
+    },
+    {
+      "location": "Seattle, USA",
+      "expected_countries": [
+        "US"
+      ],
+      "expected_us_match": true
+    },
+    {
+      "location": "Seoul, South Korea",
+      "expected_countries": [
+        "KR"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Seoul, South Korea; Shanghai, China",
+      "expected_countries": [
+        "CN",
+        "KR"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Seoul, South Korea; z-Test & Templates Only",
+      "expected_countries": [
+        "KR"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Shanghai, China",
+      "expected_countries": [
+        "CN"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Singapore",
+      "expected_countries": [
+        "SG"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Singapore, Singapore",
+      "expected_countries": [
+        "SG"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Singapore; Singapore, Singapore",
+      "expected_countries": [
+        "SG"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "South Korea",
+      "expected_countries": [
+        "KR"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Spain",
+      "expected_countries": [
+        "ES"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Sweden",
+      "expected_countries": [
+        "SE"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Sydney",
+      "expected_countries": [
+        "AU"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Taichung",
+      "expected_countries": [],
+      "expected_us_match": null
+    },
+    {
+      "location": "Tainan, Taiwan",
+      "expected_countries": [
+        "TW"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Taipei, Taiwan",
+      "expected_countries": [
+        "TW"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Taiwan",
+      "expected_countries": [
+        "TW"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Taoyuan, Taiwan",
+      "expected_countries": [
+        "TW"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "The Netherlands",
+      "expected_countries": [
+        "NL"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "Tokyo, Japan",
+      "expected_countries": [
+        "JP"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "UAE",
+      "expected_countries": [],
+      "expected_us_match": null
+    },
+    {
+      "location": "USA - Mountain View, CA",
+      "expected_countries": [
+        "US"
+      ],
+      "expected_us_match": true
+    },
+    {
+      "location": "USA - New York, NY",
+      "expected_countries": [
+        "US"
+      ],
+      "expected_us_match": true
+    },
+    {
+      "location": "USA - Remote",
+      "expected_countries": [
+        "US"
+      ],
+      "expected_us_match": true
+    },
+    {
+      "location": "USA - Tempe, AZ",
+      "expected_countries": [
+        "US"
+      ],
+      "expected_us_match": true
+    },
+    {
+      "location": "United Kingdom",
+      "expected_countries": [
+        "GB"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "United States",
+      "expected_countries": [
+        "US"
+      ],
+      "expected_us_match": true
+    },
+    {
+      "location": "Washington DC, USA",
+      "expected_countries": [
+        "US"
+      ],
+      "expected_us_match": true
+    },
+    {
+      "location": "Yanji, China",
+      "expected_countries": [
+        "CN"
+      ],
+      "expected_us_match": false
+    },
+    {
+      "location": "z-Test & Templates Only",
+      "expected_countries": [],
+      "expected_us_match": null
+    }
+  ]
+}
