@@ -22,13 +22,13 @@
     "aliases": []
   },
   {
-    "version": "dev",
-    "title": "dev (main)",
+    "version": "next",
+    "title": "next (karthik446/gigai-v0.1.10)",
     "aliases": []
   },
   {
-    "version": "next",
-    "title": "next (karthik446/gigai-v0.1.10)",
+    "version": "dev",
+    "title": "dev (main)",
     "aliases": []
   }
 ]
