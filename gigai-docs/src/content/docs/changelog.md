@@ -22,6 +22,22 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.1.10.3
+
+#### Changed
+
+- **The resume PDF no longer leaves large gaps.** It uses a tighter type scale
+  (a lighter body weight) and even spacing between every block.
+
+#### Added
+
+- **Spacing and Auto fit in Resume display.** A Spacing setting (0.7x to 1.4x)
+  and an Auto fit toggle sit in Resume display, with a small live preview. Auto
+  fit adjusts spacing only, never font size or margins, to fill the pages it
+  already uses. Spacing alone has limits: a resume of about 1.5 pages ends its
+  last page around 70% full at best, and content up to about 1.1 pages is pulled
+  onto one page.
+
 ### 0.1.10.2
 
 #### Fixed
