@@ -28,6 +28,7 @@ dependencies = [
   "python-dotenv>=1.0",
   "questionary>=2.1.1",
   "referencing>=0.36",
+  "typst>=0.15,<0.16",
 ]
 
 [project.scripts]
@@ -36,6 +37,7 @@ gigai = "gigai.cli:cli"
 [project.optional-dependencies]
 test = [
   "pydantic>=2.10",
+  "pypdf>=5",
   "pytest>=8.3",
   "pytest-xdist>=3.6",
 ]
@@ -46,7 +48,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "gigai.schemas" = ["*.schema.json", "README.md", "SHA256SUMS"]
 "gigai.data" = ["*.json", "runtime-comparison-pack-v1.json"]
-"gigai.scout" = ["data/*.md", "data/*.json.gz", "data/goalgraphs/*.md", "data/instructions/*.md", "data/ui/*.html", "data/ui/*.css", "data/tools/*/*.json", "ui/dist/*", "ui/dist/assets/*"]
+"gigai.scout" = ["data/*.md", "data/*.json.gz", "data/goalgraphs/*.md", "data/instructions/*.md", "data/resume/*.typ", "data/resume/*.ttf", "data/resume/*.txt", "data/ui/*.html", "data/ui/*.css", "data/tools/*/*.json", "ui/dist/*", "ui/dist/assets/*"]
 "gigai" = ["static/*.css"]
 
 [tool.pytest.ini_options]
