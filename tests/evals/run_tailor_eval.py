@@ -74,6 +74,26 @@ report under ``../orchestrator/research/evals/tailor-<date>.json``) and FAKE
 the fixture answers a tailor prompt with lines built from the prompt's own
 ``R1``/``A cloud:gcp`` sources and judges every claim supported).
 ``--dump-dir`` writes every prompt and raw model output per attempt.
+
+0110-006 (schema ``:4``).  Metrics computed offline from each stored result
+(``metrics.rewrite``): ``model_rewrite_rate`` (model-proposed rewrites --
+shown rewritten plus fallbacks -- over rewritable lines, entry headings
+excluded; bar < 0.25 aggregate; per row and per section too),
+``final_rewrite_rate``, every fallback listed with its source text, the
+rejected rewrite and the lost items, ``loss_after_fallback`` (the no-loss
+check re-run HERE on every shown rewrite; bar == 0), and the judge's
+``weakened`` verdict (parsed like severity; every weakened line is listed
+for adjudication, not an automatic bar).
+
+Private inputs (0110-006 5b).  The operator's resume never enters the repo:
+``--profile-id`` reads the pinned resume of a committed profile from
+``--home`` (read-only, through the product's ``resume_for_profile``;
+``--target`` names the bound project folder), ``--posting-url`` /
+``--posting-urls-file`` name the public postings (each is fetched by the
+product's ``resolve_job``), and ``--use-stored-matrix`` loads the stored quick
+assessment's matrix.  The report (it holds resume-derived text) must be
+written OUTSIDE the repository: the run refuses a ``--report`` or
+``--dump-dir`` inside it, before any call.
 """
 
 from __future__ import annotations
@@ -120,9 +140,11 @@ EVAL_DIR = Path(__file__).resolve().parent
 ANSWERS_PATH = FIXTURES_DIR / "answers.json"
 JUDGE_PROMPT_PATH = EVAL_DIR / "fabrication_judge.md"
 DEFAULT_MAX_CALLS = 25  # tailor + judge attempts, retries included (operator-approved cap for the live run)
-REPORT_SCHEMA = "gigai-tailor-eval-report:3"
+REPORT_SCHEMA = "gigai-tailor-eval-report:4"
 HARD_FABRICATIONS_BAR = 0  # guard hits + copy lines not verbatim + judge "hard"
 PRECISION_RATE_BAR = 0.02  # judge "precision" lines / all accepted lines, strictly below
+MODEL_REWRITE_RATE_BAR = 0.25  # 0110-006 5a: model-proposed rewrites / rewritable lines, aggregate, strictly below
+LOSS_AFTER_FALLBACK_BAR = 0  # a shown rewrite that still loses a source fact is a product regression
 SEVERITIES = ("hard", "precision")
 GUARDS = ("numeric", "posting_term", "provenance", "copy_line_shape")
 ROLE_TAILOR = "tailor"
@@ -367,13 +389,19 @@ def render_judge_prompt(claims: Sequence[JudgeClaim], template: str | None = Non
     return "\n\n".join(rendered)
 
 
-def parse_judge_answer(decoded: Mapping[str, Any], expected: int) -> dict[int, dict[str, Any]]:
+def parse_judge_answer(decoded: Mapping[str, Any], expected: int, *, require_weakened: bool = True) -> dict[int, dict[str, Any]]:
     """Exactly one verdict per claim 1..``expected``; anything else is a judge failure (ValueError -> retry once).
 
-    Each verdict is ``{"supported", "unsupported_span", "severity"}``: an
-    unsupported verdict must name a severity in ``SEVERITIES`` (missing or
-    anything else is a judge failure); a supported verdict's span and
-    severity are normalised to ``None`` whatever the judge wrote.
+    Each verdict is ``{"supported", "unsupported_span", "severity",
+    "weakened", "lost_span"}``: an unsupported verdict must name a severity in
+    ``SEVERITIES`` (missing or anything else is a judge failure); a supported
+    verdict's span and severity are normalised to ``None`` whatever the judge
+    wrote.  0110-006: EVERY verdict must carry a boolean ``weakened`` (missing
+    or not a boolean is a judge failure, like severity); ``weakened: true``
+    must quote the dropped source words in ``lost_span``, and ``lost_span`` is
+    normalised to ``None`` when ``weakened`` is false.  ``require_weakened=False``
+    (the ``--fake-model`` run only: the shipped fixture judge predates the field)
+    reads a missing ``weakened`` as false.
     """
 
     verdicts = decoded.get("verdicts")
@@ -399,14 +427,30 @@ def parse_judge_answer(decoded: Mapping[str, Any], expected: int) -> dict[int, d
         severity = item.get("severity")
         if not supported and severity not in SEVERITIES:
             raise ValueError(f"the verdict for claim {line} is unsupported but its severity is {severity!r}; it must be \"hard\" or \"precision\"")
-        seen[line] = {"supported": supported, "unsupported_span": span if not supported else None, "severity": severity if not supported else None}
+        weakened = item.get("weakened")
+        if weakened is None and not require_weakened and "weakened" not in item:
+            weakened = False
+        if type(weakened) is not bool:
+            raise ValueError(f"the verdict for claim {line} must carry a boolean weakened; it is {weakened!r}")
+        lost_span = item.get("lost_span")
+        if lost_span is not None and not isinstance(lost_span, str):
+            raise ValueError(f"the verdict for claim {line} has a lost_span that is not a string or null")
+        if weakened and not (isinstance(lost_span, str) and lost_span.strip()):
+            raise ValueError(f"the verdict for claim {line} is weakened but its lost_span is empty; quote the source words it drops or softens")
+        seen[line] = {
+            "supported": supported,
+            "unsupported_span": span if not supported else None,
+            "severity": severity if not supported else None,
+            "weakened": weakened,
+            "lost_span": lost_span if weakened else None,
+        }
     missing = [number for number in range(1, expected + 1) if number not in seen]
     if missing:
         raise ValueError(f"{len(seen)} verdicts for {expected} claims; missing claim(s) {missing}")
     return seen
 
 
-def judge_resume(binding: object, claims: Sequence[JudgeClaim]) -> dict[str, Any]:
+def judge_resume(binding: object, claims: Sequence[JudgeClaim], *, require_weakened: bool = True) -> dict[str, Any]:
     """One batched judge call per tailored resume through the shared retry loop; a failed judge is reported, never hidden."""
 
     from gigai.scout.assessment_core import invoke_json_once
@@ -414,7 +458,7 @@ def judge_resume(binding: object, claims: Sequence[JudgeClaim]) -> dict[str, Any
     attempt = invoke_json_once(
         binding,
         lambda error: render_judge_prompt(claims, validation_error=error),
-        lambda decoded: parse_judge_answer(decoded, len(claims)),
+        lambda decoded: parse_judge_answer(decoded, len(claims), require_weakened=require_weakened),
         role="reviewer",
     )
     if attempt.ok:
@@ -510,7 +554,7 @@ def attempt_errors(outputs: Sequence[str | None], job: Any, ctx: Any) -> list[st
 # --- one row -------------------------------------------------------------------------------------
 
 
-def _context(resume: Resume, answers: Sequence[FixedAnswer]):
+def _context(resume: Resume, answers: Sequence[FixedAnswer], matrix: Sequence[Any] = ()):
     """The product's ``TailorContext``: answers keyed by their CANONICAL question id.
 
     The validator looks a cited id up as ``normalize_question_id(raw_id)``
@@ -531,7 +575,7 @@ def _context(resume: Resume, answers: Sequence[FixedAnswer]):
         keyed[canonical] = AnswerSource(canonical, item.answer, "eval")
     # tailor-r2: exactly the product's context, so a cited wrapped line reaches
     # the guards, the row's sources and the judge as its whole span.
-    return TailorContext(resume_lines=resume_lines(resume.text), answers=keyed, continuations=resume_continuations(resume.text), entries=resume_entries(resume.text))
+    return TailorContext(resume_lines=resume_lines(resume.text), answers=keyed, matrix=tuple(matrix), continuations=resume_continuations(resume.text), entries=resume_entries(resume.text))
 
 
 def _job(posting: Posting):
@@ -558,17 +602,116 @@ def _source_label(source: Mapping[str, Any]) -> str:
     return str(source["label"]) + "".join(f"+R{number}" for number in source.get("continued_lines") or ())
 
 
-def _where_lines(result: Any) -> list[tuple[str, Any]]:
-    where_lines: list[tuple[str, Any]] = [(f"header[{index}]", line) for index, line in enumerate(result.header, 1)]
+def _positioned_lines(result: Any) -> list[tuple[str, str, Any]]:
+    """``(where, position, line)`` in document order; ``position`` is what the product's no-loss pass
+    calls it: ``header``, the section heading for a lines section, ``heading`` or ``bullet`` for an entry."""
+
+    positioned: list[tuple[str, str, Any]] = [(f"header[{index}]", "header", line) for index, line in enumerate(result.header, 1)]
     for section in result.sections:
         for index, line in enumerate(section.lines, 1):
-            where_lines.append((f"{section.heading} line {index}", line))
+            positioned.append((f"{section.heading} line {index}", section.heading, line))
         for position, block in enumerate(section.entries, 1):
             for index, line in enumerate(block.heading, 1):
-                where_lines.append((f"{section.heading} entry {position} heading[{index}]", line))
+                positioned.append((f"{section.heading} entry {position} heading[{index}]", "heading", line))
             for index, line in enumerate(block.bullets, 1):
-                where_lines.append((f"{section.heading} entry {position} bullet {index}", line))
-    return where_lines
+                positioned.append((f"{section.heading} entry {position} bullet {index}", "bullet", line))
+    return positioned
+
+
+def _where_lines(result: Any) -> list[tuple[str, Any]]:
+    return [(where, line) for where, _position, line in _positioned_lines(result)]
+
+
+# --- 0110-006 5a: rewrite metrics, computed offline from a stored result --------------------------------
+
+
+def line_stats_json(result: Any) -> dict[str, Any]:
+    """The product's ``tailor_line_stats`` (one counting rule for the eval, the UI and the tests) plus both rates."""
+
+    from gigai.scout.tailored_resume import tailor_line_stats
+
+    stats = tailor_line_stats(result)
+    return {**stats.to_json(), "model_rewrite_rate": _rate(stats.model_rewrites, stats.rewritable_lines), "final_rewrite_rate": _rate(stats.shown_rewritten, stats.rewritable_lines)}
+
+
+def section_stats_json(result: Any) -> dict[str, dict[str, Any]]:
+    from dataclasses import replace
+
+    return {section.heading: line_stats_json(replace(result, sections=(section,))) for section in result.sections}
+
+
+def _alternative_entry(where: str, source_text: str | None, sources: Sequence[Any], alternative: Any) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "where": where,
+        "source_text": source_text,
+        "sources": [_source_entry(ref) for ref in sources],
+        "rejected_rewrite": alternative.text,
+        "lost": alternative.lost_dict() or {},
+        "reason_invalid": bool(alternative.reason_invalid),
+        "dropped_duplicate": bool(alternative.dropped_duplicate),
+        "merge": bool(alternative.merge),
+    }
+    return entry
+
+
+def list_fallbacks(result: Any) -> list[dict[str, Any]]:
+    """EVERY fallback in a stored result with its source text, the rejected rewrite and the lost items.
+
+    A fallback is a shown line with ``origin == "fallback"`` whose alternative
+    is the model's rejected rewrite, or a rejected rewrite in a ``dropped``
+    list (a line with nothing to fall back to).
+    """
+
+    listed: list[dict[str, Any]] = []
+    for where, _position, line in _positioned_lines(result):
+        alternative = line.alternative
+        if line.origin == "fallback" and alternative is not None and alternative.kind == "rewritten":
+            listed.append(_alternative_entry(where, line.text, line.refs, alternative))
+    for section in result.sections:
+        for item in section.dropped:
+            if item.kind == "rewritten":
+                listed.append(_alternative_entry(f"{section.heading} dropped", None, item.refs, item))
+        for position, block in enumerate(section.entries, 1):
+            for item in block.dropped:
+                if item.kind == "rewritten":
+                    listed.append(_alternative_entry(f"{section.heading} entry {position} dropped", None, item.refs, item))
+    return listed
+
+
+def _visible_span(ref: Any, visible: Mapping[int, str]) -> str:
+    """The span as the MODEL saw it (privacy-redacted), as the product's no-loss pass reads it."""
+
+    numbers = (ref.line, *ref.continued_lines)
+    if all(number in visible for number in numbers):
+        return " ".join(visible[number] for number in numbers)
+    return ref.text
+
+
+def loss_after_fallback(result: Any, ctx: Any) -> list[dict[str, Any]]:
+    """``lost_items`` re-run HERE on every SHOWN rewritten line against its resume refs, outside the product pass.
+
+    Bar == 0: a hit is a shown rewrite that still drops a source fact, i.e. a
+    product regression (like ``detect_line`` for the guards).  An answer-only
+    line owes nothing; a summary owes only the summary prose it cites; a line
+    the operator switched (``origin == "user"``) is their choice, not a regression.
+    """
+
+    from gigai.scout.tailor_no_loss import lost_items
+
+    visible = dict(ctx.model.lines) if ctx.model is not None else {}
+    hits: list[dict[str, Any]] = []
+    for where, position, line in _positioned_lines(result):
+        if line.kind != "rewritten" or line.origin == "user":
+            continue
+        spans = [ref for ref in line.refs if ref.kind == "resume"]
+        if position == "summary":
+            spans = [ref for ref in spans if ref.line not in ctx.entries]
+        if not spans:
+            continue
+        lost = lost_items(line.text, [_visible_span(ref, visible) for ref in spans], skills=position == "skills")
+        if lost:
+            hits.append({"where": where, "text": line.text, "sources": [_source_entry(ref) for ref in spans], "lost": lost})
+    return hits
 
 
 def tailor_row(
@@ -580,6 +723,8 @@ def tailor_row(
     *,
     judge: bool = True,
     budget: CallBudget | None = None,
+    matrix: Sequence[Any] = (),
+    require_weakened: bool = True,
 ) -> dict[str, Any]:
     """One labelled pair through ``tailor_once``; every accepted line detected and listed; one judge call.
 
@@ -591,7 +736,7 @@ def tailor_row(
     from gigai.scout.tailored_resume import TailoredResume, guard_terms, render_markdown, tailor_once
 
     job = _job(posting)
-    ctx = _context(resume, answers)
+    ctx = _context(resume, answers, matrix)
     terms = guard_terms(job, ctx)
     if budget is not None:
         budget.begin(ROLE_TAILOR, label.key)
@@ -630,6 +775,10 @@ def tailor_row(
         "judge_elapsed_seconds": None,
         "judge_stopped_at_cap": False,
         "unjudged_lines": 0,
+        "line_stats": None,
+        "section_stats": {},
+        "fallbacks": [],
+        "loss_after_fallback": [],
         "markdown": None,
     }
     if not attempt.ok:
@@ -638,6 +787,10 @@ def tailor_row(
     assert isinstance(result, TailoredResume)
     row["sections"] = [section.heading for section in result.sections]
     row["markdown"] = render_markdown(result)
+    row["line_stats"] = line_stats_json(result)
+    row["section_stats"] = section_stats_json(result)
+    row["fallbacks"] = list_fallbacks(result)
+    row["loss_after_fallback"] = loss_after_fallback(result, ctx)
     claims: list[JudgeClaim] = []
     for where, line in _where_lines(result):
         cited = tuple((ref.label(), ref.text) for ref in line.refs)
@@ -662,7 +815,7 @@ def tailor_row(
             budget.begin(ROLE_JUDGE, label.key)
         started = time.monotonic()
         try:
-            verdict = judge_resume(binding, claims)
+            verdict = judge_resume(binding, claims, require_weakened=require_weakened)
         except CallCapReached:
             row["judge_stopped_at_cap"] = True
             row["unjudged_lines"] = len(rewritten)
@@ -721,6 +874,8 @@ def render_sample_markdown(row: Mapping[str, Any]) -> str:
             hits = ""
             if entry.get("numeric_hits") or entry.get("term_hits"):
                 hits = f"; guard hits numeric={entry.get('numeric_hits')} terms={entry.get('term_hits')}"
+            if judge is not None and judge.get("weakened"):
+                verdict_text += f"; WEAKENED, drops: {judge.get('lost_span')!r}"
             out.append(f"{indent}  > judge: {verdict_text}{hits}")
     if position != len(entries):  # the markdown and the line list disagree: say so rather than mislabel a source
         out.append(f"<!-- WARNING: {len(entries)} lines listed but {position} markdown lines carry refs -->")
@@ -767,6 +922,53 @@ def _tokens(calls: Sequence[CallRecord]) -> dict[str, int]:
         "input": sum(int(item["input_tokens"] or 0) for item in usages),
         "output": sum(int(item["output_tokens"] or 0) for item in usages),
         "total": sum(int(item["total_tokens"] or 0) for item in usages),
+    }
+
+
+def _rewrite_metrics(valid: Sequence[Mapping[str, Any]], *, precision_lines: int, rewritten: int) -> dict[str, Any]:
+    """0110-006 5a: every number below is read from the stored results' ``line_stats`` / ``fallbacks`` /
+    ``loss_after_fallback`` / judge verdicts, so a stored report can be re-scored offline."""
+
+    counters = ("rewritable_lines", "shown_rewritten", "answer_only_lines", "model_rewrites", "fallbacks", "kept_original_by_user", "dropped_bullets")
+
+    def total(stats: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        sums: dict[str, Any] = {name: sum(int(item.get(name) or 0) for item in stats) for name in counters}
+        sums["model_rewrite_rate"] = _rate(sums["model_rewrites"], sums["rewritable_lines"])
+        sums["final_rewrite_rate"] = _rate(sums["shown_rewritten"], sums["rewritable_lines"])
+        return sums
+
+    with_stats = [row for row in valid if row.get("line_stats")]
+    by_section: dict[str, list[Mapping[str, Any]]] = {}
+    for row in with_stats:
+        for heading, stats in (row.get("section_stats") or {}).items():
+            by_section.setdefault(heading, []).append(stats)
+    by_rule: dict[str, int] = {}
+    for row in with_stats:
+        for rule, count in row["line_stats"].get("fallbacks_by_rule", {}).items():
+            by_rule[rule] = by_rule.get(rule, 0) + int(count)
+    fallbacks = [{"resume_id": row["resume_id"], "posting_id": row["posting_id"], **item} for row in valid for item in row.get("fallbacks") or ()]
+    losses = [{"resume_id": row["resume_id"], "posting_id": row["posting_id"], **item} for row in valid for item in row.get("loss_after_fallback") or ()]
+    weakened = [
+        {"resume_id": row["resume_id"], "posting_id": row["posting_id"], "where": entry["where"], "text": entry["text"], "lost_span": entry["judge"].get("lost_span"), "sources": entry["sources"]}
+        for row in valid
+        for entry in row["lines"]
+        if (entry.get("judge") or {}).get("weakened")
+    ]
+    aggregate = total([row["line_stats"] for row in with_stats])
+    return {
+        **aggregate,
+        "rows_with_stats": len(with_stats),
+        "model_rewrite_rate_bar": MODEL_REWRITE_RATE_BAR,
+        "by_section": {heading: total(items) for heading, items in by_section.items()},
+        "by_row": [{"resume_id": row["resume_id"], "posting_id": row["posting_id"], **{name: row["line_stats"].get(name) for name in ("rewritable_lines", "model_rewrites", "model_rewrite_rate", "shown_rewritten", "final_rewrite_rate", "fallbacks")}} for row in with_stats],
+        "fallback_count": len(fallbacks),
+        "fallbacks_by_rule": by_rule,
+        "fallback_lines": fallbacks,
+        "loss_after_fallback": len(losses),
+        "loss_after_fallback_lines": losses,
+        "judge_weakened": len(weakened),
+        "judge_weakened_lines": weakened,
+        "precision_per_rewritten": _rate(precision_lines, rewritten),
     }
 
 
@@ -827,6 +1029,10 @@ def summarize(
     judge_call_log = [call for call in calls if call.role == ROLE_JUDGE]
     hard_bar_met = len(valid) > 0 and len(hard) == HARD_FABRICATIONS_BAR and (not judge or unjudged == 0)
     precision_bar_met = precision_rate is not None and precision_rate < PRECISION_RATE_BAR and (not judge or unjudged == 0)
+    rewrite = _rewrite_metrics(valid, precision_lines=len(precision), rewritten=rewritten)
+    rewrite_rate = rewrite["model_rewrite_rate"]
+    rewrite_bar_met = rewrite["rows_with_stats"] > 0 and rewrite_rate is not None and rewrite_rate < MODEL_REWRITE_RATE_BAR
+    loss_bar_met = rewrite["rows_with_stats"] > 0 and rewrite["loss_after_fallback"] == LOSS_AFTER_FALLBACK_BAR
     return {
         "calls": {
             "max_calls": max_calls,
@@ -839,6 +1045,7 @@ def summarize(
             "rows_not_done": list(rows_not_done),
         },
         "lines": {"total": lines, "copy": copied, "rewritten": rewritten, "answer_refs": answer_refs, "expanded_refs": expanded_refs},
+        "rewrite": rewrite,
         "fabrication": {
             "fabricated_claims": len(fabricated),
             "fabrication_rate": _rate(len(fabricated), accepted_lines),
@@ -856,6 +1063,7 @@ def summarize(
             "judge_hard": judge_hard,
             "judge_precision": judge_precision,
             "judge_failures": judge_failures,
+            "judge_weakened": rewrite["judge_weakened"],
             "judge_stopped_at_cap": judge_stopped,
             "unjudged_rewritten_lines": unjudged,
             "lines": [{**entry, "severity": line_severity(entry)} for entry in fabricated],  # EVERY flagged line, hard and precision, with its sources
@@ -909,21 +1117,101 @@ def summarize(
             "precision_rate_bar": PRECISION_RATE_BAR,
             "precision_rate_bar_met": precision_bar_met,
             "invalid_after_retry_bar_met": (invalid_rate is not None and invalid_rate < INVALID_AFTER_RETRY_BAR),
+            "model_rewrite_rate_bar": MODEL_REWRITE_RATE_BAR,
+            "model_rewrite_rate_bar_met": rewrite_bar_met,
+            "loss_after_fallback_bar": LOSS_AFTER_FALLBACK_BAR,
+            "loss_after_fallback_bar_met": loss_bar_met,
         },
         "samples": pick_samples(rows),
     }
 
 
+# --- private inputs (0110-006 5b) --------------------------------------------------------------------
+
+
+class PrivateInputError(ValueError):
+    """A private-input flag that cannot run; the message says why, before any model call."""
+
+
+def path_inside_repo(path: Path) -> bool:
+    return path.expanduser().resolve().is_relative_to(REPO_ROOT.resolve())
+
+
+def refuse_repo_path(flag: str, path: Path) -> None:
+    if path_inside_repo(path):
+        raise PrivateInputError(f"{flag} {path} is inside the repository; a private-input run holds resume-derived text and must write outside {REPO_ROOT}")
+
+
+def read_posting_urls_file(path: Path) -> list[str]:
+    """One public posting URL per line; blank lines and ``#`` comments ignored."""
+
+    urls = [line.split("#", 1)[0].strip() for line in path.read_text(encoding="utf-8").splitlines()]
+    return [url for url in urls if url]
+
+
+@dataclass(frozen=True)
+class PrivateRow:
+    label: Label
+    posting: Posting
+    matrix: tuple[Any, ...]
+    assessment_stored_path: str | None
+
+
+@dataclass(frozen=True)
+class PrivateInputs:
+    resume: Resume
+    answers: tuple[FixedAnswer, ...]
+    rows: tuple[PrivateRow, ...]
+
+
+def load_private_inputs(*, home_root: Path, target: Path, profile_id: str, urls: Sequence[str], use_stored_matrix: bool) -> PrivateInputs:
+    """The pinned resume of ``profile_id``, its stored answers and each posting URL, read exactly as ``run_tailored_resume`` reads them (nothing written)."""
+
+    from gigai.scout.experience_answers import read_answers
+    from gigai.scout.find_jobs.assess_contracts import AssessJobInput, AssessResumeInput
+    from gigai.scout.find_jobs.contracts import FindJobsContractError
+    from gigai.scout.find_jobs.job_input import job_fetch_client, resolve_job
+    from gigai.scout.find_jobs.resume_input import resolve_profile, resume_for_profile
+    from gigai.scout.quick_assess import QuickAssessError, _resolve_workpad
+    from gigai.scout.tailored_resume import _stored_matrix
+
+    try:
+        resolved = _resolve_workpad(home_root, target)
+        profile = resolve_profile(AssessResumeInput(profile_id=profile_id), resolved=resolved, home_root=home_root, target=target)
+        assert profile is not None
+        pinned = resume_for_profile(profile, resolved=resolved, home_root=home_root, target=target)
+    except (FindJobsContractError, QuickAssessError) as exc:
+        raise PrivateInputError(f"--profile-id {profile_id}: {exc}") from exc
+    resume = Resume(pinned.profile_id or profile_id, pinned.text, (), (), False, "private", None, "private:profile")
+    try:
+        stored_answers = read_answers(home_root=home_root, requested_target=target, gig_id=resolved.gig_id)
+    except QuickAssessError:
+        stored_answers = {}
+    answers = tuple(FixedAnswer(item.question_id, item.answer) for item in stored_answers.values())
+    rows: list[PrivateRow] = []
+    with job_fetch_client() as client:
+        for url in urls:
+            try:
+                job = resolve_job(AssessJobInput(job_url=url), client=client, home_root=home_root)
+            except FindJobsContractError as exc:
+                raise PrivateInputError(f"--posting-url {url}: {exc}") from exc
+            matrix, assessment_path = _stored_matrix(home_root, target, job.job_identity) if use_stored_matrix else ((), None)
+            posting = Posting(job.job_identity, job.title, job.company, job.location, url, job.text)
+            rows.append(PrivateRow(Label(resume.resume_id, job.job_identity, "n/a", (), False, False, False, "private", ""), posting, tuple(matrix), assessment_path))
+    return PrivateInputs(resume, answers, tuple(rows))
+
+
 # --- CLI -----------------------------------------------------------------------------------------
 
 
-def default_report_path(*, fake: bool, now: datetime) -> Path:
+def default_report_path(*, fake: bool, now: datetime, private: bool = False) -> Path:
     date = now.strftime("%Y-%m-%d")
     if fake:
         return Path(tempfile.gettempdir()) / f"gigai-tailor-eval-fake-{date}-{now.strftime('%H%M%S')}.json"
-    path = DEFAULT_REPORT_DIR / f"tailor-{date}.json"
+    stem = "tailor-private" if private else "tailor"
+    path = DEFAULT_REPORT_DIR / f"{stem}-{date}.json"
     if path.exists():
-        path = DEFAULT_REPORT_DIR / f"tailor-{date}-{now.strftime('%H%M%S')}.json"
+        path = DEFAULT_REPORT_DIR / f"{stem}-{date}-{now.strftime('%H%M%S')}.json"
     return path
 
 
@@ -937,6 +1225,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--clean-fit-only", action="store_true", help="only the clean-fit rows")
     parser.add_argument("--resume", action="append", default=[], metavar="RESUME_ID", help="only rows for this resume (repeatable)")
     parser.add_argument("--posting", action="append", default=[], metavar="POSTING_ID", help="only rows for this posting (repeatable)")
+    parser.add_argument("--profile-id", default=None, metavar="ID", help="private input: tailor this committed profile's pinned resume, read from --home (read-only); needs --posting-url or --posting-urls-file")
+    parser.add_argument("--posting-url", action="append", default=[], metavar="URL", help="private input: a public posting URL fetched by the product's resolve_job (repeatable)")
+    parser.add_argument("--posting-urls-file", type=Path, default=None, help="private input: a file of posting URLs, one per line (# comments allowed)")
+    parser.add_argument("--use-stored-matrix", action="store_true", help="private input: load each posting's stored quick-assessment matrix (the reason check and the guard terms use it)")
+    parser.add_argument("--target", type=Path, default=None, help="private input: the bound project folder (default the current directory)")
     parser.add_argument("--no-judge", action="store_true", help="skip the judge call; only the deterministic guards run")
     parser.add_argument("--report", type=Path, default=None, help="report path (default ../orchestrator/research/evals/tailor-<date>.json)")
     parser.add_argument("--dump-dir", type=Path, default=None, help="write every prompt and raw model output per attempt under this directory")
@@ -962,6 +1255,20 @@ def _print_summary(metrics: Mapping[str, Any], report_path: Path, *, out=sys.std
     )
     print(f"lines: {lines['total']} ({lines['copy']} copied, {lines['rewritten']} rewritten, {lines['answer_refs']} answer refs, {lines.get('expanded_refs', 0)} expanded resume refs)", file=out)
     bars = metrics["bars"]
+    rewrite = metrics["rewrite"]
+    print(
+        f"rewrite: model_rewrite_rate {rewrite['model_rewrite_rate']} ({rewrite['model_rewrites']}/{rewrite['rewritable_lines']} rewritable lines; bar < {bars['model_rewrite_rate_bar']} met: {bars['model_rewrite_rate_bar_met']}); "
+        f"final_rewrite_rate {rewrite['final_rewrite_rate']}; answer-only {rewrite['answer_only_lines']}; fallbacks {rewrite['fallback_count']} by rule {rewrite['fallbacks_by_rule']}; "
+        f"loss_after_fallback {rewrite['loss_after_fallback']} (bar == {bars['loss_after_fallback_bar']} met: {bars['loss_after_fallback_bar_met']}); judge-weakened {rewrite['judge_weakened']}; precision/rewritten {rewrite['precision_per_rewritten']}",
+        file=out,
+    )
+    for item in rewrite["fallback_lines"]:
+        flags = [flag for flag in ("reason_invalid", "dropped_duplicate", "merge") if item.get(flag)]
+        print(f"  FALLBACK {item['resume_id']} x {item['posting_id']} {item['where']}: kept {item['source_text']!r}; rejected {item['rejected_rewrite']!r}; lost {item['lost']}{' ' + ','.join(flags) if flags else ''}", file=out)
+    for item in rewrite["loss_after_fallback_lines"]:
+        print(f"  LOSS-AFTER-FALLBACK {item['resume_id']} x {item['posting_id']} {item['where']}: {item['text']!r}; lost {item['lost']}", file=out)
+    for item in rewrite["judge_weakened_lines"]:
+        print(f"  WEAKENED {item['resume_id']} x {item['posting_id']} {item['where']}: {item['text']!r}; drops {item['lost_span']!r}", file=out)
     print(
         f"hard fabrications: {fab['hard_fabrications']} (bar {bars['hard_fabrications_bar']} met: {bars['hard_fabrications_bar_met']}) -- numeric {fab['numeric_guard_hits']}, posting-term {fab['posting_term_guard_hits']}, copy-not-verbatim {fab['copy_lines_not_verbatim']}, judge-hard {fab['judge_hard']}; "
         f"precision lines: {fab['precision_lines']} (rate {fab['precision_rate']}; bar < {bars['precision_rate_bar']} met: {bars['precision_rate_bar_met']}); "
@@ -1005,19 +1312,66 @@ def _dump_calls(dump_dir: Path, calls: Sequence[CallRecord]) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     now = datetime.now(UTC)
+    urls = list(args.posting_url)
+    if args.posting_urls_file is not None:
+        try:
+            urls = read_posting_urls_file(args.posting_urls_file) + urls
+        except OSError as exc:
+            print(f"private input: --posting-urls-file: {exc}", file=sys.stderr)
+            return 2
+    private = bool(args.profile_id or urls or args.use_stored_matrix)
+    try:
+        if private:
+            if not args.profile_id or not urls:
+                raise PrivateInputError("private input needs --profile-id and at least one --posting-url / --posting-urls-file")
+            if args.row or args.rows_file is not None or args.sample is not None or args.clean_fit_only or args.resume or args.posting:
+                raise PrivateInputError("--profile-id/--posting-url cannot be combined with the fixture row selection flags")
+            if args.fake_model and args.home is None:
+                raise PrivateInputError("--fake-model with --profile-id needs --home: a scratch home to read the profile from")
+    except PrivateInputError as exc:
+        print(f"private input: {exc}", file=sys.stderr)
+        return 2
+    report_path = args.report or default_report_path(fake=args.fake_model, now=now, private=private)
+    if private:
+        try:
+            refuse_repo_path("--report", report_path)
+            if args.dump_dir is not None:
+                refuse_repo_path("--dump-dir", args.dump_dir)
+        except PrivateInputError as exc:
+            print(f"private input: {exc}", file=sys.stderr)
+            return 2
     postings = load_postings()
     resumes = load_resumes()
     answers = load_answers()
     all_labels = load_labels(include_excluded=True)
     excluded = [label for label in all_labels if label.excluded]
     explicit: list[tuple[str, str]] = []
+    private_inputs: PrivateInputs | None = None
     try:
-        if args.rows_file is not None:
-            explicit.extend(read_rows_file(args.rows_file))
-        explicit.extend(parse_row_spec(spec) for spec in args.row)
-        if explicit:
-            rows_to_call = select_rows(all_labels, explicit)
+        if private:
+            private_inputs = load_private_inputs(
+                home_root=(args.home or _default_home()).expanduser(),
+                target=(args.target or Path.cwd()).expanduser().resolve(),
+                profile_id=args.profile_id,
+                urls=urls,
+                use_stored_matrix=args.use_stored_matrix,
+            )
+            rows_to_call = tuple(item.label for item in private_inputs.rows)
             selection: dict[str, Any] = {
+                "mode": "private",
+                "rows": [f"{label.resume_id} x {label.posting_id}" for label in rows_to_call],
+                "excluded_rows_included": [],
+                "note": "the operator's pinned resume x public posting URLs; the report holds resume-derived text and must stay outside the repository",
+            }
+        else:
+            if args.rows_file is not None:
+                explicit.extend(read_rows_file(args.rows_file))
+            explicit.extend(parse_row_spec(spec) for spec in args.row)
+        if private:
+            pass
+        elif explicit:
+            rows_to_call = select_rows(all_labels, explicit)
+            selection = {
                 "mode": "explicit",
                 "rows": [f"{label.resume_id} x {label.posting_id}" for label in rows_to_call],
                 "excluded_rows_included": [f"{label.resume_id} x {label.posting_id}" for label in rows_to_call if label.excluded],
@@ -1033,11 +1387,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     except RowSelectionError as exc:
         print(f"row selection: {exc}", file=sys.stderr)
         return 2
+    except PrivateInputError as exc:
+        print(f"private input: {exc}", file=sys.stderr)
+        return 2
     if args.dry_run:
         for index, label in enumerate(rows_to_call, 1):
             marker = "clean" if label.clean_fit else "uncertain" if label.uncertain else "confident"
             flag = "excluded-flag" if label.excluded else ""
-            ids = ";".join(item.question_id for item in answers.get(label.resume_id, ()))
+            ids = ";".join(item.question_id for item in (private_inputs.answers if private_inputs else answers.get(label.resume_id, ())))
             print(f"{index:3} {marker:9} {label.resume_id} x {label.posting_id} answers {ids or '-'} {flag}".rstrip())
         minimum = len(rows_to_call) * (1 if args.no_judge else 2)
         print(f"    {len(rows_to_call)} rows; at least {minimum} calls without retries; cap {args.max_calls}", file=sys.stderr)
@@ -1046,7 +1403,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"    excluded  {label.resume_id} x {label.posting_id} (rule E: not planned, not scored)", file=sys.stderr)
         return 0
 
-    report_path = args.report or default_report_path(fake=args.fake_model, now=now)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     seams: dict[str, str] = {"GIGAI_SCOUT_FIND_JOBS_TEST_MODEL": "1"} if args.fake_model else {}
     budget = CallBudget(max_calls=args.max_calls)
@@ -1067,12 +1423,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             model_target = args.model_target
 
         binding = CappedBinding(resolve_binding(config, model_target, home_root=home_root), budget)
+        private_by_key = {item.label.key: item for item in private_inputs.rows} if private_inputs else {}
         try:
             for index, label in enumerate(rows_to_call, 1):
                 if not args.quiet:
                     print(f"[{index}/{len(rows_to_call)}] {label.resume_id} x {label.posting_id} (calls so far {budget.made}/{budget.max_calls})", file=sys.stderr)
                 try:
-                    row = tailor_row(binding, label, postings[label.posting_id], resumes[label.resume_id], answers.get(label.resume_id, ()), judge=not args.no_judge, budget=budget)
+                    if private_inputs is not None:
+                        item = private_by_key[label.key]
+                        row = tailor_row(binding, label, item.posting, private_inputs.resume, private_inputs.answers, judge=not args.no_judge, budget=budget, matrix=item.matrix, require_weakened=not args.fake_model)
+                        row["assessment_stored_path"] = item.assessment_stored_path
+                    else:
+                        row = tailor_row(binding, label, postings[label.posting_id], resumes[label.resume_id], answers.get(label.resume_id, ()), judge=not args.no_judge, budget=budget, require_weakened=not args.fake_model)
                 except CallCapReached as exc:
                     rows_not_done.append({"resume_id": label.resume_id, "posting_id": label.posting_id, "stage": "tailor", "reason": str(exc)})
                     rows_not_done.extend({"resume_id": rest.resume_id, "posting_id": rest.posting_id, "stage": "not started", "reason": f"call cap {budget.max_calls} reached"} for rest in rows_to_call[index:])
@@ -1119,7 +1481,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "clean_fit_only": bool(args.clean_fit_only),
             "sample": args.sample,
             "seed": args.seed,
-            "excluded_rows": [{"resume_id": label.resume_id, "posting_id": label.posting_id} for label in excluded],
+            "excluded_rows": [] if private else [{"resume_id": label.resume_id, "posting_id": label.posting_id} for label in excluded],
+            "private_inputs": {"profile_id": args.profile_id, "posting_urls": urls, "use_stored_matrix": bool(args.use_stored_matrix), "contains_resume_text": True} if private else None,
             "dump_dir": str(args.dump_dir) if args.dump_dir else None,
             "repo_root": str(REPO_ROOT),
         },
