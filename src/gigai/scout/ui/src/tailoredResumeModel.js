@@ -11,8 +11,8 @@
 // Nothing here invents text: every content line's `text` is the response's
 // own; the only client-side strings are the markdown scaffolding
 // (`# `, `## Summary`, `### `, `- `), which mirrors render_markdown() so the
-// preview reads like the .md the "Download" button saves (that file is the
-// response's `markdown` verbatim, never re-rendered here).
+// preview reads like the response's `markdown` (never re-rendered here; the
+// PDF is rendered server-side).
 
 const ENTRY_SECTIONS = new Set(["experience", "projects", "education"]);
 
@@ -257,22 +257,6 @@ export function sourceLabel(ref, promptFor) {
 // The hover text for one preview line: one "<label>: <cited text>" per ref.
 export function sourcesHover(line, promptFor) {
   return (line.refs || []).map((ref) => `${sourceLabel(ref, promptFor)}: ${ref.text}`).join("\n");
-}
-
-function slug(text) {
-  return String(text || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-// "tailored-resume-acme-software-engineer.md", from the response's own
-// job fields (never the posting text; the server's markdown_path basename
-// is a digest, not a name a person would keep).
-export function downloadName(response) {
-  const job = (response && response.job) || {};
-  const parts = [slug(job.company), slug(job.title)].filter(Boolean);
-  return `tailored-resume${parts.length ? `-${parts.join("-")}` : ""}.md`;
 }
 
 // The list route serves newest first; keep that but never trust the order

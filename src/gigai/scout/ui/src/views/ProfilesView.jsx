@@ -1,4 +1,5 @@
 import ResumeWarning from "../components/ResumeWarning.jsx";
+import ResumeDisplayPanel from "../components/ResumeDisplayPanel.jsx";
 import { useState } from "react";
 import TagListInput from "../components/TagListInput.jsx";
 import { archiveProfile, createProfile, updateProfile } from "../api.js";
@@ -277,6 +278,8 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
           {archiveNote && <div className="callout info">{archiveNote}</div>}
         </section>
       )}
+
+      {selected && <ResumeDisplayPanel profileId={selected.profile_id} />}
 
       {config && (
         <section className="panel">

@@ -440,6 +440,52 @@ export function getTailoredResumes(params) {
   return request("GET", `/api/tailored-resumes${qs ? `?${qs}` : ""}`);
 }
 
+// 0.1.10-003: the name, title and contact line printed on a tailored-resume
+// PDF (find_jobs/api/resume_display.py). GET carries `saved`, the values and,
+// while nothing is saved, a local `suggested` prefill; PUT saves (per-profile
+// `titles` merge). POST /api/tailored-resumes/pdf answers the PDF bytes: the
+// blob and the Content-Disposition file name come back for a download.
+export function getResumeDisplay(profileId) {
+  const qs = profileId ? `?profile_id=${encodeURIComponent(profileId)}` : "";
+  return request("GET", `/api/resume-display${qs}`);
+}
+
+export function putResumeDisplay(body) {
+  return request("PUT", "/api/resume-display", body);
+}
+
+export async function postTailoredResumePdf({ profileId, jobIdentity }) {
+  let response;
+  try {
+    response = await fetch("/api/tailored-resumes/pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile_id: profileId, job_identity: jobIdentity }),
+    });
+  } catch (networkError) {
+    throw new ApiError(0, "Could not reach the local API. Is the server running on 127.0.0.1:8765?");
+  }
+  if (!response.ok) {
+    let detail;
+    let code;
+    try {
+      const payload = JSON.parse(await response.text());
+      detail = payload && payload.error && payload.error.message;
+      code = payload && payload.error && payload.error.code;
+    } catch {
+      /* not JSON: fall back to the status text */
+    }
+    throw new ApiError(response.status, detail || `Request failed with status ${response.status}.`, code, { detail });
+  }
+  return { blob: await response.blob(), fileName: pdfFileName(response.headers.get("Content-Disposition")) };
+}
+
+// The file name in `attachment; filename="<name>"`, or a plain fallback.
+export function pdfFileName(disposition) {
+  const match = /filename="([^"]+)"/.exec(disposition || "");
+  return match ? match[1] : "resume.pdf";
+}
+
 // uat-batch2 (N11-C): "Update sources" (find_jobs/api/sources.py). POST
 // starts a background update and answers 202 {update_id, status: "running"}
 // at once (409 sources_update_running while one runs, 404
