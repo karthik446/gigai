@@ -3,9 +3,11 @@
 ``release.yml`` can be started with ``workflow_dispatch`` (``sha`` + ``version``).
 Everything is checked against the named commit, not the checkout, and the check
 fails closed: the SHA must be a full commit id on ``main`` or a
-``karthik446/gigai-v*`` branch, the tag ``v<version>`` must not exist yet, and
-``pyproject.toml``, ``CATALOG_REVISION`` and ``CHANGELOG.md`` at that commit must
-all name ``<version>``.
+``karthik446/gigai-v*`` branch, and ``pyproject.toml``, ``CATALOG_REVISION`` and
+``CHANGELOG.md`` at that commit must all name ``<version>``. The tag ``v<version>``
+must not exist yet, except that a re-dispatch after a partial run may reuse a tag
+that already peels to exactly ``sha`` while the version is not on PyPI and no
+GitHub Release exists for it.
 """
 
 from __future__ import annotations
@@ -14,9 +16,12 @@ import argparse
 from collections.abc import Iterable
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
+import os
 import re
 import subprocess
 import tomllib
+import urllib.error
+import urllib.request
 
 from tools import release_notes
 
@@ -41,6 +46,9 @@ class DispatchFacts:
     pyproject: str
     catalog: str
     changelog: str
+    tag_commit: str | None = None
+    release_exists: bool = False
+    on_pypi: bool = False
 
 
 def _catalog_revision(catalog: str) -> str:
@@ -83,7 +91,16 @@ def validate_dispatch(sha: str, version: str, facts: DispatchFacts) -> None:
             f"found on: {', '.join(facts.branches) or 'no branch'}"
         )
     if facts.tag_exists:
-        raise ReleaseDispatchError(f"tag v{version} already exists")
+        if facts.release_exists:
+            raise ReleaseDispatchError(
+                f"tag v{version} already exists and a GitHub Release exists for it"
+            )
+        if facts.on_pypi:
+            raise ReleaseDispatchError(f"tag v{version} already exists and {version} is on PyPI")
+        if facts.tag_commit != sha:
+            raise ReleaseDispatchError(
+                f"tag v{version} already exists at {facts.tag_commit or 'an unknown commit'}, not {sha}"
+            )
     project_version = _project_version(facts.pyproject)
     if project_version != version:
         raise ReleaseDispatchError(
@@ -124,15 +141,69 @@ def gather_facts(sha: str, version: str, remote: str = "origin") -> DispatchFact
             name.removeprefix(prefix) for name in listed if name.startswith(prefix) and name != f"{prefix}HEAD"
         )
     tag = f"refs/tags/v{version}"
-    local_tag = bool(_git("tag", "--list", f"v{version}").stdout.strip())
-    remote_tag = bool(_git("ls-remote", "--tags", remote, tag).stdout.strip())
+    local = _git("rev-parse", "--verify", "--quiet", f"{tag}^{{}}", check=False)
+    local_commit = local.stdout.strip() if local.returncode == 0 else None
+    remote_commit = _remote_tag_commit(remote, tag)
+    tag_exists = bool(local_commit or remote_commit)
+    seen = {commit for commit in (local_commit, remote_commit) if commit}
+    # A local and a remote tag that disagree can never match the input sha.
+    tag_commit = seen.pop() if len(seen) == 1 else None
     return DispatchFacts(
         resolved_commit=resolved_commit,
         branches=branches,
-        tag_exists=local_tag or remote_tag,
+        tag_exists=tag_exists,
         pyproject=_show(sha, "pyproject.toml"),
         catalog=_show(sha, "src/gigai/catalog.py"),
         changelog=_show(sha, "CHANGELOG.md"),
+        tag_commit=tag_commit,
+        release_exists=_release_exists(f"v{version}") if tag_exists else False,
+        on_pypi=_on_pypi(version) if tag_exists else False,
+    )
+
+
+def _remote_tag_commit(remote: str, tag: str) -> str | None:
+    """Return the commit the remote tag peels to, or ``None`` when it has no such tag."""
+
+    listed = _git("ls-remote", "--tags", remote, tag, f"{tag}^{{}}").stdout.splitlines()
+    commits = {}
+    for line in listed:
+        commit, _, ref = line.partition("\t")
+        commits[ref] = commit
+    return commits.get(f"{tag}^{{}}") or commits.get(tag)
+
+
+def _on_pypi(version: str, package: str = "gigai") -> bool:
+    """Ask PyPI whether ``version`` is published; fail closed on anything but 200 or 404."""
+
+    url = f"https://pypi.org/pypi/{package}/{version}/json"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310 - fixed https URL
+            return response.status == 200
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return False
+        raise ReleaseDispatchError(f"cannot check PyPI for {package} {version}: HTTP {error.code}") from error
+    except (urllib.error.URLError, OSError) as error:
+        raise ReleaseDispatchError(f"cannot check PyPI for {package} {version}: {error}") from error
+
+
+def _release_exists(tag: str) -> bool:
+    """Ask GitHub whether a Release exists for ``tag``; fail closed on any other gh outcome."""
+
+    command = ["gh", "release", "view", tag]
+    repository = os.environ.get("GITHUB_REPOSITORY")
+    if repository:
+        command += ["--repo", repository]
+    try:
+        result = subprocess.run(command, check=False, capture_output=True, text=True)
+    except OSError as error:
+        raise ReleaseDispatchError(f"cannot check for a GitHub Release for {tag}: {error}") from error
+    if result.returncode == 0:
+        return True
+    if "release not found" in result.stderr.lower():
+        return False
+    raise ReleaseDispatchError(
+        f"cannot check for a GitHub Release for {tag}: {result.stderr.strip() or result.returncode}"
     )
 
 
