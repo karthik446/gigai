@@ -51,11 +51,11 @@ _POSTING = (
     "Requirements: Python in production; Kubernetes; Terraform; GCP experience is a plus. Remote within the US."
 )
 
-_STAFF = "- Led a team of 7 engineers delivering platform and product systems end to end, owning technical direction, roadmap, and delivery across 3 domains."
-_DSAR = "- Built the data-subject access request (DSAR) pipeline handling access and deletion requests end to end under CCPA/CPRA and CO privacy requirements."
-_EKS = "- Owns the shared Kubernetes platform (EKS) for 40 services."
-_LOSSY_RESUME = f"## Experience\n**Staff Software Engineer — Guild Education** (2021–present)\n{_STAFF}\n{_DSAR}\n{_EKS}\n"
-_LOSSY_POSTING = "Acme is hiring a Staff Engineer to lead platform and product systems and privacy deletion requests. Requirements: Python; Kubernetes."
+_STAFF = "- Managed a group of 4 analysts supporting scheduling and billing systems end to end, owning the release calendar, vendor contact, and staff training across 2 hospitals."
+_DSAR = "- Built the medication reconciliation (MRX) workflow handling admission and discharge lists end to end under HIPAA and OH state requirements."
+_EKS = "- Owns the shared Kubernetes cluster (AKS) for 12 billing applications."
+_LOSSY_RESUME = f"## Experience\n**Clinical Applications Manager — Example Corp** (2020–present)\n{_STAFF}\n{_DSAR}\n{_EKS}\n"
+_LOSSY_POSTING = "Acme is hiring a Staff Engineer to lead scheduling and billing systems and medication reconciliation. Requirements: Python; Kubernetes."
 
 
 def _assert_error(response: httpx.Response, *, status: int, code: str) -> None:
@@ -243,8 +243,8 @@ def test_tailored_resumes_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         assert [bullet["id"] for bullet in bullets] == ["L3", "L4", "L5"]  # L1 summary, L2 the role heading
         staff, dsar = bullets[0]["alternative"], bullets[1]["alternative"]
         assert staff["text"] == TEST_MODEL_LOSSY_REWRITES[_STAFF[2:].rstrip(".")] and staff["lost"] == {"ownership": ["own"], "scope": ["end to end"]}
-        assert dsar["text"] == TEST_MODEL_LOSSY_REWRITES[_DSAR[2:].rstrip(".")] and dsar["lost"] == {"entities": ["co", "dsar"], "scope": ["end to end"]}
-        assert staff["reason"] == {"kind": "surface", "requirement": None, "posting_phrase": "platform"}
+        assert dsar["text"] == TEST_MODEL_LOSSY_REWRITES[_DSAR[2:].rstrip(".")] and dsar["lost"] == {"entities": ["mrx", "oh"], "scope": ["end to end"]}
+        assert staff["reason"] == {"kind": "surface", "requirement": None, "posting_phrase": "scheduling"}
         # The markdown (response and file) prints the originals once, never the weaker text.
         assert f"- {_STAFF[2:]} <!-- R3 -->\n" in h["markdown"] and f"- {_DSAR[2:]} <!-- R4 -->\n" in h["markdown"]
         assert staff["text"] not in h["markdown"] and dsar["text"] not in h["markdown"] and "- - " not in h["markdown"]

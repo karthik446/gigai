@@ -106,10 +106,10 @@ def test_tailored_resume_pdf_journey(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert_clean_and_healthy(workpad, home)
 
 
-_STAFF = "Led a team of 7 engineers delivering platform and product systems end to end, owning technical direction, roadmap, and delivery across 3 domains."
-_DSAR = "Built the data-subject access request (DSAR) pipeline handling access and deletion requests end to end under CCPA/CPRA and CO privacy requirements."
-_RESUME = f"## Experience\n**Staff Software Engineer — Guild Education** (2021–present)\n- {_STAFF}\n- {_DSAR}\n"
-_POSTING = "Acme is hiring a Staff Engineer to lead platform and product systems and privacy deletion requests. Requirements: Python."
+_STAFF = "Managed a group of 4 analysts supporting scheduling and billing systems end to end, owning the release calendar, vendor contact, and staff training across 2 hospitals."
+_DSAR = "Built the medication reconciliation (MRX) workflow handling admission and discharge lists end to end under HIPAA and OH state requirements."
+_RESUME = f"## Experience\n**Clinical Applications Manager — Example Corp** (2020–present)\n- {_STAFF}\n- {_DSAR}\n"
+_POSTING = "Acme is hiring a Staff Engineer to lead scheduling and billing systems and medication reconciliation. Requirements: Python."
 
 
 def test_the_pdf_prints_the_original_lines_when_the_model_weakened_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -44,43 +44,43 @@ from gigai.scout.tailored_resume import (
 
 # --- fixed inputs ------------------------------------------------------------------------
 
-_STAFF = "- Led a team of 7 engineers delivering platform and product systems end to end, owning technical direction, roadmap, and delivery across 3 domains."
-_STAFF_WEAK = "Led 7 engineers delivering platform and product systems, with technical direction, roadmap, and delivery across 3 domains."
-_DSAR = "- Built the data-subject access request (DSAR) pipeline handling access and deletion requests end to end under CCPA/CPRA and CO privacy requirements."
-_DSAR_WEAK = "Built a pipeline for data-subject access and deletion requests under CCPA/CPRA"
-_EKS = "- Owns the shared Kubernetes platform (EKS) for 40 services."
+_STAFF = "- Managed a group of 4 analysts supporting scheduling and billing systems end to end, owning the release calendar, vendor contact, and staff training across 2 hospitals."
+_STAFF_WEAK = "Managed 4 analysts supporting scheduling and billing systems, with the release calendar, vendor contact, and staff training across 2 hospitals."
+_DSAR = "- Built the medication reconciliation (MRX) workflow handling admission and discharge lists end to end under HIPAA and OH state requirements."
+_DSAR_WEAK = "Built a workflow for medication reconciliation on admission and discharge lists under HIPAA"
+_EKS = "- Owns the shared Kubernetes cluster (AKS) for 12 billing applications."
 _RESUME = (
     "# Kar Ohm\n"  # R1 withheld (name)
     "kar@example.test\n"  # R2 withheld (contact)
     "\n"
     "## Summary\n"  # R3
-    "Staff engineer building fault-tolerant distributed systems,\n"  # R4 -> R5
-    "owning architecture and delivery of cloud-native architectures on AWS/GCP.\n"  # R5
+    "Clinical systems analyst supporting fault-tolerant lab interfaces,\n"  # R4 -> R5
+    "owning uptime and release testing of hospital scheduling applications on Oracle/SQL Server.\n"  # R5
     "\n"
     "## Experience\n"  # R6
-    "**Staff Software Engineer — Guild Education** (2021–present)\n"  # R7
+    "**Clinical Applications Manager — Example Corp** (2020–present)\n"  # R7
     f"{_STAFF}\n"  # R8
     f"{_DSAR}\n"  # R9
     f"{_EKS}\n"  # R10
-    "**Senior Engineer — Northwind** (2012–2016)\n"  # R11: an OLD role (ended 10 years before 2026)
-    "- Built the billing service in Go.\n"  # R12
-    "- Ran the on-call rotation for 12 hosts.\n"  # R13
-    "- Designed the Kafka event bus.\n"  # R14
-    "- Mentored four engineers.\n"  # R15
-    "- Wrote the incident runbooks.\n"  # R16
+    "**IT Coordinator — Northwind** (2012–2016)\n"  # R11: an OLD role (ended 10 years before 2026)
+    "- Built the clinic intake form in Access.\n"  # R12
+    "- Ran the on-call rotation for 12 sites.\n"  # R13
+    "- Designed the interface downtime board.\n"  # R14
+    "- Mentored four technicians.\n"  # R15
+    "- Wrote the downtime runbooks.\n"  # R16
     "\n"
     "## Skills\n"  # R17
     "Python, Go, Kubernetes, Advanced SQL\n"  # R18
 )
 _POSTING = (
-    "Acme is hiring a Staff Engineer to lead platform and product systems, privacy deletion requests "
+    "Acme is hiring a Staff Engineer to lead scheduling and billing systems, privacy deletion requests "
     "and distributed systems on AWS. Requirements: Python; Kubernetes; Go; Kafka."
 )
 _JOB = TailorJob(title="Staff Engineer", company="Acme", location="Remote", posting_text=_POSTING)
 _MATRIX = (MatrixRow("Kubernetes platform ownership", "met"), MatrixRow("Distributed systems", "met"))
 _CTX = tailor_context(_RESUME, matrix=_MATRIX)
 _TODAY = date(2026, 9, 30)
-_SPAN = "Staff engineer building fault-tolerant distributed systems, owning architecture and delivery of cloud-native architectures on AWS/GCP."
+_SPAN = "Clinical systems analyst supporting fault-tolerant lab interfaces, owning uptime and release testing of hospital scheduling applications on Oracle/SQL Server."
 
 
 def _surface(phrase: str | None = None, requirement: str | None = None) -> dict[str, object]:
@@ -114,7 +114,7 @@ def _bullets(result: TailoredResume) -> tuple[TailoredLine, ...]:
 def test_the_operators_staff_and_dsar_pairs_lose_exactly_the_uat_items() -> None:
     assert lost_items(_STAFF_WEAK, [_STAFF]) == {"ownership": ["own"], "scope": ["end to end"]}
     # "CO" is a stop word for the posting-term guard; the all-caps rule still names it.
-    assert lost_items(_DSAR_WEAK, [_DSAR]) == {"entities": ["co", "dsar"], "scope": ["end to end"]}
+    assert lost_items(_DSAR_WEAK, [_DSAR]) == {"entities": ["mrx", "oh"], "scope": ["end to end"]}
 
 
 @pytest.mark.parametrize(
@@ -122,7 +122,7 @@ def test_the_operators_staff_and_dsar_pairs_lose_exactly_the_uat_items() -> None
     [
         ("Cut latency for the API.", "Cut latency by 40% for the API.", {"numbers": ["40"]}),
         ("Grew revenue to $1.2 million.", "Grew revenue to $1.2M and 3 regions.", {"numbers": ["3"]}),
-        ("Owns the shared EKS platform.", "Owns the shared Kubernetes platform (EKS).", {"entities": ["kubernetes"]}),
+        ("Owns the shared AKS cluster.", "Owns the shared Kubernetes cluster (AKS).", {"entities": ["kubernetes"]}),
         ("Built production classification models.", "Built production statistical and ML models.", {"entities": ["ml"]}),
         ("Ran the migration with the team.", "Owned the migration end-to-end.", {"ownership": ["own"], "scope": ["end to end"]}),
         ("Built low-latency backend services.", "Built highly available, low-latency distributed backend services.", {"scope": ["distributed", "highly available"]}),
@@ -171,7 +171,7 @@ def test_the_skills_rule_allows_a_reorder_and_names_a_dropped_skill() -> None:
 
 
 def test_a_lossless_rewrite_with_an_anchored_reason_is_shown_with_its_original_as_the_alternative() -> None:
-    lossless = "Owns the shared Kubernetes platform (EKS) for 40 services."
+    lossless = "Owns the shared Kubernetes cluster (AKS) for 12 billing applications."
     result = _settle(_experience(_rewrite(lossless, 10, reason=_surface(requirement="M1"))))
     (line,) = _bullets(result)
     assert line.kind == "rewritten" and line.text == lossless and line.origin == "model"
@@ -193,7 +193,7 @@ def test_a_lossless_rewrite_with_an_anchored_reason_is_shown_with_its_original_a
     ],
 )
 def test_a_missing_or_unanchored_reason_falls_back_to_the_original_line(reason: dict[str, object] | None) -> None:
-    lossless = "Owns the shared Kubernetes platform (EKS) for 40 services."
+    lossless = "Owns the shared Kubernetes cluster (AKS) for 12 billing applications."
     result = _settle(_experience(_rewrite(lossless, 10, reason=reason)))
     (line,) = _bullets(result)
     assert line.kind == "copy" and line.text == _EKS and line.origin == "fallback"
@@ -202,22 +202,22 @@ def test_a_missing_or_unanchored_reason_falls_back_to_the_original_line(reason: 
 
 
 def test_a_valid_reason_stores_only_the_anchors_that_hold_and_at_most_sixty_characters_of_posting() -> None:
-    lossless = "Owns the shared Kubernetes platform (EKS) for 40 services."
+    lossless = "Owns the shared Kubernetes cluster (AKS) for 12 billing applications."
     result = _settle(_experience(_rewrite(lossless, 10, reason=_surface(phrase="Rust", requirement="m1"))))
     assert _bullets(result)[0].reason == LineReason("surface", "M1", None)
-    phrase = "lead platform  and product\nsystems"  # whitespace and case never matter
+    phrase = "lead  scheduling and\nbilling systems"  # whitespace and case never matter
     result = _settle(_experience(_rewrite(lossless, 10, reason=_surface(phrase=phrase))))
     assert _bullets(result)[0].reason == LineReason("surface", None, phrase)
     assert _POSTING not in json.dumps(result.to_json())
 
 
 def test_a_lossy_rewrite_falls_back_to_a_copy_of_its_span_and_keeps_what_it_lost() -> None:
-    result = _settle(_experience(_rewrite(_STAFF_WEAK, 8, reason=_surface(phrase="platform and product systems"))))
+    result = _settle(_experience(_rewrite(_STAFF_WEAK, 8, reason=_surface(phrase="scheduling and billing systems"))))
     (line,) = _bullets(result)
     assert line.kind == "copy" and line.text == _STAFF and line.refs[0].line == 8 and line.origin == "fallback"
     assert line.alternative is not None and line.alternative.kind == "rewritten" and line.alternative.text == _STAFF_WEAK
     assert line.alternative.lost_dict() == {"ownership": ["own"], "scope": ["end to end"]}
-    assert line.alternative.reason == LineReason("surface", None, "platform and product systems")
+    assert line.alternative.reason == LineReason("surface", None, "scheduling and billing systems")
     assert line.alternative.reason_invalid is False
     assert line.to_json()["alternative"]["lost"] == {"ownership": ["own"], "scope": ["end to end"]}
 
@@ -225,12 +225,12 @@ def test_a_lossy_rewrite_falls_back_to_a_copy_of_its_span_and_keeps_what_it_lost
 def test_a_summary_rewrite_owes_its_prose_lines_only_and_falls_back_to_the_whole_wrapped_span() -> None:
     reason = {"kind": "summary", "requirement": "M2", "posting_phrase": None}
     # Cites the wrapped summary (R4+R5) and one role line (R8); keeps every item of the prose, not of R8.
-    keeps = "Staff engineer building fault-tolerant distributed systems, owning architecture and delivery of cloud-native architectures on AWS/GCP; led a team of 7 engineers."
+    keeps = "Clinical systems analyst supporting fault-tolerant lab interfaces, owning uptime and release testing of hospital scheduling applications on Oracle/SQL Server; managed a group of 4 analysts."
     kept = _settle({"sections": [{"heading": "summary", "lines": [_rewrite(keeps, 4, 8, reason=reason)]}]})
     (line,) = kept.sections[0].lines
     assert line.kind == "rewritten" and line.alternative is not None and line.alternative.text == _SPAN
     # The UAT summary: "fault tolerant" and the owning clause dropped -> the candidate's own summary.
-    weak = "Staff engineer building distributed systems on AWS/GCP."
+    weak = "Clinical systems analyst supporting lab interfaces on Oracle/SQL Server."
     fell = _settle({"sections": [{"heading": "summary", "lines": [_rewrite(weak, 4, reason=reason)]}]})
     (line,) = fell.sections[0].lines
     assert line.kind == "copy" and line.text == _SPAN and line.refs[0].continued_lines == (5,)
@@ -244,21 +244,21 @@ def test_a_summary_sentence_citing_only_a_role_and_an_answer_only_line_with_no_r
     ctx = tailor_context(_RESUME, matrix=_MATRIX)
     payload = {
         "sections": [
-            {"heading": "summary", "lines": [{"copy": 4}, _rewrite("Led a team of 7 engineers.", 8)]},
+            {"heading": "summary", "lines": [{"copy": 4}, _rewrite("Managed a group of 4 analysts.", 8)]},
         ]
     }
     result = _settle(payload, ctx)
     summary = result.sections[0]
     assert [line.text for line in summary.lines] == [_SPAN]  # the copy stays; the role-only sentence has no original to show
     (dropped,) = summary.dropped
-    assert dropped.kind == "rewritten" and dropped.text == "Led a team of 7 engineers." and dropped.reason_invalid is True
+    assert dropped.kind == "rewritten" and dropped.text == "Managed a group of 4 analysts." and dropped.reason_invalid is True
     # A section whose every line is dropped renders nothing (and keeps its record).
     empty = replace(result, sections=(replace(summary, lines=()),))
     assert render_markdown(empty) == "\n"
 
 
 def test_a_fallback_never_repeats_a_line_the_entry_already_copies() -> None:
-    result = _settle(_experience({"copy": 8}, _rewrite(_STAFF_WEAK, 8, reason=_surface(phrase="platform"))))
+    result = _settle(_experience({"copy": 8}, _rewrite(_STAFF_WEAK, 8, reason=_surface(phrase="billing"))))
     (line,) = _bullets(result)
     assert line.kind == "copy" and line.text == _STAFF and line.origin == "fallback"
     assert line.alternative is not None and line.alternative.dropped_duplicate is True and line.alternative.text == _STAFF_WEAK
@@ -267,7 +267,7 @@ def test_a_fallback_never_repeats_a_line_the_entry_already_copies() -> None:
 
 
 def test_a_bullet_merging_two_resume_lines_falls_back_to_both_originals() -> None:
-    merged = "Led a team of 7 engineers delivering platform and product systems end to end, owning technical direction, roadmap, and delivery across 3 domains; owns the shared Kubernetes platform (EKS) for 40 services."
+    merged = f"{_STAFF[2:-1]}; owns the shared Kubernetes cluster (AKS) for 12 billing applications."
     result = _settle(_experience(_rewrite(merged, 8, 10, reason=_surface(requirement="M1"))))
     first, second = _bullets(result)
     assert (first.text, second.text) == (_STAFF, _EKS) and first.origin == second.origin == "fallback"
@@ -320,10 +320,10 @@ def test_an_old_role_keeps_its_first_three_bullets_whole_and_every_unshown_bulle
     assert [(item.kind, item.refs[0].line) for item in current.dropped] == [("copy", 9), ("copy", 10)]
     # The old role: the model's first three (its posting order), dropped WHOLE, never shortened.
     assert [line.refs[0].line for line in old.bullets] == [14, 12, 15]
-    assert [item.text for item in old.dropped] == ["- Ran the on-call rotation for 12 hosts.", "- Wrote the incident runbooks."]
+    assert [item.text for item in old.dropped] == ["- Ran the on-call rotation for 12 sites.", "- Wrote the downtime runbooks."]
     assert tailor_line_stats(result).dropped_bullets == 4
     # A current role is never trimmed, whatever its length.
-    assert not _is_old("**Staff — Guild** (2014–present)") and _is_old("**Engineer — X** (2010–2017)") and not _is_old("**Engineer — X** (2019–2023)")
+    assert not _is_old("**Staff — Example Corp** (2014–present)") and _is_old("**Engineer — X** (2010–2017)") and not _is_old("**Engineer — X** (2019–2023)")
     assert not _is_old("**Engineer — X**")
 
 
@@ -353,8 +353,8 @@ def _mixed() -> TailoredResume:
                         {
                             "heading_ref": [{"copy": 7}],
                             "bullets": [
-                                _rewrite(_STAFF_WEAK, 8, reason=_surface(phrase="platform")),
-                                _rewrite("Owns the shared Kubernetes platform (EKS) for 40 services.", 10, reason=_surface(requirement="M1")),
+                                _rewrite(_STAFF_WEAK, 8, reason=_surface(phrase="billing")),
+                                _rewrite("Owns the shared Kubernetes cluster (AKS) for 12 billing applications.", 10, reason=_surface(requirement="M1")),
                                 {"copy": 9},
                             ],
                         }
@@ -435,7 +435,7 @@ def test_apply_line_choice_swaps_a_line_with_its_alternative_and_back_idempotent
     chosen = apply_line_choice(stored, "L3", "rewritten")
     line = chosen.result.sections[1].entries[0].bullets[0]
     assert line.id == "L3" and line.kind == "rewritten" and line.text == _STAFF_WEAK and line.origin == "user"
-    assert line.reason == LineReason("surface", None, "platform")
+    assert line.reason == LineReason("surface", None, "billing")
     assert line.alternative is not None and line.alternative.kind == "copy" and line.alternative.text == _STAFF
     assert line.alternative.lost_dict() == {"ownership": ["own"], "scope": ["end to end"]}
     assert f"- {_STAFF_WEAK} <!-- R8 -->" in chosen.markdown and chosen.updated_at == stored.updated_at

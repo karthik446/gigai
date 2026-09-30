@@ -398,20 +398,20 @@ _TEST_MODEL_JUDGE_CLAIM = re.compile(r"^CLAIM (\d+):$", re.MULTILINE)
 TEST_MODEL_FABRICATED_NUMBER_LINE = "Led a team of 8 engineers for 12 years."
 TEST_MODEL_FABRICATED_TERM_LINE = "Deep Kubernetes and Terraform experience in production."
 #: 0110-006: inside a tailor prompt only (a journey puts it in the posting
-#: text): the fixture answers with WEAKER rewrites -- the operator's exact
-#: UAT pairs (``TEST_MODEL_LOSSY_REWRITES``) for every resume line that
+#: text): the fixture answers with WEAKER rewrites -- the synthetic
+#: UAT-style pairs (``TEST_MODEL_LOSSY_REWRITES``) for every resume line that
 #: states one, else the first listed line with a named word dropped -- each
 #: with a reason anchored in the posting, plus one COPIED bullet when the
 #: resume has another bullet, so journeys exercise the no-loss fallback.
 TEST_MODEL_LOSSY_MARKER = "GIGAI-TEST-MODEL: lossy"
-#: The operator's UAT pairs (0110-006): resume sentence -> the weaker rewrite
+#: Synthetic UAT-style pairs (0110-006, 0110-014): resume sentence -> the weaker rewrite
 #: the tailor produced.  Matched on the listed line without its bullet marker
 #: and final period.
 TEST_MODEL_LOSSY_REWRITES: dict[str, str] = {
-    "Led a team of 7 engineers delivering platform and product systems end to end, owning technical direction, roadmap, and delivery across 3 domains":
-        "Led 7 engineers delivering platform and product systems, with technical direction, roadmap, and delivery across 3 domains.",
-    "Built the data-subject access request (DSAR) pipeline handling access and deletion requests end to end under CCPA/CPRA and CO privacy requirements":
-        "Built a pipeline for data-subject access and deletion requests under CCPA/CPRA",
+    "Managed a group of 4 analysts supporting scheduling and billing systems end to end, owning the release calendar, vendor contact, and staff training across 2 hospitals":
+        "Managed 4 analysts supporting scheduling and billing systems, with the release calendar, vendor contact, and staff training across 2 hospitals.",
+    "Built the medication reconciliation (MRX) workflow handling admission and discharge lists end to end under HIPAA and OH state requirements":
+        "Built a workflow for medication reconciliation on admission and discharge lists under HIPAA",
 }
 
 

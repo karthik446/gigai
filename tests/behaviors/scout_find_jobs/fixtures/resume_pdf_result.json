@@ -6,10 +6,10 @@
     {
      "kind": "resume",
      "line": 1,
-     "text": "Kar O"
+     "text": "Riley Example"
     }
    ],
-   "text": "Kar O"
+   "text": "Riley Example"
   }
  ],
  "schema_version": "scout-tailored-resume:1",
@@ -27,7 +27,7 @@
        ],
        "kind": "resume",
        "line": 3,
-       "text": "Staff Software Engineer with 12+ years building scalable, resilient, fault-tolerant distributed applications. 8 years leading teams of 4 to 30 implementing cloud native architectures on AWS/GCP, and 2 years of AI-assisted development at scale."
+       "text": "Clinical systems analyst with 19 years supporting hospital scheduling, billing, and lab applications and the"
       },
       {
        "continued_lines": [
@@ -35,15 +35,15 @@
        ],
        "kind": "resume",
        "line": 4,
-       "text": "distributed applications. 8 years leading teams of 4 to 30 implementing cloud native architectures on AWS/GCP, and 2 years of AI-assisted development at scale."
+       "text": "interfaces between them. Has managed teams of 3 to 8 through two record-system upgrades and one"
       },
       {
        "kind": "resume",
        "line": 5,
-       "text": "architectures on AWS/GCP, and 2 years of AI-assisted development at scale."
+       "text": "data center move."
       }
      ],
-     "text": "Staff Software Engineer with 12+ years building scalable, resilient, fault-tolerant distributed applications and 8 years leading teams of 4 to 30 implementing cloud-native architectures on AWS and GCP."
+     "text": "Clinical systems analyst with 19 years supporting hospital scheduling, billing, and lab applications, who has managed teams of 3 to 8 through two record-system upgrades."
     }
    ]
   },
@@ -56,11 +56,22 @@
        "refs": [
         {
          "kind": "resume",
-         "line": 10,
-         "text": "- **80% faster incident investigation** by building an LLM agent adopted by 5 teams that correlates data across 8 domains against team-defined deterministic rulesets and writes ranked root-cause hypotheses with evidence back to Jira."
+         "line": 9,
+         "text": "- Managed a group of 6 analysts supporting scheduling and billing systems at 14 clinics, owning the release calendar, vendor contact, and staff training for about 2,300 users."
         }
        ],
-       "text": "Built an LLM agent adopted by 5 teams that correlates data across 8 domains against team-defined deterministic rulesets and writes ranked root-cause hypotheses with evidence to Jira, making incident investigation 80% faster."
+       "text": "Managed 6 analysts supporting scheduling and billing systems at 14 clinics, owning the release calendar and vendor contact for about 2,300 users."
+      },
+      {
+       "kind": "rewritten",
+       "refs": [
+        {
+         "kind": "resume",
+         "line": 10,
+         "text": "- **37% fewer registration errors** after redesigning the intake screens with front-desk staff and adding required-field checks that stop a visit from being saved with a missing insurer."
+        }
+       ],
+       "text": "Redesigned the intake screens with front-desk staff and added required-field checks so a visit cannot be saved with a missing insurer, cutting registration errors by 37%."
       },
       {
        "kind": "rewritten",
@@ -68,43 +79,43 @@
         {
          "kind": "resume",
          "line": 11,
-         "text": "- Owned end-to-end architecture for member payment and admissions systems integrating with a benefit claims engine, serving 100k members with a seamless member experience and support."
+         "text": "- Planned and ran the cutover weekend for a lab results interface move, with a paper fallback and a call tree, finishing with 41 minutes of downtime."
         }
        ],
-       "text": "Owned end-to-end architecture for member payment and admissions systems integrating with a benefit claims engine and serving 100k members."
+       "text": "Planned and ran the cutover weekend for a lab results interface move, with a paper fallback and a call tree, finishing with 41 minutes of downtime."
       },
       {
        "kind": "rewritten",
        "refs": [
         {
          "kind": "resume",
-         "line": 19,
-         "text": "- Built a lightweight TypeScript service mesh for serverless architectures, enabling distributed tracing across 100+ Lambdas with intelligent caching, cutting p95 latency from 3s to 20ms."
+         "line": 12,
+         "text": "- Wrote a nightly SQL job in Oracle that flags duplicate patient records for review, clearing a backlog of 5,800 pairs in the first quarter."
         }
        ],
-       "text": "Built a TypeScript service mesh for serverless architectures, enabling distributed tracing across 100+ Lambdas and intelligent caching that cut p95 latency from 3s to 20ms."
+       "text": "Wrote a nightly Oracle SQL job that flags duplicate patient records for review and cleared a backlog of 5,800 pairs in one quarter."
       },
       {
        "kind": "rewritten",
        "refs": [
         {
          "kind": "resume",
-         "line": 20,
-         "text": "- Built a mission-critical Prod Ops CLI in Python, AWS Lambda, and RDS that reduced escalation time on identity and access issues by 85%."
+         "line": 13,
+         "text": "- Negotiated the renewal of 3 vendor support contracts and moved one to a per-clinic price, saving about $46,000 a year without dropping the weekend on-call line."
         }
        ],
-       "text": "Built a Prod Ops CLI in Python, AWS Lambda, and RDS that reduced escalation time on identity and access issues by 85%."
+       "text": "Negotiated the renewal of 3 vendor support contracts and moved one to a per-clinic price, saving about $46,000 a year without dropping the weekend on-call line."
       },
       {
        "kind": "rewritten",
        "refs": [
         {
          "kind": "resume",
-         "line": 21,
-         "text": "- Designed an org-wide custom event SDK on AWS EventBridge, establishing patterns for event consistency and retry, reaching 99.9% message delivery reliability."
+         "line": 14,
+         "text": "- Started a monthly access review with the privacy office that removed 190 stale accounts and produced a one-page report for the compliance committee."
         }
        ],
-       "text": "Designed an org-wide event SDK on AWS EventBridge with patterns for event consistency and retry, reaching 99.9% message delivery reliability."
+       "text": "Started a monthly access review with the privacy office that removed 190 stale accounts and produced a one-page report for the compliance committee."
       }
      ],
      "heading": [
@@ -113,22 +124,105 @@
        "refs": [
         {
          "kind": "resume",
-         "line": 8,
-         "text": "### GUILD EDUCATION"
+         "line": 7,
+         "text": "### EXAMPLE HEALTH SYSTEM"
         }
        ],
-       "text": "### GUILD EDUCATION"
+       "text": "### EXAMPLE HEALTH SYSTEM"
       },
       {
        "kind": "copy",
        "refs": [
         {
          "kind": "resume",
-         "line": 9,
-         "text": "**Senior Staff Software Engineer | Jun 2022 - Present**"
+         "line": 8,
+         "text": "**Clinical Applications Manager | Apr 2020 - Present**"
         }
        ],
-       "text": "**Senior Staff Software Engineer | Jun 2022 - Present**"
+       "text": "**Clinical Applications Manager | Apr 2020 - Present**"
+      }
+     ]
+    },
+    {
+     "bullets": [
+      {
+       "kind": "rewritten",
+       "refs": [
+        {
+         "kind": "resume",
+         "line": 18,
+         "text": "- Led the move of 3 departments from paper charts to the electronic record, holding 22 training sessions and staffing a floor-walker desk for the first two weeks after go-live."
+        }
+       ],
+       "text": "Led the move of 3 departments from paper charts to the electronic record, holding 22 training sessions and staffing a floor-walker desk after go-live."
+      },
+      {
+       "kind": "rewritten",
+       "refs": [
+        {
+         "kind": "resume",
+         "line": 19,
+         "text": "- Built a Python script that reconciled the daily bed census between two systems, replacing an hour of hand counting each morning."
+        }
+       ],
+       "text": "Built a Python script that reconciled the daily bed census between two systems, replacing an hour of hand counting each morning."
+      },
+      {
+       "kind": "rewritten",
+       "refs": [
+        {
+         "kind": "resume",
+         "line": 20,
+         "text": "- Kept the radiology worklist interface running through a vendor upgrade by testing 60 message types against a copy of production and fixing 9 mapping gaps beforehand."
+        }
+       ],
+       "text": "Kept the radiology worklist interface running through a vendor upgrade by testing 60 message types against a production copy and fixing 9 mapping gaps beforehand."
+      },
+      {
+       "kind": "rewritten",
+       "refs": [
+        {
+         "kind": "resume",
+         "line": 21,
+         "text": "- Trained 12 super-users in the billing office to answer first-line questions, which cut routine requests to the analyst queue by about a quarter."
+        }
+       ],
+       "text": "Trained 12 super-users in the billing office to answer first-line questions, which cut routine requests to the analyst queue by about a quarter."
+      },
+      {
+       "kind": "rewritten",
+       "refs": [
+        {
+         "kind": "resume",
+         "line": 22,
+         "text": "- Wrote the test scripts for 2 upgrade cycles and kept the results in a shared workbook so the next team could repeat them."
+        }
+       ],
+       "text": "Wrote the test scripts for 2 upgrade cycles and kept the results in a shared workbook so the next team could repeat them."
+      }
+     ],
+     "heading": [
+      {
+       "kind": "copy",
+       "refs": [
+        {
+         "kind": "resume",
+         "line": 16,
+         "text": "### LAKESHORE COMMUNITY HOSPITAL"
+        }
+       ],
+       "text": "### LAKESHORE COMMUNITY HOSPITAL"
+      },
+      {
+       "kind": "copy",
+       "refs": [
+        {
+         "kind": "resume",
+         "line": 17,
+         "text": "**Senior Systems Analyst | Sep 2016 - Mar 2020**"
+        }
+       ],
+       "text": "**Senior Systems Analyst | Sep 2016 - Mar 2020**"
       }
      ]
     },
@@ -140,10 +234,10 @@
         {
          "kind": "resume",
          "line": 26,
-         "text": "- Led 12 engineers re-architecting a monolith into microservices in Ruby on Rails, with event-driven patterns on AWS SQS and Kinesis and data pipelines on Postgres RDS."
+         "text": "- Supervised 8 technicians answering about 400 calls a week across 5 sites, and rewrote the escalation guide so urgent bedside issues reached an analyst within 10 minutes."
         }
        ],
-       "text": "Led 12 engineers re-architecting a monolith into Ruby on Rails microservices using event-driven patterns on AWS SQS and Kinesis and data pipelines on Postgres RDS."
+       "text": "Supervised 8 technicians answering about 400 calls a week across 5 sites and rewrote the escalation guide so urgent bedside issues reached an analyst within 10 minutes."
       },
       {
        "kind": "rewritten",
@@ -151,21 +245,21 @@
         {
          "kind": "resume",
          "line": 27,
-         "text": "- Improved developer experience through automated RSpec testing, Rails generators, and standardized CI/CD pipelines, reducing feature development time by 30%."
+         "text": "- Introduced a ticket tagging scheme and a monthly review that showed printer and badge-reader faults made up a third of all calls, leading to a replacement plan."
         }
        ],
-       "text": "Improved developer experience through automated RSpec testing, Rails generators, and standardized CI/CD pipelines, reducing feature development time by 30%."
+       "text": "Introduced a ticket tagging scheme and a monthly review showing that printer and badge-reader faults made up a third of all calls, which led to a replacement plan."
       },
       {
        "kind": "rewritten",
        "refs": [
         {
          "kind": "resume",
-         "line": 25,
-         "text": "- **Sub-100ms latency at 2000+ RPS** — built a scalable API layer in Ruby on Rails and Grape API with Redis caching and AWS API Gateway."
+         "line": 28,
+         "text": "- Cross-trained the weekend crew on the badge system and the paging tool so no site went a shift without someone able to reset a locked account."
         }
        ],
-       "text": "Built an API layer in Ruby on Rails and Grape API with Redis caching and AWS API Gateway, achieving sub-100ms latency at 2000+ RPS."
+       "text": "Cross-trained the weekend crew on the badge system and the paging tool so no site went a shift without someone able to reset a locked account."
       }
      ],
      "heading": [
@@ -174,22 +268,22 @@
        "refs": [
         {
          "kind": "resume",
-         "line": 23,
-         "text": "### BEACHBODY"
+         "line": 24,
+         "text": "### MERIDIAN CARE NETWORK"
         }
        ],
-       "text": "### BEACHBODY"
+       "text": "### MERIDIAN CARE NETWORK"
       },
       {
        "kind": "copy",
        "refs": [
         {
          "kind": "resume",
-         "line": 24,
-         "text": "**Senior Staff Software Engineer | Mar 2021 - May 2022**"
+         "line": 25,
+         "text": "**Help Desk Supervisor | Jun 2012 - Aug 2016**"
         }
        ],
-       "text": "**Senior Staff Software Engineer | Mar 2021 - May 2022**"
+       "text": "**Help Desk Supervisor | Jun 2012 - Aug 2016**"
       }
      ]
     },
@@ -200,22 +294,22 @@
        "refs": [
         {
          "kind": "resume",
-         "line": 33,
-         "text": "- Implemented real-time IoT ingestion pipelines in AWS Kinesis, Python, boto3, Mosquitto MQTT, Protobufs, and Postgres."
+         "line": 32,
+         "text": "- Built and monitored HL7 result feeds from 4 analyzers to the lab system, and traced dropped messages using the interface engine logs."
         }
        ],
-       "text": "Implemented real-time IoT ingestion pipelines using AWS Kinesis, Python, boto3, Mosquitto MQTT, Protobufs, and Postgres."
+       "text": "Built and monitored HL7 result feeds from 4 analyzers to the lab system and traced dropped messages using the interface engine logs."
       },
       {
        "kind": "rewritten",
        "refs": [
         {
          "kind": "resume",
-         "line": 34,
-         "text": "- Created a scalable GraphQL middleware layer in Node.js, NestJS, Apollo Server, AWS DynamoDB, and RDS."
+         "line": 33,
+         "text": "- Documented the downtime procedure for the lab and ran a yearly drill with technologists on all three shifts."
         }
        ],
-       "text": "Created a scalable GraphQL middleware layer in Node.js, NestJS, Apollo Server, AWS DynamoDB, and RDS."
+       "text": "Documented the lab downtime procedure and ran a yearly drill with technologists on all three shifts."
       }
      ],
      "heading": [
@@ -225,10 +319,10 @@
         {
          "kind": "resume",
          "line": 30,
-         "text": "### AMERICAN TOWER"
+         "text": "### HARBOR DIAGNOSTICS LAB"
         }
        ],
-       "text": "### AMERICAN TOWER"
+       "text": "### HARBOR DIAGNOSTICS LAB"
       },
       {
        "kind": "copy",
@@ -236,10 +330,10 @@
         {
          "kind": "resume",
          "line": 31,
-         "text": "**Principal IOT Engineer | Dec 2018 - Feb 2021**"
+         "text": "**Interface Analyst | Jan 2009 - May 2012**"
         }
        ],
-       "text": "**Principal IOT Engineer | Dec 2018 - Feb 2021**"
+       "text": "**Interface Analyst | Jan 2009 - May 2012**"
       }
      ]
     },
@@ -247,64 +341,14 @@
      "bullets": [
       {
        "kind": "rewritten",
-       "refs": [
-        {
-         "kind": "resume",
-         "line": 40,
-         "text": "- Developed scalable REST APIs in Node, TypeScript, Fastify, MongoDB, and Swagger for near real-time equipment checkout in construction."
-        }
-       ],
-       "text": "Developed scalable REST APIs in Node, TypeScript, Fastify, MongoDB, and Swagger for near real-time equipment checkout in construction."
-      },
-      {
-       "kind": "rewritten",
-       "refs": [
-        {
-         "kind": "resume",
-         "line": 39,
-         "text": "- Developed machine learning models in Python and Keras to predict and mitigate risks in oil and gas pipeline construction, classifying them into actionable categories."
-        }
-       ],
-       "text": "Developed Python and Keras machine learning models to predict and mitigate risks in oil and gas pipeline construction."
-      }
-     ],
-     "heading": [
-      {
-       "kind": "copy",
        "refs": [
         {
          "kind": "resume",
          "line": 37,
-         "text": "### BECHTEL"
+         "text": "- Set up workstations, printers, and user accounts for 3 new clinic openings, and kept an inventory sheet that cut lost-equipment write-offs."
         }
        ],
-       "text": "### BECHTEL"
-      },
-      {
-       "kind": "copy",
-       "refs": [
-        {
-         "kind": "resume",
-         "line": 38,
-         "text": "**Team Lead | Feb 2017 - Nov 2018**"
-        }
-       ],
-       "text": "**Team Lead | Feb 2017 - Nov 2018**"
-      }
-     ]
-    },
-    {
-     "bullets": [
-      {
-       "kind": "rewritten",
-       "refs": [
-        {
-         "kind": "resume",
-         "line": 45,
-         "text": "- Built RESTful Web APIs with Entity Framework and SQL Server across Azure environments, and led unit testing adoption with Karma, Jasmine, and NUnit."
-        }
-       ],
-       "text": "Built RESTful Web APIs with Entity Framework and SQL Server across Azure environments and led unit testing adoption with Karma, Jasmine, and NUnit."
+       "text": "Set up workstations, printers, and user accounts for 3 new clinic openings and kept an inventory sheet that cut lost-equipment write-offs."
       }
      ],
      "heading": [
@@ -313,100 +357,22 @@
        "refs": [
         {
          "kind": "resume",
-         "line": 43,
-         "text": "### USDA"
+         "line": 35,
+         "text": "### PINECREST CLINIC GROUP"
         }
        ],
-       "text": "### USDA"
+       "text": "### PINECREST CLINIC GROUP"
       },
       {
        "kind": "copy",
        "refs": [
         {
          "kind": "resume",
-         "line": 44,
-         "text": "**Senior Full Stack Developer | Feb 2016 - Jan 2017**"
+         "line": 36,
+         "text": "**IT Coordinator | Aug 2005 - Dec 2008**"
         }
        ],
-       "text": "**Senior Full Stack Developer | Feb 2016 - Jan 2017**"
-      }
-     ]
-    },
-    {
-     "bullets": [
-      {
-       "kind": "rewritten",
-       "refs": [
-        {
-         "kind": "resume",
-         "line": 49,
-         "text": "- Designed and implemented an HR database in SQL Server 2012 used by every team in DHS."
-        }
-       ],
-       "text": "Designed and implemented a SQL Server 2012 HR database used by every team in DHS."
-      }
-     ],
-     "heading": [
-      {
-       "kind": "copy",
-       "refs": [
-        {
-         "kind": "resume",
-         "line": 47,
-         "text": "### DHS"
-        }
-       ],
-       "text": "### DHS"
-      },
-      {
-       "kind": "copy",
-       "refs": [
-        {
-         "kind": "resume",
-         "line": 48,
-         "text": "**Senior Technical Consultant | Jan 2015 - Jan 2016**"
-        }
-       ],
-       "text": "**Senior Technical Consultant | Jan 2015 - Jan 2016**"
-      }
-     ]
-    },
-    {
-     "bullets": [
-      {
-       "kind": "rewritten",
-       "refs": [
-        {
-         "kind": "resume",
-         "line": 52,
-         "text": "- Built DICOM-based cardiology imaging and reporting workflows for Synapse Cardiology PACS in ASP.NET MVC under regulated medical device standards."
-        }
-       ],
-       "text": "Built DICOM-based cardiology imaging and reporting workflows for Synapse Cardiology PACS in ASP.NET MVC under regulated medical device standards."
-      }
-     ],
-     "heading": [
-      {
-       "kind": "copy",
-       "refs": [
-        {
-         "kind": "resume",
-         "line": 50,
-         "text": "### FUJIFILM MEDICAL SYSTEMS U.S.A., INC."
-        }
-       ],
-       "text": "### FUJIFILM MEDICAL SYSTEMS U.S.A., INC."
-      },
-      {
-       "kind": "copy",
-       "refs": [
-        {
-         "kind": "resume",
-         "line": 51,
-         "text": "**Full Stack Developer/Scrum Master | Nov 2012 - Jan 2015**"
-        }
-       ],
-       "text": "**Full Stack Developer/Scrum Master | Nov 2012 - Jan 2015**"
+       "text": "**IT Coordinator | Aug 2005 - Dec 2008**"
       }
      ]
     },
@@ -418,22 +384,22 @@
        "refs": [
         {
          "kind": "resume",
-         "line": 54,
-         "text": "### GEORGE MASON UNIVERSITY"
+         "line": 39,
+         "text": "### EXAMPLE TECHNICAL COLLEGE"
         }
        ],
-       "text": "### GEORGE MASON UNIVERSITY"
+       "text": "### EXAMPLE TECHNICAL COLLEGE"
       },
       {
        "kind": "copy",
        "refs": [
         {
          "kind": "resume",
-         "line": 55,
-         "text": "**TA - Mobile Developer | Dec 2010 - Aug 2012**"
+         "line": 40,
+         "text": "**Lab Assistant | Sep 2003 - Jun 2005**"
         }
        ],
-       "text": "**TA - Mobile Developer | Dec 2010 - Aug 2012**"
+       "text": "**Lab Assistant | Sep 2003 - Jun 2005**"
       }
      ]
     }
@@ -449,44 +415,22 @@
        "refs": [
         {
          "kind": "resume",
-         "line": 60,
-         "text": "Go/Chi API, Python engine, React frontend on Kubernetes; 6 RabbitMQ consumers, TimescaleDB, pgvector."
+         "line": 43,
+         "text": "Small web app for swapping volunteer shifts; Flask, SQLite, and a weekly email digest."
         }
        ],
-       "text": "Built a Go/Chi API and Python engine with a React frontend on Kubernetes, 6 RabbitMQ consumers, TimescaleDB, and pgvector."
+       "text": "Built a small web app for swapping volunteer shifts with Flask, SQLite, and a weekly email digest."
       },
       {
        "kind": "rewritten",
        "refs": [
         {
          "kind": "resume",
-         "line": 61,
-         "text": "- Built 9 Pydantic AI agents with typed output contracts and bounded retries, including an adversarial skeptic agent that kills weak theses using deterministic screen metrics alongside retrieval memory."
+         "line": 44,
+         "text": "- Added a rule check that blocks a swap when it would leave a front desk shift without a trained lead, and an audit page listing every change."
         }
        ],
-       "text": "Built 9 Pydantic AI agents with typed output contracts and bounded retries, including an adversarial skeptic agent that uses deterministic screen metrics alongside retrieval memory to kill weak theses."
-      },
-      {
-       "kind": "rewritten",
-       "refs": [
-        {
-         "kind": "resume",
-         "line": 62,
-         "text": "- Built a 12-evaluator test suite that fails any output citing a figure absent from source data, catching hallucinated indicator values within 5% tolerance."
-        }
-       ],
-       "text": "Built a 12-evaluator test suite that fails outputs citing figures absent from source data, catching hallucinated indicator values within 5% tolerance."
-      },
-      {
-       "kind": "rewritten",
-       "refs": [
-        {
-         "kind": "resume",
-         "line": 63,
-         "text": "- **Forge — a closed-loop research substrate where each generation is caused by the prior generation's failures.** Content-addressed evidence with hashed lineage, typed evaluation and learning contracts, and applicability matching that re-queues research when a prior finding's conditions recur. Domain kernel, canonical identity, and persistence shipped on a hexagonal port/adapter architecture."
-        }
-       ],
-       "text": "Built Forge with content-addressed evidence, hashed lineage, typed evaluation and learning contracts, and applicability matching that re-queues research when a prior finding's conditions recur."
+       "text": "Added a rule check that blocks a swap that would leave a front desk shift without a trained lead, and an audit page listing every change."
       }
      ],
      "heading": [
@@ -495,11 +439,11 @@
        "refs": [
         {
          "kind": "resume",
-         "line": 59,
-         "text": "**EdgeLab** — Autonomous trading research platform · docs.edgelab.one"
+         "line": 42,
+         "text": "**Clinic Shift Board** \u2014 Volunteer scheduling tool for a community clinic \u00b7 board.example.test"
         }
        ],
-       "text": "**EdgeLab** — Autonomous trading research platform · docs.edgelab.one"
+       "text": "**Clinic Shift Board** \u2014 Volunteer scheduling tool for a community clinic \u00b7 board.example.test"
       }
      ]
     }
@@ -514,80 +458,58 @@
      "refs": [
       {
        "continued_lines": [
-        66,
-        67,
-        68,
-        69
+        47,
+        48
        ],
        "kind": "resume",
-       "line": 65,
-       "text": "LLM/GenAI (RAG, evals, agent orchestration, guardrails) · Pydantic AI/OpenAI/Anthropic/OpenRouter · pgvector/Embeddings · Ruby/Rails/Sinatra · Go/Ruby/TypeScript/Python/C# · AWS/GCP · REST API/GraphQL/gRPC · MySQL/Postgres/Snowflake · Elasticsearch/MongoDB/DynamoDB · Docker/Kubernetes/Pulumi/Terraform/Istio/Containerd · Kafka/Kinesis · Datadog/New Relic/OpenTelemetry/Prometheus · Event Driven Architectures"
+       "line": 46,
+       "text": "SQL (Oracle, SQL Server) \u00b7 Python/PowerShell scripting \u00b7 HL7 interfaces/interface engines \u00b7 ServiceNow/ITIL \u00b7 Tableau/report writing \u00b7"
       },
       {
        "continued_lines": [
-        67,
-        68,
-        69
+        48
        ],
        "kind": "resume",
-       "line": 66,
-       "text": "pgvector/Embeddings · Ruby/Rails/Sinatra · Go/Ruby/TypeScript/Python/C# · AWS/GCP · REST API/GraphQL/gRPC · MySQL/Postgres/Snowflake · Elasticsearch/MongoDB/DynamoDB · Docker/Kubernetes/Pulumi/Terraform/Istio/Containerd · Kafka/Kinesis · Datadog/New Relic/OpenTelemetry/Prometheus · Event Driven Architectures"
+       "line": 47,
+       "text": "Active Directory/Citrix \u00b7 Vendor management/contract renewals \u00b7 Go-live planning/downtime procedures \u00b7"
+      },
+      {
+       "kind": "resume",
+       "line": 48,
+       "text": "Staff training/documentation \u00b7 HIPAA privacy/access reviews \u00b7 Visio/process mapping"
       }
      ],
-     "text": "LLM/GenAI: RAG, evals, agent orchestration, guardrails; Pydantic AI, OpenAI, Anthropic, OpenRouter; pgvector, embeddings."
+     "text": "SQL on Oracle and SQL Server; Python and PowerShell scripting; HL7 interfaces and interface engines."
     },
     {
      "kind": "rewritten",
      "refs": [
       {
        "continued_lines": [
-        67,
-        68,
-        69
+        48
        ],
        "kind": "resume",
-       "line": 66,
-       "text": "pgvector/Embeddings · Ruby/Rails/Sinatra · Go/Ruby/TypeScript/Python/C# · AWS/GCP · REST API/GraphQL/gRPC · MySQL/Postgres/Snowflake · Elasticsearch/MongoDB/DynamoDB · Docker/Kubernetes/Pulumi/Terraform/Istio/Containerd · Kafka/Kinesis · Datadog/New Relic/OpenTelemetry/Prometheus · Event Driven Architectures"
+       "line": 47,
+       "text": "Active Directory/Citrix \u00b7 Vendor management/contract renewals \u00b7 Go-live planning/downtime procedures \u00b7"
       },
       {
-       "continued_lines": [
-        68,
-        69
-       ],
        "kind": "resume",
-       "line": 67,
-       "text": "REST API/GraphQL/gRPC · MySQL/Postgres/Snowflake · Elasticsearch/MongoDB/DynamoDB · Docker/Kubernetes/Pulumi/Terraform/Istio/Containerd · Kafka/Kinesis · Datadog/New Relic/OpenTelemetry/Prometheus · Event Driven Architectures"
-      },
-      {
-       "continued_lines": [
-        69
-       ],
-       "kind": "resume",
-       "line": 68,
-       "text": "Docker/Kubernetes/Pulumi/Terraform/Istio/Containerd · Kafka/Kinesis · Datadog/New Relic/OpenTelemetry/Prometheus · Event Driven Architectures"
+       "line": 48,
+       "text": "Staff training/documentation \u00b7 HIPAA privacy/access reviews \u00b7 Visio/process mapping"
       }
      ],
-     "text": "Go, Ruby, TypeScript, Python, C#; REST API, GraphQL, gRPC; AWS, GCP; Docker, Kubernetes, Pulumi, Terraform; Kafka, Kinesis."
+     "text": "ServiceNow and ITIL; Tableau and report writing; Active Directory and Citrix; vendor management."
     },
     {
      "kind": "rewritten",
      "refs": [
       {
-       "continued_lines": [
-        68,
-        69
-       ],
        "kind": "resume",
-       "line": 67,
-       "text": "REST API/GraphQL/gRPC · MySQL/Postgres/Snowflake · Elasticsearch/MongoDB/DynamoDB · Docker/Kubernetes/Pulumi/Terraform/Istio/Containerd · Kafka/Kinesis · Datadog/New Relic/OpenTelemetry/Prometheus · Event Driven Architectures"
-      },
-      {
-       "kind": "resume",
-       "line": 69,
-       "text": "Datadog/New Relic/OpenTelemetry/Prometheus · Event Driven Architectures"
+       "line": 48,
+       "text": "Staff training/documentation \u00b7 HIPAA privacy/access reviews \u00b7 Visio/process mapping"
       }
      ],
-     "text": "MySQL, Postgres, Snowflake, Elasticsearch, MongoDB, DynamoDB; Datadog, New Relic, OpenTelemetry, Prometheus; event-driven architectures."
+     "text": "Go-live planning, downtime procedures, staff training, HIPAA access reviews, Visio process maps."
     }
    ]
   }

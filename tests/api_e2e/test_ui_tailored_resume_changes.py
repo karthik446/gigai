@@ -27,8 +27,8 @@ UI = Path(static_module.__file__).resolve().parents[2] / "ui"
 TAILORED_JS = UI / "src" / "tailoredResumeModel.js"
 PANEL_JSX = UI / "src" / "components" / "TailoredResumePanel.jsx"
 
-R1 = "# Kar O"
-R4 = "### GUILD EDUCATION"
+R1 = "# Riley Example"
+R4 = "### EXAMPLE CORP"
 R5 = "- Built Python services for the tutoring platform."
 R6 = "Led a team of five engineers."
 EVIL = "<script>alert(1)</script> & **bold** claim"
@@ -92,9 +92,9 @@ process.stdout.write(JSON.stringify({{
 def test_heading_marker_is_never_doubled_and_rewritten_lines_carry_their_originals() -> None:
     out = _run(MODEL_SCRIPT, {"result": RESPONSE["result"], "inline": EVIL})
     displays = [line["display"] for line in out["lines"]]
-    assert "### GUILD EDUCATION" in displays  # fail-before: "### ### GUILD EDUCATION"
+    assert "### EXAMPLE CORP" in displays  # fail-before: "### ### EXAMPLE CORP"
     assert not any("### ###" in shown or "# #" in shown for shown in displays)
-    assert displays[0] == "# Kar O"
+    assert displays[0] == "# Riley Example"
     summary_line, bullet_line = out["lines"][1], out["lines"][3]
     assert [item["text"] for item in summary_line["original"]] == ["Built Python services for the tutoring platform.", R6]
     assert [item["label"] for item in summary_line["original"]] == ["Resume line 5", "Resume line 6"]
@@ -147,12 +147,12 @@ def test_the_panel_defaults_to_show_changes_toggles_to_a_clean_escaped_copy() ->
     assert "2 of 3 lines rewritten · 1 copied" in changes
     assert 'class="md-line original"' in changes and "Led a team of five engineers." in changes
     assert '<mark class="diff-added">Kubernetes</mark>' in changes
-    assert "### GUILD EDUCATION" in changes and "### ###" not in changes
+    assert "### EXAMPLE CORP" in changes and "### ###" not in changes
     assert "<script>" not in changes and "&lt;script&gt;" in changes
     clean = out["clean"]
     assert 'aria-pressed="true">Clean copy' in clean
     assert 'data-view="clean"' in clean and 'class="md-line' not in clean
-    assert "<h5" in clean and "GUILD EDUCATION" in clean and "###" not in clean and "# Kar" not in clean
+    assert "<h5" in clean and "EXAMPLE CORP" in clean and "###" not in clean and "# Riley" not in clean
     assert "<strong>bold</strong>" in clean
     assert "<script>" not in clean and "&lt;script&gt;alert(1)&lt;/script&gt;" in clean
 
@@ -166,7 +166,7 @@ def test_the_panel_never_sets_inner_html() -> None:
 
 STAFF = "- Led a team of 7 engineers delivering platform end to end, owning technical direction."
 WEAKER = "Led 7 engineers delivering platform, with technical direction."
-DSAR = "Built the DSAR pipeline for CO privacy requests."
+DSAR = "Built the MRX workflow for OH discharge lists."
 
 
 def _alternative(kind: str, text: str, line: int, **extra: object) -> dict:
@@ -180,14 +180,14 @@ CHOICES = {
             "heading": "experience",
             "entries": [
                 {
-                    "heading": [_copy(2, "**Staff Engineer — Guild**")],
+                    "heading": [_copy(2, "**Staff Engineer — Example Corp**")],
                     "bullets": [
                         # a shown rewrite: Keep original
                         {**_rewritten(NEW_BULLET, [_ref(5, R5)]), "id": "L1", "origin": "model", "reason": {"kind": "surface", "requirement": "M3", "posting_phrase": "event-driven"}, "alternative": _alternative("copy", R5, 5)},
                         # a fallback: the no-loss check kept the original
                         {**_copy(3, STAFF), "id": "L2", "origin": "fallback", "alternative": _alternative("rewritten", WEAKER, 3, lost={"ownership": ["own"], "scope": ["end to end"]})},
                         # the operator's choice: Undo
-                        {**_copy(4, DSAR), "id": "L3", "origin": "user", "alternative": _alternative("rewritten", "Built a DSAR pipeline.", 4, lost={"entities": ["co"]})},
+                        {**_copy(4, DSAR), "id": "L3", "origin": "user", "alternative": _alternative("rewritten", "Built an MRX workflow.", 4, lost={"entities": ["oh"]})},
                         # an older line: no id, no alternative, no controls
                         _copy(6, "- Plain bullet from an older result."),
                     ],

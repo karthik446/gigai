@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from importlib import resources
 
 from gigai.scout.resume_display import ContactItem, PdfHeader
-from gigai.scout.tailored_resume import ENTRY_SECTIONS, TailoredResume, _display, shown_text
+from gigai.scout.tailored_resume import ENTRY_SECTIONS, _LEADING_MARKERS, TailoredLine, TailoredResume, _display, shown_text
 
 _PART_MAX = 40
 
@@ -31,19 +31,58 @@ def pdf_file_name(name: str, company: str) -> str:
     return "-".join(part for part in parts if part) + ".pdf"
 
 
+_YEAR = re.compile(r"\b(?:19|20)\d\d\b|\bPresent\b", re.IGNORECASE)
+
+
+def _flat(text: str) -> str:
+    """One physical line: hard wraps (newlines, runs of blanks) become single spaces."""
+    return " ".join(text.split())
+
+
+def _source_is_bullet(line: TailoredLine) -> bool:
+    """True when the resume line this text came from was a real bullet (a marker other than a heading)."""
+    source = line.text if line.kind == "copy" or not line.refs else line.refs[0].text
+    return _LEADING_MARKERS.match(source.lstrip()) is not None and not source.lstrip().startswith("#")
+
+
+def _paragraphs(lines: tuple[TailoredLine, ...]) -> list[dict[str, object]]:
+    """Real bullets stay bullets; consecutive non-bullet lines (a hard-wrapped paragraph) join into one."""
+    out: list[dict[str, object]] = []
+    for line in lines:
+        text = _flat(shown_text(line))
+        if not text:
+            continue
+        if _source_is_bullet(line):
+            out.append({"text": text, "bullet": True})
+        elif out and not out[-1]["bullet"]:
+            out[-1]["text"] = f"{out[-1]['text']} {text}"
+        else:
+            out.append({"text": text, "bullet": False})
+    return out
+
+
+def _heading_line(text: str) -> dict[str, str]:
+    """A role line \"Title | Jun 2022 - Present\" splits so the dates can sit at the right margin."""
+    shown = _flat(_display(text))
+    head, sep, tail = shown.rpartition(" | ")
+    if sep and _YEAR.search(tail):
+        return {"text": head, "dates": tail}
+    return {"text": shown, "dates": ""}
+
+
 def _body(result: TailoredResume) -> list[dict[str, object]]:
     sections: list[dict[str, object]] = []
     for section in result.sections:
         if section.is_empty():
             continue
         entries: list[dict[str, object]] = []
-        lines: list[str] = []
+        lines: list[dict[str, object]] = []
         if section.heading in ENTRY_SECTIONS:
             for entry in section.entries:
                 # A copied bullet (the model's copy or a no-loss fallback, 0110-006) prints without its own "- ".
-                entries.append({"heading": [_display(l.text) for l in entry.heading], "bullets": [shown_text(l) for l in entry.bullets]})
+                entries.append({"heading": [_heading_line(l.text) for l in entry.heading], "bullets": [_flat(shown_text(l)) for l in entry.bullets]})
         else:
-            lines = [shown_text(l) for l in section.lines]
+            lines = _paragraphs(section.lines)
         sections.append({"heading": section.heading.upper(), "lines": lines, "entries": entries})
     return sections
 

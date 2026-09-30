@@ -178,7 +178,7 @@ operator-visible capability and must link to the relevant release or evidence.
   Known limit: an assessment saved before this fix stays as it was until you
   click Assess again.
 - The tailored resume preview no longer shows doubled heading markers
-  ("### ### GUILD EDUCATION").
+  ("### ### EXAMPLE CORP").
 
 Known limit: choosing "All new postings" in the run dialog is not written back
 to `find-jobs.json`; set `"default_assess_cap": "all"` there to make it the

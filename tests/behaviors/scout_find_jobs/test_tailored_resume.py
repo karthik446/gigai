@@ -641,22 +641,22 @@ def test_tailor_resolves_a_gh_jid_company_url_through_the_board_api_with_home_ro
 # what 24e8398 already had, so the same test runs against the pre-fix code (where the
 # weaker text is stored) and the fixed code (where the original line is).
 
-_UAT_STAFF = "- Led a team of 7 engineers delivering platform and product systems end to end, owning technical direction, roadmap, and delivery across 3 domains."
-_UAT_DSAR = "- Built the data-subject access request (DSAR) pipeline handling access and deletion requests end to end under CCPA/CPRA and CO privacy requirements."
-_UAT_STAFF_WEAK = "Led 7 engineers delivering platform and product systems, with technical direction, roadmap, and delivery across 3 domains."
-_UAT_DSAR_WEAK = "Built a pipeline for data-subject access and deletion requests under CCPA/CPRA"
+_UAT_STAFF = "- Managed a group of 4 analysts supporting scheduling and billing systems end to end, owning the release calendar, vendor contact, and staff training across 2 hospitals."
+_UAT_DSAR = "- Built the medication reconciliation (MRX) workflow handling admission and discharge lists end to end under HIPAA and OH state requirements."
+_UAT_STAFF_WEAK = "Managed 4 analysts supporting scheduling and billing systems, with the release calendar, vendor contact, and staff training across 2 hospitals."
+_UAT_DSAR_WEAK = "Built a workflow for medication reconciliation on admission and discharge lists under HIPAA"
 _UAT_RESUME = (
     "# Kar Ohm\n"
     "kar@example.test\n"
     "\n"
     "## Experience\n"
-    "**Staff Software Engineer — Guild Education** (2021–present)\n"
+    "**Clinical Applications Manager — Example Corp** (2020–present)\n"
     f"{_UAT_STAFF}\n"
     f"{_UAT_DSAR}\n"
 )
 _UAT_POSTING = (
-    "Acme is hiring a Staff Engineer to lead platform and product systems and our privacy work, "
-    "including access and deletion requests. Requirements: Python; Kubernetes."
+    "Acme is hiring a Staff Engineer to lead scheduling and billing systems and our pharmacy work, "
+    "including admission and discharge lists. Requirements: Python; Kubernetes."
 )
 
 
@@ -677,7 +677,7 @@ def _uat_reply(reason: bool) -> str:
                     "entries": [
                         {
                             "heading_ref": [{"copy": 4}],
-                            "bullets": [bullet(_UAT_STAFF_WEAK, 5, "platform and product systems"), bullet(_UAT_DSAR_WEAK, 6, "deletion requests")],
+                            "bullets": [bullet(_UAT_STAFF_WEAK, 5, "scheduling and billing systems"), bullet(_UAT_DSAR_WEAK, 6, "discharge lists")],
                         }
                     ],
                 }
@@ -738,7 +738,7 @@ def test_fail_before_the_operators_weaker_staff_and_dsar_rewrites_are_stored_as_
     assert staff["kind"] == "rewritten" and staff["text"] == _UAT_STAFF_WEAK
     assert staff["lost"] == {"ownership": ["own"], "scope": ["end to end"]}
     assert dsar["kind"] == "rewritten" and dsar["text"] == _UAT_DSAR_WEAK
-    assert dsar["lost"] == {"entities": ["co", "dsar"], "scope": ["end to end"]}
+    assert dsar["lost"] == {"entities": ["mrx", "oh"], "scope": ["end to end"]}
     assert staff["reason_invalid"] is True and dsar["reason_invalid"] is True  # no reason given either
 
 
@@ -747,9 +747,9 @@ def test_a_weaker_rewrite_with_a_valid_reason_still_falls_back_on_the_lost_facts
     shown = _assert_the_original_lines_are_shown(response)
     staff, dsar = shown["staff"]["alternative"], shown["dsar"]["alternative"]
     assert "reason_invalid" not in staff and "reason_invalid" not in dsar  # the reason held; the loss decided
-    assert staff["reason"] == {"kind": "surface", "requirement": None, "posting_phrase": "platform and product systems"}
+    assert staff["reason"] == {"kind": "surface", "requirement": None, "posting_phrase": "scheduling and billing systems"}
     assert staff["lost"] == {"ownership": ["own"], "scope": ["end to end"]}
-    assert dsar["lost"] == {"entities": ["co", "dsar"], "scope": ["end to end"]}
+    assert dsar["lost"] == {"entities": ["mrx", "oh"], "scope": ["end to end"]}
     # One model call: a fallback never spends the retry.
     assert response.usage is not None and response.usage.input_tokens == 10
 
@@ -788,6 +788,6 @@ def test_the_fixture_models_lossy_marker_returns_the_operators_rewrites_and_the_
     assert [bullet["text"] for bullet in experience["entries"][0]["bullets"]] == [_UAT_STAFF_WEAK, _UAT_DSAR_WEAK]
     shown = _assert_the_original_lines_are_shown(response)
     assert shown["staff"]["alternative"]["lost"] == {"ownership": ["own"], "scope": ["end to end"]}
-    assert shown["dsar"]["alternative"]["lost"] == {"entities": ["co", "dsar"], "scope": ["end to end"]}
-    assert shown["staff"]["alternative"]["reason"]["posting_phrase"] == "platform"
+    assert shown["dsar"]["alternative"]["lost"] == {"entities": ["mrx", "oh"], "scope": ["end to end"]}
+    assert shown["staff"]["alternative"]["reason"]["posting_phrase"] == "scheduling"
     assert len(binding.port.prompts) == 1

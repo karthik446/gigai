@@ -20,17 +20,17 @@ from gigai.scout.tailored_resume import (
 )
 
 _RESUME = (
-    "# Kar O\n"
+    "# Riley Example\n"
     "kar@example.test\n"
     "\n"
     "## Experience\n"
-    "### **Guild Education** — Staff Engineer (2021–2024)\n"
+    "### **Example Corp** — Systems Analyst (2019–2023)\n"
     "Built Python services for the tutoring platform.\n"
-    "### Northwind — Engineer (2018–2021)\n"
+    "### Northwind — Help Desk Lead (2016–2019)\n"
     "Operated PostgreSQL clusters.\n"
     "\n"
     "## Education\n"
-    "### GUILD EDUCATION\n"
+    "### EXAMPLE CORP\n"
     "BS Computer Science\n"
 )
 _LINES = resume_lines(_RESUME)
@@ -55,8 +55,8 @@ _PAYLOAD = {
 def test_a_markdown_heading_resume_renders_one_marker_per_entry_heading() -> None:
     result = validate_tailored_output(_PAYLOAD, _JOB, TailorContext(resume_lines=_LINES, entries=resume_entries(_RESUME)))
     markdown = render_markdown(result)
-    assert "### Guild Education — Staff Engineer (2021–2024) <!-- R4 -->" in markdown
-    assert "### GUILD EDUCATION <!-- R9 -->" in markdown
+    assert "### Example Corp — Systems Analyst (2019–2023) <!-- R4 -->" in markdown
+    assert "### EXAMPLE CORP <!-- R9 -->" in markdown
     assert "### ###" not in markdown
     assert "####" not in markdown
 
