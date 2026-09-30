@@ -44,10 +44,19 @@ uv tool install gigai
 gigai --version
 ```
 
-Or install from the release tag (this works once the `v0.1.9` tag exists):
+To update later:
 
 ```bash
-uv tool install "git+https://github.com/karthik446/gigai@v0.1.9"
+uv tool upgrade gigai
+```
+
+To install a specific release from git instead, use a tag from the
+[Releases page](https://github.com/karthik446/gigai/releases) as the `@<tag>`
+below; version-specific notes are in the
+[CHANGELOG](https://github.com/karthik446/gigai/blob/main/CHANGELOG.md).
+
+```bash
+uv tool install "git+https://github.com/karthik446/gigai@<tag>"
 ```
 
 **4. Run**
@@ -274,7 +283,7 @@ Ollama loopback endpoints and per-target reasoning-effort options.
 Scout's find-jobs resolves a sealed model target (`ollama_local`, `codex_cli`,
 `claude_cli`, `openrouter_api`) to whichever enabled configured target uses that adapter —
 `gigai setup`'s auto-named target (e.g. `codex-default` or `claude-default`) just works, no
-special naming needed. If you followed an older 0.1.8.x version of this
+special naming needed. If you followed an older version of this
 README and already have a target literally named `codex_cli` (or
 `ollama_local`/`openrouter_api`), that still resolves correctly too. Only
 having *two* enabled targets on the same adapter with neither named exactly
@@ -516,7 +525,7 @@ stale.
 
 - [ ] Catch personal details the name and contact-line removal misses (a first line that holds a title and your name in one run, contact details inside body text)
 - [ ] Import PDF/DOCX resumes directly
-- [ ] Interview prep (0.1.10): research the company and likely interview questions through your own Codex or Claude CLI (no separate API key)
+- [ ] Interview prep: research the company and likely interview questions through your own Codex or Claude CLI (no separate API key)
 - [ ] The setup wizard checks the chosen CLI is installed and logged in
 - [ ] Mark an assessment "posting changed, re-assess" when a posting's text changes
 - [ ] Show the posting's own keywords on the tailored resume summary
@@ -562,9 +571,9 @@ makes no live provider calls, and takes a couple of minutes.
 
 ## Status
 
-This is v0.1.9. Scout's `find-jobs` workflow is implemented and covered by
+This README describes the latest release (see the [Releases page](https://github.com/karthik446/gigai/releases) and the [CHANGELOG](https://github.com/karthik446/gigai/blob/main/CHANGELOG.md) for version-specific notes). Scout's `find-jobs` workflow is implemented and covered by
 the test suite above, including a deterministic end-to-end path from
-acquisition through the present API. 0.1.9 is an alpha: it has been through hands-on testing by the maintainer (two UAT rounds, 2026-09-27 and 2026-09-29); expect rough edges.
+acquisition through the present API. GigAI is an alpha: it has been through hands-on testing by the maintainer (two UAT rounds, 2026-09-27 and 2026-09-29); expect rough edges.
 
 ## License
 

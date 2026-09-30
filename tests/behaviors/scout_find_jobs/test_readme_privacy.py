@@ -123,7 +123,7 @@ def test_the_pasted_resume_and_status_claims_are_the_decided_wording() -> None:
     assert "is used once, and is never saved" not in privacy
     status = _flat(_text().split("## Status", 1)[1].split("\n## ", 1)[0])
     assert (
-        "0.1.9 is an alpha: it has been through hands-on testing by the maintainer "
+        "GigAI is an alpha: it has been through hands-on testing by the maintainer "
         "(two UAT rounds, 2026-09-27 and 2026-09-29); expect rough edges."
     ) in status
     assert "not yet had a live-provider" not in status
@@ -207,7 +207,7 @@ def test_the_quickstart_is_first_numbered_and_asks_for_a_resume_without_personal
     assert "`gigai setup` is interactive by default" in advanced
     assert "Scout users do not need it: the first `gigai scout run`" in advanced
     assert "run `gigai setup` once first" not in text
-    assert "from the release tag" in quickstart and "@v0.1.9" in quickstart
+    assert "uv tool upgrade gigai" in quickstart and "@<tag>" in quickstart and "@v0" not in quickstart
     for button in ("Update sources", "Run find jobs", "Assess all new", "Tailor resume"):
         assert f"**{button}**" in quickstart, button
     # the human quickstart no longer starts with gigai init / gigai gigs
@@ -240,7 +240,7 @@ def test_the_roadmap_parks_interview_prep_and_readme_never_presents_it_as_a_feat
     text = _text()
     roadmap = _flat(text.split("## Roadmap / TODO", 1)[1].split("\n## ", 1)[0])
     assert (
-        "- [ ] Interview prep (0.1.10): research the company and likely interview questions "
+        "- [ ] Interview prep: research the company and likely interview questions "
         "through your own Codex or Claude CLI (no separate API key)"
     ) in roadmap
     assert "openai" not in roadmap.lower() and "OPENAI_API_KEY" not in text
