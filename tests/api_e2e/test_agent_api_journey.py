@@ -177,7 +177,7 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         assert allowed(client.post("/api/answers", json={"question_id": "a:b", "answer": "x", "bogus": 1})) == ["answer", "question_id", "reassess"]
         assert allowed(client.post("/api/sources/update", json={"bogus": 1})) == ["force"]
         assert allowed(client.post("/api/applications", json={"bogus": 1})) == ["event_kind", "job_identity", "normalized_url", "notes", "occurred_at"]
-        assert allowed(client.put("/api/resume-display", json={"bogus": 1})) == ["contact", "name", "titles"]
+        assert allowed(client.put("/api/resume-display", json={"bogus": 1})) == ["auto_fit", "contact", "name", "spacing_scale", "titles"]
         assert allowed(client.post("/api/resumes", json={"bogus": 1})) == ["content_base64", "file_name", "text"]
         profiles = client.post("/api/profiles", json={"label": "x", "titles": ["a"], "bogus": 1})
         assert "bogus" in profiles.json()["error"]["field_errors"]["_"] and "allowed: " in profiles.json()["error"]["field_errors"]["_"]
