@@ -56,6 +56,7 @@ from ....model_targets import ModelTargetResolutionError
 from ....private_records import PrivateRecordError, read_record
 from ....workpad import resolve_workpad
 from ...resume_pii import detect_contact_details
+from ...resume_privacy import model_resume
 from ...quick_assess import _default_model_target, _ObservedBinding, _ObservedPort, _seam_deadline_seconds
 from ..assess_contracts import AssessResumeInput, ResolvedResume
 from ..contracts import FindJobsContractError, ModelTarget
@@ -234,7 +235,7 @@ def render_prompt(resume_text: str) -> str:
             "You are reading ONE candidate resume and extracting three things for a job search: "
             "the tech stack, the seniority level, and suggested job titles.",
             schema,
-            "CANDIDATE RESUME (may be truncated):\n" + resume_text[:_MAX_RESUME_CHARS],
+            "CANDIDATE RESUME (may be truncated):\n" + model_resume(resume_text).text[:_MAX_RESUME_CHARS],
             "Ground every item in the resume text above; never invent a technology or title it does not support.",
         ]
     )

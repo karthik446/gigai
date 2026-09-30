@@ -16,14 +16,23 @@ The guardrail (the packet's reason to exist): every line of the output
 traces to the pinned resume or an answer, enforced in code, never trusted
 from the model:
 
-- STRUCTURE: ``header`` + ``sections[]``; experience/projects/education
-  sections hold ``entries[]`` of ``{heading_ref, bullets[]}``.
-- COPY-ONLY lines ``{"copy": <resume line n>}``: header lines and entry
-  headings (employer, title, dates, location, degree) are inserted by code
-  verbatim from the resume; the model only picks the line.  Only bullets,
-  the summary (and, optionally, skills lines) are rewritten.
+- PRIVACY (0110-003 P1): the prompt carries only the lines
+  ``resume_privacy.model_resume`` keeps (no name/contact lines, inline
+  contact redacted), under their ORIGINAL ``R<n>`` numbers (gaps are
+  fine); a copy or citation of a withheld line is rejected.  The output is
+  HEADERLESS: the PDF header comes from the local display settings, never
+  from the model.  A stray ``header`` key in the answer is accepted and
+  discarded (no retry spent); ``TailoredResume.header`` stays in the
+  contract (empty for new results) so older stored results still parse.
+- STRUCTURE: ``sections[]``; experience/projects/education sections hold
+  ``entries[]`` of ``{heading_ref, bullets[]}``.
+- COPY-ONLY lines ``{"copy": <resume line n>}``: entry headings (employer,
+  title, dates, location, degree) are inserted by code verbatim from the
+  resume; the model only picks the line.  Only bullets, the summary (and,
+  optionally, skills lines) are rewritten.
 - PROVENANCE: every rewritten line cites 1-4 sources; a resume ref must be
-  in ``1..len(resume_lines)``; an answer ref's id, after
+  a line the prompt showed (in ``1..len(resume_lines)`` and not withheld);
+  an answer ref's id, after
   ``normalize_question_id``, must be a ``read_answers`` key.  A resume ref
   whose line ends mid-sentence is EXPANDED to its continuation lines
   (``resume_continuations``, tailor-r2): the ref's ``text`` is the joined
@@ -44,17 +53,36 @@ from the model:
 
 The whole answer is rejected on the first violation, with a message naming
 the line and the reason (fed back on the single retry, then
-``model_output_invalid``).  Storage: ``<home>/scout/<project_id>/resumes/
+``model_output_invalid``).
+
+COPY BY DEFAULT, NO LOSS (0110-006): a copy line may stand for any summary,
+bullet, skills or other line (it expands to the lines it wraps onto, like a
+cited ref); a rewritten line is the exception and carries a ``reason``
+(``surface`` / ``summary`` / ``answer``, anchored to a matrix row ``M<n>``
+or a <=60-character phrase the posting contains).  After validation,
+``apply_no_loss`` (inside ``tailor_once``'s validate step, so no retry is
+spent) replaces every rewrite whose reason is missing or unanchored, that
+merges several resume lines, or that drops a fact of its cited lines
+(``tailor_no_loss.lost_items``: numbers, named tech/entities, ownership
+verbs, scope phrases; skills items on a skills line) with a COPY of its
+cited lines (``origin: "fallback"``, the rejected rewrite kept as
+``alternative`` with what it ``lost``).  Old roles keep at most
+``LENGTH_RULE.old_role_bullets`` bullets, dropped WHOLE, and every resume
+bullet a role does not show is recorded on the entry (``dropped``).
+Fabrication stays a whole-answer retry; weakening is a per-line fallback.
+
+Storage: ``<home>/scout/<project_id>/resumes/
 <profile_id|ephemeral>/<sha256(job_identity)>.json`` + a sibling ``.md``.
 The stored JSON carries resume-derived text by design (README privacy
-line); the posting text is never echoed.
+line); never the posting text, at most a 60-character requirement phrase
+per rewritten line (a validated ``reason.posting_phrase``).
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass, field, replace
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from importlib import resources
 import json
@@ -87,6 +115,7 @@ from .find_jobs.discovery.storage import atomic_write, project_id
 from .find_jobs.job_input import job_fetch_client, resolve_job
 from .find_jobs.resume_input import resolve_profile, resolve_resume, resume_for_profile
 from .question_ids import normalize_question_id
+from .resume_privacy import ModelResume, model_resume
 from .quick_assess import (
     EPHEMERAL_RESUME_KEY,
     QuickAssessError,
@@ -119,7 +148,6 @@ _MATRIX_PLACEHOLDER = "{{matrix}}"
 
 # --- bounds (orchestrator review, required change 4) ---------------------------------
 MAX_SECTIONS = 8
-MAX_HEADER_LINES = 8
 MAX_ENTRIES_PER_SECTION = 20
 MAX_TOTAL_LINES = 120
 MAX_TEXT_CHARS = 400
@@ -128,6 +156,29 @@ MAX_HEADING_LINES = 4
 
 SECTION_HEADINGS: tuple[str, ...] = ("summary", "experience", "skills", "education", "projects", "other")
 ENTRY_SECTIONS: frozenset[str] = frozenset({"experience", "projects", "education"})
+
+
+@dataclass(frozen=True)
+class LengthRule:
+    """How long a tailored resume may get (0110-006 Q4, the operator's WORKING answer)."""
+
+    #: Pages the whole resume should fit in (the prompt asks for it).
+    max_pages: int
+    #: A role whose end year is more than this many years back is an OLD role ...
+    old_role_years: int
+    #: ... and keeps at most this many bullets (the model's first ones: it
+    #: orders a role's bullets by posting relevance); the rest are dropped
+    #: WHOLE, never shortened, and recorded on the entry.
+    old_role_bullets: int
+
+
+#: The one constant to change when the length answer changes; the prompt
+#: (``{{max_pages}}`` ...) and ``apply_no_loss`` both read it.
+LENGTH_RULE = LengthRule(max_pages=2, old_role_years=8, old_role_bullets=3)
+
+#: A rewrite's reason: its kinds, and the stored posting phrase's bound (Q5).
+REASON_KINDS: frozenset[str] = frozenset({"surface", "summary", "answer"})
+MAX_POSTING_PHRASE_CHARS = 60
 
 _PRODUCER_CALLABLE = "scout.tailor"
 _PRODUCER_VERSION = "1"
@@ -326,6 +377,38 @@ class TailorContext:
     #: entry it belongs to.  Empty (the default) means no line is in an entry,
     #: so the cross-entry guard never fires.
     entries: Mapping[int, int] = field(default_factory=dict)
+    #: ``resume_privacy.model_resume(resume_text)``: the lines a model may see
+    #: and the withheld line numbers.  ``None`` (the default) derives it from
+    #: ``resume_lines``, so a context is never built without the strip;
+    #: ``tailor_context`` passes the one made from the raw resume text.
+    model: ModelResume | None = None
+
+    def __post_init__(self) -> None:
+        if self.model is None:
+            object.__setattr__(self, "model", model_resume("\n".join(self.resume_lines)))
+
+    @property
+    def withheld(self) -> frozenset[int]:
+        assert self.model is not None
+        return self.model.withheld
+
+
+def tailor_context(
+    resume_text: str,
+    *,
+    answers: Mapping[str, AnswerSource] | None = None,
+    matrix: tuple[MatrixRow, ...] = (),
+) -> TailorContext:
+    """The context ``run_tailored_resume`` tailors with: every source derived from the raw resume text."""
+
+    return TailorContext(
+        resume_lines=resume_lines(resume_text),
+        answers=dict(answers or {}),
+        matrix=matrix,
+        continuations=resume_continuations(resume_text),
+        entries=resume_entries(resume_text),
+        model=model_resume(resume_text),
+    )
 
 
 @dataclass(frozen=True)
@@ -390,7 +473,9 @@ def render_tailor_prompt(job: TailorJob, ctx: TailorContext, validation_error: s
     substitute in one pass (substituted text is never rescanned).
     """
 
-    numbered = "\n".join(f"R{index}: {line}" for index, line in enumerate(ctx.resume_lines, 1))
+    assert ctx.model is not None
+    # Only the lines the privacy strip keeps, under their original numbers.
+    numbered = "\n".join(f"R{index}: {line}" for index, line in ctx.model.lines)
     answers = "\n".join(
         f"A {item.question_id}: {item.answer[:_MAX_PROMPT_ANSWER_TEXT]}" for item in ctx.answers.values()
     )
@@ -403,6 +488,9 @@ def render_tailor_prompt(job: TailorJob, ctx: TailorContext, validation_error: s
         "answers": answers,
         "matrix": matrix,
         "validation_error": (validation_error or "")[:_MAX_PROMPT_VALIDATION_ERROR],
+        "max_pages": str(LENGTH_RULE.max_pages),
+        "old_role_years": str(LENGTH_RULE.old_role_years),
+        "old_role_bullets": str(LENGTH_RULE.old_role_bullets),
     }
     blocks = load_tailor_instructions().split("\n\n")
     if not validation_error:
@@ -759,48 +847,212 @@ def unsupported_posting_terms(text: str, sources: Iterable[str], terms: Iterable
 
 
 @dataclass(frozen=True)
+class LineReason:
+    """Why a line was rewritten (0110-006): the kind, and the posting requirement it serves.
+
+    ``requirement`` is a matrix row id (``M3``); ``posting_phrase`` is at
+    most ``MAX_POSTING_PHRASE_CHARS`` characters of the posting (Q5: the
+    only posting text a stored result may carry).  Stored on a shown
+    rewrite as validated; on a rejected rewrite (``alternative``) as the
+    model gave it.
+    """
+
+    kind: str
+    requirement: str | None = None
+    posting_phrase: str | None = None
+
+    def to_json(self) -> dict[str, object]:
+        return {"kind": self.kind, "requirement": self.requirement, "posting_phrase": self.posting_phrase}
+
+    @classmethod
+    def from_json(cls, obj: object) -> "LineReason":
+        value = _object_with_optional(obj, ("kind",), ("requirement", "posting_phrase"), "tailored_line.reason")
+        kind = _string(value["kind"], "tailored_line.reason.kind")
+        if kind not in REASON_KINDS:
+            _fail("bad_enum", "tailored_line.reason.kind must be surface, summary or answer")
+        phrase = _optional_string(value.get("posting_phrase"), "tailored_line.reason.posting_phrase")
+        if phrase is not None and len(phrase) > MAX_POSTING_PHRASE_CHARS:
+            _fail("invalid_value", f"tailored_line.reason.posting_phrase is longer than {MAX_POSTING_PHRASE_CHARS} characters")
+        return cls(kind, _optional_string(value.get("requirement"), "tailored_line.reason.requirement"), phrase)
+
+
+#: The ``lost`` rules a fallback can name (``tailor_no_loss.lost_items`` keys).
+LOST_RULES: tuple[str, ...] = ("numbers", "entities", "ownership", "scope", "skills")
+#: The flags a rejected rewrite can carry besides ``lost``.
+FALLBACK_FLAGS: tuple[str, ...] = ("reason_invalid", "dropped_duplicate", "merge")
+
+
+@dataclass(frozen=True)
+class LineAlternative:
+    """The other version of a shown line (0110-006), or a line the result does not show.
+
+    On a shown REWRITE: ``kind == "copy"``, the original resume span.  On a
+    FALLBACK (the shown line is the original): ``kind == "rewritten"``, the
+    model's rejected rewrite with ``reason``, ``lost`` (what it dropped, by
+    rule; ``{}`` when only the reason failed) and the flags
+    (``reason_invalid``, ``dropped_duplicate``, ``merge``).  In an entry's
+    or section's ``dropped`` list: a resume bullet the role does not show
+    (``copy``) or a rejected rewrite with no line of its own (``rewritten``).
+    A user toggle swaps a line with its alternative and keeps ``lost`` and
+    the flags with the pair.
+    """
+
+    kind: str  # "copy" | "rewritten"
+    text: str
+    refs: tuple[SourceRef, ...]
+    reason: LineReason | None = None
+    lost: tuple[tuple[str, tuple[str, ...]], ...] | None = None
+    reason_invalid: bool = False
+    dropped_duplicate: bool = False
+    merge: bool = False
+
+    def lost_dict(self) -> dict[str, list[str]] | None:
+        return None if self.lost is None else {rule: list(items) for rule, items in self.lost}
+
+    def to_json(self) -> dict[str, object]:
+        out: dict[str, object] = {"kind": self.kind, "text": self.text, "refs": [ref.to_json() for ref in self.refs]}
+        if self.reason is not None:
+            out["reason"] = self.reason.to_json()
+        if self.lost is not None:
+            out["lost"] = self.lost_dict()
+        for flag in FALLBACK_FLAGS:
+            if getattr(self, flag):
+                out[flag] = True
+        return out
+
+    @classmethod
+    def from_json(cls, obj: object) -> "LineAlternative":
+        value = _object_with_optional(obj, ("kind", "text", "refs"), ("reason", "lost", *FALLBACK_FLAGS), "tailored_line.alternative")
+        kind = _string(value["kind"], "tailored_line.alternative.kind")
+        if kind not in {"copy", "rewritten"}:
+            _fail("bad_enum", "tailored_line.alternative.kind must be copy or rewritten")
+        if type(value["refs"]) is not list:
+            _fail("wrong_type", "tailored_line.alternative.refs must be an array")
+        lost = value.get("lost")
+        pairs: tuple[tuple[str, tuple[str, ...]], ...] | None = None
+        if lost is not None:
+            if type(lost) is not dict or any(key not in LOST_RULES for key in lost):
+                _fail("invalid_value", f"tailored_line.alternative.lost keys must be among {', '.join(LOST_RULES)}")
+            if any(type(items) is not list or any(type(item) is not str for item in items) for items in lost.values()):
+                _fail("wrong_type", "tailored_line.alternative.lost values must be arrays of strings")
+            pairs = tuple((rule, tuple(lost[rule])) for rule in LOST_RULES if rule in lost)
+        flags = {}
+        for flag in FALLBACK_FLAGS:
+            if flag in value and type(value[flag]) is not bool:
+                _fail("wrong_type", f"tailored_line.alternative.{flag} must be a boolean")
+            flags[flag] = bool(value.get(flag, False))
+        reason = value.get("reason")
+        return cls(
+            kind,
+            _string(value["text"], "tailored_line.alternative.text", nonempty=False),
+            tuple(SourceRef.from_json(item) for item in value["refs"]),
+            None if reason is None else LineReason.from_json(reason),
+            pairs,
+            **flags,
+        )
+
+
+#: A line's ``origin``: the model's line, a fallback to the original, or the operator's choice.
+LINE_ORIGINS: frozenset[str] = frozenset({"model", "fallback", "user"})
+
+
+@dataclass(frozen=True)
 class TailoredLine(_Contract):
-    """One output line: ``copy`` (a resume line verbatim) or ``rewritten`` (the model's wording)."""
+    """One output line: ``copy`` (a resume line verbatim) or ``rewritten`` (the model's wording).
+
+    0110-006 added four OPTIONAL keys (the schema string is unchanged; an
+    older stored line without them parses as before): ``id`` (``L<n>``,
+    document order, assigned once when the result is settled), ``reason``
+    (a shown rewrite's validated reason), ``origin`` (``model`` when absent,
+    ``fallback``, ``user``) and ``alternative`` (``LineAlternative``).
+    """
 
     schema_version: ClassVar[str] = "scout-tailored-line:1"
     kind: str  # "copy" | "rewritten"
     text: str
     refs: tuple[SourceRef, ...]
+    id: str | None = None
+    reason: LineReason | None = None
+    origin: str | None = None
+    alternative: LineAlternative | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {"kind": self.kind, "text": self.text, "refs": [ref.to_json() for ref in self.refs]}
+        out: dict[str, object] = {"kind": self.kind, "text": self.text, "refs": [ref.to_json() for ref in self.refs]}
+        if self.id is not None:
+            out["id"] = self.id
+        if self.reason is not None:
+            out["reason"] = self.reason.to_json()
+        if self.origin is not None:
+            out["origin"] = self.origin
+        if self.alternative is not None:
+            out["alternative"] = self.alternative.to_json()
+        return out
 
     @classmethod
     def from_json(cls, obj: object) -> "TailoredLine":
-        value = _object_with_optional(obj, ("kind", "text", "refs"), (), "tailored_line")
+        value = _object_with_optional(obj, ("kind", "text", "refs"), ("id", "reason", "origin", "alternative"), "tailored_line")
         kind = _string(value["kind"], "tailored_line.kind")
         if kind not in {"copy", "rewritten"}:
             _fail("bad_enum", "tailored_line.kind must be copy or rewritten")
         if type(value["refs"]) is not list:
             _fail("wrong_type", "tailored_line.refs must be an array")
-        return cls(kind, _string(value["text"], "tailored_line.text", nonempty=False), tuple(SourceRef.from_json(item) for item in value["refs"]))
+        origin = _optional_string(value.get("origin"), "tailored_line.origin")
+        if origin is not None and origin not in LINE_ORIGINS:
+            _fail("bad_enum", "tailored_line.origin must be model, fallback or user")
+        reason = value.get("reason")
+        alternative = value.get("alternative")
+        return cls(
+            kind,
+            _string(value["text"], "tailored_line.text", nonempty=False),
+            tuple(SourceRef.from_json(item) for item in value["refs"]),
+            _optional_string(value.get("id"), "tailored_line.id"),
+            None if reason is None else LineReason.from_json(reason),
+            origin,
+            None if alternative is None else LineAlternative.from_json(alternative),
+        )
+
+
+def _dropped_json(items: tuple[LineAlternative, ...]) -> dict[str, object]:
+    return {"dropped": [item.to_json() for item in items]} if items else {}
+
+
+def _dropped_from_json(value: Mapping[str, object], name: str) -> tuple[LineAlternative, ...]:
+    raw = value.get("dropped", [])
+    if type(raw) is not list:
+        _fail("wrong_type", f"{name}.dropped must be an array")
+    return tuple(LineAlternative.from_json(item) for item in raw)
 
 
 @dataclass(frozen=True)
 class TailoredEntry(_Contract):
-    """One role/project/degree: copy-only heading lines, then rewritten bullets."""
+    """One role/project/degree: copy-only heading lines, then bullets.
+
+    ``dropped`` (optional, 0110-006): the role's resume bullets the result
+    does not show and any rejected rewrite that had no line of its own.
+    """
 
     schema_version: ClassVar[str] = "scout-tailored-entry:1"
     heading: tuple[TailoredLine, ...]
     bullets: tuple[TailoredLine, ...]
+    dropped: tuple[LineAlternative, ...] = ()
 
     def to_json(self) -> dict[str, object]:
-        return {"heading": [line.to_json() for line in self.heading], "bullets": [line.to_json() for line in self.bullets]}
+        return {
+            "heading": [line.to_json() for line in self.heading],
+            "bullets": [line.to_json() for line in self.bullets],
+            **_dropped_json(self.dropped),
+        }
 
     @classmethod
     def from_json(cls, obj: object) -> "TailoredEntry":
-        value = _object_with_optional(obj, ("heading", "bullets"), (), "tailored_entry")
+        value = _object_with_optional(obj, ("heading", "bullets"), ("dropped",), "tailored_entry")
         for key in ("heading", "bullets"):
             if type(value[key]) is not list:
                 _fail("wrong_type", f"tailored_entry.{key} must be an array")
         return cls(
             tuple(TailoredLine.from_json(item) for item in value["heading"]),
             tuple(TailoredLine.from_json(item) for item in value["bullets"]),
+            _dropped_from_json(value, "tailored_entry"),
         )
 
 
@@ -810,15 +1062,17 @@ class TailoredSection(_Contract):
     heading: str
     lines: tuple[TailoredLine, ...] = ()
     entries: tuple[TailoredEntry, ...] = ()
+    #: Optional (0110-006): rejected rewrites of a lines section that had no line of their own.
+    dropped: tuple[LineAlternative, ...] = ()
 
     def to_json(self) -> dict[str, object]:
         if self.heading in ENTRY_SECTIONS:
-            return {"heading": self.heading, "entries": [entry.to_json() for entry in self.entries]}
-        return {"heading": self.heading, "lines": [line.to_json() for line in self.lines]}
+            return {"heading": self.heading, "entries": [entry.to_json() for entry in self.entries], **_dropped_json(self.dropped)}
+        return {"heading": self.heading, "lines": [line.to_json() for line in self.lines], **_dropped_json(self.dropped)}
 
     @classmethod
     def from_json(cls, obj: object) -> "TailoredSection":
-        value = _object_with_optional(obj, ("heading",), ("lines", "entries"), "tailored_section")
+        value = _object_with_optional(obj, ("heading",), ("lines", "entries", "dropped"), "tailored_section")
         heading = _string(value["heading"], "tailored_section.heading")
         if heading not in SECTION_HEADINGS:
             _fail("bad_enum", "tailored_section.heading is not a known section")
@@ -830,7 +1084,16 @@ class TailoredSection(_Contract):
             heading,
             tuple(TailoredLine.from_json(item) for item in lines),
             tuple(TailoredEntry.from_json(item) for item in entries),
+            _dropped_from_json(value, "tailored_section"),
         )
+
+    def body_lines(self) -> tuple[TailoredLine, ...]:
+        """The lines a reader can choose between: every line but entry headings."""
+
+        return self.lines + tuple(line for entry in self.entries for line in entry.bullets)
+
+    def is_empty(self) -> bool:
+        return not self.lines and not self.entries
 
     def all_lines(self) -> tuple[TailoredLine, ...]:
         out: list[TailoredLine] = list(self.lines)
@@ -881,7 +1144,11 @@ def _reject(message: str) -> None:
     raise TailorValidationError(message)
 
 
-def _copy_line(raw: object, where: str, ctx: TailorContext) -> TailoredLine:
+def _copy_line(raw: object, where: str, ctx: TailorContext, *, expand: bool = False) -> TailoredLine:
+    """A copy line; ``expand`` (every position but an entry heading, 0110-006)
+    copies the line WITH the lines it wraps onto, like a cited ref, so a
+    hard-wrapped summary paragraph or bullet is copied whole."""
+
     if type(raw) is not dict or set(raw) != {"copy"}:
         _reject(f'{where} must be a copy line ({{"copy": <resume line number>}})')
     number = raw["copy"]
@@ -891,19 +1158,32 @@ def _copy_line(raw: object, where: str, ctx: TailorContext) -> TailoredLine:
         _reject(f"{where} copy must be a resume line number")
     if not 1 <= number <= len(ctx.resume_lines):
         _reject(f"{where} copies resume line {number}; the resume has {len(ctx.resume_lines)} lines")
+    if number in ctx.withheld:
+        _reject(f"{where} copies resume line {number}, which is not available (only the listed R lines can be used)")
+    if expand:
+        return _span_copy(_resume_ref(number, ctx))
     text = ctx.resume_lines[number - 1]
     return TailoredLine("copy", text, (SourceRef("resume", number, None, text),))
+
+
+def _span_copy(ref: SourceRef, **fields: object) -> TailoredLine:
+    """A copy line of one (expanded) resume ref: its text is the span, verbatim."""
+
+    return TailoredLine("copy", ref.text, (ref,), **fields)  # type: ignore[arg-type]
 
 
 def _resume_ref(number: int, ctx: TailorContext) -> SourceRef:
     """The cited resume line, expanded to its continuation lines (tailor-r2).
 
     Runs inside validation, before the numeric and posting-term guards, so
-    the guards judge the joined span; a copy line never comes through here.
+    the guards judge the joined span; an entry heading's copy line never
+    comes through here (every other copy line does, 0110-006).
     """
 
     continued = tuple(
-        item for item in ctx.continuations.get(number, ()) if number < item <= len(ctx.resume_lines)
+        item
+        for item in ctx.continuations.get(number, ())
+        if number < item <= len(ctx.resume_lines) and item not in ctx.withheld
     )
     text = " ".join(ctx.resume_lines[item - 1] for item in (number, *continued))
     return SourceRef("resume", number, None, text, continued)
@@ -927,6 +1207,8 @@ def _refs(raw: object, where: str, ctx: TailorContext) -> tuple[SourceRef, ...]:
                 _reject(f"{where} has a resume ref without a line number")
             if not 1 <= number <= len(ctx.resume_lines):
                 _reject(f"{where} cites resume line {number}; the resume has {len(ctx.resume_lines)} lines")
+            if number in ctx.withheld:
+                _reject(f"{where} cites resume line {number}, which is not available (only the listed R lines can be used)")
             refs.append(_resume_ref(number, ctx))
         elif kind == "answer":
             raw_id = item.get("question_id")
@@ -981,10 +1263,10 @@ def _rewritten_line(raw: object, where: str, ctx: TailorContext, terms: Iterable
     if type(raw) is not dict:
         _reject(f"{where} is not an object")
     if set(raw) == {"copy"}:
-        return _copy_line(raw, where, ctx)
-    unknown = set(raw) - {"text", "refs"}
+        return _copy_line(raw, where, ctx, expand=True)
+    unknown = set(raw) - {"text", "refs", "reason"}
     if unknown:
-        _reject(f"{where} has unknown key(s) {sorted(unknown)}; a rewritten line is {{\"text\", \"refs\"}}")
+        _reject(f"{where} has unknown key(s) {sorted(unknown)}; a rewritten line is {{\"text\", \"refs\", \"reason\"}}")
     text = raw.get("text")
     if not isinstance(text, str) or not text.strip():
         _reject(f"{where} has no text")
@@ -996,7 +1278,25 @@ def _rewritten_line(raw: object, where: str, ctx: TailorContext, terms: Iterable
     check_single_entry(where, refs, ctx)
     text = text.strip()
     check_rewritten_line(where, text, refs, terms)
-    return TailoredLine("rewritten", text, refs)
+    return TailoredLine("rewritten", text, refs, reason=_parse_reason(raw.get("reason")))
+
+
+def _parse_reason(raw: object) -> LineReason | None:
+    """The model's ``reason``, leniently: a malformed one is ``None`` (the
+    line then falls back to its original in ``apply_no_loss``), never a
+    rejection of the whole answer."""
+
+    if type(raw) is not dict or raw.get("kind") not in REASON_KINDS:
+        return None
+    requirement = raw.get("requirement")
+    phrase = raw.get("posting_phrase")
+    requirement = requirement.strip() if isinstance(requirement, str) and requirement.strip() else None
+    phrase = phrase.strip() if isinstance(phrase, str) and phrase.strip() else None
+    if phrase is not None and len(phrase) > MAX_POSTING_PHRASE_CHARS:
+        phrase = None
+    if requirement is not None and len(requirement) > MAX_POSTING_PHRASE_CHARS:
+        requirement = None
+    return LineReason(raw["kind"], requirement, phrase)
 
 
 def guard_terms(job: TailorJob, ctx: TailorContext) -> frozenset[str]:
@@ -1016,23 +1316,17 @@ def validate_tailored_output(decoded: Mapping[str, object], job: TailorJob, ctx:
 
     Raises ``TailorValidationError`` naming the first offending line and the
     reason; ``invoke_json_once`` feeds the message back on the one retry.
+    The output is headerless (0110-003 P1): a ``header`` key the model sends
+    anyway is accepted and discarded, whatever it holds, and never costs the
+    retry; the result's ``header`` is always empty.
     """
 
     if not isinstance(decoded, Mapping):
         _reject("the answer is not a JSON object")
     unknown = set(decoded) - {"header", "sections"}
     if unknown:
-        _reject(f"the answer has unknown top-level key(s) {sorted(unknown)}; only header and sections are allowed")
+        _reject(f"the answer has unknown top-level key(s) {sorted(unknown)}; only sections is allowed")
     terms = guard_terms(job, ctx)
-
-    raw_header = decoded.get("header", [])
-    if raw_header is None:
-        raw_header = []
-    if type(raw_header) is not list:
-        _reject("header must be a list of copy lines")
-    if len(raw_header) > MAX_HEADER_LINES:
-        _reject(f"header has {len(raw_header)} copy lines; at most {MAX_HEADER_LINES} allowed")
-    header = tuple(_copy_line(item, f"header[{index}]", ctx) for index, item in enumerate(raw_header, 1))
 
     raw_sections = decoded.get("sections")
     if type(raw_sections) is not list:
@@ -1110,7 +1404,393 @@ def validate_tailored_output(decoded: Mapping[str, object], job: TailorJob, ctx:
             if total > MAX_TOTAL_LINES:
                 _reject(f"the sections hold more than {MAX_TOTAL_LINES} lines in total; at most {MAX_TOTAL_LINES} allowed")
             sections.append(TailoredSection(heading, lines, ()))
-    return TailoredResume(header, tuple(sections))
+    return TailoredResume((), tuple(sections))
+
+
+# --- no loss: a weaker rewrite falls back to the original line (0110-006) -------------------
+
+_REQUIREMENT_ID = re.compile(r"[Mm]?(\d{1,4})")
+_WHITESPACE = re.compile(r"\s+")
+_YEAR = re.compile(r"(?<!\d)(19[5-9]\d|20\d\d)(?!\d)")
+_ONGOING = re.compile(r"\b(?:present|current|now|today|ongoing)\b", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class _Verdict:
+    """What ``apply_no_loss`` decided for one rewritten line."""
+
+    ok: bool
+    reason: LineReason | None  # the validated reason when valid, else the model's (for the record)
+    reason_invalid: bool
+    lost: dict[str, list[str]]
+    merge: bool
+    spans: tuple[SourceRef, ...]  # the resume spans a fallback copies (summary: the prose ones only)
+
+
+def _flat(text: str) -> str:
+    return _WHITESPACE.sub(" ", text).strip().casefold()
+
+
+def _spans(refs: Iterable[SourceRef]) -> tuple[SourceRef, ...]:
+    """The distinct resume spans among ``refs``: a ref whose line another ref's span already covers is folded in."""
+
+    resume = [ref for ref in refs if ref.kind == "resume"]
+    covered = {line for ref in resume for line in ref.continued_lines}
+    out: list[SourceRef] = []
+    seen: set[int] = set()
+    for ref in resume:
+        if ref.line in covered or ref.line in seen:
+            continue
+        seen.add(ref.line)  # type: ignore[arg-type]
+        out.append(ref)
+    return tuple(out)
+
+
+def _visible_text(ref: SourceRef, visible: Mapping[int, str]) -> str:
+    """The span as the MODEL saw it (privacy-redacted): a rewrite is never
+    blamed for dropping a name or contact detail it was never shown."""
+
+    numbers = (ref.line, *ref.continued_lines)
+    if all(number in visible for number in numbers):
+        return " ".join(visible[number] for number in numbers)  # type: ignore[index]
+    return ref.text
+
+
+def _check_reason(line: TailoredLine, job: TailorJob, ctx: TailorContext) -> tuple[LineReason | None, bool]:
+    """The deterministic reason check (0110-006 §2b): the reason as stored, and whether it holds.
+
+    Valid when ``requirement`` is an ``M<n>`` of ``ctx.matrix`` OR
+    ``posting_phrase`` occurs (case- and whitespace-insensitively) in the
+    posting; a ``surface`` reason also needs one of the requirement's or
+    phrase's words in both the rewrite and a cited resume line; an
+    ``answer`` reason needs an answer ref.  Only the anchors that hold are
+    stored on a valid reason.
+    """
+
+    from .tailor_no_loss import anchor_terms
+
+    reason = line.reason
+    if reason is None:
+        return None, False
+    requirement: str | None = None
+    phrase: str | None = None
+    anchors: set[str] = set()
+    match = _REQUIREMENT_ID.fullmatch(reason.requirement or "")
+    if match and 1 <= int(match.group(1)) <= len(ctx.matrix):
+        requirement = f"M{int(match.group(1))}"
+        anchors |= anchor_terms(ctx.matrix[int(match.group(1)) - 1].requirement)
+    if reason.posting_phrase and _flat(reason.posting_phrase) in _flat(job.posting_text):
+        phrase = reason.posting_phrase
+        anchors |= anchor_terms(phrase)
+    if requirement is None and phrase is None:
+        return reason, False
+    if reason.kind == "surface":
+        sources: set[str] = set()
+        for ref in line.refs:
+            if ref.kind == "resume":
+                sources |= source_terms(ref.text)
+        if not anchors & source_terms(line.text) & sources:
+            return reason, False
+    if reason.kind == "answer" and not any(ref.kind == "answer" for ref in line.refs):
+        return reason, False
+    return LineReason(reason.kind, requirement, phrase), True
+
+
+def _judge(line: TailoredLine, position: str, job: TailorJob, ctx: TailorContext, visible: Mapping[int, str]) -> _Verdict:
+    from .tailor_no_loss import lost_items
+
+    reason, valid = _check_reason(line, job, ctx)
+    spans = _spans(line.refs)
+    if position == "summary":
+        # A summary sentence owes every item of the summary PROSE it cites;
+        # it may borrow a phrase from one role (the cross-entry guard) without
+        # owing that role's every fact, and falls back to the prose lines only.
+        spans = tuple(ref for ref in spans if ref.line not in ctx.entries)
+        merge = False
+    else:
+        merge = len(spans) > 1  # 0110-006 Q2: no merges in v1; one resume line (span) per rewrite
+    lost = lost_items(line.text, [_visible_text(ref, visible) for ref in spans], skills=position == "skills")
+    return _Verdict(valid and not lost and not merge, reason, not valid, lost, merge, spans)
+
+
+def _lost_pairs(lost: Mapping[str, Sequence[str]]) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    return tuple((rule, tuple(lost[rule])) for rule in LOST_RULES if rule in lost)
+
+
+def _settle(lines: Sequence[TailoredLine], position: str, job: TailorJob, ctx: TailorContext, visible: Mapping[int, str]) -> tuple[tuple[TailoredLine, ...], list[LineAlternative]]:
+    """One container's lines (an entry's bullets or a lines section) after the reason and no-loss checks.
+
+    A failing rewrite becomes COPIES of its cited spans (the first carries
+    the rejected rewrite as ``alternative``); a copy of a span the container
+    already shows is not repeated (the rejected rewrite is recorded on the
+    retained copy with ``dropped_duplicate``); a rewrite with no span to fall
+    back to (answer-only, or a summary citing only role lines) is dropped and
+    recorded in the container's ``dropped``.
+    """
+
+    later_copies = {line.refs[0].line for line in lines if line.kind == "copy" and line.refs}
+    out: list[TailoredLine] = []
+    shown: dict[int, int] = {}  # resume line -> index in ``out`` of the copy showing it
+    pending: list[tuple[int, LineAlternative]] = []  # duplicates to record on a retained copy
+    dropped: list[LineAlternative] = []
+    for line in lines:
+        if line.kind == "copy":
+            shown.setdefault(line.refs[0].line, len(out))  # type: ignore[arg-type]
+            out.append(replace(line, origin="model"))
+            continue
+        verdict = _judge(line, position, job, ctx, visible)
+        if verdict.ok:
+            original = None
+            if verdict.spans:
+                text = " ".join(ref.text for ref in verdict.spans)
+                original = LineAlternative("copy", text, verdict.spans)
+            out.append(replace(line, reason=verdict.reason, origin="model", alternative=original))
+            continue
+        rejected = LineAlternative(
+            "rewritten", line.text, line.refs, verdict.reason, _lost_pairs(verdict.lost),
+            reason_invalid=verdict.reason_invalid, merge=verdict.merge,
+        )
+        placed = False
+        for ref in verdict.spans:
+            if ref.line in shown or ref.line in later_copies:
+                continue
+            shown[ref.line] = len(out)  # type: ignore[index]
+            out.append(_span_copy(ref, origin="fallback", alternative=None if placed else rejected))
+            placed = True
+        if placed:
+            continue
+        if verdict.spans:
+            pending.append((verdict.spans[0].line, replace(rejected, dropped_duplicate=True)))  # type: ignore[arg-type]
+        else:
+            dropped.append(rejected)
+    for number, rejected in pending:
+        index = shown.get(number)
+        if index is not None and out[index].alternative is None:
+            out[index] = replace(out[index], origin="fallback", alternative=rejected)
+        else:
+            dropped.append(rejected)
+    return tuple(out), dropped
+
+
+def _is_old_role(heading: Sequence[TailoredLine], today: date) -> bool:
+    """An OLD role (``LENGTH_RULE``): its heading's latest year is more than
+    ``old_role_years`` back; "present"/"current" or no year at all is never old."""
+
+    text = " ".join(line.text for line in heading)
+    if _ONGOING.search(text):
+        return False
+    years = [int(year) for year in _YEAR.findall(text)]
+    return bool(years) and today.year - max(years) > LENGTH_RULE.old_role_years
+
+
+def _role_dropped(heading: Sequence[TailoredLine], bullets: Sequence[TailoredLine], trimmed: Sequence[TailoredLine], ctx: TailorContext) -> list[LineAlternative]:
+    """The role's resume bullets the result does not show (Q4: recorded for Show changes).
+
+    Candidates: every line of the resume entry the heading copies
+    (``ctx.entries``) that is not its heading, not a wrapped tail of another
+    line and not withheld, plus the spans of bullets the length rule
+    trimmed; minus every line a shown bullet cites or copies.
+    """
+
+    covered = {number for line in bullets for ref in line.refs if ref.kind == "resume" for number in (ref.line, *ref.continued_lines)}
+    covered |= {ref.line for line in heading for ref in line.refs}
+    tails = {number for span in ctx.continuations.values() for number in span}
+    owners = {ctx.entries[ref.line] for line in heading for ref in line.refs if ref.line in ctx.entries}
+    candidates = {
+        number for number, owner in ctx.entries.items()
+        if owner in owners and number != owner and number not in tails and number not in ctx.withheld
+        and not _is_heading_line(ctx.resume_lines[number - 1])
+    }
+    out: list[LineAlternative] = []
+    for line in trimmed:
+        spans = _spans(line.refs)
+        if not spans:
+            out.append(LineAlternative(line.kind, line.text, line.refs, line.reason))
+        candidates |= {ref.line for ref in spans}  # type: ignore[misc]
+    for number in sorted(candidates - covered):
+        ref = _resume_ref(number, ctx)
+        out.append(LineAlternative("copy", ref.text, (ref,)))
+    return out
+
+
+def _with_ids(result: TailoredResume) -> TailoredResume:
+    """``L<n>`` on every body line, document order (entry headings included)."""
+
+    counter = 0
+
+    def tag(line: TailoredLine) -> TailoredLine:
+        nonlocal counter
+        counter += 1
+        return replace(line, id=f"L{counter}")
+
+    sections = []
+    for section in result.sections:
+        entries = tuple(
+            replace(entry, heading=tuple(tag(line) for line in entry.heading), bullets=tuple(tag(line) for line in entry.bullets))
+            for entry in section.entries
+        )
+        sections.append(replace(section, lines=tuple(tag(line) for line in section.lines), entries=entries))
+    return replace(result, sections=tuple(sections))
+
+
+def apply_no_loss(result: TailoredResume, job: TailorJob, ctx: TailorContext, *, today: date | None = None) -> TailoredResume:
+    """Settle a validated result (0110-006): reasons, no-loss fallbacks, the length rule, ids.
+
+    Runs after ``validate_tailored_output`` inside ``tailor_once``'s
+    validate step, so it never spends the retry: fabrication rejects the
+    whole answer there; weakening only replaces the weaker line here.
+    """
+
+    today = today or datetime.now(UTC).date()
+    assert ctx.model is not None
+    visible = dict(ctx.model.lines)
+    sections: list[TailoredSection] = []
+    for section in result.sections:
+        if section.heading in ENTRY_SECTIONS:
+            entries: list[TailoredEntry] = []
+            for entry in section.entries:
+                heading = tuple(replace(line, origin="model") for line in entry.heading)
+                bullets, dropped = _settle(entry.bullets, "bullet", job, ctx, visible)
+                trimmed: tuple[TailoredLine, ...] = ()
+                if _is_old_role(heading, today) and len(bullets) > LENGTH_RULE.old_role_bullets:
+                    bullets, trimmed = bullets[: LENGTH_RULE.old_role_bullets], bullets[LENGTH_RULE.old_role_bullets :]
+                dropped += _role_dropped(heading, bullets, trimmed, ctx)
+                entries.append(TailoredEntry(heading, bullets, tuple(dropped)))
+            sections.append(TailoredSection(section.heading, (), tuple(entries)))
+        else:
+            lines, dropped = _settle(section.lines, section.heading, job, ctx, visible)
+            sections.append(TailoredSection(section.heading, lines, (), tuple(dropped)))
+    return _with_ids(TailoredResume(result.header, tuple(sections)))
+
+
+# --- the operator's per-line choice and the line counts (0110-006) -----------------------------
+
+LINE_CHOICES: frozenset[str] = frozenset({"original", "rewritten"})
+
+
+def apply_line_choice(stored: "TailorResponse", line_id: str, use: str) -> "TailorResponse":
+    """Show the ``original`` or the ``rewritten`` version of line ``line_id``.
+
+    The chosen version is materialized into ``result`` (the shown line and
+    its ``alternative`` swap; ``origin`` becomes ``user``; ``id``, ``lost``
+    and the flags stay with the pair) and ``markdown`` is re-rendered;
+    ``updated_at`` is unchanged.  A line with no alternative, or a choice
+    already shown, returns ``stored`` unchanged (idempotent).  Choosing
+    ``rewritten`` on a fallback restores a rewrite that already passed every
+    fabrication guard.  An unknown id or choice is ``TailorError("invalid_value")``.
+    Pure: the caller stores the result (``save_tailor_response``).
+    """
+
+    if use not in LINE_CHOICES:
+        raise TailorError("invalid_value", "use must be original or rewritten")
+    found = False
+
+    def choose(line: TailoredLine) -> TailoredLine:
+        nonlocal found
+        if line.id != line_id:
+            return line
+        found = True
+        alternative = line.alternative
+        wanted = "copy" if use == "original" else "rewritten"
+        if alternative is None or line.kind == wanted or alternative.kind != wanted:
+            return line
+        return TailoredLine(
+            alternative.kind, alternative.text, alternative.refs, line.id,
+            alternative.reason if alternative.kind == "rewritten" else None,
+            "user",
+            replace(alternative, kind=line.kind, text=line.text, refs=line.refs, reason=line.reason),
+        )
+
+    sections = tuple(
+        replace(
+            section,
+            lines=tuple(choose(line) for line in section.lines),
+            entries=tuple(replace(entry, bullets=tuple(choose(line) for line in entry.bullets)) for entry in section.entries),
+        )
+        for section in stored.result.sections
+    )
+    if not found:
+        raise TailorError("invalid_value", f"no line {line_id!r} in this tailored resume")
+    result = replace(stored.result, sections=sections)
+    if result == stored.result:
+        return stored
+    return replace(stored, result=result, markdown=render_markdown(result))
+
+
+@dataclass(frozen=True)
+class TailorLineStats:
+    """Line counts from a stored result alone (0110-006 §3e/§5a), shared by the eval, the UI and the tests.
+
+    ``rewritable_lines`` is every body line except entry headings.  A
+    model-proposed rewrite is a shown rewrite, a line whose alternative is a
+    rewrite (a fallback, or a rewrite the operator set aside), or a rejected
+    rewrite in a ``dropped`` list.  A fallback is a line with
+    ``origin == "fallback"`` and a rewritten alternative, or a rejected
+    rewrite in a ``dropped`` list; ``fallbacks_by_rule`` counts each
+    ``lost`` rule and flag once per fallback.
+    """
+
+    rewritable_lines: int
+    shown_rewritten: int
+    copied: int
+    answer_only_lines: int
+    model_rewrites: int
+    fallbacks: int
+    fallbacks_by_rule: Mapping[str, int]
+    kept_original_by_user: int
+    dropped_bullets: int
+
+    @property
+    def model_rewrite_rate(self) -> float:
+        return self.model_rewrites / self.rewritable_lines if self.rewritable_lines else 0.0
+
+    @property
+    def final_rewrite_rate(self) -> float:
+        return self.shown_rewritten / self.rewritable_lines if self.rewritable_lines else 0.0
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "rewritable_lines": self.rewritable_lines,
+            "shown_rewritten": self.shown_rewritten,
+            "copied": self.copied,
+            "answer_only_lines": self.answer_only_lines,
+            "model_rewrites": self.model_rewrites,
+            "fallbacks": self.fallbacks,
+            "fallbacks_by_rule": dict(self.fallbacks_by_rule),
+            "kept_original_by_user": self.kept_original_by_user,
+            "dropped_bullets": self.dropped_bullets,
+            "model_rewrite_rate": self.model_rewrite_rate,
+            "final_rewrite_rate": self.final_rewrite_rate,
+        }
+
+
+def tailor_line_stats(result: TailoredResume) -> TailorLineStats:
+    """Count a result's lines (see ``TailorLineStats``)."""
+
+    body = [line for section in result.sections for line in section.body_lines()]
+    dropped = [item for section in result.sections for item in (*section.dropped, *(d for entry in section.entries for d in entry.dropped))]
+    rules = {rule: 0 for rule in (*LOST_RULES, *FALLBACK_FLAGS)}
+    rejected = [line.alternative for line in body if line.origin == "fallback" and line.alternative is not None and line.alternative.kind == "rewritten"]
+    rejected += [item for item in dropped if item.kind == "rewritten"]
+    for item in rejected:
+        for rule, _items in item.lost or ():
+            rules[rule] += 1
+        for flag in FALLBACK_FLAGS:
+            rules[flag] += int(getattr(item, flag))
+    shown_rewritten = sum(line.kind == "rewritten" for line in body)
+    return TailorLineStats(
+        rewritable_lines=len(body),
+        shown_rewritten=shown_rewritten,
+        copied=sum(line.kind == "copy" for line in body),
+        answer_only_lines=sum(line.kind == "rewritten" and not any(ref.kind == "resume" for ref in line.refs) for line in body),
+        model_rewrites=shown_rewritten
+        + sum(line.kind == "copy" and line.alternative is not None and line.alternative.kind == "rewritten" for line in body)
+        + sum(item.kind == "rewritten" for item in dropped),
+        fallbacks=len(rejected),
+        fallbacks_by_rule=rules,
+        kept_original_by_user=sum(line.origin == "user" and line.kind == "copy" for line in body),
+        dropped_bullets=sum(item.kind == "copy" for item in dropped),
+    )
 
 
 # --- markdown, rendered by code -----------------------------------------------------------
@@ -1131,6 +1811,13 @@ def _display(text: str) -> str:
     return stripped or text.strip()
 
 
+def shown_text(line: TailoredLine) -> str:
+    """A body line as the markdown and the PDF print it: a copy (the model's
+    or a fallback) without its own bullet/heading markers, a rewrite as written."""
+
+    return _display(line.text) if line.kind == "copy" else line.text
+
+
 def _refs_comment(line: TailoredLine) -> str:
     return "<!-- " + ", ".join(ref.label() for ref in line.refs) + " -->"
 
@@ -1146,6 +1833,8 @@ def render_markdown(result: TailoredResume) -> str:
     if result.header:
         out.append("")
     for section in result.sections:
+        if section.is_empty():  # every line of it fell back to nothing (0110-006)
+            continue
         out.append(f"## {section.heading.capitalize()}")
         out.append("")
         if section.heading in ENTRY_SECTIONS:
@@ -1156,12 +1845,11 @@ def render_markdown(result: TailoredResume) -> str:
                 if entry.bullets:
                     out.append("")
                 for line in entry.bullets:
-                    out.append(f"- {line.text} {_refs_comment(line)}")
+                    out.append(f"- {shown_text(line)} {_refs_comment(line)}")
                 out.append("")
         else:
             for line in section.lines:
-                text = _display(line.text) if line.kind == "copy" else line.text
-                out.append(f"- {text} {_refs_comment(line)}")
+                out.append(f"- {shown_text(line)} {_refs_comment(line)}")
             out.append("")
     while out and out[-1] == "":
         out.pop()
@@ -1174,14 +1862,15 @@ def render_markdown(result: TailoredResume) -> str:
 def tailor_once(binding: object, job: TailorJob, ctx: TailorContext) -> AssessAttempt:
     """One tailoring through the shared loop: render, invoke, extract, validate, retry once.
 
-    ``attempt.parsed`` is a ``TailoredResume`` when ``ok``.  Exactly the
+    ``attempt.parsed`` is a ``TailoredResume`` when ``ok``, already settled
+    by ``apply_no_loss`` (fallbacks never cost the retry).  Exactly the
     exception mapping and retry rule ``assess_once`` has (``invoke_json_once``).
     """
 
     return invoke_json_once(
         binding,
         lambda validation_error: render_tailor_prompt(job, ctx, validation_error),
-        lambda decoded: validate_tailored_output(decoded, job, ctx),
+        lambda decoded: apply_no_loss(validate_tailored_output(decoded, job, ctx), job, ctx),
     )
 
 
@@ -1271,7 +1960,8 @@ class TailorSources(_Contract):
 class TailorResponse(_Contract):
     """One tailored resume: identities, sources, the validated structure, the markdown, storage.
 
-    Never carries the posting text (``job`` is serialized WITHOUT ``text``).
+    Never carries the posting text (``job`` is serialized WITHOUT ``text``;
+    at most a 60-character ``reason.posting_phrase`` per rewritten line).
     It DOES carry resume-derived text (the copied lines, the rewritten lines
     and every ref's source text) -- that is the product.
     """
@@ -1511,7 +2201,7 @@ def run_tailored_resume(
     active = config if config is not None else load_config(home_root)
     binding = _resolve_binding(active, model_target, home_root=home_root)
     tailor_job = TailorJob(title=job.title, company=job.company, location=job.location, posting_text=job.text)
-    ctx = TailorContext(resume_lines=lines, answers=answers, matrix=matrix, continuations=resume_continuations(resume.text), entries=resume_entries(resume.text))
+    ctx = tailor_context(resume.text, answers=answers, matrix=matrix)
     try:
         attempt = tailor_once(binding, tailor_job, ctx)
     finally:
@@ -1557,15 +2247,27 @@ def run_tailored_resume(
         stored_path=os.fspath(path),
         markdown_path=os.fspath(markdown_path),
     )
-    atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
-    atomic_write(markdown_path, response.markdown.encode("utf-8"))
+    save_tailor_response(response)
     return response
+
+
+def save_tailor_response(response: TailorResponse) -> None:
+    """Write a response's JSON and its sibling ``.md`` (atomically) at the paths it names."""
+
+    atomic_write(Path(response.stored_path), json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
+    atomic_write(Path(response.markdown_path), response.markdown.encode("utf-8"))
 
 
 __all__ = [
     "ENTRY_SECTIONS",
     "EPHEMERAL_RESUME_KEY",
-    "MAX_HEADER_LINES",
+    "FALLBACK_FLAGS",
+    "LENGTH_RULE",
+    "LINE_CHOICES",
+    "LINE_ORIGINS",
+    "LOST_RULES",
+    "MAX_POSTING_PHRASE_CHARS",
+    "REASON_KINDS",
     "MAX_REFS_PER_LINE",
     "MAX_SECTIONS",
     "MAX_TEXT_CHARS",
@@ -1576,12 +2278,16 @@ __all__ = [
     "TERM_ALIASES",
     "TERM_STOP_WORDS",
     "AnswerSource",
+    "LengthRule",
+    "LineAlternative",
+    "LineReason",
     "MatrixRow",
     "NumberMention",
     "SourceRef",
     "TailorContext",
     "TailorError",
     "TailorJob",
+    "TailorLineStats",
     "TailorRequest",
     "TailorResponse",
     "TailorSources",
@@ -1591,6 +2297,8 @@ __all__ = [
     "TailoredResume",
     "TailoredResumesListResponse",
     "TailoredSection",
+    "apply_line_choice",
+    "apply_no_loss",
     "canonical_term",
     "check_rewritten_line",
     "check_single_entry",
@@ -1606,6 +2314,10 @@ __all__ = [
     "resume_entries",
     "resume_lines",
     "run_tailored_resume",
+    "save_tailor_response",
+    "shown_text",
+    "tailor_context",
+    "tailor_line_stats",
     "tailor_once",
     "tailored_resume_dir",
     "tailored_resume_path",

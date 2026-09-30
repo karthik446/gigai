@@ -384,6 +384,20 @@ jobs:
       profile: full
       ref: ${{ needs.preflight.outputs.ref }}
 
+  docs:
+    name: Publish this version's docs (GitHub Pages)
+    needs: [preflight, github-release]
+    # Same direct-needs gate as post-release-compatibility. Runs after the Release exists, so a
+    # docs failure never withholds a release; re-run it with docs.yml's workflow_dispatch.
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.github-release.result == 'success' }}
+    uses: ./.github/workflows/docs.yml
+    permissions:
+      contents: write
+    with:
+      version: ${{ needs.preflight.outputs.version }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      alias: latest
+
   verify-testpypi:
     name: TestPyPI clean install on ${{ matrix.os }} (post-publish)
     needs: [preflight, publish-testpypi]

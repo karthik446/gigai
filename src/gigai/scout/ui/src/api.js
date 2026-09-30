@@ -440,6 +440,20 @@ export function getTailoredResumes(params) {
   return request("GET", `/api/tailored-resumes${qs ? `?${qs}` : ""}`);
 }
 
+// 0110-006: show the original or the rewrite of one line (PUT
+// /api/tailored-resumes/lines). `updatedAt` is the updated_at of the resume
+// the caller is looking at; a newer tailoring answers 409
+// tailored_resume_changed. Answers the updated TailorResponse.
+export function putTailoredResumeLine({ profileId, jobIdentity, updatedAt, lineId, use }) {
+  return request("PUT", "/api/tailored-resumes/lines", {
+    profile_id: profileId,
+    job_identity: jobIdentity,
+    updated_at: updatedAt,
+    line_id: lineId,
+    use,
+  });
+}
+
 // 0.1.10-003: the name, title and contact line printed on a tailored-resume
 // PDF (find_jobs/api/resume_display.py). GET carries `saved`, the values and,
 // while nothing is saved, a local `suggested` prefill; PUT saves (per-profile

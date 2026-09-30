@@ -1,0 +1,1104 @@
+{
+  "schemaVersion": 1,
+  "commands": {
+    "application history": {
+      "summary": "List the recorded application history for one Gig, optionally for one opportunity.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai application history --gig scout --opportunity opp-1"
+      ]
+    },
+    "application record": {
+      "summary": "Record an application outcome from an explicit input file (needs --confirm).",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai application record --gig scout --input outcome.json --confirm"
+      ],
+      "notes": "Write requires direct operator --confirm."
+    },
+    "application status": {
+      "summary": "Show the current application state for one Gig, optionally for one opportunity.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai application status --gig scout"
+      ]
+    },
+    "approve": {
+      "summary": "Seal one pending proposal as an offline approved Gig version.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai approve prop-1"
+      ],
+      "notes": "Approval is offline; no model is called."
+    },
+    "capability prepare-successor": {
+      "summary": "Prepare a pending successor proposal from one committed passed capability review. Never approves, activates or invokes.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai capability prepare-successor --gig scout --base-version 1 --base-proposal-id prop-1 --capability-id write_workpad --reviewed-manifest-id man-1 --operation-key op-1"
+      ]
+    },
+    "capability review": {
+      "summary": "Record reviewer judgment for the write_workpad capability from an input file (needs --confirm).",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai capability review --gig scout --base-version 1 --base-proposal-id prop-1 --manifest-id man-1 --capability-id write_workpad --operation-key op-1 --input review.json --confirm"
+      ]
+    },
+    "catalog inspect": {
+      "summary": "Show one bundled catalog entry.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai catalog inspect scout"
+      ]
+    },
+    "catalog install": {
+      "summary": "Install a bundled catalog entry into the target project.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai catalog install scout --target ."
+      ]
+    },
+    "catalog list": {
+      "summary": "List the bundled catalog entries.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai catalog list"
+      ]
+    },
+    "catalog validate": {
+      "summary": "Validate one bundled catalog entry.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai catalog validate scout"
+      ]
+    },
+    "check": {
+      "summary": "Validate one existing proposal workpad without creating or changing it.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai check scout"
+      ]
+    },
+    "comparison resume": {
+      "summary": "Resume an interrupted comparison without rerunning terminal cases.",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai comparison resume cmp-1 --gig scout --local-target ollama-local --luna-target codex --confirm"
+      ],
+      "notes": "Calls the two named model targets; needs --confirm."
+    },
+    "comparison run": {
+      "summary": "Run the same frozen synthetic cases through two named model setups (local and Luna).",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai comparison run --gig scout --local-target ollama-local --luna-target codex --confirm"
+      ],
+      "notes": "Calls the two named model targets; needs --confirm. `comparison start` is the same command."
+    },
+    "comparison show": {
+      "summary": "Read one journal-authenticated comparison without rerunning it.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai comparison show cmp-1 --gig scout"
+      ]
+    },
+    "comparison start": {
+      "summary": "Alias of `comparison run`.",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai comparison start --gig scout --local-target ollama-local --luna-target codex --confirm"
+      ],
+      "aliasOf": "comparison run"
+    },
+    "comparison status": {
+      "summary": "Read authenticated attempt and per-case checkpoint status of a comparison.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai comparison status cmp-1 --gig scout"
+      ]
+    },
+    "create": {
+      "summary": "Create a proposal from an explicit agent invocation envelope (command=create).",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai create scout --invocation create.json"
+      ],
+      "notes": "Requires --invocation; ordinary conversation is not imported. Refreshes the local runtime discovery snapshot; no model call."
+    },
+    "doctor": {
+      "summary": "Run offline, zero-token installation and configured-mount checks.",
+      "effect": "read",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai doctor --json"
+      ],
+      "notes": "Default is offline and zero-token. --live with --model-target makes one budget-bounded provider call (external=model)."
+    },
+    "external cancel": {
+      "summary": "Record cancellation of an externally performed invocation under an approved Gig.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai external cancel --gig scout --stdin"
+      ],
+      "notes": "No provider runs; protocol for agents that perform the work themselves."
+    },
+    "external checkpoint": {
+      "summary": "Record an external checkpoint under an approved Gig.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai external checkpoint --gig scout --stdin"
+      ],
+      "notes": "No provider runs."
+    },
+    "external graphs": {
+      "summary": "List the approved Graphs an external agent may work under.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai external graphs --gig scout"
+      ]
+    },
+    "external inspect": {
+      "summary": "Inspect the state of an external run (or the Gig).",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai external inspect --gig scout"
+      ]
+    },
+    "external plan": {
+      "summary": "Record an external plan under an approved Gig.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai external plan --gig scout --stdin"
+      ],
+      "notes": "No provider runs."
+    },
+    "external requirements": {
+      "summary": "Show the requirements of one approved Graph for external work.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai external requirements --gig scout --graph tailor-application"
+      ]
+    },
+    "external start": {
+      "summary": "Start recording an externally performed run under an approved Gig.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai external start --gig scout --stdin"
+      ],
+      "notes": "No provider runs."
+    },
+    "external submit": {
+      "summary": "Submit the result of an externally performed run under an approved Gig.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai external submit --gig scout --stdin"
+      ],
+      "notes": "No provider runs."
+    },
+    "feedback": {
+      "summary": "Record verbatim operator feedback for one pending proposal.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text.",
+      "examples": [
+        "gigai feedback prop-1 --text \"Make the summary shorter\""
+      ]
+    },
+    "gig use": {
+      "summary": "Make one already-installed, approved Gig the active Gig for this project.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai gig use scout"
+      ]
+    },
+    "gigs": {
+      "summary": "List registered Gigs for the bound project without writing workpad state.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai gigs --json"
+      ]
+    },
+    "graph-set propose": {
+      "summary": "Atomically stage a v2 Graph Set from a definition file; never approves or runs it.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai graph-set propose --definition graphs.json"
+      ]
+    },
+    "history": {
+      "summary": "List committed journal transitions for one Gig in sequence order.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai history scout"
+      ]
+    },
+    "init": {
+      "summary": "Initialize the package boundary and recoverable default instances.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai init --confirm"
+      ]
+    },
+    "internal eval behavior": {
+      "summary": "Score separately supplied Solver observations against a Case corpus (developer only).",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text.",
+      "examples": [
+        "gigai internal eval behavior --manifest m.json --observations o.json --split development"
+      ],
+      "hidden": true,
+      "hiddenReason": "Developer-only command retained outside the public CLI surface (group `internal` is hidden)."
+    },
+    "internal eval contract": {
+      "summary": "Validate a versioned behavioral evaluation manifest (developer only).",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text.",
+      "examples": [
+        "gigai internal eval contract --manifest m.json"
+      ],
+      "hidden": true,
+      "hiddenReason": "Developer-only command retained outside the public CLI surface (group `internal` is hidden)."
+    },
+    "internal improve": {
+      "summary": "Open an explicit improvement proposal interview against local evidence (developer only).",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai internal improve manifest.json --request 'tighten the summary' --reference evidence.md"
+      ],
+      "notes": "Runs model rounds against the configured target; opens a browser by default (--no-open disables).",
+      "hidden": true,
+      "hiddenReason": "Developer-only command retained outside the public CLI surface (group `internal` is hidden)."
+    },
+    "invoke": {
+      "summary": "Validate one explicit agent invocation envelope without creating GigAI authority.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai invoke --input envelope.json"
+      ]
+    },
+    "layout migrate": {
+      "summary": "Migrate one existing clean workpad to the authenticated v2 layout.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai layout migrate --gig scout"
+      ]
+    },
+    "models": {
+      "summary": "Show model discovery; optionally run one explicit readiness probe.",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai models --json"
+      ],
+      "notes": "--refresh re-captures the local runtime discovery snapshot (writes). --probe TARGET makes one bounded readiness call to that target (external=model)."
+    },
+    "occurrence close": {
+      "summary": "Close a terminal occurrence without creating another Run.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai occurrence close occ-1"
+      ]
+    },
+    "occurrence compare": {
+      "summary": "Compare one completed occurrence with its explicitly named prior occurrence.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai occurrence compare occ-2 --prior-occurrence occ-1"
+      ]
+    },
+    "occurrence declare": {
+      "summary": "Declare one explicit recurrence slot without starting a Run.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai occurrence declare weekly 2026-W40 --snapshot snap-1"
+      ]
+    },
+    "occurrence mark": {
+      "summary": "Record an explicit occurrence outcome without starting a Run.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai occurrence mark occ-1 skipped --reason \"on holiday\" --actor-id me"
+      ]
+    },
+    "occurrence reconcile": {
+      "summary": "Reconcile a prepared occurrence without relaunching its Run.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai occurrence reconcile occ-1"
+      ]
+    },
+    "occurrence trigger": {
+      "summary": "Trigger one declared occurrence through the existing Run path (needs --confirm).",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai occurrence trigger occ-1 --confirm"
+      ],
+      "notes": "Uses the same Run path as `gigai run`, so a provider-backed Graph may call a model."
+    },
+    "open": {
+      "summary": "Launch the structured editor for the declared, existing locations of a Gig.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text.",
+      "examples": [
+        "gigai open scout"
+      ],
+      "notes": "Starts the configured editor process; changes no GigAI state itself."
+    },
+    "package export": {
+      "summary": "Export validated portable package bytes without project or Gig authority.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai package export pkg.gigai out.gigai"
+      ]
+    },
+    "package inspect": {
+      "summary": "Validate one package and report its portable identity.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai package inspect pkg.gigai"
+      ]
+    },
+    "package install": {
+      "summary": "Install portable package bytes without importing project or Gig authority.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai package install pkg.gigai --target ."
+      ]
+    },
+    "plan": {
+      "summary": "Render the proposed or approved Goal Graph without starting work.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai plan scout"
+      ]
+    },
+    "proposal": {
+      "summary": "Assess one authenticated posting with explicitly selected private revisions.",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai proposal scout --model-target ollama-local --posting-selector post-1 --private-selector rev-1 --confirm"
+      ],
+      "notes": "Calls the named local Ollama target; needs --confirm."
+    },
+    "proposals": {
+      "summary": "Show the proposal envelope currently committed for one Gig.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai proposals scout"
+      ]
+    },
+    "provider-review closeout": {
+      "summary": "Record a direct operator decision on a provider review; never approval or Run authority.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai provider-review closeout --run run-1 --plan plan-1 --confirm"
+      ]
+    },
+    "record create": {
+      "summary": "Create a private record revision from a kind, content family and id.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai record create --kind profile_preferences --content-family g45_reference --content-id ref-1 --operation-key op-1"
+      ]
+    },
+    "record native archive": {
+      "summary": "Archive one native record.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai record native archive --id rec-1 --parent-revision rev-1 --operation-key op-1"
+      ]
+    },
+    "record native context": {
+      "summary": "Show the native record context for this Gig.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai record native context"
+      ]
+    },
+    "record native create": {
+      "summary": "Create a native record from a content file.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai record native create --content-file content.json --operation-key op-1"
+      ]
+    },
+    "record native list": {
+      "summary": "List native records (metadata only).",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai record native list"
+      ]
+    },
+    "record native override": {
+      "summary": "Create a task-context override of a native record from a content file.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai record native override --content-file content.json --base-record rec-1 --base-revision rev-1 --operation-key op-1"
+      ]
+    },
+    "record native read": {
+      "summary": "Read one native record revision.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai record native read --id rec-1"
+      ]
+    },
+    "record native update": {
+      "summary": "Append a new revision to a native record from a content file.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai record native update --id rec-1 --parent-revision rev-1 --content-file content.json --operation-key op-1"
+      ]
+    },
+    "record read": {
+      "summary": "Read one private record revision.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai record read --id rec-1"
+      ]
+    },
+    "reference add": {
+      "summary": "Import a file as a private reference (resume, project evidence, role history, cover letter).",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai reference add --kind resume --file resume.md"
+      ]
+    },
+    "reference list": {
+      "summary": "List imported private references (metadata only).",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai reference list"
+      ]
+    },
+    "reference show": {
+      "summary": "Show one imported private reference.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai reference show ref-1"
+      ]
+    },
+    "reject": {
+      "summary": "Reject one pending proposal without creating an executable Gig version.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text.",
+      "examples": [
+        "gigai reject prop-1 --reason \"not needed\""
+      ]
+    },
+    "revise": {
+      "summary": "Produce a new validated proposal linked to a prior pending proposal.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai revise prop-1 --change \"shorter summary\""
+      ]
+    },
+    "run": {
+      "summary": "Run one approved Gig through its deterministic local capability.",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai run scout --confirm"
+      ],
+      "notes": "Local and deterministic by default. --execute-review runs the sealed provider-backed review participants (external=model). Needs --confirm."
+    },
+    "run-details": {
+      "summary": "Read durable state for one Run without starting work.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai run-details run-1"
+      ]
+    },
+    "run-input add": {
+      "summary": "Store a run input (for example a pasted job description) as a private record.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai run-input add --file job.txt"
+      ]
+    },
+    "run-input show": {
+      "summary": "Show one stored run input.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai run-input show ri-1"
+      ]
+    },
+    "run-plan approve-baseline": {
+      "summary": "Directly approve one frozen requirements baseline; never seals a Run Plan.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai run-plan approve-baseline --input baseline.json --confirm"
+      ]
+    },
+    "run-plan create": {
+      "summary": "Seal one immutable Run Plan; never allocates a Run.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai run-plan create --version 1"
+      ]
+    },
+    "run-plan list": {
+      "summary": "List sealed Run Plans.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai run-plan list"
+      ]
+    },
+    "run-plan show": {
+      "summary": "Show one sealed Run Plan.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai run-plan show plan-1"
+      ]
+    },
+    "scout answer": {
+      "summary": "Answer one interview question once; the answer is reused across every posting.",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout answer q-visa --answer-text \"I need H-1B sponsorship\""
+      ],
+      "notes": "Writes the answer to the Gig's experience records. --reassess JOB_URL_OR_ID re-runs the assessment with a model (external=model)."
+    },
+    "scout assess": {
+      "summary": "Assess ONE job against a resume right now, without a find-jobs run.",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout assess --job-url https://boards.greenhouse.io/acme/jobs/1 --resume resume.md --json"
+      ],
+      "notes": "Calls the configured model adapter (default from find-jobs.json). --job-url may fetch the posting over the network."
+    },
+    "scout discover": {
+      "summary": "Run the weekly company-discovery engine (OpenAI web_search + H-1B baseline).",
+      "effect": "write",
+      "external": "network",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout discover --runs 3"
+      ],
+      "notes": "Foreground; can take 5-30 minutes. Calls OpenAI web_search (network + model) and needs credentials. --status only reads."
+    },
+    "scout install": {
+      "summary": "Bind, approve, and activate Scout for the bound project; safe to rerun.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object, including \"stopped_server\" (always null for install).",
+      "examples": [
+        "gigai scout install"
+      ]
+    },
+    "scout prep": {
+      "summary": "Prepare for an interview at a find-jobs-acquired posting.",
+      "effect": "write",
+      "external": "network",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout prep https://boards.greenhouse.io/acme/jobs/1 --budget 0.25"
+      ],
+      "notes": "OpenAI web_search for company research plus one model call for likely question categories; the resume goes only to the model call. Idempotent per (profile, posting, resume revision).",
+      "hidden": true,
+      "hiddenReason": "Hidden in 0.1.9/0.1.10: not part of the supported Scout surface yet; kept for internal use until its UX ships."
+    },
+    "scout resume add": {
+      "summary": "Import a file as the resume reference and create the record find-jobs reads.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout resume add resume.md"
+      ],
+      "notes": "Works as the very first command on a fresh machine: writes the default GigAI settings (like 'gigai scout run'), installs Scout if needed, then imports the file. Never rewrites an existing config."
+    },
+    "scout resume tailor": {
+      "summary": "Tailor a resume to ONE job posting right now: markdown, every line sourced.",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout resume tailor --job-url https://boards.greenhouse.io/acme/jobs/1 --resume resume.md --out tailored.md"
+      ],
+      "notes": "Calls the configured model adapter; name and contact lines are removed before the model sees the resume text. --job-url may fetch the posting."
+    },
+    "scout run": {
+      "summary": "Install/activate Scout if needed, then start (or reuse) its local API + UI.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object, including \"stopped_server\": {pid, home, target} for a verified older Scout server that was stopped to free the port, else null.",
+      "examples": [
+        "gigai scout run --no-browser"
+      ],
+      "notes": "Serves on localhost only. Once running, GET /api describes the HTTP API."
+    },
+    "scout sources status": {
+      "summary": "Show the last sources update and whether a search can use the stored postings.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout sources status"
+      ]
+    },
+    "scout sources update": {
+      "summary": "Check every company board on the watchlist and store what changed.",
+      "effect": "write",
+      "external": "network",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout sources update --budget-seconds 120"
+      ],
+      "notes": "One conditional request per board (Greenhouse, Lever, Ashby). Resumable if the time budget stops it."
+    },
+    "scout status": {
+      "summary": "Show whether this project's Scout instance is running, stopped, or crashed.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout status"
+      ]
+    },
+    "scout stop": {
+      "summary": "Stop this project's running Scout instance, if any. Safe to rerun.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout stop"
+      ],
+      "notes": "Stops the local server process."
+    },
+    "scout watchlist add": {
+      "summary": "Add a company by its Greenhouse / Lever / Ashby board (or job) URL.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout watchlist add https://boards.greenhouse.io/acme"
+      ],
+      "notes": "The URL is only parsed; no request is made until `scout sources update`. Any other host is refused. Idempotent."
+    },
+    "scout-acquisition import": {
+      "summary": "Persist one bounded batch of caller-supplied public rows.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-acquisition import --batch-id b1 --rows-file rows.json --gig scout"
+      ]
+    },
+    "scout-acquisition resume": {
+      "summary": "Resume the exact committed input snapshot for a partial batch.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-acquisition resume --batch-id b1 --gig scout"
+      ]
+    },
+    "scout-acquisition status": {
+      "summary": "Read one journal-authenticated batch and its cumulative outcome ledger.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-acquisition status --batch-id b1 --gig scout"
+      ]
+    },
+    "scout-answer save": {
+      "summary": "Append one answered question to an existing native experience record (needs --confirm).",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-answer save --record-id rec-1 --parent-revision rev-1 --question-id q-1 --answer-file a.json --operation-key op-1 --confirm --gig scout"
+      ]
+    },
+    "scout-documents final-select": {
+      "summary": "Persist a final document selection after authenticating its completed Tailor Run (needs --confirm).",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-documents final-select --document doc-1 --run-id run-1 --goal-id g-1 --invocation-id inv-1 --output-sha256 abc123 --operation-key op-1 --confirm --gig scout"
+      ]
+    },
+    "scout-documents read-selection": {
+      "summary": "Read one authenticated immutable final selection.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-documents read-selection --opportunity opp-1 --snapshot snap-1 --gig scout"
+      ]
+    },
+    "scout-import import": {
+      "summary": "Alias of `scout-acquisition import`.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-import import --batch-id b1 --gig scout"
+      ],
+      "aliasOf": "scout-acquisition import"
+    },
+    "scout-import resume": {
+      "summary": "Alias of `scout-acquisition resume`.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-import resume --batch-id b1 --gig scout"
+      ],
+      "aliasOf": "scout-acquisition resume"
+    },
+    "scout-import status": {
+      "summary": "Alias of `scout-acquisition status`.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-import status --batch-id b1 --gig scout"
+      ],
+      "aliasOf": "scout-acquisition status"
+    },
+    "scout-interview feedback": {
+      "summary": "Save user practice feedback as a new immutable revision.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-interview feedback --record-id rec-1 --parent-revision rev-1 --feedback-file f.json --operation-key op-1 --home ~/.gigai --gig scout"
+      ]
+    },
+    "scout-interview list": {
+      "summary": "List interview preparation metadata without private content.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-interview list --home ~/.gigai --gig scout"
+      ]
+    },
+    "scout-interview prepare": {
+      "summary": "Create interview preparation, or execute it through the approved prepare-interview Graph.",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-interview prepare --selection-file sel.json --content-file c.json --operation-key op-1 --home ~/.gigai --gig scout"
+      ],
+      "notes": "Without --run it only stores the supplied content. --run --confirm executes the Graph (external=model)."
+    },
+    "scout-interview read": {
+      "summary": "Read one committed interview preparation revision.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-interview read --record-id rec-1 --home ~/.gigai --gig scout"
+      ]
+    },
+    "scout-interview revise": {
+      "summary": "Append revised interview preparation content after a fresh session.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-interview revise --record-id rec-1 --parent-revision rev-1 --content-file c.json --operation-key op-1 --home ~/.gigai --gig scout"
+      ]
+    },
+    "scout-report generate": {
+      "summary": "Generate a complete atomic report bundle from committed history.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-report generate --gig scout"
+      ]
+    },
+    "scout-report status": {
+      "summary": "Inspect the selected report and whether its journal cursor is stale.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-report status --gig scout"
+      ]
+    },
+    "scout-transfer backup-private": {
+      "summary": "Back up a workpad's private records into an archive (needs --confirm).",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-transfer backup-private --workpad wp --archive backup.tar --confirm"
+      ],
+      "notes": "Writes private content; keep the archive private."
+    },
+    "scout-transfer export-definition": {
+      "summary": "Export a workpad's shareable definition (no private records) to an archive.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-transfer export-definition --workpad wp --archive def.tar"
+      ]
+    },
+    "scout-transfer import-definition": {
+      "summary": "Import a definition archive into a destination.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-transfer import-definition --archive def.tar --destination dest"
+      ]
+    },
+    "scout-transfer restore-private": {
+      "summary": "Restore private records from a backup archive (needs --confirm).",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout-transfer restore-private --archive backup.tar --destination dest --confirm"
+      ]
+    },
+    "secrets add": {
+      "summary": "Store a credential for a service (read from --stdin, never echoed).",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai secrets add openai --stdin"
+      ],
+      "notes": "Stores a secret in the local secret store."
+    },
+    "secrets list": {
+      "summary": "List stored credential service names (never values).",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai secrets list"
+      ]
+    },
+    "secrets rm": {
+      "summary": "Remove the stored credential for a service.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai secrets rm openai"
+      ]
+    },
+    "setup": {
+      "summary": "Run terminal setup, or update configuration non-interactively.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai setup --non-interactive --model-target ollama-local"
+      ],
+      "notes": "Writes GigAI settings under the home directory."
+    },
+    "show": {
+      "summary": "Show the canonical projection for one explicit or active Gig.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai show scout"
+      ]
+    },
+    "status": {
+      "summary": "Report the explicit proposal and active-version state for one Gig.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai status scout"
+      ]
+    },
+    "tailor": {
+      "summary": "Generate explicitly requested private documents; never applies or submits.",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai tailor scout --model-target ollama-local --posting-selector post-1 --private-selector rev-1 --confirm"
+      ],
+      "notes": "Calls the named local Ollama target; needs --confirm."
+    },
+    "upgrade": {
+      "summary": "Migrate a supported v0.1.6 installation and project boundary.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai upgrade --confirm"
+      ]
+    },
+    "workpad path": {
+      "summary": "Print the canonical path of one already-registered Gig workpad.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text.",
+      "examples": [
+        "gigai workpad path scout"
+      ]
+    },
+    "agent-context": {
+      "summary": "Print the machine-readable command manual (this file merged with the live Click tree).",
+      "effect": "read",
+      "external": "none",
+      "output": "One summary line; --json emits the full manual (schemaVersion, commandCount, commands).",
+      "examples": [
+        "gigai agent-context",
+        "gigai agent-context --json"
+      ],
+      "notes": "Offline; reads only the packaged manifest and the command tree."
+    }
+  }
+}

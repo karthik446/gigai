@@ -973,7 +973,7 @@ def test_thin_matrix_on_a_long_posting_is_not_matched() -> None:
     outcome = assess_once(binding, _job(posting_text=_LONG_POSTING), _ctx(), parse=_parse)
 
     assert not outcome.ok and outcome.parsed is None  # no Matched verdict comes out
-    assert outcome.not_assessed_reason is NotAssessedReason.FAILED
+    assert outcome.not_assessed_reason is NotAssessedReason.POSTING_INCOMPLETE
     assert outcome.incomplete_posting and outcome.validation_error == POSTING_INCOMPLETE_MESSAGE
     assert POSTING_INCOMPLETE_MESSAGE == "Posting text looks incomplete: open the posting"
     assert len(binding.port.prompts) == 1  # not retried

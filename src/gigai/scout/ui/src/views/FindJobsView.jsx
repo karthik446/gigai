@@ -915,7 +915,7 @@ export default function FindJobsView({
         {rankError && <span className="muted">Rank: {rankError}</span>}
       </div>
     ) : null;
-  const strip = sourcesStrip(sources.status);
+  const strip = sourcesStrip(sources.status, { hasRun: runsState.runs.length > 0 });
   // uat-bug-048: the strip says it; the Settings link notice only when the strip cannot.
   const notice = strip.kind !== "unknown" ? null : indexNotice(sources.status, { atsEnabled: Boolean(config && config.config && config.config.sources && config.config.sources.ats) });
   const grid = (
@@ -1040,7 +1040,7 @@ export default function FindJobsView({
           </div>
         </div>
         <SourcesStrip strip={strip} read={sources.read} />
-        {strip.runBlocked && (
+        {strip.runBlocked && !strip.steps && (
           <p className="muted" style={{ margin: 0 }} data-role="run-blocked">
             {strip.runBlocked}
           </p>
@@ -1091,8 +1091,13 @@ export default function FindJobsView({
       {!results && !runActive && !resultsLoading && !runsState.loading && runsState.runs.length === 0 && (
         <div className="panel">
           <p className="muted" style={{ margin: 0 }}>
-            {noRunText(strip)}{" "}
-            <a href={ASSESSMENTS_HASH}>Assessments</a>.
+            {noRunText(strip)}
+            {!strip.steps && (
+              <>
+                {" "}
+                <a href={ASSESSMENTS_HASH}>Assessments</a>.
+              </>
+            )}
           </p>
         </div>
       )}

@@ -20,7 +20,7 @@ Design:
   human-readable log to stdout.
 
 Non-code paths (everything else counts as code, per the spec this module
-implements): ``*.md``, ``*.markdown``, ``*.txt``, ``docs/**``,
+implements): ``*.md``, ``*.markdown``, ``*.txt``, ``docs/**``, ``gigai-docs/**``,
 ``.orchestrator/**``, ``.claude/**/*.md``. Note ``.claude/**/*.py`` and
 ``.claude/**/*.sh`` are code -- only ``.md`` files under ``.claude/`` are
 exempt.
@@ -54,6 +54,7 @@ _NON_CODE_GLOBS = (
     "*.markdown",
     "*.txt",
     "docs/**",
+    "gigai-docs/**",
     ".orchestrator/**",
     ".claude/**/*.md",
 )

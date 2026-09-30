@@ -5,30 +5,36 @@ import {
   extractResume,
   getConfig,
   getProfiles,
+  getResumeDisplay,
   getSecretsStatus,
   getSetup,
+  putResumeDisplay,
   putSetup,
   selectProfile,
   storeResume,
   updateProfile,
 } from "./wizardApi.js";
+import { draftFromResponse } from "../resumeDisplayModel.js";
 import { finishSetup } from "./wizardFinish.js";
 import { existingResumes, extractBody, initialFields, screenIsComplete, setupHints } from "./wizardState.js";
 import StepIndicator from "./StepIndicator.jsx";
 import ResumeScreen from "./ResumeScreen.jsx";
+import ResumeDisplayScreen from "./ResumeDisplayScreen.jsx";
 import TargetScreen from "./TargetScreen.jsx";
 import CompaniesScreen from "./CompaniesScreen.jsx";
 import FinishScreen from "./FinishScreen.jsx";
 import "./wizard.css";
 
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 5;
 
-// P9b (F2): the 4-screen setup wizard that replaces the one-page interview.
+// P9b (F2): the 5-screen setup wizard that replaces the one-page interview.
 //
 //   1. Resume + profile  -> POST /api/resume/extract (stack / seniority / titles)
-//   2. Target            -> titles (seeded from 1), countries, work mode, visa
-//   3. Companies         -> exclude / always watch (catalog: S26, not in 0.1.9)
-//   4. Review            -> the review table, what is still missing (an
+//   2. Resume display    -> the PDF header (0110-013; GET /api/resume-display,
+//      skippable; saved by Finish with PUT /api/resume-display)
+//   3. Target            -> titles (seeded from 1), countries, work mode, visa
+//   4. Companies         -> exclude / always watch (catalog: S26, not in 0.1.9)
+//   5. Review            -> the review table, what is still missing (an
 //      unset key, Ollama: wizardState.setupHints), then Finish
 //      (wizardFinish.js) stores the resume, saves the profile with it and
 //      the preferences (A2: no discovery cadence or budget is asked;
@@ -37,6 +43,7 @@ const TOTAL_STEPS = 4;
 //        POST /api/profiles  (or PUT /api/profiles/{id})
 //        POST /api/profiles/selection (a first profile only)
 //        PUT  /api/setup
+//        PUT  /api/resume-display (unless the Resume display step was skipped)
 //
 // `onDone(result)` fires as soon as Finish has saved; `result` is
 // `{profile}` (the saved profile's public shape). The caller decides where
@@ -67,6 +74,7 @@ export default function SetupWizard({ onDone, onCancel }) {
   const [saveError, setSaveError] = useState(null);
   const [fieldErrors, setFieldErrors] = useState(null);
   const [saved, setSaved] = useState(null);
+  const [displayError, setDisplayError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -166,6 +174,38 @@ export default function SetupWizard({ onDone, onCancel }) {
     }
   }
 
+  // 0110-013: the Resume display draft loads once, when the step is first
+  // opened (prefilled from the resume header by the server, as on the profile
+  // page). A failed read leaves the draft empty so the step still works.
+  useEffect(() => {
+    if (step !== 2 || !fields || fields.display) {
+      return undefined;
+    }
+    let live = true;
+    setDisplayError(null);
+    getResumeDisplay(selectedProfile ? selectedProfile.profile_id : undefined)
+      .then((response) => live && setField("display", draftFromResponse(response)))
+      .catch((error) => {
+        if (live) {
+          setDisplayError(error.message || String(error));
+          setField("display", draftFromResponse(null));
+        }
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, Boolean(fields)]);
+
+  function changeDisplay(patch) {
+    setFields((prev) => ({ ...prev, display: { ...prev.display, ...patch }, displaySkipped: false }));
+  }
+
+  function skipDisplay() {
+    setField("displaySkipped", true);
+    goNext();
+  }
+
   function goNext() {
     if (step === 1 && !fields.titlesSeeded && fields.suggestedTitles.length > 0) {
       // Mockup default: screen 1's suggested titles copy into screen 2 on
@@ -194,7 +234,7 @@ export default function SetupWizard({ onDone, onCancel }) {
     try {
       const result = await finishSetup(
         { fields, selectedProfile, existingPrefs },
-        { storeResume, getProfiles, createProfile, updateProfile, selectProfile, putSetup },
+        { storeResume, getProfiles, createProfile, updateProfile, selectProfile, putSetup, putResumeDisplay },
       );
       setExistingPrefs(result.prefs);
       const done = { profile: result.profile };
@@ -249,9 +289,10 @@ export default function SetupWizard({ onDone, onCancel }) {
           onExtract={handleExtract}
         />
       )}
-      {step === 2 && <TargetScreen fields={fields} setField={setField} fieldErrors={fieldErrors} />}
-      {step === 3 && <CompaniesScreen fields={fields} setField={setField} fieldErrors={fieldErrors} />}
-      {step === 4 && (
+      {step === 2 && <ResumeDisplayScreen fields={fields} loadError={displayError} onChange={changeDisplay} onSkip={skipDisplay} />}
+      {step === 3 && <TargetScreen fields={fields} setField={setField} fieldErrors={fieldErrors} />}
+      {step === 4 && <CompaniesScreen fields={fields} setField={setField} fieldErrors={fieldErrors} />}
+      {step === 5 && (
         <FinishScreen
           fields={fields}
           resumes={resumes}

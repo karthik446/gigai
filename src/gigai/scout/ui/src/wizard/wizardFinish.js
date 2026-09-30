@@ -19,11 +19,13 @@
 //                                   it they went to the SELECTED profile,
 //                                   so "Create a new profile" overwrote the
 //                                   selected profile's titles)
+//   6. PUT  /api/resume-display     the Resume display step (0110-013), only
+//                                   when it was opened and not skipped
 //
 // Pressing Finish again after a failure at any step repeats the steps
 // without making a second resume (the server stores a resume once per
 // content) or a second profile (step 3 finds the one already saved).
-import { profileBody, profileToUpdate, resumeBody, setupBody } from "./wizardState.js";
+import { displayBody, profileBody, profileToUpdate, resumeBody, setupBody } from "./wizardState.js";
 
 export async function finishSetup({ fields, selectedProfile, existingPrefs }, api) {
   let resumeRef = null;
@@ -54,5 +56,11 @@ export async function finishSetup({ fields, selectedProfile, existingPrefs }, ap
   }
 
   const prefsResponse = await api.putSetup({ ...setupBody(fields, existingPrefs), profile_id: profile.profile_id });
+  // 0110-013: the Resume display step, saved for the profile just written
+  // (its title is this profile's). Only PUT /api/resume-display gets it.
+  const display = displayBody(fields, profile.profile_id);
+  if (display) {
+    await api.putResumeDisplay(display);
+  }
   return { profile, selectedProfileId, resumeRef, prefs: prefsResponse.prefs };
 }

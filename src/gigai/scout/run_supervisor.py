@@ -18,6 +18,8 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import os
+import re
+import shlex
 import signal
 import socket
 import subprocess
@@ -414,6 +416,9 @@ class ScoutRunResult:
     # Set when another project's live Scout server held the requested port
     # and was stopped so this one could start (uat-bug-019).
     stopped_other: OtherScoutServer | None = None
+    # Set when a verified Scout server NOT recorded in this home held the port
+    # and was stopped (0.1.10 item 3).
+    stopped_server: "StoppedOlderServer | None" = None
 
 
 def ensure_scout_ready(*, home_root: Path, requested_target: Path | None) -> None:
@@ -519,6 +524,126 @@ def _stop_other_server_on_port(
     return None
 
 
+# 0.1.10 item 3: the holder of the port is not recorded in the current home
+# (the home was moved or deleted while its server kept running). Stop it only
+# when it is verifiably a Scout server: its listening pid, a `-m
+# gigai.scout.find_jobs.present_api` command line, AND the Scout identity
+# answer on loopback (GET /api returning Scout's "scout-api-index:1" index, or, for 0.1.9.x, GET /api/secrets/status;
+# /api/health alone is a generic {"status": "ok"}). Anything else is message-only.
+_OLDER_SERVER_CMD = re.compile(r"(?:^|\s)-m\s+" + re.escape(_SERVER_MODULE_MARKER) + r"(?:\s|$)")
+_SCOUT_API_INDEX_SCHEMA = "scout-api-index:"
+_SCOUT_LEGACY_SCHEMA = "scout-secrets-status:"
+
+
+@dataclass(frozen=True)
+class StoppedOlderServer:
+    pid: int
+    port: int
+    home: str | None
+    target: str | None
+
+    def to_json(self) -> dict[str, object]:
+        return {"pid": self.pid, "home": self.home, "target": self.target}
+
+
+def _listening_pids(port: int) -> list[int]:
+    try:
+        result = subprocess.run(  # noqa: S603, S607 - fixed argv, no shell
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fp"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=5.0,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    lines = result.stdout.decode(errors="replace").splitlines()
+    return sorted({int(line[1:]) for line in lines if re.fullmatch(r"p\d+", line)})
+
+
+def _scout_schema_at(port: int, path: str, prefix: str, *, timeout: float) -> bool:
+    try:
+        with urlopen(f"http://127.0.0.1:{port}{path}", timeout=timeout) as response:
+            if response.status != 200:
+                return False
+            document = parse_json_bytes(response.read(1_000_000))
+    except (URLError, OSError, TimeoutError, ValueError):
+        return False
+    schema = document.get("schema_version") if isinstance(document, dict) else None
+    return isinstance(schema, str) and schema.startswith(prefix)
+
+
+def _answers_scout_identity(port: int, *, timeout: float = 2.0) -> bool:
+    # Either answer is Scout-specific (never the generic /api/health): 0.1.10+ answers
+    # GET /api; 0.1.9.x servers 404 there but answer GET /api/secrets/status (read-only,
+    # booleans only) with "scout-secrets-status:1" (v0.1.9.1 api/secrets_status.py).
+    return _scout_schema_at(port, "/api", _SCOUT_API_INDEX_SCHEMA, timeout=timeout) or _scout_schema_at(
+        port, "/api/secrets/status", _SCOUT_LEGACY_SCHEMA, timeout=timeout
+    )
+
+
+def _flag_value(command_line: str, flag: str) -> str | None:
+    try:
+        parts = shlex.split(command_line)
+    except ValueError:
+        parts = command_line.split()
+    values = [parts[i + 1] for i in range(len(parts) - 1) if parts[i] == flag]
+    return values[-1] if values else None
+
+
+def _stop_verified_older_scout(port: int) -> StoppedOlderServer | None:
+    """Stop the Scout server holding ``port`` if verifiably Scout; raise if the holder is not.
+
+    ``None`` means the holder could not be resolved (nothing was touched).
+    """
+
+    pids = _listening_pids(port)
+    if not pids:
+        return None
+    pid = pids[0]
+    command_line = _command_line_for_pid(pid)
+    if (
+        len(pids) != 1
+        or command_line is None
+        or _OLDER_SERVER_CMD.search(command_line) is None
+        or not _answers_scout_identity(port)
+    ):
+        raise ScoutRunError(
+            "scout_run_port_in_use",
+            f"port {port} is in use by pid {pid} ({command_line or 'command unknown'}), "
+            "which is not a Scout server; stop it or pass --port",
+        )
+
+    def _still_it() -> bool:
+        return _command_line_for_pid(pid) == command_line and pid in _listening_pids(port)
+
+    if not _still_it():  # re-verified immediately before signalling
+        raise ScoutRunError(
+            "scout_run_port_in_use",
+            f"port {port} is already in use; pass --port to choose a different one",
+        )
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + STOP_TIMEOUT_SECONDS
+    while time.monotonic() < deadline and _process_is_alive(pid):
+        time.sleep(0.1)
+    if _process_is_alive(pid) and _still_it():
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    stopped = StoppedOlderServer(
+        pid=pid,
+        port=port,
+        home=_flag_value(command_line, "--home"),
+        target=_flag_value(command_line, "--target"),
+    )
+    sys.stderr.write(
+        f"Stopped an older Scout server (pid {pid}, started with --home {stopped.home} "
+        f"--target {stopped.target}) that was using port {port}\n"
+    )
+    return stopped
+
+
 def _port_is_released(port: int) -> bool:
     deadline = time.monotonic() + PORT_RELEASE_TIMEOUT_SECONDS
     while not _port_is_free(port):
@@ -579,6 +704,7 @@ def start(
 
     requested_port = port if port is not None else DEFAULT_PORT
     stopped_other: OtherScoutServer | None = None
+    older: StoppedOlderServer | None = None
     if not _port_is_free(requested_port):
         # uat-bug-019: the port may be held by a Scout server recorded for
         # another project (after uat-bug-017 moved Scout to <home>/scout,
@@ -588,7 +714,9 @@ def start(
         stopped_other = _stop_other_server_on_port(home_root, project_id, requested_port)
         if stopped_other is not None and on_stopped_other is not None:
             on_stopped_other(stopped_other)
-        if stopped_other is None or not _port_is_released(requested_port):
+        if stopped_other is None:
+            older = _stop_verified_older_scout(requested_port)
+        if (stopped_other is None and older is None) or not _port_is_released(requested_port):
             raise ScoutRunError(
                 "scout_run_port_in_use",
                 f"port {requested_port} is already in use; pass --port to choose a different one",
@@ -639,6 +767,7 @@ def start(
             cleaned_stale=cleaned_stale,
             restarted_from_version=restarted_from_version,
             stopped_other=stopped_other,
+            stopped_server=older,
         )
 
     with log_path.open("ab") as log_file:
@@ -691,6 +820,7 @@ def start(
         cleaned_stale=cleaned_stale,
         restarted_from_version=restarted_from_version,
         stopped_other=stopped_other,
+        stopped_server=older,
     )
 
 

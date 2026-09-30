@@ -266,6 +266,13 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
             </>
           )}
 
+        </section>
+      )}
+
+      {selected && <ResumeDisplayPanel profileId={selected.profile_id} />}
+
+      {selected && (
+        <section className="panel">
           <h3>Run history</h3>
           <RunHistoryTable profileId={selected.profile_id} />
 
@@ -278,8 +285,6 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
           {archiveNote && <div className="callout info">{archiveNote}</div>}
         </section>
       )}
-
-      {selected && <ResumeDisplayPanel profileId={selected.profile_id} />}
 
       {config && (
         <section className="panel">

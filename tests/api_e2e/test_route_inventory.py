@@ -54,12 +54,19 @@ JOURNEYS: dict[Route, str] = {
     Route("POST", "/api/tailored-resumes"): "test_tailored_resumes_journey.py",
     Route("GET", "/api/tailored-resumes"): "test_tailored_resumes_journey.py",
     Route("POST", "/api/tailored-resumes/pdf"): "test_tailored_resume_pdf_journey.py",
+    Route("PUT", "/api/tailored-resumes/lines"): "test_tailored_resume_line_choice_journey.py",
     Route("GET", "/api/resume-display"): "test_resume_display_journey.py",
     Route("PUT", "/api/resume-display"): "test_resume_display_journey.py",
     Route("GET", "/api/watchlist"): "test_watchlist_journey.py",
     Route("POST", "/api/watchlist"): "test_watchlist_journey.py",
     Route("POST", "/api/sources/update"): "test_sources_update_journey.py",
     Route("GET", "/api/sources/update"): "test_sources_update_journey.py",
+    # 0110-007: the agent-facing routes. ``GET /api`` (and ``/api/``) is matched by
+    # ``path in (...)`` in the dispatcher, which this scanner does not read; the
+    # drift test (test_openapi_drift.py) pins it separately.
+    Route("GET", "/api/openapi.json"): "test_agent_api_journey.py, test_openapi_drift.py",
+    Route("GET", "/api/jobs"): "test_agent_api_journey.py",
+    Route("GET", "/llms.txt"): "test_agent_api_journey.py",
 }
 
 

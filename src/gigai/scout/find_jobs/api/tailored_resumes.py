@@ -26,7 +26,16 @@ from http import HTTPStatus
 from urllib.parse import parse_qs, urlsplit
 
 from ...quick_assess import QuickAssessError
-from ...tailored_resume import TailoredResumesListResponse, TailorRequest, list_tailored_resumes, run_tailored_resume
+from ...tailored_resume import (
+    LINE_CHOICES,
+    TailoredResumesListResponse,
+    TailorError,
+    TailorRequest,
+    apply_line_choice,
+    list_tailored_resumes,
+    run_tailored_resume,
+    save_tailor_response,
+)
 from ...resume_display import load_display, pdf_header
 from ...resume_pdf import pdf_file_name, render_pdf
 from ..contracts import FindJobsContractError
@@ -40,7 +49,7 @@ def _status_for(code: str) -> HTTPStatus:
 
 
 class TailoredResumesRoutesMixin:
-    """``Handler`` mixin: ``POST /api/tailored-resumes`` and ``GET /api/tailored-resumes``."""
+    """``Handler`` mixin: ``POST /api/tailored-resumes``, ``GET /api/tailored-resumes`` and ``PUT /api/tailored-resumes/lines``."""
 
     def _tailor_target(self):
         backend = self._backend
@@ -116,6 +125,48 @@ class TailoredResumesRoutesMixin:
             pdf,
             {"Content-Disposition": f'attachment; filename="{file_name}"'},
         )
+
+    def _handle_put_tailored_resume_line(self) -> None:
+        """``PUT /api/tailored-resumes/lines``: show the original or the rewrite of one line."""
+
+        body = self._read_json_body()
+        if body is None:
+            return
+        keys = {"profile_id", "job_identity", "updated_at", "line_id", "use"}
+        if type(body) is not dict or set(body) != keys:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "body must be exactly profile_id, job_identity, updated_at, line_id and use")
+            return
+        if not all(isinstance(body[key], str) and body[key] for key in keys):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "every field must be a non-empty string")
+            return
+        if body["use"] not in LINE_CHOICES:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "use must be original or rewritten")
+            return
+        target = self._tailor_target()
+        if target is None:
+            return
+        try:
+            items = list_tailored_resumes(
+                self._backend.home_root, target, profile_id=body["profile_id"], job_identity=body["job_identity"]
+            )
+        except QuickAssessError as exc:
+            self._error(_status_for(exc.code), exc.code, str(exc))
+            return
+        if not items:
+            self._error(HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that profile and job")
+            return
+        stored = items[0]
+        if stored.updated_at != body["updated_at"]:
+            self._error(HTTPStatus.CONFLICT, "tailored_resume_changed", "a newer tailoring replaced this resume; reload it")
+            return
+        try:
+            updated = apply_line_choice(stored, body["line_id"], body["use"])
+        except TailorError as exc:
+            self._error(_status_for(exc.code), exc.code, str(exc))
+            return
+        if updated is not stored:
+            save_tailor_response(updated)
+        self._write_json(HTTPStatus.OK, updated.to_json())
 
     def _handle_get_tailored_resumes(self) -> None:
         target = self._tailor_target()

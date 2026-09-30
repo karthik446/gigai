@@ -2,3 +2,7 @@
 # intentionally not part of the source distribution. Do not publish a partial,
 # non-runnable test tree.
 prune tests
+
+# The public docs site (gigai-docs/) is published to GitHub Pages, never shipped in the
+# package; tools/release_check.py verify-artifacts enforces it.
+prune gigai-docs

@@ -32,6 +32,8 @@ PULL_REQUEST_WORKFLOW_USES = "./.github/workflows/pull_request.yaml"
         "notes.txt",
         "docs/README.md",
         "docs/anything/at/any/depth.py",  # docs/** is non-code even for .py
+        "gigai-docs/astro.config.mjs",  # the public docs site; docs.yml builds and checks it
+        "gigai-docs/src/content/docs/scout/quickstart.md",
         ".orchestrator/workers/ci-docs-skip.md",
         ".orchestrator/runs/v0.1.8/workers/ci-speed.md",
         ".claude/skills/gigai-orchestrator/SKILL.md",

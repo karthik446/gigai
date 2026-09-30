@@ -116,19 +116,20 @@ def test_fake_model_run_goes_end_to_end_through_the_shipped_path(tmp_path: Path)
     for row in rows:
         assert row["ok"] is True and row["attempts"] == 1 and row["retried"] is False
         assert row["attempt_errors"] == [None] and row["attempt_guards"] == [None]
-        # The fixture: header copy R1, summary = R1 rewritten, skills copy R1.
+        # The fixture (headerless, 0110-003 P1): summary = the first listed R line rewritten, skills copy of it.
+        # Every eval resume opens "# <Name> — <Headline>": R1 is listed with the name removed.
         assert row["sections"] == ["summary", "skills"]
-        assert row["copy_lines"] == 2 and row["rewritten_lines"] == 1
-        header, summary, skills = row["lines"]
-        assert header["where"] == "header[1]" and header["kind"] == "copy" and header["verbatim"] is True and "judge" not in header
+        assert row["copy_lines"] == 1 and row["rewritten_lines"] == 1
+        summary, skills = row["lines"]
+        assert skills["where"] == "skills line 1" and skills["kind"] == "copy" and skills["verbatim"] is True and "judge" not in skills
         assert summary["where"] == "summary line 1" and summary["kind"] == "rewritten" and summary["claim"] == 1
-        assert summary["sources"] == [{"label": "R1", "text": header["text"]}]  # every accepted line lists its cited source text
-        assert summary["guard_hit"] is False and summary["judge"] == {"supported": True, "unsupported_span": None, "severity": None}
-        assert summary["severity"] is None and header["severity"] is None
-        assert skills["kind"] == "copy" and skills["verbatim"] is True
+        assert summary["sources"] == [{"label": "R1", "text": skills["text"]}]  # every accepted line lists its cited source text
+        assert summary["guard_hit"] is False and summary["judge"] == {"supported": True, "unsupported_span": None, "severity": None, "weakened": False, "lost_span": None}
+        assert summary["severity"] is None and skills["severity"] is None
+        assert summary["text"].startswith("# ") and summary["text"][2:] in skills["text"] and summary["text"] != skills["text"]
         assert row["fabricated_lines"] == [] and row["judge_calls"] == 1 and row["judge_attempts"] == 1 and row["judge_ok"] is True
         assert row["judge_stopped_at_cap"] is False and row["unjudged_lines"] == 0
-        assert row["markdown"].startswith("# ") and "<!-- R1 -->" in row["markdown"]
+        assert row["markdown"].startswith("## Summary\n") and "<!-- R1 -->" in row["markdown"]
         assert row["usage"] == {"input_tokens": 10, "output_tokens": 18, "total_tokens": 28}
         assert row["judge_usage"] == {"input_tokens": 10, "output_tokens": 18, "total_tokens": 28}
 
@@ -139,14 +140,14 @@ def test_fake_model_run_goes_end_to_end_through_the_shipped_path(tmp_path: Path)
 
     metrics = report["metrics"]
     assert metrics["calls"] == {"max_calls": 6, "made": 6, "tailor_calls": 3, "judge_calls": 3, "stopped_at_cap": True, "rows_planned": len(planned), "rows_done": 3, "rows_not_done": run["rows_not_done"]}
-    assert metrics["lines"] == {"total": 9, "copy": 6, "rewritten": 3, "answer_refs": 0, "expanded_refs": 0}
+    assert metrics["lines"] == {"total": 6, "copy": 3, "rewritten": 3, "answer_refs": 0, "expanded_refs": 0}
     fab = metrics["fabrication"]
     assert fab["fabricated_claims"] == 0 and fab["fabrication_rate"] == 0.0 and fab["lines"] == []
     assert fab["hard_fabrications"] == 0 and fab["precision_lines"] == 0 and fab["precision_rate"] == 0.0
     assert fab["judge_calls"] == 3 and fab["judge_attempts"] == 3 and fab["judge_retries"] == 0
     assert fab["judge_unsupported"] == 0 and fab["judge_hard"] == 0 and fab["judge_precision"] == 0 and fab["judge_failures"] == 0 and fab["unjudged_rewritten_lines"] == 0
     assert metrics["guard_rejections"] == {guard: {"retried": 0, "invalid_after_retry": 0} for guard in harness.GUARDS} | {"total_retried": 0, "total_invalid_after_retry": 0}
-    assert metrics["bars"] == {"hard_fabrications_bar": 0, "hard_fabrications_bar_met": True, "precision_rate_bar": 0.02, "precision_rate_bar_met": True, "invalid_after_retry_bar_met": True}
+    assert metrics["bars"] == {"hard_fabrications_bar": 0, "hard_fabrications_bar_met": True, "precision_rate_bar": 0.02, "precision_rate_bar_met": True, "invalid_after_retry_bar_met": True, "model_rewrite_rate_bar": 0.25, "model_rewrite_rate_bar_met": False, "loss_after_fallback_bar": 0, "loss_after_fallback_bar_met": True}
     rel = metrics["reliability"]
     assert rel["invalid_after_retry"] == 0 and rel["valid_output_rate"] == 1.0
     assert rel["latency_seconds"]["per_call"]["all"]["count"] == 6 and rel["latency_seconds"]["per_call"]["judge"]["count"] == 3
@@ -156,7 +157,7 @@ def test_fake_model_run_goes_end_to_end_through_the_shipped_path(tmp_path: Path)
     sample = metrics["samples"]["clean_fit"]
     assert sample["resume_id"] == rows[0]["resume_id"] and metrics["samples"]["pending"] is None
     rendered = sample["markdown_with_sources"]
-    assert rendered.count("> R1: ") == 3 and "> judge: supported" in rendered and "> check: copy line, verbatim=True" in rendered
+    assert rendered.count("> R1: ") == 2 and "> judge: supported" in rendered and "> check: copy line, verbatim=True" in rendered
     assert "WARNING" not in rendered
     # The raw dump: one prompt + one output per attempt, plus the index.
     names = sorted(path.name for path in dump.iterdir())
@@ -181,7 +182,9 @@ def test_no_judge_run_and_answers_reach_the_row(tmp_path: Path) -> None:
     from gigai.scout.question_ids import normalize_question_id
 
     assert row["answers"] == sorted({normalize_question_id(item.question_id) for item in answers[label.resume_id]})
-    assert row["judge_calls"] == 0 and row["lines"][1]["judge"] is None and row["unjudged_lines"] == 1
+    # Headerless fixture (0110-003 P1): the rewritten summary line is the row's first line.
+    assert row["lines"][0]["kind"] == "rewritten"
+    assert row["judge_calls"] == 0 and row["lines"][0]["judge"] is None and row["unjudged_lines"] == 1
     assert report["metrics"]["fabrication"]["judge_enabled"] is False
     assert report["metrics"]["calls"]["made"] == 1 and report["metrics"]["bars"]["hard_fabrications_bar_met"] is True
     assert report["metrics"]["bars"]["precision_rate_bar_met"] is True and report["metrics"]["fabrication"]["precision_rate"] == 0.0
@@ -277,7 +280,7 @@ def test_the_cap_stops_the_run_before_a_judge_call_and_lists_the_rows_not_done(t
     first, second = report["rows"]
     assert first["judge_ok"] is True and second["judge_ok"] is None
     assert second["ok"] is True and second["judge_stopped_at_cap"] is True and second["judge_calls"] == 0 and second["unjudged_lines"] == 1
-    assert second["lines"][1]["judge"] is None and second["fabricated_lines"] == []
+    assert second["lines"][0]["kind"] == "rewritten" and second["lines"][0]["judge"] is None and second["fabricated_lines"] == []
     metrics = report["metrics"]
     assert metrics["calls"]["made"] == 3 and metrics["calls"]["rows_done"] == 2 and metrics["calls"]["stopped_at_cap"] is True
     assert metrics["fabrication"]["judge_stopped_at_cap"] == 1 and metrics["fabrication"]["unjudged_rewritten_lines"] == 1
@@ -358,7 +361,7 @@ _CLAIMS = (
 
 
 def test_batched_judge_happy_path_is_one_call_with_one_verdict_per_numbered_claim() -> None:
-    binding = _ScriptedBinding([{"verdicts": [{"line": 3, "supported": True, "unsupported_span": None, "severity": None}, {"line": 1, "supported": True, "unsupported_span": "ignored when supported", "severity": "hard"}, {"line": 2, "supported": True}]}])
+    binding = _ScriptedBinding([{"verdicts": [{"line": 3, "supported": True, "unsupported_span": None, "severity": None, "weakened": False, "lost_span": None}, {"line": 1, "supported": True, "unsupported_span": "ignored when supported", "severity": "hard", "weakened": False, "lost_span": None}, {"line": 2, "supported": True, "weakened": False, "lost_span": None}]}])
     verdict = harness.judge_resume(binding, _CLAIMS)
     assert len(binding.prompts) == 1, "one judge call per tailored resume"
     prompt = binding.prompts[0]
@@ -367,18 +370,37 @@ def test_batched_judge_happy_path_is_one_call_with_one_verdict_per_numbered_clai
     assert "CLAIM 1:\nBuilt Python services.\nSOURCES FOR CLAIM 1:\nR1: Built Python services at Acme.\n\nCLAIM 2:\nUsed GCP daily.\nSOURCES FOR CLAIM 2:\nR2: Ran services.\nA cloud:gcp: cloud gcp Yes.\n\nCLAIM 3:" in prompt
     assert "{{" not in prompt and "previous answer was rejected" not in prompt
     assert verdict["judge_ok"] is True and verdict["judge_attempts"] == 1 and verdict["judge_error"] is None
-    assert verdict["verdicts"] == {n: {"supported": True, "unsupported_span": None, "severity": None} for n in (1, 2, 3)}, "a supported verdict's span and severity are normalised to null"
+    assert verdict["verdicts"] == {n: {"supported": True, "unsupported_span": None, "severity": None, "weakened": False, "lost_span": None} for n in (1, 2, 3)}, "a supported verdict's span and severity are normalised to null"
     assert verdict["usage"] == {"input_tokens": 5, "output_tokens": 7, "total_tokens": 12}
 
 
 def test_the_fake_judge_answers_one_verdict_per_claim_block() -> None:
     prompt = harness.render_judge_prompt(_CLAIMS)
     assert bindings._test_model_judge_reply(prompt) == {"verdicts": [{"line": n, "supported": True, "unsupported_span": None, "severity": None} for n in (1, 2, 3)]}
-    assert harness.parse_judge_answer(bindings._test_model_judge_reply(prompt), 3)[2] == {"supported": True, "unsupported_span": None, "severity": None}
+    # The shipped fixture judge predates ``weakened``: only the --fake-model run reads its absence as false.
+    assert harness.parse_judge_answer(bindings._test_model_judge_reply(prompt), 3, require_weakened=False)[2] == {"supported": True, "unsupported_span": None, "severity": None, "weakened": False, "lost_span": None}
+    with pytest.raises(ValueError, match="must carry a boolean weakened"):
+        harness.parse_judge_answer(bindings._test_model_judge_reply(prompt), 3)
+
+
+#: 0110-006 re-baseline: every planted rewrite carries a reason anchored in the posting
+#: (the phrase occurs in ``_POSTING``/``_GO_POSTING``), and every planted line keeps every
+#: fact of R1 ("Python" in particular), so the product's no-loss pass SHOWS it and the
+#: judge sees it; a reasonless or lossy line would fall back to R1 before the judge.
+_PLANTED_REASON = {"kind": "summary", "requirement": None, "posting_phrase": "Requirements: Python"}
 
 
 def _tailor_reply(*lines: str) -> dict:
-    return {"header": [{"copy": 1}], "sections": [{"heading": "summary", "lines": [{"text": text, "refs": [{"kind": "resume", "line": 1}]} for text in lines]}]}
+    # Headerless (0110-003 P1): the copy line these rows check sits in a leading skills section.
+    return {
+        "sections": [
+            {"heading": "skills", "lines": [{"copy": 1}]},
+            {
+                "heading": "summary",
+                "lines": [{"text": text, "refs": [{"kind": "resume", "line": 1}], "reason": _PLANTED_REASON} for text in lines],
+            },
+        ]
+    }
 
 
 _LABEL = assess_harness.Label("r", "p", "pending_user_answers", (), False, False, False, "test", "")
@@ -389,17 +411,17 @@ _RESUME_FIXTURE = assess_harness.Resume("r", "Software engineer with Python serv
 def test_a_planted_unsupported_line_is_flagged_through_the_batch() -> None:
     binding = _ScriptedBinding(
         [
-            _tailor_reply("Python service engineer.", "Ran a large platform team."),
-            {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None, "severity": None}, {"line": 2, "supported": False, "unsupported_span": "large platform team", "severity": "hard"}]},
+            _tailor_reply("Python service engineer.", "Python service engineer who ran a large platform team."),
+            {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None, "severity": None, "weakened": False, "lost_span": None}, {"line": 2, "supported": False, "unsupported_span": "large platform team", "severity": "hard", "weakened": False, "lost_span": None}]},
         ]
     )
     budget = harness.CallBudget(max_calls=25)
     row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _POSTING, _RESUME_FIXTURE, (), budget=budget)
     assert row["ok"] is True and row["judge_ok"] is True and row["judge_calls"] == 1 and budget.made == 2
-    header, first, second = row["lines"]
-    assert header["kind"] == "copy" and header["verbatim"] is True and header["severity"] is None
-    assert first["claim"] == 1 and first["judge"] == {"supported": True, "unsupported_span": None, "severity": None} and first["fabricated"] is False and first["severity"] is None
-    assert second["claim"] == 2 and second["judge"] == {"supported": False, "unsupported_span": "large platform team", "severity": "hard"} and second["fabricated"] is True
+    copied, first, second = row["lines"]
+    assert copied["where"] == "skills line 1" and copied["kind"] == "copy" and copied["verbatim"] is True and copied["severity"] is None
+    assert first["claim"] == 1 and first["judge"] == {"supported": True, "unsupported_span": None, "severity": None, "weakened": False, "lost_span": None} and first["fabricated"] is False and first["severity"] is None
+    assert second["claim"] == 2 and second["judge"] == {"supported": False, "unsupported_span": "large platform team", "severity": "hard", "weakened": False, "lost_span": None} and second["fabricated"] is True
     assert second["severity"] == "hard"
     assert second["guard_hit"] is False, "the deterministic guards pass this line; only the judge catches it"
     assert row["fabricated_lines"] == [second]
@@ -414,18 +436,18 @@ def test_a_planted_unsupported_line_is_flagged_through_the_batch() -> None:
 
 
 def test_a_planted_hard_line_and_a_planted_precision_line_land_in_their_own_buckets_and_both_are_listed_with_sources() -> None:
-    # Three accepted lines: the header copy, a precision-drift summary line
+    # Three accepted lines: the skills copy, a precision-drift summary line
     # ("auditable" -> "audited") and a hard one (an ownership the source never
     # gives). The judge returns both severities; the harness counts one under
     # each metric, computes precision_rate over ALL accepted lines (1 of 3),
     # applies both bars, and the report lists both lines with their sources.
     binding = _ScriptedBinding(
         [
-            _tailor_reply("Python services with changes reviewed and audited.", "Owned a small team."),
+            _tailor_reply("Python services with changes reviewed and audited.", "Owned a small team of Python service engineers."),
             {
                 "verdicts": [
-                    {"line": 1, "supported": False, "unsupported_span": "audited", "severity": "precision"},
-                    {"line": 2, "supported": False, "unsupported_span": "Owned", "severity": "hard"},
+                    {"line": 1, "supported": False, "unsupported_span": "audited", "severity": "precision", "weakened": False, "lost_span": None},
+                    {"line": 2, "supported": False, "unsupported_span": "Owned", "severity": "hard", "weakened": False, "lost_span": None},
                 ]
             },
         ]
@@ -433,7 +455,8 @@ def test_a_planted_hard_line_and_a_planted_precision_line_land_in_their_own_buck
     budget = harness.CallBudget(max_calls=25)
     row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _POSTING, _RESUME_FIXTURE, (), budget=budget)
     assert row["ok"] is True and row["judge_ok"] is True and budget.made == 2
-    header, precise, hard = row["lines"]
+    copied, precise, hard = row["lines"]
+    assert copied["kind"] == "copy" and copied["severity"] is None
     assert precise["severity"] == "precision" and precise["fabricated"] is True and precise["judge"]["severity"] == "precision"
     assert hard["severity"] == "hard" and hard["fabricated"] is True
     assert row["fabricated_lines"] == [precise, hard]
@@ -454,7 +477,7 @@ def test_a_planted_hard_line_and_a_planted_precision_line_land_in_their_own_buck
     out = buffer.getvalue()
     assert "hard fabrications: 1 (bar 0 met: False)" in out and "precision lines: 1 (rate 0.3333; bar < 0.02 met: False)" in out
     assert "  FAB [precision] r x p summary line 1: 'Python services with changes reviewed and audited.' | span: 'audited'" in out
-    assert "  FAB [hard] r x p summary line 2: 'Owned a small team.' | span: 'Owned'" in out
+    assert "  FAB [hard] r x p summary line 2: 'Owned a small team of Python service engineers.' | span: 'Owned'" in out
     assert out.count("| sources: R1: Software engineer with Python service experience.") == 2
 
 
@@ -502,12 +525,12 @@ def test_precision_rate_bar_is_strictly_below_two_percent_of_all_accepted_lines_
     assert harness.line_severity(line("summary line 1", "rewritten", None) | {"judge": {"supported": False, "unsupported_span": "x"}, "fabricated": True}) == "hard"
     # No valid resume: neither bar is met vacuously.
     metrics = harness.summarize([], planned=0, max_calls=25, judge=True)
-    assert metrics["fabrication"]["precision_rate"] is None and metrics["bars"] == {"hard_fabrications_bar": 0, "hard_fabrications_bar_met": False, "precision_rate_bar": 0.02, "precision_rate_bar_met": False, "invalid_after_retry_bar_met": False}
+    assert metrics["fabrication"]["precision_rate"] is None and metrics["bars"] == {"hard_fabrications_bar": 0, "hard_fabrications_bar_met": False, "precision_rate_bar": 0.02, "precision_rate_bar_met": False, "invalid_after_retry_bar_met": False, "model_rewrite_rate_bar": 0.25, "model_rewrite_rate_bar_met": False, "loss_after_fallback_bar": 0, "loss_after_fallback_bar_met": False}
 
 
 def test_a_missing_severity_on_an_unsupported_verdict_is_a_judge_failure_after_one_retry() -> None:
-    no_severity = {"verdicts": [{"line": 1, "supported": False, "unsupported_span": "large"}]}
-    binding = _ScriptedBinding([_tailor_reply("Ran a large team."), no_severity, no_severity])
+    no_severity = {"verdicts": [{"line": 1, "supported": False, "unsupported_span": "large", "weakened": False, "lost_span": None}]}
+    binding = _ScriptedBinding([_tailor_reply("Python service engineer who ran a large team."), no_severity, no_severity])
     budget = harness.CallBudget(max_calls=25)
     row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _POSTING, _RESUME_FIXTURE, (), budget=budget)
     assert row["ok"] is True and budget.made == 3
@@ -528,8 +551,8 @@ def test_an_answer_ref_is_offered_and_accepted_under_its_canonical_id() -> None:
     answers = (harness.FixedAnswer("language:java_cpp_go", "Go: yes, daily. Java and C++: no."),)
     binding = _ScriptedBinding(
         [
-            {"header": [{"copy": 1}], "sections": [{"heading": "summary", "lines": [{"text": "Go daily; no Java or C++.", "refs": [{"kind": "answer", "question_id": "language:cpp_go_java"}]}]}]},
-            {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None}]},
+            {"sections": [{"heading": "skills", "lines": [{"copy": 1}]}, {"heading": "summary", "lines": [{"text": "Go daily; no Java or C++.", "refs": [{"kind": "answer", "question_id": "language:cpp_go_java"}], "reason": {"kind": "answer", "requirement": None, "posting_phrase": "Requirements: Python"}}]}]},
+            {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None, "weakened": False, "lost_span": None}]},
         ]
     )
     budget = harness.CallBudget(max_calls=25)
@@ -559,8 +582,8 @@ def test_a_cited_wrapped_resume_line_reaches_the_guards_the_row_and_the_judge_as
     # judge's SOURCES carry the joined span, not the cited line alone.
     binding = _ScriptedBinding(
         [
-            _tailor_reply("Python and Go services for 12 years."),
-            {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None}]},
+            _tailor_reply("Python and Go services in production for 12 years."),
+            {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None, "weakened": False, "lost_span": None}]},
         ]
     )
     budget = harness.CallBudget(max_calls=25)
@@ -569,21 +592,22 @@ def test_a_cited_wrapped_resume_line_reaches_the_guards_the_row_and_the_judge_as
     # The prompt's numbering is unchanged: two lines, R1 and R2.
     assert "R1: Software engineer with Python service experience and\nR2: Go services in production for 12 years." in binding.prompts[0]
     assert row["ok"] is True and row["attempts"] == 1 and "go" in row["guard_terms"]
-    header, summary = row["lines"]
-    assert header["sources"] == [{"label": "R1", "text": "Software engineer with Python service experience and"}]  # a copy line never expands
-    assert header["verbatim"] is True
+    copied, summary = row["lines"]
+    # 0110-006: a copy line outside an entry heading copies the whole wrapped span, like a cited ref.
+    assert copied["sources"] == [{"label": "R1", "text": joined, "continued_lines": [2]}] and copied["text"] == joined
+    assert copied["verbatim"] is True
     assert summary["sources"] == [{"label": "R1", "text": joined, "continued_lines": [2]}]
     assert summary["guard_hit"] is False and summary["numeric_hits"] == [] and summary["term_hits"] == []
-    assert "CLAIM 1:\nPython and Go services for 12 years.\nSOURCES FOR CLAIM 1:\nR1: " + joined + "\n" in binding.prompts[1] + "\n"
+    assert "CLAIM 1:\nPython and Go services in production for 12 years.\nSOURCES FOR CLAIM 1:\nR1: " + joined + "\n" in binding.prompts[1] + "\n"
     metrics = harness.summarize([row], planned=1, max_calls=25, judge=True, calls=budget.calls)
-    assert metrics["lines"]["expanded_refs"] == 1 and metrics["fabrication"]["fabricated_claims"] == 0
+    assert metrics["lines"]["expanded_refs"] == 2 and metrics["fabrication"]["fabricated_claims"] == 0  # the copy's span and the rewrite's
     assert "  > R1+R2: " + joined in metrics["samples"]["pending"]["markdown_with_sources"]
-    assert "# Software engineer with Python service experience and <!-- R1 -->" in row["markdown"]
+    assert "## Skills\n\n- " + joined + " <!-- R1 -->" in row["markdown"]
 
 
 def test_a_verdict_count_mismatch_is_a_judge_failure_after_one_retry() -> None:
-    short = {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None}]}
-    binding = _ScriptedBinding([_tailor_reply("Python service engineer.", "Ran a small team."), short, short])
+    short = {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None, "weakened": False, "lost_span": None}]}
+    binding = _ScriptedBinding([_tailor_reply("Python service engineer.", "Python service engineer who ran a small team."), short, short])
     budget = harness.CallBudget(max_calls=25)
     row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _POSTING, _RESUME_FIXTURE, (), budget=budget)
     assert row["ok"] is True and budget.made == 3
@@ -616,7 +640,7 @@ def test_a_verdict_count_mismatch_is_a_judge_failure_after_one_retry() -> None:
 )
 def test_parse_judge_answer_rejects_every_malformed_batch(decoded: dict, message: str) -> None:
     with pytest.raises(ValueError) as info:
-        harness.parse_judge_answer(decoded, 2)
+        harness.parse_judge_answer(decoded, 2, require_weakened=False)  # these cases are about severity and shape
     assert str(info.value) == message
 
 
@@ -631,12 +655,14 @@ def test_parse_judge_answer_keeps_hard_and_precision_and_nulls_severity_when_sup
             ]
         },
         4,
+        require_weakened=False,
     )
+    off = {"weakened": False, "lost_span": None}
     assert parsed == {
-        1: {"supported": False, "unsupported_span": "audited", "severity": "precision"},
-        2: {"supported": False, "unsupported_span": "led", "severity": "hard"},
-        3: {"supported": True, "unsupported_span": None, "severity": None},
-        4: {"supported": True, "unsupported_span": None, "severity": None},
+        1: {"supported": False, "unsupported_span": "audited", "severity": "precision", **off},
+        2: {"supported": False, "unsupported_span": "led", "severity": "hard", **off},
+        3: {"supported": True, "unsupported_span": None, "severity": None, **off},
+        4: {"supported": True, "unsupported_span": None, "severity": None, **off},
     }
     assert harness.SEVERITIES == ("hard", "precision")
 
@@ -671,7 +697,8 @@ def test_judge_prompt_carries_the_hard_precision_definition_verbatim_and_asks_fo
 def test_the_tailor_prompts_framing_paragraph_ends_with_the_precision_sentence() -> None:
     # tailor-r3: the three r2 misses were modality/qualifier drift on clean-fit
     # rows; the rule sits in the FRAMING paragraph (one block) so the existing
-    # framing test and the prompt order are untouched.
+    # framing test and the prompt order are untouched.  0110-006: the Allowed
+    # example is a COPY of R7 and a no-downgrade rule precedes PRECISION.
     from gigai.scout.tailored_resume import render_tailor_prompt
 
     prompt = render_tailor_prompt(_JOB, _CTX)
@@ -681,7 +708,7 @@ def test_the_tailor_prompts_framing_paragraph_ends_with_the_precision_sentence()
     assert "PRECISION: keep the source's modality and qualifiers when you paraphrase" in rule
     assert '"auditable" is not "audited", "comfortable owning" is not "owned", and a qualifier stays on the clause it qualifies' in rule
     assert 'monitors that "caught problems before they reached dashboards" do not make the candidate\'s investigation happen before they reached dashboards' in rule
-    assert rule.index("Never upgrade participation") < rule.index("Allowed: the same R7") < rule.index("PRECISION:")
+    assert rule.index("Never upgrade participation") < rule.index("Allowed: COPY R7") < rule.index("Never downgrade either") < rule.index("PRECISION:")
     assert prompt.count("PRECISION:") == 1
 
 
@@ -733,7 +760,7 @@ def test_a_recovered_retry_counts_the_first_attempts_guard_as_retried() -> None:
         [
             {"header": [{"text": "x", "refs": []}], "sections": []},  # copy-line/shape
             _tailor_reply("Python service engineer."),
-            {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None}]},
+            {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None, "weakened": False, "lost_span": None}]},
         ]
     )
     budget = harness.CallBudget(max_calls=25)
@@ -866,3 +893,260 @@ def test_summarize_counts_a_judge_unsupported_line_as_fabricated_and_scores_ever
     assert metrics["reliability"]["rejections"][0]["validation_error"] == "bad"
     assert metrics["guard_rejections"]["copy_line_shape"] == {"retried": 1, "invalid_after_retry": 1}
     assert metrics["samples"]["clean_fit"]["resume_id"] == "r" and metrics["samples"]["pending"]["resume_id"] == "r-excluded"
+
+
+# --- 0110-006 packet B: rewrite metrics, computed offline from a stored result -----------------------------
+
+
+def _from_json_result(sections: list[dict]):
+    from gigai.scout.tailored_resume import TailoredResume
+
+    return TailoredResume.from_json({"schema_version": "scout-tailored-resume:1", "header": [], "sections": sections})
+
+
+def _line(kind: str, text: str, source: str, number: int = 1, **extra) -> dict:
+    return {"kind": kind, "text": text, "refs": [{"kind": "resume", "line": number, "text": source}], **extra}
+
+
+def test_a_planted_lossy_line_counts_as_a_fallback_and_is_listed_with_its_lost_items() -> None:
+    # The rewrite drops "Python" from R1: the product's no-loss pass (packet A) falls back to R1, the
+    # harness counts it from the STORED result alone and lists source, rejected rewrite and lost items.
+    lossy = "Software engineer with service experience."
+    binding = _ScriptedBinding([_tailor_reply(lossy)])
+    budget = harness.CallBudget(max_calls=25)
+    row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _POSTING, _RESUME_FIXTURE, (), budget=budget)
+    assert row["ok"] is True and budget.made == 1, "the fallback is a copy line: nothing is left for the judge"
+    assert row["rewritten_lines"] == 0 and row["judge_ok"] is None
+    [fallback] = row["fallbacks"]
+    assert fallback["where"] == "summary line 1"
+    assert fallback["source_text"] == "Software engineer with Python service experience."
+    assert fallback["rejected_rewrite"] == lossy
+    assert fallback["lost"] == {"entities": ["python"]}
+    assert fallback["reason_invalid"] is False and fallback["sources"] == [{"label": "R1", "text": "Software engineer with Python service experience."}]
+    assert row["line_stats"]["fallbacks"] == 1 and row["line_stats"]["model_rewrites"] == 1 and row["line_stats"]["shown_rewritten"] == 0
+    assert row["line_stats"]["model_rewrite_rate"] == 0.5 and row["line_stats"]["final_rewrite_rate"] == 0.0
+    assert row["section_stats"]["summary"]["model_rewrites"] == 1 and row["section_stats"]["skills"]["model_rewrites"] == 0
+    assert row["loss_after_fallback"] == []
+    metrics = harness.summarize([row], planned=1, max_calls=25, judge=True, calls=budget.calls)
+    rewrite = metrics["rewrite"]
+    assert rewrite["fallback_count"] == 1 and rewrite["fallbacks_by_rule"]["entities"] == 1
+    assert rewrite["fallback_lines"] == [{"resume_id": "r", "posting_id": "p", **fallback}]
+    assert rewrite["model_rewrite_rate"] == 0.5 and rewrite["final_rewrite_rate"] == 0.0
+    assert rewrite["by_section"]["summary"]["model_rewrite_rate"] == 1.0 and rewrite["by_row"][0]["model_rewrite_rate"] == 0.5
+    assert metrics["bars"]["model_rewrite_rate_bar_met"] is False and metrics["bars"]["loss_after_fallback_bar_met"] is True
+    buffer = io.StringIO()
+    harness._print_summary(metrics, Path("report.json"), out=buffer)
+    assert f"  FALLBACK r x p summary line 1: kept 'Software engineer with Python service experience.'; rejected {lossy!r}; lost {{'entities': ['python']}}" in buffer.getvalue()
+    assert "fallbacks 1 by rule" in buffer.getvalue() and "loss_after_fallback 0 (bar == 0 met: True)" in buffer.getvalue()
+
+
+def test_loss_after_fallback_catches_a_product_regression_a_shown_rewrite_that_still_loses_a_fact() -> None:
+    source = "Led a team of 7 engineers end to end, owning delivery."
+    lossy = "Managed 7 engineers on delivery."
+    result = _from_json_result([{"heading": "summary", "lines": [_line("rewritten", lossy, source)]}])
+    resume = assess_harness.Resume("r", source + "\n", ("US",), (), False, "synthetic", None, "test")
+    hits = harness.loss_after_fallback(result, harness._context(resume, ()))
+    assert [(hit["where"], hit["text"]) for hit in hits] == [("summary line 1", lossy)]
+    assert set(hits[0]["lost"]) >= {"ownership", "scope"} and hits[0]["sources"] == [{"label": "R1", "text": source}]
+    # A rewrite that keeps every fact, and a line the operator switched, are not hits.
+    keeps = _from_json_result([{"heading": "summary", "lines": [_line("rewritten", "Led a team of 7 engineers end to end, owning delivery of platforms.", source)]}])
+    assert harness.loss_after_fallback(keeps, harness._context(resume, ())) == []
+    chosen = _from_json_result([{"heading": "summary", "lines": [_line("rewritten", lossy, source, origin="user")]}])
+    assert harness.loss_after_fallback(chosen, harness._context(resume, ())) == []
+    # An answer-only line owes nothing.
+    answer_only = _from_json_result([{"heading": "summary", "lines": [{"kind": "rewritten", "text": "Go daily.", "refs": [{"kind": "answer", "question_id": "language:go", "text": "go yes"}]}]}])
+    assert harness.loss_after_fallback(answer_only, harness._context(resume, ())) == []
+
+
+def test_loss_after_fallback_fails_the_bar_when_the_product_pass_is_switched_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    # End to end through tailor_row: with the product's no-loss pass gone, the lossy rewrite is SHOWN
+    # and the harness's own re-run reports it; the bar is == 0, so the metrics fail.
+    from gigai.scout import tailored_resume
+
+    monkeypatch.setattr(tailored_resume, "apply_no_loss", lambda result, job, ctx, **kwargs: result)
+    binding = _ScriptedBinding(
+        [
+            _tailor_reply("Software engineer with service experience."),
+            {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None, "severity": None, "weakened": False, "lost_span": None}]},
+        ]
+    )
+    budget = harness.CallBudget(max_calls=25)
+    row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _POSTING, _RESUME_FIXTURE, (), budget=budget)
+    assert row["ok"] is True and row["rewritten_lines"] == 1 and row["fallbacks"] == []
+    [hit] = row["loss_after_fallback"]
+    assert hit["where"] == "summary line 1" and hit["lost"] == {"entities": ["python"]}
+    metrics = harness.summarize([row], planned=1, max_calls=25, judge=True, calls=budget.calls)
+    assert metrics["rewrite"]["loss_after_fallback"] == 1 and metrics["bars"]["loss_after_fallback_bar_met"] is False
+    buffer = io.StringIO()
+    harness._print_summary(metrics, Path("report.json"), out=buffer)
+    assert "  LOSS-AFTER-FALLBACK r x p summary line 1: 'Software engineer with service experience.'; lost {'entities': ['python']}" in buffer.getvalue()
+
+
+def test_the_rewrite_rate_denominator_excludes_entry_headings() -> None:
+    src = "Owns the platform."
+    entry = {
+        "heading": [_line("copy", "Staff Engineer - Acme", "Staff Engineer - Acme", 2)],
+        "bullets": [_line("copy", src, src, 3), _line("rewritten", "Owns the platform for the team.", src, 3)],
+    }
+    result = _from_json_result(
+        [
+            {"heading": "summary", "lines": [_line("copy", "Engineer.", "Engineer.", 1)]},
+            {"heading": "experience", "entries": [entry, {"heading": [_line("copy", "Senior Engineer - Beta", "Senior Engineer - Beta", 5)], "bullets": []}]},
+        ]
+    )
+    stats = harness.line_stats_json(result)
+    assert stats["rewritable_lines"] == 3, "two entry headings are not rewritable: 1 summary line + 2 bullets"
+    assert stats["model_rewrites"] == 1 and stats["model_rewrite_rate"] == round(1 / 3, 4) and stats["final_rewrite_rate"] == round(1 / 3, 4)
+    by_section = harness.section_stats_json(result)
+    assert by_section["summary"]["rewritable_lines"] == 1 and by_section["experience"]["rewritable_lines"] == 2 and by_section["experience"]["model_rewrite_rate"] == 0.5
+    # The aggregate is a ratio of sums over rows, not a mean of row rates.
+    row = {
+        "resume_id": "r", "posting_id": "p", "clean_fit": True, "expected_verdict": "x", "excluded": False, "ok": True, "attempts": 1, "retried": False, "validation_error": None,
+        "attempt_errors": [None], "attempt_guards": [None], "not_assessed_reason": None, "elapsed_seconds": 0.1, "usage": None, "lines": [], "copy_lines": 0, "rewritten_lines": 0,
+        "fabricated_lines": [], "judge_calls": 0, "judge_attempts": 0, "judge_ok": None, "judge_error": None, "judge_usage": None, "judge_elapsed_seconds": None,
+        "judge_stopped_at_cap": False, "unjudged_lines": 0, "markdown": "", "line_stats": stats, "section_stats": by_section, "fallbacks": [], "loss_after_fallback": [],
+    }
+    metrics = harness.summarize([row, row], planned=2, max_calls=25, judge=False)
+    assert metrics["rewrite"]["rewritable_lines"] == 6 and metrics["rewrite"]["model_rewrite_rate"] == round(1 / 3, 4)
+    assert metrics["bars"]["model_rewrite_rate_bar_met"] is False  # 0.3333 is not < 0.25
+    low = dict(row, line_stats={**stats, "model_rewrites": 0})
+    assert harness.summarize([low], planned=1, max_calls=25, judge=False)["bars"]["model_rewrite_rate_bar_met"] is True
+
+
+def test_the_judge_weakened_verdict_is_parsed_like_severity_and_lists_the_line_without_being_a_bar() -> None:
+    def verdict(**fields) -> dict:
+        return {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None, "severity": None, **fields}]}
+
+    parsed = harness.parse_judge_answer(verdict(weakened=True, lost_span="end to end"), 1)
+    assert parsed[1] == {"supported": True, "unsupported_span": None, "severity": None, "weakened": True, "lost_span": "end to end"}
+    assert harness.parse_judge_answer(verdict(weakened=False, lost_span="ignored when not weakened"), 1)[1]["lost_span"] is None
+    for bad, message in (
+        ({}, "must carry a boolean weakened; it is None"),
+        ({"weakened": None}, "must carry a boolean weakened; it is None"),
+        ({"weakened": "yes"}, "must carry a boolean weakened; it is 'yes'"),
+        ({"weakened": 1}, "must carry a boolean weakened; it is 1"),
+        ({"weakened": True}, "is weakened but its lost_span is empty"),
+        ({"weakened": True, "lost_span": "  "}, "is weakened but its lost_span is empty"),
+        ({"weakened": False, "lost_span": 3}, "lost_span that is not a string or null"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            harness.parse_judge_answer(verdict(**bad), 1)
+    # Missing weakened -> a judge failure after ONE retry, exactly like a missing severity.
+    missing = {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None, "severity": None}]}
+    binding = _ScriptedBinding([_tailor_reply("Python service engineer."), missing, missing])
+    budget = harness.CallBudget(max_calls=25)
+    row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _POSTING, _RESUME_FIXTURE, (), budget=budget)
+    assert row["ok"] is True and budget.made == 3 and row["judge_ok"] is False and row["judge_attempts"] == 2
+    assert row["judge_error"] == "the verdict for claim 1 must carry a boolean weakened; it is None"
+    assert "Your previous answer was rejected: " + row["judge_error"] in binding.prompts[2]
+    assert row["unjudged_lines"] == 1 and row["lines"][1]["judge"] is None
+    # A weakened but supported line is listed for adjudication, and does not move the hard/precision bars.
+    binding = _ScriptedBinding([_tailor_reply("Python service engineer."), verdict(weakened=True, lost_span="experience")])
+    budget = harness.CallBudget(max_calls=25)
+    row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _POSTING, _RESUME_FIXTURE, (), budget=budget)
+    assert row["judge_ok"] is True and row["lines"][1]["judge"]["weakened"] is True and row["fabricated_lines"] == []
+    metrics = harness.summarize([row], planned=1, max_calls=25, judge=True, calls=budget.calls)
+    assert metrics["rewrite"]["judge_weakened"] == 1 and metrics["fabrication"]["judge_weakened"] == 1
+    [listed] = metrics["rewrite"]["judge_weakened_lines"]
+    assert listed["lost_span"] == "experience" and listed["where"] == "summary line 1" and listed["sources"] == [{"label": "R1", "text": "Software engineer with Python service experience."}]
+    assert metrics["bars"]["hard_fabrications_bar_met"] is True and metrics["bars"]["precision_rate_bar_met"] is True
+    assert "WEAKENED, drops: 'experience'" in metrics["samples"]["pending"]["markdown_with_sources"]
+    buffer = io.StringIO()
+    harness._print_summary(metrics, Path("report.json"), out=buffer)
+    assert "  WEAKENED r x p summary line 1: 'Python service engineer.'; drops 'experience'" in buffer.getvalue()
+
+
+def test_the_judge_prompt_asks_for_weakened_and_lost_span_on_every_verdict() -> None:
+    prompt = harness.render_judge_prompt(_CLAIMS)
+    assert "WEAKENED: also say for every claim, supported or not, whether it drops or softens any fact, qualifier, scope or ownership word of its sources" in prompt
+    assert '"weakened": false, "lost_span": null' in prompt and "weakened is never null; lost_span is null exactly when weakened is false" in prompt
+    assert prompt.index("SEVERITY:") < prompt.index("WEAKENED:") < prompt.index("Return bare JSON") < prompt.index("CLAIM 1:")
+    assert "{{" not in prompt
+
+
+def test_the_fake_model_run_reports_schema_four_and_the_rewrite_metrics_rescore_offline_from_the_stored_rows(tmp_path: Path) -> None:
+    report = _run(tmp_path, "--max-calls", "6")
+    assert harness.REPORT_SCHEMA == "gigai-tailor-eval-report:4" and report["schema"] == "gigai-tailor-eval-report:4"
+    assert report["run"]["private_inputs"] is None
+    rewrite = report["metrics"]["rewrite"]
+    # The fixture proposes one rewrite of two rewritable lines per row; it passes no-loss, so nothing falls back.
+    assert rewrite["rewritable_lines"] == 6 and rewrite["model_rewrites"] == 3 and rewrite["model_rewrite_rate"] == 0.5
+    assert rewrite["fallback_count"] == 0 and rewrite["loss_after_fallback"] == 0 and rewrite["judge_weakened"] == 0
+    assert [item["model_rewrite_rate"] for item in rewrite["by_row"]] == [0.5, 0.5, 0.5] and set(rewrite["by_section"]) == {"summary", "skills"}
+    assert report["metrics"]["bars"]["model_rewrite_rate_bar_met"] is False and report["metrics"]["bars"]["loss_after_fallback_bar_met"] is True
+    rescored = harness.summarize(report["rows"], planned=report["metrics"]["calls"]["rows_planned"], max_calls=6, judge=True, calls=(), rows_not_done=report["run"]["rows_not_done"])
+    assert rescored["rewrite"] == rewrite, "every rewrite metric is computed from the stored rows alone"
+
+
+# --- 0110-006 packet B: private-input flags -----------------------------------------------------------------
+
+
+def _private_argv(tmp_path: Path, report: Path, *extra: str) -> list[str]:
+    return ["--fake-model", "--home", str(tmp_path / "scratch-home"), "--profile-id", "p1", "--posting-url", "https://boards.greenhouse.io/acme/jobs/101", "--report", str(report), "--quiet", *extra]
+
+
+def test_the_private_flags_refuse_a_report_or_dump_path_inside_the_repo_before_any_call(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    inside = assess_harness.REPO_ROOT / "tests" / "evals" / "private-report-must-not-exist.json"
+    assert harness.main(_private_argv(tmp_path, inside)) == 2
+    err = capsys.readouterr().err
+    assert "private input: --report" in err and "is inside the repository" in err and not inside.exists()
+    dump = assess_harness.REPO_ROOT / "private-dump-must-not-exist"
+    assert harness.main(_private_argv(tmp_path, tmp_path / "ok.json", "--dump-dir", str(dump))) == 2
+    assert "private input: --dump-dir" in capsys.readouterr().err and not dump.exists() and not (tmp_path / "ok.json").exists()
+    link = tmp_path / "link"
+    link.symlink_to(assess_harness.REPO_ROOT)
+    assert harness.main(_private_argv(tmp_path, link / "sneaky.json")) == 2, "a symlink into the repo is still inside it"
+    assert not (assess_harness.REPO_ROOT / "sneaky.json").exists()
+    assert harness.path_inside_repo(assess_harness.REPO_ROOT / "a" / "b.json") and not harness.path_inside_repo(tmp_path / "b.json")
+    # The default private report lives beside the orchestrator, outside the repo.
+    assert not harness.path_inside_repo(harness.default_report_path(fake=False, now=harness.datetime.now(harness.UTC), private=True))
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["--profile-id", "p1"], "needs --profile-id and at least one --posting-url"),
+        (["--posting-url", "https://example.test/a"], "needs --profile-id and at least one --posting-url"),
+        (["--use-stored-matrix"], "needs --profile-id and at least one --posting-url"),
+        (["--profile-id", "p1", "--posting-url", "https://example.test/a", "--row", "a x b"], "cannot be combined with the fixture row selection flags"),
+        (["--fake-model", "--profile-id", "p1", "--posting-url", "https://example.test/a"], "needs --home"),
+    ],
+)
+def test_the_private_flags_refuse_an_incomplete_or_mixed_invocation(argv: list[str], message: str, capsys: pytest.CaptureFixture[str]) -> None:
+    assert harness.main([*argv, "--quiet"]) == 2
+    assert message in capsys.readouterr().err
+
+
+def test_a_private_run_reads_the_profile_resume_and_posting_urls_from_a_scratch_home_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from gigai.scout import profile_records
+    from gigai.scout.experience_answers import record_answer
+    from gigai.scout.find_jobs.resume_input import resume_for_profile
+    from gigai.workpad import resolve_workpad
+    from tests.api_e2e.harness import TEST_HTTP_ENV
+    from tests.behaviors.scout_find_jobs.test_m1_end_to_end import _fixture
+
+    home, target, _workpad = _fixture(tmp_path)  # a scratch home: a committed resume and its default profile
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=None, allow_semantic_state=True)
+    record_answer(home_root=home, requested_target=target, question_id="years:python", prompt="Years of Python?", answer="Six.")
+    profile = profile_records.selected_profile(resolved, home_root=home, target=target)
+    assert profile is not None
+    profile_id = profile.profile_id
+    resume_text = resume_for_profile(profile, resolved=resolved, home_root=home, target=target).text
+    monkeypatch.setenv(TEST_HTTP_ENV, "1")
+    urls_file = tmp_path / "urls.txt"
+    urls_file.write_text("# public postings\nhttps://boards.greenhouse.io/acme/jobs/101\n", encoding="utf-8")
+    report_path = tmp_path / "out" / "private.json"
+    argv = ["--fake-model", "--home", str(home), "--target", str(target), "--profile-id", profile_id, "--posting-urls-file", str(urls_file), "--use-stored-matrix", "--report", str(report_path), "--quiet"]
+    assert harness.main(argv) == 0
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    run = report["run"]
+    assert run["row_selection"]["mode"] == "private" and run["fake_model"] is True and run["excluded_rows"] == []
+    assert run["private_inputs"] == {"profile_id": profile_id, "posting_urls": ["https://boards.greenhouse.io/acme/jobs/101"], "use_stored_matrix": True, "contains_resume_text": True}
+    [row] = report["rows"]
+    assert row["resume_id"] == profile_id and row["ok"] is True and row["assessment_stored_path"] is None
+    assert row["answers"] == ["years:python"], "the gig's stored answers are read like run_tailored_resume reads them"
+    assert row["lines"] and all(entry["sources"][0]["text"] in resume_text for entry in row["lines"]), "the rows cite the profile's pinned resume"
+    assert row["line_stats"]["rewritable_lines"] == 2 and report["metrics"]["rewrite"]["rows_with_stats"] == 1
+    assert [path_.name for path_ in (tmp_path / "out").iterdir()] == ["private.json"]
+    # An unknown profile is refused before any model call.
+    assert harness.main([*argv[:6], "no-such-profile", *argv[7:]]) == 2

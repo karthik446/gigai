@@ -147,6 +147,25 @@ export function jobStateFor(job, states, tailoredIds) {
   return { state, since: same ? same.since : null, nextEvents: ["applied"] };
 }
 
+// Ledger 32: the server adds `assessment_stale` {reason: "posting_changed"}
+// to a job_state whose assessment was made on an older posting text (the
+// key is absent otherwise). The verdict is never changed or hidden; the
+// page only adds a marker next to it. Read from the raw served states.
+export const STALE_ASSESSMENT_TEXT = "Posting text changed since this assessment: re-assess";
+
+export function assessmentStaleFor(job) {
+  if (!job) {
+    return null;
+  }
+  const raws = [job.quick && job.quick.job_state, job.row && job.row.jobState];
+  const found = raws.find((raw) => raw && typeof raw === "object" && raw.assessment_stale && typeof raw.assessment_stale === "object");
+  return found ? { reason: found.assessment_stale.reason || "posting_changed" } : null;
+}
+
+export function staleAssessmentNote(job) {
+  return assessmentStaleFor(job) ? STALE_ASSESSMENT_TEXT : null;
+}
+
 export function withJobStates(jobs, applications, tailoredIds) {
   const states = applicationStates(applications);
   return (jobs || []).map((job) => ({ ...job, state: jobStateFor(job, states, tailoredIds) }));

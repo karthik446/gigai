@@ -250,6 +250,9 @@ class NotAssessedReason(StrEnum):
     LOCATION_MISMATCH = "location_mismatch"
     SPONSORSHIP_EXCLUDED = "sponsorship_excluded"
     MODEL_OUTPUT_INVALID = "model_output_invalid"
+    # uat-bug-046: the assessment's requirement matrix was too thin to back a
+    # Matched, so the posting text is treated as cut off (Lever bug).
+    POSTING_INCOMPLETE = "posting_incomplete"
     # 0.1.8.1 r1 (B1 coordinator review): a finer-grained sub-case of
     # LOCATION_MISMATCH, used only for AcquireOutput.dropped_counts'
     # per-reason auditability -- a location that resolves to *only* region
@@ -310,7 +313,7 @@ def _object(value: object, keys: Iterable[str], name: str) -> dict[str, object]:
     expected = frozenset(keys)
     unknown = set(result) - expected
     if unknown:
-        _fail("unknown_key", f"{name} contains unknown key(s): {sorted(unknown)}")
+        _fail("unknown_key", f"{name} contains unknown key(s): {sorted(unknown)} (allowed: {', '.join(sorted(expected))})")
     missing = expected - set(result)
     if missing:
         _fail("missing_key", f"{name} is missing key(s): {sorted(missing)}")
@@ -336,7 +339,7 @@ def _object_with_optional(
     expected = required_set | optional_set
     unknown = set(result) - expected
     if unknown:
-        _fail("unknown_key", f"{name} contains unknown key(s): {sorted(unknown)}")
+        _fail("unknown_key", f"{name} contains unknown key(s): {sorted(unknown)} (allowed: {', '.join(sorted(expected))})")
     missing = required_set - set(result)
     if missing:
         _fail("missing_key", f"{name} is missing key(s): {sorted(missing)}")
@@ -1640,9 +1643,10 @@ class ArtifactRef(_Contract):
     def from_json(cls, obj: object) -> "ArtifactRef":
         if type(obj) is not dict:
             _fail("wrong_type", "artifact_ref must be an object")
-        unknown = set(obj) - {"path", "content_sha256", "media_type", "size_bytes", "canonical_sha256"}
+        artifact_ref_keys = {"path", "content_sha256", "media_type", "size_bytes", "canonical_sha256"}
+        unknown = set(obj) - artifact_ref_keys
         if unknown:
-            _fail("unknown_key", f"artifact_ref contains unknown key(s): {sorted(unknown)}")
+            _fail("unknown_key", f"artifact_ref contains unknown key(s): {sorted(unknown)} (allowed: {', '.join(sorted(artifact_ref_keys))})")
         missing = {"path", "content_sha256", "media_type", "size_bytes"} - set(obj)
         if missing:
             _fail("missing_key", f"artifact_ref is missing key(s): {sorted(missing)}")

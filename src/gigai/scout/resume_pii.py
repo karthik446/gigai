@@ -1,7 +1,8 @@
 """0.1.10-001: a local, no-model heads-up for contact details in a resume.
 
-Scout sends the resume text to the model the user picked and does not remove
-personal info (README, Privacy and security). This check only *notices* the
+Scout removes the name and contact lines from the resume text before it goes to
+the model the user picked, but cannot catch everything (README, Privacy and
+security). This check only *notices* the
 obvious shapes -- an email address, a phone number, a linkedin.com or
 github.com link, a street address -- so the user can be told before adding
 the resume. An empty result means "nothing obvious found", never "clean":
@@ -13,10 +14,10 @@ from __future__ import annotations
 import re
 
 RESUME_WARNING = (
-    "Remove your personal info before adding a resume: name, email, phone, street address and links. "
-    "Scout sends your resume text to the model you pick (Codex -> OpenAI, Claude -> Anthropic, "
-    "OpenRouter -> your provider) to assess postings and tailor your resume, and it does not remove "
-    "personal info for you yet."
+    "Scout removes your name and contact lines (email, phone, address, links) before sending your resume to "
+    "the model you pick (Codex -> OpenAI, Claude -> Anthropic, OpenRouter -> your provider), and adds them back "
+    "only in your PDF, on this machine. It can't catch personal details elsewhere in the text (a first line that holds both a title and your name, or contact details inside a sentence), so keep those out. "
+    "Your contact line lives in Settings > Resume display."
 )
 
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")

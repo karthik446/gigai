@@ -29,7 +29,6 @@ from gigai.scout.find_jobs.contracts import ModelTarget, NotAssessedReason
 from gigai.scout.profile_records import selected_profile
 from gigai.scout.quick_assess import run_quick_assessment
 from gigai.scout.tailored_resume import (
-    MAX_HEADER_LINES,
     MAX_REFS_PER_LINE,
     MAX_SECTIONS,
     MAX_TEXT_CHARS,
@@ -87,6 +86,11 @@ _JOB = TailorJob(title="Staff AI Engineer", company="Acme", location="Remote", p
 _GCP = AnswerSource(question_id="cloud:gcp", answer="Yes, two years on GCP.", revision_id="rev_1", prompt="Have you run workloads on GCP?")
 _CTX = TailorContext(resume_lines=_LINES, answers={"cloud:gcp": _GCP})
 
+# 0110-003 P1: a stray "header" (here copying the withheld name/contact lines) is accepted and discarded.
+# 0110-006: every rewrite carries a reason anchored in the posting and keeps every fact of its
+# cited lines, so the no-loss pass shows all three rewrites (see test_tailor_no_loss.py for fallbacks).
+_SUMMARY = "Built Python services for six years, cutting p99 latency by 40%; operated Kubernetes clusters backed by PostgreSQL."
+_BULLET = "Cut p99 latency by 40% on the Python services built over six years."
 _VALID: dict[str, object] = {
     "header": [{"copy": 1}, {"copy": 2}],
     "sections": [
@@ -94,8 +98,9 @@ _VALID: dict[str, object] = {
             "heading": "summary",
             "lines": [
                 {
-                    "text": "Engineer with six years of Python services; ran Kubernetes clusters with PostgreSQL.",
+                    "text": _SUMMARY,
                     "refs": [{"kind": "resume", "line": 5}, {"kind": "resume", "line": 6}],
+                    "reason": {"kind": "summary", "requirement": None, "posting_phrase": "Python inference services"},
                 }
             ],
         },
@@ -104,12 +109,27 @@ _VALID: dict[str, object] = {
             "entries": [
                 {
                     "heading_ref": [{"copy": 4}],
-                    "bullets": [{"text": "Cut p99 latency by 40% for Python services.", "refs": [{"kind": "resume", "line": 5}]}],
+                    "bullets": [
+                        {
+                            "text": _BULLET,
+                            "refs": [{"kind": "resume", "line": 5}],
+                            "reason": {"kind": "surface", "requirement": None, "posting_phrase": "Python inference services"},
+                        }
+                    ],
                 }
             ],
         },
         {"heading": "skills", "lines": [{"copy": 8}]},
-        {"heading": "other", "lines": [{"text": "Two years on GCP.", "refs": [{"kind": "answer", "question_id": "cloud:gcp"}]}]},
+        {
+            "heading": "other",
+            "lines": [
+                {
+                    "text": "Two years on GCP.",
+                    "refs": [{"kind": "answer", "question_id": "cloud:gcp"}],
+                    "reason": {"kind": "answer", "requirement": None, "posting_phrase": "GCP experience is a plus"},
+                }
+            ],
+        },
     ],
 }
 
@@ -225,7 +245,10 @@ def test_matrix_requirement_names_replace_the_posting_tokens_when_an_assessment_
 def test_prompt_numbers_the_sources_and_drops_empty_paragraphs() -> None:
     ctx = TailorContext(resume_lines=_LINES, answers={"cloud:gcp": _GCP}, matrix=(MatrixRow("Python", "met"),))
     prompt = render_tailor_prompt(_JOB, ctx)
-    assert "R1: # Jane Doe\nR2: jane@example.test | Denver, CO\nR3: ## Experience" in prompt
+    # 0110-003 P1: the name/contact lines are withheld; the kept lines keep their original numbers.
+    assert "RESUME LINES:\nR3: ## Experience\nR4: Acme Corp" in prompt
+    assert "Jane" not in prompt and "jane@example.test" not in prompt and "Denver" not in prompt
+    assert "R1:" not in prompt and "R2:" not in prompt
     assert f"R{len(_LINES)}: Python, Kubernetes, PostgreSQL" in prompt
     assert "A cloud:gcp: Yes, two years on GCP." in prompt
     assert "M1: Python [met]" in prompt
@@ -252,9 +275,9 @@ def test_substituted_text_is_never_rescanned_for_placeholders() -> None:
 
 def test_a_valid_answer_yields_copy_lines_verbatim_and_rewritten_lines_with_source_text() -> None:
     result = validate_tailored_output(_VALID, _JOB, _CTX)
-    assert [line.kind for line in result.header] == ["copy", "copy"]
-    assert [line.text for line in result.header] == ["# Jane Doe", "jane@example.test | Denver, CO"]
-    assert result.header[0].refs[0].to_json() == {"kind": "resume", "line": 1, "text": "# Jane Doe"}
+    # Headerless (0110-003 P1): the model's header copies are discarded, never validated or stored.
+    assert result.header == () and result.to_json()["header"] == []
+    assert _CTX.withheld == frozenset({1, 2})
     experience = result.sections[1]
     assert experience.entries[0].heading[0].text == "Acme Corp — Senior Engineer (2019–2023)"
     assert experience.entries[0].heading[0].kind == "copy"
@@ -269,7 +292,10 @@ def test_a_valid_answer_yields_copy_lines_verbatim_and_rewritten_lines_with_sour
 @pytest.mark.parametrize(
     ("payload", "message"),
     [
-        ({"header": [{"copy": 99}], "sections": [{"heading": "skills", "lines": [{"copy": 8}]}]}, "header[1] copies resume line 99; the resume has 8 lines"),
+        ({"sections": [{"heading": "skills", "lines": [{"copy": 99}]}]}, "skills line 1 copies resume line 99; the resume has 8 lines"),
+        ({"sections": [{"heading": "skills", "lines": [{"copy": 1}]}]}, "skills line 1 copies resume line 1, which is not available (only the listed R lines can be used)"),
+        ({"sections": [{"heading": "experience", "entries": [{"heading_ref": [{"copy": 2}], "bullets": []}]}]}, "experience entry 1 heading[1] copies resume line 2, which is not available (only the listed R lines can be used)"),
+        (_one_line("Based in Denver.", [{"kind": "resume", "line": 2}]), "summary line 1 cites resume line 2, which is not available (only the listed R lines can be used)"),
         (_one_line("Six years of Python.", [{"kind": "resume", "line": 98}]), "summary line 1 cites resume line 98; the resume has 8 lines"),
         (_one_line("Two years on GCP.", [{"kind": "answer", "question_id": "cloud:aws"}]), 'summary line 1 cites "cloud:aws", which is not an answered question'),
         (_one_line("Six years of Python.", []), "summary line 1 has no refs; every rewritten line cites 1 to 4 sources"),
@@ -277,14 +303,13 @@ def test_a_valid_answer_yields_copy_lines_verbatim_and_rewritten_lines_with_sour
         (_one_line("Led 12 engineers.", [{"kind": "resume", "line": 5}, {"kind": "answer", "question_id": "cloud:gcp"}]), 'summary line 1 contains the number "12" that appears in none of its cited sources (R5, A cloud:gcp)'),
         (_one_line("Deep Terraform experience.", [{"kind": "resume", "line": 6}]), 'summary line 1 contains the posting term "terraform" that appears in none of its cited sources (R6)'),
         ({"header": [{"copy": 1}], "sections": [{"heading": "experience", "entries": [{"heading_ref": [{"text": "Acme Corp", "refs": [{"kind": "resume", "line": 4}]}], "bullets": []}]}]}, 'experience entry 1 heading[1] must be a copy line ({"copy": <resume line number>})'),
-        ({"header": [{"text": "Jane", "refs": []}], "sections": [{"heading": "skills", "lines": [{"copy": 8}]}]}, 'header[1] must be a copy line ({"copy": <resume line number>})'),
         ({"header": [], "sections": [{"heading": "experience", "entries": [{"heading_ref": [{"copy": 4}], "bullets": [{"text": "Ran k8s.", "refs": [{"kind": "resume", "line": 999}]}]}]}]}, "experience entry 1 bullet 1 cites resume line 999; the resume has 8 lines"),
         ({"header": [], "sections": [{"heading": "experience", "lines": [{"copy": 4}]}]}, "experience section must hold entries (heading_ref + bullets), not lines"),
         ({"header": [], "sections": [{"heading": "summary", "entries": []}]}, "summary section must hold lines, not entries"),
         ({"header": [], "sections": [{"heading": "career", "lines": [{"copy": 4}]}]}, "sections[1] heading must be one of summary, experience, skills, education, projects, other"),
         ({"header": [], "sections": [{"heading": "skills", "lines": [{"copy": 8}]}, {"heading": "skills", "lines": [{"copy": 8}]}]}, "sections[2] repeats the skills heading; each section appears at most once"),
         ({"header": [], "sections": []}, "sections has 0 items; at least 1 section is required"),
-        ({"header": [], "sections": [{"heading": "skills", "lines": [{"copy": 8}]}], "markdown": "# no"}, "the answer has unknown top-level key(s) ['markdown']; only header and sections are allowed"),
+        ({"header": [], "sections": [{"heading": "skills", "lines": [{"copy": 8}]}], "markdown": "# no"}, "the answer has unknown top-level key(s) ['markdown']; only sections is allowed"),
     ],
 )
 def test_the_validator_names_the_offending_line_and_the_reason(payload: dict[str, object], message: str) -> None:
@@ -299,8 +324,10 @@ def test_answer_refs_are_matched_after_normalizing_the_question_id() -> None:
 def test_bounds_are_enforced_with_count_and_limit_messages() -> None:
     too_many_sections = {"header": [], "sections": [{"heading": "skills", "lines": [{"copy": 8}]}] * (MAX_SECTIONS + 1)}
     assert _reject(too_many_sections) == f"sections has {MAX_SECTIONS + 1} items; at most {MAX_SECTIONS} allowed"
-    header = {"header": [{"copy": 1}] * (MAX_HEADER_LINES + 1), "sections": [{"heading": "skills", "lines": [{"copy": 8}]}]}
-    assert _reject(header) == f"header has {MAX_HEADER_LINES + 1} copy lines; at most {MAX_HEADER_LINES} allowed"
+    # No header bound any more: whatever "header" holds is discarded without a rejection (no retry spent).
+    for header in ([{"copy": 1}] * 50, [{"text": "Jane", "refs": []}], "Jane Doe", None, [{"copy": 99}]):
+        stray = {"header": header, "sections": [{"heading": "skills", "lines": [{"copy": 8}]}]}
+        assert validate_tailored_output(stray, _JOB, _CTX).header == ()
     long_text = _one_line("x" * (MAX_TEXT_CHARS + 1), [{"kind": "resume", "line": 5}])
     assert _reject(long_text) == f"summary line 1 text has {MAX_TEXT_CHARS + 1} characters; at most {MAX_TEXT_CHARS} allowed"
     refs = _one_line("Python.", [{"kind": "resume", "line": 5}] * (MAX_REFS_PER_LINE + 1))
@@ -319,18 +346,15 @@ def test_markdown_is_rendered_from_the_validated_json_with_refs_per_line() -> No
     result = validate_tailored_output(_VALID, _JOB, _CTX)
     markdown = render_markdown(result)
     assert markdown == (
-        "# Jane Doe <!-- R1 -->\n"
-        "jane@example.test | Denver, CO <!-- R2 -->\n"
-        "\n"
         "## Summary\n"
         "\n"
-        "- Engineer with six years of Python services; ran Kubernetes clusters with PostgreSQL. <!-- R5, R6 -->\n"
+        f"- {_SUMMARY} <!-- R5, R6 -->\n"
         "\n"
         "## Experience\n"
         "\n"
         "### Acme Corp — Senior Engineer (2019–2023) <!-- R4 -->\n"
         "\n"
-        "- Cut p99 latency by 40% for Python services. <!-- R5 -->\n"
+        f"- {_BULLET} <!-- R5 -->\n"
         "\n"
         "## Skills\n"
         "\n"
@@ -607,3 +631,163 @@ def test_tailor_resolves_a_gh_jid_company_url_through_the_board_api_with_home_ro
 
     assert seen and seen[0] == "boards-api.greenhouse.io/v1/boards/nexhealth/jobs/5993376004"
     assert all(host_path.startswith("boards-api") for host_path in seen)
+
+
+# --- 0110-006: the operator's weaker rewrites never reach the stored result, the .md or the PDF ------------------
+#
+# The symptom (UAT 2026-09-30): the tailor stored "Led 7 engineers ..., with technical
+# direction ..." for "Led a team of 7 engineers ... end to end, owning technical
+# direction ...", and dropped DSAR and CO from the DSAR bullet.  These tests import only
+# what 24e8398 already had, so the same test runs against the pre-fix code (where the
+# weaker text is stored) and the fixed code (where the original line is).
+
+_UAT_STAFF = "- Managed a group of 4 analysts supporting scheduling and billing systems end to end, owning the release calendar, vendor contact, and staff training across 2 hospitals."
+_UAT_DSAR = "- Built the medication reconciliation (MRX) workflow handling admission and discharge lists end to end under HIPAA and OH state requirements."
+_UAT_STAFF_WEAK = "Managed 4 analysts supporting scheduling and billing systems, with the release calendar, vendor contact, and staff training across 2 hospitals."
+_UAT_DSAR_WEAK = "Built a workflow for medication reconciliation on admission and discharge lists under HIPAA"
+_UAT_RESUME = (
+    "# Kar Ohm\n"
+    "kar@example.test\n"
+    "\n"
+    "## Experience\n"
+    "**Clinical Applications Manager — Example Corp** (2020–present)\n"
+    f"{_UAT_STAFF}\n"
+    f"{_UAT_DSAR}\n"
+)
+_UAT_POSTING = (
+    "Acme is hiring a Staff Engineer to lead scheduling and billing systems and our pharmacy work, "
+    "including admission and discharge lists. Requirements: Python; Kubernetes."
+)
+
+
+def _uat_reply(reason: bool) -> str:
+    """The operator's exact weaker rewrites, as the model returned them (R5 = Staff, R6 = DSAR)."""
+
+    def bullet(text: str, line: int, phrase: str) -> dict[str, object]:
+        out: dict[str, object] = {"text": text, "refs": [{"kind": "resume", "line": line}]}
+        if reason:
+            out["reason"] = {"kind": "surface", "requirement": None, "posting_phrase": phrase}
+        return out
+
+    return json.dumps(
+        {
+            "sections": [
+                {
+                    "heading": "experience",
+                    "entries": [
+                        {
+                            "heading_ref": [{"copy": 4}],
+                            "bullets": [bullet(_UAT_STAFF_WEAK, 5, "scheduling and billing systems"), bullet(_UAT_DSAR_WEAK, 6, "discharge lists")],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+
+@pytest.fixture
+def uat(tmp_path: Path) -> ProfileFixtureGig:
+    return build_gig_with_resume(tmp_path, resume_text=_UAT_RESUME.encode("utf-8"))
+
+
+def _uat_run(uat: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch, reply: str) -> TailorResponse:
+    _install(monkeypatch, [reply])
+    return _run(uat, TailorRequest(job=AssessJobInput(job_text=_UAT_POSTING, title="Staff Engineer", company="Acme")))
+
+
+def _pdf_text(response: TailorResponse) -> str:
+    import io
+    from datetime import datetime, timezone
+
+    from pypdf import PdfReader
+
+    from gigai.scout.resume_display import PdfHeader
+    from gigai.scout.resume_pdf import render_pdf
+
+    stored = TailorResponse.from_json(json.loads(Path(response.stored_path).read_text(encoding="utf-8")))
+    data = render_pdf(stored.result, PdfHeader("Kar Ohm"), company="Acme", timestamp=datetime(2026, 9, 30, tzinfo=timezone.utc))
+    return " ".join("\n".join(page.extract_text() for page in PdfReader(io.BytesIO(data)).pages).split())
+
+
+def _assert_the_original_lines_are_shown(response: TailorResponse) -> dict[str, object]:
+    on_disk = json.loads(Path(response.stored_path).read_text(encoding="utf-8"))
+    experience = next(section for section in on_disk["result"]["sections"] if section["heading"] == "experience")
+    bullets = experience["entries"][0]["bullets"]
+    # The stored result shows the ORIGINAL sentences, never the weaker ones ...
+    assert [bullet["text"] for bullet in bullets] == [_UAT_STAFF, _UAT_DSAR]
+    assert all(bullet["kind"] == "copy" and bullet["refs"][0]["text"] == bullet["text"] for bullet in bullets)
+    # ... and so do the rendered markdown (on disk and in the response) and the PDF text.
+    markdown = Path(response.markdown_path).read_text(encoding="utf-8")
+    assert markdown == response.markdown
+    assert f"{_UAT_STAFF} <!-- R5 -->\n" in markdown and f"{_UAT_DSAR} <!-- R6 -->\n" in markdown
+    assert _UAT_STAFF_WEAK not in markdown and _UAT_DSAR_WEAK not in markdown and "- - " not in markdown
+    pdf = _pdf_text(response)
+    assert _UAT_STAFF[2:] in pdf and _UAT_DSAR[2:] in pdf
+    assert _UAT_STAFF_WEAK not in pdf and _UAT_DSAR_WEAK not in pdf
+    return {"staff": bullets[0], "dsar": bullets[1]}
+
+
+def test_fail_before_the_operators_weaker_staff_and_dsar_rewrites_are_stored_as_the_original_lines(uat: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The model's answer exactly as the old prompt produced it: no reason, weaker text.
+    response = _uat_run(uat, monkeypatch, _uat_reply(reason=False))
+    shown = _assert_the_original_lines_are_shown(response)
+    # The rejected rewrites are kept, with what they dropped, for Show changes.
+    staff, dsar = shown["staff"]["alternative"], shown["dsar"]["alternative"]
+    assert shown["staff"]["origin"] == shown["dsar"]["origin"] == "fallback"
+    assert staff["kind"] == "rewritten" and staff["text"] == _UAT_STAFF_WEAK
+    assert staff["lost"] == {"ownership": ["own"], "scope": ["end to end"]}
+    assert dsar["kind"] == "rewritten" and dsar["text"] == _UAT_DSAR_WEAK
+    assert dsar["lost"] == {"entities": ["mrx", "oh"], "scope": ["end to end"]}
+    assert staff["reason_invalid"] is True and dsar["reason_invalid"] is True  # no reason given either
+
+
+def test_a_weaker_rewrite_with_a_valid_reason_still_falls_back_on_the_lost_facts_alone(uat: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    response = _uat_run(uat, monkeypatch, _uat_reply(reason=True))
+    shown = _assert_the_original_lines_are_shown(response)
+    staff, dsar = shown["staff"]["alternative"], shown["dsar"]["alternative"]
+    assert "reason_invalid" not in staff and "reason_invalid" not in dsar  # the reason held; the loss decided
+    assert staff["reason"] == {"kind": "surface", "requirement": None, "posting_phrase": "scheduling and billing systems"}
+    assert staff["lost"] == {"ownership": ["own"], "scope": ["end to end"]}
+    assert dsar["lost"] == {"entities": ["mrx", "oh"], "scope": ["end to end"]}
+    # One model call: a fallback never spends the retry.
+    assert response.usage is not None and response.usage.input_tokens == 10
+
+
+class _FixtureModelBinding(_ScriptedBinding):
+    """The fixture model (``bindings._test_model_tailor_reply``) answering each prompt it gets."""
+
+    def __init__(self) -> None:
+        super().__init__([])
+        port = self.port
+
+        def invoke(request):
+            port.prompts.append(request.prompt)
+            reply = json.dumps(bindings._test_model_tailor_reply(request.prompt))
+            return InvocationResult(
+                status="success", output_text=reply, resolved_model="fixture", raw_usage={},
+                normalized_usage=NormalizedUsage(10, 20, 30), cost_status="unavailable",
+            )
+
+        port.invoke = invoke  # type: ignore[method-assign]
+
+
+def test_the_fixture_models_lossy_marker_returns_the_operators_rewrites_and_the_originals_are_shown(uat: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    binding = _FixtureModelBinding()
+
+    def resolve(config, adapter_target, **_kwargs):
+        return binding
+
+    setattr(resolve, "_scout_test_transport", True)
+    monkeypatch.setattr("gigai.scout.proposal_execution.resolve_model_adapter", resolve)
+    posting = _UAT_POSTING + " " + bindings.TEST_MODEL_LOSSY_MARKER
+    response = _run(uat, TailorRequest(job=AssessJobInput(job_text=posting, title="Staff Engineer", company="Acme")))
+
+    reply = bindings._test_model_tailor_reply(binding.port.prompts[0])
+    experience = next(section for section in reply["sections"] if section["heading"] == "experience")
+    assert [bullet["text"] for bullet in experience["entries"][0]["bullets"]] == [_UAT_STAFF_WEAK, _UAT_DSAR_WEAK]
+    shown = _assert_the_original_lines_are_shown(response)
+    assert shown["staff"]["alternative"]["lost"] == {"ownership": ["own"], "scope": ["end to end"]}
+    assert shown["dsar"]["alternative"]["lost"] == {"entities": ["mrx", "oh"], "scope": ["end to end"]}
+    assert shown["staff"]["alternative"]["reason"]["posting_phrase"] == "scheduling"
+    assert len(binding.port.prompts) == 1

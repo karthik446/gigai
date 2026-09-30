@@ -8,15 +8,16 @@ research -- no per-question probabilities, no ``noul``/``score`` primitives
 
 Model resolution reuses ``find-jobs.json``'s ``default_model_target`` ->
 the same adapter-kind resolution ``assess`` uses
-(``_resolve_configured_target_name_for_adapter`` +
-``resolve_model_adapter``, both imported from ``proposal_execution.py``,
-Scout-internal) -- "no silent provider fallback" per the packet: an
+(``_resolve_configured_target_name_for_adapter`` imported from
+``proposal_execution.py`` and ``proposal_execution.resolve_model_adapter``
+looked up as a module attribute at call time, Scout-internal) -- "no silent provider fallback" per the packet: an
 unconfigured/disabled/ambiguous target fails loudly, naming the fix,
 exactly as assess's own resolution does.
 
 Privacy: the resume text is included in this prompt (the model call, not
 the web-search call) -- matching assess's own privacy line: resume goes
-only to the configured assess-equivalent model, never to web search.
+only to the configured assess-equivalent model, never to web search -- and
+only as ``resume_privacy.model_resume`` leaves it (no name/contact lines).
 """
 
 from __future__ import annotations
@@ -26,11 +27,13 @@ from pathlib import Path
 import re
 from typing import Mapping
 
-from ...adapters.factory import AdapterFactoryError, resolve_model_adapter
+from ...adapters.factory import AdapterFactoryError
 from ...adapters.port import ModelInvocationError
 from ...config import GigAIConfig
 from ...model_targets import ModelTargetResolutionError
+from .. import proposal_execution
 from ..proposal_execution import _resolve_configured_target_name_for_adapter, ScoutProposalExecutionError
+from ..resume_privacy import model_resume
 from .types import QUESTION_CATEGORIES, QuestionCategoryPrediction
 
 _MAX_PROMPT_TEXT = 12_000
@@ -59,7 +62,7 @@ def _prompt(*, title: str, company: str, posting_text: str, resume_text: str, co
         schema,
         f"ROLE: {title}\nCOMPANY: {company}",
         "POSTING TEXT (may be truncated):\n" + posting_text[:_MAX_PROMPT_TEXT],
-        "CANDIDATE RESUME (may be truncated):\n" + resume_text[:_MAX_PROMPT_TEXT],
+        "CANDIDATE RESUME (may be truncated):\n" + model_resume(resume_text).text[:_MAX_PROMPT_TEXT],
         company_block,
         "Ground every category's \"why\" and \"grounded_in\" in the posting, resume, or company research above -- "
         "never invent a claim not supported by one of those three sources.",
@@ -130,7 +133,8 @@ def predict_categories(
         raise CategoryPredictionError("category_model_target_invalid", f"unsupported model target {model_target!r}")
     try:
         adapter_target = _resolve_configured_target_name_for_adapter(config, model_target)
-        binding = resolve_model_adapter(config, adapter_target, home_root=home_root)
+        # Module-attribute lookup (C1), so the test transport and payload tests reach this call too.
+        binding = proposal_execution.resolve_model_adapter(config, adapter_target, home_root=home_root)
     except (AdapterFactoryError, ModelTargetResolutionError, ScoutProposalExecutionError, ModelInvocationError) as exc:
         # uat-bug-035: ModelInvocationError is a CLI target not on PATH.
         raise CategoryPredictionError("category_model_unavailable", str(exc)) from exc

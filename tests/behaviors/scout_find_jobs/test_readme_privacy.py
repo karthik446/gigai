@@ -1,4 +1,8 @@
-"""SCOPE-ADD-3 E: the README's privacy and ranking claims match the code they describe."""
+"""SCOPE-ADD-3 E: the docs' privacy and ranking claims match the code they describe.
+
+0110-011: the README is short; the long-form claims live in the docs site
+(``gigai-docs/src/content/docs``). The assertions are unchanged, they read the page that now holds each fact.
+"""
 
 from __future__ import annotations
 
@@ -8,11 +12,20 @@ from gigai.scout.find_jobs import model_rank, rank_digest
 from gigai.scout.find_jobs.contracts import ModelTarget
 from gigai.scout.find_jobs.rank_run import RUN_MAX_CALLS
 
-README = Path(__file__).resolve().parents[3] / "README.md"
+ROOT = Path(__file__).resolve().parents[3]
+README = ROOT / "README.md"
+DOCS = ROOT / "gigai-docs" / "src" / "content" / "docs"
+
+
+def _page(rel: str) -> str:
+    return (DOCS / rel).read_text(encoding="utf-8")
 
 
 def _text() -> str:
-    return README.read_text(encoding="utf-8")
+    """Every hand-written page of the docs site (generated reference pages excluded)."""
+    generated = {"changelog.md", "reference/cli.md", "scout/reference/cli.md"}
+    pages = sorted(p for p in DOCS.rglob("*.md") if p.relative_to(DOCS).as_posix() not in generated)
+    return "\n\n".join(p.read_text(encoding="utf-8") for p in pages)
 
 
 def _flat(section: str) -> str:
@@ -20,22 +33,22 @@ def _flat(section: str) -> str:
 
 
 def _privacy() -> str:
-    return _flat(_text().split("## Privacy and security", 1)[1].split("\n## ", 1)[0])
+    return _flat(_page("scout/privacy.md").split("---", 2)[2])
 
 
 def test_the_readme_names_no_jev_service() -> None:
-    assert "jev" not in _text().lower()
+    assert "jev" not in _text().lower() and "jev" not in README.read_text(encoding="utf-8").lower()
 
 
 def test_the_intro_no_longer_claims_a_second_service_sees_your_resume() -> None:
-    intro = _flat(_text().split("## Scout, the first Gig", 1)[1].split("\n## ", 1)[0])
+    intro = _flat(_page("scout/index.md"))
     assert "Nothing about you leaves your machine except" not in intro
     assert "What your model target sees is exactly what leaves your machine for ranking and assessment" in intro
-    assert "[Privacy and security](#privacy-and-security)" in intro
+    assert "[Privacy and security](privacy/)" in intro
 
 
 def test_the_ranking_copy_is_honest_about_the_order() -> None:
-    text = _flat(_text())
+    text = _flat(_page("scout/index.md"))
     assert "likely fits first, likely no-matches last" in text
     assert "never by hiding them" in text
     assert "does not claim to put the best match first" in text
@@ -73,12 +86,15 @@ def test_the_resume_digest_claims_match_what_the_digest_contains() -> None:
         assert private not in digest, private
     privacy = _privacy()
     assert "the job titles, skills and domain found in your resume, and an experience-years figure" in privacy
-    # uat-bug-047: no promise of removal; the reader is told to supply a resume without personal info.
+    # 0.1.10-003: the model-bound strip shipped (resume_privacy.model_resume); the ranking digest wording stays hedged.
     assert "Scout leaves contact lines (name, email, phone, address, links) out of the ranking digest where it can recognize them" in privacy
-    assert "but do not rely on it: remove personal info from the resume you add" in privacy
+    assert "keep other personal details out of the resume you add" in privacy
     for promise in ("are never sent for ranking", "they are stripped", "are stripped from the digest"):
         assert promise not in privacy, promise
-    assert "**Assessment and tailoring** send your resume text" in privacy
+    assert "**Assessment and tailoring** send your resume text with the name and contact lines removed" in privacy
+    assert "It can't catch personal details elsewhere in the text" in privacy and "keep those out" in privacy
+    assert "contact details inside a sentence" in privacy and "title and your name" in privacy
+    assert "does not remove personal info" not in privacy and "Remove your personal info before adding" not in privacy
     assert "characters copied from the start of your resume" not in privacy
 
 
@@ -103,7 +119,7 @@ def test_the_bounded_call_count_is_stated_and_exists() -> None:
 
 def test_the_privacy_section_lists_the_other_network_traffic() -> None:
     privacy = _privacy()
-    assert "Network traffic besides your model." in privacy
+    assert "## Network traffic besides your model Scout makes these other requests" in privacy
     assert "Job boards (Greenhouse, Lever, Ashby) get plain public requests" in privacy and "see your IP address" in privacy
     assert "Exa, only if enabled in your sources, receives the search query (your target roles), a start date, a country code and your Exa key" in privacy
     assert "The setup interview itself makes no network request" in privacy
@@ -118,16 +134,16 @@ def test_the_pasted_resume_and_status_claims_are_the_decided_wording() -> None:
         "your assessment model; the stored result keeps short evidence quotes on your machine."
     ) in privacy
     assert "is used once, and is never saved" not in privacy
-    status = _flat(_text().split("## Status", 1)[1].split("\n## ", 1)[0])
+    status = _flat(_page("index.md").split("## Status", 1)[1].split("\n## ", 1)[0])
     assert (
-        "0.1.9 is an alpha: it has been through hands-on testing by the maintainer "
+        "GigAI is an alpha: it has been through hands-on testing by the maintainer "
         "(two UAT rounds, 2026-09-27 and 2026-09-29); expect rough edges."
     ) in status
     assert "not yet had a live-provider" not in status
 
 
 def test_the_readme_says_exa_is_optional_and_off_for_a_new_setup() -> None:
-    text = _flat(_text())
+    text = _flat(_page("scout/quickstart.md") + _page("scout/configuration.md"))
     # uat-bug-035 (operator decision): one model target is required, Codex or Claude.
     assert (
         "You need one model target to start: Codex (`codex_cli`) or Claude (`claude_cli`); "
@@ -144,7 +160,7 @@ def test_the_readme_names_claude_as_a_required_choice_and_says_where_it_sends() 
     """uat-bug-035: Codex or Claude is the one required target; Claude's traffic goes to Anthropic."""
 
     text = _flat(_text())
-    quickstart = _flat(_text().split("## Quickstart (Scout)", 1)[1].split("\n## ", 1)[0])
+    quickstart = _flat(_page("scout/quickstart.md"))
     assert "One model CLI, installed and logged in.** Codex: run `codex login` (check it with `codex login status`). Or Claude Code: run `claude`, then `/login`." in quickstart
     assert "Exa search is optional and off" in quickstart
     privacy = _privacy()
@@ -157,7 +173,7 @@ def test_the_readme_names_claude_as_a_required_choice_and_says_where_it_sends() 
 def test_the_readme_says_tailored_resumes_are_drafts_and_states_the_evidence_exactly() -> None:
     """uat-bug-038: the draft sentence, the evidence note (judge count and adjudication, no rounding) and the wizard's saved target."""
 
-    text = _flat(_text())
+    text = _flat(_page("scout/index.md") + _page("scout/configuration.md"))
     assert "Tailored resumes are drafts: review each line; every line shows its sources." in text
     assert "155 and 151 lines" in text and "0.6% and 0.66% of lines" in text
     assert "one judge-flagged plural" in text and "not a new fact" in text
@@ -173,25 +189,24 @@ def test_assess_all_new_is_described_and_keeps_the_privacy_statement_true() -> N
     from gigai.scout.find_jobs import assess_all
 
     assert assess_all.ASSESS_CONCURRENCY == 4
-    text = _flat(_text())
-    assert "**Assess all new.** A run assesses its top-ranked postings automatically" in text
+    text = _flat(_page("scout/privacy.md"))
+    assert "## Assess all new A run assesses its top-ranked postings automatically" in text
     assert "one model call per posting, 4 at a time" in text
     assert "per-token" not in text and "Scout passes them no API key" in text
     assert "each posting's assessment sends your resume and that posting to that provider" in text
     assert "including each posting \"Assess all new\" assesses" in _privacy()
 
 
-def test_the_quickstart_is_first_numbered_and_asks_for_a_resume_without_personal_info() -> None:
+def test_the_quickstart_is_numbered_and_asks_for_a_resume_without_personal_info() -> None:
     """uat-bug-047: one path from zero to Scout, resume input rule matching the code, roadmap present."""
     from gigai.scout import resume_import
 
     text = _text()
-    assert text.index("## Quickstart (Scout)") < text.index("## Scout, the first Gig") < text.index("## Privacy and security")
-    quickstart = _flat(text.split("## Quickstart (Scout)", 1)[1].split("\n## ", 1)[0])
-    for step in ("**1. Requirements**", "**2. Prepare your resume", "**3. Install**", "**4. Run**"):
+    quickstart = _flat(_page("scout/quickstart.md"))
+    for step in ("## 1. Requirements", "## 2. Prepare your resume", "## 3. Install", "## 4. Run"):
         assert step in quickstart, step
-    assert "with your name, email, phone, street address and links/URLs removed" in quickstart
-    assert "Scout does not yet remove personal info for you" in quickstart
+    assert "Scout removes your name and contact lines" in quickstart and "can't catch personal details elsewhere in the text" in quickstart
+    assert "does not yet remove personal info" not in text
     for command in ("uv tool install gigai", "gigai --version", "gigai scout run"):
         assert command in quickstart, command
     # uat-bug-050: `gigai scout run` writes the default settings itself, so the
@@ -199,47 +214,61 @@ def test_the_quickstart_is_first_numbered_and_asks_for_a_resume_without_personal
     # changing core settings.
     assert "gigai setup" not in quickstart
     assert "The first run on a new machine creates GigAI's settings with their defaults" in quickstart
-    advanced = _flat(text.split("### Setup, projects and Gigs (advanced)", 1)[1].split("\n## ", 1)[0])
+    advanced = _flat(_page("agents.md").split("## Setup, projects and Gigs (advanced)", 1)[1].split("\n## ", 1)[0])
     assert "`gigai setup` is interactive by default" in advanced
     assert "Scout users do not need it: the first `gigai scout run`" in advanced
     assert "run `gigai setup` once first" not in text
-    assert "from the release tag" in quickstart and "@v0.1.9" in quickstart
+    assert "uv tool upgrade gigai" in quickstart and "@<tag>" in quickstart and "@v0" not in quickstart
     for button in ("Update sources", "Run find jobs", "Assess all new", "Tailor resume"):
         assert f"**{button}**" in quickstart, button
     # the human quickstart no longer starts with gigai init / gigai gigs
     assert "gigai init" not in quickstart and "gigai gigs" not in quickstart
     # the resume input rule is the code's
     assert resume_import.RESUME_SUFFIXES == (".txt", ".md", ".markdown") and resume_import.RESUME_MAX_BYTES == 1_048_576
-    flat = _flat(text).replace("> ", "")
-    assert "accepts `.txt`, `.md` and `.markdown` files up to 1 MB" in flat and "0.1.8.x limit" not in flat
-    assert "## Roadmap / TODO" in text and "### Known limitations" in text and "(CONTRIBUTING.md)" in text
-    assert "- [ ] Remove personal info from resumes automatically before any model call" in text
+    assert "accepts `.txt`, `.md` and `.markdown` files up to 1 MB" in _flat(_page("scout/resume.md"))
+    assert "0.1.8.x limit" not in _flat(text)
+    assert "Known limitations" in _page("scout/limitations.md") and "Roadmap" in _page("scout/roadmap.md")
+    assert "- [ ] Catch personal details the name and contact-line removal misses" in _page("scout/roadmap.md")
+    assert "Remove personal info from resumes automatically" not in text
 
 
-def test_resume_display_ships_and_only_the_model_privacy_guarantee_stays_on_the_roadmap() -> None:
-    """0.1.10-003: Download PDF and Resume display are shipped (present tense); the never-sent guarantee is still a roadmap item."""
-    text = _text()
-    roadmap = _flat(text.split("## Roadmap / TODO", 1)[1].split("\n## ", 1)[0])
+def test_resume_display_ships_and_the_never_sent_guarantee_moved_out_of_the_roadmap() -> None:
+    """0.1.10-003: Download PDF, Resume display and the never-sent guarantee are shipped (present tense), not roadmap items."""
+    roadmap = _flat(_page("scout/roadmap.md"))
     assert "Download PDF for tailored resumes" not in roadmap and "- [ ] Resume display settings" not in roadmap
-    shipped = _flat(text.split("## Roadmap / TODO", 1)[0])
+    shipped = _flat(_page("scout/quickstart.md") + _page("scout/resume.md"))
     assert "**Download PDF** saves it as a PDF" in shipped and "**Resume display**" in shipped
-    assert "stored only on your computer and added to the PDF locally" in shipped
-    assert (
-        "- [ ] Keep the Resume display fields (name, title, contact line) out of everything sent to a model or the network "
-        "(0.1.10): a test will check that none of them appear in any model or network payload"
-    ) in roadmap
-    assert "Alpine/musl Linux isn't supported yet: the PDF renderer (Typst) has no musl wheel, so installing there fails." in _flat(text)
+    assert "stored only on your computer, never sent to a model, and added to the PDF locally" in shipped
+    assert "Keep the Resume display fields" not in roadmap
+    assert "The Resume display fields (name, title, contact line) are never sent to a model or the network" in _privacy()
+    assert "Alpine/musl Linux isn't supported yet: the PDF renderer (Typst) has no musl wheel, so installing there fails." in _flat(_page("scout/limitations.md"))
     assert "jev" not in roadmap.lower()
 
 
-def test_the_roadmap_parks_interview_prep_and_readme_never_presents_it_as_a_feature() -> None:
+def test_the_roadmap_parks_interview_prep_and_the_docs_never_present_it_as_a_feature() -> None:
     """uat-bug-051: hidden in 0.1.9; only a roadmap line mentions it."""
     text = _text()
-    roadmap = _flat(text.split("## Roadmap / TODO", 1)[1].split("\n## ", 1)[0])
+    roadmap = _flat(_page("scout/roadmap.md"))
     assert (
-        "- [ ] Interview prep (0.1.10): research the company and likely interview questions "
+        "- [ ] Interview prep: research the company and likely interview questions "
         "through your own Codex or Claude CLI (no separate API key)"
     ) in roadmap
     assert "openai" not in roadmap.lower() and "OPENAI_API_KEY" not in text
     assert "scout prep" not in text
     assert text.lower().count("interview prep") == 1
+
+
+def test_the_short_readme_keeps_its_promises_and_points_at_the_docs() -> None:
+    """0110-011: a short README with the 3-step quickstart, a true privacy one-liner and the links."""
+    readme = README.read_text(encoding="utf-8")
+    assert len(readme.splitlines()) <= 60
+    for command in ("uv tool install gigai", "gigai scout run"):
+        assert command in readme
+    flat = _flat(readme)
+    assert "removes your name and contact lines" in flat and "can't catch personal details elsewhere in the text" in flat
+    assert "contact and Resume display fields never leave your machine" in flat
+    for link in ("https://karthik446.github.io/gigai/", "CHANGELOG", "Releases", "CONTRIBUTING"):
+        assert link in readme, link
+    # everything the README used to carry is on the site
+    for rel in ("scout/privacy.md", "scout/quickstart.md", "scout/resume.md", "scout/limitations.md", "scout/roadmap.md", "agents.md", "scout/agents.md"):
+        assert (DOCS / rel).is_file(), rel

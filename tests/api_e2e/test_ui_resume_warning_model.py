@@ -47,12 +47,19 @@ def _run() -> dict[str, object]:
 def test_the_warning_is_model_aware_and_matches_the_cli_wording() -> None:
     out = _run()
     assert out["general"] == RESUME_WARNING
-    assert "sends your resume text to OpenAI" in out["codex"]
-    assert "sends your resume text to Anthropic" in out["claude"]
-    assert "your provider" in out["openrouter"]
+    assert "before sending your resume to OpenAI," in out["codex"]
+    assert "before sending your resume to Anthropic," in out["claude"]
+    assert "your provider (OpenRouter)" in out["openrouter"]
     assert "stays on this machine" in out["ollama"] and "OpenAI" not in out["ollama"]
-    for key in ("codex", "claude", "openrouter", "ollama"):
-        assert out[key].startswith("Remove your personal info before adding a resume: name, email, phone, street address and links.")
+    for key in ("general", "codex", "claude", "openrouter", "ollama"):
+        text = out[key]
+        assert text.startswith("Scout removes your name and contact lines (email, phone, address, links) before sending your resume to")
+        assert "adds them back only in your PDF, on this machine." in text
+        # the known gaps are named, and nothing promises more than the strip does
+        assert "It can't catch personal details elsewhere in the text" in text and "keep those out" in text
+        assert "contact details inside a sentence" in text and "title and your name" in text
+        assert text.endswith("Your contact line lives in Settings > Resume display.")
+        assert "does not remove" not in text and "Remove your personal info" not in text
 
 
 def test_the_heads_up_lists_what_was_found_and_says_nothing_otherwise() -> None:

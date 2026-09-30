@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gigai"
-version = "0.1.9.1"
+version = "0.1.10"
 description = "Contract-first foundations for a local, user-controlled agent runtime"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -49,7 +49,7 @@ where = ["src"]
 "gigai.schemas" = ["*.schema.json", "README.md", "SHA256SUMS"]
 "gigai.data" = ["*.json", "runtime-comparison-pack-v1.json"]
 "gigai.scout" = ["data/*.md", "data/*.json.gz", "data/goalgraphs/*.md", "data/instructions/*.md", "data/resume/*.typ", "data/resume/*.ttf", "data/resume/*.txt", "data/ui/*.html", "data/ui/*.css", "data/tools/*/*.json", "ui/dist/*", "ui/dist/assets/*"]
-"gigai" = ["static/*.css"]
+"gigai" = ["static/*.css", "data/cli/*.yaml"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers -p no:cacheprovider"

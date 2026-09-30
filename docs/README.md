@@ -4,10 +4,8 @@
   product, authority, storage, and implementation design.
 - [V15 forward roadmap](architecture/v15-roadmap.md) — post-Phase 1 pivot toward
   reusable Gigs, review/evaluation loops, tools, and staged execution.
-- [Command reference](reference/command-sheet.md) — planned operator-facing
-  command contract.
-- [Cheat sheet](reference/cheat-sheet.md) — current installation, offline
-  lifecycle, inspection, and opt-in live-diagnostic commands.
+- [Public docs site](../gigai-docs/) — the user-facing documentation (Starlight);
+  the CLI reference is generated from the code.
 - [External changelog](../CHANGELOG.md) — verified operator-facing capability
   history.
 - [Internal changelog](development/changelog-internal.md) — cross-goal

@@ -12,7 +12,7 @@ What is pinned:
   ``- bullet``), and EVERY content line's text is one of the response's own
   lines -- nothing the panel shows is fabricated client-side; each line
   keeps its refs (the cited source text) for the hover/expand;
-* the stats line counts copied / rewritten / citing-answers lines;
+* the stats line counts copied / rewritten / citing-answers lines (the header and entry headings are not rewritable lines, so they stay out);
 * ``latestStored`` picks the newest ``updated_at``;
 * ``payLabel``/``workModeLabel``/``h1bLabel`` render ONLY when the field is
   present (operator answer 3) in the spec's formats (``$180k–$220k / yr``,
@@ -231,8 +231,8 @@ def test_preview_lines_are_the_responses_own_text_in_markdown_order() -> None:
 
 def test_stats_download_name_and_latest_stored() -> None:
     out = _run_node(_payload())
-    assert out["stats"] == {"total": 7, "copied": 4, "rewritten": 3, "citingAnswers": 1, "unsourced": 0, "keywords": []}
-    assert out["statsLine"] == "7 lines · 4 copied verbatim · 3 rewritten (1 citing your answers)"
+    assert out["stats"] == {"total": 4, "copied": 1, "keptOriginal": 0, "rewritten": 3, "citingAnswers": 1, "unsourced": 0, "keywords": []}
+    assert out["statsLine"] == "4 lines · 1 copied verbatim · 3 rewritten (1 citing your answers)"
     assert out["latest"] == "newest"
 
 

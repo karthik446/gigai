@@ -17,6 +17,7 @@ from typing import Any
 
 from gigai.scout.assessment_core import _MAX_PROMPT_POSTING_TEXT, _MAX_PROMPT_RESUME_TEXT, AssessContext, AssessJob, render_assess_prompt
 from gigai.scout.question_ids import normalize_question_id
+from gigai.scout.resume_privacy import model_resume
 
 from tests.evals import run_assess_eval as harness
 
@@ -52,8 +53,12 @@ def test_resume_index_settings_are_config_shaped() -> None:
         assert resume.kind in {"synthetic", "clean_fit"}
         if resume.kind == "clean_fit":
             assert resume.clean_fit_posting_id in postings
-            # The residency the countries setting asserts is also stated in the resume text.
-            assert any(_COUNTRY_WORDS[code] in resume.text for code in resume.countries)
+            # 0110-003 P1: the resume's header `Location:`/citizenship line is withheld from the
+            # model, so the residency the countries setting asserts now reaches the prompt through
+            # the structured `location` field (find-jobs.json), not the resume text.
+            assert resume.location.strip()
+            if "US" not in resume.countries:  # US rows name a state, the others name the country
+                assert any(_COUNTRY_WORDS[code] in resume.location for code in resume.countries)
         else:
             assert resume.clean_fit_posting_id is None
 
@@ -150,11 +155,16 @@ def test_every_row_renders_through_the_shipped_prompt_untruncated() -> None:
         resume = resumes[label.resume_id]
         prompt = render_assess_prompt(
             AssessJob(title=posting.title, company=posting.company, location=posting.location, posting_text=posting.full_text),
-            AssessContext(resume_text=resume.text, visa_sponsorship_required=resume.visa_sponsorship_required, countries=resume.countries, titles=resume.titles),
+            AssessContext(resume_text=resume.text, visa_sponsorship_required=resume.visa_sponsorship_required, countries=resume.countries, titles=resume.titles, location=resume.location),
         )
         assert posting.full_text in prompt
-        assert resume.text in prompt
+        # 0110-003 P1: the prompt carries the privacy-stripped resume (no name/contact lines), untruncated.
+        stripped = model_resume(resume.text).text
+        assert stripped in prompt and len(stripped) > len(resume.text) // 2
+        assert resume.text.splitlines()[0] not in prompt, "the resume's name line is never sent"
         assert ", ".join(resume.countries) in prompt
+        # 0110-003 P1: location reaches the prompt via the structured field, not the withheld header line.
+        assert resume.location in prompt
         assert ", ".join(resume.titles) in prompt
         assert "{{" not in prompt
 

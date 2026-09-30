@@ -127,3 +127,19 @@ test-debian-offline:
 		--env GIGAI_AUDIT_TARGET=/audit/target \
 		--env GIGAI_AUDIT_WORKPAD=/audit/workpad \
 		gigai-debian-offline:local
+
+# Public docs site (gigai-docs/, Astro Starlight; Node 22). Reference pages (CLI, Scout API,
+# changelog) are generated from the code; commit what docs-gen writes. CI runs docs-check.
+# docs-gen replaced 0110-008's `cli-manual` / docs/cli.md: one generated manual, one freshness gate.
+.PHONY: docs-gen docs-check docs-dev docs-build
+docs-gen:
+	$(UV) run --locked python tools/docs_gen.py
+
+docs-check:
+	$(UV) run --locked python tools/docs_gen.py --check
+
+docs-dev: docs-gen
+	cd gigai-docs && npm ci && npm run dev
+
+docs-build: docs-check
+	cd gigai-docs && npm ci && npm run build

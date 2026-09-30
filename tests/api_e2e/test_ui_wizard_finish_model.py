@@ -156,7 +156,7 @@ const savedPrefs = { cadence_days: 3, budget_usd_per_session: 1.25 };
 const steps = {
   names: state.STEPS,
   review: state.reviewRows(reviewFields, []).map(([key]) => key),
-  complete: [1, 2, 3, 4].map((step) => state.screenIsComplete(step, reviewFields)),
+  complete: [1, 2, 3, 4, 5].map((step) => state.screenIsComplete(step, reviewFields)),
   firstRun: state.setupBody(reviewFields, null),
   edit: state.setupBody({ ...state.initialFields({ prefs: savedPrefs, config: null, selectedProfile: null, resumes: [] }), ...input.finishes.freshPaste.fields }, savedPrefs),
 };
@@ -534,10 +534,11 @@ def test_with_no_stored_resume_the_wizard_starts_on_paste(out: dict) -> None:
 
 def test_the_steps_and_the_review_have_no_discovery_cadence_or_budget(out: dict) -> None:
     steps = out["steps"]
-    assert steps["names"] == ["Resume", "Target", "Companies", "Review"]
+    assert steps["names"] == ["Resume", "Resume display", "Target", "Companies", "Review"]
     assert steps["review"] == [
         "Profile",
         "Resume",
+        "PDF header",
         "Extracted by",
         "Tech stack",
         "Seniority",
@@ -553,7 +554,7 @@ def test_the_steps_and_the_review_have_no_discovery_cadence_or_budget(out: dict)
     for name in steps["names"] + steps["review"]:
         lowered = name.lower()
         assert "discover" not in lowered and "cadence" not in lowered and "budget" not in lowered, name
-    assert steps["complete"] == [True, True, True, True]
+    assert steps["complete"] == [True, True, True, True, True]
 
 
 def test_the_screens_ask_for_no_cadence_and_no_budget() -> None:

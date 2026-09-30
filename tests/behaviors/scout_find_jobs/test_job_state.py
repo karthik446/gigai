@@ -358,3 +358,50 @@ def test_the_served_shape_is_state_since_next_events() -> None:
         "next_events": ["interview_scheduled", "offer_received", "rejected", "withdrawn"],
     }
     assert derive_job_state().to_json() == {"state": "not_assessed", "since": None, "next_events": ["applied"]}
+
+
+# --- ledger 32: an assessment made on posting text that has since changed -------------------
+
+_OLD = "sha256:" + "a" * 64
+_NEW = "sha256:" + "b" * 64
+
+
+def test_an_assessment_of_changed_posting_text_is_marked_stale() -> None:
+    state = derive_job_state(
+        assessments=[AssessmentFact(at="2026-09-01T10:00:00Z", verdict="matched_above_threshold", content_sha256=_OLD)],
+        current_content_sha256=_NEW,
+    )
+    assert state.state == "matched"
+    assert state.to_json()["assessment_stale"] == {"reason": "posting_changed"}
+
+
+@pytest.mark.parametrize(
+    ("assessed_on", "current"),
+    [(_OLD, _OLD), (None, _NEW), (_OLD, None)],
+    ids=["unchanged", "old record without a digest", "no current posting"],
+)
+def test_nothing_says_stale_without_two_digests_that_differ(assessed_on: str | None, current: str | None) -> None:
+    state = derive_job_state(
+        assessments=[AssessmentFact(at="2026-09-01T10:00:00Z", verdict="matched_above_threshold", content_sha256=assessed_on)],
+        current_content_sha256=current,
+    )
+    assert "assessment_stale" not in state.to_json()
+
+
+def test_only_the_assessment_that_gives_the_state_can_be_stale() -> None:
+    stale = AssessmentFact(at="2026-09-01T10:00:00Z", verdict="matched_above_threshold", content_sha256=_OLD)
+    fresh = AssessmentFact(at="2026-09-02T10:00:00Z", verdict="not_a_match", content_sha256=_NEW)
+    assert "assessment_stale" not in derive_job_state(assessments=[stale, fresh], current_content_sha256=_NEW).to_json()
+    tailored = derive_job_state(assessments=[stale], has_tailored_resume=True, current_content_sha256=_NEW)
+    assert "assessment_stale" not in tailored.to_json()
+
+
+def test_posting_incomplete_is_a_not_assessed_reason_and_in_the_openapi_document() -> None:
+    from gigai.scout.find_jobs.api import openapi
+    from gigai.scout.find_jobs.contracts import NotAssessedReason
+
+    assert NotAssessedReason("posting_incomplete") is NotAssessedReason.POSTING_INCOMPLETE
+    document = openapi.openapi_document(version="0")
+    posting = document["paths"]["/api/runs/{run_id}/posting"]["get"]["description"]
+    assert "posting_incomplete" in posting and "assessment_stale" in posting
+    assert "assessment_stale" in document["paths"]["/api/jobs"]["get"]["description"]
