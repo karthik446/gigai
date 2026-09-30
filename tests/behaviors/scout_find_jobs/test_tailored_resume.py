@@ -87,6 +87,10 @@ _GCP = AnswerSource(question_id="cloud:gcp", answer="Yes, two years on GCP.", re
 _CTX = TailorContext(resume_lines=_LINES, answers={"cloud:gcp": _GCP})
 
 # 0110-003 P1: a stray "header" (here copying the withheld name/contact lines) is accepted and discarded.
+# 0110-006: every rewrite carries a reason anchored in the posting and keeps every fact of its
+# cited lines, so the no-loss pass shows all three rewrites (see test_tailor_no_loss.py for fallbacks).
+_SUMMARY = "Built Python services for six years, cutting p99 latency by 40%; operated Kubernetes clusters backed by PostgreSQL."
+_BULLET = "Cut p99 latency by 40% on the Python services built over six years."
 _VALID: dict[str, object] = {
     "header": [{"copy": 1}, {"copy": 2}],
     "sections": [
@@ -94,8 +98,9 @@ _VALID: dict[str, object] = {
             "heading": "summary",
             "lines": [
                 {
-                    "text": "Engineer with six years of Python services; ran Kubernetes clusters with PostgreSQL.",
+                    "text": _SUMMARY,
                     "refs": [{"kind": "resume", "line": 5}, {"kind": "resume", "line": 6}],
+                    "reason": {"kind": "summary", "requirement": None, "posting_phrase": "Python inference services"},
                 }
             ],
         },
@@ -104,12 +109,27 @@ _VALID: dict[str, object] = {
             "entries": [
                 {
                     "heading_ref": [{"copy": 4}],
-                    "bullets": [{"text": "Cut p99 latency by 40% for Python services.", "refs": [{"kind": "resume", "line": 5}]}],
+                    "bullets": [
+                        {
+                            "text": _BULLET,
+                            "refs": [{"kind": "resume", "line": 5}],
+                            "reason": {"kind": "surface", "requirement": None, "posting_phrase": "Python inference services"},
+                        }
+                    ],
                 }
             ],
         },
         {"heading": "skills", "lines": [{"copy": 8}]},
-        {"heading": "other", "lines": [{"text": "Two years on GCP.", "refs": [{"kind": "answer", "question_id": "cloud:gcp"}]}]},
+        {
+            "heading": "other",
+            "lines": [
+                {
+                    "text": "Two years on GCP.",
+                    "refs": [{"kind": "answer", "question_id": "cloud:gcp"}],
+                    "reason": {"kind": "answer", "requirement": None, "posting_phrase": "GCP experience is a plus"},
+                }
+            ],
+        },
     ],
 }
 
@@ -328,13 +348,13 @@ def test_markdown_is_rendered_from_the_validated_json_with_refs_per_line() -> No
     assert markdown == (
         "## Summary\n"
         "\n"
-        "- Engineer with six years of Python services; ran Kubernetes clusters with PostgreSQL. <!-- R5, R6 -->\n"
+        f"- {_SUMMARY} <!-- R5, R6 -->\n"
         "\n"
         "## Experience\n"
         "\n"
         "### Acme Corp — Senior Engineer (2019–2023) <!-- R4 -->\n"
         "\n"
-        "- Cut p99 latency by 40% for Python services. <!-- R5 -->\n"
+        f"- {_BULLET} <!-- R5 -->\n"
         "\n"
         "## Skills\n"
         "\n"
@@ -611,3 +631,163 @@ def test_tailor_resolves_a_gh_jid_company_url_through_the_board_api_with_home_ro
 
     assert seen and seen[0] == "boards-api.greenhouse.io/v1/boards/nexhealth/jobs/5993376004"
     assert all(host_path.startswith("boards-api") for host_path in seen)
+
+
+# --- 0110-006: the operator's weaker rewrites never reach the stored result, the .md or the PDF ------------------
+#
+# The symptom (UAT 2026-09-30): the tailor stored "Led 7 engineers ..., with technical
+# direction ..." for "Led a team of 7 engineers ... end to end, owning technical
+# direction ...", and dropped DSAR and CO from the DSAR bullet.  These tests import only
+# what 24e8398 already had, so the same test runs against the pre-fix code (where the
+# weaker text is stored) and the fixed code (where the original line is).
+
+_UAT_STAFF = "- Led a team of 7 engineers delivering platform and product systems end to end, owning technical direction, roadmap, and delivery across 3 domains."
+_UAT_DSAR = "- Built the data-subject access request (DSAR) pipeline handling access and deletion requests end to end under CCPA/CPRA and CO privacy requirements."
+_UAT_STAFF_WEAK = "Led 7 engineers delivering platform and product systems, with technical direction, roadmap, and delivery across 3 domains."
+_UAT_DSAR_WEAK = "Built a pipeline for data-subject access and deletion requests under CCPA/CPRA"
+_UAT_RESUME = (
+    "# Kar Ohm\n"
+    "kar@example.test\n"
+    "\n"
+    "## Experience\n"
+    "**Staff Software Engineer — Guild Education** (2021–present)\n"
+    f"{_UAT_STAFF}\n"
+    f"{_UAT_DSAR}\n"
+)
+_UAT_POSTING = (
+    "Acme is hiring a Staff Engineer to lead platform and product systems and our privacy work, "
+    "including access and deletion requests. Requirements: Python; Kubernetes."
+)
+
+
+def _uat_reply(reason: bool) -> str:
+    """The operator's exact weaker rewrites, as the model returned them (R5 = Staff, R6 = DSAR)."""
+
+    def bullet(text: str, line: int, phrase: str) -> dict[str, object]:
+        out: dict[str, object] = {"text": text, "refs": [{"kind": "resume", "line": line}]}
+        if reason:
+            out["reason"] = {"kind": "surface", "requirement": None, "posting_phrase": phrase}
+        return out
+
+    return json.dumps(
+        {
+            "sections": [
+                {
+                    "heading": "experience",
+                    "entries": [
+                        {
+                            "heading_ref": [{"copy": 4}],
+                            "bullets": [bullet(_UAT_STAFF_WEAK, 5, "platform and product systems"), bullet(_UAT_DSAR_WEAK, 6, "deletion requests")],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+
+@pytest.fixture
+def uat(tmp_path: Path) -> ProfileFixtureGig:
+    return build_gig_with_resume(tmp_path, resume_text=_UAT_RESUME.encode("utf-8"))
+
+
+def _uat_run(uat: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch, reply: str) -> TailorResponse:
+    _install(monkeypatch, [reply])
+    return _run(uat, TailorRequest(job=AssessJobInput(job_text=_UAT_POSTING, title="Staff Engineer", company="Acme")))
+
+
+def _pdf_text(response: TailorResponse) -> str:
+    import io
+    from datetime import datetime, timezone
+
+    from pypdf import PdfReader
+
+    from gigai.scout.resume_display import PdfHeader
+    from gigai.scout.resume_pdf import render_pdf
+
+    stored = TailorResponse.from_json(json.loads(Path(response.stored_path).read_text(encoding="utf-8")))
+    data = render_pdf(stored.result, PdfHeader("Kar Ohm"), company="Acme", timestamp=datetime(2026, 9, 30, tzinfo=timezone.utc))
+    return " ".join("\n".join(page.extract_text() for page in PdfReader(io.BytesIO(data)).pages).split())
+
+
+def _assert_the_original_lines_are_shown(response: TailorResponse) -> dict[str, object]:
+    on_disk = json.loads(Path(response.stored_path).read_text(encoding="utf-8"))
+    experience = next(section for section in on_disk["result"]["sections"] if section["heading"] == "experience")
+    bullets = experience["entries"][0]["bullets"]
+    # The stored result shows the ORIGINAL sentences, never the weaker ones ...
+    assert [bullet["text"] for bullet in bullets] == [_UAT_STAFF, _UAT_DSAR]
+    assert all(bullet["kind"] == "copy" and bullet["refs"][0]["text"] == bullet["text"] for bullet in bullets)
+    # ... and so do the rendered markdown (on disk and in the response) and the PDF text.
+    markdown = Path(response.markdown_path).read_text(encoding="utf-8")
+    assert markdown == response.markdown
+    assert f"{_UAT_STAFF} <!-- R5 -->\n" in markdown and f"{_UAT_DSAR} <!-- R6 -->\n" in markdown
+    assert _UAT_STAFF_WEAK not in markdown and _UAT_DSAR_WEAK not in markdown and "- - " not in markdown
+    pdf = _pdf_text(response)
+    assert _UAT_STAFF[2:] in pdf and _UAT_DSAR[2:] in pdf
+    assert _UAT_STAFF_WEAK not in pdf and _UAT_DSAR_WEAK not in pdf
+    return {"staff": bullets[0], "dsar": bullets[1]}
+
+
+def test_fail_before_the_operators_weaker_staff_and_dsar_rewrites_are_stored_as_the_original_lines(uat: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The model's answer exactly as the old prompt produced it: no reason, weaker text.
+    response = _uat_run(uat, monkeypatch, _uat_reply(reason=False))
+    shown = _assert_the_original_lines_are_shown(response)
+    # The rejected rewrites are kept, with what they dropped, for Show changes.
+    staff, dsar = shown["staff"]["alternative"], shown["dsar"]["alternative"]
+    assert shown["staff"]["origin"] == shown["dsar"]["origin"] == "fallback"
+    assert staff["kind"] == "rewritten" and staff["text"] == _UAT_STAFF_WEAK
+    assert staff["lost"] == {"ownership": ["own"], "scope": ["end to end"]}
+    assert dsar["kind"] == "rewritten" and dsar["text"] == _UAT_DSAR_WEAK
+    assert dsar["lost"] == {"entities": ["co", "dsar"], "scope": ["end to end"]}
+    assert staff["reason_invalid"] is True and dsar["reason_invalid"] is True  # no reason given either
+
+
+def test_a_weaker_rewrite_with_a_valid_reason_still_falls_back_on_the_lost_facts_alone(uat: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    response = _uat_run(uat, monkeypatch, _uat_reply(reason=True))
+    shown = _assert_the_original_lines_are_shown(response)
+    staff, dsar = shown["staff"]["alternative"], shown["dsar"]["alternative"]
+    assert "reason_invalid" not in staff and "reason_invalid" not in dsar  # the reason held; the loss decided
+    assert staff["reason"] == {"kind": "surface", "requirement": None, "posting_phrase": "platform and product systems"}
+    assert staff["lost"] == {"ownership": ["own"], "scope": ["end to end"]}
+    assert dsar["lost"] == {"entities": ["co", "dsar"], "scope": ["end to end"]}
+    # One model call: a fallback never spends the retry.
+    assert response.usage is not None and response.usage.input_tokens == 10
+
+
+class _FixtureModelBinding(_ScriptedBinding):
+    """The fixture model (``bindings._test_model_tailor_reply``) answering each prompt it gets."""
+
+    def __init__(self) -> None:
+        super().__init__([])
+        port = self.port
+
+        def invoke(request):
+            port.prompts.append(request.prompt)
+            reply = json.dumps(bindings._test_model_tailor_reply(request.prompt))
+            return InvocationResult(
+                status="success", output_text=reply, resolved_model="fixture", raw_usage={},
+                normalized_usage=NormalizedUsage(10, 20, 30), cost_status="unavailable",
+            )
+
+        port.invoke = invoke  # type: ignore[method-assign]
+
+
+def test_the_fixture_models_lossy_marker_returns_the_operators_rewrites_and_the_originals_are_shown(uat: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    binding = _FixtureModelBinding()
+
+    def resolve(config, adapter_target, **_kwargs):
+        return binding
+
+    setattr(resolve, "_scout_test_transport", True)
+    monkeypatch.setattr("gigai.scout.proposal_execution.resolve_model_adapter", resolve)
+    posting = _UAT_POSTING + " " + bindings.TEST_MODEL_LOSSY_MARKER
+    response = _run(uat, TailorRequest(job=AssessJobInput(job_text=posting, title="Staff Engineer", company="Acme")))
+
+    reply = bindings._test_model_tailor_reply(binding.port.prompts[0])
+    experience = next(section for section in reply["sections"] if section["heading"] == "experience")
+    assert [bullet["text"] for bullet in experience["entries"][0]["bullets"]] == [_UAT_STAFF_WEAK, _UAT_DSAR_WEAK]
+    shown = _assert_the_original_lines_are_shown(response)
+    assert shown["staff"]["alternative"]["lost"] == {"ownership": ["own"], "scope": ["end to end"]}
+    assert shown["dsar"]["alternative"]["lost"] == {"entities": ["co", "dsar"], "scope": ["end to end"]}
+    assert shown["staff"]["alternative"]["reason"]["posting_phrase"] == "platform"
+    assert len(binding.port.prompts) == 1

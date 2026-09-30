@@ -10,7 +10,10 @@ cloud:gcp`` then tailor again -> a line cites ``answer cloud:gcp`` and
 ``model_output_invalid`` naming the line, nothing stored; (d) ``GET
 /api/tailored-resumes`` with the ``profile_id`` / ``job_identity`` filters;
 (e) ``{"job": {}}`` -> 422; (f) CSRF 403 / 415; (g) the posting text is
-never echoed (pasted job + ephemeral resume, stored under ``ephemeral/``).
+never echoed (pasted job + ephemeral resume, stored under ``ephemeral/``);
+(h) 0110-006: the fixture model's lossy marker returns the operator's
+weaker Staff and DSAR rewrites and the stored result and the markdown show
+the ORIGINAL lines, the rejected rewrites kept with what they dropped.
 A second test: the fake model sleeps past a 1 s deadline -> 504
 ``tailor_timeout``.  Fixtures: ``bindings._test_provider_handler`` (HTTP)
 and ``bindings._test_model_handler`` (model) through the two existing seams
@@ -25,7 +28,12 @@ import httpx
 import pytest
 
 from gigai.private_records import list_imports
-from gigai.scout.find_jobs.bindings import TEST_MODEL_FABRICATE_MARKER, TEST_MODEL_SLEEP_MARKER
+from gigai.scout.find_jobs.bindings import (
+    TEST_MODEL_FABRICATE_MARKER,
+    TEST_MODEL_LOSSY_MARKER,
+    TEST_MODEL_LOSSY_REWRITES,
+    TEST_MODEL_SLEEP_MARKER,
+)
 
 from tests.api_e2e.after_journey import assert_clean_and_healthy, timed_request
 from tests.api_e2e.harness import (
@@ -42,6 +50,12 @@ _POSTING = (
     "Acme is hiring a Software Engineer to build reliable Python services on Kubernetes and Terraform. "
     "Requirements: Python in production; Kubernetes; Terraform; GCP experience is a plus. Remote within the US."
 )
+
+_STAFF = "- Led a team of 7 engineers delivering platform and product systems end to end, owning technical direction, roadmap, and delivery across 3 domains."
+_DSAR = "- Built the data-subject access request (DSAR) pipeline handling access and deletion requests end to end under CCPA/CPRA and CO privacy requirements."
+_EKS = "- Owns the shared Kubernetes platform (EKS) for 40 services."
+_LOSSY_RESUME = f"## Experience\n**Staff Software Engineer — Guild Education** (2021–present)\n{_STAFF}\n{_DSAR}\n{_EKS}\n"
+_LOSSY_POSTING = "Acme is hiring a Staff Engineer to lead platform and product systems and privacy deletion requests. Requirements: Python; Kubernetes."
 
 
 def _assert_error(response: httpx.Response, *, status: int, code: str) -> None:
@@ -206,6 +220,37 @@ def test_tailored_resumes_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
             httpx.post(f"{server.base_url}/api/tailored-resumes", content=b"{}", headers={"Content-Type": "text/plain"}),
             status=415, code="unsupported_media_type",
         )
+
+        # (h) 0110-006: weaker rewrites fall back to the original lines, per line, with no retry.
+        lossy, lossy_latency = timed_request(
+            "POST /api/tailored-resumes (lossy rewrites)",
+            lambda: client.post(
+                "/api/tailored-resumes",
+                json={
+                    "job": {"job_text": _LOSSY_POSTING + " " + TEST_MODEL_LOSSY_MARKER, "title": "Staff Engineer", "company": "Acme"},
+                    "resume": {"resume_text": _LOSSY_RESUME},
+                },
+            ),
+        )
+        assert lossy.status_code == 200, lossy.text
+        h = lossy.json()
+        _assert_structured(h)
+        experience = next(section for section in h["result"]["sections"] if section["heading"] == "experience")
+        bullets = experience["entries"][0]["bullets"]
+        # The stored result shows the originals; the third bullet is the fixture's own copy line.
+        assert [bullet["text"] for bullet in bullets] == [_STAFF, _DSAR, _EKS]
+        assert [bullet["origin"] for bullet in bullets] == ["fallback", "fallback", "model"]
+        assert [bullet["id"] for bullet in bullets] == ["L3", "L4", "L5"]  # L1 summary, L2 the role heading
+        staff, dsar = bullets[0]["alternative"], bullets[1]["alternative"]
+        assert staff["text"] == TEST_MODEL_LOSSY_REWRITES[_STAFF[2:].rstrip(".")] and staff["lost"] == {"ownership": ["own"], "scope": ["end to end"]}
+        assert dsar["text"] == TEST_MODEL_LOSSY_REWRITES[_DSAR[2:].rstrip(".")] and dsar["lost"] == {"entities": ["co", "dsar"], "scope": ["end to end"]}
+        assert staff["reason"] == {"kind": "surface", "requirement": None, "posting_phrase": "platform"}
+        # The markdown (response and file) prints the originals once, never the weaker text.
+        assert f"- {_STAFF[2:]} <!-- R3 -->\n" in h["markdown"] and f"- {_DSAR[2:]} <!-- R4 -->\n" in h["markdown"]
+        assert staff["text"] not in h["markdown"] and dsar["text"] not in h["markdown"] and "- - " not in h["markdown"]
+        assert Path(h["markdown_path"]).read_text(encoding="utf-8") == h["markdown"]
+        assert TEST_MODEL_LOSSY_MARKER not in lossy.text and _LOSSY_POSTING not in lossy.text
+        lossy_latency.assert_within_budget()
 
         workpad = resolve_workpad_path(home, target)
     finally:

@@ -26,7 +26,18 @@ _VALID = json.dumps(
     {
         "header": [{"copy": 1}],
         "sections": [
-            {"heading": "summary", "lines": [{"text": "Staff AI Engineer with six years of Python services.", "refs": [{"kind": "resume", "line": 2}]}]},
+            # 0110-006: a rewrite carries a reason anchored in the posting and keeps every fact of
+            # its source ("Built", "six", "AI", "Python"), so the no-loss pass shows it.
+            {
+                "heading": "summary",
+                "lines": [
+                    {
+                        "text": "Built Python services for six years as a Staff AI Engineer.",
+                        "refs": [{"kind": "resume", "line": 2}],
+                        "reason": {"kind": "summary", "requirement": None, "posting_phrase": "5+ years of Python"},
+                    }
+                ],
+            },
             {"heading": "skills", "lines": [{"copy": 2}]},
         ],
     }
@@ -143,7 +154,7 @@ def test_tailor_pasted_job_prints_the_markdown_path_and_copies_to_out(tmp_path: 
     assert out.read_text(encoding="utf-8") == markdown_path.read_text(encoding="utf-8")
     # Headerless (0110-003 P1): the model's stray header copy of R1 is discarded; the file starts at a section.
     assert out.read_text(encoding="utf-8").startswith("## Summary\n") and "# Resume" not in out.read_text(encoding="utf-8")
-    assert "- Staff AI Engineer with six years of Python services. <!-- R2 -->" in out.read_text(encoding="utf-8")
+    assert "- Built Python services for six years as a Staff AI Engineer. <!-- R2 -->" in out.read_text(encoding="utf-8")
     assert "R2: Staff AI Engineer. Built Python services for six years." in binding.port.prompts[0]
     # The resume's own lines never appear in the terminal output; only the paths do.
     assert "Built Python services" not in result.output

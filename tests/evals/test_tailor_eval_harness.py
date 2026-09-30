@@ -380,12 +380,22 @@ def test_the_fake_judge_answers_one_verdict_per_claim_block() -> None:
     assert harness.parse_judge_answer(bindings._test_model_judge_reply(prompt), 3)[2] == {"supported": True, "unsupported_span": None, "severity": None}
 
 
+#: 0110-006 re-baseline: every planted rewrite carries a reason anchored in the posting
+#: (the phrase occurs in ``_POSTING``/``_GO_POSTING``), and every planted line keeps every
+#: fact of R1 ("Python" in particular), so the product's no-loss pass SHOWS it and the
+#: judge sees it; a reasonless or lossy line would fall back to R1 before the judge.
+_PLANTED_REASON = {"kind": "summary", "requirement": None, "posting_phrase": "Requirements: Python"}
+
+
 def _tailor_reply(*lines: str) -> dict:
     # Headerless (0110-003 P1): the copy line these rows check sits in a leading skills section.
     return {
         "sections": [
             {"heading": "skills", "lines": [{"copy": 1}]},
-            {"heading": "summary", "lines": [{"text": text, "refs": [{"kind": "resume", "line": 1}]} for text in lines]},
+            {
+                "heading": "summary",
+                "lines": [{"text": text, "refs": [{"kind": "resume", "line": 1}], "reason": _PLANTED_REASON} for text in lines],
+            },
         ]
     }
 
@@ -398,7 +408,7 @@ _RESUME_FIXTURE = assess_harness.Resume("r", "Software engineer with Python serv
 def test_a_planted_unsupported_line_is_flagged_through_the_batch() -> None:
     binding = _ScriptedBinding(
         [
-            _tailor_reply("Python service engineer.", "Ran a large platform team."),
+            _tailor_reply("Python service engineer.", "Python service engineer who ran a large platform team."),
             {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None, "severity": None}, {"line": 2, "supported": False, "unsupported_span": "large platform team", "severity": "hard"}]},
         ]
     )
@@ -430,7 +440,7 @@ def test_a_planted_hard_line_and_a_planted_precision_line_land_in_their_own_buck
     # applies both bars, and the report lists both lines with their sources.
     binding = _ScriptedBinding(
         [
-            _tailor_reply("Python services with changes reviewed and audited.", "Owned a small team."),
+            _tailor_reply("Python services with changes reviewed and audited.", "Owned a small team of Python service engineers."),
             {
                 "verdicts": [
                     {"line": 1, "supported": False, "unsupported_span": "audited", "severity": "precision"},
@@ -464,7 +474,7 @@ def test_a_planted_hard_line_and_a_planted_precision_line_land_in_their_own_buck
     out = buffer.getvalue()
     assert "hard fabrications: 1 (bar 0 met: False)" in out and "precision lines: 1 (rate 0.3333; bar < 0.02 met: False)" in out
     assert "  FAB [precision] r x p summary line 1: 'Python services with changes reviewed and audited.' | span: 'audited'" in out
-    assert "  FAB [hard] r x p summary line 2: 'Owned a small team.' | span: 'Owned'" in out
+    assert "  FAB [hard] r x p summary line 2: 'Owned a small team of Python service engineers.' | span: 'Owned'" in out
     assert out.count("| sources: R1: Software engineer with Python service experience.") == 2
 
 
@@ -517,7 +527,7 @@ def test_precision_rate_bar_is_strictly_below_two_percent_of_all_accepted_lines_
 
 def test_a_missing_severity_on_an_unsupported_verdict_is_a_judge_failure_after_one_retry() -> None:
     no_severity = {"verdicts": [{"line": 1, "supported": False, "unsupported_span": "large"}]}
-    binding = _ScriptedBinding([_tailor_reply("Ran a large team."), no_severity, no_severity])
+    binding = _ScriptedBinding([_tailor_reply("Python service engineer who ran a large team."), no_severity, no_severity])
     budget = harness.CallBudget(max_calls=25)
     row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _POSTING, _RESUME_FIXTURE, (), budget=budget)
     assert row["ok"] is True and budget.made == 3
@@ -538,7 +548,7 @@ def test_an_answer_ref_is_offered_and_accepted_under_its_canonical_id() -> None:
     answers = (harness.FixedAnswer("language:java_cpp_go", "Go: yes, daily. Java and C++: no."),)
     binding = _ScriptedBinding(
         [
-            {"sections": [{"heading": "skills", "lines": [{"copy": 1}]}, {"heading": "summary", "lines": [{"text": "Go daily; no Java or C++.", "refs": [{"kind": "answer", "question_id": "language:cpp_go_java"}]}]}]},
+            {"sections": [{"heading": "skills", "lines": [{"copy": 1}]}, {"heading": "summary", "lines": [{"text": "Go daily; no Java or C++.", "refs": [{"kind": "answer", "question_id": "language:cpp_go_java"}], "reason": {"kind": "answer", "requirement": None, "posting_phrase": "Requirements: Python"}}]}]},
             {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None}]},
         ]
     )
@@ -569,7 +579,7 @@ def test_a_cited_wrapped_resume_line_reaches_the_guards_the_row_and_the_judge_as
     # judge's SOURCES carry the joined span, not the cited line alone.
     binding = _ScriptedBinding(
         [
-            _tailor_reply("Python and Go services for 12 years."),
+            _tailor_reply("Python and Go services in production for 12 years."),
             {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None}]},
         ]
     )
@@ -580,20 +590,21 @@ def test_a_cited_wrapped_resume_line_reaches_the_guards_the_row_and_the_judge_as
     assert "R1: Software engineer with Python service experience and\nR2: Go services in production for 12 years." in binding.prompts[0]
     assert row["ok"] is True and row["attempts"] == 1 and "go" in row["guard_terms"]
     copied, summary = row["lines"]
-    assert copied["sources"] == [{"label": "R1", "text": "Software engineer with Python service experience and"}]  # a copy line never expands
+    # 0110-006: a copy line outside an entry heading copies the whole wrapped span, like a cited ref.
+    assert copied["sources"] == [{"label": "R1", "text": joined, "continued_lines": [2]}] and copied["text"] == joined
     assert copied["verbatim"] is True
     assert summary["sources"] == [{"label": "R1", "text": joined, "continued_lines": [2]}]
     assert summary["guard_hit"] is False and summary["numeric_hits"] == [] and summary["term_hits"] == []
-    assert "CLAIM 1:\nPython and Go services for 12 years.\nSOURCES FOR CLAIM 1:\nR1: " + joined + "\n" in binding.prompts[1] + "\n"
+    assert "CLAIM 1:\nPython and Go services in production for 12 years.\nSOURCES FOR CLAIM 1:\nR1: " + joined + "\n" in binding.prompts[1] + "\n"
     metrics = harness.summarize([row], planned=1, max_calls=25, judge=True, calls=budget.calls)
-    assert metrics["lines"]["expanded_refs"] == 1 and metrics["fabrication"]["fabricated_claims"] == 0
+    assert metrics["lines"]["expanded_refs"] == 2 and metrics["fabrication"]["fabricated_claims"] == 0  # the copy's span and the rewrite's
     assert "  > R1+R2: " + joined in metrics["samples"]["pending"]["markdown_with_sources"]
-    assert "## Skills\n\n- Software engineer with Python service experience and <!-- R1 -->" in row["markdown"]
+    assert "## Skills\n\n- " + joined + " <!-- R1 -->" in row["markdown"]
 
 
 def test_a_verdict_count_mismatch_is_a_judge_failure_after_one_retry() -> None:
     short = {"verdicts": [{"line": 1, "supported": True, "unsupported_span": None}]}
-    binding = _ScriptedBinding([_tailor_reply("Python service engineer.", "Ran a small team."), short, short])
+    binding = _ScriptedBinding([_tailor_reply("Python service engineer.", "Python service engineer who ran a small team."), short, short])
     budget = harness.CallBudget(max_calls=25)
     row = harness.tailor_row(harness.CappedBinding(binding, budget), _LABEL, _POSTING, _RESUME_FIXTURE, (), budget=budget)
     assert row["ok"] is True and budget.made == 3
@@ -681,7 +692,8 @@ def test_judge_prompt_carries_the_hard_precision_definition_verbatim_and_asks_fo
 def test_the_tailor_prompts_framing_paragraph_ends_with_the_precision_sentence() -> None:
     # tailor-r3: the three r2 misses were modality/qualifier drift on clean-fit
     # rows; the rule sits in the FRAMING paragraph (one block) so the existing
-    # framing test and the prompt order are untouched.
+    # framing test and the prompt order are untouched.  0110-006: the Allowed
+    # example is a COPY of R7 and a no-downgrade rule precedes PRECISION.
     from gigai.scout.tailored_resume import render_tailor_prompt
 
     prompt = render_tailor_prompt(_JOB, _CTX)
@@ -691,7 +703,7 @@ def test_the_tailor_prompts_framing_paragraph_ends_with_the_precision_sentence()
     assert "PRECISION: keep the source's modality and qualifiers when you paraphrase" in rule
     assert '"auditable" is not "audited", "comfortable owning" is not "owned", and a qualifier stays on the clause it qualifies' in rule
     assert 'monitors that "caught problems before they reached dashboards" do not make the candidate\'s investigation happen before they reached dashboards' in rule
-    assert rule.index("Never upgrade participation") < rule.index("Allowed: the same R7") < rule.index("PRECISION:")
+    assert rule.index("Never upgrade participation") < rule.index("Allowed: COPY R7") < rule.index("Never downgrade either") < rule.index("PRECISION:")
     assert prompt.count("PRECISION:") == 1
 
 

@@ -1,8 +1,8 @@
 """Render a stored tailored resume to PDF with Typst, locally and deterministically.
 
 The header comes from display settings (``resume_display.pdf_header``), never from
-``result.header``.  Body lines go through the same ``_display`` mapping as the markdown
-renderer.  ``typst`` is imported lazily so CLI startup never loads its native library.
+``result.header``.  Body lines go through the same ``shown_text`` mapping as the markdown
+renderer (a copy -- the model's or a no-loss fallback -- loses its own markers).  ``typst`` is imported lazily so CLI startup never loads its native library.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from importlib import resources
 
 from gigai.scout.resume_display import ContactItem, PdfHeader
-from gigai.scout.tailored_resume import ENTRY_SECTIONS, TailoredLine, TailoredResume, _display
+from gigai.scout.tailored_resume import ENTRY_SECTIONS, TailoredResume, _display, shown_text
 
 _PART_MAX = 40
 
@@ -31,20 +31,19 @@ def pdf_file_name(name: str, company: str) -> str:
     return "-".join(part for part in parts if part) + ".pdf"
 
 
-def _line(line: TailoredLine) -> str:
-    return _display(line.text) if line.kind == "copy" else line.text
-
-
 def _body(result: TailoredResume) -> list[dict[str, object]]:
     sections: list[dict[str, object]] = []
     for section in result.sections:
+        if section.is_empty():
+            continue
         entries: list[dict[str, object]] = []
         lines: list[str] = []
         if section.heading in ENTRY_SECTIONS:
             for entry in section.entries:
-                entries.append({"heading": [_display(l.text) for l in entry.heading], "bullets": [l.text for l in entry.bullets]})
+                # A copied bullet (the model's copy or a no-loss fallback, 0110-006) prints without its own "- ".
+                entries.append({"heading": [_display(l.text) for l in entry.heading], "bullets": [shown_text(l) for l in entry.bullets]})
         else:
-            lines = [_line(l) for l in section.lines]
+            lines = [shown_text(l) for l in section.lines]
         sections.append({"heading": section.heading.upper(), "lines": lines, "entries": entries})
     return sections
 

@@ -217,7 +217,10 @@ def test_the_prompt_tells_the_model_to_keep_the_sources_framing_with_one_example
     assert '"worked on the Kubernetes migration" does not support "led the Kubernetes migration"' in rule
     assert '"part of the payments team" does not support "owned payments"' in rule
     assert 'Not allowed: R7 "Worked on the Kubernetes migration with the platform team" rewritten as "Led the Kubernetes migration"' in rule
-    assert 'Allowed: the same R7 rewritten as "Worked on the platform team\'s Kubernetes migration"' in rule
+    # 0110-006: the allowed form is the COPY, and the rule now also forbids the downgrade.
+    assert 'Allowed: COPY R7 ({"copy": 7}), which keeps the candidate\'s role exactly as stated.' in rule
+    assert 'Never downgrade either: a rewrite never drops an ownership word ("owned", "led", "architected", "built"), "end to end"' in rule
+    assert '"Led a team of 7 engineers ... end to end, owning technical direction" is not "Led 7 engineers ..., with technical direction"' in rule
     # The rule sits between the line kinds and the sections, before the posting.
     assert prompt.index("LINE KINDS:") < prompt.index("FRAMING:") < prompt.index("SECTIONS:") < prompt.index("POSTING TEXT:")
 
@@ -331,9 +334,10 @@ def test_the_stored_refs_carry_the_expansion_and_round_trip_while_copy_lines_and
     lines = stored["sections"][0]["lines"]
     assert lines[0]["refs"] == [{"kind": "resume", "line": 5, "text": _R5_R6, "continued_lines": [6]}]
     assert lines[1]["refs"] == [{"kind": "resume", "line": 6, "text": _WRAP_LINES[5]}]  # no continued_lines key when nothing was joined
-    # A copy line is one resume line verbatim, never the span (a skills line copies R5 here;
-    # the header copy of R5 is discarded: tailored output is headerless, 0110-003 P1).
-    assert stored["sections"][1]["lines"][0] == {"kind": "copy", "text": _WRAP_LINES[4], "refs": [{"kind": "resume", "line": 5, "text": _WRAP_LINES[4]}]}
+    # 0110-006: a copy line outside an entry heading copies the whole span, like a cited ref (a
+    # skills line copies R5 here, which wraps onto R6; the header copy of R5 is discarded:
+    # tailored output is headerless, 0110-003 P1).
+    assert stored["sections"][1]["lines"][0] == {"kind": "copy", "text": _R5_R6, "refs": [{"kind": "resume", "line": 5, "text": _R5_R6, "continued_lines": [6]}]}
     assert stored["header"] == []
     assert TailoredResume.from_json(stored) == result
     with pytest.raises(Exception, match="continued_lines"):

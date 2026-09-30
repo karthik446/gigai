@@ -397,6 +397,22 @@ TEST_MODEL_JUDGE_MARKER = "GigAI Scout fabrication judge"
 _TEST_MODEL_JUDGE_CLAIM = re.compile(r"^CLAIM (\d+):$", re.MULTILINE)
 TEST_MODEL_FABRICATED_NUMBER_LINE = "Led a team of 8 engineers for 12 years."
 TEST_MODEL_FABRICATED_TERM_LINE = "Deep Kubernetes and Terraform experience in production."
+#: 0110-006: inside a tailor prompt only (a journey puts it in the posting
+#: text): the fixture answers with WEAKER rewrites -- the operator's exact
+#: UAT pairs (``TEST_MODEL_LOSSY_REWRITES``) for every resume line that
+#: states one, else the first listed line with a named word dropped -- each
+#: with a reason anchored in the posting, plus one COPIED bullet when the
+#: resume has another bullet, so journeys exercise the no-loss fallback.
+TEST_MODEL_LOSSY_MARKER = "GIGAI-TEST-MODEL: lossy"
+#: The operator's UAT pairs (0110-006): resume sentence -> the weaker rewrite
+#: the tailor produced.  Matched on the listed line without its bullet marker
+#: and final period.
+TEST_MODEL_LOSSY_REWRITES: dict[str, str] = {
+    "Led a team of 7 engineers delivering platform and product systems end to end, owning technical direction, roadmap, and delivery across 3 domains":
+        "Led 7 engineers delivering platform and product systems, with technical direction, roadmap, and delivery across 3 domains.",
+    "Built the data-subject access request (DSAR) pipeline handling access and deletion requests end to end under CCPA/CPRA and CO privacy requirements":
+        "Built a pipeline for data-subject access and deletion requests under CCPA/CPRA",
+}
 
 
 def _test_model_prompt_source(prompt: str, prefix: str) -> str | None:
@@ -412,17 +428,70 @@ def _test_model_prompt_source(prompt: str, prefix: str) -> str | None:
 _TEST_MODEL_RESUME_LINE = re.compile(r"^R(\d+): (.*)$", re.MULTILINE)
 
 
+def _test_model_posting(prompt: str) -> str:
+    """The posting text a tailor prompt carries (between ``POSTING TEXT:`` and ``RESUME LINES:``)."""
+
+    start = prompt.find("POSTING TEXT:\n")
+    end = prompt.find("\n\nRESUME LINES:", start)
+    return prompt[start + len("POSTING TEXT:\n") : end] if start != -1 and end != -1 else ""
+
+
+def _test_model_reason(kind: str, posting: str, words: str = "") -> dict[str, object]:
+    """A reason anchored in the posting (0110-006): the first word of ``words``
+    (5+ letters) the posting also states, else the posting's first words."""
+
+    for word in re.findall(r"[A-Za-z]{5,}", words):
+        found = re.search(rf"\b{re.escape(word)}\b", posting, re.IGNORECASE)
+        if found:
+            return {"kind": kind, "requirement": None, "posting_phrase": found.group(0)}
+    phrase = " ".join(posting.split()[:4])[:60].strip()
+    return {"kind": kind, "requirement": None, "posting_phrase": phrase or None}
+
+
+def _test_model_bare(text: str) -> str:
+    return re.sub(r"\A[-*•]\s+", "", text.strip()).rstrip(".").strip()
+
+
+def _test_model_lossy_sections(prompt: str, posting: str, number: int, first_line: str) -> list[dict[str, object]]:
+    """The lossy marker's extra sections (see ``TEST_MODEL_LOSSY_MARKER``)."""
+
+    listed = [(int(match.group(1)), match.group(2).strip()) for match in _TEST_MODEL_RESUME_LINE.finditer(prompt)]
+    bullets: list[dict[str, object]] = []
+    heading = number
+    for line_number, text in listed:
+        weaker = TEST_MODEL_LOSSY_REWRITES.get(_test_model_bare(text))
+        if weaker is None:
+            continue
+        if not bullets:
+            heading = next((n for n, t in reversed(listed) if n < line_number and t.startswith(("**", "#"))), number)
+        bullets.append({"text": weaker, "refs": [{"kind": "resume", "line": line_number}], "reason": _test_model_reason("surface", posting, weaker)})
+    if bullets:
+        cited = {bullet["refs"][0]["line"] for bullet in bullets}  # type: ignore[index]
+        other = next((n for n, t in listed if n > heading and n not in cited and t.startswith(("- ", "* ", "• "))), None)
+        if other is not None:
+            bullets.append({"copy": other})
+        return [{"heading": "experience", "entries": [{"heading_ref": [{"copy": heading}], "bullets": bullets}]}]
+    words = first_line.split()
+    named = next((index for index, word in enumerate(words) if index and word[:1].isupper()), None)
+    weaker_line = " ".join(word for index, word in enumerate(words) if index != (named if named is not None else len(words) - 1))
+    return [{"heading": "other", "lines": [{"text": weaker_line, "refs": [{"kind": "resume", "line": number}], "reason": _test_model_reason("surface", posting, weaker_line)}]}]
+
+
 def _test_model_tailor_reply(prompt: str) -> dict[str, object]:
     """The fixture's tailored resume for ``prompt`` (see ``TEST_MODEL_TAILOR_MARKER``).
 
     Headerless (0110-003 P1), and built on the FIRST ``R<n>: `` line the
     prompt lists: the privacy strip withholds name/contact lines, so R1 may
-    be missing and the first listed line keeps its original number.
+    be missing and the first listed line keeps its original number.  Every
+    rewritten line carries a reason anchored in the posting (0110-006), so
+    the no-loss pass keeps it; the lossy marker adds weaker rewrites it must
+    replace with the original lines.
     """
 
     first = _TEST_MODEL_RESUME_LINE.search(prompt)
     number = int(first.group(1)) if first else 1
     first_line = first.group(2).strip() if first else "Resume line one."
+    posting = _test_model_posting(prompt)
     if TEST_MODEL_FABRICATE_MARKER in prompt:
         return {
             "sections": [
@@ -437,14 +506,19 @@ def _test_model_tailor_reply(prompt: str) -> dict[str, object]:
             ],
         }
     sections: list[dict[str, object]] = [
-        {"heading": "summary", "lines": [{"text": first_line, "refs": [{"kind": "resume", "line": number}]}]},
+        {"heading": "summary", "lines": [{"text": first_line, "refs": [{"kind": "resume", "line": number}], "reason": _test_model_reason("summary", posting)}]},
         {"heading": "skills", "lines": [{"copy": number}]},
     ]
+    if TEST_MODEL_LOSSY_MARKER in prompt:
+        sections[1:1] = _test_model_lossy_sections(prompt, posting, number, first_line)
     gcp_answer = _test_model_prompt_source(prompt, "A cloud:gcp: ")
     if gcp_answer:
-        sections.append(
-            {"heading": "other", "lines": [{"text": gcp_answer, "refs": [{"kind": "answer", "question_id": "cloud:gcp"}]}]}
-        )
+        line = {"text": gcp_answer, "refs": [{"kind": "answer", "question_id": "cloud:gcp"}], "reason": _test_model_reason("answer", posting)}
+        other = next((section for section in sections if section["heading"] == "other"), None)
+        if other is None:
+            sections.append({"heading": "other", "lines": [line]})
+        else:
+            other["lines"].append(line)  # type: ignore[attr-defined]
     return {"sections": sections}
 
 
