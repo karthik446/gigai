@@ -40,4 +40,12 @@ only from this table (the docs mirror the code: core never imports a Gig).
 | --- | --- | --- | --- |
 | Scout | Find jobs, assess them against your resume, tailor a resume | `find-jobs` 1, ships with GigAI | [Scout](scout/) |
 
+## Status
+
+GigAI is an alpha: it has been through hands-on testing by the maintainer (two UAT rounds, 2026-09-27 and 2026-09-29); expect rough edges. Scout's `find-jobs` workflow is implemented and covered by the test suite, including a deterministic end-to-end path from acquisition through the present API. These docs describe the release they are versioned with; see the [Changelog](changelog/) for version-specific notes.
+
+## License
+
+Apache-2.0. See [LICENSE](https://github.com/karthik446/gigai/blob/main/LICENSE).
+
 Next: [Install GigAI](install/), then the [Scout quickstart](scout/quickstart/).

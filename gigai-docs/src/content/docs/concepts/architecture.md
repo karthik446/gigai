@@ -37,9 +37,4 @@ flowchart LR
 | `~/.gigai/config.toml` | core | settings, model targets, credential references (names, never values) |
 | `~/.gigai/scout/` | Scout | the Scout project: `find-jobs.json`, resumes, tailored resumes |
 
-## Model targets
-
-A model target names an adapter (`codex_cli`, `claude_cli`, `ollama_local`,
-`openrouter_api`) and a model. `gigai setup` creates one per CLI it finds
-(`codex-default`, `claude-default`); Scout's searches resolve the sealed adapter
-name to whichever enabled target uses it.
+Model targets are covered in [Model targets](../model-targets/).

@@ -26,12 +26,12 @@ export default defineConfig({
         ]),
       ],
       sidebar: [
-        { label: 'GigAI', items: ['index', 'install', 'concepts/architecture', 'reference/cli'] },
+        { label: 'GigAI', items: ['index', 'install', 'concepts/architecture', 'concepts/gigs', 'concepts/runs', 'concepts/model-targets', 'concepts/review', 'agents', 'development', 'reference/cli'] },
         // One group per Gig: its own folder, its own sidebar entry, nothing else to move.
         {
           label: 'Scout',
           badge: { text: 'Gig', variant: 'tip' },
-          items: ['scout', 'scout/quickstart', 'scout/privacy', 'scout/reference/cli', ...openAPISidebarGroups],
+          items: ['scout', 'scout/quickstart', 'scout/privacy', 'scout/resume', 'scout/sources', 'scout/configuration', 'scout/agents', 'scout/limitations', 'scout/roadmap', 'scout/reference/cli', ...openAPISidebarGroups],
         },
         { label: 'Project', items: ['changelog'] },
       ],
