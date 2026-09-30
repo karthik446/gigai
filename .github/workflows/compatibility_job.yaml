@@ -1,8 +1,8 @@
-name: Compatibility job
+name: Compatibility job (sweep)
 
+# ci-spike: no nightly schedule. The sweep runs after each release
+# (release.yml, post-release-compatibility) and on demand from here.
 on:
-  schedule:
-    - cron: "17 06 * * *"
   workflow_dispatch:
 
 permissions:

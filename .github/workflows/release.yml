@@ -4,37 +4,105 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit SHA to release (on main or a karthik446/gigai-v* branch)
+        required: true
+        type: string
+      version:
+        description: Version to release, e.g. 0.1.9.1 (tag v<version> is created on the SHA)
+        required: true
+        type: string
+      dry_run:
+        description: Run every check and stop before creating the tag
+        required: true
+        type: boolean
+        default: true
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.version || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  preflight:
-    name: Release preflight
+  dispatch:
+    name: Validate dispatch inputs and tag the release
+    # workflow_dispatch only; a pushed v* tag skips this job (the tag exists).
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: write
     outputs:
-      commit: ${{ steps.metadata.outputs.commit }}
-      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ github.ref }}
+      - name: Validate sha and version
+        env:
+          RELEASE_SHA: ${{ inputs.sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: python -m tools.release_dispatch --sha "${RELEASE_SHA}" --version "${RELEASE_VERSION}"
+      - id: tag
+        name: Create the annotated tag on the SHA
+        if: ${{ !inputs.dry_run }}
+        env:
+          RELEASE_SHA: ${{ inputs.sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${RELEASE_VERSION}" -m "GigAI ${RELEASE_VERSION}" "${RELEASE_SHA}"
+          git push origin "refs/tags/v${RELEASE_VERSION}"
+          echo "tag=v${RELEASE_VERSION}" >> "${GITHUB_OUTPUT}"
+      - name: Dry run stops before tagging
+        if: ${{ inputs.dry_run }}
+        run: echo "dry run - every check passed for v${{ inputs.version }} at ${{ inputs.sha }}; no tag created"
+
+  preflight:
+    name: Release preflight
+    needs: dispatch
+    # A pushed tag skips `dispatch`; a dispatch continues only when it created
+    # the tag (dry_run leaves `dispatch.outputs.tag` empty and stops here).
+    if: ${{ !cancelled() && (needs.dispatch.result == 'skipped' || (needs.dispatch.result == 'success' && needs.dispatch.outputs.tag != '')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      commit: ${{ steps.metadata.outputs.commit }}
+      version: ${{ steps.metadata.outputs.version }}
+      gate_green: ${{ steps.gate.outputs.gate_green }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: refs/tags/${{ needs.dispatch.outputs.tag || github.ref_name }}
       - id: metadata
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ needs.dispatch.outputs.tag || github.ref_name }}
+          DISPATCH_SHA: ${{ inputs.sha }}
         run: |
-          test "${GITHUB_REF_TYPE}" = tag
           test "$(git cat-file -t "refs/tags/${RELEASE_TAG}")" = tag
+          if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then
+            test "$(git rev-parse "refs/tags/${RELEASE_TAG}^{}")" = "${DISPATCH_SHA}"
+          else
+            test "${GITHUB_REF_TYPE}" = tag
+          fi
+          echo "tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
           python tools/release_check.py verify-tag --tag "${RELEASE_TAG}"
           python tools/release_check.py verify-lockfile
           echo "commit=$(git rev-parse "refs/tags/${RELEASE_TAG}^{}")" >> "${GITHUB_OUTPUT}"
           echo "version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "${GITHUB_OUTPUT}"
+      - id: gate
+        name: Was the release gate already green on this tree?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.metadata.outputs.commit }}
+        run: python tools/release_gate.py --commit "${COMMIT}" >> "${GITHUB_OUTPUT}"
       - name: Require named publication environments
         env:
           GH_TOKEN: ${{ github.token }}
@@ -46,17 +114,24 @@ jobs:
   ci:
     name: Exact-tag CI
     needs: preflight
+    # ci-spike: skip the duplicate run when the release gate ("Pull request
+    # (release)", workflow_dispatch) already passed on this exact TREE. Compared
+    # by tree, not commit: a squash merge gives the tag a new commit id with the
+    # same tree as the tested PR head (v0.1.9: 80865ec and 9728387 share tree 12e7cfa).
+    if: needs.preflight.outputs.gate_green != 'true'
     uses: ./.github/workflows/pull_request.yaml
     permissions:
       contents: read
       actions: read
     with:
       profile: release
-      ref: refs/tags/${{ github.ref_name }}
+      ref: refs/tags/${{ needs.preflight.outputs.tag }}
 
   build:
     name: Build and attest release artifacts
     needs: [preflight, ci]
+    # `ci` is skipped (not failed) when the gate already passed on this tree.
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -67,7 +142,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: refs/tags/${{ github.ref_name }}
+          ref: refs/tags/${{ needs.preflight.outputs.tag }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -180,7 +255,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: refs/tags/${{ github.ref_name }}
+          ref: refs/tags/${{ needs.preflight.outputs.tag }}
           sparse-checkout: |
             CHANGELOG.md
             tools/release_notes.py
@@ -197,7 +272,7 @@ jobs:
       - env:
           COMMIT: ${{ needs.preflight.outputs.commit }}
           REPOSITORY: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.preflight.outputs.tag }}
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           python - <<'PY'
@@ -242,7 +317,7 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.preflight.outputs.tag }}
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           if [ -s release-notes.md ]; then
@@ -263,14 +338,14 @@ jobs:
 
   post-release-compatibility:
     name: Full compatibility matrix (post-release)
-    needs: github-release
+    needs: [preflight, github-release]
     uses: ./.github/workflows/pull_request.yaml
     permissions:
       contents: read
       actions: read
     with:
       profile: full
-      ref: refs/tags/${{ github.ref_name }}
+      ref: refs/tags/${{ needs.preflight.outputs.tag }}
 
   verify-testpypi:
     name: TestPyPI clean install on ${{ matrix.os }} (post-publish)

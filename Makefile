@@ -6,7 +6,7 @@ TEST_XDIST_WORKERS ?= auto
 TEST_XDIST_MAX_WORKERS ?= 14
 TEST_XDIST_DIST ?= worksteal
 
-.PHONY: test test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live
+.PHONY: test test-macos-smoke test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live
 
 # Complete portable offline coverage: one source discovery pass, the existing
 # deterministic behavior evaluation, and a fresh wheel plus every installed
@@ -57,6 +57,16 @@ test-source:
 		--xdist-workers "$(TEST_XDIST_WORKERS)" \
 		--xdist-max-workers "$(TEST_XDIST_MAX_WORKERS)" \
 		--xdist-dist "$(TEST_XDIST_DIST)"
+
+# ci-spike: the release gate's macOS check. The files that failed only on macOS
+# in 0.1.8-0.1.9: Scout server health/port takeover, installed init scenarios,
+# and the setup -> config -> run journey. Not part of `make test`.
+test-macos-smoke:
+	$(UV) run --locked --extra test python -m pytest -n 3 --dist $(TEST_XDIST_DIST) \
+		tests/behaviors/scout_find_jobs/test_scout_port_takeover.py \
+		tests/behaviors/scout_find_jobs/test_scout_run_supervisor.py \
+		tests/behaviors/installed_release/test_g04_installed_scenarios.py \
+		tests/api_e2e/test_setup_config_run_poll_results.py
 
 # G28's deterministic evaluator is not a pytest test and therefore remains an
 # explicit offline phase in the aggregate command.
