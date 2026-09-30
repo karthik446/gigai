@@ -193,8 +193,40 @@ does. A time estimate is shown only once a per-call time has been measured.
 ## For agents
 
 It's mostly agents — Claude, Codex, and similar — driving GigAI, so these
-commands are non-interactive and scriptable. Every one below was run against
-this build.
+commands are non-interactive and scriptable. The CLI commands below were run
+against this build.
+
+### Discover the CLI and the API
+
+- **CLI:** `gigai agent-context` prints a one-line summary; `gigai agent-context --json`
+  is the full machine-readable manual (every command, its examples, effect and
+  external). The same data is rendered in [docs/cli.md](docs/cli.md).
+- **API (while Scout runs, default `http://127.0.0.1:8765`):** `GET /api` lists every
+  route, `GET /api/openapi.json` is the OpenAPI 3.1 spec, `GET /llms.txt` is a short
+  plain-text guide. `GET /api/jobs?url=` returns one job with everything known about it.
+
+```sh
+B=http://127.0.0.1:8765; J='https://boards.greenhouse.io/acme/jobs/101'
+curl -s -G "$B/api/jobs" --data-urlencode "url=$J"     # one job: posting, assessments, open questions, tailored resumes, links
+curl -s "$B/api/runs"                                  # every run, newest first
+curl -s -X POST "$B/api/assess" -H 'Content-Type: application/json' \
+  -d "{\"job\": {\"job_url\": \"$J\"}}"                # assess (model call, blocks until done)
+curl -s -X POST "$B/api/tailored-resumes" -H 'Content-Type: application/json' \
+  -d "{\"job\": {\"job_url\": \"$J\"}}"                # tailor the resume (model call)
+curl -s -X POST "$B/api/tailored-resumes/pdf" -H 'Content-Type: application/json' \
+  -d "{\"profile_id\": \"<profile_id>\", \"job_identity\": \"$J\"}" -o resume.pdf
+```
+
+The PDF body takes the `profile_id` and `job_identity` of a stored tailored resume; both
+are in the `tailored_resumes` entries and `links.pdf` of the `GET /api/jobs` response.
+Errors are `{"error": {"code", "message"}}`; an `unknown_key` 422 lists the allowed keys.
+
+The API answers this computer only (loopback peers): `Host` must be
+`127.0.0.1:<port>` or `localhost:<port>` (curl sets it), and every write (POST/PUT)
+needs `Content-Type: application/json`. Each route and command carries an **effect**
+(`read` changes nothing, `write` may change GigAI state) and an **external** marker
+(`none` offline, `model` spends a model call and sends text to your model target,
+`network` reads the public internet).
 
 ### Setup, projects and Gigs (advanced)
 
