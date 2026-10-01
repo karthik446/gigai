@@ -14,6 +14,9 @@ uses in this API, not a blocking request:
   ``update`` is the running (or last finished) update's snapshot, ``null``
   when none has ever run; ``index`` says whether a search can read the
   stored postings (``needs_update`` + the message to show when it cannot).
+  0110-025 adds ``background`` (additive): the hourly refresh (on or off,
+  its state, the last update and who started it, the next tick time, whether
+  an update is in progress) and the tag-store and text-index counts.
 
 The update itself is ``find_jobs.sources_update`` (the CLI's ``gigai scout
 sources update`` calls the same function); the snapshot lives beside the
@@ -130,7 +133,15 @@ class SourcesRoutesMixin:
         home_root = self._sources_home()
         if home_root is None:
             return
-        self._write_json(HTTPStatus.OK, read_status(home_root))
+        from ..refresh_tick import background_status
+
+        status = read_status(home_root)
+        status["background"] = background_status(
+            home_root,
+            getattr(self._backend, "target", None),
+            ticker=getattr(self.server, "refresh_ticker", None),
+        )
+        self._write_json(HTTPStatus.OK, status)
 
 
 __all__ = ["SOURCES_UPDATE_START_SCHEMA", "SOURCES_UPDATE_STATUS_SCHEMA", "SourcesRoutesMixin"]

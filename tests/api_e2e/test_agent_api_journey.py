@@ -176,6 +176,16 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         assert allowed(client.post("/api/watchlist", json={"url": "x", "bogus": 1})) == ["url"]
         assert allowed(client.post("/api/answers", json={"question_id": "a:b", "answer": "x", "bogus": 1})) == ["answer", "question_id", "reassess"]
         assert allowed(client.post("/api/sources/update", json={"bogus": 1})) == ["force", "full_refresh"]
+        # 0110-025: the sources status carries the documented `background` block. A journey server
+        # runs with the background refresh off (the harness says so), and the block says that.
+        documented = next(r for r in openapi.ROUTES if r.key == ("GET", "/api/sources/update")).example
+        sources_status = client.get("/api/sources/update").json()
+        assert set(sources_status) == set(documented)
+        background = sources_status["background"]
+        assert set(background) == set(documented["background"])
+        assert {name: set(background[name]) for name in ("auto_refresh", "tags", "text")} == {name: set(documented["background"][name]) for name in ("auto_refresh", "tags", "text")}
+        assert background["auto_refresh"] == {"enabled": False, "source": "environment", "active": True}
+        assert (background["state"], background["next_tick_at"]) == ("disabled", None)
         assert allowed(client.post("/api/applications", json={"bogus": 1})) == ["event_kind", "job_identity", "normalized_url", "notes", "occurred_at"]
         assert allowed(client.put("/api/resume-display", json={"bogus": 1})) == ["auto_fit", "contact", "name", "spacing_scale", "titles"]
         assert allowed(client.post("/api/resumes", json={"bogus": 1})) == ["content_base64", "file_name", "text"]

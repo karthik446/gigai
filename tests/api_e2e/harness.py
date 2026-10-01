@@ -246,6 +246,7 @@ def start_server(
     monkeypatch: pytest.MonkeyPatch,
     test_http: bool = True,
     test_model: bool = True,
+    auto_refresh: bool = False,
 ) -> RunningServer:
     """Start the real supervised server (``gigai scout run --no-browser``).
 
@@ -265,6 +266,10 @@ def start_server(
     if test_model:
         monkeypatch.setenv(TEST_MODEL_ENV, "1")
     monkeypatch.setenv("EXA_API_KEY", "api-e2e-test-key")
+    # 0110-025: the real server runs the hourly sources refresh thread. A
+    # journey only gets it when it asks, so no journey sees a tick it did
+    # not start (a seeded stale index would otherwise be refreshed under it).
+    monkeypatch.setenv("GIGAI_SCOUT_AUTO_REFRESH", "1" if auto_refresh else "0")
 
     chosen_port = port if port is not None else free_port()
     result = run_supervisor.start(

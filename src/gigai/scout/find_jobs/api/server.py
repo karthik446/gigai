@@ -1878,7 +1878,27 @@ class _ScoutHTTPServer(NoLookupThreadingHTTPServer):
     With the stock bind the port refuses every connection, ``/api/health``
     included, until the lookup returns; on GitHub's macOS runners that is
     longer than ``gigai scout run`` waits for the server to become healthy.
+
+    0110-025: ``refresh_ticker`` is the hourly sources refresh thread
+    (``find_jobs.refresh_tick``), ``None`` unless ``serve`` was asked for
+    one. ``shutdown()`` and ``server_close()`` stop it first, so a tick in
+    progress ends between boards with a clean ``partial`` snapshot.
     """
+
+    refresh_ticker = None
+
+    def stop_refresh_ticker(self) -> None:
+        ticker = self.refresh_ticker
+        if ticker is not None and not ticker.stop():
+            _logger.warning("sources refresh: the tick thread did not stop in time")
+
+    def shutdown(self) -> None:
+        self.stop_refresh_ticker()
+        super().shutdown()
+
+    def server_close(self) -> None:
+        self.stop_refresh_ticker()
+        super().server_close()
 
 
 def serve(
@@ -1886,6 +1906,7 @@ def serve(
     backend: Backend | None = None,
     bind: tuple[str, int] = API_BIND,
     run_start_timeout_seconds: float = RUN_START_TIMEOUT_SECONDS,
+    background_refresh: bool = False,
 ) -> ThreadingHTTPServer:
     """Build and start a ``ThreadingHTTPServer`` bound to ``bind``.
 
@@ -1894,6 +1915,12 @@ def serve(
     ``run_start_timeout_seconds`` is exposed for tests that need a short
     ``POST /api/run`` allocation timeout; production callers should leave it
     at the default.
+
+    ``background_refresh`` (0110-025): also start the hourly sources refresh
+    thread for the backend's home and target. Off by default, so a server
+    built by a test or a one-shot caller makes no background request; the
+    real server entry (``present_api._run_forever``) turns it on. The thread
+    itself honours the ``sources.auto_refresh`` setting.
     """
 
     if backend is None:
@@ -1915,6 +1942,12 @@ def serve(
         project if project is not None else "-",
         os.getpid(),
     )
+    home_root = getattr(backend, "home_root", None)
+    if background_refresh and home_root is not None and project is not None:
+        from ..refresh_tick import RefreshTicker
+
+        server.refresh_ticker = RefreshTicker(home_root=home_root, target=project, logger=_logger)
+        server.refresh_ticker.start()
     return server
 
 

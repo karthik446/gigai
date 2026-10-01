@@ -33,6 +33,21 @@ already does (one transition when the catalog or the prefs changed).
   server's tick loop calls it;
 * ``stop`` on :func:`update_sources`: a stopped update ends ``partial`` with
   ``cancelled: true`` and the boards it did not ask counted in ``remaining``.
+
+0110-024/025 hooks (only when the caller names the GigAI home): as each
+company file is written, the titles of its new and changed postings are
+rules-tagged (``posting_tags.tag_new_titles``) and its postings replace the
+company's rows in the text index (``text_index.upsert_company``). A manual
+update also drops boards that left the watchlist from the text index. The
+tag store is a cache: when it is empty (deleted, or an index built before
+it existed) the update first tags every title the index already holds. No
+model call, no request; a failure there is counted in the snapshot's
+``stores`` block and never fails the update.
+
+One update at a time, across a tick's long quiet stretches too: a running
+update rewrites its snapshot at least every
+:data:`HEARTBEAT_INTERVAL_SECONDS`. A manual Full refresh started in the
+process that runs a tick stops that tick and takes over.
 """
 
 from __future__ import annotations
@@ -54,9 +69,13 @@ from .company_index import (
     INDEX_EMPTY,
     INDEX_READY,
     INDEX_STALE,
+    STATUS_INDEXED,
+    STATUS_UPDATED,
     CompanyChange,
     CompanyIndex,
     UpdateTotals,
+    cached_posting_rows,
+    company_key,
     index_stamp,
     refresh_company,
 )
@@ -73,6 +92,13 @@ SNAPSHOT_INTERVAL_SECONDS = 1.0
 #: A ``running`` snapshot not rewritten for this long belongs to a process
 #: that died: it reads as ``interrupted`` and no longer blocks a new update.
 HEARTBEAT_TIMEOUT_SECONDS = 300.0
+#: A running update rewrites its snapshot at least this often, whatever the
+#: pacing: a spread tick over a short watchlist can wait minutes between two
+#: boards, and it must not read as dead (and let a second update start).
+HEARTBEAT_INTERVAL_SECONDS = 30.0
+#: How long a manual Full refresh waits for the tick it stopped to settle
+#: (a request already on the wire finishes first).
+TICK_YIELD_TIMEOUT_SECONDS = 30.0
 
 STATUS_RUNNING = "running"
 STATUS_SUCCEEDED = "succeeded"  # every board was attempted
@@ -179,13 +205,34 @@ def _parse(value: object) -> datetime | None:
     return parsed if parsed.tzinfo is not None else None
 
 
+def _process_is_gone(pid: object) -> bool:
+    """Whether ``pid`` (a snapshot's writer) certainly no longer exists on this machine."""
+
+    if type(pid) is not int or pid <= 0 or pid == os.getpid() or os.name != "posix":
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False  # it exists (another user's), or we cannot tell: the heartbeat decides
+    return False
+
+
 def snapshot_is_live(snapshot: Mapping[str, object] | None, *, now: datetime | None = None) -> bool:
-    """Whether ``snapshot`` is an update some process is still running."""
+    """Whether ``snapshot`` is an update some process is still running.
+
+    Not live: a heartbeat older than :data:`HEARTBEAT_TIMEOUT_SECONDS`, or a
+    writer process that is gone (a Scout server stopped mid-tick: the next
+    start does not wait out the heartbeat).
+    """
 
     if snapshot is None or snapshot.get("status") != STATUS_RUNNING:
         return False
     beat = _parse(snapshot.get("updated_at"))
     if beat is None:
+        return False
+    if _process_is_gone(snapshot.get("pid")):
         return False
     moment = datetime.now(timezone.utc) if now is None else now
     return moment - beat <= timedelta(seconds=HEARTBEAT_TIMEOUT_SECONDS)
@@ -262,12 +309,171 @@ class SourcesUpdateResult:
         return dict(self.snapshot)
 
 
+class _PostingStores:
+    """The tag store and the text index, kept in step with the company files one update writes.
+
+    Used from the update's own thread only. Every failure is counted and
+    printed once per kind; none reaches the update. Rules only: no model
+    call and no request.
+    """
+
+    def __init__(self, home_root: Path, *, index: CompanyIndex, cache: BoardCache) -> None:
+        self._home = Path(home_root)
+        self._index = index
+        self._cache = cache
+        self._tags: Any = None
+        self._text_usable = True
+        self._text_rebuild_due = False
+        self._reported: set[str] = set()
+        self.titles_tagged = 0
+        self.titles_backfilled = 0
+        self.tag_failures = 0
+        self.text_companies = 0
+        self.text_removed = 0
+        self.text_failures = 0
+
+    def _failed(self, kind: str, exc: BaseException | None) -> None:
+        if kind in self._reported:
+            return
+        self._reported.add(kind)
+        why = type(exc).__name__ if exc is not None else "unavailable"
+        print(f"scout sources update: the {kind} was not updated ({why}); the update goes on", file=sys.stderr)
+
+    def _tag_store(self) -> Any:
+        from . import posting_tags
+
+        if self._tags is None:
+            self._tags = posting_tags.default_store(self._home)
+        return self._tags
+
+    def prepare(self) -> None:
+        """Before the first board: an empty tag store over an index that has companies is filled once.
+
+        The hooks below only see titles that are new or changed, so without
+        this a deleted ``tags.sqlite`` (or an index older than the tag
+        store) would stay untagged until every posting changed.
+        """
+
+        try:
+            from . import posting_tags
+
+            store = self._tag_store()
+            if store.count() > 0:
+                return
+            titles: list[str] = []
+            for ats, slug in self._index.keys():
+                entry = self._index.read(ats, slug)
+                if entry is not None:
+                    titles.extend(posting.title for posting in entry.live())
+            if titles:
+                self.titles_backfilled = posting_tags.tag_new_titles(store, titles).tagged
+        except Exception as exc:  # noqa: BLE001 - the tag store is a cache: counted, never fails the update
+            self.tag_failures += 1
+            self._failed("tag store", exc)
+
+    def company_written(self, change: CompanyChange) -> None:
+        """After ``change``'s company file was written (first indexed, or its body re-read)."""
+
+        if change.status not in (STATUS_INDEXED, STATUS_UPDATED):
+            return
+        entry = self._index.read(change.ats, change.slug)
+        if entry is None:
+            return
+        live = entry.live()
+        wanted = set(change.new) | set(change.changed)
+        titles = [posting.title for posting in live if posting.posting_id in wanted]
+        if titles:
+            try:
+                from . import posting_tags
+
+                self.titles_tagged += posting_tags.tag_new_titles(self._tag_store(), titles).tagged
+            except Exception as exc:  # noqa: BLE001 - the tag store is a cache: counted, never fails the update
+                self.tag_failures += 1
+                self._failed("tag store", exc)
+        if not self._text_usable:
+            return
+        try:
+            from . import text_index
+
+            if not getattr(text_index, "_SUPPORTS_CONTENTLESS_DELETE", False):
+                # Replacing one company would rebuild the whole index each
+                # time on this SQLite: rebuild once, when the update ends.
+                self._text_rebuild_due = True
+                return
+            cached = cached_posting_rows(self._cache, change.ats, change.slug, (posting.posting_id for posting in live))
+            postings = []
+            for posting in live:
+                row = cached.rows.get(posting.posting_id)
+                postings.append(text_index.TextPosting(posting.posting_id, posting.title, row.text if row is not None else None))
+            if text_index.upsert_company(self._home, change.key, postings):
+                self.text_companies += 1
+            else:
+                self._text_usable = False
+                self.text_failures += 1
+                self._failed("text index", None)
+        except Exception as exc:  # noqa: BLE001 - the text index is a cache: counted, never fails the update
+            self.text_failures += 1
+            self._failed("text index", exc)
+
+    def boards_dropped(self, keys: Sequence[str]) -> None:
+        """Companies still indexed but no longer on the watchlist: out of the text index."""
+
+        if not keys or not self._text_usable:
+            return
+        try:
+            from . import text_index
+
+            if not text_index.text_index_path(self._home).is_file():
+                return  # nothing built yet; a later build reads the company files
+            if not getattr(text_index, "_SUPPORTS_CONTENTLESS_DELETE", False):
+                self._text_rebuild_due = True
+                return
+            for key in keys:
+                if not text_index.remove_company(self._home, key):
+                    self._text_usable = False
+                    self.text_failures += 1
+                    self._failed("text index", None)
+                    return
+                self.text_removed += 1
+        except Exception as exc:  # noqa: BLE001 - the text index is a cache: counted, never fails the update
+            self.text_failures += 1
+            self._failed("text index", exc)
+
+    def finish(self) -> None:
+        """The end of the update: the deferred rebuild, then this thread's connections."""
+
+        try:
+            from . import text_index
+
+            if self._text_rebuild_due and self._text_usable:
+                self._text_rebuild_due = False
+                if not text_index.rebuild_from_cache(self._home).available:
+                    self.text_failures += 1
+                    self._failed("text index", None)
+            text_index.close(self._home)
+        except Exception as exc:  # noqa: BLE001 - the text index is a cache: counted, never fails the update
+            self.text_failures += 1
+            self._failed("text index", exc)
+        try:
+            if self._tags is not None:
+                self._tags.close()
+        except Exception as exc:  # noqa: BLE001 - closing a cache connection never fails the update
+            self._failed("tag store", exc)
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "tags": {"titles_tagged": self.titles_tagged, "titles_backfilled": self.titles_backfilled, "failures": self.tag_failures},
+            "text": {"companies_written": self.text_companies, "companies_removed": self.text_removed, "failures": self.text_failures},
+        }
+
+
 class _Listener:
     """What ``_fetch_boards`` reports to, in place of a run's ``ProgressWriter``.
 
     ``board_finished`` is called from the fetch loop's own (main) thread as
     each board settles, so the index is written one company at a time and
-    never from two threads at once.
+    never from two threads at once. The heartbeat thread only calls
+    :meth:`publish`; ``_lock`` keeps its read of the counters whole.
     """
 
     def __init__(
@@ -280,11 +486,14 @@ class _Listener:
         limits: AcquireLimits,
         roles: Sequence[str],
         on_progress: Callable[[dict[str, object]], None] | None,
+        stores: _PostingStores | None = None,
     ) -> None:
         self._index = index
         self._cache = cache
         self._companies = companies
         self._on_progress = on_progress
+        self._stores = stores
+        self._lock = threading.RLock()
         self._last_write = 0.0
         self.totals = UpdateTotals()
         self.counts = {"fetched": 0, "cached": 0, "failed": 0, "skipped": 0}
@@ -321,8 +530,9 @@ class _Listener:
 
     def boards_planned(self, *, total: int, budget_seconds: float | None, rotation: Mapping[str, object] | None = None) -> None:
         del budget_seconds
-        self.total = total
-        self.rotation = dict(rotation) if rotation is not None else None
+        with self._lock:
+            self.total = total
+            self.rotation = dict(rotation) if rotation is not None else None
         self.publish(force=True)
 
     def board_finished(
@@ -339,22 +549,24 @@ class _Listener:
         code: str | None = None,
     ) -> None:
         del cache, postings, matched, elapsed_ms
-        self.done += 1
-        if status == "failed":
-            failure = code or "error"
-            self.failure_codes[failure] = self.failure_codes.get(failure, 0) + 1
-            if len(self.failed_boards) < FAILED_BOARDS_LISTED:
-                self.failed_boards.append({"board": f"{provider}:{board_token}", "code": failure})
-        elif status == "skipped" and code == CANCELLED_CODE:
-            self.cancelled = True
-        self.counts[status] = self.counts.get(status, 0) + 1
-        self.requests += requests
-        first = False
-        if status != "skipped":
-            first = self.checked == 0
-            self.checked += 1
-        if status in ("fetched", "cached"):
-            self.totals.add(self._refresh(provider, board_token))
+        change = self._refresh(provider, board_token) if status in ("fetched", "cached") else None
+        with self._lock:
+            self.done += 1
+            if status == "failed":
+                failure = code or "error"
+                self.failure_codes[failure] = self.failure_codes.get(failure, 0) + 1
+                if len(self.failed_boards) < FAILED_BOARDS_LISTED:
+                    self.failed_boards.append({"board": f"{provider}:{board_token}", "code": failure})
+            elif status == "skipped" and code == CANCELLED_CODE:
+                self.cancelled = True
+            self.counts[status] = self.counts.get(status, 0) + 1
+            self.requests += requests
+            first = False
+            if status != "skipped":
+                first = self.checked == 0
+                self.checked += 1
+            if change is not None:
+                self.totals.add(change)
         self.publish(force=first)
 
     def boards_finished(self, summary: Mapping[str, object]) -> None:
@@ -366,7 +578,7 @@ class _Listener:
 
     def _refresh(self, provider: str, board_token: str) -> CompanyChange:
         try:
-            return refresh_company(
+            change = refresh_company(
                 self._index,
                 self._cache,
                 ats=provider,
@@ -376,6 +588,9 @@ class _Listener:
         except Exception as exc:  # noqa: BLE001 - one company's index write never fails the update
             print(f"scout sources update: could not index {provider}:{board_token} ({type(exc).__name__})", file=sys.stderr)
             return CompanyChange(provider, board_token, "unreadable", code=type(exc).__name__.lower())
+        if self._stores is not None:
+            self._stores.company_written(change)
+        return change
 
     def snapshot(self) -> dict[str, object]:
         totals = self.totals
@@ -425,22 +640,34 @@ class _Listener:
             ),
             "rotation": self.rotation,
             "watchlist_seed": self.watchlist_seed,
+            # The tag store and the text index this update kept in step
+            # (``None``: not asked to); a failure there is counted here.
+            "stores": self._stores.to_json() if self._stores is not None else None,
             "summary": totals.summary_line(),
         }
 
     def publish(self, *, force: bool = False) -> dict[str, object] | None:
-        now = time.monotonic()
-        if not force and now - self._last_write < SNAPSHOT_INTERVAL_SECONDS:
-            return None
-        self._last_write = now
-        value = self.snapshot()
-        try:
-            self._index.write_update_summary(value)
-        except OSError as exc:
-            print(f"scout sources update: could not write the status snapshot ({type(exc).__name__})", file=sys.stderr)
+        with self._lock:
+            now = time.monotonic()
+            if not force and now - self._last_write < SNAPSHOT_INTERVAL_SECONDS:
+                return None
+            self._last_write = now
+            value = self.snapshot()
+            try:
+                self._index.write_update_summary(value)
+            except OSError as exc:
+                print(f"scout sources update: could not write the status snapshot ({type(exc).__name__})", file=sys.stderr)
         if self._on_progress is not None:
             self._on_progress(value)
         return value
+
+    def beat(self) -> None:
+        """The heartbeat: rewrite the snapshot when nothing has for a while (and the update still runs)."""
+
+        with self._lock:
+            if self.state["status"] != STATUS_RUNNING or time.monotonic() - self._last_write < HEARTBEAT_INTERVAL_SECONDS:
+                return
+            self.publish(force=True)
 
 
 def update_sources(
@@ -461,6 +688,7 @@ def update_sources(
     stale_after_hours: float = DEFAULT_STALE_AFTER_HOURS,
     now: datetime | None = None,
     stop: threading.Event | None = None,
+    home_root: Path | None = None,
 ) -> SourcesUpdateResult:
     """Refresh ``boards`` through the rotation and bring the company index in step.
 
@@ -479,6 +707,9 @@ def update_sources(
 
     ``stop``: once set, no further board is asked; the update ends
     ``partial`` with ``cancelled: true`` and every board it reached indexed.
+
+    ``home_root``: the GigAI home whose tag store and text index follow the
+    company files this update writes (``None``: neither is touched).
     """
 
     if not force and snapshot_is_live(index.read_update_summary()):
@@ -501,6 +732,7 @@ def update_sources(
         watchlist_seed=watchlist_seed,
         full_refresh=full_refresh,
         stop=stop,
+        home_root=home_root,
     )
 
 
@@ -522,12 +754,14 @@ def _run_update(
     stop: threading.Event | None,
     trigger: str = TRIGGER_MANUAL,
     tick: Mapping[str, object] | None = None,
+    home_root: Path | None = None,
 ) -> SourcesUpdateResult:
     """Ask exactly ``boards`` (already chosen out of ``all_boards``) and write the snapshot."""
 
     up_to_date = len(all_boards) - len(boards)
     config = config if config is not None else listing_config()
     limits = limits if limits is not None else AcquireLimits.from_environment()
+    stores = _PostingStores(home_root, index=index, cache=cache) if home_root is not None else None
     listener = _Listener(
         update_id=update_id or new_update_id(),
         index=index,
@@ -536,6 +770,7 @@ def _run_update(
         limits=limits,
         roles=config.roles,
         on_progress=on_progress,
+        stores=stores,
     )
     if watchlist_seed is not None:
         listener.watchlist_seeded(watchlist_seed)
@@ -545,7 +780,17 @@ def _run_update(
     listener.tick = dict(tick) if tick is not None else None
     listener.never_checked = _never_checked(cache, all_boards)
     listener.publish(force=True)
+    beating = threading.Event()
+
+    def heartbeat() -> None:
+        while not beating.wait(HEARTBEAT_INTERVAL_SECONDS / 2):
+            listener.beat()
+
+    beater = threading.Thread(target=heartbeat, name="scout-sources-heartbeat", daemon=True)
+    beater.start()
     try:
+        if stores is not None and not (stop is not None and stop.is_set()):
+            stores.prepare()
         _rows, _failures, summary = _fetch_boards(
             boards,
             ats=ats if ats is not None else ATSBoardClients(),
@@ -560,6 +805,9 @@ def _run_update(
         )
         listener.boards_finished(summary)
         listener.never_checked = _never_checked(cache, all_boards)
+        if stores is not None and trigger == TRIGGER_MANUAL:
+            watched = {(board.provider.value, board.board_token) for board in all_boards}
+            stores.boards_dropped([company_key(ats, slug) for ats, slug in index.keys() if (ats, slug) not in watched])
         attempted = listener.checked
         if boards and attempted > 0 and up_to_date == 0 and listener.counts.get("failed", 0) == attempted:
             listener.state["status"] = STATUS_FAILED
@@ -572,8 +820,15 @@ def _run_update(
         listener.state["status"] = STATUS_FAILED
         listener.state["error"] = {"code": type(exc).__name__.lower(), "message": "the sources update stopped early"}
         listener.state["finished_at"] = index_stamp()
+        beating.set()
+        if stores is not None:
+            stores.finish()
         listener.publish(force=True)
         raise
+    finally:
+        beating.set()
+    if stores is not None:
+        stores.finish()
     listener.state["finished_at"] = index_stamp()
     final = listener.publish(force=True) or listener.snapshot()
     return SourcesUpdateResult(final)
@@ -657,6 +912,7 @@ def run_sources_update(
         force=force,
         full_refresh=full_refresh,
         stop=stop,
+        home_root=home,
     )
 
 
@@ -754,19 +1010,60 @@ def run_refresh_tick(
     update (manual or a tick) is live, and claims the snapshot under the
     same lock :func:`start_background_update` uses, so a manual start and a
     tick can never both begin. Setting ``stop_event`` ends the tick between
-    boards: ``partial``, ``cancelled: true``. No thread is started here.
+    boards: ``partial``, ``cancelled: true``. A manual Full refresh started
+    in this process sets it too (:func:`start_background_update`). No thread
+    is started here.
     """
-
-    from ...workpad import resolve_workpad
-    from .watchlist import list_active
 
     home = Path(home_root)
     index = CompanyIndex.for_home(home)
     update_id = update_id or new_update_id()
+    stop_event = stop_event if stop_event is not None else threading.Event()
+    live = _LiveTick(stop_event)
     with _START_LOCK:
         if snapshot_is_live(index.read_update_summary()):
             raise SourcesUpdateRunningError()
         index.write_update_summary({**_blank_snapshot(update_id, STATUS_RUNNING), "trigger": TRIGGER_AUTO})
+        _LIVE_TICKS[index.root] = live
+    try:
+        return _run_claimed_tick(
+            home,
+            target,
+            index=index,
+            client=client,
+            now=now,
+            stop_event=stop_event,
+            config=config,
+            limits=limits,
+            ats=ats,
+            on_progress=on_progress,
+            update_id=update_id,
+        )
+    finally:
+        if _LIVE_TICKS.get(index.root) is live:
+            del _LIVE_TICKS[index.root]
+        live.settled.set()
+
+
+def _run_claimed_tick(
+    home: Path,
+    target: Path,
+    *,
+    index: CompanyIndex,
+    client: Any,
+    now: datetime | None,
+    stop_event: threading.Event,
+    config: FindJobsConfig | None,
+    limits: AcquireLimits | None,
+    ats: Any,
+    on_progress: Callable[[dict[str, object]], None] | None,
+    update_id: str,
+) -> SourcesUpdateResult:
+    """The tick itself, once :func:`run_refresh_tick` holds the snapshot."""
+
+    from ...workpad import resolve_workpad
+    from .watchlist import list_active
+
     try:
         resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=None, allow_semantic_state=True)
         seed = _Seed()
@@ -802,6 +1099,7 @@ def run_refresh_tick(
         stop=stop_event,
         trigger=TRIGGER_AUTO,
         tick=plan.to_json(),
+        home_root=home,
     )
 
 
@@ -840,11 +1138,34 @@ def _blank_snapshot(update_id: str, status: str, *, error: Mapping[str, object] 
         "remaining": 0,
         "rotation": None,
         "watchlist_seed": None,
+        "stores": None,
         "summary": UpdateTotals().summary_line(),
     }
 
 
 _START_LOCK = threading.Lock()
+
+
+class _LiveTick:
+    """A tick running in this process: how to stop it, and when it has settled its snapshot."""
+
+    def __init__(self, stop: threading.Event) -> None:
+        self.stop = stop
+        self.settled = threading.Event()
+
+
+#: The tick this process is running, by company-index root (one per home).
+_LIVE_TICKS: dict[Path, _LiveTick] = {}
+
+
+def _yield_tick(index: CompanyIndex) -> bool:
+    """Stop the tick this process runs on ``index`` and wait for its final snapshot; ``False`` if none did."""
+
+    live = _LIVE_TICKS.get(index.root)
+    if live is None:
+        return False
+    live.stop.set()
+    return live.settled.wait(TICK_YIELD_TIMEOUT_SECONDS)
 
 
 def start_background_update(
@@ -865,6 +1186,12 @@ def start_background_update(
     before this returns, so a status read straight after the start already
     sees it. Raises :class:`SourcesUpdateRunningError` when an update is
     live, unless ``force``.
+
+    A Full refresh wins over a background tick: when the live update is a
+    tick this process runs, the tick is stopped (it ends ``partial``,
+    ``cancelled``) and this update starts once it has settled. A plain
+    (incremental) start is still refused while a tick runs: the tick is
+    already doing that work, and its progress is what the status shows.
     """
 
     home = Path(home_root)
@@ -872,7 +1199,8 @@ def start_background_update(
     update_id = new_update_id()
     with _START_LOCK:
         if not force and snapshot_is_live(index.read_update_summary()):
-            raise SourcesUpdateRunningError()
+            if not (full_refresh and _yield_tick(index)) or snapshot_is_live(index.read_update_summary()):
+                raise SourcesUpdateRunningError()
         index.write_update_summary(_blank_snapshot(update_id, STATUS_RUNNING))
 
     def run() -> None:
@@ -931,6 +1259,7 @@ def read_status(home_root: Path, *, now: datetime | None = None) -> dict[str, ob
 
 
 __all__ = [
+    "HEARTBEAT_INTERVAL_SECONDS",
     "HEARTBEAT_TIMEOUT_SECONDS",
     "SNAPSHOT_INTERVAL_SECONDS",
     "SOURCES_UPDATE_STATUS_SCHEMA",
@@ -943,6 +1272,7 @@ __all__ = [
     "TICK_INTERVAL_SECONDS",
     "TICK_SPREAD_ENV",
     "TICK_SPREAD_SECONDS",
+    "TICK_YIELD_TIMEOUT_SECONDS",
     "TRIGGER_AUTO",
     "TRIGGER_MANUAL",
     "SourcesUpdateError",

@@ -16,6 +16,12 @@ no fixture route and 404s), like every journey in this suite:
    the company file only moves ``checked_at``.
 5. A foreign ``Origin`` is 403 before anything starts.
 
+0110-025: the server runs the hourly refresh thread here (the journey asks
+the harness for it). The status carries the ``background`` block: before the
+first update the thread does nothing and says "Run Update sources once";
+after it, the next tick is an hour after the update started, and the tag
+store and the text index hold the posting the update indexed.
+
 No setup preferences are saved, so nothing is seeded from the company
 catalog: the update covers exactly the two user-added boards (the
 full-catalog cost is measured separately, not journeyed).
@@ -23,6 +29,7 @@ full-catalog cost is measured separately, not journeyed).
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import json
 import time
 from pathlib import Path
@@ -63,14 +70,27 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
     home, target = setup_and_init(tmp_path)
     add_resume(home, target, tmp_path)
     write_offline_find_jobs_config(target, sources_live=True)
-    server = start_server(home, target, monkeypatch=monkeypatch)
+    server = start_server(home, target, monkeypatch=monkeypatch, auto_refresh=True)
     try:
         client = server.client
         companies = home / "cache" / "scout" / "companies"
 
         before, before_latency = timed_request("GET /api/sources/update", lambda: client.get("/api/sources/update"))
         assert before.status_code == 200, before.text
-        assert before.json() == {
+        before_body = before.json()
+        assert before_body.pop("background") == {
+            "auto_refresh": {"enabled": True, "source": "environment", "active": True},
+            "state": "needs_first_update",
+            "message": "Run Update sources once. Automatic refresh starts after the first update.",
+            "in_progress": False,
+            "trigger": None,
+            "last_update": None,
+            "next_tick_at": None,
+            "interval_seconds": 3600.0,
+            "tags": {"available": False, "titles": 0, "with_function": 0, "lacking_function": 0},
+            "text": {"available": False, "postings": 0, "with_text": 0, "unchecked": 0},
+        }
+        assert before_body == {
             "schema_version": "scout-sources-update-status:1",
             "running": False,
             "update": None,
@@ -117,6 +137,25 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
         assert first["index"]["status"] == "ready" and first["index"]["needs_update"] is False
         assert first["index"]["message"] is None and first["index"]["companies_indexed"] == 1
         assert first["index"]["last_checked_at"] == update["finished_at"]
+        assert update["trigger"] == "manual" and update["tick"] is None
+        assert update["stores"] == {"tags": {"titles_tagged": 1, "titles_backfilled": 0, "failures": 0}, "text": {"companies_written": 1, "companies_removed": 0, "failures": 0}}
+
+        # -- the background block after the first update --------------------
+        background = first["background"]
+        assert background["auto_refresh"] == {"enabled": True, "source": "environment", "active": True}
+        assert (background["state"], background["message"], background["in_progress"], background["trigger"]) == ("waiting", None, False, "manual")
+        assert background["last_update"] == {
+            "update_id": update["update_id"],
+            "status": "succeeded",
+            "trigger": "manual",
+            "started_at": update["started_at"],
+            "finished_at": update["finished_at"],
+        }
+        started_at = datetime.fromisoformat(update["started_at"].replace("Z", "+00:00"))
+        next_tick = datetime.fromisoformat(background["next_tick_at"].replace("Z", "+00:00"))
+        assert next_tick - started_at == timedelta(hours=1)
+        assert background["tags"] == {"available": True, "titles": 1, "with_function": 1, "lacking_function": 0}
+        assert background["text"] == {"available": True, "postings": 1, "with_text": 1, "unchecked": 0}
 
         assert sorted(item.name for item in companies.iterdir()) == ["greenhouse:acme.json", "last-update.json"]
         acme = json.loads((companies / "greenhouse:acme.json").read_text(encoding="utf-8"))

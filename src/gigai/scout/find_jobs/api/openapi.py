@@ -454,7 +454,39 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         request_example={}, errors=(_UNKNOWN_KEY, _WRONG_TYPE),
         description="Reads public boards; incremental by default; returns immediately; poll GET /api/sources/update.",
     ),
-    RouteSpec("GET", "/api/sources/update", "State of the last or running sources update.", "read", "none", {"state": "idle"}),
+    RouteSpec(
+        "GET", "/api/sources/update", "State of the last or running sources update.", "read", "none",
+        {
+            "schema_version": "scout-sources-update-status:1",
+            "running": False,
+            "update": None,
+            "index": {"status": "ready", "needs_update": False, "message": None, "companies_indexed": 120, "last_checked_at": "2026-10-01T12:00:00.000Z", "stale_after_hours": 24.0},
+            "background": {
+                "auto_refresh": {"enabled": True, "source": "default", "active": True},
+                "state": "waiting",
+                "message": None,
+                "in_progress": False,
+                "trigger": "manual",
+                "last_update": {"update_id": "sources_update_1", "status": "succeeded", "trigger": "manual", "started_at": "2026-10-01T11:50:00.000Z", "finished_at": "2026-10-01T12:00:00.000Z"},
+                "next_tick_at": "2026-10-01T12:50:00.000Z",
+                "interval_seconds": 3600.0,
+                "tags": {"available": True, "titles": 5200, "with_function": 4400, "lacking_function": 800},
+                "text": {"available": True, "postings": 9000, "with_text": 6100, "unchecked": 2900},
+            },
+        },
+        schema_version="scout-sources-update-status:1",
+        description=(
+            "`update` is the running or last update's snapshot (null when none ever ran): `trigger` is manual or auto (the hourly "
+            "background refresh), `failures` counts boards that did not answer by code, `stores` counts what the update wrote to the "
+            "tag store and the text index. `index` says whether a search can read the stored postings. `background` is the hourly "
+            "refresh and the two stores: `auto_refresh` {enabled, source: default|setting|environment|settings_unreadable, active: a "
+            "refresh thread runs in this server}; `state` is disabled, inactive, needs_first_update (run Update sources once: the "
+            "background refresh never fills an empty index), running, waiting or due; `in_progress` and `trigger` describe the live "
+            "update, `last_update` the last finished one; `next_tick_at` is null unless a tick is scheduled; `tags` counts stored "
+            "titles and those still lacking a function; `text.unchecked` counts postings with no stored text, which a text search "
+            "cannot match."
+        ),
+    ),
 )
 
 TAGS: tuple[str, ...] = ("Agents and meta", "Runs", "Jobs", "Assessment", "Tailored resumes", "Profiles and resume", "Sources", "Settings")

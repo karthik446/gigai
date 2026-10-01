@@ -71,7 +71,8 @@ _TEST_MODEL_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_MODEL"
 def _run_forever(bind: tuple[str, int], *, backend: Backend | None = None) -> None:
     import threading
 
-    server = serve(backend=backend, bind=bind)
+    # 0110-025: the real server also runs the hourly sources refresh thread.
+    server = serve(backend=backend, bind=bind, background_refresh=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
