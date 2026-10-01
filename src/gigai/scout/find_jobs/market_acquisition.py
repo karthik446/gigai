@@ -93,6 +93,12 @@ DEFAULT_ATS_CONCURRENCY_PER_PROVIDER = 4
 DEFAULT_ATS_MIN_INTERVAL_SECONDS = 0.125  # 8 requests/s per provider, across all its workers
 DEFAULT_ACQUIRE_BUDGET_SECONDS = 1200.0  # 20 minutes for the whole ATS pass
 BUDGET_EXCEEDED_CODE = "time_budget_exceeded"
+# 0110-025 (R2): a board the pass never asked because its stop event was set
+# (a background tick cancelled by a manual Full refresh, or the server
+# stopping). Reported like a budget skip: status ``skipped``, this code.
+CANCELLED_CODE = "cancelled"
+# How long a paced wait sleeps before it looks at the stop event again.
+_STOP_POLL_SECONDS = 0.5
 # acquire-rotation: how often the last-fetched index is flushed mid-pass, so
 # a run killed before its end still advances the rotation for the boards it
 # reached (the final flush at the end of the pass is unconditional).
@@ -141,11 +147,28 @@ class AcquireLimits:
     ``time_budget_exceeded`` failure row), in-flight boards finish, and the
     run seals cleanly with what it has. ``None``/``<= 0`` disables the
     budget.
+
+    ``spread_seconds`` (0110-025, the background refresh tick): spread each
+    provider's requests evenly over this long instead of sending them at the
+    polite maximum. The interval is computed per provider from its board
+    count (:meth:`interval_for`) and never drops below
+    ``min_request_interval_seconds``, so a spread can only slow a pass down.
+    ``None`` (every manual update and every find-jobs run) is the fixed
+    interval.
     """
 
     concurrency_per_provider: int = DEFAULT_ATS_CONCURRENCY_PER_PROVIDER
     min_request_interval_seconds: float = DEFAULT_ATS_MIN_INTERVAL_SECONDS
     time_budget_seconds: float | None = DEFAULT_ACQUIRE_BUDGET_SECONDS
+    spread_seconds: float | None = None
+
+    def interval_for(self, board_count: int) -> float:
+        """Seconds between request starts for a provider with ``board_count`` boards in this pass."""
+
+        floor = max(0.0, float(self.min_request_interval_seconds))
+        if self.spread_seconds is None or self.spread_seconds <= 0 or board_count <= 0:
+            return floor
+        return max(floor, float(self.spread_seconds) / board_count)
 
     @classmethod
     def from_environment(cls, environ: Mapping[str, str] | None = None) -> "AcquireLimits":
@@ -171,11 +194,18 @@ class AcquireLimits:
         )
 
     def to_json(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "concurrency_per_provider": self.concurrency_per_provider,
             "min_request_interval_seconds": self.min_request_interval_seconds,
             "time_budget_seconds": self.time_budget_seconds,
         }
+        if self.spread_seconds is not None:
+            value["spread_seconds"] = self.spread_seconds
+        return value
+
+
+class _PassCancelled(Exception):
+    """The pass's stop event was set while a request waited for its slot."""
 
 
 class _RateLimiter:
@@ -184,14 +214,22 @@ class _RateLimiter:
     The slot is reserved under the lock and the sleep happens outside it, so
     N workers sharing one limiter start their requests in a strict cadence
     rather than all sleeping and then bursting together.
+
+    With a ``stop`` event the sleep is taken in short steps and a set event
+    raises :class:`_PassCancelled` instead of starting the request, so a
+    spread pass (seconds between starts) stops at once.
     """
 
-    def __init__(self, min_interval: float) -> None:
+    def __init__(self, min_interval: float, *, stop: threading.Event | None = None) -> None:
         self._min_interval = max(0.0, float(min_interval))
         self._lock = threading.Lock()
         self._next_start = 0.0
+        self._stop = stop
 
     def wait(self) -> None:
+        stop = self._stop
+        if stop is not None and stop.is_set():
+            raise _PassCancelled()
         if self._min_interval <= 0:
             return
         with self._lock:
@@ -199,27 +237,103 @@ class _RateLimiter:
             start = max(now, self._next_start)
             self._next_start = start + self._min_interval
         delay = start - now
-        if delay > 0:
+        if delay <= 0:
+            return
+        if stop is None:
             time.sleep(delay)
+            return
+        while True:
+            remaining = start - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(remaining, _STOP_POLL_SECONDS))
+            if stop.is_set():
+                raise _PassCancelled()
+
+
+def _response_failure_code(response: Any) -> str | None:
+    """``http_<status>`` for an answer that is neither a body nor a ``304``."""
+
+    status = getattr(response, "status_code", None)
+    if type(status) is not int or status in (200, 304):
+        return None
+    return f"http_{status}"
+
+
+def _exception_failure_code(exc: BaseException) -> str:
+    """``timeout``, ``connect_error`` or ``network_error`` for a request that got no answer."""
+
+    names = {cls.__name__ for cls in type(exc).__mro__}
+    if names & {"TimeoutException", "TimeoutError"}:
+        return "timeout"
+    if "ConnectError" in names or "ConnectionError" in names:
+        return "connect_error"
+    return "network_error"
 
 
 class _ThrottledClient:
-    """Pass-through httpx-like client whose ``get``/``post`` wait on a limiter."""
+    """Pass-through httpx-like client whose ``get``/``post`` wait on a limiter.
+
+    It also remembers, per worker thread, why the last request did not
+    answer with a body (0110-025 R5): the board clients redact every
+    failure to ``http_error``/``network_error``, and the status is what
+    tells a rate limit (``http_429``) from a dead board (``http_404``).
+    """
 
     def __init__(self, client: Any, limiter: _RateLimiter) -> None:
         self._client = client
         self._limiter = limiter
+        self._seen = threading.local()
+
+    def _send(self, method: str, url: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        self._limiter.wait()
+        self._seen.failure = None
+        try:
+            response = getattr(self._client, method)(url, *args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - noted for the board's failure code, then re-raised
+            self._seen.failure = _exception_failure_code(exc)
+            raise
+        self._seen.failure = _response_failure_code(response)
+        return response
 
     def get(self, url: str, *args: Any, **kwargs: Any) -> Any:
-        self._limiter.wait()
-        return self._client.get(url, *args, **kwargs)
+        return self._send("get", url, args, kwargs)
 
     def post(self, url: str, *args: Any, **kwargs: Any) -> Any:
-        self._limiter.wait()
-        return self._client.post(url, *args, **kwargs)
+        return self._send("post", url, args, kwargs)
+
+    def last_failure(self) -> str | None:
+        """The calling thread's last request failure (``None`` after an answered request)."""
+
+        return getattr(self._seen, "failure", None)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._client, name)
+
+
+#: The board clients' redacted codes that a request-level detail refines.
+_REDACTED_REQUEST_CODES = frozenset({"http_error", "network_error"})
+
+
+def _board_failure_code(exc: BaseException, client: Any) -> str:
+    """One board's failure code: the HTTP status or transport failure when known.
+
+    ``http_429``, ``http_404``, ``timeout``, ``connect_error``; otherwise the
+    board client's own stable code (``bad_json``, ``unsupported_provider``),
+    and for anything else the exception's class name, as before.
+    """
+
+    code = getattr(exc, "code", None)
+    code = code if type(code) is str and code else None
+    if isinstance(client, _ThrottledClient) and code in _REDACTED_REQUEST_CODES:
+        seen = client.last_failure()
+        if seen is not None:
+            return seen
+    if code is not None:
+        return code
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    return type(exc).__name__.lower()
 
 
 @dataclass(frozen=True)
@@ -361,7 +475,10 @@ def _fetch_one_board(
     config: FindJobsConfig,
     cache: BoardCache | None,
     deadline: float | None,
+    stop: threading.Event | None = None,
 ) -> _BoardOutcome:
+    if stop is not None and stop.is_set():
+        return _BoardOutcome(board, "skipped", (), None, 0, CANCELLED_CODE)
     if deadline is not None and time.monotonic() >= deadline:
         return _BoardOutcome(board, "skipped", (), None, 0, BUDGET_EXCEEDED_CODE)
     started = time.monotonic()
@@ -374,9 +491,13 @@ def _fetch_one_board(
         else:
             rows = tuple(ats.list_board(client, board.provider.value, board.board_token, config))
             stats = None
+    except _PassCancelled:
+        # Stopped while waiting for its request slot: not asked, so not
+        # stamped; it leads the next pass like a budget skip.
+        return _BoardOutcome(board, "skipped", (), None, 0, CANCELLED_CODE)
     except Exception as exc:  # noqa: BLE001 - one board's failure is one failure row
         elapsed = int((time.monotonic() - started) * 1000)
-        return _BoardOutcome(board, "failed", (), None, elapsed, type(exc).__name__.lower())
+        return _BoardOutcome(board, "failed", (), None, elapsed, _board_failure_code(exc, client))
     elapsed = int((time.monotonic() - started) * 1000)
     cached = stats is not None and stats.cache in {"hit", "revalidated"} and stats.detail_fetched == 0
     return _BoardOutcome(board, "cached" if cached else "fetched", rows, stats, elapsed, None)
@@ -393,8 +514,18 @@ def _fetch_boards(
     progress: ProgressWriter | None,
     started_at: float,
     catalog_counts: Mapping[tuple[str, str], int] | None = None,
+    stop: threading.Event | None = None,
 ) -> tuple[list[PostingRow], list[FailureRow], dict[str, object]]:
     """Fetch the next page of watchlist boards with per-provider pools, pacing and a budget.
+
+    0110-025: ``limits.spread_seconds`` spreads each provider's request
+    starts evenly (the interval comes from that provider's board count,
+    ``AcquireLimits.interval_for``), and ``stop`` is checked before every
+    board and while a request waits for its slot. Once it is set no new
+    request starts: the boards not asked are ``skipped`` with code
+    ``cancelled`` (not stamped, so they lead the next pass), a request
+    already on the wire finishes, and the pass returns as it does after a
+    budget stop.
 
     acquire-rotation: the boards are ordered by ``_plan_rotation`` (least
     recently attempted first, from the ``BoardCache``'s last-fetched index),
@@ -438,6 +569,9 @@ def _fetch_boards(
             print(f"scout acquire: could not write the board rotation index ({type(exc).__name__})", file=sys.stderr)
         last_flush = time.monotonic()
 
+    provider_totals: dict[str, int] = {}
+    for board in ordered:
+        provider_totals[board.provider.value] = provider_totals.get(board.provider.value, 0) + 1
     limiters: dict[str, _RateLimiter] = {}
     throttled: dict[str, Any] = {}
     executors: dict[str, ThreadPoolExecutor] = {}
@@ -447,7 +581,7 @@ def _fetch_boards(
         for index, board in enumerate(ordered):
             provider = board.provider.value
             if provider not in executors:
-                limiters[provider] = _RateLimiter(limits.min_request_interval_seconds)
+                limiters[provider] = _RateLimiter(limits.interval_for(provider_totals[provider]), stop=stop)
                 throttled[provider] = _ThrottledClient(client, limiters[provider]) if client is not None else None
                 executors[provider] = ThreadPoolExecutor(max_workers=workers, thread_name_prefix=f"scout-ats-{provider}")
             future = executors[provider].submit(
@@ -458,6 +592,7 @@ def _fetch_boards(
                 config=config,
                 cache=cache,
                 deadline=deadline,
+                stop=stop,
             )
             futures[future] = index
         for future in as_completed(futures):
@@ -498,6 +633,7 @@ def _fetch_boards(
     rows: list[PostingRow] = []
     failures: list[FailureRow] = []
     counts = {"fetched": 0, "cached": 0, "failed": 0, "skipped": 0}
+    cancelled = 0
     requests = 0
     cache_hits = 0
     listed = 0
@@ -517,15 +653,28 @@ def _fetch_boards(
             detail_cached += outcome.stats.detail_cached
         if outcome.status == "failed":
             failures.append(FailureRow(SourceKind.ATS, outcome.board.board_token, None, outcome.code or "error", "ATS board fetch failed"))
-    if counts["skipped"]:
+        elif outcome.status == "skipped" and outcome.code == CANCELLED_CODE:
+            cancelled += 1
+    over_budget = counts["skipped"] - cancelled
+    if over_budget:
         failures.append(
             FailureRow(
                 SourceKind.ATS,
                 "ats",
                 None,
                 BUDGET_EXCEEDED_CODE,
-                f"{counts['skipped']} of {len(ordered)} watchlist boards were not fetched: the "
-                f"{budget:.0f}s acquire time budget ran out",
+                f"{over_budget} of {len(ordered)} watchlist boards were not fetched: the "
+                f"{budget or 0:.0f}s acquire time budget ran out",
+            )
+        )
+    if cancelled:
+        failures.append(
+            FailureRow(
+                SourceKind.ATS,
+                "ats",
+                None,
+                CANCELLED_CODE,
+                f"{cancelled} of {len(ordered)} watchlist boards were not fetched: the board pass was stopped",
             )
         )
     summary: dict[str, object] = {
@@ -543,6 +692,8 @@ def _fetch_boards(
         "limits": limits.to_json(),
         "rotation": rotation,
     }
+    if stop is not None:
+        summary["cancelled"] = cancelled
     return rows, failures, summary
 
 

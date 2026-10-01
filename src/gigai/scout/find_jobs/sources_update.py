@@ -20,12 +20,25 @@ and a later search all read.
 
 Nothing here writes a journal record except the watchlist seeding acquire
 already does (one transition when the catalog or the prefs changed).
+
+0110-025 (hourly background refresh) adds three things, all additive:
+
+* the snapshot's ``failures`` block: a histogram of per-board failure codes
+  (``http_429``, ``http_404``, ``timeout`` ...), so a provider pushing back
+  is visible;
+* :func:`run_refresh_tick`: ONE background tick. It asks the boards
+  ``refresh_plan.plan_tick`` picks (busy boards, one slice of the quiet
+  ones), spread evenly over the tick instead of at the polite maximum, and
+  stops between boards when its stop event is set. It starts no thread: the
+  server's tick loop calls it;
+* ``stop`` on :func:`update_sources`: a stopped update ends ``partial`` with
+  ``cancelled: true`` and the boards it did not ask counted in ``remaining``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
@@ -48,7 +61,8 @@ from .company_index import (
     refresh_company,
 )
 from .contracts import FindJobsConfig, SourceToggles, WatchlistEntry
-from .market_acquisition import AcquireLimits, _catalog_us_counts, _fetch_boards, _seed_watchlist
+from .market_acquisition import CANCELLED_CODE, AcquireLimits, _catalog_us_counts, _fetch_boards, _seed_watchlist
+from .refresh_plan import TICK_INTERVAL_SECONDS, BoardFacts, RefreshPlan, plan_tick
 
 SOURCES_UPDATE_STATUS_SCHEMA = "scout-sources-update-status:1"
 #: How often the running snapshot is rewritten (it is also the liveness
@@ -65,6 +79,21 @@ STATUS_SUCCEEDED = "succeeded"  # every board was attempted
 STATUS_PARTIAL = "partial"  # the time budget left boards for the next update
 STATUS_FAILED = "failed"
 STATUS_INTERRUPTED = "interrupted"  # a running snapshot whose process is gone
+
+#: Who started an update (the snapshot's ``trigger``): the operator (CLI,
+#: the Update sources button) or the background refresh tick.
+TRIGGER_MANUAL = "manual"
+TRIGGER_AUTO = "auto"
+#: How many failed boards the snapshot names (``failures.boards``); the
+#: histogram (``failures.codes``) always counts every one.
+FAILED_BOARDS_LISTED = 50
+#: A tick spreads its requests over this long and gives up on what it has
+#: not started by the budget; both leave room before the next hourly tick.
+TICK_SPREAD_SECONDS = 3000.0
+TICK_BUDGET_SECONDS = 3300.0
+#: Test/operator override of :data:`TICK_SPREAD_SECONDS` (``0``: no spread,
+#: the polite maximum, as a manual update).
+TICK_SPREAD_ENV = "GIGAI_SCOUT_REFRESH_SPREAD_SECONDS"
 
 
 class SourcesUpdateError(RuntimeError):
@@ -266,6 +295,11 @@ class _Listener:
         self.never_checked: int | None = None
         self.up_to_date = 0  # boards left alone: checked within the stale window
         self.full_refresh = False
+        self.trigger = TRIGGER_MANUAL
+        self.tick: dict[str, object] | None = None
+        self.cancelled = False
+        self.failure_codes: dict[str, int] = {}
+        self.failed_boards: list[dict[str, str]] = []
         self.rotation: dict[str, object] | None = None
         self.watchlist_seed: dict[str, object] | None = None
         self.state: dict[str, object] = {
@@ -304,8 +338,15 @@ class _Listener:
         elapsed_ms: int = 0,
         code: str | None = None,
     ) -> None:
-        del cache, postings, matched, elapsed_ms, code
+        del cache, postings, matched, elapsed_ms
         self.done += 1
+        if status == "failed":
+            failure = code or "error"
+            self.failure_codes[failure] = self.failure_codes.get(failure, 0) + 1
+            if len(self.failed_boards) < FAILED_BOARDS_LISTED:
+                self.failed_boards.append({"board": f"{provider}:{board_token}", "code": failure})
+        elif status == "skipped" and code == CANCELLED_CODE:
+            self.cancelled = True
         self.counts[status] = self.counts.get(status, 0) + 1
         self.requests += requests
         first = False
@@ -351,6 +392,17 @@ class _Listener:
                 "up_to_date": self.up_to_date,
             },
             "full_refresh": self.full_refresh,
+            "trigger": self.trigger,
+            "tick": self.tick,
+            "cancelled": self.cancelled,
+            # Why boards did not answer, by code (`http_429` is a provider
+            # pushing back, `http_404` a board that is gone); `boards` names
+            # the first few.
+            "failures": {
+                "total": sum(self.failure_codes.values()),
+                "codes": dict(sorted(self.failure_codes.items())),
+                "boards": list(self.failed_boards),
+            },
             "companies": {
                 "checked": totals.companies,
                 "indexed": totals.indexed,
@@ -408,6 +460,7 @@ def update_sources(
     full_refresh: bool = False,
     stale_after_hours: float = DEFAULT_STALE_AFTER_HOURS,
     now: datetime | None = None,
+    stop: threading.Event | None = None,
 ) -> SourcesUpdateResult:
     """Refresh ``boards`` through the rotation and bring the company index in step.
 
@@ -423,15 +476,56 @@ def update_sources(
     update right after an update asks ~0 boards. ``full_refresh`` asks every
     board anyway. (``force`` is a different thing: it overrides a live
     snapshot.)
+
+    ``stop``: once set, no further board is asked; the update ends
+    ``partial`` with ``cancelled: true`` and every board it reached indexed.
     """
 
     if not force and snapshot_is_live(index.read_update_summary()):
         raise SourcesUpdateRunningError()
     all_boards = boards
-    up_to_date = 0
     if not full_refresh:
         boards = _stale_boards(boards, cache, index, stale_after_hours=stale_after_hours, now=now)
-        up_to_date = len(all_boards) - len(boards)
+    return _run_update(
+        boards,
+        all_boards=all_boards,
+        cache=cache,
+        index=index,
+        client=client,
+        config=config,
+        limits=limits,
+        ats=ats,
+        on_progress=on_progress,
+        update_id=update_id,
+        catalog_counts=catalog_counts,
+        watchlist_seed=watchlist_seed,
+        full_refresh=full_refresh,
+        stop=stop,
+    )
+
+
+def _run_update(
+    boards: Sequence[WatchlistEntry],
+    *,
+    all_boards: Sequence[WatchlistEntry],
+    cache: BoardCache,
+    index: CompanyIndex,
+    client: Any,
+    config: FindJobsConfig | None,
+    limits: AcquireLimits | None,
+    ats: Any,
+    on_progress: Callable[[dict[str, object]], None] | None,
+    update_id: str | None,
+    catalog_counts: Mapping[tuple[str, str], int] | None,
+    watchlist_seed: Mapping[str, object] | None,
+    full_refresh: bool,
+    stop: threading.Event | None,
+    trigger: str = TRIGGER_MANUAL,
+    tick: Mapping[str, object] | None = None,
+) -> SourcesUpdateResult:
+    """Ask exactly ``boards`` (already chosen out of ``all_boards``) and write the snapshot."""
+
+    up_to_date = len(all_boards) - len(boards)
     config = config if config is not None else listing_config()
     limits = limits if limits is not None else AcquireLimits.from_environment()
     listener = _Listener(
@@ -447,6 +541,8 @@ def update_sources(
         listener.watchlist_seeded(watchlist_seed)
     listener.up_to_date = up_to_date
     listener.full_refresh = full_refresh
+    listener.trigger = trigger
+    listener.tick = dict(tick) if tick is not None else None
     listener.never_checked = _never_checked(cache, all_boards)
     listener.publish(force=True)
     try:
@@ -460,6 +556,7 @@ def update_sources(
             progress=listener,  # type: ignore[arg-type]
             started_at=time.monotonic(),
             catalog_counts=catalog_counts,
+            stop=stop,
         )
         listener.boards_finished(summary)
         listener.never_checked = _never_checked(cache, all_boards)
@@ -524,6 +621,7 @@ def run_sources_update(
     update_id: str | None = None,
     force: bool = False,
     full_refresh: bool = False,
+    stop: threading.Event | None = None,
 ) -> SourcesUpdateResult:
     """The whole command for one Scout project: seed, list the watchlist, update.
 
@@ -558,6 +656,152 @@ def run_sources_update(
         watchlist_seed=seed.payload,
         force=force,
         full_refresh=full_refresh,
+        stop=stop,
+    )
+
+
+def read_board_facts(index: CompanyIndex, boards: Sequence[WatchlistEntry]) -> dict[str, BoardFacts]:
+    """What the company index says about each of ``boards`` (one file read per indexed board).
+
+    Keyed like the rotation stamps (``"<provider>:<board token>"``); a
+    board with no readable index file has no entry.
+    """
+
+    indexed = set(index.keys())
+    facts: dict[str, BoardFacts] = {}
+    for board in boards:
+        ats, slug = board.provider.value, board.board_token
+        if (ats, slug) not in indexed:
+            continue
+        entry = index.read(ats, slug)
+        if entry is None:
+            continue
+        live = sum(1 for posting in entry.postings.values() if not posting.removed)
+        facts[_board_key(board)] = BoardFacts(live=live, checked_at=entry.checked_at, changed_at=entry.changed_at)
+    return facts
+
+
+def _board_key(board: WatchlistEntry) -> str:
+    return f"{board.provider.value}:{board.board_token}"
+
+
+def plan_refresh_tick(
+    boards: Sequence[WatchlistEntry],
+    *,
+    cache: BoardCache,
+    index: CompanyIndex,
+    now: datetime | None = None,
+) -> tuple[RefreshPlan, list[WatchlistEntry]]:
+    """The tick plan for ``boards`` (the whole watchlist) and the boards it asks, busy first."""
+
+    moment = datetime.now(timezone.utc) if now is None else now
+    by_key = {_board_key(board): board for board in boards}
+    plan = plan_tick(
+        list(by_key),
+        facts=read_board_facts(index, boards),
+        stamps=cache.load_fetch_index().boards,
+        now=moment,
+    )
+    return plan, [by_key[key] for key in plan.keys]
+
+
+def tick_limits(environ: Mapping[str, str] | None = None) -> AcquireLimits:
+    """The limits of a background tick: the environment's, spread over the tick.
+
+    Concurrency and the polite minimum interval are a manual update's
+    (:meth:`AcquireLimits.from_environment`); the spread
+    (:data:`TICK_SPREAD_SECONDS`, or :data:`TICK_SPREAD_ENV`) slows each
+    provider down to one request every ``spread / boards`` seconds.
+    """
+
+    env = os.environ if environ is None else environ
+    spread: float | None = TICK_SPREAD_SECONDS
+    raw = env.get(TICK_SPREAD_ENV)
+    if raw is not None and raw.strip():
+        try:
+            spread = float(raw)
+        except ValueError:
+            spread = TICK_SPREAD_SECONDS
+    if spread is not None and spread <= 0:
+        spread = None
+    return replace(AcquireLimits.from_environment(env), spread_seconds=spread, time_budget_seconds=TICK_BUDGET_SECONDS)
+
+
+def run_refresh_tick(
+    home_root: Path,
+    target: Path,
+    *,
+    client: Any,
+    now: datetime | None = None,
+    stop_event: threading.Event | None = None,
+    config: FindJobsConfig | None = None,
+    limits: AcquireLimits | None = None,
+    ats: Any = None,
+    on_progress: Callable[[dict[str, object]], None] | None = None,
+    update_id: str | None = None,
+) -> SourcesUpdateResult:
+    """Plan and run ONE background refresh tick, on the calling thread.
+
+    Seeds and lists the watchlist as a manual update does, picks this
+    tick's boards (``refresh_plan.plan_tick``: every busy board and one
+    slice of the quiet ones), and asks them spread over the tick
+    (:func:`tick_limits` unless ``limits`` is given). The snapshot is the
+    same file a manual update writes, with ``trigger: "auto"`` and the plan
+    in ``tick``; ``boards.up_to_date`` counts the watchlist boards this tick
+    left alone.
+
+    One update at a time: raises :class:`SourcesUpdateRunningError` when an
+    update (manual or a tick) is live, and claims the snapshot under the
+    same lock :func:`start_background_update` uses, so a manual start and a
+    tick can never both begin. Setting ``stop_event`` ends the tick between
+    boards: ``partial``, ``cancelled: true``. No thread is started here.
+    """
+
+    from ...workpad import resolve_workpad
+    from .watchlist import list_active
+
+    home = Path(home_root)
+    index = CompanyIndex.for_home(home)
+    update_id = update_id or new_update_id()
+    with _START_LOCK:
+        if snapshot_is_live(index.read_update_summary()):
+            raise SourcesUpdateRunningError()
+        index.write_update_summary({**_blank_snapshot(update_id, STATUS_RUNNING), "trigger": TRIGGER_AUTO})
+    try:
+        resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=None, allow_semantic_state=True)
+        seed = _Seed()
+        _seed_watchlist(resolved, home_root=home, target=target, progress=seed)  # type: ignore[arg-type]
+        watchlist = list_active(home, target, resolved.gig_id)
+        cache = board_cache_for_home(home)
+        plan, boards = plan_refresh_tick(watchlist, cache=cache, index=index, now=now)
+    except Exception as exc:  # noqa: BLE001 - release the claimed snapshot, then re-raise
+        failed = _blank_snapshot(
+            update_id,
+            STATUS_FAILED,
+            error={"code": getattr(exc, "code", type(exc).__name__.lower()), "message": "the sources refresh could not run"},
+        )
+        try:
+            index.write_update_summary({**failed, "trigger": TRIGGER_AUTO})
+        except OSError:
+            pass
+        raise
+    return _run_update(
+        boards,
+        all_boards=watchlist,
+        cache=cache,
+        index=index,
+        client=client,
+        config=config,
+        limits=limits if limits is not None else tick_limits(),
+        ats=ats,
+        on_progress=on_progress,
+        update_id=update_id,
+        catalog_counts=_catalog_us_counts(),
+        watchlist_seed=seed.payload,
+        full_refresh=False,
+        stop=stop_event,
+        trigger=TRIGGER_AUTO,
+        tick=plan.to_json(),
     )
 
 
@@ -586,6 +830,10 @@ def _blank_snapshot(update_id: str, status: str, *, error: Mapping[str, object] 
         "elapsed_seconds": 0.0,
         "boards": {"total": 0, "done": 0, "checked": 0, "fetched": 0, "cached": 0, "failed": 0, "skipped": 0, "never_checked": None, "up_to_date": 0},
         "full_refresh": False,
+        "trigger": TRIGGER_MANUAL,
+        "tick": None,
+        "cancelled": False,
+        "failures": {"total": 0, "codes": {}, "boards": []},
         "companies": {"checked": 0, "indexed": 0, "updated": 0, "untouched": 0, "unreadable": 0, "with_new": 0, "with_changes": 0},
         "postings": {"new": 0, "changed": 0, "removed": 0, "live": 0},
         "requests": 0,
@@ -691,6 +939,12 @@ __all__ = [
     "STATUS_PARTIAL",
     "STATUS_RUNNING",
     "STATUS_SUCCEEDED",
+    "TICK_BUDGET_SECONDS",
+    "TICK_INTERVAL_SECONDS",
+    "TICK_SPREAD_ENV",
+    "TICK_SPREAD_SECONDS",
+    "TRIGGER_AUTO",
+    "TRIGGER_MANUAL",
     "SourcesUpdateError",
     "SourcesUpdateResult",
     "SourcesUpdateRunningError",
@@ -700,10 +954,14 @@ __all__ = [
     "listing_config",
     "load_effective_config",
     "new_update_id",
+    "plan_refresh_tick",
+    "read_board_facts",
     "read_status",
+    "run_refresh_tick",
     "run_sources_update",
     "settled_snapshot",
     "snapshot_is_live",
     "start_background_update",
+    "tick_limits",
     "update_sources",
 ]
