@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta, tzinfo
 import math
 
 #: A board with at least this many live postings is busy.
@@ -159,14 +159,154 @@ def plan_tick(
     )
 
 
+# ---------------------------------------------------------------------------
+# 0110-029: when the background checks run (additive: ``plan_tick`` above is unchanged)
+# ---------------------------------------------------------------------------
+
+#: The default check times, in the machine's local time. Weekdays: eight a
+#: day, one overnight and seven through the work day (who updates a board at
+#: night?). Weekends: two.
+DEFAULT_WEEKDAY_TIMES = ("03:00", "07:00", "09:00", "11:00", "13:00", "15:00", "17:00", "19:00")
+DEFAULT_WEEKEND_TIMES = ("09:00", "18:00")
+#: A quiet board is asked about twice a day: it is due again this long after
+#: its last check, and one check takes a quarter of the quiet boards (eight
+#: weekday checks ask each one twice; nothing is asked in a burst).
+CHECK_QUIET_PERIOD_SECONDS = 12 * 3600.0
+CHECK_QUIET_SLICES = 4
+#: An update (manual or a check) that started this close before a scheduled
+#: time counts as that time's check: no second pass over the busy boards.
+CHECK_MIN_GAP_SECONDS = 45 * 60.0
+#: How many times one day's list may hold.
+MAX_CHECK_TIMES = 24
+
+
+def parse_check_times(values: object) -> tuple[str, ...]:
+    """``["07:00", "9:30"]`` -> ``("07:00", "09:30")``: 24-hour ``HH:MM``, sorted, no repeats.
+
+    Raises ``ValueError`` for anything else (not a list, a bad time, more
+    than :data:`MAX_CHECK_TIMES`). An empty list is allowed: no check that day.
+    """
+
+    if not isinstance(values, (list, tuple)) or len(values) > MAX_CHECK_TIMES:
+        raise ValueError("check times must be a list of at most 24 HH:MM times")
+    minutes: set[int] = set()
+    for value in values:
+        if type(value) is not str:
+            raise ValueError("a check time must be an HH:MM string")
+        hour, sep, minute = value.strip().partition(":")
+        if not sep or not hour.isdigit() or not minute.isdigit() or len(minute) != 2 or len(hour) > 2:
+            raise ValueError(f"not an HH:MM time: {value!r}")
+        if int(hour) > 23 or int(minute) > 59:
+            raise ValueError(f"not an HH:MM time: {value!r}")
+        minutes.add(int(hour) * 60 + int(minute))
+    return tuple(f"{value // 60:02d}:{value % 60:02d}" for value in sorted(minutes))
+
+
+def _local(moment: datetime, tz: tzinfo | None) -> datetime:
+    """``moment`` on the machine's wall clock (``tz`` for tests; ``None``: the system's local time)."""
+
+    return moment.astimezone(tz) if tz is not None else moment.astimezone()
+
+
+def _at(day: date, text: str, tz: tzinfo | None) -> datetime:
+    hour, _, minute = text.partition(":")
+    naive = datetime.combine(day, time(int(hour), int(minute)))
+    # A naive value is read as the system's local time, so a daylight-saving change between two days is honoured.
+    return naive.replace(tzinfo=tz) if tz is not None else naive.astimezone()
+
+
+@dataclass(frozen=True)
+class CheckSchedule:
+    """When the background checks run: times of day (weekdays, weekends), or every ``interval_seconds``.
+
+    The fixed interval is the 0110-025 behaviour (a check one interval after
+    the last update started); it is what a caller that names an interval
+    gets. Without one, the times decide.
+    """
+
+    weekdays: tuple[str, ...] = DEFAULT_WEEKDAY_TIMES
+    weekends: tuple[str, ...] = DEFAULT_WEEKEND_TIMES
+    interval_seconds: float | None = None
+
+    def times_on(self, day: date) -> tuple[str, ...]:
+        return self.weekends if day.weekday() >= 5 else self.weekdays
+
+    def _slots(self, around: datetime, tz: tzinfo | None, days: range) -> list[datetime]:
+        local = _local(around, tz)
+        slots: list[datetime] = []
+        for offset in days:
+            day = local.date() + timedelta(days=offset)
+            slots.extend(_at(day, text, tz) for text in self.times_on(day))
+        return sorted(slots)
+
+    def latest_slot(self, now: datetime, *, tz: tzinfo | None = None) -> datetime | None:
+        """The most recent scheduled time at or before ``now`` (looking back a week), or ``None``."""
+
+        past = [slot for slot in self._slots(now, tz, range(-7, 1)) if slot <= now]
+        return past[-1] if past else None
+
+    def next_slot(self, now: datetime, *, tz: tzinfo | None = None) -> datetime | None:
+        """The first scheduled time after ``now`` (looking ahead a week), or ``None``."""
+
+        for slot in self._slots(now, tz, range(0, 8)):
+            if slot > now:
+                return slot
+        return None
+
+    def due(self, last_started: datetime, now: datetime, *, tz: tzinfo | None = None) -> bool:
+        """Whether a check should run at ``now``, the last update (manual or a check) having started at ``last_started``.
+
+        Times: when a scheduled time has passed that the last update did not
+        cover (it started more than :data:`CHECK_MIN_GAP_SECONDS` before
+        it). Only the most recent time counts, so a machine that was closed
+        over several of them runs ONE check when it comes back, never a pile.
+        """
+
+        if self.interval_seconds is not None:
+            return now >= last_started + timedelta(seconds=self.interval_seconds)
+        slot = self.latest_slot(now, tz=tz)
+        return slot is not None and last_started < slot - timedelta(seconds=CHECK_MIN_GAP_SECONDS)
+
+    def next_after(self, last_started: datetime, now: datetime, *, tz: tzinfo | None = None) -> datetime | None:
+        """When the next check is due, given that none is due at ``now``."""
+
+        if self.interval_seconds is not None:
+            return last_started + timedelta(seconds=self.interval_seconds)
+        moment = now
+        for _ in range(MAX_CHECK_TIMES * 8):
+            slot = self.next_slot(moment, tz=tz)
+            if slot is None:
+                return None
+            if last_started < slot - timedelta(seconds=CHECK_MIN_GAP_SECONDS):
+                return slot
+            moment = slot  # the update that just ran covers this time: the one after it
+        return None
+
+    def checks_on(self, day: date) -> int:
+        return len(self.times_on(day))
+
+    def to_json(self) -> dict[str, object]:
+        if self.interval_seconds is not None:
+            return {"kind": "interval", "interval_seconds": self.interval_seconds, "weekdays": None, "weekends": None}
+        return {"kind": "times", "interval_seconds": None, "weekdays": list(self.weekdays), "weekends": list(self.weekends)}
+
+
 __all__ = [
     "BUSY_LIVE_POSTINGS",
+    "CHECK_MIN_GAP_SECONDS",
+    "CHECK_QUIET_PERIOD_SECONDS",
+    "CHECK_QUIET_SLICES",
+    "DEFAULT_WEEKDAY_TIMES",
+    "DEFAULT_WEEKEND_TIMES",
+    "MAX_CHECK_TIMES",
     "QUIET_SLICES",
     "TICK_INTERVAL_SECONDS",
     "TIER_BUSY",
     "TIER_QUIET",
     "BoardFacts",
+    "CheckSchedule",
     "RefreshPlan",
+    "parse_check_times",
     "plan_tick",
     "tier",
 ]

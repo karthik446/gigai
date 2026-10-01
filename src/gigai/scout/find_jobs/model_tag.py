@@ -44,7 +44,10 @@ asks for it again.
 a time, and holds no lock while a call runs: a search reads the tag store,
 and an update writes it, as if no drain were running. Before every batch the
 drain looks at the stop event and at the sources update snapshot: it stops
-for a shutdown and yields to a live update.
+for a shutdown and yields to a live MANUAL update (the operator asked for
+that one, at full speed). It does not yield to a background check
+(0110-028): a check is paced, a model call asks no job board, and yielding
+to every check left the demand set untagged for as long as checks ran.
 
 **Invalid answers** are never stored. An answer that is not the asked JSON
 array is retried once with the error fed back, then the batch is split once
@@ -629,10 +632,25 @@ class TagQueue:
             return result
 
     def _update_is_live(self) -> bool:
-        from .company_index import CompanyIndex
-        from .sources_update import snapshot_is_live
+        """A manual update is running (the queue waits for it); a background check is not waited for."""
 
-        return snapshot_is_live(CompanyIndex.for_home(self.home_root).read_update_summary(), now=self._clock())
+        from .company_index import CompanyIndex
+        from .sources_update import TRIGGER_AUTO, snapshot_is_live
+
+        snapshot = CompanyIndex.for_home(self.home_root).read_update_summary()
+        return snapshot_is_live(snapshot, now=self._clock()) and (snapshot or {}).get("trigger") != TRIGGER_AUTO
+
+    def demand_levels(self) -> tuple[str, ...]:
+        """The rules levels of the demand set, from the roles this queue last read (read again when they are stale).
+
+        For the status: which waiting titles the demand lane will tag. Empty
+        when the roles cannot be read or name no level.
+        """
+
+        try:
+            return self._current_demand(self._clock()).levels
+        except Exception:  # noqa: BLE001 - a status read never fails on the roles
+            return ()
 
     def _current_demand(self, now: datetime) -> Demand:
         fresh = self._demand is not None and self._demand_at is not None and (now - self._demand_at).total_seconds() < DEMAND_TTL_SECONDS

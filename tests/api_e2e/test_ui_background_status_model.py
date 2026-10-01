@@ -244,7 +244,8 @@ def test_tags_line_quiet_states(out: dict) -> None:
     error = tags["backfillFailing"]["error"]
     assert error.startswith("The model (claude_cli:haiku) could not tag titles: xxx") and error.endswith("… It is tried again by itself.") and len(error) < 260
     assert tags["modelOff"]["line"].endswith("150 waiting (tagging with the model is off)")
-    assert tags["noThread"] == {"line": "Titles tagged: 4,400 by rules, 600 by model, 0 waiting", "error": ""}
+    # A server from before 0110-028 (no queued count): the line as it was, and no tagging line.
+    assert tags["noThread"] == {"line": "Titles tagged: 4,400 by rules, 600 by model, 0 waiting", "error": "", "tagging": ""}
     assert tags["noTitles"] is None
     assert out["text"] == {"one": "Descriptions checked for 1 posting, 0 not yet", "empty": ""}
 

@@ -86,6 +86,9 @@ def _ticker(home: Path, target: Path, boards: _Boards, clock: _FakeClock, **kwar
         return run_refresh_tick(*args, limits=FAST, **more)
 
     kwargs.setdefault("run_tick", fast_tick)
+    # A fixed hour between checks (the 0110-025 rule): these tests move a fake clock by minutes and hours.
+    # The times of day (0110-029) have their own tests in test_refresh_schedule.py.
+    kwargs.setdefault("interval_seconds", 3600.0)
     return RefreshTicker(home_root=home, target=target, client_factory=boards.client, clock=clock, **kwargs)
 
 
@@ -253,7 +256,7 @@ def test_the_thread_ticks_on_the_fake_clock_and_ends_when_it_is_stopped(tmp_path
         clock.advance(seconds=seconds)
         time.sleep(0.001)
 
-    ticker = RefreshTicker(home_root=home, target=target, client_factory=lambda: None, clock=clock, wait=fake_wait, run_tick=fake_tick, poll_seconds=60.0)
+    ticker = RefreshTicker(home_root=home, target=target, client_factory=lambda: None, clock=clock, wait=fake_wait, run_tick=fake_tick, poll_seconds=60.0, interval_seconds=3600.0)
     ticker.start()
     try:
         _wait_for(lambda: len(ticks) >= 3)

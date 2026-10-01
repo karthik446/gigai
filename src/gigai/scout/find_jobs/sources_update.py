@@ -39,10 +39,14 @@ company file is written, the titles of its new and changed postings are
 rules-tagged (``posting_tags.tag_new_titles``) and its postings replace the
 company's rows in the text index (``text_index.upsert_company``). A manual
 update also drops boards that left the watchlist from the text index. The
-tag store is a cache: when it is empty (deleted, or an index built before
-it existed) the update first tags every title the index already holds. No
-model call, no request; a failure there is counted in the snapshot's
-``stores`` block and never fails the update.
+tag store is a cache: when it never covered the whole index (deleted, or an
+index built before it existed) the update tags every title the index already
+holds, a few company files after each board that settles and the rest once
+the boards are done; a text index that does not exist yet is built once,
+after the boards (0110-028: neither runs before the first request, and the
+snapshot's ``catch_up`` block says how far they are). No model call, no
+request; a failure there is counted in the snapshot's ``stores`` block and
+never fails the update.
 
 One update at a time, across a tick's long quiet stretches too: a running
 update rewrites its snapshot at least every
@@ -52,6 +56,7 @@ process that runs a tick stops that tick and takes over.
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -80,8 +85,8 @@ from .company_index import (
     refresh_company,
 )
 from .contracts import FindJobsConfig, SourceToggles, WatchlistEntry
-from .market_acquisition import CANCELLED_CODE, AcquireLimits, _catalog_us_counts, _fetch_boards, _seed_watchlist
-from .refresh_plan import TICK_INTERVAL_SECONDS, BoardFacts, RefreshPlan, plan_tick
+from .market_acquisition import ATS_MIN_INTERVAL_ENV, CANCELLED_CODE, AcquireLimits, _catalog_us_counts, _fetch_boards, _PassCancelled, _seed_watchlist
+from .refresh_plan import CHECK_QUIET_PERIOD_SECONDS, CHECK_QUIET_SLICES, TICK_INTERVAL_SECONDS, BoardFacts, RefreshPlan, plan_tick
 
 SOURCES_UPDATE_STATUS_SCHEMA = "scout-sources-update-status:1"
 #: How often the running snapshot is rewritten (it is also the liveness
@@ -113,13 +118,26 @@ TRIGGER_AUTO = "auto"
 #: How many failed boards the snapshot names (``failures.boards``); the
 #: histogram (``failures.codes``) always counts every one.
 FAILED_BOARDS_LISTED = 50
-#: A tick spreads its requests over this long and gives up on what it has
-#: not started by the budget; both leave room before the next hourly tick.
+#: 0110-029: a background check asks at a moderate fixed rate, 2.5 requests
+#: a second to each provider (a manual update asks 8), so a check of about
+#: 4,000 boards is done in under 15 minutes and Scout is idle until the next
+#: one. It gives up on what it has not started by the budget.
+CHECK_MIN_INTERVAL_SECONDS = 0.4
+CHECK_BUDGET_SECONDS = 1800.0
+#: A provider that answers ``429`` during a check is left alone this long,
+#: doubling while it keeps refusing, up to the maximum.
+CHECK_BACKOFF_SECONDS = 30.0
+CHECK_BACKOFF_MAX_SECONDS = 600.0
+#: Test/operator override of the pace: spread a check's requests evenly over
+#: this many seconds (the 0110-025 hourly tick spread them over
+#: :data:`TICK_SPREAD_SECONDS`); ``0`` is the polite maximum, as a manual update.
+TICK_SPREAD_ENV = "GIGAI_SCOUT_REFRESH_SPREAD_SECONDS"
 TICK_SPREAD_SECONDS = 3000.0
 TICK_BUDGET_SECONDS = 3300.0
-#: Test/operator override of :data:`TICK_SPREAD_SECONDS` (``0``: no spread,
-#: the polite maximum, as a manual update).
-TICK_SPREAD_ENV = "GIGAI_SCOUT_REFRESH_SPREAD_SECONDS"
+#: 0110-028: how many company files the one-time rules catch-up reads after
+#: each board that settles (and per step once the boards are done). Small on
+#: purpose: a step sits between two boards on the update's own thread.
+CATCH_UP_COMPANIES_PER_BOARD = 10
 
 
 class SourcesUpdateError(RuntimeError):
@@ -324,12 +342,17 @@ class _PostingStores:
         self._tags: Any = None
         self._text_usable = True
         self._text_rebuild_due = False
+        self._text_deferred = False  # no text index file yet: built once, after the boards
+        self._pending: deque[tuple[str, str]] | None = None  # company files the rules catch-up has not read yet
+        self.catch_up_total = 0
+        self.catch_up_done = 0
         self._reported: set[str] = set()
         self.titles_tagged = 0
         self.titles_backfilled = 0
         self.tag_failures = 0
         self.text_companies = 0
         self.text_removed = 0
+        self.text_rebuilding = False
         self.text_failures = 0
 
     def _failed(self, kind: str, exc: BaseException | None) -> None:
@@ -346,30 +369,78 @@ class _PostingStores:
             self._tags = posting_tags.default_store(self._home)
         return self._tags
 
-    def prepare(self) -> None:
-        """Before the first board: an empty tag store over an index that has companies is filled once.
+    def begin(self) -> None:
+        """Before the first board: decide what this update still owes the two stores. Cheap: no company file is read.
 
-        The hooks below only see titles that are new or changed, so without
-        this a deleted ``tags.sqlite`` (or an index older than the tag
-        store) would stay untagged until every posting changed.
+        0110-028: the hooks below only see titles that are new or changed,
+        so a tag store that never covered the whole index (deleted, or an
+        index older than the tag store) is caught up over every company
+        file, :data:`CATCH_UP_COMPANIES_PER_BOARD` at a time as boards
+        settle (:meth:`catch_up`) and the rest when the boards are done
+        (:meth:`finish`). Never before the first request: on a large index
+        that pass took long enough to look like a stalled update.
+
+        A text index that does not exist yet is not built by the first
+        board that settles (the full build held that board, and every one
+        behind it, uncounted): it is built once, when the boards are done.
         """
 
         try:
+            if not self._tag_store().rules_catch_up_done():
+                self._pending = deque(self._index.keys())
+                self.catch_up_total = len(self._pending)
+                if not self._pending:
+                    self._tag_store().mark_rules_catch_up_done()  # nothing indexed yet: the hooks tag everything
+                    self._pending = None
+        except Exception as exc:  # noqa: BLE001 - the tag store is a cache: counted, never fails the update
+            self._pending = None
+            self.tag_failures += 1
+            self._failed("tag store", exc)
+        try:
+            from . import text_index
+
+            # ``is_built`` (side-effect free) where the text index has it; else "the file is there".
+            is_built = getattr(text_index, "is_built", None)
+            built = bool(is_built(self._home)) if callable(is_built) else text_index.text_index_path(self._home).is_file()
+            if not built and next(iter(self._index.keys()), None) is not None:
+                self._text_rebuild_due = True
+                self._text_deferred = True
+        except Exception as exc:  # noqa: BLE001 - the text index is a cache: counted, never fails the update
+            self.text_failures += 1
+            self._failed("text index", exc)
+
+    @property
+    def catching_up(self) -> bool:
+        return self._pending is not None
+
+    def catch_up(self, companies: int = CATCH_UP_COMPANIES_PER_BOARD) -> bool:
+        """Rules-tag the titles of the next ``companies`` company files; ``True`` once none is left."""
+
+        pending = self._pending
+        if pending is None:
+            return True
+        try:
             from . import posting_tags
 
-            store = self._tag_store()
-            if store.count() > 0:
-                return
             titles: list[str] = []
-            for ats, slug in self._index.keys():
+            for _ in range(max(1, companies)):
+                if not pending:
+                    break
+                ats, slug = pending.popleft()
+                self.catch_up_done += 1
                 entry = self._index.read(ats, slug)
                 if entry is not None:
                     titles.extend(posting.title for posting in entry.live())
             if titles:
-                self.titles_backfilled = posting_tags.tag_new_titles(store, titles).tagged
+                self.titles_backfilled += posting_tags.tag_new_titles(self._tag_store(), titles).tagged
+            if not pending:
+                self._tag_store().mark_rules_catch_up_done()
+                self._pending = None
         except Exception as exc:  # noqa: BLE001 - the tag store is a cache: counted, never fails the update
+            self._pending = None  # not marked done: the next update starts the catch-up again
             self.tag_failures += 1
             self._failed("tag store", exc)
+        return self._pending is None
 
     def company_written(self, change: CompanyChange) -> None:
         """After ``change``'s company file was written (first indexed, or its body re-read)."""
@@ -395,9 +466,10 @@ class _PostingStores:
         try:
             from . import text_index
 
-            if not getattr(text_index, "_SUPPORTS_CONTENTLESS_DELETE", False):
+            if self._text_deferred or not getattr(text_index, "_SUPPORTS_CONTENTLESS_DELETE", False):
                 # Replacing one company would rebuild the whole index each
-                # time on this SQLite: rebuild once, when the update ends.
+                # time on this SQLite, and a missing index would be built
+                # in full by this one board: rebuild once, when the update ends.
                 self._text_rebuild_due = True
                 return
             cached = cached_posting_rows(self._cache, change.ats, change.slug, (posting.posting_id for posting in live), allow_stale=True)
@@ -439,17 +511,38 @@ class _PostingStores:
             self.text_failures += 1
             self._failed("text index", exc)
 
-    def finish(self) -> None:
-        """The end of the update: the deferred rebuild, then this thread's connections."""
+    def finish(self, *, stop: threading.Event | None = None, progress: Callable[[], object] | None = None, work: bool = True) -> None:
+        """The end of the update: the rest of the rules catch-up, the deferred rebuild, then this thread's connections.
 
+        Both are skipped once ``stop`` is set (a shutdown, or a Full refresh
+        taking over, does not wait for them) and when ``work`` is false (the
+        update failed): the catch-up is not marked done and the text index
+        stays unbuilt, so the next update (or the first keyword search) does
+        the work. ``progress`` is called after every catch-up step and before
+        the rebuild, so the snapshot shows the count moving.
+        """
+
+        def skipped() -> bool:
+            return not work or (stop is not None and stop.is_set())
+
+        while self._pending is not None and not skipped():
+            self.catch_up()
+            if progress is not None:
+                progress()
         try:
             from . import text_index
 
-            if self._text_rebuild_due and self._text_usable:
+            if self._text_rebuild_due and self._text_usable and not skipped():
                 self._text_rebuild_due = False
-                if not text_index.rebuild_from_cache(self._home).available:
-                    self.text_failures += 1
-                    self._failed("text index", None)
+                self.text_rebuilding = True
+                if progress is not None:
+                    progress()
+                try:
+                    if not text_index.rebuild_from_cache(self._home).available:
+                        self.text_failures += 1
+                        self._failed("text index", None)
+                finally:
+                    self.text_rebuilding = False
             text_index.close(self._home)
         except Exception as exc:  # noqa: BLE001 - the text index is a cache: counted, never fails the update
             self.text_failures += 1
@@ -464,6 +557,23 @@ class _PostingStores:
         return {
             "tags": {"titles_tagged": self.titles_tagged, "titles_backfilled": self.titles_backfilled, "failures": self.tag_failures},
             "text": {"companies_written": self.text_companies, "companies_removed": self.text_removed, "failures": self.text_failures},
+        }
+
+    def catch_up_json(self) -> dict[str, object] | None:
+        """The one-time work this update does besides asking boards; ``None`` when it has none.
+
+        ``tags``: the rules catch-up over the company files (``companies_done``
+        of ``companies_total``; ``pending`` until the last one is read).
+        ``text_index``: ``deferred`` while a missing text index waits for
+        the boards to be done, ``building`` while it is built, else ``None``.
+        """
+
+        text = "building" if self.text_rebuilding else "deferred" if self._text_rebuild_due and self._text_deferred else None
+        if self.catch_up_total == 0 and not self._text_deferred:
+            return None
+        return {
+            "tags": {"companies_done": self.catch_up_done, "companies_total": self.catch_up_total, "pending": self._pending is not None},
+            "text_index": text,
         }
 
 
@@ -506,6 +616,7 @@ class _Listener:
         self.full_refresh = False
         self.trigger = TRIGGER_MANUAL
         self.tick: dict[str, object] | None = None
+        self.backoff: _BackoffClients | None = None
         self.cancelled = False
         self.failure_codes: dict[str, int] = {}
         self.failed_boards: list[dict[str, str]] = []
@@ -568,6 +679,9 @@ class _Listener:
             if change is not None:
                 self.totals.add(change)
         self.publish(force=first)
+        if self._stores is not None and status != "skipped":
+            # After this board was counted and published: one bounded step of the one-time rules catch-up.
+            self._stores.catch_up()
 
     def boards_finished(self, summary: Mapping[str, object]) -> None:
         rotation = summary.get("rotation")
@@ -610,6 +724,9 @@ class _Listener:
             "trigger": self.trigger,
             "tick": self.tick,
             "cancelled": self.cancelled,
+            # 0110-029: the providers a background check left alone after a
+            # ``429`` (``None``: none pushed back, or a manual update).
+            "backoff": self.backoff.to_json() if self.backoff is not None else None,
             # Why boards did not answer, by code (`http_429` is a provider
             # pushing back, `http_404` a board that is gone); `boards` names
             # the first few.
@@ -643,6 +760,9 @@ class _Listener:
             # The tag store and the text index this update kept in step
             # (``None``: not asked to); a failure there is counted here.
             "stores": self._stores.to_json() if self._stores is not None else None,
+            # 0110-028: the one-time catch-up of the tag store and the text
+            # index, done after boards settle (never before the first request).
+            "catch_up": self._stores.catch_up_json() if self._stores is not None else None,
             "summary": totals.summary_line(),
         }
 
@@ -755,6 +875,87 @@ def _with_fill(ats: Any) -> Any:
     return _FillingClients(ats) if isinstance(ats, ATSBoardClients) else ats
 
 
+class _BackoffClients:
+    """A background check's view of the board clients: a provider that answers ``429`` is left alone for a while (0110-029).
+
+    The pause is per provider and is taken inside that provider's workers,
+    before the next board is asked: :data:`CHECK_BACKOFF_SECONDS`, doubling
+    with each refusal that follows a pause, up to
+    :data:`CHECK_BACKOFF_MAX_SECONDS`; an answered request ends the streak.
+    A stop set during a pause leaves the board unasked (``cancelled``, so it
+    leads the next check). ``clock`` and ``wait`` are seams for tests.
+    """
+
+    def __init__(
+        self,
+        inner: Any,
+        stop: threading.Event | None,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        wait: Callable[[float], object] | None = None,
+    ) -> None:
+        self._inner = inner
+        self._stop = stop if stop is not None else threading.Event()
+        self._clock = clock
+        self._wait = wait if wait is not None else self._stop.wait
+        self._lock = threading.Lock()
+        self._until: dict[str, float] = {}
+        self._streak: dict[str, int] = {}
+        self.pauses: dict[str, int] = {}
+        self.paused_seconds: dict[str, float] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def _hold(self, provider: str) -> None:
+        while True:
+            if self._stop.is_set():
+                raise _PassCancelled()
+            with self._lock:
+                left = self._until.get(provider, 0.0) - self._clock()
+            if left <= 0:
+                return
+            self._wait(left)
+
+    def _note(self, provider: str, failure: str | None) -> None:
+        with self._lock:
+            if failure != "http_429":
+                if failure is None:
+                    self._streak[provider] = 0
+                return
+            now = self._clock()
+            if now < self._until.get(provider, 0.0):
+                return  # a request already on the wire when the pause began: one refusal, one pause
+            streak = self._streak.get(provider, 0) + 1
+            self._streak[provider] = streak
+            pause = min(CHECK_BACKOFF_MAX_SECONDS, CHECK_BACKOFF_SECONDS * 2 ** (streak - 1))
+            self._until[provider] = now + pause
+            self.pauses[provider] = self.pauses.get(provider, 0) + 1
+            self.paused_seconds[provider] = self.paused_seconds.get(provider, 0.0) + pause
+
+    def fetch_board(self, client: Any, provider: str, board_token: str, config: FindJobsConfig, **kwargs: Any) -> Any:
+        self._hold(provider)
+        failure: str | None = "error"
+        try:
+            result = self._inner.fetch_board(client, provider, board_token, config, **kwargs)
+            failure = None
+            return result
+        except Exception:  # noqa: BLE001 - nothing is swallowed: the failure code is noted for the back-off, then re-raised
+            seen = getattr(client, "last_failure", None)
+            failure = seen() if callable(seen) else "error"
+            raise
+        finally:
+            self._note(provider, failure)
+
+    def to_json(self) -> dict[str, object] | None:
+        """``{provider: {"pauses", "paused_seconds"}}`` for the providers that pushed back; ``None`` when none did."""
+
+        with self._lock:
+            if not self.pauses:
+                return None
+            return {provider: {"pauses": count, "paused_seconds": round(self.paused_seconds.get(provider, 0.0), 1)} for provider, count in sorted(self.pauses.items())}
+
+
 def _run_update(
     boards: Sequence[WatchlistEntry],
     *,
@@ -808,14 +1009,17 @@ def _run_update(
     beater = threading.Thread(target=heartbeat, name="scout-sources-heartbeat", daemon=True)
     beater.start()
     try:
-        if stores is not None and not (stop is not None and stop.is_set()):
-            stores.prepare()
+        if stores is not None:
+            stores.begin()
         if full_refresh:
             for board in boards:  # a Full refresh redoes the one-time Greenhouse description fill
                 cache.clear_content_filled(board.provider.value, board.board_token)
+        clients = _with_fill(ats if ats is not None else ATSBoardClients())
+        if trigger == TRIGGER_AUTO and callable(getattr(clients, "fetch_board", None)):
+            clients = listener.backoff = _BackoffClients(clients, stop)
         _rows, _failures, summary = _fetch_boards(
             boards,
-            ats=_with_fill(ats if ats is not None else ATSBoardClients()),
+            ats=clients,
             client=client,
             config=config,
             limits=limits,
@@ -830,6 +1034,9 @@ def _run_update(
         if stores is not None and trigger == TRIGGER_MANUAL:
             watched = {(board.provider.value, board.board_token) for board in all_boards}
             stores.boards_dropped([company_key(ats, slug) for ats, slug in index.keys() if (ats, slug) not in watched])
+        if stores is not None:
+            # Still ``running`` and the heartbeat still beating: the rest of the catch-up, the deferred text build.
+            stores.finish(stop=stop, progress=listener.publish)
         attempted = listener.checked
         if boards and attempted > 0 and up_to_date == 0 and listener.counts.get("failed", 0) == attempted:
             listener.state["status"] = STATUS_FAILED
@@ -844,13 +1051,11 @@ def _run_update(
         listener.state["finished_at"] = index_stamp()
         beating.set()
         if stores is not None:
-            stores.finish()
+            stores.finish(work=False)  # only closes this thread's connections (a second call is harmless)
         listener.publish(force=True)
         raise
     finally:
         beating.set()
-    if stores is not None:
-        stores.finish()
     listener.state["finished_at"] = index_stamp()
     final = listener.publish(force=True) or listener.snapshot()
     return SourcesUpdateResult(final)
@@ -994,30 +1199,38 @@ def plan_refresh_tick(
         facts=read_board_facts(index, boards),
         stamps=cache.load_fetch_index().boards,
         now=moment,
+        # 0110-029: a quiet board about twice a day, a quarter of them per check.
+        slices=CHECK_QUIET_SLICES,
+        tick_interval_seconds=CHECK_QUIET_PERIOD_SECONDS / CHECK_QUIET_SLICES,
     )
     return plan, [by_key[key] for key in plan.keys]
 
 
 def tick_limits(environ: Mapping[str, str] | None = None) -> AcquireLimits:
-    """The limits of a background tick: the environment's, spread over the tick.
+    """The limits of a background check: a moderate fixed rate and its own budget (0110-029).
 
-    Concurrency and the polite minimum interval are a manual update's
-    (:meth:`AcquireLimits.from_environment`); the spread
-    (:data:`TICK_SPREAD_SECONDS`, or :data:`TICK_SPREAD_ENV`) slows each
-    provider down to one request every ``spread / boards`` seconds.
+    Concurrency is a manual update's (:meth:`AcquireLimits.from_environment`).
+    The pace is one request every :data:`CHECK_MIN_INTERVAL_SECONDS` to each
+    provider, unless the environment names the polite interval itself
+    (``GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS``: that value is used) or a
+    spread (:data:`TICK_SPREAD_ENV`: the requests are spread over that long,
+    ``0`` for the polite maximum).
     """
 
     env = os.environ if environ is None else environ
-    spread: float | None = TICK_SPREAD_SECONDS
+    base = AcquireLimits.from_environment(env)
     raw = env.get(TICK_SPREAD_ENV)
     if raw is not None and raw.strip():
         try:
-            spread = float(raw)
+            spread: float | None = float(raw)
         except ValueError:
-            spread = TICK_SPREAD_SECONDS
-    if spread is not None and spread <= 0:
-        spread = None
-    return replace(AcquireLimits.from_environment(env), spread_seconds=spread, time_budget_seconds=TICK_BUDGET_SECONDS)
+            spread = None
+        else:
+            if spread <= 0:
+                return replace(base, spread_seconds=None, time_budget_seconds=TICK_BUDGET_SECONDS)
+            return replace(base, spread_seconds=spread, time_budget_seconds=TICK_BUDGET_SECONDS)
+    interval = base.min_request_interval_seconds if (env.get(ATS_MIN_INTERVAL_ENV) or "").strip() else CHECK_MIN_INTERVAL_SECONDS
+    return replace(base, min_request_interval_seconds=interval, spread_seconds=None, time_budget_seconds=CHECK_BUDGET_SECONDS)
 
 
 def run_refresh_tick(
@@ -1168,6 +1381,7 @@ def _blank_snapshot(update_id: str, status: str, *, error: Mapping[str, object] 
         "trigger": TRIGGER_MANUAL,
         "tick": None,
         "cancelled": False,
+        "backoff": None,
         "failures": {"total": 0, "codes": {}, "boards": []},
         "companies": {"checked": 0, "indexed": 0, "updated": 0, "untouched": 0, "unreadable": 0, "with_new": 0, "with_changes": 0},
         "postings": {"new": 0, "changed": 0, "removed": 0, "live": 0},
@@ -1176,6 +1390,7 @@ def _blank_snapshot(update_id: str, status: str, *, error: Mapping[str, object] 
         "rotation": None,
         "watchlist_seed": None,
         "stores": None,
+        "catch_up": None,
         "summary": UpdateTotals().summary_line(),
     }
 
@@ -1296,6 +1511,11 @@ def read_status(home_root: Path, *, now: datetime | None = None) -> dict[str, ob
 
 
 __all__ = [
+    "CATCH_UP_COMPANIES_PER_BOARD",
+    "CHECK_BACKOFF_MAX_SECONDS",
+    "CHECK_BACKOFF_SECONDS",
+    "CHECK_BUDGET_SECONDS",
+    "CHECK_MIN_INTERVAL_SECONDS",
     "HEARTBEAT_INTERVAL_SECONDS",
     "HEARTBEAT_TIMEOUT_SECONDS",
     "SNAPSHOT_INTERVAL_SECONDS",

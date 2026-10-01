@@ -1,54 +1,61 @@
-"""0110-025 (R3): the background thread that keeps the sources fresh while the Scout server runs.
+"""0110-025 (R3), 0110-029: the background threads that keep the sources fresh while the Scout server runs.
 
-One daemon thread per server (:class:`RefreshTicker`). Every
-:data:`POLL_SECONDS` it reads the last update's snapshot and decides
-(:func:`decide`, pure):
+One :class:`RefreshTicker` per server. Its check thread reads the last
+update's snapshot every :data:`POLL_SECONDS` and decides (:func:`decide`, pure):
 
 * ``disabled``: the setting ``sources.auto_refresh`` is off. Nothing else is
   read and no request is made.
 * ``needs_first_update``: the company index is empty or no update has ever
-  left a stamp. A tick never fills an index (it takes a sixth of the
-  unindexed boards an hour): the first fill is the operator's Update sources.
-* ``running``: an update is live, a manual one or a tick. The thread waits:
+  left a stamp. A check never fills an index: the first fill is the
+  operator's Update sources.
+* ``running``: an update is live, a manual one or a check. The thread waits:
   one update at a time.
-* ``waiting``: the last update started less than an hour ago.
-* ``due``: it started an hour ago or more, so a tick runs now
-  (``sources_update.run_refresh_tick``). A server started after a night off
-  finds the last update stale and ticks at once.
+* ``waiting``: no scheduled time has passed since the last update started.
+* ``due``: one has, so a check runs now (``sources_update.run_refresh_tick``).
 
-A tick claims the same live-update snapshot a manual update does, so a
-manual start and a tick can never both run; a manual Full refresh stops the
-tick and takes over (``sources_update.start_background_update``). Stopping
-the server sets the stop event: the tick ends between boards with a clean
+**When** (0110-029): at times of day in the machine's local time
+(``refresh_plan.CheckSchedule``): eight on a weekday (one overnight, seven
+through the work day), two on a weekend day; ``sources.check_times`` in the
+settings file replaces either list (:func:`check_schedule_setting`). A check
+asks every busy board and a quarter of the quiet ones at a moderate fixed
+rate, so it is done in minutes and Scout is idle until the next time. A
+server that was closed over several times runs ONE check when it starts.
+
+A check claims the same live-update snapshot a manual update does, so a
+manual start and a check can never both run; a manual Full refresh stops the
+check and takes over (``sources_update.start_background_update``). Stopping
+the server sets the stop event: the check ends between boards with a clean
 ``partial`` snapshot and the thread exits.
 
-The setting lives in ``<home>/scout/<project_id>/settings.json`` (beside
+The settings live in ``<home>/scout/<project_id>/settings.json`` (beside
 ``discovery/prefs.json``; ``{"schema_version": "scout-settings:1",
 "sources": {"auto_refresh": false}}``). A missing file or key is ON; a file
 that cannot be read is OFF (a background job that makes requests does not
 guess). :data:`AUTO_REFRESH_ENV` overrides the file either way.
 
-The model tag queue (0110-024 P3, ``model_tag.TagQueue``) rides the same
-thread: after every look, :meth:`RefreshTicker.step` lets the queue drain a
-bounded number of batches, unless an update is live (the queue yields to it)
-or the thread is stopping. The queue has its own setting
-(``tagging.model_enabled`` in the same settings file), so it also drains
-with the refresh off. :meth:`RefreshTicker.kick_tags` wakes the thread for a
-drain now (a profile changed, an update finished) instead of at the next
-poll. A drain never changes what :meth:`RefreshTicker.step` returns.
+The model tag queue (0110-024 P3, ``model_tag.TagQueue``) has its own thread
+(0110-028): every :data:`POLL_SECONDS` it drains a bounded number of
+batches, also while a background check runs (a model call asks no job
+board; the queue itself yields to a manual update), unless the server is
+stopping or ``sources.auto_refresh`` is off. Riding the check thread, as it
+did, the queue never ran while a check did. The queue has its own setting
+(``tagging.model_enabled`` in the same settings file).
+:meth:`RefreshTicker.kick_tags` wakes both threads now (a profile changed,
+an update finished) instead of at the next poll. Every drain that calls a
+model is logged, and so is every change of why a drain did nothing.
 
 :func:`background_status` is the one status block the refresh and the tag
-queue share (``GET /api/sources/update`` -> ``background``). The queue's own
-counters (calls, failures, the last error, the backoff) are
-:meth:`RefreshTicker.tag_queue_status`; adding them to the block is the
-status packet's (P4).
+queue share (``GET /api/sources/update`` -> ``background``);
+:func:`schedule_status` is the schedule for its ``refresh`` block. The
+queue's own counters (calls, failures, the last error, the backoff) are
+:meth:`RefreshTicker.tag_queue_status`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 import json
 import logging
 import os
@@ -59,7 +66,7 @@ from typing import Any
 
 from .company_index import CompanyIndex, index_stamp
 from .model_tag import TagQueue
-from .refresh_plan import TICK_INTERVAL_SECONDS
+from .refresh_plan import TICK_INTERVAL_SECONDS, CheckSchedule, parse_check_times
 from .sources_update import (
     TRIGGER_MANUAL,
     SourcesUpdateRunningError,
@@ -161,6 +168,52 @@ def auto_refresh_setting(
     return AutoRefresh(value, SOURCE_SETTING)
 
 
+@dataclass(frozen=True)
+class ScheduleSetting:
+    """When the background checks run for this project, and what said so."""
+
+    schedule: CheckSchedule
+    source: str
+
+
+def check_schedule_setting(home_root: Path, target: Path | None) -> ScheduleSetting:
+    """``sources.check_times`` of the project's settings file, else the defaults (0110-029).
+
+    ``{"sources": {"check_times": {"weekdays": ["07:00", ...], "weekends":
+    ["09:00", "18:00"]}}}``: 24-hour local times; either list may be left
+    out (its default) or be empty (no check on those days). A value that is
+    not such a list is not guessed at: the defaults run and ``source`` says
+    ``settings_unreadable``. Whether checks run at all is
+    :func:`auto_refresh_setting`.
+    """
+
+    default = ScheduleSetting(CheckSchedule(), SOURCE_DEFAULT)
+    if target is None:
+        return default
+    try:
+        payload = json.loads(settings_path(home_root, target).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return default
+    except Exception:  # noqa: BLE001 - no bound project, or a file auto_refresh_setting already reports as unreadable
+        return ScheduleSetting(CheckSchedule(), SOURCE_UNREADABLE)
+    sources = payload.get("sources", {}) if isinstance(payload, dict) and payload.get("schema_version") == SETTINGS_SCHEMA else None
+    if not isinstance(sources, dict):
+        return ScheduleSetting(CheckSchedule(), SOURCE_UNREADABLE)
+    if "check_times" not in sources:
+        return default
+    times = sources["check_times"]
+    if not isinstance(times, dict) or set(times) - {"weekdays", "weekends"}:
+        return ScheduleSetting(CheckSchedule(), SOURCE_UNREADABLE)
+    try:
+        schedule = CheckSchedule(
+            weekdays=parse_check_times(times["weekdays"]) if "weekdays" in times else CheckSchedule().weekdays,
+            weekends=parse_check_times(times["weekends"]) if "weekends" in times else CheckSchedule().weekends,
+        )
+    except ValueError:
+        return ScheduleSetting(CheckSchedule(), SOURCE_UNREADABLE)
+    return ScheduleSetting(schedule, SOURCE_SETTING)
+
+
 # ---------------------------------------------------------------------------
 # The decision (pure)
 # ---------------------------------------------------------------------------
@@ -190,12 +243,17 @@ def decide(
     enabled: bool,
     now: datetime,
     interval_seconds: float = TICK_INTERVAL_SECONDS,
+    schedule: CheckSchedule | None = None,
+    tz: tzinfo | None = None,
 ) -> TickDecision:
     """What the tick thread does at ``now``, from the last update's snapshot alone.
 
-    ``indexed``: the company index holds at least one company. The next
-    tick is one interval after the last update *started* (manual or tick),
-    so ticks stay an hour apart however long each one takes.
+    ``indexed``: the company index holds at least one company. ``schedule``
+    (0110-029) says when checks run: at its times of day, in local time
+    (``tz`` for tests), a check being due when the last update (manual or a
+    check) started before the most recent of them; several missed times are
+    ONE check. Without a schedule the next check is ``interval_seconds``
+    after the last update *started*.
     """
 
     if not enabled:
@@ -207,10 +265,10 @@ def decide(
         last = _parse(snapshot.get("started_at")) or _parse(snapshot.get("finished_at")) or _parse(snapshot.get("updated_at"))
     if not indexed or last is None:
         return TickDecision(STATE_NEEDS_FIRST_UPDATE, message=MESSAGE_NEEDS_FIRST_UPDATE)
-    due = last + timedelta(seconds=interval_seconds)
-    if now >= due:
+    plan = schedule if schedule is not None else CheckSchedule(interval_seconds=interval_seconds)
+    if plan.due(last, now, tz=tz):
         return TickDecision(STATE_DUE, next_tick_at=now)
-    return TickDecision(STATE_WAITING, next_tick_at=due)
+    return TickDecision(STATE_WAITING, next_tick_at=plan.next_after(last, now, tz=tz))
 
 
 def _has_companies(index: CompanyIndex) -> bool:
@@ -223,14 +281,21 @@ def _has_companies(index: CompanyIndex) -> bool:
 
 
 class RefreshTicker:
-    """The hourly refresh thread of one Scout server.
+    """The background refresh of one Scout server: the scheduled checks, and the model tag queue.
 
-    ``clock``, ``wait``, ``run_tick``, ``client_factory`` and ``tag_queue``
-    are seams for tests (a fake clock, a fake fetcher, a queue over a fake
-    model); production passes none of them. :meth:`step` is one look at the
-    snapshot and, when a tick is due, the tick itself, then one bounded drain
-    of the model tag queue, on the calling thread. ``model_tags=False`` runs
-    the refresh with no tag queue at all.
+    ``clock``, ``wait``, ``run_tick``, ``client_factory``, ``tag_queue``,
+    ``interval_seconds``, ``schedule`` and ``tz`` are seams for tests (a
+    fake clock, a fake fetcher, a queue over a fake model, a fixed interval
+    in place of the times of day); production passes none of them and reads
+    the schedule from the settings file at every look
+    (:func:`check_schedule_setting`). :meth:`step` is one look at the
+    snapshot and, when a check is due, the check itself, then one bounded
+    drain of the model tag queue, on the calling thread.
+    ``model_tags=False`` runs the refresh with no tag queue at all.
+
+    Two threads (0110-028): the checks run on one, the tag queue drains on
+    the other, so a check that takes a quarter of an hour never holds the
+    model tags back (a model call does not touch a job board).
     """
 
     def __init__(
@@ -243,16 +308,23 @@ class RefreshTicker:
         wait: Callable[[float], object] | None = None,
         run_tick: Callable[..., Any] = run_refresh_tick,
         config_loader: Callable[[Path, Path], Any] = load_effective_config,
-        interval_seconds: float = TICK_INTERVAL_SECONDS,
+        interval_seconds: float | None = None,
         poll_seconds: float = POLL_SECONDS,
         environ: Mapping[str, str] | None = None,
         logger: logging.Logger | None = None,
         tag_queue: TagQueue | None = None,
         model_tags: bool = True,
+        schedule: CheckSchedule | None = None,
+        tz: tzinfo | None = None,
     ) -> None:
         self.home_root = Path(home_root)
         self.target = Path(target)
-        self.interval_seconds = float(interval_seconds)
+        if schedule is None and interval_seconds is not None:
+            schedule = CheckSchedule(interval_seconds=float(interval_seconds))
+        self._schedule = schedule
+        self._tz = tz
+        #: How long a check that could not run waits before the next try.
+        self.interval_seconds = float(interval_seconds) if interval_seconds is not None else TICK_INTERVAL_SECONDS
         self._client_factory = client_factory
         self._clock = clock if clock is not None else (lambda: datetime.now(timezone.utc))
         self._stop = threading.Event()
@@ -264,6 +336,9 @@ class RefreshTicker:
         self._environ = environ
         self._logger = logger if logger is not None else _logger
         self._thread: threading.Thread | None = None
+        self._tags_thread: threading.Thread | None = None
+        self._tags_wake = threading.Event()  # set by a kick and by stop: ends the tag thread's wait
+        self._last_drain_state: str | None = None
         self._tick_stop: threading.Event | None = None
         self._retry_after: datetime | None = None
         self._last_state: str | None = None
@@ -278,20 +353,26 @@ class RefreshTicker:
             return
         self._thread = threading.Thread(target=self._loop, name="scout-sources-refresh", daemon=True)
         self._thread.start()
+        if self._tag_queue is not None:
+            self._tags_thread = threading.Thread(target=self._tags_loop, name="scout-model-tags", daemon=True)
+            self._tags_thread.start()
 
     def stop(self, timeout: float | None = 10.0) -> bool:
         """End the thread; a running tick stops between boards. ``True`` once the thread is gone."""
 
         self._stop.set()
         self._wake.set()
+        self._tags_wake.set()
         tick = self._tick_stop
         if tick is not None:
             tick.set()
-        thread = self._thread
-        if thread is None or thread is threading.current_thread():
-            return True
-        thread.join(timeout)
-        return not thread.is_alive()
+        gone = True
+        for thread in (self._thread, self._tags_thread):
+            if thread is None or thread is threading.current_thread():
+                continue
+            thread.join(timeout)
+            gone = gone and not thread.is_alive()
+        return gone
 
     @property
     def alive(self) -> bool:
@@ -310,17 +391,38 @@ class RefreshTicker:
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
-                self.step()
+                self._refresh_step()
             except Exception as exc:  # noqa: BLE001 - nothing else observes this thread: log it and keep the loop
                 self._logger.warning("sources refresh: the tick loop hit %s; it goes on", type(exc).__name__)
             if self._stop.is_set():
                 break
             self._wait(self._poll_seconds)
 
+    def _tags_loop(self) -> None:
+        """The tag queue's own thread: a bounded drain at every look, whatever the check thread is doing."""
+
+        while not self._stop.is_set():
+            self._drain_tags()
+            if self._stop.is_set():
+                break
+            if self._tags_wake.wait(self._poll_seconds):
+                self._tags_wake.clear()
+
     # -- one look ----------------------------------------------------------
 
     def setting(self) -> AutoRefresh:
         return auto_refresh_setting(self.home_root, self.target, environ=self._environ)
+
+    def schedule_setting(self) -> ScheduleSetting:
+        """When the checks run: the constructor's schedule (tests), else the settings file's, else the defaults."""
+
+        if self._schedule is not None:
+            return ScheduleSetting(self._schedule, SOURCE_DEFAULT)
+        return check_schedule_setting(self.home_root, self.target)
+
+    @property
+    def tz(self) -> tzinfo | None:
+        return self._tz
 
     def step(self) -> str:
         """Decide, and run a tick when one is due. Returns what happened (a ``STATE_*``, ``ticked``, ``yielded`` or ``failed``).
@@ -330,7 +432,7 @@ class RefreshTicker:
         """
 
         outcome = self._refresh_step()
-        self._drain_tags(outcome)
+        self._drain_tags()
         return outcome
 
     # -- the model tag queue -----------------------------------------------
@@ -345,23 +447,50 @@ class RefreshTicker:
         if self._tag_queue is not None:
             self._tag_queue.kick(reset_backoff=reset_backoff)
         self._wake.set()
+        self._tags_wake.set()
 
     def tag_queue_status(self) -> dict[str, object] | None:
         """The queue's counters, last error and backoff; ``None`` when this thread has no queue."""
 
         return None if self._tag_queue is None else self._tag_queue.status()
 
-    def _drain_tags(self, outcome: str) -> None:
+    def _drain_tags(self) -> None:
+        """One bounded drain of the tag queue, logged (0110-028: a drain that says nothing cannot be told from none).
+
+        Not while stopping, and not with ``sources.auto_refresh`` off (one
+        switch for all background work). A live manual update is the queue's
+        own business: it yields to it (``model_tag.TagQueue``), and no longer
+        to a background check.
+        """
+
         queue = self._tag_queue
-        if queue is None or self._stop.is_set() or outcome in (STATE_RUNNING, "yielded") or not self.setting().enabled:
-            return  # stopping, an update is live (one thing at a time), or sources.auto_refresh is off (one switch for all background work)
+        if queue is None or self._stop.is_set():
+            return
+        if not self.setting().enabled:
+            self._note_drain("paused", "sources.auto_refresh is off")
+            return
         try:
             result = queue.drain(stop=self._stop)
         except Exception as exc:  # noqa: BLE001 - the tag queue never takes the refresh thread down
             self._logger.warning("model tags: the drain hit %s; it goes on", type(exc).__name__)
             return
-        if result.batches:
-            self._logger.info("model tags: %s batches=%s tagged=%s rejected=%s calls=%s", result.state, result.batches, result.tagged, result.rejected, result.calls)
+        if result.batches or result.calls:
+            status = queue.status()
+            models = {lane: status[lane]["model"] for lane in ("demand", "backfill") if isinstance(status.get(lane), dict) and status[lane].get("calls")}  # type: ignore[index]
+            self._logger.info(
+                "model tags: %s batches=%s tagged=%s rejected=%s calls=%s models=%s",
+                result.state, result.batches, result.tagged, result.rejected, result.calls, models,
+            )
+            self._last_drain_state = result.state
+        else:
+            self._note_drain(result.state, None)
+
+    def _note_drain(self, state: str, why: str | None) -> None:
+        """One line when a drain that did nothing changes its reason (idle, disabled, yielded, backoff ...)."""
+
+        if state != self._last_drain_state:
+            self._logger.info("model tags: %s%s", state, f" ({why})" if why else "")
+        self._last_drain_state = state
 
     def _refresh_step(self) -> str:
         if not self.setting().enabled:
@@ -373,7 +502,8 @@ class RefreshTicker:
             indexed=_has_companies(index),
             enabled=True,
             now=now,
-            interval_seconds=self.interval_seconds,
+            schedule=self.schedule_setting().schedule,
+            tz=self._tz,
         )
         if decision.state != STATE_DUE:
             return self._note(decision.state)
@@ -546,8 +676,8 @@ def background_status(
     running = snapshot_is_live(raw, now=moment)
     snapshot = settled_snapshot(raw, now=moment)
     active = ticker is not None and ticker.alive and not ticker.stopping
-    interval = ticker.interval_seconds if ticker is not None else TICK_INTERVAL_SECONDS
-    decision = decide(raw, indexed=_has_companies(index), enabled=setting.enabled, now=moment, interval_seconds=interval)
+    schedule = (ticker.schedule_setting() if ticker is not None else check_schedule_setting(home, target)).schedule
+    decision = decide(raw, indexed=_has_companies(index), enabled=setting.enabled, now=moment, schedule=schedule, tz=ticker.tz if ticker is not None else None)
     state, message, next_tick = decision.state, decision.message, decision.next_tick_at
     if setting.enabled and not active and state != STATE_RUNNING:
         state, next_tick = STATE_INACTIVE, None
@@ -568,9 +698,36 @@ def background_status(
         "trigger": (snapshot.get("trigger") or TRIGGER_MANUAL) if snapshot is not None else None,
         "last_update": last,
         "next_tick_at": index_stamp(next_tick) if next_tick is not None else None,
-        "interval_seconds": interval,
+        # ``None`` since 0110-029 unless the checks run at a fixed interval: `refresh.schedule` has the times.
+        "interval_seconds": schedule.interval_seconds,
         "tags": _tag_counts(home),
         "text": _text_counts(home),
+    }
+
+
+def schedule_status(
+    home_root: Path,
+    target: Path | None,
+    *,
+    ticker: RefreshTicker | None = None,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    """The schedule the background checks follow, for the ``refresh`` block (0110-029).
+
+    ``kind`` ``times`` with the ``weekdays`` and ``weekends`` lists (local
+    time), or ``interval`` with ``interval_seconds``; ``source`` (default,
+    setting, settings_unreadable: the stored times could not be used, so the
+    defaults run); ``checks_today`` is how many times today's list holds.
+    """
+
+    moment = datetime.now(timezone.utc) if now is None else now
+    setting = ticker.schedule_setting() if ticker is not None else check_schedule_setting(Path(home_root), target)
+    tz = ticker.tz if ticker is not None else None
+    today = (moment.astimezone(tz) if tz is not None else moment.astimezone()).date()
+    return {
+        **setting.schedule.to_json(),
+        "source": setting.source,
+        "checks_today": None if setting.schedule.interval_seconds is not None else setting.schedule.checks_on(today),
     }
 
 
@@ -589,9 +746,12 @@ __all__ = [
     "STATE_WAITING",
     "AutoRefresh",
     "RefreshTicker",
+    "ScheduleSetting",
     "TickDecision",
     "auto_refresh_setting",
     "background_status",
+    "check_schedule_setting",
     "decide",
+    "schedule_status",
     "settings_path",
 ]

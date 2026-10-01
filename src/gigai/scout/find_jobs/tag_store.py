@@ -34,6 +34,8 @@ SOURCE_RULES = "rules"
 SOURCE_MODEL = "model"
 
 _BUSY_TIMEOUT_MS = 5000
+#: ``meta`` key: the tagger version at which the one-time rules catch-up over the company index finished.
+_RULES_CATCH_UP_KEY = "rules_catch_up"
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -248,7 +250,24 @@ class TagStore:
             (self.tagger_version, *values),
         ).fetchone()[0]
 
+    def rules_catch_up_done(self) -> bool:
+        """Whether every title the company index held was rules-tagged at this tagger version (0110-028).
+
+        The marker lives in the file, so a deleted store reads as not done
+        and the next update fills it again; a tagger-version bump does too.
+        """
+
+        row = self._conn().execute("SELECT value FROM meta WHERE key = ?", (_RULES_CATCH_UP_KEY,)).fetchone()
+        return row is not None and row[0] == str(self.tagger_version)
+
     # -- writes ----------------------------------------------------------
+
+    def mark_rules_catch_up_done(self) -> None:
+        with self._write_lock:
+            self._conn().execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (_RULES_CATCH_UP_KEY, str(self.tagger_version)),
+            )
 
     def write_rules(self, tags: Iterable[TitleTag]) -> int:
         """Insert rules tags; returns rows written.

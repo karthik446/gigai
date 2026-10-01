@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.scout_servers import orphaned_test_servers, scout_test_servers, stop_test_servers
 from tests.support.sharding import ShardUsageError, requested_shard, split_items
 
 _INTEGRATION_TOKENS = frozenset(
@@ -180,13 +181,60 @@ def pytest_configure(config) -> None:
     _requested_shard(None)
 
 
-def pytest_report_header(config) -> str | None:
+def pytest_report_header(config) -> list[str] | None:
     del config
+    lines: list[str] = []
     requested = _requested_shard(None)
-    if requested is None:
-        return None
-    shard, shards = requested
-    return f"gigai shard: {shard}/{shards} (test files by sha1 of repo-relative path)"
+    if requested is not None:
+        shard, shards = requested
+        lines.append(f"gigai shard: {shard}/{shards} (test files by sha1 of repo-relative path)")
+    # 0110-028: a pytest process that was killed cannot stop the Scout servers
+    # its tests started. Say so at the next start; nothing is signalled here
+    # (they belong to another session, which may be a concurrent one's parent).
+    orphans = orphaned_test_servers()
+    if orphans:
+        lines.append(f"gigai: {len(orphans)} Scout test server(s) left running by an earlier pytest session: pids {[server.pid for server in orphans]}")
+    return lines or None
+
+
+def _session_basetemp(config) -> Path | None:
+    """This session's base temp directory, when a test asked for one (never created here)."""
+
+    factory = getattr(config, "_tmp_path_factory", None)
+    base = getattr(factory, "_basetemp", None)
+    return Path(base) if base is not None else None
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    """0110-028: no test leaves a Scout server running. A leftover fails the session, and is stopped.
+
+    A leftover is a live process whose command line names the server module
+    (``present_api``) and a path under THIS session's pytest temp directory;
+    nothing else is looked at. The controller checks for its workers (their
+    temp directories are inside its own).
+    """
+
+    del exitstatus
+    if hasattr(session.config, "workerinput"):
+        return
+    base = _session_basetemp(session.config)
+    if base is None:
+        return
+    left = scout_test_servers(under=base)
+    if not left:
+        return
+    stop_test_servers(left)
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    message = [f"LEAKED SCOUT SERVER: {len(left)} server(s) started by this test session were still running at its end (stopped now):"]
+    message.extend(f"  {server.line()}" for server in left)
+    message.append("  The directory after pytest-N/ names the test. Stop the server in a finally or a fixture finalizer.")
+    if reporter is not None:
+        reporter.write_sep("=", "leaked Scout servers", red=True, bold=True)
+        for line in message:
+            reporter.write_line(line, red=True)
+    else:
+        print("\n".join(message))
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 def pytest_collection_modifyitems(config, items) -> None:
@@ -202,6 +250,7 @@ __all__ = [
     "pytest_collection_modifyitems",
     "pytest_configure",
     "pytest_report_header",
+    "pytest_sessionfinish",
 ]
 
 

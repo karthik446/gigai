@@ -164,7 +164,7 @@ class SourcesRoutesMixin:
             return
         from datetime import datetime, timezone
 
-        from ..refresh_tick import background_status
+        from ..refresh_tick import background_status, schedule_status
         from ..snapshot import snapshot_status
         from ..sources_status import refresh_block, tags_block, text_index_block
 
@@ -174,9 +174,9 @@ class SourcesRoutesMixin:
         status = read_status(home_root)
         status["background"] = background_status(home_root, target, ticker=ticker, now=now)
         status["snapshot"] = snapshot_status(home_root, target)
-        status["tags"] = tags_block(home_root, target, ticker=ticker)
+        status["tags"] = tags_block(home_root, target, ticker=ticker, background=status["background"])
         status["text_index"] = text_index_block(home_root)
-        status["refresh"] = refresh_block(status["background"], now=now)
+        status["refresh"] = refresh_block(status["background"], now=now, schedule=schedule_status(home_root, target, ticker=ticker, now=now))
         self._write_json(HTTPStatus.OK, status)
 
     # -- the background settings ---------------------------------------------

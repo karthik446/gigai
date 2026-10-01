@@ -39,6 +39,7 @@ from click.testing import CliRunner
 from gigai.cli import cli
 from gigai.scout import run_supervisor
 from tests.support.latency import latency_bound
+from tests.support.scout_servers import scout_test_servers, stop_test_servers
 
 # The inert-unless-set test seams bindings.py exposes for the real-backend
 # M1/uat-bug-005 tests. Setting HTTP+MODEL makes a real find-jobs run fully
@@ -238,6 +239,37 @@ class RunningServer:
     client: httpx.Client
 
 
+#: 0110-028: every server ``start_server`` started and ``stop_server`` has not
+#: seen gone. ``tests/api_e2e/conftest.py`` empties it after each test: a
+#: journey that fails before its ``finally``, or whose supervisor ``stop`` did
+#: not take, no longer leaves a detached server running for days.
+_STARTED: list[RunningServer] = []
+
+
+def stop_leftover_servers() -> list[str]:
+    """Stop every server this process started that is still running; one line per server that was.
+
+    The supervisor's own ``stop`` first, then a signal to whatever of that
+    home is still alive (found by its command line: the server module and
+    this test's pytest temp directory).
+    """
+
+    left: list[str] = []
+    while _STARTED:
+        server = _STARTED.pop()
+        server.client.close()
+        running = scout_test_servers(under=server.home)
+        if not running:
+            continue  # the journey stopped it some other way (the CLI, the supervisor)
+        left.extend(found.line() for found in running)
+        try:
+            run_supervisor.stop(home_root=server.home, requested_target=server.target)
+        except Exception:  # noqa: BLE001 - the polite first try; the signal below is what guarantees it
+            pass
+        stop_test_servers(scout_test_servers(under=server.home))
+    return left
+
+
 def start_server(
     home: Path,
     target: Path,
@@ -282,7 +314,7 @@ def start_server(
     )
     base_url = result.state.url
     client = httpx.Client(base_url=base_url, timeout=latency_bound(CLIENT_TIMEOUT_SECONDS))
-    return RunningServer(
+    server = RunningServer(
         home=home,
         target=target,
         port=result.state.port,
@@ -290,6 +322,8 @@ def start_server(
         base_url=base_url,
         client=client,
     )
+    _STARTED.append(server)
+    return server
 
 
 def stop_server(server: RunningServer) -> None:
@@ -300,10 +334,20 @@ def stop_server(server: RunningServer) -> None:
     """
 
     server.client.close()
-    run_supervisor.stop(home_root=server.home, requested_target=server.target)
-    assert not _process_is_alive(server.pid), (
+    try:
+        run_supervisor.stop(home_root=server.home, requested_target=server.target)
+    finally:
+        # 0110-028: whatever the supervisor's stop did (it only signals a pid
+        # whose identity check passes, and removes the state file either
+        # way), no server of this home outlives this call.
+        survived = _process_is_alive(server.pid)
+        killed = stop_test_servers(scout_test_servers(under=server.home))
+        if server in _STARTED:
+            _STARTED.remove(server)
+    assert not survived, (
         f"Scout server pid {server.pid} survived stop_server() -- a leftover "
-        "process would corrupt every later test's ephemeral-port assumption"
+        "process would corrupt every later test's ephemeral-port assumption "
+        f"(killed now: {[leftover.line() for leftover in killed]})"
     )
 
 
@@ -381,6 +425,7 @@ __all__ = [
     "setup_and_init",
     "setup_and_init_without_a_model_target",
     "start_server",
+    "stop_leftover_servers",
     "stop_server",
     "write_offline_find_jobs_config",
 ]

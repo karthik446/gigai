@@ -5,12 +5,19 @@
 // The data is GET /api/sources/update (find_jobs/sources_status.py,
 // snapshot.snapshot_status), all of it read-only:
 //   refresh     {enabled, state, in_progress, trigger, last_updated_at,
-//               last_updated_minutes_ago, next_tick_at, next_tick_in_minutes}
+//               last_updated_minutes_ago, next_tick_at, next_tick_in_minutes,
+//               schedule {kind times | interval, weekdays, weekends,
+//               interval_seconds, checks_today} (0110-029)}
 //   tags        {available, titles, tagged_by_rules, tagged_by_model,
-//               model_other, awaiting_model, setting {model_enabled, ...},
-//               models {demand, backfill}, queue (null without a refresh
-//               thread) {demand, backfill: {model, consecutive_failures,
-//               last_error, retry_after}}}
+//               model_other, awaiting_model, awaiting_model_queued,
+//               awaiting_model_not_queued, not_queued_reason, tagging
+//               {state, detail, retry_after, model} (0110-028), setting
+//               {model_enabled, ...}, models {demand, backfill}, queue (null
+//               without a refresh thread) {demand, backfill: {model,
+//               consecutive_failures, last_error, retry_after}}}
+//   update      the running or last update: {status, trigger manual | auto,
+//               boards {checked, total}, catch_up {tags {companies_done,
+//               companies_total, pending}, text_index deferred | building}}
 //   text_index  {available, postings_with_text, unchecked}
 //   snapshot    {enabled, as_of, source, last_result imported | up_to_date |
 //               skipped | refused | failed, last_reason offline |
@@ -108,25 +115,90 @@ function failingLane(queue) {
   return null;
 }
 
-// "Titles tagged: 4,400 by rules, 600 by model, 150 waiting" and, when a
-// model lane is failing right now, one quiet line with its last error.
-// Null when the tag store has nothing to count.
+// Why the server says some titles will not be tagged by a model (tags.not_queued_reason).
+const NOT_QUEUED_REASONS = {
+  backfill_off: "background tagging of the rest is off",
+  model_off: "tagging with the model is off",
+  refresh_off: "automatic updates are off",
+  no_refresh_thread: "this server runs no background tagging",
+};
+
+// 0110-028: the tags line of a server that says what a model WILL tag.
+//   "Titles: 5,200 stored, each with a level from the rules. Function: 4,400
+//    by rules, 600 by model, 50 a model could not place, 100 waiting for the
+//    model, 50 not tagged by a model (background tagging of the rest is off)"
+// The five numbers after "Function:" add up to the first one. "Waiting" is
+// only what the model is going to tag under the settings in effect.
+function honestTagsLine(tags) {
+  const parts = [`${formatCount(count(tags.tagged_by_rules))} by rules`, `${formatCount(count(tags.tagged_by_model))} by model`];
+  if (count(tags.model_other) > 0) {
+    parts.push(`${formatCount(count(tags.model_other))} a model could not place`);
+  }
+  const queued = count(tags.awaiting_model_queued);
+  const notQueued = count(tags.awaiting_model_not_queued);
+  if (queued > 0 || notQueued === 0) {
+    parts.push(`${formatCount(queued)} waiting for the model`);
+  }
+  if (notQueued > 0) {
+    const reason = NOT_QUEUED_REASONS[tags.not_queued_reason];
+    parts.push(`${formatCount(notQueued)} not tagged by a model${reason ? ` (${reason})` : ""}`);
+  }
+  return `Titles: ${formatCount(count(tags.titles))} stored, each with a level from the rules. Function: ${parts.join(", ")}`;
+}
+
+// "Tagging: running, 2,032 titles to go" / "waiting for this update to
+// finish" / "off" / "paused"; "" when there is nothing to say (idle, a
+// failing lane has its own line, no background thread).
+function taggingLine(tags) {
+  const tagging = tags.tagging;
+  if (!tagging || typeof tagging !== "object") {
+    return "";
+  }
+  const queued = count(tags.awaiting_model_queued);
+  const titles = `${formatCount(queued)} title${queued === 1 ? "" : "s"}`;
+  if (tagging.state === "running") {
+    return `Tagging: running, ${titles} to go (it also runs while a background check does)`;
+  }
+  if (tagging.state === "waiting_for_update") {
+    return `Tagging: ${titles} wait for this update to finish, then the model starts`;
+  }
+  if (tagging.state === "off") {
+    return "Tagging: off (tagging with the model is off)";
+  }
+  if (tagging.state === "paused") {
+    return "Tagging: paused (automatic updates are off)";
+  }
+  return "";
+}
+
+// The tags line and, when a model lane is failing right now, one quiet line
+// with its last error; `tagging` says what the model queue is doing. Null
+// when the tag store has nothing to count. A server from before 0110-028
+// sends no queued count and reads as it did:
+// "Titles tagged: 4,400 by rules, 600 by model, 150 waiting".
 export function tagsLines(status) {
   const tags = status && status.tags;
   if (!tags || typeof tags !== "object" || !tags.available || count(tags.titles) === 0) {
     return null;
   }
-  const waiting = count(tags.awaiting_model);
-  const refresh = status.refresh;
-  let why = "";
-  if (waiting > 0) {
-    if (refresh && typeof refresh === "object" && !refresh.enabled) {
-      why = " (paused: automatic updates are off)";
-    } else if (tags.setting && tags.setting.model_enabled === false) {
-      why = " (tagging with the model is off)";
+  let line;
+  let tagging = "";
+  if (typeof tags.awaiting_model_queued === "number") {
+    line = honestTagsLine(tags);
+    tagging = taggingLine(tags);
+  } else {
+    const waiting = count(tags.awaiting_model);
+    const refresh = status.refresh;
+    let why = "";
+    if (waiting > 0) {
+      if (refresh && typeof refresh === "object" && !refresh.enabled) {
+        why = " (paused: automatic updates are off)";
+      } else if (tags.setting && tags.setting.model_enabled === false) {
+        why = " (tagging with the model is off)";
+      }
     }
+    line = `Titles tagged: ${formatCount(count(tags.tagged_by_rules))} by rules, ${formatCount(count(tags.tagged_by_model))} by model, ${formatCount(waiting)} waiting${why}`;
   }
-  const line = `Titles tagged: ${formatCount(count(tags.tagged_by_rules))} by rules, ${formatCount(count(tags.tagged_by_model))} by model, ${formatCount(waiting)} waiting${why}`;
   const lane = failingLane(tags.queue);
   let error = "";
   if (lane) {
@@ -135,7 +207,89 @@ export function tagsLines(status) {
     const model = typeof lane.model === "string" && lane.model ? ` (${lane.model})` : "";
     error = `The model${model} could not tag titles: ${short}${/[.!?…]$/.test(short) ? "" : "."} It is tried again by itself.`;
   }
-  return { line, error };
+  return { line, error, tagging };
+}
+
+// "13:30" in the viewer's local time (the machine Scout runs on), or "".
+export function clockLabel(stamp) {
+  const moment = typeof stamp === "string" && stamp ? new Date(stamp) : null;
+  if (!moment || Number.isNaN(moment.getTime())) {
+    return "";
+  }
+  return `${String(moment.getHours()).padStart(2, "0")}:${String(moment.getMinutes()).padStart(2, "0")}`;
+}
+
+function boardsProgress(update) {
+  const boards = update && typeof update === "object" ? update.boards : null;
+  if (!boards || typeof boards !== "object" || count(boards.total) === 0) {
+    return "";
+  }
+  return `${formatCount(count(boards.checked))} of ${formatCount(count(boards.total))} boards checked`;
+}
+
+// 0110-028/029: what runs in the background, said so that its pace never
+// looks stuck. "" when the server sent no schedule (an older server).
+//   idle     "Background check: 8 a day on weekdays, 2 on weekend days ·
+//             next at 13:30 · last 11:58 (12 min ago)"
+//   a check  "Background check running: 1,204 of 3,982 boards checked (busy
+//             boards every check, quiet ones about twice a day), at a
+//             moderate pace on purpose"
+//   manual   "Update sources running at full speed: 1,204 of 10,360 boards checked"
+//   off      "Background check: off"
+export function checkLine(status) {
+  const refresh = status && status.refresh;
+  const schedule = refresh && typeof refresh === "object" ? refresh.schedule : null;
+  if (!schedule || typeof schedule !== "object") {
+    return "";
+  }
+  if (refresh.in_progress || refresh.state === "running") {
+    const progress = boardsProgress(status.update);
+    if (refresh.trigger === "auto") {
+      return `Background check running: ${progress ? `${progress} ` : ""}(busy boards every check, quiet ones about twice a day), at a moderate pace on purpose`;
+    }
+    return `Update sources running at full speed${progress ? `: ${progress}` : ""}`;
+  }
+  if (!refresh.enabled) {
+    return "Background check: off";
+  }
+  let often = "";
+  if (schedule.kind === "times" && Array.isArray(schedule.weekdays) && Array.isArray(schedule.weekends)) {
+    often = `${schedule.weekdays.length} a day on weekdays, ${schedule.weekends.length} on weekend days`;
+  } else if (typeof schedule.interval_seconds === "number" && schedule.interval_seconds > 0) {
+    often = `every ${spanLabel(Math.max(1, Math.round(schedule.interval_seconds / 60)))}`;
+  }
+  const parts = [];
+  if (refresh.state === "needs_first_update") {
+    parts.push("starts after the first update");
+  } else {
+    const next = clockLabel(refresh.next_tick_at);
+    if (next) {
+      parts.push(minutesOrNull(refresh.next_tick_in_minutes) === 0 ? "next due now" : `next at ${next}`);
+    }
+    const last = clockLabel(refresh.last_updated_at);
+    const ago = minutesOrNull(refresh.last_updated_minutes_ago);
+    if (last) {
+      parts.push(`last ${last}${ago === null ? "" : ` (${ago < 1 ? "just now" : `${spanLabel(ago)} ago`})`}`);
+    }
+  }
+  return [`Background check: ${often || "on"}`, ...parts].join(" · ");
+}
+
+// The one-time work an update does after its boards (0110-028), or "".
+export function catchUpLine(status) {
+  const update = status && status.update;
+  const catchUp = update && typeof update === "object" && update.status === "running" ? update.catch_up : null;
+  if (!catchUp || typeof catchUp !== "object") {
+    return "";
+  }
+  if (catchUp.text_index === "building") {
+    return "Building the keyword index from the stored descriptions (once; the boards are done)";
+  }
+  const tags = catchUp.tags;
+  if (tags && typeof tags === "object" && tags.pending) {
+    return `Tagging stored titles by the rules (once): ${formatCount(count(tags.companies_done))} of ${formatCount(count(tags.companies_total))} companies`;
+  }
+  return "";
 }
 
 // "Descriptions checked for 6,100 postings, 2,900 not yet", or "".
@@ -193,7 +347,8 @@ export function snapshotLine(status) {
 }
 
 // Every detail line of the strip, in order, for one read of the status:
-//   [{role, text, tone}]  role refresh | tags | tags-error | text | snapshot;
+//   [{role, text, tone}]  role refresh | check | catch-up | tags | tagging |
+//   tags-error | text | snapshot;
 //   tone is "quiet" for everything (none of these is an error to act on).
 // `withRefresh` adds the refresh sentence (the places that do not already
 // carry it in their own line).
@@ -203,9 +358,12 @@ export function statusLines(status, { withRefresh = false } = {}) {
   if (withRefresh) {
     push("refresh", refreshLine(status));
   }
+  push("check", checkLine(status));
+  push("catch-up", catchUpLine(status));
   const tags = tagsLines(status);
   if (tags) {
     push("tags", tags.line);
+    push("tagging", tags.tagging);
     push("tags-error", tags.error);
   }
   push("text", textLine(status));

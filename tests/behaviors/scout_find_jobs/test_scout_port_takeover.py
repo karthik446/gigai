@@ -31,6 +31,7 @@ from gigai.cli import cli
 from gigai.scout import run_supervisor, target_resolution
 from gigai.workpad import resolve_bound_project
 from tests.support.latency import latency_bound
+from tests.support.scout_servers import scout_test_servers, stop_test_servers
 
 STOPPED_OPENING = "Stopped the Scout server for"
 
@@ -154,6 +155,12 @@ def projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     yield home, project_a, project_b
     for target in (project_a, project_b):
         run_supervisor.stop(home_root=home, requested_target=target)
+    # 0110-028: several tests here delete a server's state file on purpose
+    # (the "moved home"), so the supervisor's stop above cannot find that
+    # server. When such a test fails before its takeover, the server stayed
+    # up for days. Whatever Scout server of this test's home is still alive
+    # is stopped by its pid, found by its command line.
+    stop_test_servers(scout_test_servers(under=tmp_path))
 
 
 def test_run_stops_another_projects_live_server_that_holds_the_port(projects) -> None:

@@ -135,8 +135,8 @@ def test_a_put_that_turns_auto_refresh_off_silences_the_running_thread_and_on_br
     # The thread looks once at start, then once an hour: every later look in this test is one a PUT (or a kick) woke.
     with _Served(home, target, poll_seconds=3600.0) as served:
         queue, ticker, client = served.queue, served.ticker, served.client
-        _wait_for(lambda: queue.drains == 1)  # on by default: the first look drained the tag queue
-        assert served.looks == 1
+        # On by default: the check thread looked once and the tag thread drained once (0110-028: two threads).
+        _wait_for(lambda: queue.drains == 1 and served.looks == 1)
         assert auto_refresh_setting(home, target).enabled is True
         assert client.get("/api/sources/update").json()["refresh"]["enabled"] is True
 
@@ -150,7 +150,7 @@ def test_a_put_that_turns_auto_refresh_off_silences_the_running_thread_and_on_br
         for look in (3, 4, 5):
             ticker.kick_tags()
             _wait_for(lambda: served.looks == look)
-        time.sleep(0.05)  # the drain, if one were coming, follows the look on the same thread
+        time.sleep(0.05)  # the drain, if one were coming, is woken by the same kick on the tag thread
         assert queue.drains == 1, "the tag queue drained with auto refresh off"
         assert ticker._last_state == STATE_DISABLED and ticker.alive
         status = client.get("/api/sources/update").json()
@@ -159,8 +159,7 @@ def test_a_put_that_turns_auto_refresh_off_silences_the_running_thread_and_on_br
 
         on = client.put("/api/settings/background", json={"sources": {"auto_refresh": True}})
         assert on.status_code == 200, on.text
-        _wait_for(lambda: queue.drains == 2)  # woken again, and this look drained
-        assert served.looks == 6
+        _wait_for(lambda: queue.drains == 2 and served.looks == 6)  # both threads woken again, and the tag thread drained
         assert client.get("/api/sources/update").json()["background"]["auto_refresh"] == {"enabled": True, "source": "setting", "active": True}
 
 
@@ -277,6 +276,7 @@ def test_the_refresh_block_says_when_the_sources_were_updated_and_when_the_next_
         "last_updated_minutes_ago": 12,
         "next_tick_at": "2026-10-01T12:50:00.000Z",
         "next_tick_in_minutes": 37,
+        "schedule": None,  # 0110-029: the caller passes the schedule (schedule_status); this call did not
     }
     # A tick that is due now: 0 minutes, never negative.
     due = {**waiting, "state": "due", "next_tick_at": "2026-10-01T12:00:00.000Z"}
@@ -285,7 +285,7 @@ def test_the_refresh_block_says_when_the_sources_were_updated_and_when_the_next_
     running = {"auto_refresh": {"enabled": True}, "state": "running", "in_progress": True, "trigger": "manual", "last_update": None, "next_tick_at": None}
     assert refresh_block(running, now=now) == {
         "enabled": True, "state": "running", "in_progress": True, "trigger": "manual",
-        "last_updated_at": None, "last_updated_minutes_ago": None, "next_tick_at": None, "next_tick_in_minutes": None,
+        "last_updated_at": None, "last_updated_minutes_ago": None, "next_tick_at": None, "next_tick_in_minutes": None, "schedule": None,
     }
     off = {"auto_refresh": {"enabled": False}, "state": "disabled", "in_progress": False, "trigger": None, "last_update": None, "next_tick_at": None}
     assert (refresh_block(off, now=now)["enabled"], refresh_block(off, now=now)["state"]) == (False, "disabled")

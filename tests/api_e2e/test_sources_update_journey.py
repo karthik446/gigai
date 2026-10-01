@@ -90,7 +90,7 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
             "trigger": None,
             "last_update": None,
             "next_tick_at": None,
-            "interval_seconds": 3600.0,
+            "interval_seconds": None,  # 0110-029: checks run at times of day (`refresh.schedule`), not at a fixed interval
             "tags": {"available": False, "titles": 0, "with_function": 0, "lacking_function": 0},
             "text": {"available": False, "postings": 0, "with_text": 0, "unchecked": 0},
         }
@@ -120,6 +120,11 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
             "tagged_by_model": 0,
             "model_other": 0,
             "awaiting_model": 0,
+            # 0110-028: what a model will and will not tag, and what the queue is doing.
+            "awaiting_model_queued": 0,
+            "awaiting_model_not_queued": 0,
+            "not_queued_reason": None,
+            "tagging": {"state": "off", "detail": None, "retry_after": None, "model": None},
             # The suite turns model tagging off for every server it starts (tests/conftest.py).
             "setting": {"model_enabled": False, "backfill_enabled": False, "tag_backfill_model": "configured", "source": "environment"},
             "models": {"demand": "ollama_local", "backfill": "ollama_local"},
@@ -130,7 +135,18 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
             "backfill": (0, None, None),
         }
         assert before_body.pop("text_index") == {"available": False, "postings_with_text": 0, "unchecked": 0}
-        assert before_body.pop("refresh") == {
+        refresh_before = before_body.pop("refresh")
+        # 0110-029: the schedule the background checks follow (the default times; how many today depends on the day).
+        schedule = refresh_before.pop("schedule")
+        assert schedule.pop("checks_today") in (8, 2)
+        assert schedule == {
+            "kind": "times",
+            "interval_seconds": None,
+            "weekdays": ["03:00", "07:00", "09:00", "11:00", "13:00", "15:00", "17:00", "19:00"],
+            "weekends": ["09:00", "18:00"],
+            "source": "default",
+        }
+        assert refresh_before == {
             "enabled": True,
             "state": "needs_first_update",
             "in_progress": False,
@@ -204,7 +220,9 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
         }
         started_at = datetime.fromisoformat(update["started_at"].replace("Z", "+00:00"))
         next_tick = datetime.fromisoformat(background["next_tick_at"].replace("Z", "+00:00"))
-        assert next_tick - started_at == timedelta(hours=1)
+        # 0110-029: the next check is the next scheduled time of day (local time), no longer "an hour after".
+        assert next_tick > started_at and next_tick - started_at <= timedelta(hours=16)
+        assert next_tick.astimezone().strftime("%H:%M") in schedule["weekdays"] + schedule["weekends"]
         assert background["tags"] == {"available": True, "titles": 1, "with_function": 1, "lacking_function": 0}
         assert background["text"] == {"available": True, "postings": 1, "with_text": 1, "unchecked": 0}
 
@@ -218,7 +236,7 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
         refresh = first["refresh"]
         assert (refresh["enabled"], refresh["state"], refresh["in_progress"], refresh["trigger"]) == (True, "waiting", False, "manual")
         assert refresh["last_updated_at"] == update["finished_at"] and refresh["last_updated_minutes_ago"] == 0
-        assert refresh["next_tick_at"] == background["next_tick_at"] and refresh["next_tick_in_minutes"] in (58, 59)
+        assert refresh["next_tick_at"] == background["next_tick_at"] and 0 <= refresh["next_tick_in_minutes"] <= 16 * 60
         assert set(background) == {"auto_refresh", "state", "message", "in_progress", "trigger", "last_update", "next_tick_at", "interval_seconds", "tags", "text"}
         # The manual update's status still shows the snapshot block (0110-026e), untouched.
         assert set(first["snapshot"]) == {"enabled", "setting_source", "manifest_url", "as_of", "source", "kind", "imported_at", "last_attempt_at", "last_result", "last_reason", "last_message", "counts"}

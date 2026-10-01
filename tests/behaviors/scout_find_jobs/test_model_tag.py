@@ -718,9 +718,9 @@ def test_the_queue_drains_on_the_refresh_thread_after_each_look_and_a_kick_wakes
     def ticker(**kwargs) -> RefreshTicker:
         return RefreshTicker(home_root=home, target=tmp_path / "project", client_factory=lambda: None, clock=clock, tag_queue=queue, **kwargs)
 
-    # While an update is live the look says so and the queue is not even asked.
+    # While a manual update is live the look says so, and the queue yields to it: no model call.
     _write_running(home, updated_at=index_stamp(clock.now))
-    assert ticker().step() == STATE_RUNNING and port.requests == [] and queue.status()["state"] is None
+    assert ticker().step() == STATE_RUNNING and port.requests == [] and queue.status()["state"] == "yielded"
     CompanyIndex.for_home(home).update_summary_path.unlink()
 
     # The step's return value is the refresh's alone; the drain happened behind it.
@@ -768,3 +768,107 @@ def test_a_drain_that_raises_never_takes_the_refresh_thread_down(tmp_path: Path)
 
     ticker = RefreshTicker(home_root=tmp_path / "home", target=tmp_path / "project", client_factory=lambda: None, tag_queue=_Broken())  # type: ignore[arg-type]
     assert ticker.step() == STATE_NEEDS_FIRST_UPDATE
+
+
+# --- 0110-028: the queue does not starve behind a background check -------------------------------------------
+
+
+def _live(home: Path, clock: _Clock, *, trigger: str | None) -> None:
+    """A live update's snapshot: ``trigger`` ``"auto"`` is a background check, ``None`` a manual update."""
+
+    stamp = index_stamp(clock.now)
+    snapshot: dict[str, object] = {"update_id": "sources_update_live", "status": "running", "started_at": stamp, "updated_at": stamp, "finished_at": None}
+    if trigger is not None:
+        snapshot["trigger"] = trigger
+    CompanyIndex.for_home(home).write_update_summary(snapshot)
+
+
+def test_the_queue_yields_to_a_manual_update_and_not_to_a_background_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = tmp_path / "home"
+    _seed(home, _demand_titles(3))
+    port = _Port()
+    _install(monkeypatch, port)
+    clock = _Clock()
+    queue = _queue(home, clock=clock, live_update=None)  # the queue's own rule, not a test's stand-in
+
+    _live(home, clock, trigger=None)
+    assert queue.drain().state == "yielded" and port.requests == []
+
+    _live(home, clock, trigger="auto")
+    drained = queue.drain()
+    assert (drained.state, drained.tagged) == ("drained", 3) and len(port.requests) == 1
+
+
+def test_the_demand_set_is_tagged_while_a_background_check_runs_not_after_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The operator's "0 by model": every look that found a check running skipped the drain, and a check ran all hour."""
+
+    home = tmp_path / "home"
+    monkeypatch.delenv("GIGAI_SCOUT_AUTO_REFRESH", raising=False)
+    port = _Port()
+    _install(monkeypatch, port)
+    clock = _Clock()
+    queue = _queue(home, clock=clock, live_update=None)
+    index = CompanyIndex.for_home(home)
+    index.root.mkdir(parents=True)
+    (index.root / "greenhouse:acme.json").write_text("{}", encoding="utf-8")  # an indexed home ...
+    old = index_stamp(clock.now - timedelta(hours=2))
+    index.write_update_summary({"update_id": "sources_update_first", "status": "succeeded", "started_at": old, "updated_at": old, "finished_at": old})  # ... whose check is due
+    entered, release = threading.Event(), threading.Event()
+
+    def long_check(home_root, target_root, *, client, now, stop_event, config):
+        del target_root, client, stop_event, config, now
+        _live(home_root, clock, trigger="auto")  # what a check does first: it claims the snapshot
+        entered.set()
+        assert release.wait(timeout=30), "the test never let the check end"
+        done = index_stamp(clock.now)
+        CompanyIndex.for_home(home_root).write_update_summary({"update_id": "sources_update_live", "status": "succeeded", "trigger": "auto", "started_at": done, "updated_at": done, "finished_at": done})
+        return SimpleNamespace(to_json=lambda: {"status": "succeeded"})
+
+    ticker = RefreshTicker(
+        home_root=home, target=tmp_path / "project", client_factory=lambda: None, clock=clock, tag_queue=queue,
+        run_tick=long_check, config_loader=lambda _home, _target: None, interval_seconds=3600.0, poll_seconds=0.05,
+    )
+    ticker.start()
+    try:
+        assert entered.wait(timeout=10), "the check never started"
+        # The titles arrive while the check runs (it writes them as boards settle).
+        _seed(home, _demand_titles(3))
+        ticker.kick_tags()
+        deadline = time.monotonic() + 10
+        while not port.requests:
+            assert time.monotonic() < deadline, "the demand set waited for the background check to end"
+            time.sleep(0.01)
+        while queue.status()["last_drain"] is None or queue.status()["last_drain"]["tagged"] != 3:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        assert not release.is_set() and index.read_update_summary()["status"] == "running"  # the check is still running
+    finally:
+        release.set()
+        assert ticker.stop(timeout=10) is True
+    assert {function for function, _source, _model, _version in _rows(home).values()} == {"operations"}
+
+
+def test_every_drain_that_calls_a_model_is_logged_and_an_idle_one_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    home = tmp_path / "home"
+    monkeypatch.delenv("GIGAI_SCOUT_AUTO_REFRESH", raising=False)
+    _seed(home, _demand_titles(3))
+    port = _Port()
+    _install(monkeypatch, port)
+    queue = _queue(home, clock=_Clock())
+    ticker = RefreshTicker(home_root=home, target=tmp_path / "project", client_factory=lambda: None, tag_queue=queue, logger=logging.getLogger("test.model_tags"))
+
+    with caplog.at_level(logging.INFO, logger="test.model_tags"):
+        for _ in range(3):
+            ticker.step()
+
+    lines = [record.getMessage() for record in caplog.records if record.getMessage().startswith("model tags:")]
+    assert lines == ["model tags: drained batches=1 tagged=3 rejected=0 calls=1 models={'demand': 'codex_cli:default'}", "model tags: idle"]
+
+    # Off is said once too, with the reason.
+    monkeypatch.setenv("GIGAI_SCOUT_AUTO_REFRESH", "0")
+    with caplog.at_level(logging.INFO, logger="test.model_tags"):
+        ticker.step()
+        ticker.step()
+    assert [record.getMessage() for record in caplog.records if "paused" in record.getMessage()] == ["model tags: paused (sources.auto_refresh is off)"]

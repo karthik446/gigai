@@ -506,8 +506,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
                 "in_progress": False,
                 "trigger": "manual",
                 "last_update": {"update_id": "sources_update_1", "status": "succeeded", "trigger": "manual", "started_at": "2026-10-01T11:50:00.000Z", "finished_at": "2026-10-01T12:00:00.000Z"},
-                "next_tick_at": "2026-10-01T12:50:00.000Z",
-                "interval_seconds": 3600.0,
+                "next_tick_at": "2026-10-01T13:00:00.000Z",
+                "interval_seconds": None,
                 "tags": {"available": True, "titles": 5200, "with_function": 4400, "lacking_function": 800},
                 "text": {"available": True, "postings": 9000, "with_text": 6100, "unchecked": 2900},
             },
@@ -532,6 +532,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
                 "tagged_by_model": 600,
                 "model_other": 50,
                 "awaiting_model": 150,
+                "awaiting_model_queued": 100,
+                "awaiting_model_not_queued": 50,
+                "not_queued_reason": "backfill_off",
+                "tagging": {"state": "running", "detail": None, "retry_after": None, "model": None},
                 "setting": {"model_enabled": True, "backfill_enabled": False, "tag_backfill_model": "configured", "source": "default"},
                 "models": {"demand": "ollama_local:llama3.1", "backfill": "ollama_local"},
                 "queue": {
@@ -561,34 +565,56 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
                 "trigger": "manual",
                 "last_updated_at": "2026-10-01T12:00:00.000Z",
                 "last_updated_minutes_ago": 12,
-                "next_tick_at": "2026-10-01T12:50:00.000Z",
-                "next_tick_in_minutes": 38,
+                "next_tick_at": "2026-10-01T13:00:00.000Z",
+                "next_tick_in_minutes": 48,
+                "schedule": {
+                    "kind": "times",
+                    "interval_seconds": None,
+                    "weekdays": ["03:00", "07:00", "09:00", "11:00", "13:00", "15:00", "17:00", "19:00"],
+                    "weekends": ["09:00", "18:00"],
+                    "source": "default",
+                    "checks_today": 8,
+                },
             },
         },
         schema_version="scout-sources-update-status:1",
         description=(
-            "`update` is the running or last update's snapshot (null when none ever ran): `trigger` is manual or auto (the hourly "
-            "background refresh), `failures` counts boards that did not answer by code, `stores` counts what the update wrote to the "
-            "tag store and the text index. `index` says whether a search can read the stored postings. `background` is the hourly "
-            "refresh and the two stores: `auto_refresh` {enabled, source: default|setting|environment|settings_unreadable, active: a "
+            "`update` is the running or last update's snapshot (null when none ever ran): `trigger` is manual or auto (a "
+            "background check), `failures` counts boards that did not answer by code, `backoff` names the providers a background "
+            "check left alone after a 429 (null: none), `stores` counts what the update wrote to the tag store and the text index "
+            "(`stores.tags.titles_backfilled`: stored titles this update gave their first rules tag, a level, in its one-time "
+            "catch-up; it is not the number of titles with a function), `catch_up` is that one-time work, done after boards settle "
+            "and never before the first request: `tags` {companies_done, companies_total, pending} and `text_index` (deferred until "
+            "the boards are done, building, or null). `index` says whether a search can read the stored postings. `background` is "
+            "the background refresh and the two stores: `auto_refresh` {enabled, source: default|setting|environment|settings_unreadable, active: a "
             "refresh thread runs in this server}; `state` is disabled, inactive, needs_first_update (run Update sources once: the "
             "background refresh never fills an empty index), running, waiting or due; `in_progress` and `trigger` describe the live "
-            "update, `last_update` the last finished one; `next_tick_at` is null unless a tick is scheduled; `tags` counts stored "
+            "update, `last_update` the last finished one; `next_tick_at` is null unless a check is scheduled; `interval_seconds` is "
+            "null unless the checks run at a fixed interval (see `refresh.schedule`); `tags` counts stored "
             "titles and those still lacking a function; `text.unchecked` counts postings with no stored text, which a text search "
             "cannot match. `snapshot` is the downloaded metadata snapshot (titles, locations, links, title tags and board "
             "validators; never descriptions): `enabled` and `setting_source` (default|setting|environment|settings_unreadable) say "
             "whether it may be downloaded, `as_of` when the one in use was built (null: none imported), `kind` full or delta, "
             "`last_result` imported, up_to_date, skipped, refused or failed, `last_reason` why nothing was imported (offline, "
             "not_published, local_fresher, checked_recently, digest_mismatch, ...), `counts` what the last import wrote. "
-            "`tags` counts the stored titles: `tagged_by_rules` and `tagged_by_model` have a function, `model_other` are titles a "
-            "model looked at and could not place, `awaiting_model` still wait for a model (it reaches 0 when the queue is done); "
+            "`tags` counts the stored titles (`titles`: every one has a level from the rules) by function, four numbers that add up "
+            "to `titles`: `tagged_by_rules` and `tagged_by_model` have a function, `model_other` are titles a model looked at and "
+            "could not place, `awaiting_model` have no function and no model has looked. Of those, `awaiting_model_queued` are the "
+            "ones a model will tag under the settings in effect (the demand set; all of them with the backfill on) and "
+            "`awaiting_model_not_queued` the ones it will not, for `not_queued_reason` (backfill_off, model_off, refresh_off, "
+            "no_refresh_thread; null when none). `tagging.state` is what the model queue does now: running, idle, "
+            "waiting_for_update (a manual update is live; the queue does not wait for a background check), failing (`detail` is "
+            "the last error, `retry_after` the next try), off, paused (automatic updates are off) or inactive (no refresh thread); "
             "`setting` is the tagging setting in effect, `models` the model each lane asks (demand: titles the active profiles can "
             "reach; backfill: the rest; null when none is configured), `queue` the model queue of this server (null when it runs no "
             "refresh thread): its last drain and, per lane, calls, `failures`, `last_error` and `retry_after` (when a failed lane "
             "tries again). `text_index` counts postings a keyword search can check (`postings_with_text`) and cannot (`unchecked`). "
             "`refresh` is the strip's line: `enabled`, `state` and `trigger` as in `background`, `last_updated_at` with "
             "`last_updated_minutes_ago` (null before the first update and while one runs), `next_tick_at` with "
-            "`next_tick_in_minutes` (null unless a check is scheduled). Reading this makes no request."
+            "`next_tick_in_minutes` (null unless a check is scheduled), and `schedule`: when the background checks run, `kind` "
+            "times with the `weekdays` and `weekends` lists of local HH:MM times (the settings file's `sources.check_times`, else "
+            "eight on a weekday and two on a weekend day) or interval with `interval_seconds`; `source` default, setting or "
+            "settings_unreadable; `checks_today` how many times today's list holds. Reading this makes no request."
         ),
     ),
     # --- settings ----------------------------------------------------------------------

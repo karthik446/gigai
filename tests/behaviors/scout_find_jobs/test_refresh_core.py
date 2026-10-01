@@ -214,16 +214,20 @@ def test_the_interval_comes_from_each_providers_board_count_and_never_beats_the_
     assert "spread_seconds" not in AcquireLimits().to_json()
 
 
-def test_tick_limits_spread_over_the_tick_and_the_env_can_turn_the_spread_off() -> None:
+def test_check_limits_are_a_moderate_fixed_rate_and_the_env_can_spread_or_unpace_them() -> None:
+    # 0110-029: a background check is no longer spread over the hour. 2.5 requests a second to each provider.
     default = tick_limits({})
-    assert default.spread_seconds == sources_update.TICK_SPREAD_SECONDS == 3000.0
-    assert default.time_budget_seconds == sources_update.TICK_BUDGET_SECONDS
-    assert default.min_request_interval_seconds == 0.125 and default.concurrency_per_provider == 4
+    assert default.spread_seconds is None
+    assert default.min_request_interval_seconds == sources_update.CHECK_MIN_INTERVAL_SECONDS == 0.4
+    assert default.time_budget_seconds == sources_update.CHECK_BUDGET_SECONDS and default.concurrency_per_provider == 4
 
-    assert tick_limits({"GIGAI_SCOUT_REFRESH_SPREAD_SECONDS": "0"}).spread_seconds is None
+    unpaced = tick_limits({"GIGAI_SCOUT_REFRESH_SPREAD_SECONDS": "0"})  # the polite maximum, as a manual update
+    assert unpaced.spread_seconds is None and unpaced.min_request_interval_seconds == 0.125
     assert tick_limits({"GIGAI_SCOUT_REFRESH_SPREAD_SECONDS": "120"}).spread_seconds == 120.0
-    assert tick_limits({"GIGAI_SCOUT_REFRESH_SPREAD_SECONDS": "garbage"}).spread_seconds == 3000.0
+    assert tick_limits({"GIGAI_SCOUT_REFRESH_SPREAD_SECONDS": "garbage"}) == default
+    # An interval the environment names is used as it is (tests, an operator who wants another pace).
     assert tick_limits({"GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS": "0"}).min_request_interval_seconds == 0.0
+    assert tick_limits({"GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS": "1.5"}).min_request_interval_seconds == 1.5
 
 
 # --- R2: stop / cancel -------------------------------------------------------------
@@ -362,17 +366,18 @@ def test_one_tick_asks_the_busy_boards_and_one_slice_of_the_quiet_ones(tmp_path:
         assert first.status == STATUS_SUCCEEDED
         assert _paths(boards) == ["/v1/boards/acme/jobs"]
         assert snapshot["trigger"] == "auto" and snapshot["full_refresh"] is False and snapshot["cancelled"] is False
-        assert snapshot["tick"] == {"boards": 1, "busy": 1, "quiet": 0, "quiet_total": 2, "quiet_due": 0, "slice_size": 1, "slices": 6}
+        assert snapshot["tick"] == {"boards": 1, "busy": 1, "quiet": 0, "quiet_total": 2, "quiet_due": 0, "slice_size": 1, "slices": 4}
         assert snapshot["boards"] == {"total": 1, "done": 1, "checked": 1, "fetched": 0, "cached": 1, "failed": 0, "skipped": 0, "never_checked": 0, "up_to_date": 2}
         assert read_status(home)["update"]["trigger"] == "auto"
 
-        # That check found acme unchanged, so it is quiet now. Six hours on
-        # all three are due and the tick takes one slice: the least recently
-        # checked board (ties by key).
+        # That check found acme unchanged, so it is quiet now. Twelve hours
+        # on (0110-029: a quiet board about twice a day, a quarter of them
+        # per check) all three are due and the tick takes one slice: the
+        # least recently checked board (ties by key).
         boards.requests.clear()
-        second = run_refresh_tick(home, target, client=client, now=now + timedelta(hours=7), limits=fast)
+        second = run_refresh_tick(home, target, client=client, now=now + timedelta(hours=13), limits=fast)
 
-        assert second.to_json()["tick"] == {"boards": 1, "busy": 0, "quiet": 1, "quiet_total": 3, "quiet_due": 3, "slice_size": 1, "slices": 6}
+        assert second.to_json()["tick"] == {"boards": 1, "busy": 0, "quiet": 1, "quiet_total": 3, "quiet_due": 3, "slice_size": 1, "slices": 4}
         assert _paths(boards) == ["/v1/boards/globex/jobs"]
         assert second.to_json()["boards"]["up_to_date"] == 2
 
