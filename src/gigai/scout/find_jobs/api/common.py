@@ -7,9 +7,30 @@ docstring for the split rationale).
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import functools
+
+from ....workpad import committed_read_cache
 
 
 RUN_START_TIMEOUT_SECONDS = 30.0
+
+
+def reads_committed(handler):
+    """A ``GET`` handler that only reads (0110-033).
+
+    While it runs, a workpad check that already passed and a committed
+    journal read already made are reused for as long as the workpad is
+    unchanged (``workpad.committed_read_cache``): the page reads were 13 to
+    146 git subprocesses each, every call. A journal write moves the head,
+    so the read after a write is made again.
+    """
+
+    @functools.wraps(handler)
+    def wrapper(self, *args, **kwargs):
+        with committed_read_cache():
+            return handler(self, *args, **kwargs)
+
+    return wrapper
 
 
 def _error_body(code: str, message: str) -> dict[str, object]:

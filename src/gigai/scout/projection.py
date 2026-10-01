@@ -44,7 +44,7 @@ from .find_jobs.contracts import (
     PresentPayload,
     aggregate_status,
 )
-from ..workpad import resolve_workpad
+from ..workpad import committed_read_cache, committed_read_cache_active, resolve_workpad
 
 
 class ScoutProjectionError(RuntimeError):
@@ -509,6 +509,8 @@ PROJECTION_SNAPSHOT_PREFIXES = (
     "run-inputs/",
     "manifests/",
 )
+_PROJECTION_RUNS_PREFIX = ("runs/",)
+_PROJECTION_OTHER_PREFIXES = tuple(prefix for prefix in PROJECTION_SNAPSHOT_PREFIXES if prefix not in _PROJECTION_RUNS_PREFIX)
 
 
 def read_projection_snapshot(resolved: Any) -> JournalSnapshot:
@@ -518,13 +520,38 @@ def read_projection_snapshot(resolved: Any) -> JournalSnapshot:
     # Handoff text is journal metadata, not a standalone artifact and has
     # no self-reference entry. Readers derive sequence from the immutable
     # records below; excluding it avoids treating a handoff as a payload.
-    return read_committed_snapshot(
-        workpad=resolved.path,
-        project_id=resolved.project_id,
-        gig_id=resolved.gig_id,
-        prefixes=PROJECTION_SNAPSHOT_PREFIXES,
-        child_prefixes=(("records/", RECORD_DIRECTORY_PATTERN),),
-    )
+    read = dict(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id)
+    records = (("records/", RECORD_DIRECTORY_PATTERN),)
+    if committed_read_cache_active():
+        # 0110-033: inside a read the runs are kept apart from the rest. A
+        # kept snapshot is read again when a commit touched it, and the runs
+        # are megabytes: a recorded application then costs the small half,
+        # not every run's sealed outputs. Each artifact is checked on its
+        # own, so the two halves at one head are the whole snapshot.
+        # Read side by side: each half is mostly waiting for git.
+        other: list[object] = []
+
+        def read_rest() -> None:
+            try:
+                with committed_read_cache():
+                    other.append(read_committed_snapshot(prefixes=_PROJECTION_OTHER_PREFIXES, child_prefixes=records, **read))
+            except BaseException as exc:  # noqa: BLE001 - raised again below, on the caller's thread
+                other.append(exc)
+
+        beside = threading.Thread(target=read_rest, name="scout-projection-read", daemon=True)
+        beside.start()
+        try:
+            runs = read_committed_snapshot(prefixes=_PROJECTION_RUNS_PREFIX, **read)
+        finally:
+            beside.join()
+        rest = other[0]
+        if isinstance(rest, BaseException):
+            raise rest
+        assert isinstance(rest, JournalSnapshot)
+        if runs.head == rest.head:
+            token = (runs.read_token, rest.read_token) if runs.read_token is not None and rest.read_token is not None else None
+            return JournalSnapshot(rest.head, {**rest.artifacts, **runs.artifacts}, token)
+    return read_committed_snapshot(prefixes=PROJECTION_SNAPSHOT_PREFIXES, child_prefixes=records, **read)
 
 
 def rebuild_projection(*, resolved: Any, readers: ScoutReaderSet | None = None) -> ScoutProjection:

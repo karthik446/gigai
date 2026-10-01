@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import json
 from importlib import resources
+import os
 from pathlib import Path
+import threading
 from typing import Any, Iterable, Mapping
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -162,8 +164,50 @@ def _report(findings: Iterable[ValidationFinding]) -> ValidationReport:
     return ValidationReport(tuple(sorted(set(findings))))
 
 
+_SCHEMA_REGISTRY_LOCK = threading.Lock()
+# 0110-033: the packaged schemas, kept while their files are unchanged. Every
+# validation used to read and parse all of them again (84 files, about 4 ms):
+# 300 application events were 1.3 s of one GET /api/applications.
+_schema_registry_kept: tuple[tuple[object, ...], tuple[dict[str, dict[str, Any]], Registry]] | None = None
+# schema name -> (the registry it was built over, its validator): built once for each kept registry.
+_schema_validators: dict[str, tuple[Registry, Draft202012Validator]] = {}
+
+
+def _schema_files_signature(root: object) -> tuple[object, ...] | None:
+    """Identity, size and change time of every packaged schema file; ``None`` when they are not plain files."""
+
+    try:
+        base = os.fspath(root)  # type: ignore[call-overload]
+        found = [os.stat(os.path.join(base, name)) for name in (*SCHEMA_NAMES, *_VERSIONED_SCHEMA_NAMES)]
+    except (TypeError, OSError):
+        return None
+    return tuple((item.st_ino, item.st_size, item.st_mtime_ns) for item in found)
+
+
 def _schema_registry() -> tuple[dict[str, dict[str, Any]], Registry]:
+    """Every packaged schema and the registry that resolves their references.
+
+    Shared by every caller and never changed by one (a validator only reads
+    it). Read again when a schema file changes; read every time when the
+    package is not a directory of plain files.
+    """
+
+    global _schema_registry_kept
     root = resources.files("gigai.schemas")
+    signature = _schema_files_signature(root)
+    if signature is None:
+        return _read_schema_registry(root)
+    with _SCHEMA_REGISTRY_LOCK:
+        kept = _schema_registry_kept
+        if kept is not None and kept[0] == signature:
+            return kept[1]
+        loaded = _read_schema_registry(root)
+        if _schema_files_signature(root) == signature:
+            _schema_registry_kept = (signature, loaded)
+        return loaded
+
+
+def _read_schema_registry(root: Any) -> tuple[dict[str, dict[str, Any]], Registry]:
     schemas: dict[str, dict[str, Any]] = {}
     registry = Registry()
     for name in (*SCHEMA_NAMES, *_VERSIONED_SCHEMA_NAMES):
@@ -187,9 +231,16 @@ def validate_serialized_contract(schema_name: str, data: bytes) -> ValidationRep
     except CanonicalizationError as exc:
         return _report((ValidationFinding("$", "invalid_json", str(exc)),))
     schemas, registry = _schema_registry()
-    validator = Draft202012Validator(
-        schemas[schema_name], registry=registry, format_checker=FormatChecker()
-    )
+    with _SCHEMA_REGISTRY_LOCK:
+        built = _schema_validators.get(schema_name)
+    if built is not None and built[0] is registry:
+        validator = built[1]
+    else:
+        validator = Draft202012Validator(
+            schemas[schema_name], registry=registry, format_checker=FormatChecker()
+        )
+        with _SCHEMA_REGISTRY_LOCK:
+            _schema_validators[schema_name] = (registry, validator)
     findings = []
     for error in sorted(
         validator.iter_errors(instance), key=lambda item: list(item.absolute_path)

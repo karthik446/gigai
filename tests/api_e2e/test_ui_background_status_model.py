@@ -293,7 +293,12 @@ def test_the_strip_starts_nothing_by_itself() -> None:
 
 def test_the_draft_is_what_the_file_says_never_the_override(out: dict) -> None:
     settings = out["settings"]
-    expected = {"autoRefresh": True, "modelEnabled": True, "backfillEnabled": False, "backfillModel": "configured", "snapshotEnabled": True, "manifestUrl": "https://example.invalid/default/manifest.json"}
+    expected = {
+        "autoRefresh": True, "modelEnabled": True, "backfillEnabled": False, "backfillModel": "configured", "snapshotEnabled": True,
+        "manifestUrl": "https://example.invalid/default/manifest.json",
+        # 0110-033: this fixture is a body with no check times (an older server): the two lines are empty and never sent.
+        "weekdayTimes": "", "weekendTimes": "",
+    }
     assert settings["draft"] == expected
     assert settings["forcedDraft"] == expected, "an environment override is shown as a note, not written into the form"
 

@@ -79,6 +79,7 @@ from ..job_state import (
 )
 from ...projection import projection_from_snapshot, read_projection_snapshot
 from ...report_readers import default_reader_set
+from .common import reads_committed
 
 _APPLICATION_ERROR_STATUS: dict[str, HTTPStatus] = {
     "application_event_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -98,6 +99,17 @@ _APPLICATION_ERROR_STATUS: dict[str, HTTPStatus] = {
 # uat-bug-018: one check-then-record at a time in this server process, so a
 # double click cannot record the same transition twice.
 _TRANSITION_LOCK = threading.Lock()
+
+_ROWS_CACHE_LOCK = threading.Lock()
+# 0110-033: (workpad, project, gig) -> (the snapshot's read token, the rows
+# ``GET`` answers). The rows are built from the committed snapshot alone, so
+# the same artifacts are always the same rows; building them again was 0.4 s
+# at 300 events (1.7 s before the schemas were kept). The journal names "the
+# same artifacts" with ``JournalSnapshot.read_token``: a recorded event is a
+# new artifact, the snapshot is read again and has a new token, and the rows
+# are built again. A snapshot with no token is built every time. One entry a
+# workpad.
+_rows_cache: dict[tuple[str, str, str], tuple[object, list[dict[str, object]]]] = {}
 
 
 def _status_for(code: str) -> HTTPStatus:
@@ -134,6 +146,7 @@ class ApplicationsRoutesMixin:
             return None
         return resolve_workpad(home_root=backend.home_root, requested_target=target, gig_id=None, allow_semantic_state=True)
 
+    @reads_committed
     def _handle_get_applications(self) -> None:
         try:
             resolved = self._resolve_applications_gig()
@@ -143,18 +156,28 @@ class ApplicationsRoutesMixin:
         if resolved is None:
             return
 
-        projection = projection_from_snapshot(
-            snapshot=read_projection_snapshot(resolved),
-            project_id=resolved.project_id,
-            gig_id=resolved.gig_id,
-            readers=default_reader_set(resolved),
-        )
-        applications = [_application_to_json(dict(item)) for item in projection.applications]
-        # uat-bug-018: the rows just read are every event there is, so the
-        # state needs no second read.
-        states = {identity: _job_state_json(events) for identity, events in group_events(applications).items()}
-        for row in applications:
-            row["job_state"] = states.get(event_identity(row) or "")
+        snapshot = read_projection_snapshot(resolved)
+        cache_key = (str(resolved.path), resolved.project_id, resolved.gig_id)
+        with _ROWS_CACHE_LOCK:
+            kept = _rows_cache.get(cache_key)
+        if kept is not None and snapshot.read_token is not None and kept[0] == snapshot.read_token:
+            applications = kept[1]
+        else:
+            projection = projection_from_snapshot(
+                snapshot=snapshot,
+                project_id=resolved.project_id,
+                gig_id=resolved.gig_id,
+                readers=default_reader_set(resolved),
+            )
+            applications = [_application_to_json(dict(item)) for item in projection.applications]
+            # uat-bug-018: the rows just read are every event there is, so the
+            # state needs no second read.
+            states = {identity: _job_state_json(events) for identity, events in group_events(applications).items()}
+            for row in applications:
+                row["job_state"] = states.get(event_identity(row) or "")
+            if snapshot.read_token is not None:
+                with _ROWS_CACHE_LOCK:
+                    _rows_cache[cache_key] = (snapshot.read_token, applications)
         self._write_json(
             HTTPStatus.OK,
             {

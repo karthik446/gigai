@@ -106,16 +106,65 @@ _JOB_URL = "https://boards.greenhouse.io/acme/jobs/101"
 _IDENTITY_KEY: dict[str, object] = {"profile_id": "prof_1", "job_identity": _JOB_URL}
 _ROW_ERRORS = (_INVALID, _WRONG_TYPE, _UNKNOWN_KEY)
 
+_STORY_ID = _p("story_id", "string", "A story bank entry's id (its question_id, e.g. cloud:gcp or story:database_led_migration).")
+_STORY_BANK_ENTRY: dict[str, object] = {
+    "question_id": "cloud:gcp", "question": "Have you run workloads on GCP?", "answer": "Yes: two years of batch workloads on GCP.",
+    "tag": "technical", "owner_profile_id": "prof_1", "shared": False, "legacy": False, "edited": False, "confirmed_from": None,
+    "first_answered_at": "2026-10-01T15:00:00.000000Z", "updated_at": "2026-10-01T15:00:00.000000Z", "revision": 1, "written_by": "operator",
+    "history": [{"at": "2026-10-01T15:00:00.000000Z", "by": "operator", "action": "answered"}],
+    "postings": [{"job_identity": _JOB_URL, "title": "Software Engineer", "company": "Acme", "url": _JOB_URL, "kind": "answered", "at": "2026-10-01T15:00:00.000000Z"}],
+    "record_id": "rec_1", "revision_id": "rev_1",
+}
+_STORY_BANK_STORY_REQUEST: dict[str, object] = {
+    "question": "Tell me about a database migration you led",
+    "answer": (
+        "Situation: a 4 TB Postgres primary was close to its disk limit. Task: move it to a new cluster with no downtime. "
+        "Action: led three engineers through a dual-write cut-over with a replayable backfill. Result: zero lost writes and p95 latency down 30%."
+    ),
+    "actor": "agent",
+}
+_STORY_BANK_STORY: dict[str, object] = {
+    **_STORY_BANK_ENTRY, "question_id": "story:database_led_migration", "question": _STORY_BANK_STORY_REQUEST["question"],
+    "answer": _STORY_BANK_STORY_REQUEST["answer"], "tag": "leadership", "written_by": "agent", "postings": [],
+    "history": [{"at": "2026-10-01T15:00:00.000000Z", "by": "agent", "action": "added"}],
+}
+_STORY_BANK_SUGGESTION: dict[str, object] = {
+    "question_id": "tooling:cloud_google_platform", "bank_question_id": "cloud:gcp", "bank_question": "Have you run workloads on GCP?",
+    "answer": "Yes: two years of batch workloads on GCP.", "score": 1.0, "owner_profile_id": "prof_1", "shared": False,
+}
+_STORY_BANK_EXAMPLE: dict[str, object] = {
+    "schema_version": "scout-story-bank-response:1", "profile_id": "prof_1", "entries": [_STORY_BANK_ENTRY], "total": 1, "tags": ["technical"],
+    "sharing": {"share_with": None, "read_by": [], "profiles": [{"profile_id": "prof_2", "label": "second"}]},
+}
+_STORY_BANK_NOTE = (
+    "`entries` are the profile's own, then (with `shared: true`) those of the one profile named by `sharing.share_with`. Each entry: the "
+    "`question_id` (its id in the other routes), the `question` as asked (the id itself for an answer saved before the bank), the `answer`, "
+    "a model-free `tag` (technical, experience-level, eligibility, education, domain, leadership, conflict, failure, collaboration, "
+    "system-design, delivery, skill, other; or your own), `postings` (the jobs that asked it, confirmed a suggestion with it, or whose "
+    "assessment reused it: kind answered | confirmed | reused), `first_answered_at`, `updated_at` (send it back on PUT and DELETE), `revision`, "
+    "`written_by` (operator | agent) and the last writes in `history`. `legacy: true` marks an answer saved before the bank: it belongs to the "
+    "profile named in its answer history, else to the default profile. `total` counts the entries before `q` and `tag` narrow them. "
+    "An assessment of this profile gets the entries as one-line summaries and reuses one that covers a requirement instead of asking again."
+)
+
+_CHECK_TIMES_EXAMPLE: dict[str, object] = {
+    "weekdays": ["03:00", "07:00", "09:00", "11:00", "13:00", "15:00", "17:00", "19:00"],
+    "weekends": ["09:00", "18:00"],
+}
 _BACKGROUND_SETTINGS_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-background-settings:1",
     "readable": True,
     "settings": {
-        "sources": {"auto_refresh": True},
+        "sources": {"auto_refresh": True, "check_times": _CHECK_TIMES_EXAMPLE},
         "tagging": {"model_enabled": True, "backfill_enabled": False, "tag_backfill_model": "configured"},
         "snapshot": {"enabled": True, "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json"},
     },
     "effective": {
-        "sources": {"auto_refresh": True, "source": "default"},
+        "sources": {
+            "auto_refresh": True,
+            "source": "default",
+            "check_times": {**_CHECK_TIMES_EXAMPLE, "source": "default", "default": _CHECK_TIMES_EXAMPLE},
+        },
         "tagging": {"model_enabled": True, "backfill_enabled": False, "tag_backfill_model": "configured", "source": "default"},
         "snapshot": {
             "enabled": True,
@@ -129,7 +178,9 @@ _BACKGROUND_SETTINGS_NOTE = (
     "`effective` is what the background jobs act on now, each block with the `source` that decided it: default, setting, "
     "environment (an environment variable overrides the file) or settings_unreadable. `readable` is false when the file exists "
     "and cannot be read: every background job is then off. `sources.auto_refresh` off stops all background work, the model "
-    "tagging included; `tagging.model_enabled` lets a model tag titles the rules cannot place, `tagging.backfill_enabled` also "
+    "tagging included; `sources.check_times` is when the background checks run: `weekdays` and `weekends`, each 1 to 12 "
+    "24-hour HH:MM times in the machine's local time (in `effective` with its own `source`, and `default`: the times a reset "
+    "puts back); `tagging.model_enabled` lets a model tag titles the rules cannot place, `tagging.backfill_enabled` also "
     "tags titles no active profile can reach, with `tagging.tag_backfill_model`; `snapshot.enabled` allows the metadata snapshot "
     "download from `snapshot.manifest_url`."
 )
@@ -656,7 +707,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         _BACKGROUND_SETTINGS_EXAMPLE,
         schema_version="scout-background-settings:1",
         params=(
-            _b("sources", "object", "{auto_refresh: boolean}: the hourly background refresh of the sources."),
+            _b(
+                "sources", "object",
+                "{auto_refresh: boolean, check_times: {weekdays: [HH:MM, ...], weekends: [HH:MM, ...]}}: the background checks "
+                "of the sources and the local times they run at. A day left out keeps its times; null for a day, or for "
+                "check_times, puts the default times back.",
+            ),
             _b("tagging", "object", "{model_enabled: boolean, backfill_enabled: boolean, tag_backfill_model: configured|haiku|openai}."),
             _b("snapshot", "object", "{enabled: boolean, manifest_url: an http(s) URL, or null for the default location}."),
         ),
@@ -665,8 +721,9 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         description=(
             "Send only the keys to change; at least one. Every other key of the project's settings.json is kept, and the file is "
             "replaced in one step. The refresh thread reads the file at every look and is woken by this call, so turning "
-            "`sources.auto_refresh` off stops the hourly refresh and the model tagging at once (an update already running "
-            "finishes). 409 settings_unreadable: the stored file is not one Scout can read; it is left as it is. The answer is the "
+            "`sources.auto_refresh` off stops the background checks and the model tagging at once (an update already running "
+            "finishes), and new `sources.check_times` decide the next check. A list of check times is stored sorted, without "
+            "repeats; an empty list, more than 12 times or anything that is not HH:MM (00:00 to 23:59) is 422 invalid_value. 409 settings_unreadable: the stored file is not one Scout can read; it is left as it is. The answer is the "
             "GET body after the change. " + _BACKGROUND_SETTINGS_NOTE
         ),
     ),

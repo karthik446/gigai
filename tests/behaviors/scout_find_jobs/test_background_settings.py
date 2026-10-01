@@ -11,7 +11,10 @@ round trip and validation; here:
   brings the drain back; the ``PUT`` itself wakes the thread;
 * the ``tags`` / ``text_index`` / ``refresh`` blocks carry the right counts
   on a synthetic home, with the queue's failures, last error and retry time;
-* the writer changes only what it is given, atomically, under concurrent writes.
+* the writer changes only what it is given, atomically, under concurrent writes;
+* 0110-033: ``sources.check_times`` is read back, validated, written one day
+  at a time, reset by ``null``, and a ``PUT`` moves the running thread's next
+  check (a fake clock in a fixed zone).
 """
 
 from __future__ import annotations
@@ -36,7 +39,14 @@ from gigai.scout.find_jobs.background_settings import (
 from gigai.scout.find_jobs.model_tag import MODEL_TAGS_ENV, DrainResult, tagging_setting
 from gigai.scout.find_jobs.posting_tags import normalize_title, tag_new_titles
 from gigai.scout.find_jobs.present_api import ScoutFindJobsBackend, serve
-from gigai.scout.find_jobs.refresh_tick import AUTO_REFRESH_ENV, STATE_DISABLED, RefreshTicker, auto_refresh_setting, settings_path
+from gigai.scout.find_jobs.refresh_tick import (
+    AUTO_REFRESH_ENV,
+    STATE_DISABLED,
+    RefreshTicker,
+    auto_refresh_setting,
+    check_schedule_setting,
+    settings_path,
+)
 from gigai.scout.find_jobs.snapshot import MANIFEST_URL_ENV, SNAPSHOT_ENV, snapshot_setting
 from gigai.scout.find_jobs.sources_status import refresh_block, tags_block, text_index_block
 from gigai.scout.find_jobs.text_index import TextPosting
@@ -142,7 +152,8 @@ def test_a_put_that_turns_auto_refresh_off_silences_the_running_thread_and_on_br
 
         off = client.put("/api/settings/background", json={"sources": {"auto_refresh": False}})
         assert off.status_code == 200, off.text
-        assert off.json()["effective"]["sources"] == {"auto_refresh": False, "source": "setting"}
+        effective = off.json()["effective"]["sources"]
+        assert (effective["auto_refresh"], effective["source"]) == (False, "setting")
         # The PUT woke the thread; its next look read the file and stood down.
         _wait_for(lambda: served.looks == 2)
         assert ticker._last_state == STATE_DISABLED
@@ -178,8 +189,8 @@ def test_a_written_setting_is_what_each_reader_returns_on_its_next_read(tmp_path
     assert (snapshot.enabled, snapshot.manifest_url, snapshot.source) == (False, "https://data.example.test/manifest.json", "setting")
     # The environment still wins over the file, and the API says which decided.
     body = background_settings(home, target, environ={AUTO_REFRESH_ENV: "1"})
-    assert body["settings"]["sources"] == {"auto_refresh": False}
-    assert body["effective"]["sources"] == {"auto_refresh": True, "source": "environment"}
+    assert body["settings"]["sources"]["auto_refresh"] is False
+    assert (body["effective"]["sources"]["auto_refresh"], body["effective"]["sources"]["source"]) == (True, "environment")
 
 
 # --- the status blocks on a synthetic home ------------------------------------------------
@@ -425,9 +436,196 @@ def test_a_put_for_a_target_with_no_scout_project_is_404(tmp_path: Path) -> None
             assert refused.status_code == 404 and refused.json()["error"]["code"] == "target_unavailable", refused.text
             # Reading still answers: with no project there is no file, so the defaults apply.
             defaults = client.get("/api/settings/background")
-            assert defaults.status_code == 200 and defaults.json()["settings"]["sources"] == {"auto_refresh": True}
+            assert defaults.status_code == 200 and defaults.json()["settings"]["sources"] == {"auto_refresh": True, "check_times": _DEFAULT_TIMES}
+            assert defaults.json()["effective"]["sources"]["check_times"]["source"] == "default"
     finally:
         server.shutdown()
         server.server_close()
         serving.join(timeout=5)
     assert not (home / "scout").exists()
+
+
+# --- 0110-033: sources.check_times ----------------------------------------------------------
+
+_DEFAULT_TIMES = {
+    "weekdays": ["03:00", "07:00", "09:00", "11:00", "13:00", "15:00", "17:00", "19:00"],
+    "weekends": ["09:00", "18:00"],
+}
+
+
+def test_check_times_are_read_back_written_one_day_at_a_time_and_reset_by_null(tmp_path: Path) -> None:
+    home, target = _installed(tmp_path)
+    path = settings_path(home, target)
+
+    fresh = background_settings(home, target)
+    assert fresh["settings"]["sources"] == {"auto_refresh": True, "check_times": _DEFAULT_TIMES}
+    assert fresh["effective"]["sources"]["check_times"] == {**_DEFAULT_TIMES, "source": "default", "default": _DEFAULT_TIMES}
+    assert not path.exists()
+
+    # One day named: sorted, repeats dropped; the other day keeps its default and is not written.
+    write_background_settings(home, target, validate_patch({"sources": {"check_times": {"weekdays": ["13:30", "07:00", "13:30"]}}}))
+    assert json.loads(path.read_text(encoding="utf-8")) == {"schema_version": "scout-settings:1", "sources": {"check_times": {"weekdays": ["07:00", "13:30"]}}}
+    body = background_settings(home, target)
+    assert body["settings"]["sources"]["check_times"] == {"weekdays": ["07:00", "13:30"], "weekends": _DEFAULT_TIMES["weekends"]}
+    assert body["effective"]["sources"]["check_times"] == {
+        "weekdays": ["07:00", "13:30"], "weekends": _DEFAULT_TIMES["weekends"], "source": "setting", "default": _DEFAULT_TIMES,
+    }
+    # The thread's own reader returns the same times (it reads the file at every look).
+    schedule = check_schedule_setting(home, target)
+    assert (schedule.schedule.weekdays, schedule.schedule.weekends, schedule.source) == (("07:00", "13:30"), ("09:00", "18:00"), "setting")
+
+    # The other day: the first one stays; so does a key this version does not know, and auto_refresh.
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    stored["sources"]["kept"] = [1]
+    path.write_text(json.dumps(stored), encoding="utf-8")
+    write_background_settings(home, target, validate_patch({"sources": {"auto_refresh": False, "check_times": {"weekends": ["10:00"]}}}))
+    assert json.loads(path.read_text(encoding="utf-8"))["sources"] == {
+        "check_times": {"weekdays": ["07:00", "13:30"], "weekends": ["10:00"]}, "kept": [1], "auto_refresh": False,
+    }
+
+    # null for one day: its default again; the other day is untouched.
+    write_background_settings(home, target, validate_patch({"sources": {"check_times": {"weekdays": None}}}))
+    assert json.loads(path.read_text(encoding="utf-8"))["sources"]["check_times"] == {"weekends": ["10:00"]}
+    assert background_settings(home, target)["settings"]["sources"]["check_times"] == {"weekdays": _DEFAULT_TIMES["weekdays"], "weekends": ["10:00"]}
+
+    # null for the whole setting: both defaults; nothing else in the block is lost.
+    write_background_settings(home, target, validate_patch({"sources": {"check_times": None}}))
+    assert json.loads(path.read_text(encoding="utf-8"))["sources"] == {"kept": [1], "auto_refresh": False}
+    assert background_settings(home, target)["effective"]["sources"]["check_times"]["source"] == "default"
+
+    # The last day reset empties the stored object: the key goes too.
+    write_background_settings(home, target, validate_patch({"sources": {"check_times": {"weekends": ["08:00"]}}}))
+    write_background_settings(home, target, validate_patch({"sources": {"check_times": {"weekends": None}}}))
+    assert "check_times" not in json.loads(path.read_text(encoding="utf-8"))["sources"]
+
+
+def test_stored_times_that_cannot_be_used_show_the_defaults_and_say_so_and_a_put_replaces_them(tmp_path: Path) -> None:
+    home, target = _installed(tmp_path)
+    path = settings_path(home, target)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schema_version": "scout-settings:1", "sources": {"check_times": {"weekdays": ["noon"]}}}), encoding="utf-8")
+
+    body = background_settings(home, target)
+    assert body["readable"] is True  # the file is readable; only its times are not usable
+    assert body["settings"]["sources"]["check_times"] == _DEFAULT_TIMES
+    assert body["effective"]["sources"]["check_times"]["source"] == "settings_unreadable"
+
+    write_background_settings(home, target, validate_patch({"sources": {"check_times": {"weekdays": ["12:00"]}}}))
+    assert background_settings(home, target)["effective"]["sources"]["check_times"]["source"] == "setting"
+    assert check_schedule_setting(home, target).schedule.weekdays == ("12:00",)
+
+    # A stored value that is not even an object is replaced whole.
+    path.write_text(json.dumps({"schema_version": "scout-settings:1", "sources": {"check_times": "hourly"}}), encoding="utf-8")
+    write_background_settings(home, target, validate_patch({"sources": {"check_times": {"weekends": ["11:00"]}}}))
+    assert json.loads(path.read_text(encoding="utf-8"))["sources"]["check_times"] == {"weekends": ["11:00"]}
+
+
+@pytest.mark.parametrize(
+    ("check_times", "code"),
+    [
+        ("07:00", "wrong_type"),
+        (["07:00"], "wrong_type"),
+        ({}, "invalid_value"),
+        ({"weekdays": "07:00"}, "wrong_type"),
+        ({"weekdays": [7]}, "wrong_type"),
+        ({"weekdays": []}, "invalid_value"),  # 1 to 12 times: none is refused
+        ({"weekends": [f"{hour:02d}:00" for hour in range(13)]}, "invalid_value"),  # 13
+        ({"weekdays": ["7:00"]}, "invalid_value"),  # HH:MM, two digits each
+        ({"weekdays": ["07:0"]}, "invalid_value"),
+        ({"weekdays": ["24:00"]}, "invalid_value"),
+        ({"weekdays": ["07:60"]}, "invalid_value"),
+        ({"weekdays": [" 07:00"]}, "invalid_value"),
+        ({"weekdays": ["07:00", "noon"]}, "invalid_value"),
+        ({"saturday": ["07:00"]}, "unknown_key"),
+        ({"weekdays": ["07:00"], "weekends": ["25:00"]}, "invalid_value"),  # one bad day refuses both
+    ],
+)
+def test_check_times_a_put_refuses(tmp_path: Path, check_times: object, code: str) -> None:
+    with pytest.raises(SettingsError) as refused:
+        validate_patch({"sources": {"check_times": check_times}})
+    assert refused.value.code == code, str(refused.value)
+
+
+def test_check_times_twelve_a_day_is_the_most_and_repeats_do_not_count() -> None:
+    twelve = [f"{hour:02d}:30" for hour in range(12)]
+    assert validate_patch({"sources": {"check_times": {"weekdays": [*reversed(twelve), "00:30"]}}})["sources"]["check_times"] == {"weekdays": twelve}
+
+
+def test_a_put_of_check_times_moves_the_running_threads_next_check_on_a_fake_clock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The thread reads the file at every look: a saved time is the next check, with no restart."""
+
+    from gigai.scout.find_jobs import sources_update
+    from gigai.scout.find_jobs.company_index import CompanyIndex, index_stamp
+    from gigai.scout.find_jobs.refresh_tick import STATE_WAITING, decide
+    from gigai.scout.find_jobs.sources_update import STATUS_SUCCEEDED, run_refresh_tick, run_sources_update
+
+    from .test_refresh_core import _project
+    from .test_refresh_schedule import FAST, THURSDAY, ZONE, _Clock
+    from .test_sources_update import _Boards
+
+    home, target = _project(tmp_path)
+    boards = _Boards()
+    clock = _Clock(THURSDAY + timedelta(hours=7, minutes=30))
+    monkeypatch.setattr(sources_update, "index_stamp", lambda moment=None: index_stamp(moment if moment is not None else clock.now))
+    with boards.client() as client:
+        assert run_sources_update(home_root=home, target=target, client=client, limits=FAST).status == STATUS_SUCCEEDED  # the first update, 07:30
+
+    def fast_tick(*args, **more):
+        return run_refresh_tick(*args, limits=FAST, **more)
+
+    def next_check() -> datetime | None:
+        """When the thread's next look would run a check: its own decision, at the fake clock's now."""
+
+        index = CompanyIndex.for_home(home)
+        return decide(
+            index.read_update_summary(), indexed=True, enabled=True, now=clock.now,
+            schedule=ticker.schedule_setting().schedule, tz=ZONE,
+        ).next_tick_at
+
+    def at(hours: int, minutes: int = 0) -> datetime:
+        return THURSDAY + timedelta(hours=hours, minutes=minutes)
+
+    server = serve(backend=ScoutFindJobsBackend(home_root=home, target=target), bind=("127.0.0.1", 0))
+    ticker = RefreshTicker(home_root=home, target=target, client_factory=boards.client, clock=clock, run_tick=fast_tick, tz=ZONE, model_tags=False)
+    server.refresh_ticker = ticker  # stepped by hand below: the looks are the test's, not a thread's
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address[0], server.server_address[1]
+    try:
+        with httpx.Client(base_url=f"http://{host}:{port}", timeout=30.0) as client:
+            clock.now = at(8, 10)
+            assert ticker.step() == STATE_WAITING
+            assert next_check() == at(9)  # the default 09:00
+
+            saved = client.put("/api/settings/background", json={"sources": {"check_times": {"weekdays": ["12:00", "08:30"]}}})
+            assert saved.status_code == 200, saved.text
+            assert saved.json()["settings"]["sources"]["check_times"]["weekdays"] == ["08:30", "12:00"]
+            assert client.get("/api/sources/update").json()["refresh"]["schedule"]["weekdays"] == ["08:30", "12:00"]
+            assert next_check() == at(8, 30)
+
+            clock.now = at(8, 29)
+            assert ticker.step() == STATE_WAITING
+            clock.now = at(8, 30)
+            assert ticker.step() == "ticked"
+            clock.now = at(9)  # the default's 09:00 is no longer a check time
+            assert ticker.step() == STATE_WAITING
+            assert next_check() == at(12)
+
+            # Back to the default times: the 08:30 check covers 09:00 (it started within 45 minutes of it), so 11:00 is next.
+            reset = client.put("/api/settings/background", json={"sources": {"check_times": None}})
+            assert reset.status_code == 200, reset.text
+            assert reset.json()["effective"]["sources"]["check_times"]["source"] == "default"
+            assert next_check() == at(11)
+            clock.now = at(11)
+            assert ticker.step() == "ticked"
+
+            # A refused body changes nothing the thread reads.
+            before = settings_path(home, target).read_bytes() if settings_path(home, target).exists() else None
+            refused = client.put("/api/settings/background", json={"sources": {"check_times": {"weekdays": ["8:30"]}}})
+            assert refused.status_code == 422 and refused.json()["error"]["code"] == "invalid_value", refused.text
+            assert (settings_path(home, target).read_bytes() if settings_path(home, target).exists() else None) == before
+            assert next_check() == at(13)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)

@@ -25,6 +25,7 @@ from ..contracts import (
     SourceToggles,
     is_location_placeholder,
 )
+from .common import reads_committed
 from .config import _prefs_prefill_from_config
 from .server import (
     ConfigMissingError,
@@ -320,6 +321,7 @@ def _with_selected_profile_settings(backend: object, prefs_json: object) -> obje
 class SetupRoutesMixin:
     """``Handler`` mixin: ``GET``/``PUT /api/setup``."""
 
+    @reads_committed
     def _handle_get_setup(self) -> None:
         try:
             prefs_json = self._backend.read_setup()

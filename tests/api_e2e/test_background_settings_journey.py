@@ -14,6 +14,9 @@ snapshot download).
    changes nothing.
 6. A stored file Scout cannot read is never overwritten: 409, bytes intact.
 7. A foreign ``Origin`` is 403.
+8. 0110-033: ``sources.check_times`` round trip (one day at a time, sorted,
+   reset by ``null``), its invalid bodies, and the sources status showing the
+   saved times as the schedule.
 
 The harness forces ``GIGAI_SCOUT_AUTO_REFRESH`` for every journey server (so
 no journey gets a tick it did not ask for), which is why ``effective`` says
@@ -43,8 +46,12 @@ from tests.api_e2e.harness import (
 )
 
 DEFAULT_URL = "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json"
+DEFAULT_TIMES = {
+    "weekdays": ["03:00", "07:00", "09:00", "11:00", "13:00", "15:00", "17:00", "19:00"],
+    "weekends": ["09:00", "18:00"],
+}
 DEFAULTS = {
-    "sources": {"auto_refresh": True},
+    "sources": {"auto_refresh": True, "check_times": DEFAULT_TIMES},
     "tagging": {"model_enabled": True, "backfill_enabled": False, "tag_backfill_model": "configured"},
     "snapshot": {"enabled": True, "manifest_url": DEFAULT_URL},
 }
@@ -73,7 +80,11 @@ def test_background_settings_round_trip_validate_and_keep_what_they_do_not_know(
             "settings": DEFAULTS,
             "effective": {
                 # The harness and the suite's conftest override these two for every journey server.
-                "sources": {"auto_refresh": False, "source": "environment"},
+                "sources": {
+                    "auto_refresh": False,
+                    "source": "environment",
+                    "check_times": {**DEFAULT_TIMES, "source": "default", "default": DEFAULT_TIMES},
+                },
                 "tagging": {"model_enabled": False, "backfill_enabled": False, "tag_backfill_model": "configured", "source": "environment"},
                 "snapshot": {"enabled": True, "manifest_url": DEFAULT_URL, "source": "default"},
             },
@@ -90,7 +101,7 @@ def test_background_settings_round_trip_validate_and_keep_what_they_do_not_know(
         assert saved.status_code == 200, saved.text
         put_latency.assert_within_budget()
         expected = {
-            "sources": {"auto_refresh": False},
+            "sources": {"auto_refresh": False, "check_times": DEFAULT_TIMES},
             "tagging": {"model_enabled": True, "backfill_enabled": True, "tag_backfill_model": "haiku"},
             "snapshot": {"enabled": False, "manifest_url": "https://example.test/scout/manifest.json"},
         }
@@ -149,6 +160,19 @@ def test_background_settings_round_trip_validate_and_keep_what_they_do_not_know(
             ({}, "invalid_value"),
             ({"sources": {}}, "invalid_value"),
             ([], "wrong_type"),
+            # 0110-033: the check times.
+            ({"sources": {"check_times": "09:00"}}, "wrong_type"),
+            ({"sources": {"check_times": {}}}, "invalid_value"),
+            ({"sources": {"check_times": {"weekdays": "09:00"}}}, "wrong_type"),
+            ({"sources": {"check_times": {"weekdays": [9]}}}, "wrong_type"),
+            ({"sources": {"check_times": {"weekdays": []}}}, "invalid_value"),
+            ({"sources": {"check_times": {"weekdays": [f"{hour:02d}:15" for hour in range(13)]}}}, "invalid_value"),
+            ({"sources": {"check_times": {"weekdays": ["9:00"]}}}, "invalid_value"),
+            ({"sources": {"check_times": {"weekdays": ["24:00"]}}}, "invalid_value"),
+            ({"sources": {"check_times": {"weekends": ["12:60"]}}}, "invalid_value"),
+            ({"sources": {"check_times": {"weekdays": ["noon"]}}}, "invalid_value"),
+            ({"sources": {"check_times": {"mondays": ["09:00"]}}}, "unknown_key"),
+            ({"sources": {"auto_refresh": True, "check_times": {"weekdays": ["09:00"], "weekends": ["9"]}}}, "invalid_value"),
             # One bad key refuses the whole body: the good one beside it is not written.
             ({"sources": {"auto_refresh": True}, "tagging": {"model_enabled": "yes"}}, "wrong_type"),
         ):
@@ -165,7 +189,9 @@ def test_background_settings_round_trip_validate_and_keep_what_they_do_not_know(
         assert path.read_bytes() == broken
         unreadable = client.get("/api/settings/background").json()
         assert unreadable["readable"] is False
-        assert unreadable["settings"]["sources"] == {"auto_refresh": False} and unreadable["effective"]["snapshot"]["source"] == "settings_unreadable"
+        assert unreadable["settings"]["sources"] == {"auto_refresh": False, "check_times": DEFAULT_TIMES}
+        assert unreadable["effective"]["snapshot"]["source"] == "settings_unreadable"
+        assert unreadable["effective"]["sources"]["check_times"]["source"] == "settings_unreadable"
         path.write_bytes(before_bytes)
         assert client.get("/api/settings/background").json()["readable"] is True
 
@@ -173,6 +199,43 @@ def test_background_settings_round_trip_validate_and_keep_what_they_do_not_know(
         evil = client.put("/api/settings/background", json={"sources": {"auto_refresh": True}}, headers={"Origin": "https://evil.example"})
         assert evil.status_code == 403, evil.text
         assert path.read_bytes() == before_bytes
+
+        # -- 8. 0110-033: the check times ----------------------------------------
+        # One day, unsorted with a repeat: stored sorted and once; the other day keeps its default and is not written.
+        times = client.put("/api/settings/background", json={"sources": {"check_times": {"weekdays": ["16:30", "08:00", "12:00", "08:00"]}}})
+        assert times.status_code == 200, times.text
+        assert times.json()["settings"]["sources"]["check_times"] == {"weekdays": ["08:00", "12:00", "16:30"], "weekends": DEFAULT_TIMES["weekends"]}
+        assert times.json()["effective"]["sources"]["check_times"] == {
+            "weekdays": ["08:00", "12:00", "16:30"], "weekends": DEFAULT_TIMES["weekends"], "source": "setting", "default": DEFAULT_TIMES,
+        }
+        assert client.get("/api/settings/background").json() == times.json()
+        stored_sources = json.loads(path.read_text(encoding="utf-8"))["sources"]
+        assert stored_sources["check_times"] == {"weekdays": ["08:00", "12:00", "16:30"]}
+        assert stored_sources["some_other_key"] == 7 and stored_sources["auto_refresh"] is False  # nothing else in the block moved
+        # The schedule the background checks follow is the saved one.
+        schedule = client.get("/api/sources/update").json()["refresh"]["schedule"]
+        assert (schedule["kind"], schedule["weekdays"], schedule["weekends"], schedule["source"]) == ("times", ["08:00", "12:00", "16:30"], DEFAULT_TIMES["weekends"], "setting")
+        # The other day: the first stays.
+        weekend = client.put("/api/settings/background", json={"sources": {"check_times": {"weekends": ["10:00"]}}})
+        assert weekend.status_code == 200, weekend.text
+        assert weekend.json()["settings"]["sources"]["check_times"] == {"weekdays": ["08:00", "12:00", "16:30"], "weekends": ["10:00"]}
+        # A refused body changes nothing.
+        kept_bytes = path.read_bytes()
+        refused_times = client.put("/api/settings/background", json={"sources": {"check_times": {"weekdays": ["8:00"]}}})
+        assert refused_times.status_code == 422 and refused_times.json()["error"]["code"] == "invalid_value", refused_times.text
+        nested_times = client.put("/api/settings/background", json={"sources": {"check_times": {"mondays": ["09:00"]}}})
+        assert nested_times.status_code == 422 and nested_times.json()["error"]["allowed_keys"] == ["weekdays", "weekends"], nested_times.text
+        assert path.read_bytes() == kept_bytes
+        # null for one day: that day's default; null for the setting: both defaults, and the key leaves the file.
+        one_default = client.put("/api/settings/background", json={"sources": {"check_times": {"weekdays": None}}})
+        assert one_default.status_code == 200, one_default.text
+        assert one_default.json()["settings"]["sources"]["check_times"] == {"weekdays": DEFAULT_TIMES["weekdays"], "weekends": ["10:00"]}
+        both_default = client.put("/api/settings/background", json={"sources": {"check_times": None}})
+        assert both_default.status_code == 200, both_default.text
+        assert both_default.json()["settings"]["sources"]["check_times"] == DEFAULT_TIMES
+        assert both_default.json()["effective"]["sources"]["check_times"]["source"] == "default"
+        assert "check_times" not in json.loads(path.read_text(encoding="utf-8"))["sources"]
+        assert client.get("/api/sources/update").json()["refresh"]["schedule"]["source"] == "default"
 
         assert_clean_and_healthy(workpad, home)
     finally:

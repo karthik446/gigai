@@ -62,6 +62,7 @@ from ...profile_records import (
     write_profile,
 )
 from ..contracts import PinnedResume
+from .common import reads_committed
 from ..effective_config import default_search_settings
 
 
@@ -295,6 +296,7 @@ class ProfilesRoutesMixin:
 
     # -- GET /api/profiles --------------------------------------------------
 
+    @reads_committed
     def _handle_get_profiles(self) -> None:
         try:
             resolved = self._resolve_profiles_gig()

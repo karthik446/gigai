@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import fnmatch
 import os
@@ -35,6 +35,11 @@ from .workpad import (
     WORKPAD_GIT_USER_NAME,
     WORKPAD_V2_GITIGNORE,
     WORKPAD_LAYOUT_PATH,
+    committed_read_cache_active,
+    layout_paths_touched,
+    read_cache_key_lock as _read_cache_key_lock,
+    read_still_holds,
+    workpad_fingerprint,
     workpad_layout_version,
 )
 
@@ -249,10 +254,17 @@ class JournalWriter:
 
 @dataclass(frozen=True)
 class JournalSnapshot:
-    """Exact committed bytes plus a checked working-tree mirror at one HEAD."""
+    """Exact committed bytes plus a checked working-tree mirror at one HEAD.
+
+    ``read_token`` (0110-033) is set on a snapshot answered inside
+    ``workpad.committed_read_cache``: two snapshots with the same token hold
+    the same artifacts, whatever their heads, so what was built from one need
+    not be built again from the other. ``None`` says nothing.
+    """
 
     head: str
     artifacts: dict[str, bytes]
+    read_token: object | None = field(default=None, compare=False, repr=False)
 
 
 def run_with_journal_writer(
@@ -609,6 +621,70 @@ _MOUNT_PROBE_CACHE_LOCK = threading.Lock()
 _mount_probe_cache: dict[tuple[str, int, int], bool] = {}
 
 
+# 0110-033: what a read keeps inside ``workpad.committed_read_cache`` (and
+# only there). Every entry is held with the workpad fingerprint it was read
+# at. A journal write moves the head: an entry is then used again only when
+# none of the commits since touched what it was read from
+# (``workpad.read_still_holds``), and read again otherwise. Nothing is kept
+# when the fingerprint moved while the read ran, or when the head cannot be
+# read from the ``.git`` files.
+#
+# Bounded by bytes, least recently used out first: a run's sealed outputs are
+# megabytes, and what is kept stays in memory. A read larger than the bound
+# is not kept at all (it is made every time, as before).
+_READ_CACHE_LOCK = threading.Lock()
+_validated_workpads: dict[tuple[str, str, str], tuple[object, ...]] = {}
+_SNAPSHOT_CACHE_MAX_BYTES = 192 * 1024 * 1024
+_ARTIFACT_CACHE_MAX_BYTES = 64 * 1024 * 1024
+_READ_CACHE_MAX_ENTRIES = 4096
+
+
+class _KeptReads:
+    """key -> (fingerprint, value), least recently used first, at most ``max_bytes`` of values."""
+
+    def __init__(self, max_bytes: int) -> None:
+        self.max_bytes = max_bytes
+        self.bytes = 0
+        self._entries: dict[tuple[object, ...], tuple[tuple[object, ...], object, int]] = {}
+
+    def get(self, key: tuple[object, ...]) -> tuple[tuple[object, ...], object] | None:
+        with _READ_CACHE_LOCK:
+            entry = self._entries.pop(key, None)
+            if entry is None:
+                return None
+            self._entries[key] = entry  # the most recently used is last
+            return entry[0], entry[1]
+
+    def put(self, key: tuple[object, ...], fingerprint: tuple[object, ...], value: object, size: int) -> None:
+        with _READ_CACHE_LOCK:
+            old = self._entries.pop(key, None)
+            if old is not None:
+                self.bytes -= old[2]
+            if size > self.max_bytes:
+                return
+            self._entries[key] = (fingerprint, value, size)
+            self.bytes += size
+            while self.bytes > self.max_bytes or len(self._entries) > _READ_CACHE_MAX_ENTRIES:
+                _first, dropped = next(iter(self._entries.items()))
+                del self._entries[_first]
+                self.bytes -= dropped[2]
+
+    def clear(self) -> None:
+        with _READ_CACHE_LOCK:
+            self._entries.clear()
+            self.bytes = 0
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def __eq__(self, other: object) -> bool:  # ``cache == {}`` reads as "nothing kept"
+        return self._entries == other
+
+
+_snapshot_cache = _KeptReads(_SNAPSHOT_CACHE_MAX_BYTES)
+_artifact_cache = _KeptReads(_ARTIFACT_CACHE_MAX_BYTES)
+
+
 def _mount_probe_cache_key(root: Path) -> tuple[str, int, int] | None:
     """Identity of the mount to cache a PASS against, or ``None`` if it
 
@@ -656,6 +732,29 @@ def _validate_workpad(workpad: Path, project_id: str, gig_id: str) -> Path:
     root = workpad.resolve(strict=True)
     if root != workpad or root.is_symlink() or not root.is_dir():
         raise JournalConflictError("journal workpad is unavailable or redirected")
+    # 0110-033: inside a read (``workpad.committed_read_cache``), a workpad
+    # that passed these checks at this exact fingerprint is not asked again;
+    # readers arriving together ask once.
+    cache_key = (os.fspath(root), project_id, gig_id)
+    checked_at = workpad_fingerprint(root) if committed_read_cache_active() else None
+    if checked_at is None:
+        _check_workpad(root, project_id, gig_id)
+        return root
+    with _read_cache_key_lock(("workpad", *cache_key)):
+        with _READ_CACHE_LOCK:
+            passed_at = _validated_workpads.get(cache_key)
+        if passed_at is None or not read_still_holds(root, passed_at, checked_at, layout_paths_touched):
+            _check_workpad(root, project_id, gig_id)
+            if workpad_fingerprint(root) != checked_at:
+                return root  # it moved while it was checked: this pass is not kept
+        with _READ_CACHE_LOCK:
+            _validated_workpads[cache_key] = checked_at
+    return root
+
+
+def _check_workpad(root: Path, project_id: str, gig_id: str) -> None:
+    """The checks of :func:`_validate_workpad`, asked of git every time."""
+
     expected = {
         "user.name": WORKPAD_GIT_USER_NAME,
         "user.email": WORKPAD_GIT_USER_EMAIL,
@@ -675,7 +774,6 @@ def _validate_workpad(workpad: Path, project_id: str, gig_id: str) -> Path:
             raise JournalConflictError("journal workpad ownership marker mismatches")
     if _git(root, "remote").stdout.strip():
         raise JournalConflictError("journal workpad has a remote")
-    return root
 
 
 def _validate_recovery_migration_root(workpad: Path, project_id: str, gig_id: str) -> Path:
@@ -1280,7 +1378,47 @@ def read_committed_artifact(
     path must have been added by a journal commit and be listed, with its exact
     bytes, in that commit's handoff metadata.  Callers must not follow paths
     from the record itself before this check succeeds.
+
+    0110-033: inside ``workpad.committed_read_cache`` a proven artifact is
+    kept while the workpad's fingerprint is unchanged and no later commit
+    touched its path; a refusal is never kept.
     """
+
+    def read(pinned: str | None) -> tuple[bytes, str]:
+        return _read_committed_artifact(
+            workpad=workpad, project_id=project_id, gig_id=gig_id, path=path, head=pinned,
+            allow_replaced_run_details=allow_replaced_run_details,
+            allow_replaced_manifests=allow_replaced_manifests,
+        )
+
+    before = workpad_fingerprint(workpad) if committed_read_cache_active() else None
+    if before is None:
+        return read(head)
+    key = ("artifact", os.fspath(workpad), project_id, gig_id, path, head, allow_replaced_run_details, allow_replaced_manifests)
+    with _read_cache_key_lock(key):
+        held = _artifact_cache.get(key)
+        if held is not None:
+            # A caller's own pinned head does not move with the journal's: only the workpad must be the same.
+            holds = held[0][1:] == before[1:] if head is not None else read_still_holds(
+                workpad, held[0], before, lambda touched: path in touched
+            )
+            if holds:
+                kept: tuple[bytes, str] = held[1]  # type: ignore[assignment]
+                _artifact_cache.put(key, before, kept, len(kept[0]))
+                return kept
+        # Pinned to the head the fingerprint names, so what is kept is that head's.
+        data, commit = read(head or str(before[0]))
+        if workpad_fingerprint(workpad) == before:
+            _artifact_cache.put(key, before, (data, commit), len(data))
+        return data, commit
+
+
+def _read_committed_artifact(
+    *, workpad: Path, project_id: str, gig_id: str, path: str, head: str | None = None,
+    allow_replaced_run_details: bool = False,
+    allow_replaced_manifests: bool = False,
+) -> tuple[bytes, str]:
+    """:func:`read_committed_artifact`, read from git every time."""
 
     _validate_ids(project_id, gig_id, None)
     checked = _validate_artifacts((JournalArtifact(path, b""),))[0].path
@@ -1746,6 +1884,67 @@ def read_committed_snapshot(
         prefixes or child_prefixes
     ):
         raise JournalConflictError("journal snapshot prefixes are invalid")
+    # 0110-033: inside ``workpad.committed_read_cache`` a snapshot is kept
+    # while the workpad's fingerprint is unchanged and no later commit touched
+    # a path under what it selected. Each caller gets its own mapping; the
+    # bytes are shared.
+    before = workpad_fingerprint(workpad) if committed_read_cache_active() else None
+    if before is None:
+        return _read_committed_snapshot(workpad, project_id, gig_id, prefixes, child_prefixes, lock_timeout_seconds)
+    try:
+        key = ("snapshot", os.fspath(workpad), project_id, gig_id, prefixes, child_prefixes)
+        hash(key)
+    except TypeError:
+        raise JournalConflictError("journal snapshot prefixes are invalid") from None
+    with _read_cache_key_lock(key):
+        held = _snapshot_cache.get(key)
+        if held is not None and read_still_holds(
+            workpad, held[0], before, lambda touched: _snapshot_selection_touched(prefixes, child_prefixes, touched)
+        ):
+            kept: JournalSnapshot = held[1]  # type: ignore[assignment]
+            if held[0] != before:
+                # The same artifacts at the newer head: nothing they were read from changed.
+                kept = JournalSnapshot(str(before[0]), kept.artifacts, kept.read_token)
+                _snapshot_cache.put(key, before, kept, _snapshot_bytes(kept))
+            return JournalSnapshot(kept.head, dict(kept.artifacts), kept.read_token)
+        snapshot = _read_committed_snapshot(workpad, project_id, gig_id, prefixes, child_prefixes, lock_timeout_seconds)
+        if snapshot.head == before[0] and workpad_fingerprint(workpad) == before:
+            snapshot = JournalSnapshot(snapshot.head, snapshot.artifacts, object())
+            _snapshot_cache.put(key, before, snapshot, _snapshot_bytes(snapshot))
+        return JournalSnapshot(snapshot.head, dict(snapshot.artifacts), snapshot.read_token)
+
+
+def _snapshot_bytes(snapshot: JournalSnapshot) -> int:
+    return sum(len(path) + len(data) for path, data in snapshot.artifacts.items())
+
+
+def _snapshot_selection_touched(
+    prefixes: tuple[str, ...], child_prefixes: tuple[tuple[str, str], ...], touched: frozenset[str]
+) -> bool:
+    """Whether a commit that touched ``touched`` changes what a snapshot of this selection holds."""
+
+    families = [(parent, re.compile(pattern)) for parent, pattern in child_prefixes]
+    for path in touched:
+        if any(path.startswith(prefix) for prefix in prefixes):
+            return True
+        for parent, pattern in families:
+            if path.startswith(parent):
+                child, slash, _rest = path[len(parent):].partition("/")
+                if slash and pattern.fullmatch(child):
+                    return True
+    return False
+
+
+def _read_committed_snapshot(
+    workpad: Path,
+    project_id: str,
+    gig_id: str,
+    prefixes: tuple[str, ...],
+    child_prefixes: tuple[tuple[str, str], ...],
+    lock_timeout_seconds: float,
+) -> JournalSnapshot:
+    """:func:`read_committed_snapshot` after its argument checks, read from git every time."""
+
     root = _validate_workpad(workpad, project_id, gig_id)
     _require_mount_probes(root)
 

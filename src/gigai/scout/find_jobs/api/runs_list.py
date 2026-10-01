@@ -50,6 +50,7 @@ from http import HTTPStatus
 import threading
 from urllib.parse import parse_qs, urlsplit
 
+from .common import reads_committed
 from .run_reads import RunReadsRoutesMixin, _query_int, run_counts
 
 RUNS_LIST_LIMIT_MAX = 500
@@ -190,6 +191,7 @@ class RunsListRoutesMixin(RunReadsRoutesMixin):
     own list of mixins (``server._make_handler``) is left as it is.
     """
 
+    @reads_committed
     def _handle_get_runs_list(self) -> None:
         from ....workpad import resolve_workpad
 

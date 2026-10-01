@@ -12,6 +12,7 @@ from __future__ import annotations
 from http import HTTPStatus
 
 from ..contracts import FindJobsConfig, FindJobsContractError
+from .common import reads_committed
 from .server import ConfigMissingError
 
 
@@ -81,6 +82,7 @@ class ConfigRoutesMixin:
         self._write_json(HTTPStatus.OK, {"sources": {"exa": body["exa"]}})
 
 
+    @reads_committed
     def _handle_get_config(self) -> None:
         try:
             config, _config_bytes = self._backend.read_config()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import os
 from pathlib import Path
@@ -9,7 +10,8 @@ import shutil
 import stat
 import subprocess
 import tempfile
-from typing import Callable
+import threading
+from typing import Callable, Iterator
 
 from .canonical import EntityPrefix, InvalidIdentifierError, validate_entity_id
 from .config import ConfigurationError, GigAIConfig, load_config
@@ -69,6 +71,223 @@ WORKPAD_GIT_USER_NAME = "GigAI Journal"
 WORKPAD_GIT_USER_EMAIL = "local@gigai.invalid"
 PROVISION_FAILPOINTS = ("after_staging", "after_publish", "after_registry")
 ProvisionObserver = Callable[[str], None]
+
+
+# --- 0110-033: reuse of unchanged authority checks inside a read ------------
+#
+# Resolving a workpad costs 13 git subprocesses and a journal read as many
+# again, every call, for facts that only change when the workpad does. A
+# caller that only READS (a GET route) opens ``committed_read_cache()``;
+# inside it, on that thread, a check that already passed for the workpad's
+# current fingerprint is not run again, and ``journal`` keeps the committed
+# reads it made at that fingerprint. Outside the block nothing is reused:
+# every writer, the CLI and every other caller run each check as before.
+#
+# The fingerprint is everything those checks read, taken without git: the
+# journal head (``.git/HEAD`` and its loose ref), the top-level entries, the
+# identity of ``.git``, ``tools`` and ``handoffs``, and the identity, size
+# and change time of ``.git/config``, ``.gitignore`` and the layout marker.
+# A result is only kept when the fingerprint was the same before and after
+# it was computed. A head that cannot be read from the files (a packed ref)
+# is never cached.
+#
+# A journal write moves the head. What was kept at the old head still holds
+# at the new one only when the new head is a straight descendant of the old
+# one and none of the commits between them touched a path the kept result
+# was read from (``read_still_holds``: one ``git log`` per head move, shared
+# by everything kept). So a recorded application is read again by the
+# applications read, and leaves the profiles read as it was.
+
+_READ_SCOPE = threading.local()
+_READ_CACHE_LOCK = threading.Lock()
+_validated_repositories: dict[tuple[object, ...], tuple[object, ...]] = {}
+_resolved_targets: dict[tuple[object, ...], tuple[tuple[object, ...], ResolvedTarget]] = {}
+_GIT_DISCOVERY_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM")
+# (workpad, old head, new head) -> the paths the commits between them touched; None: not a straight descendant.
+_committed_between: dict[tuple[str, str, str], frozenset[str] | None] = {}
+_COMMITTED_BETWEEN_MAX = 64
+
+
+_read_cache_key_locks: dict[tuple[object, ...], threading.Lock] = {}
+_READ_CACHE_KEY_LOCKS_MAX = 16384
+
+
+def read_cache_key_lock(key: tuple[object, ...]) -> threading.Lock:
+    """One lock per kept read, so readers arriving together make the read once."""
+
+    with _READ_CACHE_LOCK:
+        if len(_read_cache_key_locks) > _READ_CACHE_KEY_LOCKS_MAX:
+            _read_cache_key_locks.clear()  # a lock in use stays referenced by its holder
+        return _read_cache_key_locks.setdefault(key, threading.Lock())
+
+
+@contextmanager
+def committed_read_cache() -> Iterator[None]:
+    """Reuse unchanged workpad checks and committed journal reads on this thread, for a read."""
+
+    depth = getattr(_READ_SCOPE, "depth", 0)
+    _READ_SCOPE.depth = depth + 1
+    try:
+        yield
+    finally:
+        _READ_SCOPE.depth = depth
+
+
+def committed_read_cache_active() -> bool:
+    return getattr(_READ_SCOPE, "depth", 0) > 0
+
+
+def _file_signature(path: Path) -> tuple[int, int, int, int] | None:
+    try:
+        found = os.lstat(path)
+    except OSError:
+        return None
+    return (found.st_mode, found.st_ino, found.st_size, found.st_mtime_ns)
+
+
+def _directory_signature(path: Path) -> tuple[int, int] | None:
+    """What kind of entry ``path`` is and which one: a directory's size and change time move with its content."""
+
+    try:
+        found = os.lstat(path)
+    except OSError:
+        return None
+    return (found.st_mode, found.st_ino)
+
+
+def workpad_head_without_git(root: Path) -> str | None:
+    """The journal head commit, read from ``.git`` files; ``None`` when only git can tell."""
+
+    git_dir = root / ".git"
+    try:
+        head = (git_dir / "HEAD").read_text(encoding="ascii").strip()
+        if head.startswith("ref: "):
+            ref = head[len("ref: "):].strip()
+            if not ref.startswith("refs/heads/") or ".." in ref.split("/"):
+                return None
+            head = (git_dir / ref).read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError):
+        return None
+    if len(head) not in (40, 64) or any(character not in "0123456789abcdef" for character in head):
+        return None
+    return head
+
+
+def workpad_fingerprint(root: Path) -> tuple[object, ...] | None:
+    """What the workpad's authority checks read, without git; ``None`` when it cannot be taken."""
+
+    head = workpad_head_without_git(root)
+    if head is None:
+        return None
+    try:
+        entries = tuple(sorted(os.listdir(root)))
+    except OSError:
+        return None
+    return (
+        head,
+        entries,
+        *(_directory_signature(root / name) for name in (".git", "tools", "handoffs")),
+        *(_file_signature(root / name) for name in (".git/config", ".gitignore", WORKPAD_LAYOUT_PATH)),
+    )
+
+
+def paths_committed_between(root: Path, old: str, new: str) -> frozenset[str] | None:
+    """Every path the commits after ``old`` up to ``new`` touched; ``None`` unless ``new`` descends straight from ``old``.
+
+    "Straight": each commit from ``new`` back has exactly one parent and the
+    chain ends at ``old``, which is how the journal grows. Anything else (a
+    rewritten or reset history, a merge) answers ``None``: nothing kept at
+    ``old`` is trusted at ``new``.
+    """
+
+    key = (os.fspath(root), old, new)
+    with _READ_CACHE_LOCK:
+        if key in _committed_between:
+            return _committed_between[key]
+    listing = _git(root, "log", "-z", "--format=%x01%H %P", "--name-only", f"{old}..{new}", check=False)
+    touched: set[str] = set()
+    chain: list[tuple[str, list[str]]] = []
+    if listing.returncode == 0:
+        for chunk in listing.stdout.split("\x00"):
+            if not chunk:
+                continue
+            if chunk[0] == "\x01":
+                commit, _space, parents = chunk[1:].partition(" ")
+                chain.append((commit, parents.split()))
+                continue
+            name = chunk[1:] if chunk[0] == "\n" else chunk
+            if name:
+                touched.add(name)
+    straight = bool(chain) and chain[0][0] == new and chain[-1][1] == [old] and all(
+        parents == [chain[index + 1][0]] for index, (_commit, parents) in enumerate(chain[:-1])
+    )
+    result = frozenset(touched) if straight else None
+    with _READ_CACHE_LOCK:
+        if len(_committed_between) >= _COMMITTED_BETWEEN_MAX:
+            _committed_between.pop(next(iter(_committed_between)))
+        _committed_between[key] = result
+    return result
+
+
+def read_still_holds(
+    root: Path,
+    held: tuple[object, ...],
+    now: tuple[object, ...],
+    touches: Callable[[frozenset[str]], bool],
+) -> bool:
+    """Whether what was read at fingerprint ``held`` is what a read at ``now`` would be.
+
+    The same fingerprint: yes. Only the head moved: yes when the commits in
+    between touched nothing the read depends on (``touches`` says whether a
+    set of paths does). Anything else changed: no.
+    """
+
+    if held == now:
+        return True
+    if held[1:] != now[1:]:
+        return False
+    touched = paths_committed_between(root, str(held[0]), str(now[0]))
+    return touched is not None and not touches(touched)
+
+
+def layout_paths_touched(touched: frozenset[str]) -> bool:
+    """The two committed files the workpad's own checks read: the layout marker and the ignore rules."""
+
+    return WORKPAD_LAYOUT_PATH in touched or ".gitignore" in touched
+
+
+def _target_fingerprint(requested: Path) -> tuple[object, ...]:
+    """Whether ``requested`` is inside a Git work tree, and which one: what ``resolve_target`` asks git."""
+
+    try:
+        identity = requested.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return (None,)
+    nearest: tuple[object, ...] = (None,)
+    for candidate in (identity, *identity.parents):
+        signature = _directory_signature(candidate / ".git")
+        if signature is not None:
+            nearest = (os.fspath(candidate), signature)
+            break
+    return (os.fspath(identity), _directory_signature(identity), nearest, *(os.environ.get(name) for name in _GIT_DISCOVERY_ENV))
+
+
+def _resolve_target(requested: Path | None, *, cwd: Path | None) -> ResolvedTarget:
+    """``resolve_target``, its answer kept inside a ``committed_read_cache`` while the target is unchanged."""
+
+    if requested is None or not committed_read_cache_active():
+        return resolve_target(requested, cwd=cwd)
+    key = (os.fspath(requested), None if cwd is None else os.fspath(cwd))
+    before = _target_fingerprint(requested)
+    with _READ_CACHE_LOCK:
+        held = _resolved_targets.get(key)
+    if held is not None and held[0] == before:
+        return held[1]
+    target = resolve_target(requested, cwd=cwd)
+    if _target_fingerprint(requested) == before:
+        with _READ_CACHE_LOCK:
+            _resolved_targets[key] = (before, target)
+    return target
 
 
 class WorkpadError(RuntimeError):
@@ -525,6 +744,35 @@ def _validate_workpad_repository(
         raise WorkpadConflictError(
             "workpad path is missing, redirected, or not a directory"
         )
+    # 0110-033: inside a read, a workpad that already passed these checks
+    # with this exact fingerprint is not asked again (12 git subprocesses);
+    # readers arriving together ask once.
+    cache_key = (os.fspath(root), project_id, gig_id, allow_journal, allow_semantic_state)
+    checked_at = workpad_fingerprint(root) if committed_read_cache_active() else None
+    if checked_at is None:
+        _check_workpad_repository(root, project_id, gig_id, allow_journal=allow_journal, allow_semantic_state=allow_semantic_state)
+        return
+    with read_cache_key_lock(("repository", *cache_key)):
+        with _READ_CACHE_LOCK:
+            passed_at = _validated_repositories.get(cache_key)
+        if passed_at is None or not read_still_holds(root, passed_at, checked_at, layout_paths_touched):
+            _check_workpad_repository(root, project_id, gig_id, allow_journal=allow_journal, allow_semantic_state=allow_semantic_state)
+            if workpad_fingerprint(root) != checked_at:
+                return  # it moved while it was checked: this pass is not kept
+        with _READ_CACHE_LOCK:
+            _validated_repositories[cache_key] = checked_at
+
+
+def _check_workpad_repository(
+    root: Path,
+    project_id: str,
+    gig_id: str,
+    *,
+    allow_journal: bool = False,
+    allow_semantic_state: bool = False,
+) -> None:
+    """The checks of :func:`_validate_workpad_repository`, asked of git every time."""
+
     entries = {path.name for path in root.iterdir()}
     allowed = {".git", ".gitignore"}
     layout_version = workpad_layout_version(root, project_id=project_id, gig_id=gig_id)
@@ -700,7 +948,7 @@ def _resolve_bound_project(
 ) -> BoundProject:
     try:
         try:
-            target = resolve_target(requested_target, cwd=cwd)
+            target = _resolve_target(requested_target, cwd=cwd)
         except GitTargetError:
             # An explicitly initialized non-Git target is still a valid implicit
             # target for commands run from that directory, or from a subfolder
@@ -887,12 +1135,20 @@ __all__ = [
     "WorkpadError",
     "WorkpadPermissionError",
     "WorkpadUnavailableError",
+    "committed_read_cache",
+    "committed_read_cache_active",
     "ensure_run_local_artifact_excludes",
+    "layout_paths_touched",
     "open_locations",
+    "paths_committed_between",
     "provision_workpad",
+    "read_cache_key_lock",
+    "read_still_holds",
     "register_existing_workpad",
     "resolve_bound_project",
     "resolve_workpad",
     "select_active_workpad",
+    "workpad_fingerprint",
+    "workpad_head_without_git",
     "workpad_layout_version",
 ]

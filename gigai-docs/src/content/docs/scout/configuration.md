@@ -84,6 +84,7 @@ open. Nothing is saved until you press **Save**. The same settings are at
 | Setting | Default | What it does |
 |---|---|---|
 | Check the company boards automatically (`sources.auto_refresh`) | on | The background check of the company boards: 8 a day on weekdays and 2 on weekend days, in your local time. Off also pauses tagging titles with the model in the background. |
+| Check on weekdays at / on weekend days at (`sources.check_times`) | 03:00, 07:00, 09:00, 11:00, 13:00, 15:00, 17:00, 19:00 on weekdays; 09:00, 18:00 on weekend days | When the background checks run: 1 to 12 times a day for each kind of day, as 24-hour `HH:MM` times on this machine's clock, separated by commas. **Use the default times** puts both lists back. The page shows what is in effect now, and a saved change decides the very next check. |
 | Tag titles with the model (`tagging.model_enabled`) | on | Sends titles the built-in rules cannot place to the model Scout is set up with, only for the roles your profiles search for. |
 | Tag the rest in the background (`tagging.backfill_enabled`) | off | Also tags every other stored title, a few at a time. `tagging.tag_backfill_model` picks the model: `configured` (the model Scout is set up with) or `haiku` (Claude Haiku through the Claude CLI). |
 | Use the shared starter snapshot (`snapshot.enabled`) | on | **Update sources** first downloads the [starter snapshot](../sources/#the-starter-snapshot). `snapshot.manifest_url` (under "Advanced") is where it is read from; leave it empty for the default address. |

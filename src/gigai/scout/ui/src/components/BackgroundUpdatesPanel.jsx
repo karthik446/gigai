@@ -3,23 +3,30 @@ import { getBackgroundSettings, putBackgroundSettings } from "../api.js";
 import {
   AUTO_REFRESH_HELP,
   BACKFILL_HELP,
+  CHECK_TIMES_HELP,
   MODEL_TAGS_HELP,
   SNAPSHOT_HELP,
   UNREADABLE_WARNING,
   backfillModelOptions,
   buildPatch,
   draftFromResponse,
+  checkTimesError,
   formError,
+  hasCheckTimes,
   isUnreadable,
   overrideNotes,
   saveErrorText,
+  scheduleSummary,
   taggingPausedNote,
+  withDefaultCheckTimes,
 } from "../backgroundSettingsModel.js";
 
 // 0110-024 P4 / 0110-025 R4 / 0110-026 S3: Settings' "Background updates",
 // over GET / PUT /api/settings/background. The form edits what the settings
 // file says; nothing is saved until Save, and Save sends only what changed.
 // An environment override is named beside the switch it decides.
+// 0110-033: the times of day the boards are checked at (sources.check_times),
+// one line for weekdays and one for weekend days, with what is in effect now.
 export default function BackgroundUpdatesPanel() {
   const [response, setResponse] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -48,7 +55,10 @@ export default function BackgroundUpdatesPanel() {
   }
 
   const patch = draft && response ? buildPatch(draft, response) : null;
-  const invalid = draft ? formError(draft) : "";
+  const invalid = draft ? formError(draft, response) : "";
+  const timesShown = hasCheckTimes(response);
+  const timesInvalid = draft && timesShown ? checkTimesError(draft) : "";
+  const schedule = response ? scheduleSummary(response) : "";
   const unreadable = isUnreadable(response);
 
   async function save() {
@@ -93,6 +103,38 @@ export default function BackgroundUpdatesPanel() {
             </label>
             <small className="muted">{AUTO_REFRESH_HELP}</small>
             {notes.sources && <small className="override-note" data-role="override-sources">{notes.sources}</small>}
+            {timesShown && (
+              <div className="background-setting-sub" data-setting="check-times">
+                <label className="form-label" htmlFor="background-check-times-weekdays">
+                  Check on weekdays at
+                </label>
+                <input
+                  id="background-check-times-weekdays"
+                  type="text"
+                  className="text-input"
+                  value={draft.weekdayTimes}
+                  disabled={off}
+                  onChange={(event) => change({ weekdayTimes: event.target.value })}
+                />
+                <label className="form-label" htmlFor="background-check-times-weekends">
+                  Check on weekend days at
+                </label>
+                <input
+                  id="background-check-times-weekends"
+                  type="text"
+                  className="text-input"
+                  value={draft.weekendTimes}
+                  disabled={off}
+                  onChange={(event) => change({ weekendTimes: event.target.value })}
+                />
+                <small className="muted">{CHECK_TIMES_HELP}</small>
+                <button type="button" className="link-button" disabled={off} onClick={() => change(withDefaultCheckTimes(draft, response))} data-action="check-times-default">
+                  Use the default times
+                </button>
+                {timesInvalid && <div className="field-error" data-role="check-times-error">{timesInvalid}</div>}
+                {schedule && <small className="muted" data-role="check-times-effective">{schedule}</small>}
+              </div>
+            )}
           </div>
 
           <div className="background-setting" data-setting="model-tags">
@@ -156,7 +198,7 @@ export default function BackgroundUpdatesPanel() {
               <button type="button" className="link-button" disabled={off || draft.manifestUrl === ""} onClick={() => change({ manifestUrl: "" })} data-action="manifest-default">
                 Use the default address
               </button>
-              {invalid && <div className="field-error">{invalid}</div>}
+              {invalid && !timesInvalid && <div className="field-error">{invalid}</div>}
             </details>
           </div>
 

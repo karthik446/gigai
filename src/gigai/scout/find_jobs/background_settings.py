@@ -5,6 +5,8 @@ holds what the operator chose for Scout's background work. Three readers
 already exist, each beside the job it switches:
 
 * ``sources.auto_refresh`` -- ``refresh_tick.auto_refresh_setting`` (0110-025);
+* ``sources.check_times`` -- ``refresh_tick.check_schedule_setting`` (0110-029;
+  editable here since 0110-033);
 * ``tagging.model_enabled`` / ``tagging.backfill_enabled`` /
   ``tagging.tag_backfill_model`` -- ``model_tag.tagging_setting`` (0110-024);
 * ``snapshot.enabled`` / ``snapshot.manifest_url`` --
@@ -16,6 +18,12 @@ given, keeps every key it does not know, and replaces the file atomically;
 and :func:`background_settings`, the body both routes answer, built from
 those three readers so the API can never disagree with the jobs.
 
+``sources.check_times`` is ``{"weekdays": [...], "weekends": [...]}``, each a
+list of 1 to :data:`MAX_CHECK_TIMES_PER_DAY` 24-hour ``HH:MM`` local times
+(stored sorted, without repeats). A ``PUT`` may name one list or both; a
+list left out keeps what is stored, ``null`` for a list puts that list's
+default back, and ``"check_times": null`` puts both back.
+
 Nothing here caches: the refresh thread reads the file again at every look
 (``RefreshTicker.step``), so a write is honoured at its next look.
 """
@@ -26,19 +34,32 @@ from collections.abc import Mapping
 import json
 import os
 from pathlib import Path
+import re
 import threading
 from urllib.parse import urlsplit
 
 from .model_tag import BACKFILL_MODELS, tagging_setting
-from .refresh_tick import SETTINGS_SCHEMA, auto_refresh_setting, settings_path
+from .refresh_plan import DEFAULT_WEEKDAY_TIMES, DEFAULT_WEEKEND_TIMES, CheckSchedule, parse_check_times
+from .refresh_tick import (
+    SETTINGS_SCHEMA,
+    SOURCE_DEFAULT,
+    ScheduleSetting,
+    auto_refresh_setting,
+    check_schedule_setting,
+    settings_path,
+)
 from .snapshot import snapshot_setting
 
 BACKGROUND_SETTINGS_SCHEMA = "scout-background-settings:1"
 MAX_MANIFEST_URL_LENGTH = 2048
+#: How many check times one day's list may hold when it is set through the API.
+MAX_CHECK_TIMES_PER_DAY = 12
+CHECK_TIMES_DAYS = ("weekdays", "weekends")
+_HH_MM = re.compile(r"\A\d{2}:\d{2}\Z")
 
-#: block -> key -> what a value must be ("bool", "backfill_model" or "manifest_url").
+#: block -> key -> what a value must be ("bool", "backfill_model", "manifest_url" or "check_times").
 _KEYS: dict[str, dict[str, str]] = {
-    "sources": {"auto_refresh": "bool"},
+    "sources": {"auto_refresh": "bool", "check_times": "check_times"},
     "tagging": {"model_enabled": "bool", "backfill_enabled": "bool", "tag_backfill_model": "backfill_model"},
     "snapshot": {"enabled": "bool", "manifest_url": "manifest_url"},
 }
@@ -69,8 +90,54 @@ class _Remove:
 _REMOVE = _Remove()
 
 
+class _DayLists(dict):
+    """``sources.check_times`` in a patch: day -> its times, or ``_REMOVE`` for that day's default.
+
+    Laid over the stored lists by the writer, so naming one day keeps the other.
+    """
+
+
+def _check_times(name: str, value: object) -> object:
+    """``sources.check_times`` of a body, checked: ``_REMOVE`` (both defaults) or a :class:`_DayLists`."""
+
+    if value is None:
+        return _REMOVE
+    if not isinstance(value, dict):
+        raise SettingsError("wrong_type", f"{name} must be an object {{weekdays, weekends}} or null for the default times")
+    extra = sorted(set(value) - set(CHECK_TIMES_DAYS))
+    if extra:
+        raise SettingsError("unknown_key", f"{name} has unknown field(s): {extra} (allowed: {', '.join(CHECK_TIMES_DAYS)})")
+    if not value:
+        raise SettingsError("invalid_value", f"{name} must name weekdays, weekends or both")
+    days = _DayLists()
+    for day in CHECK_TIMES_DAYS:
+        if day not in value:
+            continue
+        times = value[day]
+        if times is None:
+            days[day] = _REMOVE
+            continue
+        if not isinstance(times, list):
+            raise SettingsError("wrong_type", f"{name}.{day} must be a list of HH:MM times, or null for the default")
+        if any(type(item) is not str for item in times):
+            raise SettingsError("wrong_type", f"{name}.{day} must hold HH:MM strings")
+        problem = f"{name}.{day} must hold 1 to {MAX_CHECK_TIMES_PER_DAY} 24-hour HH:MM times (00:00 to 23:59)"
+        if not all(_HH_MM.match(item) for item in times):
+            raise SettingsError("invalid_value", problem)
+        try:
+            parsed = parse_check_times(times)
+        except ValueError:
+            raise SettingsError("invalid_value", problem) from None
+        if not 1 <= len(parsed) <= MAX_CHECK_TIMES_PER_DAY:
+            raise SettingsError("invalid_value", problem)
+        days[day] = list(parsed)
+    return days
+
+
 def _value(block: str, key: str, kind: str, value: object) -> object:
     name = f"{block}.{key}"
+    if kind == "check_times":
+        return _check_times(name, value)
     if kind == "bool":
         if type(value) is not bool:
             raise SettingsError("wrong_type", f"{name} must be true or false")
@@ -152,6 +219,17 @@ def write_background_settings(home_root: Path, target: Path, patch: Mapping[str,
                 raise SettingsUnreadableError(path)
             merged = dict(stored)
             for key, value in values.items():
+                if isinstance(value, _DayLists):
+                    # One day named: the other day's stored list stays. A stored value that
+                    # is not an object is one the schedule already ignores; it is replaced.
+                    kept = merged.get(key)
+                    lists = dict(kept) if isinstance(kept, dict) else {}
+                    for day, times in value.items():
+                        if times is _REMOVE:
+                            lists.pop(day, None)
+                        else:
+                            lists[day] = times
+                    value = lists if lists else _REMOVE
                 if value is _REMOVE:
                     merged.pop(key, None)
                 else:
@@ -170,6 +248,17 @@ def write_background_settings(home_root: Path, target: Path, patch: Mapping[str,
     return path
 
 
+def _check_times_setting(home: Path, target: Path | None) -> ScheduleSetting:
+    """``check_schedule_setting``; a target with no Scout project has no file, so the defaults (as the other readers say)."""
+
+    if target is not None:
+        try:
+            settings_path(home, target)
+        except Exception:  # noqa: BLE001 - no bound project yet: there is no settings file to read
+            return ScheduleSetting(CheckSchedule(), SOURCE_DEFAULT)
+    return check_schedule_setting(home, target)
+
+
 def background_settings(
     home_root: Path,
     target: Path | None,
@@ -182,7 +271,11 @@ def background_settings(
     default), which is what a form edits. ``effective`` is what the
     background jobs act on right now: the same values after the environment
     overrides, each block with the ``source`` that decided it (``default``,
-    ``setting``, ``environment`` or ``settings_unreadable``). ``readable`` is
+    ``setting``, ``environment`` or ``settings_unreadable``).
+    ``sources.check_times`` (0110-033) is the two lists of local times the
+    checks run at; in ``effective`` it carries its own ``source`` (stored
+    times that cannot be used run the defaults, ``settings_unreadable``) and
+    ``default``, the times a reset puts back. ``readable`` is
     false when the file exists and cannot be read: every job is then off
     and a write is refused until the file is fixed or removed.
     """
@@ -194,11 +287,14 @@ def background_settings(
     refresh = auto_refresh_setting(home, target, environ=environ)
     tagging = tagging_setting(home, target, environ=environ)
     snapshot = snapshot_setting(home, target, environ=environ)
+    # No environment variable changes the times: the file's are the ones in effect.
+    schedule = _check_times_setting(home, target)
+    check_times = {"weekdays": list(schedule.schedule.weekdays), "weekends": list(schedule.schedule.weekends)}
     return {
         "schema_version": BACKGROUND_SETTINGS_SCHEMA,
         "readable": stored_refresh.source != "settings_unreadable",
         "settings": {
-            "sources": {"auto_refresh": stored_refresh.enabled},
+            "sources": {"auto_refresh": stored_refresh.enabled, "check_times": check_times},
             "tagging": {
                 "model_enabled": stored_tagging.model_enabled,
                 "backfill_enabled": stored_tagging.backfill_enabled,
@@ -207,7 +303,15 @@ def background_settings(
             "snapshot": {"enabled": stored_snapshot.enabled, "manifest_url": stored_snapshot.manifest_url},
         },
         "effective": {
-            "sources": {"auto_refresh": refresh.enabled, "source": refresh.source},
+            "sources": {
+                "auto_refresh": refresh.enabled,
+                "source": refresh.source,
+                "check_times": {
+                    **{day: list(times) for day, times in check_times.items()},
+                    "source": schedule.source,
+                    "default": {"weekdays": list(DEFAULT_WEEKDAY_TIMES), "weekends": list(DEFAULT_WEEKEND_TIMES)},
+                },
+            },
             "tagging": tagging.to_json(),
             "snapshot": snapshot.to_json(),
         },
@@ -216,6 +320,8 @@ def background_settings(
 
 __all__ = [
     "BACKGROUND_SETTINGS_SCHEMA",
+    "CHECK_TIMES_DAYS",
+    "MAX_CHECK_TIMES_PER_DAY",
     "MAX_MANIFEST_URL_LENGTH",
     "SettingsError",
     "SettingsUnreadableError",
