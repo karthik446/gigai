@@ -221,3 +221,10 @@ def _canned_cli_probe(monkeypatch: pytest.MonkeyPatch) -> None:
             else "--setting-sources\n--strict-mcp-config\n--tools\n"
         ),
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_background_model_tags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test server may spend a real model call on background tagging; tests of the tag queue pass the setting explicitly."""
+
+    monkeypatch.setenv("GIGAI_SCOUT_MODEL_TAGS", "0")

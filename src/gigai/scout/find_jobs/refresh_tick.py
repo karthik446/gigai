@@ -353,8 +353,8 @@ class RefreshTicker:
 
     def _drain_tags(self, outcome: str) -> None:
         queue = self._tag_queue
-        if queue is None or self._stop.is_set() or outcome in (STATE_RUNNING, "yielded"):
-            return  # stopping, or an update is live: one thing at a time
+        if queue is None or self._stop.is_set() or outcome in (STATE_RUNNING, "yielded") or not self.setting().enabled:
+            return  # stopping, an update is live (one thing at a time), or sources.auto_refresh is off (one switch for all background work)
         try:
             result = queue.drain(stop=self._stop)
         except Exception as exc:  # noqa: BLE001 - the tag queue never takes the refresh thread down

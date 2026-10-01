@@ -440,6 +440,7 @@ def test_a_model_tag_payload_carries_titles_and_locations_and_no_resume_or_profi
         store.close()
     assert load_demand(fixture.home, fixture.target).levels == ("staff",)  # the real profile is the one asking
 
+    monkeypatch.setenv("GIGAI_SCOUT_MODEL_TAGS", "1")  # the suite switches background tagging off; this test is about it
     capture = arm(monkeypatch)
     with capture.running("tags"):
         queue = TagQueue(home_root=fixture.home, target=fixture.target, config=fixture.config, live_update=lambda: False)
