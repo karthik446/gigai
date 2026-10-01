@@ -30,6 +30,16 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### Unreleased
+
+#### Changed
+
+- **Converting a PDF or DOCX resume now needs nothing beyond `uv`.** The
+  Quickstart, the Resume page and the `scout resume add` error use
+  `uvx --from 'markitdown[pdf,docx]' markitdown resume.pdf > resume.md` instead of
+  `pdftotext` or `textutil`, which a stock Mac does not have. `pdftotext`,
+  `pandoc` and `textutil` still work if you already have them.
+
 ### 0.1.10.3
 
 #### Changed

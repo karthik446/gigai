@@ -338,3 +338,9 @@ def test_without_a_home_only_the_environment_counts(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("JEV_API_KEY", "jev-environment-secret")
 
     assert secrets_status.keys_set(None) == {"exa": False, "openai": False, "openrouter": False}
+
+
+def test_the_unsupported_format_message_names_the_conversion_command() -> None:
+    with pytest.raises(ResumeImportError) as refused:
+        safe_resume_file_name("resume.pdf")
+    assert "uvx --from 'markitdown[pdf,docx]' markitdown" in str(refused.value)

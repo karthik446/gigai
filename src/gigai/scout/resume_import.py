@@ -39,6 +39,10 @@ from ..private_records import create_record, import_reference
 RESUME_MAX_BYTES = 1_048_576
 #: The suffixes ``import_reference`` accepts (plain text or Markdown).
 RESUME_SUFFIXES = (".txt", ".md", ".markdown")
+RESUME_MEDIA_TYPE_MESSAGE = (
+    "the resume must be plain text or Markdown (.txt, .md, .markdown); convert a PDF or DOCX with: "
+    "uvx --from 'markitdown[pdf,docx]' markitdown resume.pdf > resume.md"
+)
 #: The file name (and so the label) a pasted resume is stored under.
 PASTED_RESUME_FILE_NAME = "pasted-resume.txt"
 
@@ -82,6 +86,9 @@ def import_resume_file(
     gig_id: str | None = None,
 ) -> ImportedResume:
     """Import ``source`` as the resume reference and create the record find-jobs reads."""
+
+    if source.suffix.lower() not in RESUME_SUFFIXES:
+        raise ResumeImportError("resume_media_type_unsupported", RESUME_MEDIA_TYPE_MESSAGE)
 
     # Key by name + content digest (not name alone) so re-adding the
     # SAME bytes under the same file name stays idempotent (identical
@@ -170,10 +177,7 @@ def safe_resume_file_name(file_name: str) -> str:
 
     base = file_name.replace("\\", "/").rsplit("/", 1)[-1].strip()
     if Path(base).suffix.lower() not in RESUME_SUFFIXES:
-        raise ResumeImportError(
-            "resume_media_type_unsupported",
-            "the resume must be plain text or Markdown (.txt, .md, .markdown)",
-        )
+        raise ResumeImportError("resume_media_type_unsupported", RESUME_MEDIA_TYPE_MESSAGE)
     return reduce_file_name(base)
 
 

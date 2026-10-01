@@ -24,9 +24,13 @@ text, so **keep those out** (anything else you would not paste into Codex or
 Claude). A PDF or DOCX resume must be converted first:
 
 ```bash
-pdftotext resume.pdf resume.txt          # Linux, or macOS with poppler
-textutil -convert txt resume.docx        # macOS built-in, .docx only
+uvx --from 'markitdown[pdf,docx]' markitdown resume.pdf > resume.md
+uvx --from 'markitdown[pdf,docx]' markitdown resume.docx > resume.md
 ```
+
+This runs through `uv`, which you already have, so there is nothing else to
+install. If you already have `pdftotext` (poppler), `pandoc` or macOS `textutil`,
+those work too. Check the converted `resume.md` before you import it.
 
 See [Resume and PDF](../resume/) and [Privacy and security](../privacy/).
 
