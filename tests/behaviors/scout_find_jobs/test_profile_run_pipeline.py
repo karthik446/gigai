@@ -344,6 +344,12 @@ def _seal_run_input(workpad: Path, run_id: str, *, resume_revision_id: str, prof
 
 
 def _write_successful_assess_output(workpad: Path, run_id: str, *, posting: PostingRow, resume_revision_id: str) -> None:
+    # 0110-035: an earlier run of this version seals the assess prompt version and the digest of the candidate
+    # constraints next to its assessments; without them it is not carried forward (the old verdict was made
+    # without the run's own settings).
+    from gigai.scout.assessment_core import assess_prompt_version, constraints_digest
+
+    config = _config()
     assert posting.content_sha256 is not None
     selected = SelectedPosting(posting.normalized_url, posting.url, posting.content_sha256, True)
     pinned = PinnedResume("record_00000000-0000-4000-8000-000000000001", resume_revision_id, "sha256:" + "d" * 64)
@@ -360,6 +366,11 @@ def _write_successful_assess_output(workpad: Path, run_id: str, *, posting: Post
         model_target=ModelTarget.OLLAMA_LOCAL,
         producer=Producer("scout.find_jobs.assess", "1", "scout-assess", ModelTarget.OLLAMA_LOCAL, "fixture"),
         usage=None, failures=(),
+        prompt_version=assess_prompt_version(config.effective_work_mode),
+        constraints_digest=constraints_digest(
+            visa_sponsorship_required=config.visa_sponsorship_required, countries=config.countries, location=config.location or "",
+            work_mode=config.effective_work_mode,
+        ),
     )
     outputs_dir = workpad / "runs" / run_id / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
