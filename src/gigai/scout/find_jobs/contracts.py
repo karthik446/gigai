@@ -1911,10 +1911,11 @@ class StoryBankStamp(_Contract):
     ``profile_id`` is whose bank (its own entries plus a shared profile's),
     ``entries`` maps every answered question id the run could reuse to an
     opaque revision mark (a list of ``{question_id, mark}`` in JSON), and ``digest`` is the digest of that map. No answer
-    text and nothing derived from it: a mark is built from record ids only.
-    A later run compares its own bank against this to decide whether an
-    unchanged posting's assessment still stands (``story_bank.
-    bank_makes_stale``).
+    text and nothing derived from it: a mark is built from record ids and the
+    entry's own write count and time (0110-041: per entry; before, the
+    record's revision). A later run compares its own bank against this to
+    decide whether an unchanged posting's assessment still stands
+    (``story_bank.bank_makes_stale``).
     """
 
     profile_id: str

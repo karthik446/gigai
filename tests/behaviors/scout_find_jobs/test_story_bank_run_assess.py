@@ -490,25 +490,56 @@ def test_a_rerun_assesses_an_unchanged_posting_again_once_the_bank_can_answer_it
     assert len(binding.port.prompts) == calls + 1
 
 
+def _bank_of(**marks: str) -> story_bank.AssessBank:
+    """A bank with one entry per ``question_id=mark`` (``__`` for ``:``), as ``assess_bank`` builds it."""
+
+    entries = tuple(
+        story_bank.BankEntry(
+            question_id=key.replace("__", ":"), question=f"About {key.replace('__', ' ')}?", answer="An answer.", tag="technical",
+            owner_profile_id="profile_1", shared=False, legacy=False, edited=False, confirmed_from=None, first_answered_at=None,
+            updated_at=None, postings=(), record_id=f"record_{key}", revision_id=mark,
+        )
+        for key, mark in marks.items()
+    )
+    return story_bank.AssessBank("profile_1", entries=entries, marks={entry.question_id: entry.revision_id for entry in entries})
+
+
 def test_the_staleness_rule() -> None:
+    """0110-041: targeted. A changed entry counts only when it answers one of the assessment's OWN open questions."""
+
     stale = story_bank.bank_makes_stale
-    open_question, cites = [_ASKED_ID], ["Story bank cloud:gcp: two years"]
+    asked = [SimpleNamespace(question_id=_ASKED_ID, question=f"Do you have {_REQUIREMENT_B}?")]  # tooling:cloud_google_platform
+    other = [SimpleNamespace(question_id="years:rust", question="How many years of Rust?")]
+    cites = ["Story bank cloud:gcp: two years"]
+    gcp, gcp_edited, empty = _bank_of(cloud__gcp="a"), _bank_of(cloud__gcp="b"), _bank_of()
 
     # Nothing open, nothing cited: the bank cannot change this verdict.
-    assert not stale(questions=[], evidence=["six years"], sealed_marks={}, current_marks={"cloud:gcp": "a"})
-    # An open question: stale when the bank holds an answer the run never saw (new, or edited) ...
-    assert stale(questions=open_question, evidence=[], sealed_marks={}, current_marks={"cloud:gcp": "a"})
-    assert stale(questions=open_question, evidence=[], sealed_marks={"cloud:gcp": "a"}, current_marks={"cloud:gcp": "b"})
+    assert not stale(questions=[], evidence=["six years"], sealed_marks={}, bank=gcp)
+    # An open question: stale when an entry the run never saw (new, or edited) answers IT: the same id ...
+    assert stale(questions=asked, evidence=[], sealed_marks={}, bank=_bank_of(tooling__cloud_google_platform="a"))
+    # ... or the near match behind bank_suggestions (cloud:gcp for "Google Cloud Platform") ...
+    assert stale(questions=asked, evidence=[], sealed_marks={}, bank=gcp)
+    assert stale(questions=asked, evidence=[], sealed_marks={"cloud:gcp": "a"}, bank=gcp_edited)
     # ... a run from before the bank reached runs saw none of it ...
-    assert stale(questions=open_question, evidence=[], sealed_marks=None, current_marks={"cloud:gcp": "a"})
-    assert not stale(questions=open_question, evidence=[], sealed_marks=None, current_marks={})
-    # ... and not when the bank is what the run saw, or only lost an entry (a deletion answers nothing).
-    assert not stale(questions=open_question, evidence=[], sealed_marks={"cloud:gcp": "a"}, current_marks={"cloud:gcp": "a"})
-    assert not stale(questions=open_question, evidence=[], sealed_marks={"cloud:gcp": "a", "years:go": "b"}, current_marks={"cloud:gcp": "a"})
+    assert stale(questions=asked, evidence=[], sealed_marks=None, bank=gcp)
+    assert not stale(questions=asked, evidence=[], sealed_marks=None, bank=empty)
+    # ... and NOT when the new or edited entry answers some other question (the broad rule before 0110-041).
+    assert not stale(questions=other, evidence=[], sealed_marks={}, bank=gcp)
+    assert not stale(questions=other, evidence=[], sealed_marks={"cloud:gcp": "a"}, bank=gcp_edited)
+    assert not stale(questions=asked, evidence=[], sealed_marks={"cloud:gcp": "a"}, bank=_bank_of(cloud__gcp="a", years__rust="c"))
+    # Not when the bank is what the run saw, or only lost an entry (a deletion answers nothing).
+    assert not stale(questions=asked, evidence=[], sealed_marks={"cloud:gcp": "a"}, bank=gcp)
+    assert not stale(questions=asked, evidence=[], sealed_marks={"cloud:gcp": "a", "years:go": "b"}, bank=gcp)
     # A cited answer: stale when it was edited, deleted or is no longer visible; not when another entry changed.
-    assert stale(questions=[], evidence=cites, sealed_marks={"cloud:gcp": "a"}, current_marks={"cloud:gcp": "b"})
-    assert stale(questions=[], evidence=cites, sealed_marks={"cloud:gcp": "a"}, current_marks={})
-    assert not stale(questions=[], evidence=cites, sealed_marks={"cloud:gcp": "a"}, current_marks={"cloud:gcp": "a", "years:go": "c"})
+    assert stale(questions=[], evidence=cites, sealed_marks={"cloud:gcp": "a"}, bank=gcp_edited)
+    assert stale(questions=[], evidence=cites, sealed_marks={"cloud:gcp": "a"}, bank=empty)
+    assert not stale(questions=[], evidence=cites, sealed_marks={"cloud:gcp": "a"}, bank=_bank_of(cloud__gcp="a", years__go="c"))
+
+    # What matched is named: the entry, how, and the question it answers.
+    (near,) = story_bank.bank_matches(questions=asked, evidence=[], sealed_marks={}, bank=gcp)
+    assert (near.match, near.bank_question_id, near.question_id) == ("near", "cloud:gcp", _ASKED_ID)
+    (cited,) = story_bank.bank_matches(questions=[], evidence=cites, sealed_marks={"cloud:gcp": "a"}, bank=empty)
+    assert cited.to_json() == {"match": "cited", "bank_question_id": "cloud:gcp"}
 
 
 # --- the questions that remain: the same near match as the job page -----------------------------------

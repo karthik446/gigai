@@ -17,9 +17,13 @@ assessed with now, and names why the two differ:
   renders (``CURRENT_ASSESS_PROMPT_VERSIONS``);
 - ``settings_changed``: the constraints digest differs (a changed work
   mode, countries, location or sponsorship need);
-- ``story_bank_changed``: ``story_bank.bank_makes_stale``: it left a question
-  open and the bank holds an answer it never saw, or it cites a bank answer
-  that was edited, deleted or unshared.
+- ``story_bank_changed``: ``story_bank.bank_matches`` (0110-041, targeted): a
+  bank entry added or edited since answers one of ITS OWN open questions
+  (the same id, or the model-free near match), or it cites a bank answer
+  that was edited, deleted or unshared. Answering one question flags the
+  assessments that asked it, not every assessment that asked anything. The
+  entries that matched are served as ``basis_stale_bank``, so the reason
+  line can name the question that is now answered.
 
 The same three checks, in the same order, as a run's unchanged skip
 (``proposal_execution._basis_stale``).
@@ -41,8 +45,10 @@ the record says has nothing the old prompt missed: its old verdicts stay.
 
 Nothing here calls a model, and nothing is written: staleness is derived on
 read. ``BasisCheck`` is one request's view: the settings of each resume
-identity are read at most once, and the story bank only for a record that
-has an open question or cites a bank answer.
+identity are read at most once, and the story bank at most once per resume
+identity (never per row), and only when a record has an open question or
+cites a bank answer. The bank rule itself is in memory: the entries changed
+since the record's basis x its open questions.
 
 Cost (the 0110-033 budget: a hot read of an unchanged workpad starts almost
 no subprocess). Reading the profiles is a committed journal read (16 git
@@ -57,7 +63,6 @@ next request.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 import threading
@@ -99,38 +104,53 @@ class CurrentBasis:
         )
 
 
-def stale_reason(item: AssessResponse, current: CurrentBasis, bank_marks) -> str | None:
+@dataclass(frozen=True)
+class Staleness:
+    """Why a stored assessment should be made again; ``bank`` (``story_bank.BankMatch``) only for ``story_bank_changed``."""
+
+    reason: str
+    bank: tuple[object, ...] = ()
+
+
+def staleness(item: AssessResponse, current: CurrentBasis, bank_now) -> Staleness | None:
     """Why ``item`` is not what ``current`` would produce, or ``None``. Pure.
 
-    ``bank_marks`` is called (at most once, and only for a record that has an
-    open question or cites a bank answer) for the bank's marks now; it
-    answers ``None`` when there is no bank to read.
+    ``bank_now`` is called (at most once, and only for a record that has an
+    open question or cites a bank answer) for the bank now
+    (``story_bank.AssessBank``); it answers ``None`` when there is no bank to
+    read.
     """
 
     from . import story_bank
 
     if item.prompt_version is None and item.constraints_digest is None:
         if normalize_work_mode(current.work_mode):
-            return REASON_OLDER_PROMPT
+            return Staleness(REASON_OLDER_PROMPT)
         said = item.preferences
         if bool(said.visa_sponsorship_required) != current.visa_sponsorship_required or _countries(said.countries) != _countries(current.countries):
-            return REASON_SETTINGS_CHANGED
+            return Staleness(REASON_SETTINGS_CHANGED)
         return None
     if item.prompt_version not in CURRENT_ASSESS_PROMPT_VERSIONS:
-        return REASON_OLDER_PROMPT
+        return Staleness(REASON_OLDER_PROMPT)
     if item.constraints_digest != current.constraints_digest:
-        return REASON_SETTINGS_CHANGED
-    questions = [question.question_id for question in item.result.structured_questions]
+        return Staleness(REASON_SETTINGS_CHANGED)
+    questions = item.result.structured_questions
     evidence = [evidence for row in item.result.matrix for evidence in row.resume_evidence]
     if not questions and not story_bank.cited_ids(evidence):
         return None
-    marks = bank_marks()
-    if marks is None:
+    bank = bank_now()
+    if bank is None:
         return None
     sealed = None if item.story_bank is None else item.story_bank.entries
-    if story_bank.bank_makes_stale(questions=questions, evidence=evidence, sealed_marks=sealed, current_marks=marks):
-        return REASON_STORY_BANK_CHANGED
-    return None
+    matches = story_bank.bank_matches(questions=questions, evidence=evidence, sealed_marks=sealed, bank=bank)
+    return Staleness(REASON_STORY_BANK_CHANGED, matches) if matches else None
+
+
+def stale_reason(item: AssessResponse, current: CurrentBasis, bank_now) -> str | None:
+    """``staleness``'s reason alone."""
+
+    found = staleness(item, current, bank_now)
+    return None if found is None else found.reason
 
 
 _UNREAD = object()
@@ -150,7 +170,8 @@ class _Kept:
 
     key: tuple[object, ...]
     current: dict[str | None, CurrentBasis | None] = field(default_factory=dict)
-    marks: dict[str | None, Mapping[str, str] | None] = field(default_factory=dict)
+    #: ``story_bank.AssessBank`` per resume identity (``None``: no bank to read).
+    banks: dict[str | None, object | None] = field(default_factory=dict)
 
 
 _KEPT_LOCK = threading.Lock()
@@ -190,7 +211,7 @@ class BasisCheck:
         # time), and a pasted resume's bank (the SELECTED profile's, and the
         # selection is not one of the things a kept read is keyed on).
         self._failed: set[str | None] = set()
-        self._pasted_marks: object = _UNREAD
+        self._pasted_bank: object = _UNREAD
 
     def _workpad(self):
         if self._resolved is None:
@@ -271,40 +292,58 @@ class BasisCheck:
             work_mode=normalize_work_mode(work_mode),
         )
 
-    def _bank_marks(self, profile_id: str | None) -> Mapping[str, str] | None:
+    def _bank(self, profile_id: str | None):
+        """The bank ``profile_id`` reads now: ONE read per resume identity, kept like the settings."""
+
         from . import story_bank
 
-        def read() -> Mapping[str, str] | None:
+        def read():
             reader = story_bank.reader_profile_id(home_root=self._home_root, target=self._target, profile_id=profile_id)
             bank = story_bank.assess_bank(home_root=self._home_root, target=self._target, profile_id=reader)
-            return None if bank.profile_id is None else bank.marks
+            return None if bank.profile_id is None else bank
 
         if profile_id is None:
-            if self._pasted_marks is _UNREAD:
-                self._pasted_marks = read()
-            return self._pasted_marks  # type: ignore[return-value]
-        marks = self._kept().marks
-        if profile_id not in marks:
-            marks[profile_id] = read()
-        return marks[profile_id]
+            if self._pasted_bank is _UNREAD:
+                self._pasted_bank = read()
+            return self._pasted_bank
+        banks = self._kept().banks
+        if profile_id not in banks:
+            banks[profile_id] = read()
+        return banks[profile_id]
 
-    def reason(self, item: AssessResponse) -> str | None:
-        """Why ``item`` should be assessed again, or ``None`` (current, or it cannot be said)."""
+    def staleness(self, item: AssessResponse) -> Staleness | None:
+        """Why ``item`` should be assessed again, with the bank entries that say so; ``None``: current, or it cannot be said."""
 
         profile_id = item.resume.profile_id
         current = self.current(profile_id)
         if current is None:
             return None
         try:
-            return stale_reason(item, current, lambda: self._bank_marks(profile_id))
+            return staleness(item, current, lambda: self._bank(profile_id))
         except Exception:  # noqa: BLE001 - display-only: a check that fails marks nothing
             return None
 
-    def served(self, item: AssessResponse) -> dict[str, object]:
-        """The additive keys a served assessment carries: ``basis_stale`` and, when true, ``basis_stale_reason``."""
+    def reason(self, item: AssessResponse) -> str | None:
+        """Why ``item`` should be assessed again, or ``None`` (current, or it cannot be said)."""
 
-        reason = self.reason(item)
-        return {"basis_stale": False} if reason is None else {"basis_stale": True, "basis_stale_reason": reason}
+        found = self.staleness(item)
+        return None if found is None else found.reason
+
+    def served(self, item: AssessResponse) -> dict[str, object]:
+        """The additive keys a served assessment carries: ``basis_stale`` and, when true, ``basis_stale_reason``.
+
+        0110-041: a ``story_bank_changed`` one also carries ``basis_stale_bank``,
+        the bank entries that made it stale (``story_bank.BankMatch.to_json``:
+        ids and question words, never an answer).
+        """
+
+        found = self.staleness(item)
+        if found is None:
+            return {"basis_stale": False}
+        served: dict[str, object] = {"basis_stale": True, "basis_stale_reason": found.reason}
+        if found.bank:
+            served["basis_stale_bank"] = [match.to_json() for match in found.bank]  # type: ignore[attr-defined]
+        return served
 
 
 __all__ = [
@@ -314,5 +353,7 @@ __all__ = [
     "REASON_STORY_BANK_CHANGED",
     "BasisCheck",
     "CurrentBasis",
+    "Staleness",
     "stale_reason",
+    "staleness",
 ]

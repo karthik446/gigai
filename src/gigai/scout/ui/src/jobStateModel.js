@@ -163,6 +163,32 @@ export const OLDER_SETTINGS_TEXT = "Assessed with older settings: re-assess";
 export const STORY_BANK_CHANGED_TEXT = "Your story bank changed since this assessment: re-assess";
 export const OLDER_SETTINGS_CHIP = "Older settings";
 
+// 0110-041: story_bank_changed is targeted. The stored item says which bank
+// entries made it stale (`basis_stale_bank`: {match: "exact" | "near" |
+// "cited", bank_question_id, bank_question?, question_id?, question?}), so
+// the note names the question that is now answered instead of "your story
+// bank changed". Without the list (a run row alone) the older line stays.
+export const BANK_CITED_TEXT = "A story bank answer this assessment used has changed: re-assess";
+const BANK_QUESTION_MAX = 90;
+
+function shortQuestion(text) {
+  const flat = String(text || "").split(/\s+/).filter(Boolean).join(" ");
+  return flat.length > BANK_QUESTION_MAX ? `${flat.slice(0, BANK_QUESTION_MAX - 3).trimEnd()}...` : flat;
+}
+
+export function storyBankNote(matches) {
+  const list = Array.isArray(matches) ? matches.filter((item) => item && typeof item === "object") : [];
+  const answered = list.filter((item) => item.match === "exact" || item.match === "near");
+  if (answered.length > 0) {
+    const first = answered[0];
+    const question = shortQuestion(first.bank_question || first.question || first.bank_question_id);
+    const others = new Set(answered.map((item) => item.bank_question_id)).size - 1;
+    const more = others > 0 ? ` (and ${others} more)` : "";
+    return question ? `Answered in your story bank: ${question}${more}: re-assess` : STORY_BANK_CHANGED_TEXT;
+  }
+  return list.some((item) => item.match === "cited") ? BANK_CITED_TEXT : STORY_BANK_CHANGED_TEXT;
+}
+
 export function isBasisStaleReason(reason) {
   return BASIS_STALE_REASONS.includes(reason);
 }
@@ -193,7 +219,8 @@ export function assessmentStaleFor(job) {
   if (isBasisStaleReason(reason) && quickIsCurrent(job.quick)) {
     return null;
   }
-  return { reason };
+  const bank = reason === "story_bank_changed" && job.quick && Array.isArray(job.quick.basis_stale_bank) ? job.quick.basis_stale_bank : [];
+  return bank.length > 0 ? { reason, bank } : { reason };
 }
 
 export function staleAssessmentNote(job) {
@@ -202,7 +229,7 @@ export function staleAssessmentNote(job) {
     return null;
   }
   if (stale.reason === "story_bank_changed") {
-    return STORY_BANK_CHANGED_TEXT;
+    return storyBankNote(stale.bank);
   }
   return isBasisStaleReason(stale.reason) ? OLDER_SETTINGS_TEXT : STALE_ASSESSMENT_TEXT;
 }

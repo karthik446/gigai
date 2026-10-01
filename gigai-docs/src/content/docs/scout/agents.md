@@ -187,9 +187,13 @@ What to know:
   the settings or the answers). `GET /api/assessments` items and the `source: "quick"`
   assessments of `GET /api/jobs` carry `basis_stale` (true or false) and, when true,
   `basis_stale_reason`: `older_prompt`, `settings_changed` (the profile's work mode, countries,
-  location or sponsorship need changed) or `story_bank_changed` (it left a question open and
-  the bank has an answer it had not seen, or it cites an answer that was edited, deleted or
-  unshared). `job_state.assessment_stale.reason` carries the same reason when that assessment
+  location or sponsorship need changed) or `story_bank_changed` (a bank entry added or edited
+  since answers one of ITS OWN open questions, by the same id or the near match behind
+  `bank_suggestions`, or it cites an answer that was edited, deleted or unshared; answering one
+  question does not flag assessments that asked something else). A `story_bank_changed` item
+  also carries `basis_stale_bank`: the entries that made it stale, each `{match: "exact" |
+  "near" | "cited", bank_question_id, bank_question, question_id, question}` (ids and question
+  words, never an answer). `job_state.assessment_stale.reason` carries the same reason when that assessment
   gives the job's state. The verdict still reads. Each profile is compared with its own
   settings.
 - **An assessment stored before that is stale only for what its prompt missed.** It has no

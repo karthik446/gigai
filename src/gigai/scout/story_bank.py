@@ -64,6 +64,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import lru_cache
 import json
 from pathlib import Path
 import re
@@ -1008,6 +1009,8 @@ class AssessBank:
     near match. ``marks`` maps every entry's id to an opaque revision mark
     (record ids only, never answer text) and ``digest`` is the digest of that
     map: what a run seals, and what the next run compares against.
+    ``record_marks`` is each entry's mark as it was sealed before 0110-041
+    (see ``_record_mark``), only so a basis recorded then still compares.
     """
 
     profile_id: str | None
@@ -1015,6 +1018,7 @@ class AssessBank:
     prior_answers: tuple[CorePriorAnswer, ...] = ()
     bank_answers: tuple[BankAnswer, ...] = ()
     marks: Mapping[str, str] = field(default_factory=dict)
+    record_marks: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def digest(self) -> str:
@@ -1022,7 +1026,31 @@ class AssessBank:
 
 
 def _mark(entry: BankEntry) -> str:
-    """An opaque mark that changes when the entry is edited, re-answered or comes from another profile."""
+    """An opaque mark that changes when THIS entry is edited, re-answered or comes from another profile.
+
+    0110-041: built from the entry's own write count and time (the overlay's
+    ``revision`` / ``updated_at``, bumped by every bank write of this entry
+    and by no other), its record id and its owner. Not from the record's
+    revision id: a profile's answers share one record, so that id changes
+    for EVERY entry when any one of them is written (``_record_mark``), which
+    made every cited or nearly matching entry look edited. An answer saved
+    before the bank (no overlay entry, write count 0) keeps one mark until
+    the bank writes it. No answer text and nothing derived from it.
+    """
+
+    written = f"{entry.revision}\n{entry.updated_at or ''}" if entry.revision > 0 else "0\n"
+    return digest_imported_bytes(
+        f"entry\n{entry.owner_profile_id}\n{entry.record_id}\n{entry.question_id}\n{written}".encode("utf-8")
+    )[len("sha256:"):][:16]
+
+
+def _record_mark(entry: BankEntry) -> str:
+    """The mark as sealed before 0110-041: owner, record and the RECORD's revision (shared by all its entries).
+
+    Kept only to compare with a basis recorded then: such a basis reads as
+    unchanged while the record is, and after the next write of that record
+    every entry of it reads as changed to it (it cannot say which one was).
+    """
 
     return digest_imported_bytes(f"{entry.owner_profile_id}\n{entry.record_id}\n{entry.revision_id}".encode("utf-8"))[len("sha256:"):][:16]
 
@@ -1058,37 +1086,137 @@ def assess_bank(*, home_root: Path, target: Path, profile_id: str | None, resume
             for item in prompt_summaries(entries, names=names)
         ),
         marks={entry.question_id: _mark(entry) for entry in entries},
+        record_marks={entry.question_id: _record_mark(entry) for entry in entries},
     )
+
+
+#: ``BankMatch.match``: how a changed bank entry concerns one assessment.
+MATCH_EXACT = "exact"
+MATCH_NEAR = "near"
+MATCH_CITED = "cited"
+
+
+@dataclass(frozen=True)
+class BankMatch:
+    """Why the bank makes ONE assessment stale: a changed entry that concerns it.
+
+    ``exact`` / ``near``: ``bank_question_id`` was added or edited since the
+    assessment's basis and answers its open ``question_id`` (the same id, or
+    ``near_match``). ``cited``: the assessment's evidence cites
+    ``bank_question_id`` and that entry was edited, deleted or is no longer
+    visible (``question_id`` is then ``None``; ``bank_question`` is empty when
+    the entry is gone). Ids and question words only, never an answer.
+    """
+
+    match: str
+    bank_question_id: str
+    bank_question: str = ""
+    question_id: str | None = None
+    question: str = ""
+
+    def to_json(self) -> dict[str, object]:
+        value: dict[str, object] = {"match": self.match, "bank_question_id": self.bank_question_id}
+        if self.bank_question:
+            value["bank_question"] = self.bank_question
+        if self.question_id is not None:
+            value["question_id"] = self.question_id
+            if self.question:
+                value["question"] = self.question
+        return value
+
+
+def changed_entries(sealed_marks: Mapping[str, str] | None, bank: AssessBank) -> tuple[BankEntry, ...]:
+    """The entries of ``bank`` an assessment with ``sealed_marks`` never saw as they are now (added, or edited since)."""
+
+    sealed = sealed_marks or {}
+    return tuple(entry for entry in bank.entries if not _as_sealed(sealed, bank, entry.question_id))
+
+
+def _as_sealed(sealed: Mapping[str, str], bank: AssessBank, question_id: str) -> bool:
+    """Whether the bank's entry ``question_id`` is the one ``sealed`` recorded (by either mark; both absent: nothing changed)."""
+
+    mark = sealed.get(question_id)
+    if mark is None:
+        return question_id not in bank.marks
+    return mark == bank.marks.get(question_id) or mark == bank.record_marks.get(question_id)
+
+
+def bank_matches(
+    *,
+    questions: Iterable[object],
+    evidence: Iterable[str],
+    sealed_marks: Mapping[str, str] | None,
+    bank: AssessBank,
+) -> tuple[BankMatch, ...]:
+    """The changed bank entries that concern ONE assessment (0110-041); empty: the bank leaves it current.
+
+    ``questions`` are the questions it left open (anything with a
+    ``question_id`` and a ``question``, e.g. ``AssessmentQuestion``),
+    ``evidence`` its matrix evidence, ``sealed_marks`` the bank it was made
+    with (``None``: made before the bank was recorded, read as an empty bank)
+    and ``bank`` the bank now. Targeted: answering one question concerns the
+    assessments that asked it, not every assessment that asked anything.
+
+    - An entry ADDED or EDITED since (``changed_entries``) that answers one of
+      ITS OWN open questions: the same id (``exact``), or the model-free
+      ``near_match`` behind ``bank_suggestions`` (``near``).
+    - It cites ``Story bank <id>`` and that entry was edited, deleted or is no
+      longer visible (sharing turned off): ``cited``.
+
+    An assessment with no open question that cites nothing is never stale,
+    neither is any assessment while the bank is unchanged (a model that saw
+    the bank and still asked is not asked again until an entry that concerns
+    its question changes), and neither is one whose questions the changed
+    entries do not answer. In memory: changed entries x open questions, no
+    read.
+    """
+
+    sealed = sealed_marks or {}
+    found: list[BankMatch] = []
+    asked = [(normalize_question_id(str(getattr(item, "question_id", "") or "")), str(getattr(item, "question", "") or "")) for item in questions]
+    if asked:
+        for entry in changed_entries(sealed, bank):
+            for question_id, question in asked:
+                if not question_id:
+                    continue
+                if entry.question_id == question_id:
+                    kind = MATCH_EXACT
+                elif near_match((entry,), question_id=question_id, question=question) is not None:
+                    kind = MATCH_NEAR
+                else:
+                    continue
+                found.append(BankMatch(kind, entry.question_id, _shown_question(entry), question_id, question))
+    by_id: dict[str, BankEntry] | None = None
+    for cited in cited_ids(evidence):
+        if _as_sealed(sealed, bank, cited):
+            continue
+        if by_id is None:
+            by_id = {entry.question_id: entry for entry in bank.entries}
+        entry = by_id.get(cited)
+        found.append(BankMatch(MATCH_CITED, cited, "" if entry is None else _shown_question(entry)))
+    return tuple(found)
+
+
+def _shown_question(entry: BankEntry) -> str:
+    """The entry's question words for a reason line ("answered in your story bank: ..."): contact details out, one line."""
+
+    return one_line(_redacted(entry.question or entry.question_id), _MAX_SUMMARY_QUESTION_CHARS)
 
 
 def bank_makes_stale(
     *,
-    questions: Iterable[str],
+    questions: Iterable[object],
     evidence: Iterable[str],
     sealed_marks: Mapping[str, str] | None,
-    current_marks: Mapping[str, str],
+    bank: AssessBank,
 ) -> bool:
-    """Whether a stored run assessment must be made again because the bank changed.
+    """Whether an assessment must be made again because the bank changed: ``bank_matches`` found something.
 
-    ``questions`` are the ids it left open, ``evidence`` its matrix evidence,
-    ``sealed_marks`` the bank its run read (``None``: a run from before the
-    bank reached runs, read as an empty bank) and ``current_marks`` the bank
-    now. Stale when:
-
-    - it left a question open and the bank now holds an answer its run never
-      saw (a new entry, or an edited one): the question may be answerable now;
-    - it cites ``Story bank <id>`` and that entry was edited, deleted or is no
-      longer visible (sharing turned off).
-
-    An assessment with no open question that cites nothing is never stale,
-    and neither is any assessment while the bank is unchanged: a model that
-    saw the bank and still asked is not asked again until the bank changes.
+    One rule for a stored assessment (``assessment_basis``) and a run's
+    unchanged skip (``proposal_execution._basis_stale``).
     """
 
-    sealed = sealed_marks or {}
-    if any(True for _ in questions) and any(sealed.get(question_id) != mark for question_id, mark in current_marks.items()):
-        return True
-    return any(sealed.get(question_id) != current_marks.get(question_id) for question_id in cited_ids(evidence))
+    return bool(bank_matches(questions=questions, evidence=evidence, sealed_marks=sealed_marks, bank=bank))
 
 
 # --- reuse: the prompt summaries and the near match ------------------------------------------
@@ -1179,6 +1307,7 @@ _FAMILY: dict[str, str] = {
 }
 
 
+@lru_cache(maxsize=4096)
 def _tokens(text: str) -> frozenset[str]:
     flat = text.lower().replace("ci/cd", "cicd")
     for separator in "_:/-":
@@ -1325,6 +1454,7 @@ __all__ = [
     "NEAR_MATCH_THRESHOLD",
     "SCHEMA_VERSION",
     "BankEntry",
+    "BankMatch",
     "BankPosting",
     "BankSuggestion",
     "AssessBank",
@@ -1336,7 +1466,9 @@ __all__ = [
     "assess_bank",
     "attach_suggestions",
     "bank_makes_stale",
+    "bank_matches",
     "bank_path",
+    "changed_entries",
     "cited_ids",
     "delete_entry",
     "edit_entry",

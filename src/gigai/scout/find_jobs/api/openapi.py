@@ -81,7 +81,10 @@ _BASIS_NOTE = (
     "A stored assessment records its basis (`prompt_version`, `constraints_digest`, `story_bank`: digests and ids, no settings "
     "or answer text). Served with `basis_stale` (true | false) and, when true, `basis_stale_reason` (`older_prompt` | "
     "`settings_changed` | `story_bank_changed`): whether it is what its profile would be assessed with now. Derived on read; "
-    "no model is called."
+    "no model is called. `story_bank_changed` is targeted: a bank entry added or edited since answers one of the assessment's own "
+    "open questions (the same id, or the near match behind `bank_suggestions`), or it cites a bank answer that was edited, deleted "
+    "or unshared. Such an item also carries `basis_stale_bank`: the entries that made it stale, each `{match: \"exact\" | \"near\" | "
+    "\"cited\", bank_question_id, bank_question?, question_id?, question?}` (ids and question words, never an answer)."
 )
 
 

@@ -680,10 +680,14 @@ def _basis_stale(prior: object, *, bank: object, constraints: str | None) -> boo
       ``assessment_core.constraints_digest``, work mode included since
       0110-038; ``None`` when the caller has no
       config to compare, which skips this check);
-    - the story bank changed in a way that could change the verdict
-      (``story_bank.bank_makes_stale``): an open question the bank can newly
-      answer, or a cited bank answer that was edited, deleted or unshared.
-      A run with no profile has no bank.
+    - the story bank changed in a way that concerns THIS assessment
+      (``story_bank.bank_makes_stale``, targeted since 0110-041): a bank
+      entry added or edited since answers one of its own open questions (the
+      same id, or the model-free near match), or a cited bank answer was
+      edited, deleted or unshared. A bank change that answers none of its
+      questions leaves it carried forward. The same rule, the same function,
+      as a stored assessment's (``assessment_basis``). A run with no profile
+      has no bank.
     """
 
     from . import story_bank
@@ -699,10 +703,10 @@ def _basis_stale(prior: object, *, bank: object, constraints: str | None) -> boo
         return False
     result = prior.result  # type: ignore[attr-defined]
     return story_bank.bank_makes_stale(
-        questions=[item.question_id for item in result.structured_questions],
+        questions=result.structured_questions,
         evidence=[evidence for row in result.matrix for evidence in row.resume_evidence],
         sealed_marks=getattr(prior, "bank_marks", None),
-        current_marks=bank.marks,  # type: ignore[attr-defined]
+        bank=bank,  # type: ignore[arg-type]
     )
 
 

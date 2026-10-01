@@ -258,7 +258,7 @@ def test_each_profile_is_judged_by_its_own_settings(fx: ProfileFixtureGig, model
 
 
 def test_the_story_bank_rule_is_the_runs_own(fx: ProfileFixtureGig, model: _Binding) -> None:
-    """Stale when it left a question open and the bank holds an answer it never saw; the twin of ``_basis_stale``."""
+    """Stale when the bank now answers a question IT left open (0110-041: targeted); the twin of ``_basis_stale``."""
 
     _write_find_jobs(fx, _with_mode(None))
     item = _assess(fx)  # asks about the Houston office
@@ -267,9 +267,16 @@ def test_the_story_bank_rule_is_the_runs_own(fx: ProfileFixtureGig, model: _Bind
     assert settled.result.verdict.value == "matched_above_threshold"
     assert _reason(fx, item) is None
 
+    # 0110-041: an answer to a question it did NOT ask leaves it current (039 flagged it here).
     story_bank.save_answer(
         home_root=fx.home_root, target=fx.target, profile_id=item.resume.profile_id,  # type: ignore[arg-type]
         question_id="cloud:gcp", answer="Two years running services on GCP.", question="Do you have GCP experience?",
+    )
+    assert _reason(fx, item) is None and "assessment_stale" not in _state(fx, item)
+
+    story_bank.save_answer(
+        home_root=fx.home_root, target=fx.target, profile_id=item.resume.profile_id,  # type: ignore[arg-type]
+        question_id="location:houston", answer="I live in Houston and can be in the office.", question="Can you work from the Houston office?",
     )
 
     assert _reason(fx, item) == "story_bank_changed"
@@ -367,9 +374,11 @@ def test_a_request_on_an_unchanged_workpad_pays_one_cheap_lookup(fx: ProfileFixt
     items = [_assess(fx, f"{_HOUSTON} Posting number {number}.", company=f"Bayou {number}") for number in range(4)]
     profile_id = items[0].resume.profile_id
     assert profile_id is not None
+    # 0110-041: the answer to the question these four asked (an unrelated one would flag none of them).
+    assert {question.question_id for item in items for question in item.result.structured_questions} == {"location:houston"}
     story_bank.save_answer(
         home_root=fx.home_root, target=fx.target, profile_id=profile_id,
-        question_id="cloud:gcp", answer="Two years running services on GCP.", question="Do you have GCP experience?",
+        question_id="location:houston", answer="I live in Houston and can be in the office.", question="Can you work from the Houston office?",
     )
     spawned: list[str] = []
     real_run = subprocess.run
