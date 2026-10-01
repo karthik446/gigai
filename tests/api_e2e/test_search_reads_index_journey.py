@@ -146,3 +146,110 @@ def test_a_search_never_fetches_a_board_and_says_when_to_update_sources(
         stop_server(server)
 
     assert_clean_and_healthy(workpad, home)
+
+
+def _run_with(client: httpx.Client, **body: object) -> httpx.Response:
+    config_digest = client.get("/api/config").json()["config_digest"]
+    return client.post("/api/run", json=run_request_body(config_digest, **body))
+
+
+def test_search_keywords_filter_through_the_text_index_and_the_sealed_config_shows_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0110-026 (F2): ``POST /api/run`` takes optional ``keywords``.
+
+    The posting's stored description is "Build reliable Python services."
+    1. Keywords before any Update sources: no text index, so they are
+       ignored with a reason; the run fails for the empty index, as without them.
+    2. After Update sources, a keyword found only in the description: the
+       posting is kept and assessed; the run's sealed config holds the
+       keywords and ``boards.keywords`` counts the match.
+    3. A keyword the text does not hold: the posting is dropped, counted.
+    4. A bad ``keywords`` value is 422 and starts nothing; the form's
+       ``config_digest`` (which never includes keywords) is still checked.
+    """
+
+    home, target = setup_and_init(tmp_path)
+    add_resume(home, target, tmp_path)
+    _boards_only_config(target)
+    server = start_server(home, target, monkeypatch=monkeypatch)
+    try:
+        client = server.client
+        workpad = resolve_workpad_path(home, target)
+        assert client.post("/api/watchlist", json={"url": ACME_BOARD}).status_code == 201
+        plain_config = client.get("/api/config").json()
+        assert "keywords" not in plain_config["config"]
+
+        # -- 1. no text index yet: ignored with a reason, never an error ----------
+        early = _run_with(client, keywords=["python services"])
+        assert early.status_code == 202, early.text
+        early_id = early.json()["run_id"]
+        assert poll_until_terminal(client, early_id, deadline_seconds=120.0)["status"] == "failed"  # the empty index, as in the journey above
+        early_keywords = client.get(f"/api/runs/{early_id}/progress").json()["boards"]["keywords"]
+        assert (early_keywords["applied"], early_keywords["reason"], early_keywords["terms"]) == (False, "no_text_index", ["python services"])
+        assert not (home / "cache" / "scout" / "text.sqlite").exists()
+
+        _update_sources(client)
+
+        # -- 2. a keyword only the description holds: kept, assessed, sealed --------
+        found = _run_with(client, keywords=["  Python   services ", "kubernetes"])
+        assert found.status_code == 202, found.text
+        found_id = found.json()["run_id"]
+        found_status = poll_until_terminal(client, found_id, deadline_seconds=120.0)
+        assert found_status["status"] == "succeeded", found_status
+        sealed = json.loads((workpad / "runs" / found_id / "sealed" / "find-jobs-config.json").read_text(encoding="utf-8"))
+        assert sealed["keywords"] == ["Python services", "kubernetes"]
+        assert {key: value for key, value in sealed.items() if key != "keywords"} == plain_config["config"]
+        boards = client.get(f"/api/runs/{found_id}/progress").json()["boards"]
+        assert boards["keywords"] == {
+            "terms": ["Python services", "kubernetes"],
+            "mode": "filter",
+            "applied": True,
+            "reason": None,
+            "message": None,
+            "matched": 1,
+            "dropped": 0,
+            "text_not_checked": 0,
+        }
+        assert boards["requests"] == 0 and boards["matched"] == 1
+        payload = client.get(f"/api/runs/{found_id}/results").json()["payload"]
+        assert [row["posting"]["url"] for row in payload["rows"]] == ["https://boards.greenhouse.io/acme/jobs/101"]
+        assert payload["assessments"], "the keyword-only match reached assess"
+        # The stored config and its digest are what they were: keywords belong to the one search.
+        assert client.get("/api/config").json() == plain_config
+
+        # -- 3. a keyword the stored text does not hold: dropped and counted --------
+        missed = _run_with(client, keywords=["kubernetes"])
+        assert missed.status_code == 202, missed.text
+        missed_id = missed.json()["run_id"]
+        poll_until_terminal(client, missed_id, deadline_seconds=120.0)
+        missed_boards = client.get(f"/api/runs/{missed_id}/progress").json()["boards"]
+        assert (missed_boards["keywords"]["matched"], missed_boards["keywords"]["dropped"], missed_boards["keywords"]["text_not_checked"]) == (0, 1, 0)
+        assert missed_boards["matched"] == 0
+
+        # A run without keywords has no keywords block and an unchanged sealed config.
+        plain_id, plain_status = _run(client)
+        assert plain_status["status"] == "succeeded", plain_status
+        assert "keywords" not in client.get(f"/api/runs/{plain_id}/progress").json()["boards"]
+        assert json.loads((workpad / "runs" / plain_id / "sealed" / "find-jobs-config.json").read_text(encoding="utf-8")) == plain_config["config"]
+
+        # -- 4. validation ------------------------------------------------------------
+        runs_before = len(client.get("/api/runs").json()["runs"])
+        for bad, code in ((["   "], "invalid_value"), ("python", "wrong_type"), ([7], "wrong_type"), (["x" * 101], "invalid_value")):
+            refused = _run_with(client, keywords=bad)
+            assert refused.status_code == 422 and refused.json()["error"]["code"] == code, (bad, refused.text)
+        stale = client.post("/api/run", json=run_request_body("sha256:" + "0" * 64, keywords=["python"]))
+        assert stale.status_code == 409 and stale.json()["error"]["code"] == "config_digest_mismatch", stale.text
+        unknown = _run_with(client, keyword=["python"])
+        assert unknown.status_code == 422 and "keywords" in unknown.json()["error"]["allowed_keys"], unknown.text
+        assert len(client.get("/api/runs").json()["runs"]) == runs_before
+        # An empty list is "no keywords": the plain run.
+        empty = _run_with(client, keywords=[])
+        assert empty.status_code == 202, empty.text
+        empty_id = empty.json()["run_id"]
+        poll_until_terminal(client, empty_id, deadline_seconds=120.0)
+        assert "keywords" not in client.get(f"/api/runs/{empty_id}/progress").json()["boards"]
+    finally:
+        stop_server(server)
+
+    assert_clean_and_healthy(workpad, home)

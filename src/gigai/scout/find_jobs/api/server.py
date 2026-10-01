@@ -31,6 +31,7 @@ import tempfile
 import threading
 import time
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from http import HTTPStatus
@@ -157,6 +158,10 @@ class Backend(Protocol):
         POST caller as an error response. Any exception raised after allocation cannot
         reach the (already-answered) POST caller; the backend must record the failure
         so it shows up in ``run_status``/``run_results`` instead.
+
+        0110-026 (F2): a request with full-text keywords also passes
+        ``keywords=(...)`` (keyword-only); a request without them makes the
+        three-argument call it always made.
         """
         ...
 
@@ -679,6 +684,8 @@ class ScoutFindJobsBackend:
         run_request: RunRequest,
         config_bytes: bytes,
         on_run_allocated: Callable[[str], None],
+        *,
+        keywords: tuple[str, ...] = (),
     ) -> None:
         """Seal and launch a run against the SELECTED profile (S25 F1-b).
 
@@ -694,6 +701,14 @@ class ScoutFindJobsBackend:
         form's snapshot), and that call's own unchanged digest guard raises
         ``find_jobs_config_digest_mismatch`` -> 409, exactly like any other
         stale-form edit.
+
+        0110-026 (F2): ``keywords`` are this one search's full-text keywords
+        (``POST /api/run``'s optional ``keywords``). They are laid over the
+        effective config as ``FindJobsConfig.keywords`` and sealed with it,
+        so the run's own acquire (and a later "find older") reads them from
+        its sealed config. The form's digest is still checked against the
+        config WITHOUT them (the form never saw them); only then is the
+        request's digest moved to the sealed config's.
         """
 
         from .... import run
@@ -721,6 +736,11 @@ class ScoutFindJobsBackend:
         shared_config = FindJobsConfig.from_json(parse_json_bytes(path.read_bytes()))
         effective_config = overlay_selected_profile(shared_config, profile)
         effective_config = with_saved_work_mode(effective_config, saved_work_mode(home_root=self.home_root, target=target))
+        if keywords:
+            if effective_config.digest() != run_request.config_digest:
+                raise _RunBoundaryError(HTTPStatus.CONFLICT, "config_digest_mismatch", "config digest does not match run request")
+            effective_config = replace(effective_config, keywords=tuple(keywords))
+            run_request = replace(run_request, config_digest=effective_config.digest())
         effective_config_bytes = canonical_json_bytes(effective_config.to_json())
 
         profile_ref = (
@@ -1739,6 +1759,9 @@ def _make_handler(
                     if path == "/api/secrets/status":
                         self._handle_get_secrets_status()
                         return
+                    if path == "/api/settings/background":
+                        self._handle_get_settings_background()
+                        return
                     # run-reads-fast (uat-bug-022): with a query these two are
                     # the page-sized reads (``run_reads.py``); with none they
                     # answer what they always did.
@@ -1853,6 +1876,9 @@ def _make_handler(
                     return
                 if path == "/api/config/sources":
                     self._handle_put_config_sources()
+                    return
+                if path == "/api/settings/background":
+                    self._handle_put_settings_background()
                     return
                 if path == "/api/resume-display":
                     self._handle_put_resume_display()

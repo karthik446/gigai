@@ -27,6 +27,17 @@ is stale it still returns what is stored and says so. Either way the
 ``index`` block of the summary (``status`` / ``needs_update`` / ``message``)
 is what the UI shows: "Run Update sources".
 
+0110-026 (F2): when the search carries keywords (``config.keywords``, laid
+over the config by ``POST /api/run``), they FILTER those rows through the
+full-text index (``text_index.search``, title and description): a row whose
+stored text was checked and matches none of the keywords is dropped; one
+keyword is enough, each keyword is matched as a phrase. A row with no stored
+text cannot be checked, so it is KEPT and counted (``text_not_checked``).
+Keywords never widen the role match: they only narrow the tag/rule
+candidates. Without a text index (never built, or no FTS5 in this SQLite)
+the keywords are ignored and the summary's ``keywords`` block says why; the
+search itself never fails for it.
+
 Every matching live posting is returned, not only the ones first seen or
 changed since the last search: which rows are NEW, EDITED or UNCHANGED, and
 which unchanged ones still need an assessment, is decided by the existing
@@ -45,6 +56,7 @@ from pathlib import Path
 import threading
 import time
 
+from . import text_index
 from .ats_board_clients import BoardCache
 from .company_index import (
     DEFAULT_STALE_AFTER_HOURS,
@@ -53,6 +65,7 @@ from .company_index import (
     CompanyIndexEntry,
     IndexedPosting,
     cached_posting_rows,
+    company_key,
     index_stamp,
     index_state,
 )
@@ -123,6 +136,96 @@ def _keep(entry: CompanyIndexEntry, posting: IndexedPosting, config: FindJobsCon
     return True
 
 
+KEYWORDS_NO_TEXT_INDEX = "no_text_index"
+KEYWORDS_TEXT_INDEX_UNAVAILABLE = "text_index_unavailable"
+KEYWORDS_BAD_QUERY = "bad_query"
+#: A company's candidates are few; the limit only has to be above any board's posting count.
+_ALL_HITS = 1_000_000
+
+
+def keyword_query(keywords: Sequence[str]) -> str:
+    """The FTS5 query for a search's keywords: each one a quoted phrase, any one enough."""
+
+    return " OR ".join('"' + keyword.replace('"', '""') + '"' for keyword in keywords)
+
+
+def _home_of(index: CompanyIndex) -> Path | None:
+    """The GigAI home a ``CompanyIndex.for_home`` index sits under (``None`` for any other root)."""
+
+    home = index.root.parent.parent.parent
+    return home if CompanyIndex.for_home(home).root == index.root else None
+
+
+class KeywordFilter:
+    """The keywords of one search over the text index. Build once per pass, call :meth:`keep` per company.
+
+    ``applied`` is False when there are no keywords or the text index cannot
+    answer (``reason`` / ``message`` say which); :meth:`keep` then keeps
+    everything. Never raises.
+    """
+
+    def __init__(self, keywords: Sequence[str], home_root: Path | None) -> None:
+        self.keywords = tuple(keywords)
+        self.home_root = home_root
+        self.query = keyword_query(self.keywords)
+        self.applied = False
+        self.reason: str | None = None
+        self.message: str | None = None
+        self.matched = self.dropped = self.text_not_checked = 0
+        if not self.keywords:
+            return
+        if home_root is None or not text_index.text_index_path(home_root).is_file():
+            # Never built here: a search does not build it (that is Update sources' work).
+            self.reason = KEYWORDS_NO_TEXT_INDEX
+            self.message = "Keywords were not applied: no posting text is indexed on this machine yet. Run Update sources, then search again."
+            return
+        probe = text_index.search(home_root, self.query, company_keys=(), limit=1)
+        if not probe.available:
+            self.reason = KEYWORDS_TEXT_INDEX_UNAVAILABLE
+            self.message = f"Keywords were not applied: the text index cannot be used ({probe.reason or 'unavailable'})."
+        elif probe.error:
+            self.reason = KEYWORDS_BAD_QUERY
+            self.message = "Keywords were not applied: they hold no searchable word."
+        else:
+            self.applied = True
+
+    def keep(self, key: str, posting_ids: Sequence[str]) -> set[str]:
+        """The ids of one company's candidates that stay: a keyword matched, or the text was not checked."""
+
+        if not self.applied or not posting_ids:
+            return set(posting_ids)
+        assert self.home_root is not None
+        result = text_index.search(self.home_root, self.query, company_keys=(key,), limit=_ALL_HITS)
+        with_text = text_index.postings_with_text(self.home_root, key)
+        if not result.available or result.error or with_text is None:
+            self.text_not_checked += len(posting_ids)  # the index went away mid-pass: nothing is dropped unchecked
+            return set(posting_ids)
+        hits = {hit.posting_id for hit in result.hits}
+        kept: set[str] = set()
+        for posting_id in posting_ids:
+            if posting_id in hits:
+                self.matched += 1
+            elif posting_id in with_text:
+                self.dropped += 1
+                continue
+            else:
+                self.text_not_checked += 1
+            kept.add(posting_id)
+        return kept
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "terms": list(self.keywords),
+            "mode": "filter",
+            "applied": self.applied,
+            "reason": self.reason,
+            "message": self.message,
+            "matched": self.matched,
+            "dropped": self.dropped,
+            "text_not_checked": self.text_not_checked,
+        }
+
+
 def read_indexed_boards(
     boards: Sequence[WatchlistEntry],
     *,
@@ -135,6 +238,7 @@ def read_indexed_boards(
     stale_after_hours: float = DEFAULT_STALE_AFTER_HOURS,
     remember_search: bool = True,
     tags: TagStore | None = None,
+    home_root: Path | None = None,
 ) -> tuple[list[PostingRow], list[FailureRow], dict[str, object]]:
     """Read the watchlist's postings from the company index. Makes no request.
 
@@ -145,6 +249,12 @@ def read_indexed_boards(
     always ``0``. ``tags`` is the title-tag store for the tag query (``None``:
     the whole-word rule alone); the summary's ``title_match`` block counts what
     matched by rule, by tag only, and what the rule judged alone for want of a tag.
+
+    ``config.keywords`` (F2) filter the rows through the text index under
+    ``home_root`` (default: the home ``index`` sits under); the summary then
+    has a ``keywords`` block (``applied``, ``reason``, ``matched``,
+    ``dropped``, ``text_not_checked``). No keywords: no block, and the text
+    index is not opened.
     """
 
     began = time.monotonic() if started_at is None else started_at
@@ -155,6 +265,7 @@ def read_indexed_boards(
     )
     since = read_last_search(index)
     title_matcher = TitleMatcher(config.roles, tags)
+    keywords = KeywordFilter(config.keywords, home_root if home_root is not None else _home_of(index)) if config.keywords else None
     planned = getattr(progress, "boards_planned", None)
     if callable(planned):
         planned(total=len(ordered), budget_seconds=None, rotation=None)
@@ -193,6 +304,10 @@ def read_indexed_boards(
                 kept = {posting_id: row for posting_id, row in found.rows.items() if work_mode_fit(row, config).passes}
                 board_rows = list(kept.values())
                 work_mode_filtered_out += len(found.rows) - len(kept)
+                if keywords is not None:
+                    staying = keywords.keep(company_key(ats, slug), list(kept))
+                    kept = {posting_id: row for posting_id, row in kept.items() if posting_id in staying}
+                    board_rows = list(kept.values())
                 without_text += sum(1 for posting_id in found.without_text if posting_id in kept)
                 not_cached += len(found.missing)
                 touched += len(fresh - (found.rows.keys() - kept.keys()))
@@ -250,6 +365,8 @@ def read_indexed_boards(
         "budget_seconds": None,
         "index": state.to_json(),
     }
+    if keywords is not None:
+        summary["keywords"] = keywords.to_json()
     return rows, failures, summary
 
 
@@ -263,6 +380,12 @@ def index_line(summary: dict[str, object]) -> str:
         "{listed} postings stored, {matched} matched ({touched_since_last_search} new or changed since the last search), "
         "{requests} board requests, {elapsed_seconds}s"
     ).format(status=status, **summary)
+    keywords = summary.get("keywords")
+    if isinstance(keywords, dict):
+        if keywords.get("applied"):
+            line += "; keywords: {matched} matched, {dropped} dropped, {text_not_checked} kept with text not checked".format(**keywords)
+        else:
+            line += f"; keywords ignored ({keywords.get('reason')})"
     exa_new = summary.get("exa_new")
     if isinstance(exa_new, dict) and exa_new.get("found"):
         noun = "company" if exa_new.get("fetched") == 1 else "companies"
@@ -277,7 +400,12 @@ def index_line(summary: dict[str, object]) -> str:
 
 
 __all__ = [
+    "KEYWORDS_BAD_QUERY",
+    "KEYWORDS_NO_TEXT_INDEX",
+    "KEYWORDS_TEXT_INDEX_UNAVAILABLE",
+    "KeywordFilter",
     "SOURCES_UPDATE_REQUIRED_CODE",
+    "keyword_query",
     "index_line",
     "read_indexed_boards",
     "read_last_search",

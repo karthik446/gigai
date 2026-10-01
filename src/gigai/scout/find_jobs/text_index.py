@@ -147,8 +147,11 @@ class _Store:
             except _Unavailable:
                 conn.close()
                 raise
-            except sqlite3.DatabaseError:
+            except sqlite3.DatabaseError as exc:
                 conn.close()
+                if isinstance(exc, sqlite3.OperationalError):
+                    # A locked/busy database is not a damaged one: never delete the file another process is writing.
+                    raise _Unavailable("text index is busy or cannot be opened") from None
                 if attempt:
                     raise _Unavailable("text index file cannot be created") from None
                 self._discard_files()  # a cache: an unreadable file is rebuilt, not repaired
@@ -191,7 +194,7 @@ class _Store:
         try:
             self._create(conn)
             conn.execute("COMMIT")
-        except BaseException:
+        except BaseException:  # noqa: BLE001 - cleans up (rollback/undo) and re-raises: nothing is swallowed
             conn.execute("ROLLBACK")
             raise
 
@@ -318,7 +321,7 @@ def rebuild_from_cache(home_root: Path) -> TextIndexStats:
                     _insert_postings(conn, key, postings)
                 conn.execute("UPDATE meta SET value='1' WHERE key='built'")
                 conn.execute("COMMIT")
-            except BaseException:
+            except BaseException:  # noqa: BLE001 - cleans up (rollback/undo) and re-raises: nothing is swallowed
                 conn.execute("ROLLBACK")
                 raise
     except (_Unavailable, sqlite3.DatabaseError) as error:
@@ -360,7 +363,7 @@ def upsert_company(home_root: Path, key: str, postings: Sequence[TextPosting]) -
                 _delete_company(conn, key)
                 _insert_postings(conn, key, postings)
                 conn.execute("COMMIT")
-            except BaseException:
+            except BaseException:  # noqa: BLE001 - cleans up (rollback/undo) and re-raises: nothing is swallowed
                 conn.execute("ROLLBACK")
                 raise
     except (_Unavailable, sqlite3.DatabaseError):
@@ -381,7 +384,7 @@ def remove_company(home_root: Path, key: str) -> bool:
             try:
                 _delete_company(conn, key)
                 conn.execute("COMMIT")
-            except BaseException:
+            except BaseException:  # noqa: BLE001 - cleans up (rollback/undo) and re-raises: nothing is swallowed
                 conn.execute("ROLLBACK")
                 raise
     except (_Unavailable, sqlite3.DatabaseError):
@@ -411,6 +414,22 @@ def stats(home_root: Path) -> TextIndexStats:
     except (_Unavailable, sqlite3.DatabaseError) as error:
         return TextIndexStats(False, reason=str(error))
     return TextIndexStats(True, with_text + without_text, with_text, without_text)
+
+
+def postings_with_text(home_root: Path, key: str) -> frozenset[str] | None:
+    """The ids of one company's indexed postings that have stored text; ``None`` when the index is unavailable.
+
+    What a text query could have matched: a posting of the company that is
+    not in this set was not checked (:class:`TextSearchResult.unchecked`
+    counts them; this says which ones).
+    """
+
+    try:
+        conn = _ready(home_root)
+        rows = conn.execute("SELECT posting_id FROM postings WHERE company_key=? AND has_text=1", (key,)).fetchall()
+    except (_Unavailable, sqlite3.DatabaseError):
+        return None
+    return frozenset(row[0] for row in rows)
 
 
 def search(

@@ -106,6 +106,34 @@ _JOB_URL = "https://boards.greenhouse.io/acme/jobs/101"
 _IDENTITY_KEY: dict[str, object] = {"profile_id": "prof_1", "job_identity": _JOB_URL}
 _ROW_ERRORS = (_INVALID, _WRONG_TYPE, _UNKNOWN_KEY)
 
+_BACKGROUND_SETTINGS_EXAMPLE: dict[str, object] = {
+    "schema_version": "scout-background-settings:1",
+    "readable": True,
+    "settings": {
+        "sources": {"auto_refresh": True},
+        "tagging": {"model_enabled": True, "backfill_enabled": False, "tag_backfill_model": "configured"},
+        "snapshot": {"enabled": True, "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json"},
+    },
+    "effective": {
+        "sources": {"auto_refresh": True, "source": "default"},
+        "tagging": {"model_enabled": True, "backfill_enabled": False, "tag_backfill_model": "configured", "source": "default"},
+        "snapshot": {
+            "enabled": True,
+            "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json",
+            "source": "default",
+        },
+    },
+}
+_BACKGROUND_SETTINGS_NOTE = (
+    "`settings` is what the project's settings file says (a key it does not hold shows its default): the values a form edits. "
+    "`effective` is what the background jobs act on now, each block with the `source` that decided it: default, setting, "
+    "environment (an environment variable overrides the file) or settings_unreadable. `readable` is false when the file exists "
+    "and cannot be read: every background job is then off. `sources.auto_refresh` off stops all background work, the model "
+    "tagging included; `tagging.model_enabled` lets a model tag titles the rules cannot place, `tagging.backfill_enabled` also "
+    "tags titles no active profile can reach, with `tagging.tag_backfill_model`; `snapshot.enabled` allows the metadata snapshot "
+    "download from `snapshot.manifest_url`."
+)
+
 _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     # --- discovery of the API itself -------------------------------------------------
     RouteSpec(
@@ -213,10 +241,20 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("selection_cap", "integer", "Postings to assess (1..50).", required=True),
             _b("selection_rule", "string", "Which postings the cap keeps.", required=True),
             _b("model_target", "string", "Model target.", required=True),
+            _b("keywords", "array", "Optional full-text keywords for this one search: up to 20 phrases of at most 100 characters."),
         ),
-        request_example={"schema_version": "scout-find-jobs-run-request:1", "config_digest": "sha256:...", "selection_cap": 10},
-        errors=(_INVALID, _UNKNOWN_KEY, (404, "config_missing"), (409, "config_digest_mismatch")),
-        description="Reads the boards over the network and spends model calls on assessment; returns as soon as the run is allocated. Poll GET /api/runs/{run_id}.",
+        request_example={"schema_version": "scout-find-jobs-run-request:1", "config_digest": "sha256:...", "selection_cap": 10, "keywords": ["kubernetes"]},
+        errors=(_INVALID, _WRONG_TYPE, _UNKNOWN_KEY, (404, "config_missing"), (409, "config_digest_mismatch")),
+        description=(
+            "Reads the boards over the network and spends model calls on assessment; returns as soon as the run is allocated. "
+            "Poll GET /api/runs/{run_id}. `keywords` filter the postings the profile's titles matched, through the full-text index "
+            "(title and description): a posting whose stored text matches none of them is dropped; one keyword is enough, each is "
+            "matched as a phrase. A posting with no stored text cannot be checked: it is kept and counted. They never add postings "
+            "the titles did not match. The run's sealed config carries them (`keywords`), and GET /api/runs/{run_id}/progress "
+            "`boards.keywords` reports {terms, mode: filter, applied, reason, message, matched, dropped, text_not_checked}; with no "
+            "text index on this machine `applied` is false, `reason` is no_text_index, text_index_unavailable or bad_query, and the "
+            "search runs as if no keyword was given. `config_digest` is the one GET /api/config returned (keywords are not part of it)."
+        ),
     ),
     RouteSpec(
         "GET", "/api/runs", "Every run, newest first, with counts.", "read", "none",
@@ -487,6 +525,45 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
                 "last_message": "Imported the snapshot as of 2026-10-01T06:00:00Z.",
                 "counts": {"boards": 120, "postings": 9000, "tags": 5200, "boards_kept_local": 0, "boards_removed": 0, "postings_removed": 0},
             },
+            "tags": {
+                "available": True,
+                "titles": 5200,
+                "tagged_by_rules": 4400,
+                "tagged_by_model": 600,
+                "model_other": 50,
+                "awaiting_model": 150,
+                "setting": {"model_enabled": True, "backfill_enabled": False, "tag_backfill_model": "configured", "source": "default"},
+                "models": {"demand": "ollama_local:llama3.1", "backfill": "ollama_local"},
+                "queue": {
+                    "setting": {"model_enabled": True, "backfill_enabled": False, "tag_backfill_model": "configured", "source": "default"},
+                    "prompt_version": "tag-v1",
+                    "batch_size": 50,
+                    "batches_per_tick": 4,
+                    "state": "drained",
+                    "last_drain_at": "2026-10-01T12:01:00Z",
+                    "last_drain": {"state": "drained", "batches": 4, "tagged": 200, "rejected": 0, "calls": 4},
+                    "parked": 0,
+                    "demand": {
+                        "model": "ollama_local:llama3.1", "batches": 12, "calls": 12, "tagged": 600, "rejected": 0, "failures": 0,
+                        "consecutive_failures": 0, "last_error": None, "last_error_at": None, "retry_after": None,
+                    },
+                    "backfill": {
+                        "model": None, "batches": 0, "calls": 0, "tagged": 0, "rejected": 0, "failures": 0,
+                        "consecutive_failures": 0, "last_error": None, "last_error_at": None, "retry_after": None,
+                    },
+                },
+            },
+            "text_index": {"available": True, "postings_with_text": 6100, "unchecked": 2900},
+            "refresh": {
+                "enabled": True,
+                "state": "waiting",
+                "in_progress": False,
+                "trigger": "manual",
+                "last_updated_at": "2026-10-01T12:00:00.000Z",
+                "last_updated_minutes_ago": 12,
+                "next_tick_at": "2026-10-01T12:50:00.000Z",
+                "next_tick_in_minutes": 38,
+            },
         },
         schema_version="scout-sources-update-status:1",
         description=(
@@ -502,8 +579,43 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "validators; never descriptions): `enabled` and `setting_source` (default|setting|environment|settings_unreadable) say "
             "whether it may be downloaded, `as_of` when the one in use was built (null: none imported), `kind` full or delta, "
             "`last_result` imported, up_to_date, skipped, refused or failed, `last_reason` why nothing was imported (offline, "
-            "not_published, local_fresher, checked_recently, digest_mismatch, ...), `counts` what the last import wrote. Reading "
-            "this makes no request."
+            "not_published, local_fresher, checked_recently, digest_mismatch, ...), `counts` what the last import wrote. "
+            "`tags` counts the stored titles: `tagged_by_rules` and `tagged_by_model` have a function, `model_other` are titles a "
+            "model looked at and could not place, `awaiting_model` still wait for a model (it reaches 0 when the queue is done); "
+            "`setting` is the tagging setting in effect, `models` the model each lane asks (demand: titles the active profiles can "
+            "reach; backfill: the rest; null when none is configured), `queue` the model queue of this server (null when it runs no "
+            "refresh thread): its last drain and, per lane, calls, `failures`, `last_error` and `retry_after` (when a failed lane "
+            "tries again). `text_index` counts postings a keyword search can check (`postings_with_text`) and cannot (`unchecked`). "
+            "`refresh` is the strip's line: `enabled`, `state` and `trigger` as in `background`, `last_updated_at` with "
+            "`last_updated_minutes_ago` (null before the first update and while one runs), `next_tick_at` with "
+            "`next_tick_in_minutes` (null unless a check is scheduled). Reading this makes no request."
+        ),
+    ),
+    # --- settings ----------------------------------------------------------------------
+    RouteSpec(
+        "GET", "/api/settings/background", "The background settings: hourly refresh, model tagging, snapshot download.", "read", "none",
+        _BACKGROUND_SETTINGS_EXAMPLE,
+        schema_version="scout-background-settings:1",
+        errors=(_NO_TARGET,),
+        description=_BACKGROUND_SETTINGS_NOTE,
+    ),
+    RouteSpec(
+        "PUT", "/api/settings/background", "Change background settings.", "write", "none",
+        _BACKGROUND_SETTINGS_EXAMPLE,
+        schema_version="scout-background-settings:1",
+        params=(
+            _b("sources", "object", "{auto_refresh: boolean}: the hourly background refresh of the sources."),
+            _b("tagging", "object", "{model_enabled: boolean, backfill_enabled: boolean, tag_backfill_model: configured|haiku|openai}."),
+            _b("snapshot", "object", "{enabled: boolean, manifest_url: an http(s) URL, or null for the default location}."),
+        ),
+        request_example={"sources": {"auto_refresh": False}},
+        errors=(_WRONG_TYPE, _UNKNOWN_KEY, _INVALID, (422, "bad_enum"), _NO_TARGET, (409, "settings_unreadable")),
+        description=(
+            "Send only the keys to change; at least one. Every other key of the project's settings.json is kept, and the file is "
+            "replaced in one step. The refresh thread reads the file at every look and is woken by this call, so turning "
+            "`sources.auto_refresh` off stops the hourly refresh and the model tagging at once (an update already running "
+            "finishes). 409 settings_unreadable: the stored file is not one Scout can read; it is left as it is. The answer is the "
+            "GET body after the change. " + _BACKGROUND_SETTINGS_NOTE
         ),
     ),
 )
@@ -558,6 +670,8 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/watchlist"): ("Watch a company board", "Sources"),
     ("POST", "/api/sources/update"): ("Refresh the board catalog", "Sources"),
     ("GET", "/api/sources/update"): ("Get the board refresh status", "Sources"),
+    ("GET", "/api/settings/background"): ("Get the background settings", "Settings"),
+    ("PUT", "/api/settings/background"): ("Change the background settings", "Settings"),
 }
 
 

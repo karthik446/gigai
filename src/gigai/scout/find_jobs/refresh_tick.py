@@ -448,14 +448,24 @@ def _signature(path: Path) -> tuple[object, ...]:
 
 #: The last counts read from each cache file, kept while the file is unchanged:
 #: the status is polled every second during an update and the counts scan the store.
-_COUNTS: dict[Path, tuple[tuple[object, ...], dict[str, object]]] = {}
+_COUNTS: dict[tuple[Path, str], tuple[tuple[object, ...], dict[str, object]]] = {}
 _COUNTS_LOCK = threading.Lock()
 #: A status read waits this long for a writer, then reports the store unavailable for this poll.
 _COUNT_TIMEOUT_SECONDS = 1.0
 
 
-def _cached_counts(path: Path, read: Callable[[sqlite3.Connection], dict[str, object]], blank: dict[str, object]) -> dict[str, object]:
+def _cached_counts(
+    path: Path,
+    read: Callable[[sqlite3.Connection], dict[str, object]],
+    blank: dict[str, object],
+    *,
+    slot: str = "",
+) -> dict[str, object]:
     """``read`` over a read-only connection to the cache at ``path``; ``blank`` when it cannot be read.
+
+    ``slot`` names the reader when more than one reads the same file (the
+    ``background`` block here, ``sources_status`` for the API's own blocks):
+    each keeps its own last counts.
 
     Read-only on purpose. The stores' own openers create a missing file and
     rebuild one they cannot open; a status poll must do neither, least of
@@ -466,7 +476,7 @@ def _cached_counts(path: Path, read: Callable[[sqlite3.Connection], dict[str, ob
         return dict(blank)  # a status read never creates the cache
     with _COUNTS_LOCK:
         before = _signature(path)
-        held = _COUNTS.get(path)
+        held = _COUNTS.get((path, slot))
         if held is not None and held[0] == before:
             return dict(held[1])
         try:
@@ -478,7 +488,7 @@ def _cached_counts(path: Path, read: Callable[[sqlite3.Connection], dict[str, ob
         except (sqlite3.Error, OSError, ValueError, TypeError):
             return dict(blank)  # being created, locked or not this layout: unavailable now, read again next time
         # Signed as it was before the read: a write during the read only costs one more read.
-        _COUNTS[path] = (before, dict(value))
+        _COUNTS[(path, slot)] = (before, dict(value))
         return value
 
 

@@ -190,6 +190,23 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         snapshot_block = sources_status["snapshot"]
         assert set(snapshot_block) == set(documented["snapshot"])
         assert (snapshot_block["as_of"], snapshot_block["last_attempt_at"], snapshot_block["counts"]) == (None, None, None)
+        # 0110-026f: and the documented `tags`, `text_index` and `refresh` blocks, key for key.
+        for block in ("tags", "text_index", "refresh"):
+            assert set(sources_status[block]) == set(documented[block]), block
+        tags_block, documented_queue = sources_status["tags"], documented["tags"]["queue"]
+        assert set(tags_block["setting"]) == set(documented["tags"]["setting"]) and set(tags_block["models"]) == set(documented["tags"]["models"])
+        assert set(tags_block["queue"]) == set(documented_queue)
+        assert {lane: set(tags_block["queue"][lane]) for lane in ("demand", "backfill")} == {lane: set(documented_queue[lane]) for lane in ("demand", "backfill")}
+        assert (sources_status["refresh"]["enabled"], sources_status["refresh"]["state"], sources_status["refresh"]["next_tick_at"]) == (False, "disabled", None)
+        # 0110-026f: the background settings, documented key for key; a bad body names what is allowed.
+        settings_documented = next(r for r in openapi.ROUTES if r.key == ("GET", "/api/settings/background")).example
+        settings_body = client.get("/api/settings/background").json()
+        assert set(settings_body) == set(settings_documented)
+        for view in ("settings", "effective"):
+            assert {name: set(settings_body[view][name]) for name in settings_body[view]} == {name: set(settings_documented[view][name]) for name in settings_documented[view]}, view
+        assert allowed(client.put("/api/settings/background", json={"bogus": 1})) == ["snapshot", "sources", "tagging"]
+        nested_setting = client.put("/api/settings/background", json={"tagging": {"bogus": 1}})
+        assert nested_setting.status_code == 422 and nested_setting.json()["error"]["allowed_keys"] == ["backfill_enabled", "model_enabled", "tag_backfill_model"]
         assert allowed(client.post("/api/applications", json={"bogus": 1})) == ["event_kind", "job_identity", "normalized_url", "notes", "occurred_at"]
         assert allowed(client.put("/api/resume-display", json={"bogus": 1})) == ["auto_fit", "contact", "name", "spacing_scale", "titles"]
         assert allowed(client.post("/api/resumes", json={"bogus": 1})) == ["content_base64", "file_name", "text"]

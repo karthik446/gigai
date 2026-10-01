@@ -22,6 +22,10 @@ first update the thread does nothing and says "Run Update sources once";
 after it, the next tick is an hour after the update started, and the tag
 store and the text index hold the posting the update indexed.
 
+0110-026f: the status also carries ``tags``, ``text_index`` and ``refresh``
+(one block each, beside ``background``, whose key set is unchanged): the
+counts are checked on this synthetic home before and after the first update.
+
 No setup preferences are saved, so nothing is seeded from the company
 catalog: the update covers exactly the two user-added boards (the
 full-catalog cost is measured separately, not journeyed).
@@ -92,8 +96,8 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
         }
         # 0110-026: the snapshot block. Nothing was imported, and reading the status asked nobody.
         assert before_body.pop("snapshot") == {
-            "enabled": True,
-            "setting_source": "default",
+            "enabled": False,  # the suite sets GIGAI_SCOUT_SNAPSHOT=0 so no update reaches the real release URL
+            "setting_source": "environment",
             "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json",
             "as_of": None,
             "source": None,
@@ -106,6 +110,37 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
             "counts": None,
         }
         assert not (home / "cache" / "scout" / "snapshot").exists()
+        # 0110-026f: the three status blocks. Nothing is stored yet; reading them creates neither cache.
+        tags_before = before_body.pop("tags")
+        queue_before = tags_before.pop("queue")
+        assert tags_before == {
+            "available": False,
+            "titles": 0,
+            "tagged_by_rules": 0,
+            "tagged_by_model": 0,
+            "model_other": 0,
+            "awaiting_model": 0,
+            # The suite turns model tagging off for every server it starts (tests/conftest.py).
+            "setting": {"model_enabled": False, "backfill_enabled": False, "tag_backfill_model": "configured", "source": "environment"},
+            "models": {"demand": "ollama_local", "backfill": "ollama_local"},
+        }
+        assert queue_before["setting"] == tags_before["setting"] and queue_before["parked"] == 0
+        assert {lane: (queue_before[lane]["failures"], queue_before[lane]["last_error"], queue_before[lane]["retry_after"]) for lane in ("demand", "backfill")} == {
+            "demand": (0, None, None),
+            "backfill": (0, None, None),
+        }
+        assert before_body.pop("text_index") == {"available": False, "postings_with_text": 0, "unchecked": 0}
+        assert before_body.pop("refresh") == {
+            "enabled": True,
+            "state": "needs_first_update",
+            "in_progress": False,
+            "trigger": None,
+            "last_updated_at": None,
+            "last_updated_minutes_ago": None,
+            "next_tick_at": None,
+            "next_tick_in_minutes": None,
+        }
+        assert not (home / "cache" / "scout" / "tags.sqlite").exists() and not (home / "cache" / "scout" / "text.sqlite").exists()
         assert before_body == {
             "schema_version": "scout-sources-update-status:1",
             "running": False,
@@ -172,6 +207,21 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
         assert next_tick - started_at == timedelta(hours=1)
         assert background["tags"] == {"available": True, "titles": 1, "with_function": 1, "lacking_function": 0}
         assert background["text"] == {"available": True, "postings": 1, "with_text": 1, "unchecked": 0}
+
+        # -- 0110-026f: the tags, text_index and refresh blocks after the first update --
+        tags = first["tags"]
+        assert {name: tags[name] for name in ("available", "titles", "tagged_by_rules", "tagged_by_model", "model_other", "awaiting_model")} == {
+            "available": True, "titles": 1, "tagged_by_rules": 1, "tagged_by_model": 0, "model_other": 0, "awaiting_model": 0,
+        }
+        assert tags["queue"] is not None and tags["queue"]["prompt_version"] == "tag-v1"
+        assert first["text_index"] == {"available": True, "postings_with_text": 1, "unchecked": 0}
+        refresh = first["refresh"]
+        assert (refresh["enabled"], refresh["state"], refresh["in_progress"], refresh["trigger"]) == (True, "waiting", False, "manual")
+        assert refresh["last_updated_at"] == update["finished_at"] and refresh["last_updated_minutes_ago"] == 0
+        assert refresh["next_tick_at"] == background["next_tick_at"] and refresh["next_tick_in_minutes"] in (58, 59)
+        assert set(background) == {"auto_refresh", "state", "message", "in_progress", "trigger", "last_update", "next_tick_at", "interval_seconds", "tags", "text"}
+        # The manual update's status still shows the snapshot block (0110-026e), untouched.
+        assert set(first["snapshot"]) == {"enabled", "setting_source", "manifest_url", "as_of", "source", "kind", "imported_at", "last_attempt_at", "last_result", "last_reason", "last_message", "counts"}
 
         assert sorted(item.name for item in companies.iterdir()) == ["greenhouse:acme.json", "last-update.json"]
         acme = json.loads((companies / "greenhouse:acme.json").read_text(encoding="utf-8"))

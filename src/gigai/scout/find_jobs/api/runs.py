@@ -10,7 +10,7 @@ import threading
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
-from ..contracts import ATSProvider, FindJobsContractError, RunRequest
+from ..contracts import ATSProvider, FindJobsContractError, RunRequest, search_keywords
 from ..job_state import AssessmentFact, JobStateSources
 from .server import ConfigMissingError, _RunBoundaryError, _logger
 
@@ -147,6 +147,17 @@ class RunRoutesMixin:
         body = self._read_json_body()
         if body is None:
             return
+        # 0110-026 (F2): the optional full-text keywords of this one search.
+        # They are not part of the sealed run request: the backend lays them
+        # over the effective config it seals, and the index read applies them.
+        keywords: tuple[str, ...] = ()
+        if isinstance(body, dict) and "keywords" in body:
+            body = dict(body)
+            try:
+                keywords = search_keywords(body.pop("keywords"))
+            except FindJobsContractError as exc:
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, exc.code, str(exc))
+                return
         try:
             run_request = RunRequest.from_json(body)
         except FindJobsContractError as exc:
@@ -184,7 +195,10 @@ class RunRoutesMixin:
         def _run() -> None:
             nonlocal pre_allocation_error, post_allocation_error
             try:
-                self._backend.start_run(run_request, config_bytes, _on_run_allocated)
+                if keywords:
+                    self._backend.start_run(run_request, config_bytes, _on_run_allocated, keywords=keywords)
+                else:
+                    self._backend.start_run(run_request, config_bytes, _on_run_allocated)
             except BaseException as exc:  # noqa: BLE001 - routed to the right side of allocation, not swallowed
                 if allocated.is_set():
                     post_allocation_error = exc

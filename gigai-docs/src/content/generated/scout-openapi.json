@@ -2430,7 +2430,7 @@
     },
     "/api/run": {
       "post": {
-        "description": "Start a find-jobs run (acquire, rank, assess up to the cap). Reads the boards over the network and spends model calls on assessment; returns as soon as the run is allocated. Poll GET /api/runs/{run_id}.",
+        "description": "Start a find-jobs run (acquire, rank, assess up to the cap). Reads the boards over the network and spends model calls on assessment; returns as soon as the run is allocated. Poll GET /api/runs/{run_id}. `keywords` filter the postings the profile's titles matched, through the full-text index (title and description): a posting whose stored text matches none of them is dropped; one keyword is enough, each is matched as a phrase. A posting with no stored text cannot be checked: it is kept and counted. They never add postings the titles did not match. The run's sealed config carries them (`keywords`), and GET /api/runs/{run_id}/progress `boards.keywords` reports {terms, mode: filter, applied, reason, message, matched, dropped, text_not_checked}; with no text index on this machine `applied` is false, `reason` is no_text_index, text_index_unavailable or bad_query, and the search runs as if no keyword was given. `config_digest` is the one GET /api/config returned (keywords are not part of it).",
         "operationId": "post_api_run",
         "parameters": [],
         "requestBody": {
@@ -2438,6 +2438,9 @@
             "application/json": {
               "example": {
                 "config_digest": "sha256:...",
+                "keywords": [
+                  "kubernetes"
+                ],
                 "schema_version": "scout-find-jobs-run-request:1",
                 "selection_cap": 10
               },
@@ -2451,6 +2454,10 @@
                   "consent": {
                     "description": "The consent envelope the UI sends.",
                     "type": "object"
+                  },
+                  "keywords": {
+                    "description": "Optional full-text keywords for this one search: up to 20 phrases of at most 100 characters.",
+                    "type": "array"
                   },
                   "model_target": {
                     "description": "Model target.",
@@ -2575,7 +2582,7 @@
                 }
               }
             },
-            "description": "invalid_value, unknown_key"
+            "description": "invalid_value, wrong_type, unknown_key"
           }
         },
         "summary": "Start a find-jobs run",
@@ -3498,6 +3505,267 @@
         "x-gigai-external": "none"
       }
     },
+    "/api/settings/background": {
+      "get": {
+        "description": "The background settings: hourly refresh, model tagging, snapshot download. `settings` is what the project's settings file says (a key it does not hold shows its default): the values a form edits. `effective` is what the background jobs act on now, each block with the `source` that decided it: default, setting, environment (an environment variable overrides the file) or settings_unreadable. `readable` is false when the file exists and cannot be read: every background job is then off. `sources.auto_refresh` off stops all background work, the model tagging included; `tagging.model_enabled` lets a model tag titles the rules cannot place, `tagging.backfill_enabled` also tags titles no active profile can reach, with `tagging.tag_backfill_model`; `snapshot.enabled` allows the metadata snapshot download from `snapshot.manifest_url`.",
+        "operationId": "get_api_settings_background",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "effective": {
+                    "snapshot": {
+                      "enabled": true,
+                      "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json",
+                      "source": "default"
+                    },
+                    "sources": {
+                      "auto_refresh": true,
+                      "source": "default"
+                    },
+                    "tagging": {
+                      "backfill_enabled": false,
+                      "model_enabled": true,
+                      "source": "default",
+                      "tag_backfill_model": "configured"
+                    }
+                  },
+                  "readable": true,
+                  "schema_version": "scout-background-settings:1",
+                  "settings": {
+                    "snapshot": {
+                      "enabled": true,
+                      "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json"
+                    },
+                    "sources": {
+                      "auto_refresh": true
+                    },
+                    "tagging": {
+                      "backfill_enabled": false,
+                      "model_enabled": true,
+                      "tag_backfill_model": "configured"
+                    }
+                  }
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-background-settings:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          }
+        },
+        "summary": "Get the background settings",
+        "tags": [
+          "Settings"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none"
+      },
+      "put": {
+        "description": "Change background settings. Send only the keys to change; at least one. Every other key of the project's settings.json is kept, and the file is replaced in one step. The refresh thread reads the file at every look and is woken by this call, so turning `sources.auto_refresh` off stops the hourly refresh and the model tagging at once (an update already running finishes). 409 settings_unreadable: the stored file is not one Scout can read; it is left as it is. The answer is the GET body after the change. `settings` is what the project's settings file says (a key it does not hold shows its default): the values a form edits. `effective` is what the background jobs act on now, each block with the `source` that decided it: default, setting, environment (an environment variable overrides the file) or settings_unreadable. `readable` is false when the file exists and cannot be read: every background job is then off. `sources.auto_refresh` off stops all background work, the model tagging included; `tagging.model_enabled` lets a model tag titles the rules cannot place, `tagging.backfill_enabled` also tags titles no active profile can reach, with `tagging.tag_backfill_model`; `snapshot.enabled` allows the metadata snapshot download from `snapshot.manifest_url`.",
+        "operationId": "put_api_settings_background",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "sources": {
+                  "auto_refresh": false
+                }
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "snapshot": {
+                    "description": "{enabled: boolean, manifest_url: an http(s) URL, or null for the default location}.",
+                    "type": "object"
+                  },
+                  "sources": {
+                    "description": "{auto_refresh: boolean}: the hourly background refresh of the sources.",
+                    "type": "object"
+                  },
+                  "tagging": {
+                    "description": "{model_enabled: boolean, backfill_enabled: boolean, tag_backfill_model: configured|haiku|openai}.",
+                    "type": "object"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "effective": {
+                    "snapshot": {
+                      "enabled": true,
+                      "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json",
+                      "source": "default"
+                    },
+                    "sources": {
+                      "auto_refresh": true,
+                      "source": "default"
+                    },
+                    "tagging": {
+                      "backfill_enabled": false,
+                      "model_enabled": true,
+                      "source": "default",
+                      "tag_backfill_model": "configured"
+                    }
+                  },
+                  "readable": true,
+                  "schema_version": "scout-background-settings:1",
+                  "settings": {
+                    "snapshot": {
+                      "enabled": true,
+                      "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json"
+                    },
+                    "sources": {
+                      "auto_refresh": true
+                    },
+                    "tagging": {
+                      "backfill_enabled": false,
+                      "model_enabled": true,
+                      "tag_backfill_model": "configured"
+                    }
+                  }
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-background-settings:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "settings_unreadable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "settings_unreadable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "wrong_type",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "wrong_type, unknown_key, invalid_value, bad_enum"
+          }
+        },
+        "summary": "Change the background settings",
+        "tags": [
+          "Settings"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
     "/api/setup": {
       "get": {
         "description": "The saved preferences (the wizard's answers).",
@@ -3740,7 +4008,7 @@
     },
     "/api/sources/update": {
       "get": {
-        "description": "State of the last or running sources update. `update` is the running or last update's snapshot (null when none ever ran): `trigger` is manual or auto (the hourly background refresh), `failures` counts boards that did not answer by code, `stores` counts what the update wrote to the tag store and the text index. `index` says whether a search can read the stored postings. `background` is the hourly refresh and the two stores: `auto_refresh` {enabled, source: default|setting|environment|settings_unreadable, active: a refresh thread runs in this server}; `state` is disabled, inactive, needs_first_update (run Update sources once: the background refresh never fills an empty index), running, waiting or due; `in_progress` and `trigger` describe the live update, `last_update` the last finished one; `next_tick_at` is null unless a tick is scheduled; `tags` counts stored titles and those still lacking a function; `text.unchecked` counts postings with no stored text, which a text search cannot match. `snapshot` is the downloaded metadata snapshot (titles, locations, links, title tags and board validators; never descriptions): `enabled` and `setting_source` (default|setting|environment|settings_unreadable) say whether it may be downloaded, `as_of` when the one in use was built (null: none imported), `kind` full or delta, `last_result` imported, up_to_date, skipped, refused or failed, `last_reason` why nothing was imported (offline, not_published, local_fresher, checked_recently, digest_mismatch, ...), `counts` what the last import wrote. Reading this makes no request.",
+        "description": "State of the last or running sources update. `update` is the running or last update's snapshot (null when none ever ran): `trigger` is manual or auto (the hourly background refresh), `failures` counts boards that did not answer by code, `stores` counts what the update wrote to the tag store and the text index. `index` says whether a search can read the stored postings. `background` is the hourly refresh and the two stores: `auto_refresh` {enabled, source: default|setting|environment|settings_unreadable, active: a refresh thread runs in this server}; `state` is disabled, inactive, needs_first_update (run Update sources once: the background refresh never fills an empty index), running, waiting or due; `in_progress` and `trigger` describe the live update, `last_update` the last finished one; `next_tick_at` is null unless a tick is scheduled; `tags` counts stored titles and those still lacking a function; `text.unchecked` counts postings with no stored text, which a text search cannot match. `snapshot` is the downloaded metadata snapshot (titles, locations, links, title tags and board validators; never descriptions): `enabled` and `setting_source` (default|setting|environment|settings_unreadable) say whether it may be downloaded, `as_of` when the one in use was built (null: none imported), `kind` full or delta, `last_result` imported, up_to_date, skipped, refused or failed, `last_reason` why nothing was imported (offline, not_published, local_fresher, checked_recently, digest_mismatch, ...), `counts` what the last import wrote. `tags` counts the stored titles: `tagged_by_rules` and `tagged_by_model` have a function, `model_other` are titles a model looked at and could not place, `awaiting_model` still wait for a model (it reaches 0 when the queue is done); `setting` is the tagging setting in effect, `models` the model each lane asks (demand: titles the active profiles can reach; backfill: the rest; null when none is configured), `queue` the model queue of this server (null when it runs no refresh thread): its last drain and, per lane, calls, `failures`, `last_error` and `retry_after` (when a failed lane tries again). `text_index` counts postings a keyword search can check (`postings_with_text`) and cannot (`unchecked`). `refresh` is the strip's line: `enabled`, `state` and `trigger` as in `background`, `last_updated_at` with `last_updated_minutes_ago` (null before the first update and while one runs), `next_tick_at` with `next_tick_in_minutes` (null unless a check is scheduled). Reading this makes no request.",
         "operationId": "get_api_sources_update",
         "parameters": [],
         "responses": {
@@ -3788,6 +4056,16 @@
                     "stale_after_hours": 24.0,
                     "status": "ready"
                   },
+                  "refresh": {
+                    "enabled": true,
+                    "in_progress": false,
+                    "last_updated_at": "2026-10-01T12:00:00.000Z",
+                    "last_updated_minutes_ago": 12,
+                    "next_tick_at": "2026-10-01T12:50:00.000Z",
+                    "next_tick_in_minutes": 38,
+                    "state": "waiting",
+                    "trigger": "manual"
+                  },
                   "running": false,
                   "schema_version": "scout-sources-update-status:1",
                   "snapshot": {
@@ -3810,6 +4088,74 @@
                     "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json",
                     "setting_source": "default",
                     "source": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json"
+                  },
+                  "tags": {
+                    "available": true,
+                    "awaiting_model": 150,
+                    "model_other": 50,
+                    "models": {
+                      "backfill": "ollama_local",
+                      "demand": "ollama_local:llama3.1"
+                    },
+                    "queue": {
+                      "backfill": {
+                        "batches": 0,
+                        "calls": 0,
+                        "consecutive_failures": 0,
+                        "failures": 0,
+                        "last_error": null,
+                        "last_error_at": null,
+                        "model": null,
+                        "rejected": 0,
+                        "retry_after": null,
+                        "tagged": 0
+                      },
+                      "batch_size": 50,
+                      "batches_per_tick": 4,
+                      "demand": {
+                        "batches": 12,
+                        "calls": 12,
+                        "consecutive_failures": 0,
+                        "failures": 0,
+                        "last_error": null,
+                        "last_error_at": null,
+                        "model": "ollama_local:llama3.1",
+                        "rejected": 0,
+                        "retry_after": null,
+                        "tagged": 600
+                      },
+                      "last_drain": {
+                        "batches": 4,
+                        "calls": 4,
+                        "rejected": 0,
+                        "state": "drained",
+                        "tagged": 200
+                      },
+                      "last_drain_at": "2026-10-01T12:01:00Z",
+                      "parked": 0,
+                      "prompt_version": "tag-v1",
+                      "setting": {
+                        "backfill_enabled": false,
+                        "model_enabled": true,
+                        "source": "default",
+                        "tag_backfill_model": "configured"
+                      },
+                      "state": "drained"
+                    },
+                    "setting": {
+                      "backfill_enabled": false,
+                      "model_enabled": true,
+                      "source": "default",
+                      "tag_backfill_model": "configured"
+                    },
+                    "tagged_by_model": 600,
+                    "tagged_by_rules": 4400,
+                    "titles": 5200
+                  },
+                  "text_index": {
+                    "available": true,
+                    "postings_with_text": 6100,
+                    "unchecked": 2900
                   },
                   "update": null
                 },

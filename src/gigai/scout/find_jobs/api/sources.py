@@ -1,4 +1,4 @@
-"""N11-C: ``POST``/``GET /api/sources/update`` -- "Update sources".
+"""N11-C: ``POST``/``GET /api/sources/update`` -- "Update sources"; and ``GET``/``PUT /api/settings/background``.
 
 Refreshing the sources is long work (one conditional request per watchlist
 board at polite pacing: minutes), so it follows the pattern Discover already
@@ -20,6 +20,18 @@ uses in this API, not a blocking request:
   0110-026 adds ``snapshot`` (additive): the metadata snapshot in use (its
   ``as_of`` and where it came from), the last attempt and its result, and
   whether the download is turned on. Reading it makes no request.
+  0110-026f adds ``tags``, ``text_index`` and ``refresh`` (additive, one
+  block each, ``find_jobs.sources_status``): the title-tag counts with the
+  model queue's status, the postings a keyword search can check, and the
+  "updated N min ago / next check" facts. ``background`` keeps its key set.
+* ``GET /api/settings/background`` answers the background settings: what the
+  project's ``settings.json`` says and what is in effect (the environment
+  can override the file). ``PUT /api/settings/background`` changes the keys
+  it names (``sources.auto_refresh``, ``tagging.model_enabled``,
+  ``tagging.backfill_enabled``, ``tagging.tag_backfill_model``,
+  ``snapshot.enabled``, ``snapshot.manifest_url``) and answers the same
+  body. The refresh thread reads the file at every look, so a change is
+  honoured at its next one; the route wakes it so that is now.
 
 The update itself is ``find_jobs.sources_update`` (the CLI's ``gigai scout
 sources update`` calls the same function); the snapshot lives beside the
@@ -34,6 +46,15 @@ from __future__ import annotations
 
 from http import HTTPStatus
 
+from ..background_settings import (
+    BACKGROUND_SETTINGS_SCHEMA,
+    SettingsError,
+    SettingsUnreadableError,
+    background_settings,
+    validate_patch,
+    write_background_settings,
+)
+from ..refresh_tick import settings_path
 from ..sources_update import (
     SOURCES_UPDATE_STATUS_SCHEMA,
     SourcesUpdateRunningError,
@@ -54,7 +75,7 @@ def _board_http_client():
 
 
 class SourcesRoutesMixin:
-    """``Handler`` mixin: ``POST``/``GET /api/sources/update``."""
+    """``Handler`` mixin: ``POST``/``GET /api/sources/update``, ``GET``/``PUT /api/settings/background``."""
 
     def _sources_home(self):
         home_root = getattr(self._backend, "home_root", None)
@@ -102,6 +123,8 @@ class SourcesRoutesMixin:
             _logger.warning("sources update: no usable find-jobs config (%s); listing boards only", type(exc).__name__)
             config = None
 
+        ticker = getattr(self.server, "refresh_ticker", None)
+
         def _finished(snapshot: dict[str, object]) -> None:
             log = _logger.warning if snapshot.get("status") == "failed" else _logger.info
             log(
@@ -111,6 +134,9 @@ class SourcesRoutesMixin:
                 snapshot.get("boards"),
                 snapshot.get("summary"),
             )
+            if ticker is not None:
+                # The update tagged new titles: let the model queue look now, not at the next poll.
+                ticker.kick_tags()
 
         try:
             update_id = start_background_update(
@@ -136,18 +162,72 @@ class SourcesRoutesMixin:
         home_root = self._sources_home()
         if home_root is None:
             return
+        from datetime import datetime, timezone
+
         from ..refresh_tick import background_status
         from ..snapshot import snapshot_status
+        from ..sources_status import refresh_block, tags_block, text_index_block
 
         target = getattr(self._backend, "target", None)
+        ticker = getattr(self.server, "refresh_ticker", None)
+        now = datetime.now(timezone.utc)
         status = read_status(home_root)
-        status["background"] = background_status(
-            home_root,
-            target,
-            ticker=getattr(self.server, "refresh_ticker", None),
-        )
+        status["background"] = background_status(home_root, target, ticker=ticker, now=now)
         status["snapshot"] = snapshot_status(home_root, target)
+        status["tags"] = tags_block(home_root, target, ticker=ticker)
+        status["text_index"] = text_index_block(home_root)
+        status["refresh"] = refresh_block(status["background"], now=now)
         self._write_json(HTTPStatus.OK, status)
 
+    # -- the background settings ---------------------------------------------
 
-__all__ = ["SOURCES_UPDATE_START_SCHEMA", "SOURCES_UPDATE_STATUS_SCHEMA", "SourcesRoutesMixin"]
+    def _handle_get_settings_background(self) -> None:
+        home_root = self._sources_home()
+        if home_root is None:
+            return
+        self._write_json(HTTPStatus.OK, background_settings(home_root, getattr(self._backend, "target", None)))
+
+    def _handle_put_settings_background(self) -> None:
+        body = self._read_json_body()
+        if body is None:
+            return
+        try:
+            patch = validate_patch(body)
+        except SettingsError as exc:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, exc.code, str(exc))
+            return
+        home_root = self._sources_home()
+        if home_root is None:
+            return
+        target = self._sources_target()
+        if target is None:
+            return
+        try:
+            settings_path(home_root, target)
+        except Exception as exc:  # noqa: BLE001 - the target is not a bound Scout project: there is no settings file to write
+            _logger.warning("background settings not saved: no project (%s)", type(exc).__name__)
+            self._error(HTTPStatus.NOT_FOUND, "target_unavailable", "no Scout project is set up for this target")
+            return
+        try:
+            path = write_background_settings(home_root, target, patch)
+        except SettingsUnreadableError as exc:
+            _logger.warning("background settings not saved: %s cannot be read", exc.path.name)
+            self._error(
+                HTTPStatus.CONFLICT,
+                "settings_unreadable",
+                f"{exc.path} is not a settings file Scout can read, so it was left as it is. Fix or remove it, then save again.",
+            )
+            return
+        except OSError as exc:
+            _logger.warning("background settings not saved: %s", type(exc).__name__)
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "settings_write_failed", "the settings file could not be written")
+            return
+        _logger.info("background settings saved: %s %s", path.name, {block: sorted(values) for block, values in patch.items()})
+        ticker = getattr(self.server, "refresh_ticker", None)
+        if ticker is not None:
+            # The thread reads the file at every look; wake it so the change is honoured now.
+            ticker.kick_tags()
+        self._write_json(HTTPStatus.OK, background_settings(home_root, target))
+
+
+__all__ = ["BACKGROUND_SETTINGS_SCHEMA", "SOURCES_UPDATE_START_SCHEMA", "SOURCES_UPDATE_STATUS_SCHEMA", "SourcesRoutesMixin"]

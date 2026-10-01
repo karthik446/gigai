@@ -484,6 +484,39 @@ def _country_codes(value: object, name: str) -> tuple[str, ...]:
     return codes
 
 
+#: 0110-026 (F2): the search keywords of one run. A handful of short phrases, not a document.
+MAX_SEARCH_KEYWORDS = 20
+MAX_SEARCH_KEYWORD_LENGTH = 100
+_KEYWORD_WORD = re.compile(r"\w", re.UNICODE)
+
+
+def search_keywords(value: object, name: str = "keywords") -> tuple[str, ...]:
+    """The keywords of a search: trimmed phrases, each with at least one letter or digit, no repeats.
+
+    Raises ``FindJobsContractError`` (``wrong_type`` / ``invalid_value``) for
+    anything else; an empty list is "no keywords".
+    """
+
+    if type(value) is not list:
+        _fail("wrong_type", f"{name} must be an array of strings")
+    if len(value) > MAX_SEARCH_KEYWORDS:
+        _fail("invalid_value", f"{name} must hold at most {MAX_SEARCH_KEYWORDS} keywords")
+    result: list[str] = []
+    seen: set[str] = set()
+    for index, item in enumerate(value):
+        if type(item) is not str:
+            _fail("wrong_type", f"{name}[{index}] must be a string")
+        keyword = " ".join(item.split())
+        if not keyword or not _KEYWORD_WORD.search(keyword):
+            _fail("invalid_value", f"{name}[{index}] must contain a letter or a digit")
+        if len(keyword) > MAX_SEARCH_KEYWORD_LENGTH:
+            _fail("invalid_value", f"{name}[{index}] must be at most {MAX_SEARCH_KEYWORD_LENGTH} characters")
+        if keyword.casefold() not in seen:
+            seen.add(keyword.casefold())
+            result.append(keyword)
+    return tuple(result)
+
+
 def _enum_list(value: object, enum_type: type[StrEnum], name: str) -> tuple[StrEnum, ...]:
     if type(value) is not list:
         _fail("wrong_type", f"{name} must be an array")
@@ -565,6 +598,12 @@ class FindJobsConfig(_Contract):
     ("Denver, CO"); the starter placeholder text is read as ``None``
     (``is_location_placeholder``) -- a read-time migration, the file itself
     is never rewritten here.
+
+    0110-026 (F2): ``keywords`` are the full-text keywords of ONE search, an
+    additive optional key omitted from ``to_json`` when empty (so every
+    config without them digests as before). ``find-jobs.json`` never holds
+    them: ``POST /api/run`` lays the request's keywords over the effective
+    config it seals, and the index read (``index_search``) applies them.
     """
 
     schema_version: ClassVar[str] = "find-jobs-config:1"
@@ -580,6 +619,7 @@ class FindJobsConfig(_Contract):
     visa_sponsorship_required: bool = False
     max_age_days: int | None = None
     work_mode: WorkModePreference | None = None
+    keywords: tuple[str, ...] = ()
 
     @property
     def effective_work_mode(self) -> WorkModePreference:
@@ -628,6 +668,9 @@ class FindJobsConfig(_Contract):
         # uat-bug-028: same additive rule -- absent until a save sets it.
         if self.work_mode is not None:
             value["work_mode"] = _json_enum(self.work_mode)
+        # 0110-026 (F2): same additive rule -- only a search that typed keywords carries them.
+        if self.keywords:
+            value["keywords"] = _json_strings(self.keywords)
         return value
 
     @classmethod
@@ -635,7 +678,7 @@ class FindJobsConfig(_Contract):
         value = _object_with_optional(
             obj,
             ("schema_version", "roles", "merged_queries", "location", "remote", "published_after", "sources", "default_assess_cap", "default_model_target"),
-            ("countries", "visa_sponsorship_required", "max_age_days", "work_mode"),
+            ("countries", "visa_sponsorship_required", "max_age_days", "work_mode", "keywords"),
             "find_jobs_config",
         )
         if value["schema_version"] != cls.schema_version:
@@ -668,6 +711,7 @@ class FindJobsConfig(_Contract):
             visa_sponsorship_required,
             max_age_days,
             work_mode,  # type: ignore[arg-type]
+            () if "keywords" not in value else search_keywords(value["keywords"], "keywords"),
         )
 
 
@@ -2425,6 +2469,7 @@ __all__ = [
     "AggregateStatus", "ArtifactRef", "AssessmentQuestion", "AssessmentResult", "AssessInput", "AssessNodeCallable", "AssessOutput", "ConsentActor", "ConfigRequest", "ConfigResponse",
     "ASSESS_ALL", "ASSESS_ALL_CEILING", "SELECTION_CAP_MAXIMUM", "SelectionCap", "is_assess_all", "selection_cap_limit", "selection_cap_value",
     "DEFAULT_MAX_AGE_DAYS", "DropCount", "LOCATION_PLACEHOLDER_PREFIX", "MAX_AGE_DAYS_MAXIMUM", "is_location_placeholder",
+    "MAX_SEARCH_KEYWORDS", "MAX_SEARCH_KEYWORD_LENGTH", "search_keywords",
     "EditedURL", "FindJobsConfig", "FindJobsContractError", "FailureRow", "FindJobsRunInput", "FindJobsConfig", "GoalError", "GoalStatus", "MatrixStatus", "ModelTarget", "NodeContext",
     "NodeFailure", "NodeReceipt", "NodeReceiptFixture", "NodeReceiptStatus", "NodeStatus", "NodeCallable", "NormalizedPostingRow", "NormalizedPublicPostingRow", "NotAssessedReason",
     "NotAssessedRow", "PRESENT_CAPABILITY", "PRESENT_CAPABILITY_ID", "PRESENT_DECLARED_EFFECTS", "PRESENT_EFFECTS", "PresentInput",
