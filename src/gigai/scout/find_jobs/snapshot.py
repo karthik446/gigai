@@ -56,7 +56,6 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime, timedelta
-import hashlib
 import json
 import logging
 import lzma
@@ -71,6 +70,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
+from ...canonical import digest_imported_bytes
 from .company_index import CompanyIndex, CompanyIndexEntry, IndexedPosting, company_key, index_stamp
 from .posting_tags import TAGGER_VERSION, normalize_title
 from .tag_store import SOURCE_MODEL, TagStore, TitleTag
@@ -105,12 +105,14 @@ def file_name(role: str, date: str) -> str:
     return f"{role}-{date}.jsonl.xz"
 
 
+def sha256_hex(data: bytes) -> str:
+    """Hex SHA-256 of ``data`` through the canonical module (the one place product code hashes)."""
+
+    return digest_imported_bytes(data).split(":", 1)[1]
+
+
 def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return sha256_hex(path.read_bytes())
 
 
 def _compress(lines: Iterable[Mapping[str, object]]) -> tuple[bytes, int]:
@@ -1008,7 +1010,7 @@ def _run(home: Path, source_text: str, client: httpx.Client | None, moment: date
         (work / MANIFEST_NAME).write_bytes(raw)
         manifest = load_manifest(work / MANIFEST_NAME)
         _check_manifest(manifest)
-        digest = hashlib.sha256(raw).hexdigest()
+        digest = sha256_hex(raw)
         as_of = str(manifest["as_of"])
         state = _read_json(directory / _STATE_NAME, STATE_SCHEMA)
         if state.get("manifest_sha256") == digest or state.get("as_of") == as_of:
@@ -1361,7 +1363,7 @@ def export_snapshot(
             "tags": len(tags),
         },
         "files": {
-            name: {"role": role, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "rows": rows}
+            name: {"role": role, "sha256": sha256_hex(data), "size": len(data), "rows": rows}
             for name, (role, data, rows) in sorted(payloads.items())
         },
     }

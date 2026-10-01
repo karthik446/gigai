@@ -159,6 +159,8 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "answer": ("scout", "answer", "years-of-python", "--answer-text", "Eight years."),
     "watchlist add": ("scout", "watchlist", "add", "https://boards.greenhouse.io/example"),
     "sources update": ("scout", "sources", "update"),
+    "snapshot import": ("scout", "snapshot", "import"),
+    "snapshot status": ("scout", "snapshot", "status"),
     "profile list": ("scout", "profile", "list"),
     "profile update": ("scout", "profile", "update", "profile_00000000-0000-4000-8000-000000000001", "--work-mode", "remote"),
 }

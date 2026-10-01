@@ -763,26 +763,26 @@ def test_cli_imports_a_snapshot_directory_and_reports_the_status(day1: _Release,
 
     never = runner.invoke(scout_group, ["snapshot", "status", "--home", str(home)])
     assert never.exit_code == 0 and "No snapshot has been imported." in never.output and "Snapshot download: on (default)." in never.output
-    assert not home.exists()  # a status read creates nothing
+    assert not (home / "cache").exists()  # a status read stores no snapshot state (resolving the project may create <home>/scout, as for every Scout command)
 
     done = runner.invoke(scout_group, ["snapshot", "import", "--from", str(day1.directory), "--home", str(home)])
     assert done.exit_code == 0, done.output
     assert "Imported the snapshot as of 2026-10-01T06:00:00Z." in done.output and "5 postings on 3 boards and 5 title tags" in done.output
     assert _live(home, "greenhouse", "acme") == {"1", "2"}
 
-    status = json.loads(runner.invoke(scout_group, ["snapshot", "status", "--home", str(home), "--json"]).output)
+    status = json.loads(runner.invoke(scout_group, ["snapshot", "status", "--home", str(home), "--target", str(tmp_path / "project"), "--json"]).output)
     assert (status["as_of"], status["last_result"], status["kind"]) == ("2026-10-01T06:00:00Z", "imported", "full")
 
-    again = runner.invoke(scout_group, ["snapshot", "import", "--from", str(day1.directory / "manifest.json"), "--home", str(home), "--json"])
+    again = runner.invoke(scout_group, ["snapshot", "import", "--from", str(day1.directory / "manifest.json"), "--home", str(home), "--target", str(tmp_path / "project"), "--json"])
     assert again.exit_code == 0 and json.loads(again.output)["status"] == "up_to_date"
 
     # a snapshot that fails its checks exits 1; one that is simply not there exits 0
     victim = day1.directory / file_name("boards", "2026-10-01")
     victim.write_bytes(victim.read_bytes()[:-3])
     other = tmp_path / "other"
-    refused = runner.invoke(scout_group, ["snapshot", "import", "--from", str(day1.directory), "--home", str(other), "--json"])
+    refused = runner.invoke(scout_group, ["snapshot", "import", "--from", str(day1.directory), "--home", str(other), "--target", str(tmp_path / "project"), "--json"])
     assert refused.exit_code == 1 and json.loads(refused.output)["reason"] == "size_mismatch"
-    missing = runner.invoke(scout_group, ["snapshot", "import", "--from", str(tmp_path / "no-such-dir"), "--home", str(other)])
+    missing = runner.invoke(scout_group, ["snapshot", "import", "--from", str(tmp_path / "no-such-dir"), "--home", str(other), "--target", str(tmp_path / "project")])
     assert missing.exit_code == 0 and "no snapshot manifest" in missing.output.lower()
-    off = runner.invoke(scout_group, ["snapshot", "import", "--from", str(day1.directory), "--home", str(other)], env={SNAPSHOT_ENV: "0"})
+    off = runner.invoke(scout_group, ["snapshot", "import", "--from", str(day1.directory), "--home", str(other), "--target", str(tmp_path / "project")], env={SNAPSHOT_ENV: "0"})
     assert off.exit_code == 0 and "turned off" in off.output

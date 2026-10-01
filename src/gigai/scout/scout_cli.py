@@ -1510,12 +1510,11 @@ def snapshot_export_command(out_value: Path, base_value: Path | None, home_value
         click.echo(f"  {command}")
 
 
-def _snapshot_target(target_value: Path | None, home_root: Path) -> Path | None:
-    # The setting is per project. Nothing is created to find it: no project yet means the defaults.
-    if target_value is not None:
-        return target_value
-    default = Path(home_root) / "scout"
-    return default if default.is_dir() else None
+def _snapshot_target(target_value: Path | None, home_root: Path, *, as_json: bool = False) -> Path | None:
+    # The setting is per project: resolved like every Scout command (--target, else <home>/scout; the cwd never matters).
+    if target_value is None and not Path(home_root).is_dir():
+        return None  # no GigAI home yet: nothing to resolve, the defaults apply and nothing is created
+    return _resolved_target(target_value, home_root, as_json=as_json)
 
 
 @snapshot_group.command("import")
@@ -1529,7 +1528,12 @@ def snapshot_import_command(source_value: str | None, home_value: Path | None, t
     from .find_jobs.snapshot import RESULT_FAILED, RESULT_REFUSED, import_snapshot
 
     home_root = home_value or default_home_root()
-    result = import_snapshot(home_root, source_value, target=_snapshot_target(target_value, home_root))
+    try:
+        target = _snapshot_target(target_value, home_root, as_json=as_json)
+    except (ScoutTargetError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_snapshot_failed")
+        return
+    result = import_snapshot(home_root, source_value, target=target)
     if as_json:
         _emit(result.to_json(), True, "")
     elif result.imported:
@@ -1554,7 +1558,12 @@ def snapshot_status_command(home_value: Path | None, target_value: Path | None, 
     from .find_jobs.snapshot import snapshot_status
 
     home_root = home_value or default_home_root()
-    status = snapshot_status(home_root, _snapshot_target(target_value, home_root))
+    try:
+        target = _snapshot_target(target_value, home_root, as_json=as_json)
+    except (ScoutTargetError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_snapshot_failed")
+        return
+    status = snapshot_status(home_root, target)
     if as_json:
         _emit(status, True, "")
         return

@@ -197,7 +197,8 @@ def test_the_wizard_chooses_claude_extracts_through_it_and_finishes(tmp_path: Pa
         )
         assert run_response.status_code == 202, run_response.text
         run_id = run_response.json()["run_id"]
-        status_body = poll_until_terminal(client, run_id)
+        # The run alone takes ~25 s (fake claude CLI children), as on 0.1.10.3: the default 30 s deadline fails under a loaded full-suite run.
+        status_body = poll_until_terminal(client, run_id, deadline_seconds=180.0)
         assert status_body["status"] == "succeeded", status_body
         workpad = resolve_workpad_path(home, target)
         run_dir = workpad / "runs" / run_id
