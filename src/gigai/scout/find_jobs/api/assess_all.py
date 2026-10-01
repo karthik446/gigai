@@ -110,15 +110,18 @@ def assess_all_request(
         body["skip_reason"] = "no_profile"
         return body
     profile_id = profile.profile_id
-    quick = _quick_verdicts(home_root, target, profile_id)
-    added = added_rows(home_root, target, run_id)
-    body["counts"] = live_counts(evidence, quick, joins.events, [row.posting.normalized_url for row in added])
+    # The job record is read BEFORE the verdicts the counts come from: a job
+    # that finishes in between then reads "running" with counts at least as
+    # new, never "complete" with counts that miss its last result.
     records = [record for record in assess_all.list_records(home_root, target, run_id=run_id) if record.profile_id == profile_id]
     if cancel:
         for record in records:
             if record.status == "running":
                 assess_all.cancel(home_root, target, record.record_id)
         records = [record for record in assess_all.list_records(home_root, target, run_id=run_id) if record.profile_id == profile_id]
+    quick = _quick_verdicts(home_root, target, profile_id)
+    added = added_rows(home_root, target, run_id)
+    body["counts"] = live_counts(evidence, quick, joins.events, [row.posting.normalized_url for row in added])
     if run_input is None or evidence.acquire_output is None:
         body["skip_reason"] = "no_run_input"
         body["job"] = assess_all.summary(records[0]) if records else None

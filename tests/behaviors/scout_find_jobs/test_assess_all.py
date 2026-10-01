@@ -462,3 +462,45 @@ def test_the_assess_node_with_all_runs_k_at_a_time_and_seals_in_selection_order(
 def test_a_numeric_cap_still_assesses_one_at_a_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output, port, _postings = _run_node(tmp_path, monkeypatch, cap=10, count=4, run_number=4202)
     assert port.peak == 1 and len(output.assessments) == 4 and output.selection_cap == 10
+
+
+def test_a_job_that_finishes_mid_read_never_shows_complete_with_stale_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """0110-031: the job record and the verdicts behind ``counts`` are two reads; the job
+    finishing after the first of them must not read ``complete`` beside counts that miss its last result."""
+
+    from gigai.scout.find_jobs.api import assess_all as api
+    from gigai.scout.find_jobs.api import run_reads
+    from gigai.scout.find_jobs import posted_window
+    from gigai.scout import projection
+
+    state = {"stored": {"https://x/1": "pending_user_answers"}, "status": "running", "reads": 0}
+
+    def after_a_read() -> None:  # the interleaving, forced: the job's last result lands after the first read
+        state["reads"] += 1
+        if state["reads"] == 1:
+            state["stored"] = {**state["stored"], "https://x/2": "pending_user_answers"}
+            state["status"] = "complete"
+
+    def quick(*_args) -> dict[str, str | None]:
+        seen = dict(state["stored"])
+        after_a_read()
+        return seen
+
+    def records(*_args, **_kwargs):
+        seen = SimpleNamespace(record_id="aa_1", status=state["status"], profile_id="p1")
+        after_a_read()
+        return [seen]
+
+    rows = tuple(SimpleNamespace(posting=SimpleNamespace(normalized_url=f"https://x/{n}")) for n in (1, 2))
+    evidence = SimpleNamespace(run_input=None, acquire_output=None, assess_output=None, terminal=True)
+    backend = SimpleNamespace(home_root="h", target="t", _require_run=lambda _run_id: SimpleNamespace(path="w"))
+    monkeypatch.setattr(projection, "read_run_evidence", lambda *_a: evidence)
+    monkeypatch.setattr(run_reads, "row_joins", lambda *_a: SimpleNamespace(profile=SimpleNamespace(profile_id="p1"), events={}))
+    monkeypatch.setattr(posted_window, "added_rows", lambda *_a: rows)
+    monkeypatch.setattr(api, "_quick_verdicts", quick)
+    monkeypatch.setattr(assess_all, "list_records", records)
+    monkeypatch.setattr(assess_all, "summary", lambda record: {"status": record.status})
+
+    body = api.assess_all_request(backend, "run_1")
+
+    assert body["job"]["status"] == "running" or body["counts"]["assessed"] == 2, body
