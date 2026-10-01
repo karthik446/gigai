@@ -2052,6 +2052,7 @@ def _acquire_node_body(
         visa_sponsorship_required=input.config.visa_sponsorship_required,
         countries=tuple(input.config.countries or ()),
         location=input.config.location or "",
+        work_mode=input.config.effective_work_mode,  # 0110-038: the same digest the assess node seals
     )
 
     bank = (

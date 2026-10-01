@@ -36,12 +36,14 @@ from .assessment_core import (  # noqa: F401 - moved in P1; re-exported by the o
     _normalize_sponsorship,
     _normalize_status,
     _normalize_string_list,
-    ASSESS_PROMPT_VERSION,
+    CURRENT_ASSESS_PROMPT_VERSIONS,
     AssessContext,
     AssessJob,
     assess_once,
+    assess_prompt_version,
     build_assess_context,
     constraints_digest,
+    normalize_work_mode,
     render_assess_prompt,
 )
 from .find_jobs.progress import ProgressWriter
@@ -252,6 +254,9 @@ def _assess_node_body(
     # find-jobs.json), so assess.md rule 4 can decide a posting's
     # state/province restriction; None/empty renders "unknown".
     prompt_location = str(getattr(run_config, "location", "") or "")
+    # 0110-038: the run's own sealed work mode (the profile's since 0110-022;
+    # "any"/none adds nothing to the prompt).
+    prompt_work_mode = normalize_work_mode(getattr(run_config, "effective_work_mode", None))
 
     # Candidate resolution mirrors acquire's own selection loop exactly
     # (coordinator decision, P2 dispatch): a candidate is a new/edited,
@@ -309,7 +314,10 @@ def _assess_node_body(
     prior_assessments = _prior_assessments(run_root, context.run_id, default_profile_id=default_profile_id)
     # 0110-035: what an earlier assessment must have been made with to stand.
     current_constraints = constraints_digest(
-        visa_sponsorship_required=visa_sponsorship_required, countries=prompt_countries, location=prompt_location
+        visa_sponsorship_required=visa_sponsorship_required,
+        countries=prompt_countries,
+        location=prompt_location,
+        work_mode=prompt_work_mode,
     )
     # 0110-034b: the run's profile reads ITS story bank (own answers plus the
     # one profile it shares with), through the same builder as the job page's
@@ -479,6 +487,7 @@ def _assess_node_body(
         titles=prompt_titles,
         location=prompt_location,
         bank=bank,
+        work_mode=prompt_work_mode,
     )
 
     def call_model(posting: object, posting_text: bytes) -> object:
@@ -633,7 +642,7 @@ def _assess_node_body(
     # 0110-034b: sealed with the output, so a later run (and a reader) knows
     # which prompt and which bank these verdicts were made with.
     bank_stamp = None if bank.profile_id is None else StoryBankStamp(bank.profile_id, bank.digest, dict(bank.marks))
-    return AssessOutput(tuple(input.selected_postings), input.pinned_resume, input.target, input.selection_cap, SelectionRule.NEW_OR_EDITED_ROLE_MATCH, tuple(rows), tuple(assessments), tuple(not_assessed), tuple(revisions), ContractModelTarget(model_target), producer, usage, (), ASSESS_PROMPT_VERSION, bank_stamp, current_constraints)
+    return AssessOutput(tuple(input.selected_postings), input.pinned_resume, input.target, input.selection_cap, SelectionRule.NEW_OR_EDITED_ROLE_MATCH, tuple(rows), tuple(assessments), tuple(not_assessed), tuple(revisions), ContractModelTarget(model_target), producer, usage, (), assess_prompt_version(prompt_work_mode), bank_stamp, current_constraints)
 
 
 def _run_root(root: Path, context: object) -> Path:
@@ -667,7 +676,8 @@ def _basis_stale(prior: object, *, bank: object, constraints: str | None) -> boo
     - the assess prompt version differs (a run sealed before 0.1.10.5 has
       none: its prompt had no candidate constraints, 0110-035);
     - the candidate constraints differ (``constraints``: this run's
-      ``assessment_core.constraints_digest``; ``None`` when the caller has no
+      ``assessment_core.constraints_digest``, work mode included since
+      0110-038; ``None`` when the caller has no
       config to compare, which skips this check);
     - the story bank changed in a way that could change the verdict
       (``story_bank.bank_makes_stale``): an open question the bank can newly
@@ -677,7 +687,10 @@ def _basis_stale(prior: object, *, bank: object, constraints: str | None) -> boo
 
     from . import story_bank
 
-    if getattr(prior, "prompt_version", None) != ASSESS_PROMPT_VERSION:
+    # 0110-038: v5 (with a CANDIDATE WORK MODE paragraph) and v4 (without
+    # one: the same bytes as before) are both what the shipped prompt renders;
+    # which of the two an assessment needed is in the constraints digest.
+    if getattr(prior, "prompt_version", None) not in CURRENT_ASSESS_PROMPT_VERSIONS:
         return True
     if constraints is not None and getattr(prior, "constraints_digest", None) != constraints:
         return True

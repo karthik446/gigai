@@ -1,0 +1,490 @@
+{
+ "schema": "gigai-assess-rules-eval-fixture:1",
+ "note": "Synthetic only: an invented resume, invented companies and invented postings. 'expected' is the verdict assess.md's rules 4/5 and the CANDIDATE WORK MODE paragraph (assess-prompt-v5) give; 'expected_v4' is what the v4 prompt's rules give for the same candidate with no work mode in the prompt, where they decide it.",
+ "resume": "# Senior Backend Engineer\n\n## Summary\nBackend engineer with 9 years of professional Python. Builds and operates REST APIs and event-driven services on AWS, with PostgreSQL as the main datastore.\n\n## Experience\n**Senior Backend Engineer -- Fernhollow Systems (synthetic)** (2020-present)\n- Designed and ran Python (FastAPI) REST APIs serving 40k requests a minute on AWS (ECS, Lambda, SQS, S3).\n- Owned the PostgreSQL schema and query tuning for the billing service; cut p95 latency by 60%.\n- Led on-call and incident reviews for a team of six; wrote the service runbooks.\n\n**Backend Engineer -- Quillmere Labs (synthetic)** (2016-2020)\n- Built Python (Django) REST APIs and background workers backed by PostgreSQL and Redis.\n- Deployed with Docker and Terraform on AWS; added CI with automated tests.\n\n## Skills\nPython, FastAPI, Django, REST APIs, PostgreSQL, Redis, AWS, Docker, Terraform, CI/CD\n",
+ "titles": [
+  "senior backend engineer",
+  "backend engineer"
+ ],
+ "posting_intro": "{company} is hiring a {title} to build and run the backend services behind our product.",
+ "requirements": "Requirements:\n- 5+ years of professional Python experience\n- Experience designing and building REST APIs\n- Strong PostgreSQL or other relational database skills\n- Experience running services on AWS",
+ "candidates": {
+  "houston_visa": {
+   "location": "Houston, TX",
+   "countries": [
+    "US"
+   ],
+   "visa_sponsorship_required": true,
+   "work_mode": "",
+   "note": "0110-035's candidate: needs sponsorship, no work mode"
+  },
+  "denver": {
+   "location": "Denver, CO",
+   "countries": [
+    "US"
+   ],
+   "visa_sponsorship_required": false,
+   "work_mode": "",
+   "note": "no work mode: the v5 prompt is the v4 prompt"
+  },
+  "unknown_place": {
+   "location": "",
+   "countries": [
+    "US"
+   ],
+   "visa_sponsorship_required": false,
+   "work_mode": "",
+   "note": "no location, no work mode"
+  },
+  "houston_visa_remote": {
+   "location": "Houston, TX",
+   "countries": [
+    "US"
+   ],
+   "visa_sponsorship_required": true,
+   "work_mode": "remote",
+   "note": "the operator's UAT shape: Houston, remote only, needs sponsorship"
+  },
+  "austin_remote": {
+   "location": "Austin, TX",
+   "countries": [
+    "US"
+   ],
+   "visa_sponsorship_required": false,
+   "work_mode": "remote"
+  },
+  "houston_hybrid": {
+   "location": "Houston, TX",
+   "countries": [
+    "US"
+   ],
+   "visa_sponsorship_required": false,
+   "work_mode": "hybrid"
+  },
+  "chicago_onsite": {
+   "location": "Chicago, IL",
+   "countries": [
+    "US"
+   ],
+   "visa_sponsorship_required": false,
+   "work_mode": "onsite"
+  }
+ },
+ "cases": [
+  {
+   "id": "visa-no-sponsorship",
+   "candidate": "houston_visa",
+   "rule": "rule 5",
+   "title": "Senior Backend Engineer",
+   "company": "Corvid Ledger",
+   "location": "Remote - United States",
+   "statement": "This role is fully remote within the United States. We do not sponsor work visas for this position.",
+   "expected": [
+    "not_a_match"
+   ]
+  },
+  {
+   "id": "visa-sponsorship-offered",
+   "candidate": "houston_visa",
+   "rule": "rule 5",
+   "title": "Senior Backend Engineer",
+   "company": "Marrow Analytics",
+   "location": "Remote - United States",
+   "statement": "This role is fully remote within the United States. Visa sponsorship is available for this role.",
+   "expected": [
+    "matched_above_threshold"
+   ]
+  },
+  {
+   "id": "visa-silent",
+   "candidate": "houston_visa",
+   "rule": "rule 5",
+   "title": "Senior Backend Engineer",
+   "company": "Tallow Freight",
+   "location": "Remote - United States",
+   "statement": "This role is fully remote within the United States.",
+   "expected": [
+    "matched_above_threshold"
+   ]
+  },
+  {
+   "id": "visa-not-needed",
+   "candidate": "denver",
+   "rule": "rule 5",
+   "title": "Senior Backend Engineer",
+   "company": "Pinegate Health",
+   "location": "Remote - United States",
+   "statement": "This role is fully remote within the United States. Candidates must be authorized to work in the US without sponsorship.",
+   "expected": [
+    "matched_above_threshold"
+   ]
+  },
+  {
+   "id": "loc-remote-poland",
+   "candidate": "denver",
+   "rule": "rule 4",
+   "title": "Senior Backend Engineer",
+   "company": "Wisla Data",
+   "location": "Remote - Poland",
+   "statement": "This is a remote role for people based in Poland only.",
+   "expected": [
+    "not_a_match"
+   ]
+  },
+  {
+   "id": "loc-remote-uk",
+   "candidate": "denver",
+   "rule": "rule 4",
+   "title": "Senior Backend Engineer",
+   "company": "Thames Metrics",
+   "location": "Remote - United Kingdom",
+   "statement": "Remote, United Kingdom residents only.",
+   "expected": [
+    "not_a_match"
+   ]
+  },
+  {
+   "id": "loc-states-not-listed",
+   "candidate": "denver",
+   "rule": "rule 4",
+   "title": "Senior Backend Engineer",
+   "company": "Lumen Parcel",
+   "location": "Remote - United States",
+   "statement": "Remote within the United States. We can only hire residents of these states: New York, California, Washington.",
+   "expected": [
+    "not_a_match"
+   ]
+  },
+  {
+   "id": "loc-states-listed",
+   "candidate": "denver",
+   "rule": "rule 4",
+   "title": "Senior Backend Engineer",
+   "company": "Granite Payroll",
+   "location": "Remote - United States",
+   "statement": "Remote within the United States. We can only hire residents of these states: Colorado, Texas, Utah.",
+   "expected": [
+    "matched_above_threshold"
+   ]
+  },
+  {
+   "id": "loc-states-unknown-candidate",
+   "candidate": "unknown_place",
+   "rule": "rule 4",
+   "title": "Senior Backend Engineer",
+   "company": "Saltmarsh Bio",
+   "location": "Remote - United States",
+   "statement": "Remote within the United States. We can only hire residents of these states: New York, California, Washington.",
+   "expected": [
+    "pending_user_answers"
+   ],
+   "expected_question_id": "location:us_region"
+  },
+  {
+   "id": "loc-hybrid-own-city",
+   "candidate": "denver",
+   "rule": "rule 4",
+   "title": "Senior Backend Engineer",
+   "company": "Front Range Grid",
+   "location": "Denver, CO",
+   "statement": "Hybrid: you will work from our Denver office 2 days a week.",
+   "expected": [
+    "matched_above_threshold"
+   ]
+  },
+  {
+   "id": "loc-hybrid-other-city",
+   "candidate": "denver",
+   "rule": "rule 4",
+   "title": "Senior Backend Engineer",
+   "company": "Puget Tide",
+   "location": "Seattle, WA",
+   "statement": "Hybrid: you will work from our Seattle office 3 days a week.",
+   "expected": [
+    "pending_user_answers"
+   ],
+   "expected_question_id": "location:seattle"
+  },
+  {
+   "id": "loc-remote-americas-offices",
+   "candidate": "denver",
+   "rule": "rule 4",
+   "title": "Senior Backend Engineer",
+   "company": "Opal Shield",
+   "location": "Remote - Americas",
+   "statement": "This role is fully remote anywhere in the Americas. We have offices in Tampa and Toronto that you are welcome to use, but nobody is required to.",
+   "expected": [
+    "matched_above_threshold"
+   ],
+   "shape": "the Opswat shape"
+  },
+  {
+   "id": "hypr-ny-hybrid-no-h1b",
+   "candidate": "houston_visa_remote",
+   "rule": "rule 5 + work mode",
+   "title": "Senior Backend Engineer",
+   "company": "Halden Identity",
+   "location": "New York, NY",
+   "statement": "Hybrid: 3 days a week in our New York office. No H1B sponsorship for this role.",
+   "expected": [
+    "not_a_match"
+   ],
+   "expected_v4": [
+    "not_a_match"
+   ],
+   "shape": "the Hypr shape"
+  },
+  {
+   "id": "duolingo-nyc-office",
+   "candidate": "houston_visa_remote",
+   "rule": "work mode: remote only",
+   "title": "Senior Backend Engineer",
+   "company": "Lark Lingua",
+   "location": "New York, NY",
+   "statement": "This is an in-office role: you will work on-site from our New York headquarters 5 days a week.",
+   "expected": [
+    "not_a_match"
+   ],
+   "expected_v4": [
+    "pending_user_answers"
+   ],
+   "shape": "the Duolingo shape"
+  },
+  {
+   "id": "remote-visa-offered",
+   "candidate": "houston_visa_remote",
+   "rule": "rule 5 + work mode",
+   "title": "Senior Backend Engineer",
+   "company": "Marrow Analytics",
+   "location": "Remote - United States",
+   "statement": "This role is fully remote within the United States. Visa sponsorship is available for this role.",
+   "expected": [
+    "matched_above_threshold"
+   ],
+   "expected_v4": [
+    "matched_above_threshold"
+   ]
+  },
+  {
+   "id": "remote-only-hybrid-elsewhere",
+   "candidate": "austin_remote",
+   "rule": "work mode: remote only",
+   "title": "Senior Backend Engineer",
+   "company": "Bayou Signal",
+   "location": "Houston, TX",
+   "statement": "Hybrid: 2 days a week in our Houston office.",
+   "expected": [
+    "not_a_match"
+   ],
+   "expected_v4": [
+    "pending_user_answers"
+   ]
+  },
+  {
+   "id": "remote-only-hybrid-own-city",
+   "candidate": "austin_remote",
+   "rule": "work mode: remote only",
+   "title": "Senior Backend Engineer",
+   "company": "Colorado Bend Labs",
+   "location": "Austin, TX",
+   "statement": "Hybrid: 3 days a week in our Austin office.",
+   "expected": [
+    "not_a_match"
+   ],
+   "expected_v4": [
+    "matched_above_threshold"
+   ]
+  },
+  {
+   "id": "remote-only-onsite",
+   "candidate": "austin_remote",
+   "rule": "work mode: remote only",
+   "title": "Senior Backend Engineer",
+   "company": "Trinity Forge",
+   "location": "Dallas, TX",
+   "statement": "This role is on-site in our Dallas office 5 days a week.",
+   "expected": [
+    "not_a_match"
+   ],
+   "expected_v4": [
+    "pending_user_answers"
+   ]
+  },
+  {
+   "id": "remote-only-city-mode-not-stated",
+   "candidate": "austin_remote",
+   "rule": "work mode: not stated",
+   "title": "Senior Backend Engineer",
+   "company": "Lark Lingua",
+   "location": "New York, NY",
+   "statement": "Join the platform team that runs our learning backend.",
+   "expected": [
+    "pending_user_answers"
+   ],
+   "shape": "the Duolingo shape, work mode not stated",
+   "expected_question_id": "location:new_york"
+  },
+  {
+   "id": "remote-only-own-city-mode-not-stated",
+   "candidate": "austin_remote",
+   "rule": "work mode: not stated",
+   "title": "Senior Backend Engineer",
+   "company": "Cedar Loop",
+   "location": "Austin, TX",
+   "statement": "Join the platform team that runs our logistics backend.",
+   "expected": [
+    "pending_user_answers"
+   ],
+   "expected_question_id": "location:austin"
+  },
+  {
+   "id": "remote-only-remote-us",
+   "candidate": "austin_remote",
+   "rule": "work mode: remote only",
+   "title": "Senior Backend Engineer",
+   "company": "Tallow Freight",
+   "location": "Remote - United States",
+   "statement": "This role is fully remote within the United States.",
+   "expected": [
+    "matched_above_threshold"
+   ],
+   "expected_v4": [
+    "matched_above_threshold"
+   ]
+  },
+  {
+   "id": "remote-only-americas-offices",
+   "candidate": "austin_remote",
+   "rule": "work mode: remote only",
+   "title": "Senior Backend Engineer",
+   "company": "Opal Shield",
+   "location": "Remote - Americas",
+   "statement": "This role is fully remote anywhere in the Americas. We have offices in Tampa and Toronto that you are welcome to use, but nobody is required to.",
+   "expected": [
+    "matched_above_threshold"
+   ],
+   "expected_v4": [
+    "matched_above_threshold"
+   ],
+   "shape": "the Opswat shape"
+  },
+  {
+   "id": "remote-only-travel",
+   "candidate": "austin_remote",
+   "rule": "work mode: remote only",
+   "title": "Senior Backend Engineer",
+   "company": "Juniper Rail",
+   "location": "Remote - United States",
+   "statement": "This role is fully remote within the United States. The team meets in person in Denver once a quarter for planning week.",
+   "expected": [
+    "matched_above_threshold"
+   ],
+   "expected_v4": [
+    "matched_above_threshold"
+   ]
+  },
+  {
+   "id": "remote-only-remote-poland",
+   "candidate": "austin_remote",
+   "rule": "rule 4 + work mode",
+   "title": "Senior Backend Engineer",
+   "company": "Wisla Data",
+   "location": "Remote - Poland",
+   "statement": "This is a remote role for people based in Poland only.",
+   "expected": [
+    "not_a_match"
+   ],
+   "expected_v4": [
+    "not_a_match"
+   ]
+  },
+  {
+   "id": "remote-only-no-city-no-mode",
+   "candidate": "austin_remote",
+   "rule": "work mode: not stated",
+   "title": "Senior Backend Engineer",
+   "company": "Lumen Parcel",
+   "location": "United States",
+   "statement": "Join the platform team that runs our parcel backend.",
+   "expected": [
+    "matched_above_threshold"
+   ],
+   "expected_v4": [
+    "matched_above_threshold"
+   ]
+  },
+  {
+   "id": "hybrid-own-city",
+   "candidate": "houston_hybrid",
+   "rule": "work mode: hybrid",
+   "title": "Senior Backend Engineer",
+   "company": "Bayou Signal",
+   "location": "Houston, TX",
+   "statement": "Hybrid: 2 days a week in our Houston office.",
+   "expected": [
+    "matched_above_threshold"
+   ],
+   "expected_v4": [
+    "matched_above_threshold"
+   ]
+  },
+  {
+   "id": "hybrid-own-metro",
+   "candidate": "houston_hybrid",
+   "rule": "work mode: hybrid",
+   "title": "Senior Backend Engineer",
+   "company": "Brazos Meter",
+   "location": "Sugar Land, TX",
+   "statement": "Hybrid: 2 days a week in our Sugar Land office.",
+   "expected": [
+    "matched_above_threshold"
+   ]
+  },
+  {
+   "id": "hybrid-other-city",
+   "candidate": "houston_hybrid",
+   "rule": "work mode: hybrid",
+   "title": "Senior Backend Engineer",
+   "company": "Lakeshore Ledger",
+   "location": "Chicago, IL",
+   "statement": "Hybrid: 3 days a week in our Chicago office.",
+   "expected": [
+    "pending_user_answers"
+   ],
+   "expected_v4": [
+    "pending_user_answers"
+   ],
+   "expected_question_id": "location:chicago"
+  },
+  {
+   "id": "hybrid-remote-us",
+   "candidate": "houston_hybrid",
+   "rule": "work mode: hybrid",
+   "title": "Senior Backend Engineer",
+   "company": "Tallow Freight",
+   "location": "Remote - United States",
+   "statement": "This role is fully remote within the United States.",
+   "expected": [
+    "matched_above_threshold"
+   ],
+   "expected_v4": [
+    "matched_above_threshold"
+   ]
+  },
+  {
+   "id": "onsite-own-city",
+   "candidate": "chicago_onsite",
+   "rule": "work mode: on-site",
+   "title": "Senior Backend Engineer",
+   "company": "Lakeshore Ledger",
+   "location": "Chicago, IL",
+   "statement": "This role is on-site in our Chicago office 5 days a week.",
+   "expected": [
+    "matched_above_threshold"
+   ],
+   "expected_v4": [
+    "matched_above_threshold"
+   ]
+  }
+ ]
+}

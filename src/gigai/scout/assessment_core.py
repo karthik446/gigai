@@ -55,15 +55,56 @@ _PLACEHOLDER = re.compile(r"\{\{([a-z_]+)\}\}")
 _VALIDATION_PLACEHOLDER = "{{validation_error}}"
 _PRIOR_ANSWERS_PLACEHOLDER = "{{prior_answers}}"
 _BANK_ANSWERS_PLACEHOLDER = "{{bank_answers}}"
+_REMOTE_ONLY_PLACEHOLDER = "{{remote_only_area}}"
+_IN_PERSON_PLACEHOLDER = "{{in_person_mode}}"
 
 #: The name of the shipped ``assess.md`` wording. v4 (0110-034) adds the
 #: STORY BANK paragraph: the profile's answered questions (id, the question
 #: as asked, a one-line answer) and the rule to reuse one that covers a
 #: requirement instead of asking again. The paragraph is dropped when no
 #: bank answer is offered, so such a prompt renders exactly as v3-r2 did.
+#: v5 (0110-038) adds the CANDIDATE WORK MODE paragraph: the candidate's work
+#: mode (remote only / hybrid / on-site) and own area, with the rule a
+#: remote-only candidate is never matched on a role that needs presence. A
+#: candidate with no work mode (or "any") gets no such paragraph, and that
+#: prompt renders byte for byte as v4 did, so it keeps the v4 name
+#: (``assess_prompt_version``).
 #: ``tests/behaviors/scout_find_jobs/test_assessment_core.py`` pins it with
 #: the file's digest.
-ASSESS_PROMPT_VERSION = "assess-prompt-v4"
+ASSESS_PROMPT_VERSION = "assess-prompt-v5"
+#: The name of a prompt rendered with no CANDIDATE WORK MODE paragraph: the
+#: same bytes v4 rendered, so an assessment sealed under it still stands.
+ASSESS_PROMPT_VERSION_NO_WORK_MODE = "assess-prompt-v4"
+#: The versions the shipped ``assess.md`` renders today. An earlier
+#: assessment sealed with either is current as far as the wording goes; the
+#: constraints digest (which includes the work mode) says whether it was made
+#: for the same candidate constraints.
+CURRENT_ASSESS_PROMPT_VERSIONS = frozenset({ASSESS_PROMPT_VERSION, ASSESS_PROMPT_VERSION_NO_WORK_MODE})
+
+_WORK_MODES = ("remote", "hybrid", "onsite")
+_IN_PERSON_MODE_TEXT = {
+    "hybrid": "hybrid (remote roles, and hybrid roles in their own area)",
+    "onsite": "on-site (remote roles, and hybrid or on-site roles in their own area)",
+}
+
+
+def normalize_work_mode(value: object) -> str:
+    """``remote`` / ``hybrid`` / ``onsite``, or ``""`` for none.
+
+    Takes ``find-jobs.json``'s ``work_mode`` (a ``WorkModePreference`` or its
+    string) or a profile's ``search_settings.work_mode``. ``any``, ``None``
+    and anything unknown are "no work mode": the prompt then carries no
+    CANDIDATE WORK MODE paragraph.
+    """
+
+    text = str(getattr(value, "value", value) or "").strip().lower()
+    return text if text in _WORK_MODES else ""
+
+
+def assess_prompt_version(work_mode: object = "") -> str:
+    """The version of the prompt a candidate with ``work_mode`` is assessed with."""
+
+    return ASSESS_PROMPT_VERSION if normalize_work_mode(work_mode) else ASSESS_PROMPT_VERSION_NO_WORK_MODE
 
 # Exception mapping at the model boundary, exactly as the pre-P1 loop had it:
 # a transport/adapter failure whose code is one of these is the operator's own
@@ -156,6 +197,11 @@ class AssessContext:
     # paragraph is then dropped, like {{prior_answers}}, so every earlier
     # caller (the run's assess node, the goldens) renders the same way.
     bank_answers: tuple[BankAnswer, ...] = ()
+    # assess-prompt-v5 (0110-038): the candidate's work mode, "remote",
+    # "hybrid" or "onsite" (``normalize_work_mode``). Empty by default (and
+    # for "any"): the CANDIDATE WORK MODE paragraph is then dropped and the
+    # prompt renders as v4 did. The area it names is ``location`` above.
+    work_mode: str = ""
 
 
 def build_assess_context(
@@ -166,6 +212,7 @@ def build_assess_context(
     titles: tuple[str, ...] = (),
     location: str = "",
     bank: object | None = None,
+    work_mode: object = "",
 ) -> AssessContext:
     """The candidate side of one assessment: the ONE builder every path uses.
 
@@ -173,8 +220,10 @@ def build_assess_context(
     goes through it) and a find-jobs run's assess node all build their
     prompt's context here, so no path can render a prompt that lacks what
     another sends: the candidate's constraints (sponsorship need, eligible
-    countries, own location, target titles) and the profile's story bank
-    (``bank``: a ``story_bank.AssessBank``, or ``None`` for no bank).
+    countries, own location, target titles), the profile's story bank
+    (``bank``: a ``story_bank.AssessBank``, or ``None`` for no bank) and,
+    since 0110-038, the candidate's work mode (``work_mode``: remote, hybrid
+    or onsite; ``any``/none adds nothing to the prompt).
     """
 
     return AssessContext(
@@ -185,25 +234,34 @@ def build_assess_context(
         prior_answers=tuple(getattr(bank, "prior_answers", ()) or ()),
         location=location or "",
         bank_answers=tuple(getattr(bank, "bank_answers", ()) or ()),
+        work_mode=normalize_work_mode(work_mode),
     )
 
 
-def constraints_digest(*, visa_sponsorship_required: bool, countries: tuple[str, ...] = (), location: str = "") -> str:
+def constraints_digest(
+    *, visa_sponsorship_required: bool, countries: tuple[str, ...] = (), location: str = "", work_mode: object = ""
+) -> str:
     """A digest of the candidate constraints a verdict depends on (rules 4 and 5).
 
-    Sponsorship need, eligible countries (order and case do not matter) and
-    the candidate's own location. Target titles are left out on purpose:
+    Sponsorship need, eligible countries (order and case do not matter), the
+    candidate's own location and, since 0110-038, the work mode. A candidate
+    with no work mode (or "any") digests exactly as before 0110-038, so only
+    the assessments of a candidate whose prompt gained the CANDIDATE WORK
+    MODE paragraph are refreshed. Target titles are left out on purpose:
     rule 6 makes them context only, never a reason for a verdict, so a title
     edit does not void an assessment. A find-jobs run seals this with its
     assessments; a later run does not reuse an unchanged posting's
     assessment made under other constraints.
     """
 
-    value = {
+    value: dict[str, object] = {
         "visa_sponsorship_required": bool(visa_sponsorship_required),
         "countries": sorted({item.strip().upper() for item in countries if item and item.strip()}),
         "location": " ".join((location or "").split()),
     }
+    mode = normalize_work_mode(work_mode)
+    if mode:
+        value["work_mode"] = mode
     return digest_imported_bytes(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8"))
 
 
@@ -273,6 +331,9 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
         "countries": ", ".join(ctx.countries) if ctx.countries else "any",
         "titles": ", ".join(ctx.titles) if ctx.titles else "unspecified",
         "candidate_location": ctx.location.strip() or "unknown",
+        "remote_only_area": ctx.location.strip() or "unknown",
+        "in_person_mode": _IN_PERSON_MODE_TEXT.get(ctx.work_mode, ""),
+        "in_person_area": ctx.location.strip() or "unknown",
         "prior_answers": "\n".join(
             f"- {item.question_id}: {item.answer}" for item in ctx.prior_answers
         ),
@@ -290,6 +351,11 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
         blocks = [block for block in blocks if _PRIOR_ANSWERS_PLACEHOLDER not in block]
     if not ctx.bank_answers:
         blocks = [block for block in blocks if _BANK_ANSWERS_PLACEHOLDER not in block]
+    # 0110-038: at most one CANDIDATE WORK MODE paragraph, the candidate's own.
+    if ctx.work_mode != "remote":
+        blocks = [block for block in blocks if _REMOTE_ONLY_PLACEHOLDER not in block]
+    if ctx.work_mode not in _IN_PERSON_MODE_TEXT:
+        blocks = [block for block in blocks if _IN_PERSON_PLACEHOLDER not in block]
 
     def fill(match: re.Match[str]) -> str:
         key = match.group(1)
@@ -769,6 +835,8 @@ def _normalize_and_strip(decoded: Mapping[str, object]) -> tuple[dict[str, objec
 
 __all__ = [
     "ASSESS_PROMPT_VERSION",
+    "ASSESS_PROMPT_VERSION_NO_WORK_MODE",
+    "CURRENT_ASSESS_PROMPT_VERSIONS",
     "AssessAttempt",
     "AssessContext",
     "AssessJob",
@@ -777,10 +845,12 @@ __all__ = [
     "POSTING_INCOMPLETE_MESSAGE",
     "PriorAnswer",
     "assess_once",
+    "assess_prompt_version",
     "build_assess_context",
     "constraints_digest",
     "posting_looks_incomplete",
     "invoke_json_once",
     "load_assess_instructions",
+    "normalize_work_mode",
     "render_assess_prompt",
 ]

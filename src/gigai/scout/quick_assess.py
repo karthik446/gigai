@@ -434,6 +434,23 @@ def _config_location(target: Path) -> str:
         return ""
 
 
+def _config_work_mode(home_root: Path, target: Path) -> str:
+    """The default profile's work mode, as a run for it would seal it (0110-038).
+
+    ``find-jobs.json``'s ``work_mode``, else the setup's saved answer
+    (``effective_config.default_search_settings``); missing or unreadable ->
+    ``""`` (no CANDIDATE WORK MODE paragraph in the prompt).
+    """
+
+    from .find_jobs.effective_config import default_search_settings
+
+    try:
+        settings = default_search_settings(home_root=home_root, target=target)
+    except Exception:  # noqa: BLE001 - a missing or unreadable setting means no work-mode paragraph, never a failed assessment
+        return ""
+    return "" if settings is None else settings.work_mode
+
+
 def _default_model_target(target: Path) -> ModelTarget:
     """``find-jobs.json``'s ``default_model_target``, tolerantly (missing/
     unreadable/starter -> the contract default, ``ollama_local``)."""
@@ -565,6 +582,10 @@ def run_quick_assessment(
         candidate_location = own_settings.location or ""
     else:
         candidate_location = _config_location(target)
+    # 0110-038: the profile's own work mode, else the default's (the shared
+    # find-jobs.json, filled from the setup's saved answer like a run's
+    # sealed config). "any"/none adds nothing to the prompt.
+    candidate_work_mode = own_settings.work_mode if own_settings is not None else _config_work_mode(home_root, target)
 
     # 4. Storage path first, so the response can name it and a prior
     #    ``created_at`` survives a re-assessment.
@@ -609,6 +630,7 @@ def run_quick_assessment(
                 titles=tuple(preferences.titles),
                 location=candidate_location,
                 bank=bank,
+                work_mode=candidate_work_mode,
             ),
             parse=_parse_body,
         )

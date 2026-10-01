@@ -342,12 +342,13 @@ def test_a_run_for_another_person_never_gets_the_first_profiles_answers_until_th
 
 
 def test_the_run_seals_the_prompt_version_and_the_bank_it_read(fx: ProfileFixtureGig, two: tuple[str, str], binding: _Binding) -> None:
-    from gigai.scout.assessment_core import ASSESS_PROMPT_VERSION
+    from gigai.scout.assessment_core import ASSESS_PROMPT_VERSION_NO_WORK_MODE
     from gigai.scout.find_jobs.contracts import AssessOutput
 
     default, other = two
     empty = _assess(fx, _run_id(21), profile_id=default)
-    assert empty.prompt_version == ASSESS_PROMPT_VERSION == "assess-prompt-v4"
+    # 0110-038: this run's config has no work mode, so its prompt is the one v4 rendered and keeps that name.
+    assert empty.prompt_version == ASSESS_PROMPT_VERSION_NO_WORK_MODE == "assess-prompt-v4"
     assert empty.story_bank is not None and empty.story_bank.profile_id == default and empty.story_bank.entries == {}
 
     story_bank.save_answer(home_root=fx.home_root, target=fx.target, profile_id=default, question_id="cloud:gcp", answer=_ANSWER, posting=_POSTING_A)

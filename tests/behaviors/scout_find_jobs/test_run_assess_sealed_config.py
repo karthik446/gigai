@@ -30,7 +30,7 @@ import re
 
 import pytest
 
-from gigai.scout.assessment_core import ASSESS_PROMPT_VERSION, build_assess_context, constraints_digest, render_assess_prompt
+from gigai.scout.assessment_core import ASSESS_PROMPT_VERSION_NO_WORK_MODE, build_assess_context, constraints_digest, render_assess_prompt
 from gigai.scout.find_jobs.contracts import FindJobsConfig, PostingRow, SourceToggles
 from gigai.scout.proposal_execution import _assess_job
 
@@ -245,21 +245,21 @@ def test_the_before_column_is_what_a_run_with_no_config_decides(fx: ProfileFixtu
     assert _constraints(binding.port.prompts[0]) == {"visa": "no", "countries": "any", "location": "unknown", "titles": "unspecified"}
 
 
-def test_work_mode_is_not_a_prompt_input_a_hybrid_role_elsewhere_stays_a_question(fx: ProfileFixtureGig, binding: _Binding) -> None:
-    """A remote-only candidate in Austin and a Houston hybrid role: a location question, before and after.
+def test_with_no_work_mode_a_hybrid_role_elsewhere_stays_a_question(fx: ProfileFixtureGig, binding: _Binding) -> None:
+    """A candidate in Austin with NO work mode in the config and a Houston hybrid role: a location question.
 
-    The assess prompt has no work-mode line on ANY path (quick assess sends
-    none either): rule 4 asks whether the candidate can be at a named office
-    unless their location places them there. A launched run for a remote-only
-    profile does not get this far: acquire's work-mode filter drops the
-    posting (``work_mode_mismatch``) before assess.
+    Rule 4 asks whether the candidate can be at a named office unless their
+    location places them there. Since 0110-038 a work mode in the run's
+    config adds a CANDIDATE WORK MODE paragraph (``test_assess_work_mode``);
+    this config has none (``remote=True`` alone is never a work mode), so the
+    prompt is the one v4 rendered.
     """
 
     company, location, text = _POSTINGS["hybrid_houston"]
     austin = _assess(fx, _run_id(401), profile_id=None, postings=[_job(401, company, location, text)], config=_candidate(location="Austin, TX", visa=False))
     assert austin.assessments[0].verdict.value == "pending_user_answers"
     assert [item.question_id for item in austin.assessments[0].structured_questions] == ["location:houston"]
-    assert "work mode" not in binding.port.prompts[-1].lower() and "remote-only" not in binding.port.prompts[-1].lower()
+    assert "work mode" not in binding.port.prompts[-1].lower() and "remote only" not in binding.port.prompts[-1].lower()
 
 
 # --- one builder, and what the run seals -----------------------------------------------------------
@@ -286,7 +286,7 @@ def test_the_run_seals_the_constraints_digest_and_never_the_constraints(fx: Prof
 
     output = _assess(fx, _run_id(601), profile_id=None, postings=[_job(601, company, location, text)], config=config)
 
-    assert output.prompt_version == ASSESS_PROMPT_VERSION
+    assert output.prompt_version == ASSESS_PROMPT_VERSION_NO_WORK_MODE  # 0110-038: no work mode in this config, the v4 prompt
     assert output.constraints_digest == constraints_digest(visa_sponsorship_required=True, countries=("US",), location="Houston, TX")
     sealed = json.dumps(output.to_json())
     assert "Houston" not in sealed, "the output holds a digest of the constraints, not the candidate's location"

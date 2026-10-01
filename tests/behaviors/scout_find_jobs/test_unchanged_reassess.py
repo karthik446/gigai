@@ -192,7 +192,7 @@ def _write_successful_assess_output(
     prompt carried, here ``_config()``'s); ``sealed_basis=False`` writes the
     output of a run from before that, which has neither.
     """
-    from gigai.scout.assessment_core import ASSESS_PROMPT_VERSION, constraints_digest
+    from gigai.scout.assessment_core import assess_prompt_version, constraints_digest
 
     config = _config()
     assert posting.content_sha256 is not None
@@ -211,9 +211,10 @@ def _write_successful_assess_output(
         model_target=ModelTarget.OLLAMA_LOCAL,
         producer=Producer("scout.find_jobs.assess", "1", "scout-assess", ModelTarget.OLLAMA_LOCAL, "fixture"),
         usage=None, failures=(),
-        prompt_version=ASSESS_PROMPT_VERSION if sealed_basis else None,
+        prompt_version=assess_prompt_version(config.effective_work_mode) if sealed_basis else None,
         constraints_digest=constraints_digest(
-            visa_sponsorship_required=config.visa_sponsorship_required, countries=config.countries, location=config.location or ""
+            visa_sponsorship_required=config.visa_sponsorship_required, countries=config.countries, location=config.location or "",
+            work_mode=config.effective_work_mode,
         )
         if sealed_basis
         else None,

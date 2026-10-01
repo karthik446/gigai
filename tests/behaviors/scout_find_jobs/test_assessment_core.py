@@ -327,8 +327,13 @@ GOLDEN_BOUNDED_LEN = 38_710
 # requirement instead of asking again). The paragraph is dropped when no bank answer is offered, so
 # every golden above (none carries one) renders byte for byte as before; its own rendering is pinned
 # by ``test_the_story_bank_paragraph_renders_only_when_bank_answers_are_offered`` below.
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:2e2b8d4cba4dd8273a887bb790b83b696c41159976cc247865154287ebdfc04d"
-SHIPPED_PROMPT_VERSION = "assess-prompt-v4"
+# assess-prompt-v5 (0110-038) INTENTIONAL CHANGE: bumped for the two CANDIDATE WORK MODE paragraphs (remote
+# only; hybrid / on-site), of which a prompt carries at most one: the candidate's own. Both are dropped
+# for a candidate with no work mode (or "any"), so every golden above (none carries one) renders byte for
+# byte as before and such a prompt keeps the v4 name (``assess_prompt_version``); their own rendering is
+# pinned in ``test_assess_work_mode.py``.
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:fd3e2ad21140dc463e8e7493bb6d992f60dcabc6208a6907e8efc0d9a47541ec"
+SHIPPED_PROMPT_VERSION = "assess-prompt-v5"
 
 
 def _sha256(text: str) -> str:
