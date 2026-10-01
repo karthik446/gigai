@@ -10,15 +10,25 @@ import { getApplications, getProfiles, getRuns, selectProfile } from "./api.js";
 // optimistically-on-success (never before the server confirms it, so a
 // rejected switch never shows the wrong profile as active).
 export function useProfiles() {
-  const [state, setState] = useState({ loading: true, profiles: [], selectedProfileId: null, error: null });
+  // 0110-022: `defaultSearchSettings` is what the default profile searches
+  // with (the setup settings); a profile without its own uses them.
+  const [state, setState] = useState({ loading: true, profiles: [], selectedProfileId: null, defaultSearchSettings: null, error: null });
 
   const reload = useCallback(() => {
     setState((prev) => ({ ...prev, loading: true, error: null }));
     getProfiles()
       .then((response) =>
-        setState({ loading: false, profiles: response.profiles, selectedProfileId: response.selected_profile_id, error: null }),
+        setState({
+          loading: false,
+          profiles: response.profiles,
+          selectedProfileId: response.selected_profile_id,
+          defaultSearchSettings: response.default_search_settings || null,
+          error: null,
+        }),
       )
-      .catch((error) => setState({ loading: false, profiles: [], selectedProfileId: null, error: error.message || String(error) }));
+      .catch((error) =>
+        setState({ loading: false, profiles: [], selectedProfileId: null, defaultSearchSettings: null, error: error.message || String(error) }),
+      );
   }, []);
 
   useEffect(reload, [reload]);

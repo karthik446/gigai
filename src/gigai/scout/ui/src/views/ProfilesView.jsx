@@ -1,6 +1,8 @@
 import ResumeWarning from "../components/ResumeWarning.jsx";
 import ResumeDisplayPanel from "../components/ResumeDisplayPanel.jsx";
 import NewProfileResume from "../components/NewProfileResume.jsx";
+import ProfileSearchSettings from "../components/ProfileSearchSettings.jsx";
+import { settingsSummary } from "../profileSettingsModel.js";
 import { storeResume } from "../wizard/wizardApi.js";
 import {
   canCreateProfile,
@@ -42,8 +44,9 @@ import { isAssessAll } from "../assessAllModel.js";
 // /api/profiles), create (POST), edit titles/label (PUT), archive (POST
 // .../archive) -- all exactly per find_jobs/api/profiles.py's shapes.
 // "Shared across all profiles" reuses GET /api/config, since visa/
-// countries/work-mode/cadence/budget/model all live in find-jobs.json, not
-// per profile (S25).
+// cadence/budget/model all live in find-jobs.json, not per profile (S25).
+// 0110-022: location, work mode, countries and the posted window are per
+// profile (ProfileSearchSettings); the default profile's are the setup's.
 function RunHistoryTable({ profileId }) {
   const { loading, runs, error } = useRuns(profileId);
   if (loading) {
@@ -83,7 +86,7 @@ function RunHistoryTable({ profileId }) {
   );
 }
 
-export default function ProfilesView({ profiles, selectedProfileId, onSelectProfile, config, reloadProfiles }) {
+export default function ProfilesView({ profiles, selectedProfileId, onSelectProfile, config, reloadProfiles, defaultSearchSettings }) {
   const selected = profiles.find((profile) => profile.profile_id === selectedProfileId) || null;
   const sharedNotes = sharedResumeNotes(profiles);
 
@@ -167,7 +170,10 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
     <div>
       <section className="panel">
         <h2>Profiles</h2>
-        <p className="muted">An interested profile pairs one resume with job titles/queries. Everything else is shared.</p>
+        <p className="muted">
+          An interested profile pairs one resume with job titles/queries. Every profile but the default one also has its
+          own location, work mode, countries and posted window.
+        </p>
 
         <div className="profile-list">
           {profiles.map((profile) => (
@@ -178,6 +184,9 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
                   {profile.titles.join(", ") || "no titles set"}
                 </div>
                 <div className="muted" style={{ fontSize: "0.8rem" }}>{resumeDescription(profile, config)}</div>
+                <div className="muted" style={{ fontSize: "0.8rem" }} data-role="profile-search-summary">
+                  {settingsSummary(profile, defaultSearchSettings)}
+                </div>
                 {sharedNotes[profile.profile_id] && (
                   <div className="callout warn" role="note" data-role="shared-resume-warning" style={{ fontSize: "0.8rem" }}>
                     {sharedNotes[profile.profile_id]}
@@ -222,7 +231,8 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
             />
             <p className="muted" style={{ fontSize: "0.8rem" }}>
               This profile gets the resume you give here; it does not use the selected profile's resume unless you choose
-              it under "Choose existing".
+              it under "Choose existing". It starts with the default profile's location, work mode, countries and posted
+              window; change them in the profile's detail after creating it.
             </p>
             {createError && <div className="callout danger">{createError}</div>}
             <div className="actions">
@@ -292,6 +302,12 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
             </>
           )}
 
+          <ProfileSearchSettings
+            key={selected.profile_id}
+            profile={selected}
+            defaults={defaultSearchSettings}
+            onSaved={reloadProfiles}
+          />
         </section>
       )}
 
@@ -316,18 +332,10 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
         <section className="panel">
           <h2>Shared across all profiles</h2>
           <p className="muted">
-            Countries, work mode, visa, company excludes/watch, discovery cadence/budget, and model are one set of
-            preferences for every profile.
+            Visa, company excludes/watch, discovery cadence/budget, and model are one set of preferences for every
+            profile.
           </p>
           <div className="field-row">
-            <div className="field">
-              <div className="label">Location</div>
-              <div className="value">{config.location || "any"}</div>
-            </div>
-            <div className="field">
-              <div className="label">Remote</div>
-              <div className="value">{config.remote ? "yes" : "no"}</div>
-            </div>
             <div className="field">
               <div className="label">Visa sponsorship required</div>
               <div className="value">{config.visa_sponsorship_required ? "yes" : "no"}</div>

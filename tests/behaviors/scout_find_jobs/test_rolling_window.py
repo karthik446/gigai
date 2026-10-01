@@ -32,7 +32,7 @@ from gigai.scout.find_jobs.contracts import (
 from gigai.scout.find_jobs.effective_config import overlay_selected_profile
 from gigai.scout.find_jobs.exa_client import EXA_API_KEY_ENV_VAR, ExaSearchClient
 from gigai.scout.find_jobs.filters import exclusion_reason, published_cutoff, published_too_old
-from gigai.scout.profile_records import ProfileRecord
+from gigai.scout.profile_records import ProfileRecord, ProfileSearchSettings
 
 from .conftest import load_fixture
 
@@ -206,7 +206,12 @@ def test_both_set_fixed_date_decides_the_drop() -> None:
     assert exclusion_reason(_row(published_at="2026-09-11T00:00:00Z"), config, now=NOW) is None
 
 
-# --- shared field: the profile overlay passes it through --------------------
+# --- the profile overlay: the shared window, unless the profile has its own ---
+#
+# 0110-022: this section used to pin the window as a SHARED field for every
+# profile. It still is for the default profile and for any profile without
+# its own search settings (first test, unchanged); a profile with its own
+# ``max_age_days`` now runs with that window (second test).
 
 
 def test_effective_config_overlay_keeps_the_window_fields() -> None:
@@ -234,6 +239,38 @@ def test_effective_config_overlay_keeps_the_window_fields() -> None:
     assert effective.published_after is None
     fixed = overlay_selected_profile(_config(published_after="2026-09-10"), profile)
     assert fixed.published_after == "2026-09-10"
+
+
+def test_effective_config_overlay_uses_a_profiles_own_window() -> None:
+    def profile(max_age_days: int | None) -> ProfileRecord:
+        return ProfileRecord(
+            schema_version="scout-profile:1",
+            profile_id="prof_2",
+            seq=1,
+            revision=1,
+            label="director",
+            state="active",
+            origin="test",
+            resume_ref=PinnedResume(record_id="rec_1", revision_id="rev_1", content_sha256="sha256:" + "0" * 64),
+            titles=("director of ai",),
+            titles_to_avoid=(),
+            queries=("director of ai",),
+            content_digest="sha256:" + "1" * 64,
+            created_at="2026-09-25T00:00:00Z",
+            updated_at="2026-09-25T00:00:00Z",
+            parent_seq=None,
+            search_settings=ProfileSearchSettings(location="Houston, TX", work_mode="hybrid", countries=("US",), max_age_days=max_age_days),
+        )
+
+    own = overlay_selected_profile(_config(max_age_days=21), profile(7))
+    assert own.max_age_days == 7 and own.published_after is None
+    assert published_cutoff(own, now=NOW) == NOW - timedelta(days=7)
+    # its rolling window wins over a shared fixed date (which would otherwise decide)
+    over_fixed = overlay_selected_profile(_config(published_after="2026-09-10", max_age_days=21), profile(7))
+    assert over_fixed.published_after is None and published_cutoff(over_fixed, now=NOW) == NOW - timedelta(days=7)
+    # no window of its own: the shared one, fixed date included
+    inherit = overlay_selected_profile(_config(published_after="2026-09-10"), profile(None))
+    assert inherit.published_after == "2026-09-10" and inherit.max_age_days is None
 
 
 # --- Exa asks for the same cutoff ------------------------------------------

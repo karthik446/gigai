@@ -557,7 +557,15 @@ def run_quick_assessment(
     #     ``location``. Kept OUT of the echoed ``preferences`` unless the
     #     request carried it, so a stored/served response's preferences
     #     object is unchanged for every caller that never sends one.
-    candidate_location = preferences.location if preferences.location is not None else _config_location(target)
+    # 0110-022: a profile with its own search settings is assessed for ITS
+    #     location, not the default profile's.
+    own_settings = None if profile is None else profile.search_settings
+    if preferences.location is not None:
+        candidate_location = preferences.location
+    elif own_settings is not None:
+        candidate_location = own_settings.location or ""
+    else:
+        candidate_location = _config_location(target)
 
     # 4. Storage path first, so the response can name it and a prior
     #    ``created_at`` survives a re-assessment.

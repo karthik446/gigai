@@ -1065,6 +1065,15 @@ class ScoutFindJobsBackend:
         # is left out of the prefs dataclass here and consumed only by
         # `_update_find_jobs_config` below.
         prefs = discovery.DiscoveryPrefs(**{key: value for key, value in prefs_fields.items() if key not in ("max_age_days", "model_target")})
+        # 0110-022: a save for a profile that is not the default one puts its
+        # countries / work mode / city on THAT profile (below); the shared
+        # prefs keep the default profile's, so the default's never change.
+        if self._setup_profile_has_own_settings(profile_id):
+            previous = discovery.load_prefs(home_root=self.home_root, target=self._target_root())
+            if previous is not None:
+                from dataclasses import replace
+
+                prefs = replace(prefs, countries=previous.countries, work_mode=previous.work_mode, city=previous.city)
         discovery.save_prefs(home_root=self.home_root, target=self._target_root(), prefs=prefs)
         self._update_find_jobs_config(prefs_fields, profile_id=profile_id)
 
@@ -1136,8 +1145,40 @@ class ScoutFindJobsBackend:
         config = replace(existing, sources=replace(existing.sources, exa=enabled))
         _atomic_write_json(path, config.to_json())
 
+    def _setup_profile_has_own_settings(self, profile_id: str | None) -> bool:
+        """0110-022: does a setup save for ``profile_id`` (``None``: the selected one) go to a NON-default profile?
+
+        Such a profile keeps its own location, work mode, countries and
+        posted window; the default profile's are the shared file's. ``False``
+        whenever no profile can be resolved (the save then writes the shared
+        file, as it always did).
+        """
+
+        from ... import profile_records
+
+        try:
+            resolved = self._resolved_gig()
+            profiles = profile_records.list_profiles(resolved)
+            if profile_id is None:
+                profile = profile_records.selected_profile(resolved, home_root=self.home_root, target=self._target_root())
+                profiles = profile_records.list_profiles(resolved)
+            else:
+                profile = next((item for item in profiles if item.profile_id == profile_id), None)
+        except Exception:  # noqa: BLE001 - no gig or profile yet: the shared-file save
+            return False
+        default = profile_records.default_profile(profiles)
+        return profile is not None and default is not None and profile.profile_id != default.profile_id
+
     def _update_find_jobs_config(self, prefs_fields: dict[str, object], *, profile_id: str | None = None) -> None:
         """Apply the setup answers onto the SELECTED profile + ``find-jobs.json``.
+
+        0110-022: when the profile the save is for is NOT the default one,
+        ``city``, ``work_mode``, ``countries`` and ``max_age_days`` go to
+        that profile's own ``search_settings`` and an existing shared file
+        keeps its own values for them (and its ``remote`` /
+        ``published_after``): creating or editing another profile never
+        changes the default profile's location. For the default profile, or
+        with no profile at all, everything below is as it was.
 
         uat-bug-024: with ``profile_id`` the answers go onto THAT profile and
         the selected one is neither read nor written (the wizard's "Create a
@@ -1227,13 +1268,24 @@ class ScoutFindJobsBackend:
             profile = profile_records.selected_profile(
                 resolved, home_root=self.home_root, target=self._target_root()
             )
+        own_settings = None
         if profile is not None:
+            default = profile_records.default_profile(profile_records.list_profiles(resolved))
+            if default is not None and default.profile_id != profile.profile_id:
+                kept_window = None if profile.search_settings is None else profile.search_settings.max_age_days
+                own_settings = profile_records.ProfileSearchSettings(
+                    location=city,
+                    work_mode=work_mode.value,
+                    countries=countries,
+                    max_age_days=max_age_days_sent if window_sent else kept_window,
+                )
             profile_records.write_profile(
                 resolved,
                 profile_id=profile.profile_id,
                 titles=roles,
                 titles_to_avoid=titles_to_avoid,
                 queries=roles,
+                search_settings=own_settings,
             )
 
         if path.is_symlink() or not path.is_file():
@@ -1261,19 +1313,22 @@ class ScoutFindJobsBackend:
             )
         else:
             existing = FindJobsConfig.from_json(parse_json_bytes(path.read_bytes()))
+            # 0110-022: a non-default profile's save leaves the shared
+            # (default profile's) location, work mode, countries and window.
+            shared = own_settings is None
             config = FindJobsConfig(
                 roles=existing.roles if profile is not None else roles,
                 merged_queries=existing.merged_queries if profile is not None else roles,
-                location=city,
-                remote=remote,
-                published_after=None if window_sent else existing.published_after,
+                location=city if shared else existing.location,
+                remote=remote if shared else existing.remote,
+                published_after=(None if window_sent else existing.published_after) if shared else existing.published_after,
                 sources=existing.sources,
                 default_assess_cap=existing.default_assess_cap,
                 default_model_target=model_target_sent or existing.default_model_target,
-                countries=countries,
+                countries=countries if shared else existing.countries,
                 visa_sponsorship_required=visa_sponsorship_required,
-                max_age_days=max_age_days_sent if window_sent else existing.max_age_days,
-                work_mode=work_mode,
+                max_age_days=(max_age_days_sent if window_sent else existing.max_age_days) if shared else existing.max_age_days,
+                work_mode=work_mode if shared else existing.work_mode,
             )
         _atomic_write_json(path, config.to_json())
 

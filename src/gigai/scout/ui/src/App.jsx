@@ -286,6 +286,7 @@ export default function App() {
             selectedProfileId={profilesState.selectedProfileId}
             onSelectProfile={handleSelectProfile}
             reloadProfiles={profilesState.reload}
+            defaultSearchSettings={profilesState.defaultSearchSettings}
           />
         )}
 

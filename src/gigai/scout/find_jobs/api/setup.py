@@ -296,6 +296,27 @@ def _named_profile_refusal(backend: object, profile_id: str) -> tuple[HTTPStatus
     return None
 
 
+def _with_selected_profile_settings(backend: object, prefs_json: object) -> object:
+    """0110-022: the saved prefs, with the SELECTED profile's own countries / work mode / city.
+
+    The shared prefs hold the default profile's. A selected profile with its
+    own search settings shows those in the wizard instead, so saving the
+    form again does not overwrite them with the default's. Anything that
+    cannot be read leaves the prefs as saved.
+    """
+
+    if not isinstance(prefs_json, dict):
+        return prefs_json
+    try:
+        profile = backend._selected_profile()  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - no profile to read: the saved prefs
+        return prefs_json
+    own = getattr(profile, "search_settings", None)
+    if own is None:
+        return prefs_json
+    return {**prefs_json, "countries": list(own.countries), "work_mode": own.work_mode, "city": own.location}
+
+
 class SetupRoutesMixin:
     """``Handler`` mixin: ``GET``/``PUT /api/setup``."""
 
@@ -311,6 +332,7 @@ class SetupRoutesMixin:
             # it reads as no city, like find-jobs.json's own location.
             if isinstance(prefs_json, dict) and is_location_placeholder(prefs_json.get("city")):
                 prefs_json = {**prefs_json, "city": None}
+            prefs_json = _with_selected_profile_settings(self._backend, prefs_json)
             self._write_json(
                 HTTPStatus.OK,
                 {"schema_version": "scout-find-jobs-setup-response:1", "prefs": prefs_json},

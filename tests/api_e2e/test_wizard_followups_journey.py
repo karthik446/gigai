@@ -267,12 +267,21 @@ def test_a_resume_stored_from_the_cli_is_analysed_before_any_profile_exists(
     server = start_server(home, target, monkeypatch=monkeypatch)
     try:
         client = server.client
+        config = client.get("/api/config").json()
         assert client.get("/api/profiles").json() == {
             "schema_version": "scout-profiles-response:1",
             "profiles": [],
             "selected_profile_id": None,
+            # 0110-022: the response also names the default profile (none yet)
+            # and the setup settings it would search with.
+            "default_profile_id": None,
+            "default_search_settings": {
+                "location": config["config"]["location"],
+                "work_mode": config["config"].get("work_mode") or "any",
+                "countries": config["config"].get("countries", []),
+                "max_age_days": config["config"].get("max_age_days"),
+            },
         }
-        config = client.get("/api/config").json()
         offered = config["resume_preview"]
         assert offered["record_id"] == cli_body["record_id"] and offered["revision_id"] == cli_body["revision_id"]
         # What is stored as the label: the file's own name.

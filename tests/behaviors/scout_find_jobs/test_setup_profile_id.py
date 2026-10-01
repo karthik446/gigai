@@ -153,10 +153,15 @@ def test_a_new_profiles_titles_do_not_reach_the_selected_profile(
     assert still_selected is not None and still_selected.profile_id == selected.profile_id
 
     # The new profile has the new titles (the values POST /api/profiles
-    # gave it, so this save changed nothing in it: no new revision).
+    # gave it, so this save changed nothing in them).
     new = _profile(fx, created.profile_id)
     assert list(new.titles) == TITLES_B and list(new.titles_to_avoid) == AVOID_B and list(new.queries) == TITLES_B
-    assert new.revision == created.revision
+    # 0110-022: this used to assert "no new revision". The save's city /
+    # work mode / countries / window now go to the NEW profile as its own
+    # search settings (one revision), not into the shared find-jobs.json.
+    assert new.revision == created.revision + 1
+    assert new.search_settings is not None
+    assert new.search_settings.to_json() == {"location": None, "work_mode": "remote", "countries": ["US"], "max_age_days": 60}
 
     # The shared preferences: every active profile's titles.
     prefs = response.json()["prefs"]

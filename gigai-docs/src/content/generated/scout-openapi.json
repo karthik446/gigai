@@ -1413,7 +1413,7 @@
         "x-gigai-external": "none"
       },
       "post": {
-        "description": "Create a profile.",
+        "description": "Create a profile. Every profile but the default one has its own location, work mode, countries and posted window. The first profile is the default and uses the setup settings.",
         "operationId": "post_api_profiles",
         "parameters": [],
         "requestBody": {
@@ -1443,6 +1443,10 @@
                   "resume_revision_id": {
                     "description": "Stored resume revision.",
                     "type": "string"
+                  },
+                  "search_settings": {
+                    "description": "This profile's own {location, work_mode, countries, max_age_days}; omitted = a copy of the default's, null = same as default.",
+                    "type": "object"
                   },
                   "titles": {
                     "description": "Titles to search (non-empty).",
@@ -1664,7 +1668,7 @@
     },
     "/api/profiles/{profile_id}": {
       "put": {
-        "description": "Update a profile.",
+        "description": "Update a profile. search_settings on the default profile is a 409: it uses the setup settings (PUT /api/setup). An unknown key inside search_settings lists that object's allowed_keys.",
         "operationId": "put_api_profiles_profile_id",
         "parameters": [
           {
@@ -1704,6 +1708,10 @@
                   "resume_revision_id": {
                     "description": "Stored resume revision.",
                     "type": "string"
+                  },
+                  "search_settings": {
+                    "description": "Any of {location, work_mode, countries, max_age_days} to change; null = same as default.",
+                    "type": "object"
                   },
                   "titles": {
                     "description": "Titles (non-empty).",
@@ -1782,6 +1790,22 @@
               }
             },
             "description": "not_found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "scout_profile_default_search_settings",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "scout_profile_default_search_settings"
           },
           "415": {
             "content": {

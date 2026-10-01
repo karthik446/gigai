@@ -15,6 +15,7 @@ export default function SettingsView({
   selectedProfileId,
   onSelectProfile,
   reloadProfiles,
+  defaultSearchSettings,
 }) {
   return (
     <div>
@@ -27,7 +28,8 @@ export default function SettingsView({
         <h2>Preferences</h2>
         <p className="muted">
           Job titles, location, visa, publication window and the resume every run and assessment use. Editing them
-          re-opens the setup wizard.
+          re-opens the setup wizard. Location, work mode, countries and the publication window here are the default
+          profile's; every other profile has its own, under Profiles below.
         </p>
         {configLoading && <p className="muted">Loading configuration…</p>}
         {configError && (
@@ -64,6 +66,7 @@ export default function SettingsView({
           onSelectProfile={onSelectProfile}
           config={config ? config.config : null}
           reloadProfiles={reloadProfiles}
+          defaultSearchSettings={defaultSearchSettings}
         />
       </div>
 

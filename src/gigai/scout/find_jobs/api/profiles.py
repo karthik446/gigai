@@ -29,6 +29,16 @@ Responses never include resume text: only the sealed ``resume_ref`` triple
 (``record_id``/``revision_id``/``content_sha256``) plus a caller-supplied or
 resolved ``label`` field is ever returned -- no resume body byte is read by
 this module for display.
+
+0110-022: every profile but the default one has its own search settings
+(location, work mode, countries, posted window), the nested optional
+``search_settings`` object of ``POST``/``PUT``. Left out of a ``POST``, the
+new profile is prefilled with the default's; in a ``PUT`` the keys given
+replace the profile's own (the others keep their value) and ``null`` goes
+back to "same as default". The default profile uses the setup settings:
+``search_settings`` for it is a ``409 scout_profile_default_search_settings``.
+An unknown nested key is a 400 that lists that object's ``allowed_keys``.
+``location`` here is the search area, never the Resume display contact line.
 """
 
 from __future__ import annotations
@@ -39,16 +49,20 @@ from .... import private_records
 from ....canonical import digest_imported_bytes
 from ....workpad import resolve_workpad
 from ...profile_records import (
+    SEARCH_SETTINGS_KEYS,
     ProfileRecord,
     ProfileRecordError,
+    ProfileSearchSettings,
     ProfileSelection,
     create_profile,
+    default_profile,
     list_profiles,
     selected_profile,
     switch_selected_profile,
     write_profile,
 )
 from ..contracts import PinnedResume
+from ..effective_config import default_search_settings
 
 
 def _match_profile_id(path: str, *, suffix: str) -> str | None:
@@ -83,6 +97,7 @@ _PROFILE_ERROR_STATUS: dict[str, int] = {
     "scout_profile_invalid": HTTPStatus.BAD_REQUEST,
     "scout_profile_unavailable": HTTPStatus.NOT_FOUND,
     "scout_profile_archived": HTTPStatus.CONFLICT,
+    "scout_profile_default_search_settings": HTTPStatus.CONFLICT,
     "profile_archive_requires_replacement": HTTPStatus.CONFLICT,
     "scout_profile_selection_dangling": HTTPStatus.CONFLICT,
     "scout_profile_write_corrupt": HTTPStatus.CONFLICT,
@@ -98,10 +113,17 @@ _PROFILE_ERROR_STATUS: dict[str, int] = {
 }
 
 
-def _profile_to_json(record: ProfileRecord) -> dict[str, object]:
-    """The profile's public shape: never the resume's own bytes/text."""
+def _profile_to_json(record: ProfileRecord, *, default_profile_id: str | None = None) -> dict[str, object]:
+    """The profile's public shape: never the resume's own bytes/text.
+
+    0110-022: ``search_settings`` is the profile's OWN settings, ``None``
+    when it uses the default's; ``is_default`` marks the profile that uses
+    the setup settings.
+    """
 
     return {
+        "is_default": record.profile_id == default_profile_id,
+        "search_settings": None if record.search_settings is None else record.search_settings.to_json(),
         "profile_id": record.profile_id,
         "revision": record.revision,
         "label": record.label,
@@ -125,6 +147,46 @@ def _string_list(body: dict[str, object], field: str, errors: dict[str, str]) ->
         errors[field] = f"{field} must be an array of non-empty strings"
         return None
     return tuple(value)
+
+
+_NO_SETTINGS = ProfileSearchSettings(location=None, work_mode="any", countries=(), max_age_days=None)
+
+
+def _search_settings(
+    body: dict[str, object], errors: dict[str, str], *, base: ProfileSearchSettings | None
+) -> ProfileSearchSettings | None:
+    """The body's ``search_settings`` laid over ``base``; ``None`` for ``null`` or a refused one.
+
+    Only called when the key is present. ``base`` is what the keys left out
+    keep: the profile's own settings, else the default's.
+    """
+
+    value = body["search_settings"]
+    if value is None:
+        return None
+    allowed = ", ".join(SEARCH_SETTINGS_KEYS)
+    if not isinstance(value, dict):
+        errors["search_settings"] = f"search_settings must be an object or null (allowed: {allowed})"
+        return None
+    unknown = sorted(set(value) - set(SEARCH_SETTINGS_KEYS))
+    if unknown:
+        errors["search_settings"] = f"search_settings contains unknown key(s): {unknown} (allowed: {allowed})"
+        return None
+    merged = {**(base or _NO_SETTINGS).to_json(), **value}
+    try:
+        return ProfileSearchSettings.from_json(merged)
+    except ProfileRecordError as exc:
+        errors["search_settings"] = str(exc)
+        return None
+
+
+def _field_errors_extra(errors: dict[str, str]) -> dict[str, object]:
+    """``field_errors``, plus the nested object's ``allowed_keys`` when it had an unknown key."""
+
+    extra: dict[str, object] = {"field_errors": errors}
+    if "unknown key(s)" in errors.get("search_settings", ""):
+        extra["allowed_keys"] = list(SEARCH_SETTINGS_KEYS)
+    return extra
 
 
 def _label(body: dict[str, object], errors: dict[str, str], *, required: bool) -> str | None:
@@ -158,6 +220,22 @@ class ProfilesRoutesMixin:
             requested_target=target,
             gig_id=None,
             allow_semantic_state=True,
+        )
+
+    def _default_search_settings(self) -> ProfileSearchSettings | None:
+        return default_search_settings(home_root=self._backend.home_root, target=self._backend.target)
+
+    def _profile_response(self, status: HTTPStatus, resolved, record: ProfileRecord) -> None:
+        try:
+            default = default_profile(list_profiles(resolved))
+        except ProfileRecordError:
+            default = None
+        self._write_json(
+            status,
+            {
+                "schema_version": "scout-profile-response:1",
+                "profile": _profile_to_json(record, default_profile_id=None if default is None else default.profile_id),
+            },
         )
 
     def _error_from_profile_error(self, exc: ProfileRecordError) -> None:
@@ -230,12 +308,18 @@ class ProfilesRoutesMixin:
         except ProfileRecordError as exc:
             self._error_from_profile_error(exc)
             return
+        default = default_profile(profiles)
+        default_profile_id = None if default is None else default.profile_id
+        shared = self._default_search_settings()
         self._write_json(
             HTTPStatus.OK,
             {
                 "schema_version": "scout-profiles-response:1",
-                "profiles": [_profile_to_json(item) for item in profiles],
+                "profiles": [_profile_to_json(item, default_profile_id=default_profile_id) for item in profiles],
                 "selected_profile_id": selection.profile_id if selection is not None else None,
+                # 0110-022: the profile that uses the setup settings, and those settings.
+                "default_profile_id": default_profile_id,
+                "default_search_settings": None if shared is None else shared.to_json(),
             },
         )
 
@@ -250,7 +334,7 @@ class ProfilesRoutesMixin:
             return
 
         errors: dict[str, str] = {}
-        known_keys = {"label", "titles", "titles_to_avoid", "queries", "resume_record_id", "resume_revision_id"}
+        known_keys = {"label", "titles", "titles_to_avoid", "queries", "resume_record_id", "resume_revision_id", "search_settings"}
         unknown = set(body) - known_keys
         if unknown:
             errors["_"] = f"unknown field(s): {sorted(unknown)}"
@@ -280,9 +364,17 @@ class ProfilesRoutesMixin:
 
         resume_ref = self._resolve_resume_ref(resolved, body, errors, fallback=fallback_resume)
 
+        # 0110-022: a new profile starts with the default's settings; the
+        # body's keys replace them, `null` keeps "same as default". The
+        # first profile of a gig is the default one and stores none
+        # (create_profile).
+        search_settings = self._default_search_settings()
+        if "search_settings" in body:
+            search_settings = _search_settings(body, errors, base=search_settings)
+
         if errors:
             self._error_with_extra(
-                HTTPStatus.BAD_REQUEST, "invalid_value", "invalid profile", {"field_errors": errors}
+                HTTPStatus.BAD_REQUEST, "invalid_value", "invalid profile", _field_errors_extra(errors)
             )
             return
         assert label is not None and titles is not None and resume_ref is not None
@@ -295,14 +387,12 @@ class ProfilesRoutesMixin:
                 titles_to_avoid=titles_to_avoid,
                 queries=queries or titles,
                 resume_ref=resume_ref,
+                search_settings=search_settings,
             )
         except ProfileRecordError as exc:
             self._error_from_profile_error(exc)
             return
-        self._write_json(
-            HTTPStatus.CREATED,
-            {"schema_version": "scout-profile-response:1", "profile": _profile_to_json(record)},
-        )
+        self._profile_response(HTTPStatus.CREATED, resolved, record)
 
     # -- PUT /api/profiles/{profile_id} --------------------------------------
 
@@ -315,7 +405,7 @@ class ProfilesRoutesMixin:
             return
 
         errors: dict[str, str] = {}
-        known_keys = {"label", "titles", "titles_to_avoid", "queries", "resume_record_id", "resume_revision_id"}
+        known_keys = {"label", "titles", "titles_to_avoid", "queries", "resume_record_id", "resume_revision_id", "search_settings"}
         unknown = set(body) - known_keys
         if unknown:
             errors["_"] = f"unknown field(s): {sorted(unknown)}"
@@ -337,9 +427,23 @@ class ProfilesRoutesMixin:
         if "resume_record_id" in body or "resume_revision_id" in body:
             resume_ref = self._resolve_resume_ref(resolved, body, errors, fallback=None)
 
+        # 0110-022: the keys given replace the profile's own settings (its
+        # own, else the default's, fill the rest); `null` clears them.
+        search_settings: ProfileSearchSettings | None = None
+        clear_search_settings = False
+        if "search_settings" in body:
+            try:
+                existing = next((item for item in list_profiles(resolved) if item.profile_id == profile_id), None)
+            except ProfileRecordError as exc:
+                self._error_from_profile_error(exc)
+                return
+            own = None if existing is None else existing.search_settings
+            search_settings = _search_settings(body, errors, base=own or self._default_search_settings())
+            clear_search_settings = body["search_settings"] is None
+
         if errors:
             self._error_with_extra(
-                HTTPStatus.BAD_REQUEST, "invalid_value", "invalid profile edit", {"field_errors": errors}
+                HTTPStatus.BAD_REQUEST, "invalid_value", "invalid profile edit", _field_errors_extra(errors)
             )
             return
 
@@ -352,14 +456,13 @@ class ProfilesRoutesMixin:
                 titles_to_avoid=titles_to_avoid,
                 queries=queries,
                 resume_ref=resume_ref,
+                search_settings=search_settings,
+                clear_search_settings=clear_search_settings,
             )
         except ProfileRecordError as exc:
             self._error_from_profile_error(exc)
             return
-        self._write_json(
-            HTTPStatus.OK,
-            {"schema_version": "scout-profile-response:1", "profile": _profile_to_json(record)},
-        )
+        self._profile_response(HTTPStatus.OK, resolved, record)
 
     # -- POST /api/profiles/{profile_id}/archive -----------------------------
 
@@ -403,10 +506,7 @@ class ProfilesRoutesMixin:
         except LookupError:
             self._error(HTTPStatus.NOT_FOUND, "not_found", "no target is configured")
             return
-        self._write_json(
-            HTTPStatus.OK,
-            {"schema_version": "scout-profile-response:1", "profile": _profile_to_json(record)},
-        )
+        self._profile_response(HTTPStatus.OK, resolved, record)
 
     # -- POST /api/profiles/selection ----------------------------------------
 

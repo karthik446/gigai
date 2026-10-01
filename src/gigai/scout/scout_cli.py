@@ -1145,6 +1145,187 @@ def watchlist_add_command(url: str, target_value: Path | None, home_value: Path 
     click.echo(f"{verb} {entry.company} ({entry.provider.value} board '{entry.board_token}').")
 
 
+# --- 0110-022: `gigai scout profile list|update` ---------------------------
+
+
+@scout_group.group("profile")
+def profile_group() -> None:
+    """Show profiles and set a profile's own search settings."""
+
+
+def _profiles_context(target_value: Path | None, home_root: Path, *, as_json: bool):
+    """``(resolved gig, target, profiles, selected, default's settings)`` for the profile commands."""
+
+    from ..workpad import resolve_workpad
+    from . import profile_records
+    from .find_jobs.effective_config import default_search_settings
+
+    target = _resolved_target(target_value, home_root, as_json=as_json).expanduser().resolve(strict=True)
+    resolved = resolve_workpad(home_root=home_root, requested_target=target, gig_id=None, allow_semantic_state=True)
+    # Migrates the default profile on first read, like every profile-aware path.
+    selected = profile_records.selected_profile(resolved, home_root=home_root, target=target)
+    profiles = profile_records.list_profiles(resolved)
+    return resolved, profiles, selected, default_search_settings(home_root=home_root, target=target)
+
+
+def _profile_payload(record, *, default_id: str | None, selected_id: str | None) -> dict[str, object]:
+    return {
+        "profile_id": record.profile_id,
+        "label": record.label,
+        "state": record.state,
+        "revision": record.revision,
+        "titles": list(record.titles),
+        "is_default": record.profile_id == default_id,
+        "selected": record.profile_id == selected_id,
+        "search_settings": None if record.search_settings is None else record.search_settings.to_json(),
+    }
+
+
+def _settings_line(settings: dict[str, object] | None) -> str:
+    if settings is None:
+        return "no setup settings saved yet"
+    countries = ", ".join(settings["countries"]) or "any country"  # type: ignore[arg-type]
+    window = settings["max_age_days"]
+    return (
+        f"{settings['location'] or 'no area'} · {settings['work_mode']} · {countries} · "
+        + (f"last {window} days" if window is not None else "the default window")
+    )
+
+
+@profile_group.command("list")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def profile_list_command(target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """List the profiles and what each one searches with.
+
+    The default profile uses the setup settings (location, work mode,
+    countries, posted window). Every other profile has its own, or uses the
+    default's when it has none.
+    """
+
+    from . import profile_records
+
+    home_root = home_value or default_home_root()
+    try:
+        _resolved, profiles, selected, shared = _profiles_context(target_value, home_root, as_json=as_json)
+    except (ScoutTargetError, WorkpadError, profile_records.ProfileRecordError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_profile_list_failed")
+        return
+    default = profile_records.default_profile(profiles)
+    default_id = None if default is None else default.profile_id
+    selected_id = None if selected is None else selected.profile_id
+    shared_json = None if shared is None else shared.to_json()
+    items = [_profile_payload(item, default_id=default_id, selected_id=selected_id) for item in profiles]
+    if as_json:
+        _emit({"ok": True, "profiles": items, "default_profile_id": default_id, "default_search_settings": shared_json}, True, "")
+        return
+    if not items:
+        click.echo("No profiles yet. Finish the Scout setup and add a resume.")
+        return
+    for item in items:
+        marks = [mark for mark, on in (("default", item["is_default"]), ("selected", item["selected"]), ("archived", item["state"] == "archived")) if on]
+        click.echo(f"{item['label']} ({item['profile_id']})" + (f" [{', '.join(marks)}]" if marks else ""))
+        own = item["search_settings"]
+        if item["is_default"]:
+            click.echo(f"  setup settings: {_settings_line(shared_json)}")
+        elif own is None:
+            click.echo(f"  same as default: {_settings_line(shared_json)}")
+        else:
+            click.echo(f"  own settings: {_settings_line(own)}")  # type: ignore[arg-type]
+
+
+@profile_group.command("update")
+@click.argument("profile_id")
+@click.option("--location", help="City or area this profile searches and ranks for (not printed on the resume).")
+@click.option("--no-location", is_flag=True, help="No area preference.")
+@click.option("--work-mode", type=click.Choice(["remote", "hybrid", "onsite", "any"]))
+@click.option("--country", "countries", multiple=True, help="ISO-3166 alpha-2 code; repeat for more. Replaces the list.")
+@click.option("--max-age-days", type=click.IntRange(1, 365), help="Only postings from the last N days.")
+@click.option("--default-window", is_flag=True, help="Use the default profile's posted window.")
+@click.option("--same-as-default", is_flag=True, help="Drop this profile's own settings; use the default profile's.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def profile_update_command(
+    profile_id: str,
+    location: str | None,
+    no_location: bool,
+    work_mode: str | None,
+    countries: tuple[str, ...],
+    max_age_days: int | None,
+    default_window: bool,
+    same_as_default: bool,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Set a profile's own location, work mode, countries and posted window.
+
+    The options given replace that profile's values; the others keep theirs
+    (its own, else the default profile's). The default profile uses the
+    setup settings and is refused here: change those in the Scout UI under
+    Settings. No other profile is changed.
+    """
+
+    from . import profile_records
+
+    changes = any((location is not None, no_location, work_mode, countries, max_age_days is not None, default_window))
+    if same_as_default and changes:
+        _fail(ValueError("pass --same-as-default alone"), as_json=as_json, fallback="scout_profile_invalid")
+    if not same_as_default and not changes:
+        _fail(ValueError("nothing to change: pass at least one setting, or --same-as-default"), as_json=as_json, fallback="scout_profile_invalid")
+    if location is not None and no_location:
+        _fail(ValueError("pass --location or --no-location, not both"), as_json=as_json, fallback="scout_profile_invalid")
+    if max_age_days is not None and default_window:
+        _fail(ValueError("pass --max-age-days or --default-window, not both"), as_json=as_json, fallback="scout_profile_invalid")
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved, profiles, selected, shared = _profiles_context(target_value, home_root, as_json=as_json)
+        existing = next((item for item in profiles if item.profile_id == profile_id), None)
+        if existing is None:
+            raise profile_records.ProfileRecordError("scout_profile_unavailable", f"profile {profile_id!r} is not committed in this gig")
+        if same_as_default:
+            record = profile_records.write_profile(resolved, profile_id=profile_id, clear_search_settings=True)
+        else:
+            base = existing.search_settings or shared
+            merged: dict[str, object] = (
+                base.to_json() if base is not None else {"location": None, "work_mode": "any", "countries": [], "max_age_days": None}
+            )
+            if location is not None:
+                merged["location"] = location
+            if no_location:
+                merged["location"] = None
+            if work_mode:
+                merged["work_mode"] = work_mode
+            if countries:
+                merged["countries"] = [code.upper() for code in countries]
+            if max_age_days is not None:
+                merged["max_age_days"] = max_age_days
+            if default_window:
+                merged["max_age_days"] = None
+            record = profile_records.write_profile(
+                resolved, profile_id=profile_id, search_settings=profile_records.ProfileSearchSettings.from_json(merged)
+            )
+    except (ScoutTargetError, WorkpadError, profile_records.ProfileRecordError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_profile_update_failed")
+        return
+    default = profile_records.default_profile(profiles)
+    payload = _profile_payload(
+        record,
+        default_id=None if default is None else default.profile_id,
+        selected_id=None if selected is None else selected.profile_id,
+    )
+    if as_json:
+        _emit({"ok": True, "profile": payload}, True, "")
+        return
+    if record.search_settings is None:
+        click.echo(f"{record.label} ({record.profile_id}) now uses the default profile's settings.")
+    else:
+        click.echo(f"{record.label} ({record.profile_id}): {_settings_line(record.search_settings.to_json())}")
+
+
 # --- N11-C (v0.1.9): `gigai scout sources update|status` -------------------
 
 

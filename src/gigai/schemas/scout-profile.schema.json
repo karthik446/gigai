@@ -29,6 +29,17 @@
     "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "created_at": {"type": "string", "format": "date-time"},
     "updated_at": {"type": "string", "format": "date-time"},
-    "parent_seq": {"type": ["integer", "null"], "minimum": 1}
+    "parent_seq": {"type": ["integer", "null"], "minimum": 1},
+    "search_settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["location", "work_mode", "countries", "max_age_days"],
+      "properties": {
+        "location": {"type": ["string", "null"], "minLength": 1, "maxLength": 200},
+        "work_mode": {"enum": ["remote", "hybrid", "onsite", "any"]},
+        "countries": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z]{2}$"}},
+        "max_age_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 365}
+      }
+    }
   }
 }

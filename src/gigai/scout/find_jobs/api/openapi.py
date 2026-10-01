@@ -297,8 +297,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("label", "string", "Profile name.", required=True), _b("titles", "array", "Titles to search (non-empty).", required=True),
             _b("titles_to_avoid", "array", "Titles to skip."), _b("queries", "array", "Search queries (default: titles)."),
             _b("resume_record_id", "string", "Stored resume record."), _b("resume_revision_id", "string", "Stored resume revision."),
+            _b("search_settings", "object", "This profile's own {location, work_mode, countries, max_age_days}; omitted = a copy of the default's, null = same as default."),
         ),
         request_example={"label": "Backend", "titles": ["Software Engineer"]}, errors=(_WRONG_TYPE, (400, "invalid_value"), _NOT_FOUND),
+        description="Every profile but the default one has its own location, work mode, countries and posted window. The first profile is the default and uses the setup settings.",
     ),
     RouteSpec(
         "PUT", "/api/profiles/{profile_id}", "Update a profile.", "write", "none", {"profile": {"profile_id": "prof_1"}},
@@ -306,8 +308,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _PROFILE_ID, _b("label", "string", "Profile name.", required=True), _b("titles", "array", "Titles (non-empty).", required=True),
             _b("titles_to_avoid", "array", "Titles to skip."), _b("queries", "array", "Search queries."),
             _b("resume_record_id", "string", "Stored resume record."), _b("resume_revision_id", "string", "Stored resume revision."),
+            _b("search_settings", "object", "Any of {location, work_mode, countries, max_age_days} to change; null = same as default."),
         ),
-        request_example={"label": "Backend", "titles": ["Software Engineer"]}, errors=(_WRONG_TYPE, (400, "invalid_value"), _NOT_FOUND),
+        request_example={"label": "Backend", "titles": ["Software Engineer"]}, errors=(_WRONG_TYPE, (400, "invalid_value"), (409, "scout_profile_default_search_settings"), _NOT_FOUND),
+        description="search_settings on the default profile is a 409: it uses the setup settings (PUT /api/setup). An unknown key inside search_settings lists that object's allowed_keys.",
     ),
     RouteSpec(
         "POST", "/api/profiles/{profile_id}/archive", "Archive a profile, optionally moving its selection to another.", "write", "none", {"archived": "prof_1"},

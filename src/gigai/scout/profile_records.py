@@ -50,7 +50,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Mapping, NoReturn
+from typing import Callable, Iterable, Mapping, NoReturn
 import re
 import uuid
 
@@ -65,7 +65,13 @@ from ..journal import (
 from ..validators import validate_serialized_contract
 from ..workpad import ResolvedWorkpad
 from .. import private_records
-from .find_jobs.contracts import FindJobsConfig, PinnedResume
+from .find_jobs.contracts import (
+    MAX_AGE_DAYS_MAXIMUM,
+    FindJobsConfig,
+    PinnedResume,
+    WorkModePreference,
+    is_location_placeholder,
+)
 
 SCHEMA_VERSION = "scout-profile:1"
 SELECTION_SCHEMA_VERSION = "scout-profile-selection:1"
@@ -95,6 +101,84 @@ class NoResumeAvailable(Exception):
     """Raised (caught internally) when the resolved gig has no committed resume yet."""
 
 
+_COUNTRY_CODE = re.compile(r"\A[A-Z]{2}\Z")
+_LOCATION_MAX = 200
+SEARCH_SETTINGS_KEYS = ("countries", "location", "max_age_days", "work_mode")
+
+
+@dataclass(frozen=True)
+class ProfileSearchSettings:
+    """0110-022: one profile's OWN search settings (location, work mode, countries, posted window).
+
+    Stored only on a profile that is not the default one (``default_profile``);
+    a record without them reads as "same as default": the shared
+    ``find-jobs.json`` the setup wrote. ``location`` is the search area (the
+    candidate location the rank and assess prompts read), never the Resume
+    display contact line. ``max_age_days`` ``None`` keeps the default's
+    posted window (its ``max_age_days`` or fixed ``published_after``).
+    """
+
+    location: str | None
+    work_mode: str
+    countries: tuple[str, ...]
+    max_age_days: int | None
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "location": self.location,
+            "work_mode": self.work_mode,
+            "countries": list(self.countries),
+            "max_age_days": self.max_age_days,
+        }
+
+    @classmethod
+    def from_json(cls, value: object) -> "ProfileSearchSettings":
+        if not isinstance(value, Mapping) or set(value) != set(SEARCH_SETTINGS_KEYS):
+            raise ProfileRecordError("scout_profile_invalid", "profile search_settings is malformed")
+        location = value["location"]
+        work_mode = value["work_mode"]
+        countries = value["countries"]
+        max_age_days = value["max_age_days"]
+        if location is not None and (
+            not isinstance(location, str)
+            or not location.strip()
+            or len(location) > _LOCATION_MAX
+            or is_location_placeholder(location)
+        ):
+            raise ProfileRecordError("scout_profile_invalid", "search_settings.location must be a city or area, or null")
+        if not isinstance(work_mode, str) or work_mode not in {item.value for item in WorkModePreference}:
+            raise ProfileRecordError("scout_profile_invalid", "search_settings.work_mode must be remote, hybrid, onsite or any")
+        if not isinstance(countries, (list, tuple)) or not all(
+            isinstance(code, str) and _COUNTRY_CODE.fullmatch(code) for code in countries
+        ):
+            raise ProfileRecordError("scout_profile_invalid", "search_settings.countries must be ISO-3166 alpha-2 codes")
+        if max_age_days is not None and (
+            not isinstance(max_age_days, int)
+            or isinstance(max_age_days, bool)
+            or not (1 <= max_age_days <= MAX_AGE_DAYS_MAXIMUM)
+        ):
+            raise ProfileRecordError(
+                "scout_profile_invalid", f"search_settings.max_age_days must be an integer from 1 to {MAX_AGE_DAYS_MAXIMUM}, or null"
+            )
+        return cls(
+            location=None if location is None else location.strip(),
+            work_mode=work_mode,
+            countries=tuple(countries),
+            max_age_days=max_age_days,
+        )
+
+    @classmethod
+    def from_config(cls, config: FindJobsConfig) -> "ProfileSearchSettings":
+        """The default's settings, as a new profile is prefilled with them."""
+
+        return cls(
+            location=config.location,
+            work_mode=config.effective_work_mode.value,
+            countries=tuple(config.countries),
+            max_age_days=config.max_age_days,
+        )
+
+
 @dataclass(frozen=True)
 class ProfileRecord:
     schema_version: str
@@ -112,9 +196,14 @@ class ProfileRecord:
     created_at: str
     updated_at: str
     parent_seq: int | None
+    # 0110-022: additive and optional. ``None`` (every record written before
+    # it, and the default profile always) is "same as default"; the key is
+    # then left out of the written file, so such a record's bytes and
+    # ``content_digest`` are exactly what they were.
+    search_settings: ProfileSearchSettings | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "schema_version": self.schema_version,
             "profile_id": self.profile_id,
             "seq": self.seq,
@@ -131,6 +220,9 @@ class ProfileRecord:
             "updated_at": self.updated_at,
             "parent_seq": self.parent_seq,
         }
+        if self.search_settings is not None:
+            value["search_settings"] = self.search_settings.to_json()
+        return value
 
     @classmethod
     def from_json(cls, value: object) -> "ProfileRecord":
@@ -139,6 +231,7 @@ class ProfileRecord:
         try:
             resume_ref = PinnedResume.from_json(value["resume_ref"])
             parent_seq = value["parent_seq"]
+            search_settings = value.get("search_settings")
             return cls(
                 schema_version=str(value["schema_version"]),
                 profile_id=str(value["profile_id"]),
@@ -155,6 +248,7 @@ class ProfileRecord:
                 created_at=str(value["created_at"]),
                 updated_at=str(value["updated_at"]),
                 parent_seq=None if parent_seq is None else int(parent_seq),
+                search_settings=None if search_settings is None else ProfileSearchSettings.from_json(search_settings),
             )
         except (KeyError, TypeError) as exc:
             raise ProfileRecordError("scout_profile_invalid", "profile record is malformed") from exc
@@ -217,7 +311,14 @@ def _selection_path(seq: int) -> str:
     return f"{_SELECTION_ROOT}{seq:012d}.json"
 
 
-def _content_digest(*, titles: tuple[str, ...], titles_to_avoid: tuple[str, ...], queries: tuple[str, ...], resume_ref: PinnedResume) -> str:
+def _content_digest(
+    *,
+    titles: tuple[str, ...],
+    titles_to_avoid: tuple[str, ...],
+    queries: tuple[str, ...],
+    resume_ref: PinnedResume,
+    search_settings: ProfileSearchSettings | None = None,
+) -> str:
     """The ONE place a profile's ``content_digest`` is computed.
 
     Recomputed unconditionally on every write, over exactly the four
@@ -226,14 +327,20 @@ def _content_digest(*, titles: tuple[str, ...], titles_to_avoid: tuple[str, ...]
     because nothing ever trusts one that wasn't just recomputed here (open
     question 9's recommended default, matching ``FindJobsConfig.digest()``'s
     own "computed, not accepted" convention).
+
+    0110-022: a profile's own ``search_settings`` are a fifth
+    revision-bumping field, in the payload ONLY when the profile has them,
+    so a record without them digests exactly as before.
     """
 
-    payload = {
+    payload: dict[str, object] = {
         "titles": list(titles),
         "titles_to_avoid": list(titles_to_avoid),
         "queries": list(queries),
         "resume_ref": resume_ref.to_json(),
     }
+    if search_settings is not None:
+        payload["search_settings"] = search_settings.to_json()
     return digest_imported_bytes(canonical_json_bytes(payload))
 
 
@@ -320,6 +427,21 @@ def _existing_default_profile(current: Mapping[str, ProfileRecord]) -> ProfileRe
         if record.origin == "migrated_default":
             return record
     return None
+
+
+def default_profile(profiles: Iterable[ProfileRecord]) -> ProfileRecord | None:
+    """0110-022: the profile that uses the shared setup settings (``find-jobs.json``).
+
+    The migrated default when there is one, else the oldest profile ("the
+    first time the user creates it, it's the default profile"); archived or
+    not. Every other profile may store its own ``search_settings``.
+    """
+
+    ordered = sorted(profiles, key=lambda item: (item.created_at, item.profile_id))
+    for record in ordered:
+        if record.origin == "migrated_default":
+            return record
+    return ordered[0] if ordered else None
 
 
 def _all_selection_writes(artifacts: Mapping[str, bytes]) -> list[ProfileSelection]:
@@ -665,9 +787,15 @@ def create_profile(
     titles_to_avoid: tuple[str, ...],
     queries: tuple[str, ...],
     resume_ref: PinnedResume,
+    search_settings: ProfileSearchSettings | None = None,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> ProfileRecord:
     """Mint a brand-new, operator-named profile (F1-c's "create").
+
+    0110-022: ``search_settings`` are the new profile's own location, work
+    mode, countries and posted window (the caller prefills them from the
+    default). They are stored only when another profile already exists: the
+    first profile of a gig is the default one and uses the setup settings.
 
     Distinct from ``ensure_default_profile`` (migration-only: fixed
     ``origin="migrated_default"``, ``label="default"``, titles/queries
@@ -697,8 +825,13 @@ def create_profile(
         while profile_id in current:  # astronomically unlikely; defensive only
             profile_id = f"profile_{uuid_factory()}"
 
+        own_settings = search_settings if current else None
         digest = _content_digest(
-            titles=titles, titles_to_avoid=titles_to_avoid, queries=queries, resume_ref=resume_ref
+            titles=titles,
+            titles_to_avoid=titles_to_avoid,
+            queries=queries,
+            resume_ref=resume_ref,
+            search_settings=own_settings,
         )
         now = _now()
         record = ProfileRecord(
@@ -717,6 +850,7 @@ def create_profile(
             created_at=now,
             updated_at=now,
             parent_seq=None,
+            search_settings=own_settings,
         )
         record_bytes = _validated(record)
         path = _write_path(profile_id, 1)
@@ -846,6 +980,8 @@ def write_profile(
     queries: tuple[str, ...] | None = None,
     resume_ref: PinnedResume | None = None,
     replacement_profile_id: str | None = None,
+    search_settings: ProfileSearchSettings | None = None,
+    clear_search_settings: bool = False,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> ProfileRecord:
     """The ONE write function for an existing profile's content or metadata.
@@ -864,6 +1000,12 @@ def write_profile(
     requires ``replacement_profile_id`` naming another committed,
     non-archived profile; the archive write and the reselection write are
     committed as one transition (Active-profile authority, decision 4).
+
+    0110-022: ``search_settings`` replaces the profile's own location, work
+    mode, countries and posted window (a revision bump when they change);
+    ``clear_search_settings`` drops them, back to "same as default". The
+    default profile (``default_profile``) never stores any: giving them for
+    it is refused with ``scout_profile_default_search_settings``.
     """
 
     if not _PROFILE_ID.fullmatch(profile_id):
@@ -882,16 +1024,34 @@ def write_profile(
         new_titles_to_avoid = existing.titles_to_avoid if titles_to_avoid is None else tuple(titles_to_avoid)
         new_queries = existing.queries if queries is None else tuple(queries)
         new_resume_ref = existing.resume_ref if resume_ref is None else resume_ref
+        if search_settings is not None and clear_search_settings:
+            _fail("scout_profile_invalid", "give search_settings or clear_search_settings, not both")
+        if search_settings is not None:
+            default = default_profile(current.values())
+            if default is not None and default.profile_id == profile_id:
+                _fail(
+                    "scout_profile_default_search_settings",
+                    "the default profile uses the setup settings; change its location, work mode, countries and posted window in Settings",
+                )
+        if clear_search_settings:
+            new_search_settings = None
+        else:
+            new_search_settings = existing.search_settings if search_settings is None else search_settings
 
         content_changed = (
             new_titles != existing.titles
             or new_titles_to_avoid != existing.titles_to_avoid
             or new_queries != existing.queries
             or new_resume_ref != existing.resume_ref
+            or new_search_settings != existing.search_settings
         )
         new_revision = existing.revision + 1 if content_changed else existing.revision
         new_digest = _content_digest(
-            titles=new_titles, titles_to_avoid=new_titles_to_avoid, queries=new_queries, resume_ref=new_resume_ref
+            titles=new_titles,
+            titles_to_avoid=new_titles_to_avoid,
+            queries=new_queries,
+            resume_ref=new_resume_ref,
+            search_settings=new_search_settings,
         )
 
         previous_selection = _current_selection(snapshot.artifacts)
@@ -945,6 +1105,7 @@ def write_profile(
             created_at=existing.created_at,
             updated_at=now,
             parent_seq=existing.seq,
+            search_settings=new_search_settings,
         )
         record_bytes = _validated(record)
         record_path = _write_path(profile_id, next_seq)
@@ -1020,6 +1181,7 @@ def retrieve_profile_revision(
             titles_to_avoid=record.titles_to_avoid,
             queries=record.queries,
             resume_ref=record.resume_ref,
+            search_settings=record.search_settings,
         )
         if recomputed != content_digest or record.content_digest != content_digest:
             continue
@@ -1035,8 +1197,11 @@ __all__ = [
     "NoResumeAvailable",
     "ProfileRecord",
     "ProfileRecordError",
+    "ProfileSearchSettings",
     "ProfileSelection",
+    "SEARCH_SETTINGS_KEYS",
     "create_profile",
+    "default_profile",
     "ensure_default_profile",
     "list_profiles",
     "retrieve_profile_revision",

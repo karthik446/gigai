@@ -362,6 +362,35 @@ def test_request_preferences_override_countries_titles_and_visa(fx: ProfileFixtu
     assert response.preferences == AssessPreferences(visa_sponsorship_required=True, titles=("platform lead",), countries=("CA", "GB"))
 
 
+def test_a_profile_with_its_own_search_settings_is_assessed_for_its_location_and_countries(
+    fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0110-022: the shared config says "Remote" / US; this profile says Houston / CA."""
+    from gigai.scout.profile_records import ProfileSearchSettings
+
+    binding, _ = _install(monkeypatch, [_GOOD_MATCH, _GOOD_MATCH])
+    selected = selected_profile(fx.resolved, home_root=fx.home_root, target=fx.target)
+    assert selected is not None
+    created = create_profile(
+        fx.resolved, label="Director", titles=("director of ai",), titles_to_avoid=(), queries=("director of ai",),
+        resume_ref=selected.resume_ref,
+        search_settings=ProfileSearchSettings(location="Houston, TX", work_mode="hybrid", countries=("CA",), max_age_days=None),
+    )
+
+    response = _run(fx, _pasted(resume=AssessResumeInput(profile_id=created.profile_id)))
+
+    constraints = _constraints(binding.port.prompts[0])
+    assert "applied by rule 4): Houston, TX; target titles" in constraints
+    assert re.search(r"\bCA\b", constraints) and not re.search(r"\bUS\b", constraints)
+    assert response.preferences.countries == ("CA",) and response.preferences.location is None
+
+    # the default profile is still assessed for the shared config's
+    _run(fx, _pasted(resume=AssessResumeInput(profile_id=selected.profile_id)))
+    default_constraints = _constraints(binding.port.prompts[1])
+    assert "applied by rule 4): Remote; target titles" in default_constraints
+    assert re.search(r"\bUS\b", default_constraints) and "Houston" not in default_constraints
+
+
 def test_explicit_profile_supplies_its_own_titles(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
     binding, _ = _install(monkeypatch, [_GOOD_MATCH])
     selected = selected_profile(fx.resolved, home_root=fx.home_root, target=fx.target)

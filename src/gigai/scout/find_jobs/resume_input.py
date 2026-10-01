@@ -133,6 +133,9 @@ def resolve_preferences(
     """Fill every ``None`` in ``overrides`` from the defaults; never returns a ``None`` field."""
 
     visa_default, countries_default = read_config_preferences(target)
+    # 0110-022: a profile with its own search settings has its own countries.
+    if profile is not None and profile.search_settings is not None:
+        countries_default = tuple(profile.search_settings.countries)
     titles_default: tuple[str, ...] = () if profile is None else tuple(profile.titles)
     given = overrides if overrides is not None else AssessPreferences()
     return AssessPreferences(
