@@ -191,21 +191,61 @@ _LEVER_URL = "https://api.lever.co/v0/postings/{token}?mode=json"
 _ASHBY_URL = "https://api.ashbyhq.com/posting-api/job-board/{token}?includeCompensation=true"
 
 
-def matches_roles(title: str, roles: tuple[str, ...]) -> bool:
-    """Case-insensitive token containment: any configured role's words all
-    appear (as substrings) in the title.
+_WORD_RE = re.compile(r"[a-z0-9+#]+")
+# Words that carry no role meaning: dropped from both sides.
+_FILLER_WORDS = frozenset({"of", "the", "and", "a", "an", "for", "in"})
+# Seniority words never decide a prefilter match (ranking judges fit); "sr"
+# is the abbreviation of "senior".
+_SENIORITY_WORDS = frozenset({"sr", "senior", "associate", "managing"})
 
-    A role matches when every whitespace-separated token in that role string
-    appears as a substring of the lowercased title. An empty ``roles`` tuple
-    matches nothing (fail closed, not fail open).
+
+#: A role that matches every string title. Internal: lets a caller that does not
+#: know the title yet (URL lookup) list a whole board through ``matches_roles``.
+MATCH_ANY_TITLE_ROLE = "\x00any-title"
+
+_ALIASES = {"engineering": "engineer", "sr": "senior"}
+
+
+def _stem(word: str) -> str:
+    """Fold engineer/engineers/engineering and plurals to one form.
+
+    Deliberately tiny: whole-word matching must still let the role word
+    "engineer" meet "Engineering" in a title, but never match inside an
+    unrelated word ("ai" stays "ai", "maintain" stays "maintain").
+    """
+
+    if word in _ALIASES:
+        return _ALIASES[word]
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        return _ALIASES.get(word[:-1], word[:-1])
+    return word
+
+
+def _words(text: str) -> list[str]:
+    return [_stem(w) for w in _WORD_RE.findall(text.lower()) if w not in _FILLER_WORDS]
+
+
+def matches_roles(title: str, roles: tuple[str, ...]) -> bool:
+    """Case-insensitive whole-word match: any configured role's words all
+    appear as words of the title.
+
+    Punctuation and filler words (of, the, and, &, -, ,) are ignored and word
+    order is free, so the role "Director of Engineering" matches "Director,
+    Engineering" and "Engineering Director". Seniority words in the role
+    (Sr., Senior, Associate, Managing) are not required. This is a prefilter:
+    ``titles_to_avoid`` still excludes and ranking judges fit. An empty
+    ``roles`` tuple matches nothing (fail closed, not fail open).
     """
 
     if type(title) is not str:
         return False
-    title_lower = title.lower()
+    title_words = set(_words(title))
     for role in roles:
-        tokens = [token for token in role.lower().split() if token]
-        if tokens and all(token in title_lower for token in tokens):
+        if role == MATCH_ANY_TITLE_ROLE:
+            return True
+        role_words = _words(role)
+        needed = [w for w in role_words if w not in _SENIORITY_WORDS] or role_words
+        if needed and all(w in title_words for w in needed):
             return True
     return False
 
@@ -1232,6 +1272,7 @@ __all__ = [
     "list_ashby_board",
     "list_greenhouse_board",
     "list_lever_board",
+    "MATCH_ANY_TITLE_ROLE",
     "matches_roles",
     "parse_board_url",
     "work_mode_from_label",

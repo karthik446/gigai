@@ -36,7 +36,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 from ...canonical import digest_imported_bytes
 from .assess_contracts import AssessJobInput, ResolvedJob, text_identity
-from .ats_board_clients import ATSBoardClientError, ATSBoardClients, html_to_text
+from .ats_board_clients import MATCH_ANY_TITLE_ROLE, ATSBoardClientError, ATSBoardClients, html_to_text
 from .contracts import (
     FindJobsConfig,
     FindJobsContractError,
@@ -70,9 +70,10 @@ _GREENHOUSE_PATH_JOB_ID = re.compile(r"/jobs/(\d+)/?\Z")
 
 # ``matches_roles`` fails closed on an empty role list, and a board lister
 # drops every row whose title matches no role.  When we match a board row by
-# URL we do not know the title yet, so the permissive config lists roles that
-# together match any title containing at least one letter or digit.
-_WILDCARD_ROLES: tuple[str, ...] = tuple("abcdefghijklmnopqrstuvwxyz0123456789")
+# URL we do not know the title yet, so the permissive config lists the
+# match-any-title role (title matching is whole-word, so single letters no
+# longer work as a wildcard).
+_WILDCARD_ROLES: tuple[str, ...] = (MATCH_ANY_TITLE_ROLE,)
 _PERMISSIVE_CONFIG = FindJobsConfig(
     roles=_WILDCARD_ROLES,
     merged_queries=_WILDCARD_ROLES,

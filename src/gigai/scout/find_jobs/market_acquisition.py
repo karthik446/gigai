@@ -32,7 +32,7 @@ from ..acquisition_records import (
     preflight_public_import,
     public_row_refusal,
 )
-from .ats_board_clients import BoardCache, BoardFetchIndex, BoardFetchStats
+from .ats_board_clients import BoardCache, BoardFetchIndex, BoardFetchStats, matches_roles
 from .contracts import (
     ATSBoardClient,
     ATSProvider,
@@ -911,8 +911,10 @@ def _merge_exa_and_ats_rows(rows: Sequence[PostingRow]) -> list[PostingRow]:
 
 
 def _role_match(row: PostingRow, roles: Sequence[str]) -> bool:
-    haystack = f"{row.title} {row.company} {row.location}".casefold()
-    return any(str(role).casefold().strip() in haystack for role in roles)
+    # One shared whole-word title rule (same as the board listers / index search).
+    # Company and location no longer count: roles name job titles, and the old
+    # substring-in-haystack match let a role word hit a company or place name.
+    return matches_roles(row.title, tuple(str(role) for role in roles))
 
 
 def _digest(row: PostingRow) -> str:
