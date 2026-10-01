@@ -286,7 +286,7 @@ class TagStore:
                     )
                     written += 1
                 conn.execute("COMMIT")
-            except BaseException:
+            except BaseException:  # noqa: BLE001 - cleans up (rollback/undo) and re-raises: nothing is swallowed
                 conn.execute("ROLLBACK")
                 raise
         return written

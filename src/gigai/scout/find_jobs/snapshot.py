@@ -945,7 +945,7 @@ def _apply(home: Path, index: CompanyIndex, plan: _Plan, tagger_version: object,
         plan.counts.tags = _apply_tags(home, plan.tags, tagger_version)
         _write_json(directory / _LEDGER_NAME, {"schema_version": LEDGER_SCHEMA, "boards": plan.ledger})
         _write_json(directory / _STATE_NAME, {**state, "counts": asdict(plan.counts)})
-    except BaseException:
+    except BaseException:  # noqa: BLE001 - cleans up (rollback/undo) and re-raises: nothing is swallowed
         journal.restore()
         raise
     journal.commit()
@@ -1389,7 +1389,7 @@ def export_snapshot(
         written.append(manifest_path)
         scan_for_private_content(out_dir, [MANIFEST_NAME], extra_markers=(str(home), str(Path.home())))
         verify_files(load_manifest(manifest_path), out_dir)
-    except BaseException:
+    except BaseException:  # noqa: BLE001 - cleans up (rollback/undo) and re-raises: nothing is swallowed
         for path in written:
             path.unlink(missing_ok=True)
         raise
@@ -1404,7 +1404,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
         os.replace(temp, path)
-    except BaseException:
+    except BaseException:  # noqa: BLE001 - cleans up (rollback/undo) and re-raises: nothing is swallowed
         try:
             os.unlink(temp)
         except FileNotFoundError:
