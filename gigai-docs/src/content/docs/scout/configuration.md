@@ -74,6 +74,27 @@ export EXA_API_KEY=...
 Without either, Exa refuses to run; ATS-board acquisition is
 unaffected. An existing `find-jobs.json` keeps the Exa setting it already has.
 
+## Background updates
+
+**Settings > Background updates** holds what Scout does by itself while it is
+open. Nothing is saved until you press **Save**. The same settings are at
+`GET` / `PUT /api/settings/background`, and are stored per project in
+`<home>/scout/<project_id>/settings.json`.
+
+| Setting | Default | What it does |
+|---|---|---|
+| Check the company boards automatically (`sources.auto_refresh`) | on | The hourly check of the company boards. Off also pauses tagging titles with the model in the background. |
+| Tag titles with the model (`tagging.model_enabled`) | on | Sends titles the built-in rules cannot place to the model Scout is set up with, only for the roles your profiles search for. |
+| Tag the rest in the background (`tagging.backfill_enabled`) | off | Also tags every other stored title, a few at a time. `tagging.tag_backfill_model` picks the model: `configured` (the model Scout is set up with) or `haiku` (Claude Haiku through the Claude CLI). |
+| Use the shared starter snapshot (`snapshot.enabled`) | on | **Update sources** first downloads the [starter snapshot](../sources/#the-starter-snapshot). `snapshot.manifest_url` (under "Advanced") is where it is read from; leave it empty for the default address. |
+
+An environment variable overrides the saved value while it is set, and the
+page says so beside the setting: `GIGAI_SCOUT_AUTO_REFRESH`,
+`GIGAI_SCOUT_MODEL_TAGS` and `GIGAI_SCOUT_SNAPSHOT` take `0` or `1`;
+`GIGAI_SCOUT_SNAPSHOT_MANIFEST_URL` takes an address. If the settings file
+cannot be read, every background job is off and the page will not save over
+it: fix or remove the file.
+
 ## Where Scout lives
 
 Scout always lives in `<home>/scout` (`~/.gigai/scout` by default): every

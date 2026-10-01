@@ -1,6 +1,7 @@
 import ConfigPanel from "../components/ConfigPanel.jsx";
 import AddCompanyForm from "../components/AddCompanyForm.jsx";
 import SourcesUpdatePanel from "../components/SourcesUpdatePanel.jsx";
+import BackgroundUpdatesPanel from "../components/BackgroundUpdatesPanel.jsx";
 import ExaSourceToggle from "../components/ExaSourceToggle.jsx";
 import ProfilesView from "./ProfilesView.jsx";
 
@@ -23,6 +24,10 @@ export default function SettingsView({
           the operator comes back for (the Jobs page links here for it), so
           it is the first panel. */}
       <SourcesUpdatePanel />
+
+      {/* 0110-024/025/026: what runs by itself (automatic checks, model
+          tagging, the starter snapshot), right under the action it follows. */}
+      <BackgroundUpdatesPanel />
 
       <section className="panel" id="settings-preferences">
         <h2>Preferences</h2>

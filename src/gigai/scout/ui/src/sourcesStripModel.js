@@ -6,6 +6,7 @@
 // last_checked_at} and `update` (the running / last update, boards.total).
 import { formatCount } from "./runText.js";
 import { boardsChecked, isRunning, sourcesProgress } from "./sourcesModel.js";
+import { refreshParts, statusLines } from "./sourcesStatusModel.js";
 
 // A lower bound: the operator's own update on 2026-09-29 (read from
 // ~/.gigai/cache/scout/companies/last-update.json, status succeeded,
@@ -81,11 +82,17 @@ export function firstRunSteps(status, { hasRun = false, boards = "", running = f
 //   amber     stale ("out of date")
 //   steps     the first-run stepper (empty store, or no run yet), else null
 //   runBlocked  why Run find jobs is off ("" when it is on)
+//   details   0110-024/025/026: the quiet lines under it (tags, descriptions,
+//             the starter snapshot; sourcesStatusModel.statusLines), [] when
+//             the server sends none of those blocks
+// With a `refresh` block the line reads "… · updated 12 min ago · next check
+// in 48 min · up to date" (the server's own minutes); without one it keeps
+// the age of index.last_checked_at.
 export function sourcesStrip(status, { now = Date.now(), hasRun = true } = {}) {
   const index = status && status.index;
   const running = isRunning(status);
   if (!index) {
-    return { kind: "unknown", running: false, progress: null, line: "", amber: false, steps: null, runBlocked: "" };
+    return { kind: "unknown", running: false, progress: null, line: "", amber: false, steps: null, runBlocked: "", details: [] };
   }
   const stored = count(index.companies_indexed);
   const progress = running ? sourcesProgress(status.update) : null;
@@ -100,20 +107,26 @@ export function sourcesStrip(status, { now = Date.now(), hasRun = true } = {}) {
       amber: false,
       steps: firstRunSteps(status, { hasRun: false, boards, running }),
       runBlocked: running ? "Updating sources… Run find jobs opens when it finishes." : "Update sources first, then run.",
+      // The stepper has no line of its own, so the refresh sentence is a detail here.
+      details: statusLines(status, { withRefresh: true }),
     };
   }
   const stale = index.status === "stale";
+  const refresh = refreshParts(status);
   const age = ageLabel(index.last_checked_at, now);
+  const updated = refresh ? [refresh.updated, refresh.next].filter(Boolean).join(" · ") : age ? `updated ${age}` : "";
   const companies = `${formatCount(stored)} compan${stored === 1 ? "y" : "ies"} stored`;
   const steps = hasRun ? null : firstRunSteps(status, { hasRun, running, stored: companies });
   return {
     kind: stale ? "stale" : "fresh",
     running,
     progress,
-    line: `Company postings: ${companies}${age ? ` · updated ${age}` : ""}${stale ? " · out of date" : " · up to date"}`,
+    line: `Company postings: ${companies}${updated ? ` · ${updated}` : ""}${stale ? " · out of date" : " · up to date"}`,
     amber: stale,
     steps,
     runBlocked: "",
+    // With the stepper showing, the line above is not: the refresh sentence moves to the details.
+    details: statusLines(status, { withRefresh: Boolean(steps) }),
   };
 }
 

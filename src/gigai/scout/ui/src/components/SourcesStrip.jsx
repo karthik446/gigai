@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { startSourcesUpdate } from "../api.js";
 import { startErrorText } from "../sourcesModel.js";
+import SourcesStatusLines from "./SourcesStatusLines.jsx";
 
 // uat-bug-048: the strip above "Run find jobs". `strip` is
 // sourcesStripModel.sourcesStrip(status); `read` re-reads the status.
@@ -74,6 +75,8 @@ export default function SourcesStrip({ strip, read }) {
           <p className="muted sources-line">{strip.progress.line}</p>
         </div>
       )}
+      {/* 0110-024/025/026: what the background did; reading it starts nothing. */}
+      <SourcesStatusLines lines={strip.details} />
       {error && <div className="field-error" data-role="sources-strip-error">{error}</div>}
     </div>
   );

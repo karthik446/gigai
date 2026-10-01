@@ -37,6 +37,38 @@ mechanics here. Those belong in the internal changelog.
 - **Releases are now one click after a green pre-check.** The release gate also builds and smoke
   tests the package, and Release publishes exactly that tested build. A `rollback` workflow can
   yank a bad version and point the docs `latest` alias back.
+- **Posted window on the Jobs page.** Posted chips (7d, 10d, 30d, 60d, Any) filter the shown
+  postings at once, with no new run. A button finds postings from a wider window in the local index
+  and adds only the new ones; existing assessments and answers stay.
+- **Each profile has its own location, work mode, countries and posted window.** The first profile
+  keeps the setup settings; other profiles are prefilled from it and editable in the profile form
+  and with `gigai scout profile list` and `gigai scout profile update`.
+- **Update sources is incremental.** Boards checked recently are skipped, so a second update right
+  after the first takes seconds. A Full refresh option checks every board. Switching profiles never
+  starts an update.
+- **Background refresh.** While Scout runs, boards are refreshed in the background: busy boards
+  about hourly, quiet boards every six hours or so, spread out instead of in a burst. Turn it off
+  with the new Background updates setting.
+- **Title tags.** Postings are tagged with a level and a job function (director, engineering and so
+  on), so "Director, Engineering", "Engineering Director" and "Dir. of Engineering" are found for a
+  "Director of Engineering" profile. Tags come from rules; a model fills in the function for the
+  titles your profiles can reach (backfilling the rest is off until you enable it). Titles and
+  locations are all a model sees.
+- **Keyword search.** An optional Keywords field on the search form filters candidates by the text
+  of their descriptions (Greenhouse descriptions are now fetched once per board, then only for new
+  postings). Postings without stored text are kept and counted.
+- **Starter snapshot.** Update sources can start from a shared metadata snapshot (companies, titles,
+  tags and change markers; no descriptions) so a first update is much faster. Offline or not
+  published is quiet; turn it off in Background updates. `gigai scout snapshot export`, `import` and
+  `status` manage it.
+
+#### Fixed
+
+- **Title matching** matches whole words and ignores filler words and punctuation, so
+  "Director, Engineering" matches "Director of Engineering" and "ai" no longer matches "maintain".
+- **Rank years.** The posting's main years-of-experience requirement is read correctly
+  ("10+ years ... 2+ years managing" is 10; a range is its lower bound). Cached ranks are refreshed
+  once.
 
 #### Changed
 

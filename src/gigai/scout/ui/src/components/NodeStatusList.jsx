@@ -2,6 +2,7 @@ import { relativeTimeLabel } from "../display.js";
 import { SETTINGS_HASH } from "../routing.js";
 import { notImportedLine, rotationLine, searchLines } from "../runText.js";
 import { rankCountsLine, rankShortfallLine, rankedByLine } from "../rankModel.js";
+import { keywordsLine } from "../keywordsModel.js";
 
 const NODE_ORDER = ["acquire", "assess", "present"];
 
@@ -50,6 +51,8 @@ export default function NodeStatusList({ status, nodeReceipts, progressSteps, ro
   const search = searchLines(boards, relativeTimeLabel);
   const line = search ? null : rotationLine(rotation, boards);
   const leftOut = notImportedLine(notImported);
+  // 0110-026 F2: what the search did with its keywords (boards.keywords), quietly.
+  const keywords = keywordsLine(boards);
   const counts = rankCountsLine(rank, assessCounts);
   const rankedBy = counts ? rankedByLine(rankStatus, rank) : null;
   const shortfall = rankShortfallLine(rank, rankStatus);
@@ -88,6 +91,11 @@ export default function NodeStatusList({ status, nodeReceipts, progressSteps, ro
             )}
           </p>
         ))}
+      {keywords && (
+        <p className="muted keywords-line" data-role="run-keywords" data-ignored={keywords.ignored ? "true" : undefined}>
+          {keywords.text}
+        </p>
+      )}
       {leftOut && (
         <p className="muted not-imported-line" data-role="not-imported" title="They matched every filter. A run imports a bounded number of postings: the best ranked first, the newest first where the model gave no score.">
           {leftOut}

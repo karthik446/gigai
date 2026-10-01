@@ -198,12 +198,12 @@ def test_the_js_constants_are_the_python_ones(out: dict) -> None:
 
 def test_the_dialog_offers_all_new_postings() -> None:
     dialog = (UI_SRC / "components" / "RunConfirmDialog.jsx").read_text(encoding="utf-8")
-    assert "RunConfirmDialog({ config, onConfirm, onCancel, submitting, error })" in dialog
+    assert "RunConfirmDialog({ config, onConfirm, onCancel, submitting, error, initialKeywords })" in dialog
     assert '<option value={ASSESS_ALL}>All new postings</option>' in dialog
     assert "Top-ranked only (1-{SELECTION_CAP_MAX})" in dialog
     assert "defaultSelectionCap(config.default_assess_cap, config.default_model_target)" in dialog
     assert "capValid(selectionCap)" in dialog and "fullAssessmentsHelp(selectionCap, modelTarget)" in dialog
-    assert "onConfirm({ selectionCap, modelTarget })" in dialog  # "all" goes to POST /api/run as it is
+    assert "onConfirm({ selectionCap, modelTarget, keywords })" in dialog  # "all" goes to POST /api/run as it is
 
 
 def test_the_jobs_page_has_the_button_the_confirm_line_and_live_counts() -> None:

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getSourcesUpdate, startSourcesUpdate } from "../api.js";
 import { relativeTimeLabel } from "../display.js";
 import { SOURCES_POLL_MS, isRunning, looksStuck, sourcesProgress, sourcesResult, startErrorText, storedLine } from "../sourcesModel.js";
+import { statusLines } from "../sourcesStatusModel.js";
+import SourcesStatusLines from "./SourcesStatusLines.jsx";
 
 // uat-batch2 (N11-C): GET /api/sources/update, read when the page opens and
 // polled every SOURCES_POLL_MS while an update runs (its own or one started
@@ -126,6 +128,8 @@ export default function SourcesUpdatePanel() {
           {lastChecked ? ` · last updated ${lastChecked}` : ""}.
         </p>
       )}
+
+      <SourcesStatusLines lines={statusLines(status, { withRefresh: true })} />
 
       {index && index.needs_update && index.message && !running && (
         <div className="callout info" data-role="sources-needs-update">

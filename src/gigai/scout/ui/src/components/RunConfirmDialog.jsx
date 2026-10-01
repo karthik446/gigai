@@ -4,6 +4,7 @@ import { relativeTimeLabel } from "../display.js";
 import { indexedBoardsLine, sourceLabel } from "../runText.js";
 import { SETTINGS_HASH } from "../routing.js";
 import { MODEL_TARGETS, MODEL_TARGET_HINTS, modelTargetLabel } from "../modelTargets.js";
+import KeywordsInput from "./KeywordsInput.jsx";
 import { ASSESS_ALL, SELECTION_CAP_MAX, capValid, defaultSelectionCap, fullAssessmentsHelp, isAssessAll } from "../assessAllModel.js";
 
 // uat-batch1 (N12): the dialog names what a run reads in plain words.
@@ -35,7 +36,11 @@ function useStoredIndex(enabled) {
 // (the top-ranked ones, as before). "All new postings" is the starting choice
 // for a local CLI target; a target billed per token (OpenRouter) starts on the
 // saved number. Until the operator picks, the choice follows the model target.
-export default function RunConfirmDialog({ config, onConfirm, onCancel, submitting, error }) {
+//
+// 0110-026 F2: "Keywords" are this one search's (sent as `keywords` on
+// POST /api/run); `initialKeywords` are the ones the last run here used.
+export default function RunConfirmDialog({ config, onConfirm, onCancel, submitting, error, initialKeywords }) {
+  const [keywords, setKeywords] = useState(() => (Array.isArray(initialKeywords) ? initialKeywords : []));
   const [modelTarget, setModelTarget] = useState(config.default_model_target);
   const [selectionCap, setSelectionCap] = useState(() => defaultSelectionCap(config.default_assess_cap, config.default_model_target));
   const [capChosen, setCapChosen] = useState(false);
@@ -73,7 +78,7 @@ export default function RunConfirmDialog({ config, onConfirm, onCancel, submitti
   }
 
   function handleConfirm() {
-    onConfirm({ selectionCap, modelTarget });
+    onConfirm({ selectionCap, modelTarget, keywords });
   }
 
   const capInvalid = !capValid(selectionCap);
@@ -104,6 +109,8 @@ export default function RunConfirmDialog({ config, onConfirm, onCancel, submitti
             <strong>Role filter:</strong> {config.roles.join(", ")}
           </li>
         </ul>
+
+        <KeywordsInput id="run-keywords" values={keywords} onChange={setKeywords} disabled={submitting} />
 
         <div className="form-group" data-role="full-assessments">
           <label className="form-label" htmlFor="selection-cap-mode">

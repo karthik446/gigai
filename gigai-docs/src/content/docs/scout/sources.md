@@ -54,3 +54,70 @@ The limit counts companies, not requests: one company can take more than one
 request (on Greenhouse, one for the list and one per posting whose title
 matches yours). Companies over the limit wait for the next **Update
 sources**.
+
+## Background updates
+
+While Scout is open it keeps the store current by itself. The strip above
+**Run find jobs** says what it did, for example `updated 12 min ago · next
+check in 48 min`, and never starts anything itself: an update starts from the
+**Update sources** and **Full refresh** buttons, or from the automatic check.
+
+- **Automatic checks.** About once an hour Scout checks the busy company
+  boards, and the quiet ones a slice at a time over about six hours. It waits
+  for your first **Update sources**, and steps aside while an update you
+  started is running.
+- **Title tags.** Each stored title gets a level and a function, first from
+  built-in rules (no model). Titles the rules cannot place are sent to the
+  model Scout is set up with, only for the roles your profiles search for.
+  The strip counts them: `Titles tagged: 4,400 by rules, 600 by model, 150
+  waiting`. If the model cannot be reached the strip says so in one line and
+  Scout tries again later; searching keeps working.
+- **Descriptions.** `Descriptions checked for 6,100 postings, 2,900 not yet`
+  is how many stored postings have their description text indexed on this
+  machine, which is what a keyword search can look in.
+
+All of this is switched in **Settings > Background updates**; see
+[Configuration](../configuration/#background-updates).
+
+## Keywords
+
+The run dialog has an optional **Keywords** field (up to 20, each up to 100
+characters). A keyword is an exact phrase, with no word stemming. Keywords
+narrow a search and never widen it: of the postings your titles and filters
+already matched, one is kept when its stored description mentions any one of
+the keywords. A posting whose description is not stored on this machine
+cannot be checked, so it is kept, and the run says how many: `Keywords: rust,
+payments · text not checked for 12 postings`. If no description text is
+indexed yet, the keywords are ignored and the run says why. From the API,
+send them as `keywords` on `POST /api/run`.
+
+## The starter snapshot
+
+So that a new install does not start from an empty store, **Update sources**
+first tries to download a shared starter snapshot and then checks the boards
+as usual. The strip shows `Starter data: as of <date>`. If no snapshot is
+published, or the machine is offline, the update simply carries on without
+it.
+
+- It holds metadata only: company boards, posting titles, locations and
+  dates, the title tags, and the validators that let a board answer "not
+  changed". It never holds posting descriptions.
+- The download is a plain public request. Nothing about you, your resume or
+  your searches is sent.
+- Each file is checked against the SHA-256 in the snapshot's manifest before
+  it is used; a file that does not match is not used.
+- A board this machine has checked itself is never overwritten by a snapshot.
+- Turn it off under **Settings > Background updates** ("Use the shared
+  starter snapshot"), or run `gigai scout snapshot status` to see what is in
+  use.
+
+## Where the data comes from
+
+Company and title data comes from the public job boards of each company
+(Greenhouse, Lever, Ashby), read with plain public requests. The starter
+snapshot redistributes only the metadata listed above, never an employer's
+description text. A company that wants its board left out of the snapshot can
+ask by opening an issue on the
+[GigAI repository](https://github.com/karthik446/gigai/issues); boards on the
+removal list are left out of the next snapshot and removed from stores that
+only had them from a snapshot.

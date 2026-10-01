@@ -531,4 +531,17 @@ export function getSourcesUpdate() {
   return request("GET", "/api/sources/update");
 }
 
+// 0110-024 P4 / 0110-025 R4 / 0110-026 S3: the per-project background
+// settings (find_jobs/background_settings.py). PUT takes only the keys to
+// change and answers the same body as GET; 422 wrong_type / unknown_key /
+// bad_enum / invalid_value, 404 target_unavailable, 409 settings_unreadable
+// (the stored file cannot be read and is never overwritten).
+export function getBackgroundSettings() {
+  return request("GET", "/api/settings/background");
+}
+
+export function putBackgroundSettings(patch) {
+  return request("PUT", "/api/settings/background", patch);
+}
+
 export { ApiError };

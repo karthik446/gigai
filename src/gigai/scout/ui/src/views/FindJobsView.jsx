@@ -41,6 +41,7 @@ import {
 } from "../assessAllModel.js";
 import { indexNotice } from "../sourcesModel.js";
 import { noRunText, sourcesStrip } from "../sourcesStripModel.js";
+import { keywordsLine, runBodyWithKeywords } from "../keywordsModel.js";
 import SourcesStrip from "../components/SourcesStrip.jsx";
 import { ASSESSMENTS_HASH, RUNS_HASH, SETTINGS_HASH, runHash } from "../routing.js";
 
@@ -212,6 +213,8 @@ export default function FindJobsView({
   // 0110-019: what POST /posted-window last said about the shown run;
   // whether a search is on its way.
   const [postedWindow, setPostedWindow] = useState(null);
+  // 0110-026 F2: the keywords of the last run started here, offered again in the dialog.
+  const [runKeywords, setRunKeywords] = useState([]);
   const [findingOlder, setFindingOlder] = useState(false);
   const [findOlderError, setFindOlderError] = useState(null);
   const [quickItems, setQuickItems] = useState([]);
@@ -302,6 +305,7 @@ export default function FindJobsView({
     showRun(null);
     setRunStatus(null);
     setProgress(null);
+    setRunKeywords([]);
     boardRowsRef.current = [];
     setBoardRows([]);
     setResults(null);
@@ -741,14 +745,16 @@ export default function FindJobsView({
     };
   }, [profileId, runId, routeRunId, viewPastRun]);
 
-  async function handleConfirm({ selectionCap, modelTarget }) {
+  async function handleConfirm({ selectionCap, modelTarget, keywords }) {
     if (!config) {
       return;
     }
     setRunSubmitting(true);
     setRunError(null);
     try {
-      const body = buildRunRequest({ configDigest: config.config_digest, selectionCap, modelTarget });
+      // 0110-026 F2: this search's keywords ride beside the run request (no key when there are none).
+      const body = runBodyWithKeywords(buildRunRequest({ configDigest: config.config_digest, selectionCap, modelTarget }), keywords);
+      setRunKeywords(Array.isArray(keywords) ? keywords : []);
       const response = await startRun(body);
       setDialogOpen(false);
       showRun(response.run_id);
@@ -990,6 +996,9 @@ export default function FindJobsView({
     </>
   );
 
+  const statusShown = Boolean(runId && runStatus && (runActive || runStatus.status !== "succeeded"));
+  const runKeywordsLine = runId && (results || runActive) ? keywordsLine(progress?.boards) : null;
+
   if (route.view === "run") {
     const shownRun = currentRun || (runId === routeRunId && runStatus ? { run_id: runId, created_at: null, counts: null, status: runStatus.status } : null);
     const crumb = shownRun && shownRun.created_at ? `run ${relativeTimeLabel(shownRun.created_at)}` : `run ${routeRunId}`;
@@ -1119,6 +1128,7 @@ export default function FindJobsView({
           onCancel={closeDialog}
           submitting={runSubmitting}
           error={runError}
+          initialKeywords={runKeywords}
         />
       )}
 
@@ -1129,7 +1139,7 @@ export default function FindJobsView({
         </div>
       )}
 
-      {runId && runStatus && (runActive || runStatus.status !== "succeeded") && (
+      {statusShown && (
         <NodeStatusList
           status={runStatus.status}
           nodeReceipts={runStatus.node_receipts}
@@ -1141,6 +1151,13 @@ export default function FindJobsView({
           assessCounts={progress?.assess_counts}
           rankStatus={progress?.rank_status}
         />
+      )}
+
+      {/* 0110-026 F2: a finished run shows no status panel here; its keywords line still does. */}
+      {runKeywordsLine && !statusShown && (
+        <p className="muted keywords-line" data-role="run-keywords" data-ignored={runKeywordsLine.ignored ? "true" : undefined}>
+          {runKeywordsLine.text}
+        </p>
       )}
 
       {grid}

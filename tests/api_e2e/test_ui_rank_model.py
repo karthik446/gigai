@@ -546,7 +546,7 @@ def test_settings_the_wizard_the_run_dialog_and_the_cards_have_no_jev_parts() ->
     wizard = _source("wizard/wizardState.js")
     assert 'unset("exa")' in wizard and 'unset("jev")' not in wizard and "secrets add jev" not in wizard
     dialog = _source("components/RunConfirmDialog.jsx")
-    assert "RunConfirmDialog({ config, onConfirm, onCancel, submitting, error })" in dialog
+    assert "RunConfirmDialog({ config, onConfirm, onCancel, submitting, error, initialKeywords })" in dialog
     assert 'data-role="rank-run-note"' in dialog
     view = _source("views/FindJobsView.jsx")
     # no privacy notice about a hosted ranker, no day's-usage line, no "Score with" button

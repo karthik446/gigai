@@ -71,8 +71,11 @@ your roles, location and work mode. Then:
    job boards. The first update over the whole catalog runs in passes of up to
    20 minutes each (the default time budget) and continues where it stopped;
    later updates are a single short pass.
+   While Scout stays open it then re-checks the boards about once an hour by
+   itself ([Background updates](../sources/#background-updates)).
 2. **Run find jobs** (Jobs page): ranks the stored postings that pass your
-   filters and assesses the top ones.
+   filters and assesses the top ones. Optional **Keywords** in the run dialog
+   narrow the search to postings whose description mentions one of them.
 3. **Assess all new**: on the finished run, assesses the rest in the background.
 4. **Tailor resume**: on a posting's page, drafts a resume for that posting.
    Review every line; each shows its sources. **Download PDF** saves it as a
