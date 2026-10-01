@@ -284,7 +284,8 @@ def _simulate(*, dispatch: bool, dry_run: bool, gate_green: bool) -> dict[str, s
         job = next(name for name in remaining if all(need in results for need in graph[name]))
         remaining.remove(job)
         needs = {need: results[need] for need in graph[job]}
-        if job == "dispatch":
+        if job in {"classify", "dispatch"}:
+            # both run only for a workflow_dispatch; a pushed tag skips them
             run = dispatch
         elif conditions[job]:
             run = _evaluate(conditions[job], results, dry_run=dry_run, gate_green=gate_green)
@@ -304,7 +305,7 @@ def test_release_reaches_every_publish_job_on_both_trigger_paths(
     results = _simulate(dispatch=dispatch, dry_run=dry_run, gate_green=gate_green)
     assert results["dispatch"] == ("success" if dispatch else "skipped")
     assert results["ci"] == ("skipped" if gate_green else "success")
-    skipped = sorted(job for job, result in results.items() if result != "success" and job not in {"dispatch", "ci"})
+    skipped = sorted(job for job, result in results.items() if result != "success" and job not in {"classify", "dispatch", "ci"})
     assert not skipped, f"skipped after build: {skipped}"
 
 
@@ -313,7 +314,7 @@ def test_dry_run_reaches_smoke_and_stops_before_publish(gate_green: bool) -> Non
     results = _simulate(dispatch=True, dry_run=True, gate_green=gate_green)
     assert results["preflight"] == results["build"] == results["smoke-artifacts"] == "success"
     for job in ("publish-testpypi", "publish-pypi", "github-release", "post-release-compatibility",
-                "verify-testpypi", "verify-pypi", "docs"):
+                "verify-testpypi", "verify-pypi", "docs", "advance-main"):
         assert results[job] == "skipped", job
 
 

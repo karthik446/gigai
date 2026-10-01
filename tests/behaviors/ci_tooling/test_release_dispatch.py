@@ -190,3 +190,51 @@ def test_dispatch_tag_step_reuses_an_existing_tag_at_the_sha() -> None:
     # the release lookup needs a token in the validate step
     validate = text.split("- name: Validate sha and version", 1)[1].split("- id: tag", 1)[0]
     assert "GH_TOKEN: ${{ github.token }}" in validate
+
+
+@pytest.mark.parametrize(
+    ("version", "kind"),
+    [
+        ("0.1.10.1", "patch"),
+        ("0.1.10.12", "patch"),
+        ("0.1.10", "minor"),
+        ("0.1.11", "minor"),
+        ("0.2.0", "minor"),
+        ("1.0.0", "minor"),
+        ("0.1.10.0", "minor"),
+        ("0.1.10.1.1", "minor"),
+        ("0.1.10.1rc1", "minor"),
+        ("", "minor"),
+    ],
+)
+def test_only_a_four_part_version_is_a_patch(version: str, kind: str) -> None:
+    assert release_dispatch.release_kind(version) == kind
+
+
+def test_kind_flag_prints_a_github_output_line(capsys: pytest.CaptureFixture[str]) -> None:
+    assert release_dispatch.main(["--kind", "0.1.10.4"]) == 0
+    assert capsys.readouterr().out == "kind=patch\n"
+
+
+def test_a_real_minor_release_waits_in_the_release_minor_environment() -> None:
+    text = _workflow()
+    graph = release_notes.parse_workflow_job_needs(text)
+    assert graph["dispatch"] == ["classify"]
+    # the approval gate sits on the job that creates the tag, so nothing exists before approval
+    dispatch = text.split("\n  dispatch:\n", 1)[1].split("\n  preflight:\n", 1)[0]
+    assert (
+        "environment: ${{ (inputs.dry_run || needs.classify.outputs.kind == 'patch') "
+        "&& 'release-patch' || 'release-minor' }}"
+    ) in dispatch
+    assert "git tag -a" in dispatch
+
+
+def test_main_moves_by_fast_forward_only_after_the_github_release() -> None:
+    text = _workflow()
+    graph = release_notes.parse_workflow_job_needs(text)
+    assert graph["advance-main"] == ["preflight", "github-release"]
+    job = text.split("\n  advance-main:\n", 1)[1].split("\n  verify-testpypi:\n", 1)[0]
+    assert 'git push origin "${COMMIT}:refs/heads/main"' in job
+    assert "--force" not in job and "gh pr" not in job
+    # a failed fast-forward never fails a release that is already published
+    assert "continue-on-error: true" in job

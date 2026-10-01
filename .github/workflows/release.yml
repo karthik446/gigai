@@ -28,12 +28,37 @@ permissions:
   contents: read
 
 jobs:
+  classify:
+    name: Patch or minor release?
+    # workflow_dispatch only. A four-part version (0.1.10.4) is a patch and
+    # releases without a person; anything else (0.1.11, 0.2.0, 1.0.0) waits for
+    # the operator's approval in the `release-minor` environment.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      kind: ${{ steps.kind.outputs.kind }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: tools
+      - id: kind
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: python -m tools.release_dispatch --kind "${RELEASE_VERSION}" >> "${GITHUB_OUTPUT}"
+
   dispatch:
     name: Validate dispatch inputs and tag the release
     # workflow_dispatch only; a pushed v* tag skips this job (the tag exists).
+    needs: classify
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # `release-patch` has no protection rule. `release-minor` has the operator as
+    # a required reviewer, so a real minor/major release pauses here, before the
+    # tag exists, until the operator approves it in GitHub (web or mobile).
+    # A dry run never waits: it creates no tag and publishes nothing.
+    environment: ${{ (inputs.dry_run || needs.classify.outputs.kind == 'patch') && 'release-patch' || 'release-minor' }}
     permissions:
       contents: write
     outputs:
@@ -397,6 +422,40 @@ jobs:
       version: ${{ needs.preflight.outputs.version }}
       ref: ${{ needs.preflight.outputs.ref }}
       alias: latest
+
+  advance-main:
+    name: Fast-forward main to the release
+    needs: [preflight, github-release]
+    # main is the latest release and has no commits of its own, so it moves by a
+    # fast-forward push: no post-release PR, no merge commit. A hotfix to an older
+    # line (0.1.9.2 after 0.1.10) is not a descendant of main and is left alone.
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.github-release.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+      - env:
+          COMMIT: ${{ needs.preflight.outputs.commit }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          git fetch origin "refs/tags/${TAG}"
+          if git merge-base --is-ancestor "${COMMIT}" origin/main; then
+            echo "main already contains ${TAG}"
+          elif git merge-base --is-ancestor origin/main "${COMMIT}"; then
+            git push origin "${COMMIT}:refs/heads/main" || {
+              echo "::warning::could not fast-forward main to ${TAG}; run: git push origin ${COMMIT}:main"
+              exit 1
+            }
+            echo "main fast-forwarded to ${TAG} (${COMMIT})" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "::warning::main is not an ancestor of ${TAG} (older release line, or main has its own commits); main left unchanged"
+          fi
 
   verify-testpypi:
     name: TestPyPI clean install on ${{ matrix.os }} (post-publish)

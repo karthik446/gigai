@@ -1,0 +1,163 @@
+name: Rollback
+
+# Withdraw a published release. A PyPI version can never be uploaded again, so a
+# rollback cannot remove it; it steers people and tools back to the previous one:
+#
+#   automated here   GitHub Release of <version> -> pre-release with a "withdrawn" note,
+#                    <restore> marked Latest; docs: <version> removed, "latest" -> <restore>
+#   manual (printed) yank <version> on PyPI (web only; installers then skip it unless pinned)
+#   follow-up        a revert release (next patch number = the previous code) for anyone who
+#                    already upgraded; that is an ordinary patch release through release.yml
+#
+# Nothing is deleted from git: the tag stays, main is not rewound. dry_run (the default)
+# prints the plan and changes nothing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to withdraw, e.g. 0.1.10.3
+        required: true
+        type: string
+      restore:
+        description: "Version to point people back to (default: the newest older release)"
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: Print the plan and change nothing
+        required: true
+        type: boolean
+        default: true
+
+concurrency:
+  group: rollback
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PAGES_PATH: /gigai
+
+jobs:
+  plan:
+    name: Plan the rollback of ${{ inputs.version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      restore: ${{ steps.plan.outputs.restore }}
+    steps:
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          RESTORE: ${{ inputs.restore }}
+        run: |
+          case "${VERSION}${RESTORE}" in *[!0-9.]*) echo "versions must look like 0.1.10.3" >&2; exit 1;; esac
+          gh release view "v${VERSION}" --repo "${GITHUB_REPOSITORY}" --json tagName >/dev/null
+          if [ -z "${RESTORE}" ]; then
+            # the newest published, not withdrawn release that sorts below <version>
+            RESTORE="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | select(.draft or .prerelease | not) | .tag_name' \
+              | sed 's/^v//' | { cat; echo "${VERSION}"; } | sort -V -u \
+              | awk -v bad="${VERSION}" '$0 == bad { print previous; exit } { previous = $0 }')"
+          fi
+          test -n "${RESTORE}" || { echo "no older release to restore" >&2; exit 1; }
+          test "${RESTORE}" != "${VERSION}"
+          gh release view "v${RESTORE}" --repo "${GITHUB_REPOSITORY}" --json tagName >/dev/null
+          curl -fsS "https://pypi.org/pypi/gigai/${RESTORE}/json" >/dev/null
+          echo "restore=${RESTORE}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "## Rollback of ${VERSION} to ${RESTORE}"
+            echo
+            echo "1. **Yank on PyPI (manual, web only):** <https://pypi.org/manage/project/gigai/release/${VERSION}/> > Options > Yank."
+            echo "   Reason: \`withdrawn, use ${RESTORE}\`. Installers then skip ${VERSION} unless it is pinned with ==."
+            echo "2. GitHub Release v${VERSION} becomes a pre-release with a withdrawn note; v${RESTORE} is marked Latest."
+            echo "3. Docs: ${VERSION} is removed and \`latest\` points to ${RESTORE}."
+            echo "4. Follow-up: a revert release (the next patch number, with the code of ${RESTORE}) for anyone already on ${VERSION}."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  github-release:
+    name: Withdraw the GitHub Release
+    needs: plan
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          RESTORE: ${{ needs.plan.outputs.restore }}
+        run: |
+          gh release view "v${VERSION}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > body.md
+          if ! grep -q '^> \*\*Withdrawn\.\*\*' body.md; then
+            { echo "> **Withdrawn.** Use ${RESTORE}: \`uv tool install gigai==${RESTORE}\`."; echo; cat body.md; } > notes.md
+          else
+            cp body.md notes.md
+          fi
+          gh release edit "v${VERSION}" --repo "${GITHUB_REPOSITORY}" --prerelease --latest=false --notes-file notes.md
+          gh release edit "v${RESTORE}" --repo "${GITHUB_REPOSITORY}" --latest
+
+  docs:
+    name: Point docs "latest" back to ${{ needs.plan.outputs.restore }}
+    needs: plan
+    if: ${{ !inputs.dry_run && vars.DOCS_PUBLISH == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: docs-gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: src
+          sparse-checkout: gigai-docs/scripts
+      - uses: actions/checkout@v6
+        with:
+          ref: gh-pages
+          path: site
+      - env:
+          VERSION: ${{ inputs.version }}
+          RESTORE: ${{ needs.plan.outputs.restore }}
+        run: |
+          test -d "site/${RESTORE}" || { echo "docs for ${RESTORE} are not published; run docs.yml for it first" >&2; exit 1; }
+          # publish-version.mjs never moves "latest" backwards while a newer version holds it,
+          # so the withdrawn version goes first; the restored build is re-filed from its own folder.
+          cp -R "site/${RESTORE}" restore-dist
+          node src/gigai-docs/scripts/publish-version.mjs --site site --version "${VERSION}" --delete
+          node src/gigai-docs/scripts/publish-version.mjs --site site --version "${RESTORE}" --dist restore-dist --alias latest
+          node src/gigai-docs/scripts/check-links.mjs site --base "${PAGES_PATH}/"
+      - working-directory: site
+        env:
+          VERSION: ${{ inputs.version }}
+          RESTORE: ${{ needs.plan.outputs.restore }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "no change"; exit 0; }
+          git commit -qm "docs: withdraw ${VERSION}, latest -> ${RESTORE}"
+          git push origin HEAD:gh-pages
+
+  verify:
+    name: What is still manual
+    needs: [plan, github-release, docs]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          VERSION: ${{ inputs.version }}
+          RESTORE: ${{ needs.plan.outputs.restore }}
+        run: |
+          yanked="$(curl -fsS "https://pypi.org/pypi/gigai/${VERSION}/json" | python3 -c 'import json, sys; print(json.load(sys.stdin)["info"]["yanked"])')"
+          if [ "${yanked}" = True ]; then
+            echo "PyPI: ${VERSION} is yanked" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "::warning::PyPI still serves ${VERSION}: yank it at https://pypi.org/manage/project/gigai/release/${VERSION}/ (reason: withdrawn, use ${RESTORE})"
+          fi

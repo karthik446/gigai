@@ -29,6 +29,7 @@ ALLOWED_BRANCHES = ("main", "karthik446/gigai-v*")
 
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 _VERSION = re.compile(r"^[0-9]+(\.[0-9]+)+$")
+_PATCH_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+\.[1-9][0-9]*$")
 _CATALOG_REVISION = re.compile(r'^CATALOG_REVISION\s*=\s*"(?P<value>[^"]*)"\s*$', re.MULTILINE)
 
 
@@ -64,6 +65,16 @@ def _project_version(pyproject: str) -> str:
     if not isinstance(version, str) or not version:
         raise ReleaseDispatchError("pyproject.toml [project].version is not a static string")
     return version
+
+
+def release_kind(version: str) -> str:
+    """Return ``patch`` for a four-part version (0.1.10.4), else ``minor``.
+
+    A patch releases without a person. Everything else (0.1.11, 0.2.0, 1.0.0,
+    and any spelling this does not recognise) needs the operator's approval.
+    """
+
+    return "patch" if _PATCH_VERSION.match(version) else "minor"
 
 
 def allowed_branches(branches: Iterable[str]) -> list[str]:
@@ -209,10 +220,16 @@ def _release_exists(tag: str) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sha", required=True)
-    parser.add_argument("--version", required=True)
+    parser.add_argument("--kind", metavar="VERSION", help="print kind=patch or kind=minor and exit")
+    parser.add_argument("--sha")
+    parser.add_argument("--version")
     parser.add_argument("--remote", default="origin")
     args = parser.parse_args(argv)
+    if args.kind is not None:
+        print(f"kind={release_kind(args.kind)}")
+        return 0
+    if not args.sha or not args.version:
+        parser.error("--sha and --version are required")
     try:
         validate_dispatch(args.sha, args.version, gather_facts(args.sha, args.version, args.remote))
     except (ReleaseDispatchError, subprocess.CalledProcessError) as error:
