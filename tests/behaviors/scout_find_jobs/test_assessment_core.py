@@ -11,6 +11,7 @@ lane, through the wheel venv's own interpreter.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 from importlib import resources
 import json
@@ -321,7 +322,13 @@ GOLDEN_BOUNDED_LEN = 38_710
 # assess-prompt-v3 (v0.1.9) INTENTIONAL CHANGE: bumped again for the three rules (see above).
 # assess-prompt-v3-r1 (v0.1.9) INTENTIONAL CHANGE: bumped for the two sentences (see above).
 # assess-prompt-v3-r2 (v0.1.9) INTENTIONAL CHANGE: bumped for the two HARD-class sentences (see above).
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:c64635f8042f8e4f8d56186626bd00865b618f620ff6687c1b3f6756af9e5e8c"
+# assess-prompt-v4 (0110-034) INTENTIONAL CHANGE: bumped for the STORY BANK paragraph (the profile's
+# answered questions as id | asked | one-line answer, and the rule to reuse one that covers a
+# requirement instead of asking again). The paragraph is dropped when no bank answer is offered, so
+# every golden above (none carries one) renders byte for byte as before; its own rendering is pinned
+# by ``test_the_story_bank_paragraph_renders_only_when_bank_answers_are_offered`` below.
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:2e2b8d4cba4dd8273a887bb790b83b696c41159976cc247865154287ebdfc04d"
+SHIPPED_PROMPT_VERSION = "assess-prompt-v4"
 
 
 def _sha256(text: str) -> str:
@@ -480,6 +487,43 @@ def test_an_answered_question_id_is_never_re_asked_in_the_fixture_reply() -> Non
     assert outcome.ok
     assert "cloud:gcp: Yes, two years on GCP." in binding.port.prompts[0]
     assert outcome.parsed.questions == ()
+
+
+# --- assess-prompt-v4 (0110-034): the story bank paragraph ---------------------------
+
+
+def test_the_story_bank_paragraph_renders_only_when_bank_answers_are_offered() -> None:
+    """Hermetic (no model call): the version pin, the paragraph's lines, and its absence without a bank."""
+
+    from gigai.scout.assessment_core import BankAnswer
+
+    assert assessment_core.ASSESS_PROMPT_VERSION == SHIPPED_PROMPT_VERSION
+    plain = render_assess_prompt(_job(), _ctx())
+    assert "STORY BANK" not in plain and "{{bank_answers}}" not in plain
+
+    bank = (
+        BankAnswer("cloud:gcp", "Have you run workloads on GCP?", "Yes: two years of batch workloads."),
+        BankAnswer("years:python", "", "Six."),
+    )
+    prompt = render_assess_prompt(_job(), replace(_ctx(), bank_answers=bank))
+    paragraph = next(block for block in prompt.split("\n\n") if block.startswith("STORY BANK"))
+    head, *lines = paragraph.split("\n")
+    assert lines == [
+        "- cloud:gcp | asked: Have you run workloads on GCP? | answer: Yes: two years of batch workloads.",
+        "- years:python | answer: Six.",
+    ]
+    for needle in (
+        "with the same authority as PRIOR ANSWERS",
+        "even if the posting words it differently or you would have picked a different question_id, do not ask again",
+        'put "Story bank <question_id>: <the answer>" in that row\'s resume_evidence, and emit no question for it',
+        "An entry about a different fact (another tool, another number of years, another place) does not cover the requirement",
+    ):
+        assert needle in head, needle
+    # Everything else of the prompt is the prompt without a bank, in the same order.
+    assert prompt.replace("\n\n" + paragraph, "") == plain
+    # A retry keeps the paragraph before the validation paragraph.
+    retry = render_assess_prompt(_job(), replace(_ctx(), bank_answers=bank), "matrix has 14 rows; at most 12 allowed")
+    assert retry.index("STORY BANK") < retry.index("A previous attempt at this same prompt was rejected")
 
 
 # --- assess-prompt-v3: the three rules are in the shipped prompt --------------------

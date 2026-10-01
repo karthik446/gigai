@@ -13,9 +13,8 @@ the dispatch's new home, instead.
 
 ## What this recognizes
 
-The dispatch (there is no ``do_PATCH``/``do_DELETE`` today -- confirmed by
-the same grep ``test_present_csrf.py``'s docstring already used to justify
-its own route list) each contain a flat chain of ``if path ==
+The dispatch methods (``do_GET``/``do_POST``/``do_PUT`` and, since 0110-034,
+``do_DELETE``; there is no ``do_PATCH``) each contain a flat chain of ``if path ==
 "<literal>":`` / ``if path.startswith("<literal>"):`` comparisons, plus two
 parametric-path helpers of the same shape: ``_match_run_id(path,
 suffix="<literal>")`` for the three ``/api/runs/{run_id}...`` routes, and
@@ -87,6 +86,8 @@ def _literal_str(node: ast.AST) -> str | None:
 _PARAMETRIC_MATCHERS = {
     "_match_run_id": "/api/runs/{run_id}",
     "_match_profile_id": "/api/profiles/{profile_id}",
+    # 0110-034: ``api/story_bank._match_story_id`` (the entry's question_id).
+    "_match_story_id": "/api/story-bank/{story_id}",
 }
 
 
@@ -146,7 +147,8 @@ def discover_routes() -> frozenset[Route]:
 
     tree = ast.parse(_PRESENT_API_PATH.read_text(encoding="utf-8"), filename=str(_PRESENT_API_PATH))
     routes: set[Route] = set()
-    for method_name, http_method in (("do_GET", "GET"), ("do_POST", "POST"), ("do_PUT", "PUT")):
+    # 0110-034 added ``do_DELETE`` (one route: a story bank entry).
+    for method_name, http_method in (("do_GET", "GET"), ("do_POST", "POST"), ("do_PUT", "PUT"), ("do_DELETE", "DELETE")):
         method_node = _find_do_method(tree, method_name)
         if method_node is None:
             continue

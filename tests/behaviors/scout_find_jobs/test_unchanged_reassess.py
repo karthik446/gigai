@@ -179,14 +179,22 @@ def _seal_run_input(workpad: Path, run_id: str, *, resume_revision_id: str) -> N
 
 
 def _write_successful_assess_output(
-    workpad: Path, run_id: str, *, posting: PostingRow, resume_revision_id: str
+    workpad: Path, run_id: str, *, posting: PostingRow, resume_revision_id: str, sealed_basis: bool = True
 ) -> None:
     """Hand-write outputs/assess.json for an earlier run that DID succeed.
 
     A minimal, contract-valid ``AssessOutput`` with exactly one successful
     assessment for ``posting`` -- everything ``_prior_assessments`` needs to
     find it, and nothing ``_validate_assessment_partition`` would reject.
+
+    0110-035: with what a 0.1.10.5 run seals next to its assessments (the
+    assess prompt version and the digest of the candidate constraints its
+    prompt carried, here ``_config()``'s); ``sealed_basis=False`` writes the
+    output of a run from before that, which has neither.
     """
+    from gigai.scout.assessment_core import ASSESS_PROMPT_VERSION, constraints_digest
+
+    config = _config()
     assert posting.content_sha256 is not None
     selected = SelectedPosting(posting.normalized_url, posting.url, posting.content_sha256, True)
     pinned = PinnedResume("record_00000000-0000-4000-8000-000000000001", resume_revision_id, "sha256:" + "d" * 64)
@@ -203,18 +211,26 @@ def _write_successful_assess_output(
         model_target=ModelTarget.OLLAMA_LOCAL,
         producer=Producer("scout.find_jobs.assess", "1", "scout-assess", ModelTarget.OLLAMA_LOCAL, "fixture"),
         usage=None, failures=(),
+        prompt_version=ASSESS_PROMPT_VERSION if sealed_basis else None,
+        constraints_digest=constraints_digest(
+            visa_sponsorship_required=config.visa_sponsorship_required, countries=config.countries, location=config.location or ""
+        )
+        if sealed_basis
+        else None,
     )
     outputs_dir = workpad / "runs" / run_id / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
     (outputs_dir / "assess.json").write_bytes(canonical_json_bytes(output.to_json()))
 
 
-def _acquire(workpad: Path, project_id: str, gig_id: str, run_id: str, rows: list[PostingRow]) -> "AcquireOutput":
+def _acquire(
+    workpad: Path, project_id: str, gig_id: str, run_id: str, rows: list[PostingRow], *, config: FindJobsConfig | None = None
+) -> "AcquireOutput":
     # A real, git-journaled workpad (not a mocked import_public_rows) is
     # required: _prior_observations's own UNCHANGED detection reads back the
     # real records/scout-acquisition/*/input.json acquire's own journal
     # write produced for the earlier run.
-    input = AcquireInput(_config(), "sha256:" + "e" * 64, None, tuple(rows), 10, SelectionRule.NEW_OR_EDITED_ROLE_MATCH)
+    input = AcquireInput(config or _config(), "sha256:" + "e" * 64, None, tuple(rows), 10, SelectionRule.NEW_OR_EDITED_ROLE_MATCH)
     return acquire_node(
         _context(workpad, project_id, gig_id, run_id, operation_key=f"acquire-{run_id}"), input,
         http_client=None, exa=_Exa(), ats=_ATS(), watchlist=_Watchlist(),
@@ -314,6 +330,62 @@ def test_changed_resume_revision_makes_the_posting_re_eligible(tmp_path: Path) -
     assert len(out2.selected_postings) == 1
     assert out2.selected_postings[0].normalized_url == posting.normalized_url
     assert out2.carried_forward_assessments == ()
+
+
+# --- 0110-035: an assessment stands only for the prompt version and the
+# candidate constraints it was made with. A launched run before 0.1.10.5
+# rendered its assess prompt with NO constraints (sponsorship "no", countries
+# "any", location "unknown"), and sealed neither value: its verdicts are not
+# carried forward, so the fix reaches postings that did not change.
+
+
+def test_an_assessment_sealed_before_the_prompt_carried_the_constraints_is_not_carried_forward(tmp_path: Path) -> None:
+    workpad, project_id, gig_id = _managed_workpad(tmp_path)
+    resume_revision_id = "revision_00000000-0000-4000-8000-000000000001"
+    posting = _row("https://boards.greenhouse.io/acme/jobs/351")
+
+    run1_id = "run_00000000-0000-4000-8000-000000000041"
+    _seal_run_input(workpad, run1_id, resume_revision_id=resume_revision_id)
+    _acquire(workpad, project_id, gig_id, run1_id, [posting])
+    _write_successful_assess_output(workpad, run1_id, posting=posting, resume_revision_id=resume_revision_id, sealed_basis=False)
+
+    run2_id = "run_00000000-0000-4000-8000-000000000042"
+    _seal_run_input(workpad, run2_id, resume_revision_id=resume_revision_id)
+    out2 = _acquire(workpad, project_id, gig_id, run2_id, [posting])
+
+    assert {row.outcome for row in out2.rows} == {RowOutcome.UNCHANGED}
+    assert len(out2.selected_postings) == 1, "assessed again, with the constraints in the prompt this time"
+    assert out2.carried_forward_assessments == ()
+
+
+def test_changed_candidate_constraints_make_the_posting_re_eligible(tmp_path: Path) -> None:
+    workpad, project_id, gig_id = _managed_workpad(tmp_path)
+    resume_revision_id = "revision_00000000-0000-4000-8000-000000000001"
+    posting = _row("https://boards.greenhouse.io/acme/jobs/361")
+
+    run1_id = "run_00000000-0000-4000-8000-000000000051"
+    _seal_run_input(workpad, run1_id, resume_revision_id=resume_revision_id)
+    _acquire(workpad, project_id, gig_id, run1_id, [posting])
+    _write_successful_assess_output(workpad, run1_id, posting=posting, resume_revision_id=resume_revision_id)
+
+    # Same constraints: skipped and carried forward (a changed TITLE is not a constraint: rule 6).
+    run2_id = "run_00000000-0000-4000-8000-000000000052"
+    _seal_run_input(workpad, run2_id, resume_revision_id=resume_revision_id)
+    retitled = replace(_config(), roles=("software engineer", "data engineer", "platform engineer"))
+    out2 = _acquire(workpad, project_id, gig_id, run2_id, [posting], config=retitled)
+    assert out2.selected_postings == () and len(out2.carried_forward_assessments) == 1
+
+    # The candidate now needs sponsorship: the verdict may differ, so the posting is assessed again.
+    run3_id = "run_00000000-0000-4000-8000-000000000053"
+    _seal_run_input(workpad, run3_id, resume_revision_id=resume_revision_id)
+    out3 = _acquire(workpad, project_id, gig_id, run3_id, [posting], config=replace(_config(), visa_sponsorship_required=True))
+    assert len(out3.selected_postings) == 1 and out3.carried_forward_assessments == ()
+
+    # And so does a move.
+    run4_id = "run_00000000-0000-4000-8000-000000000054"
+    _seal_run_input(workpad, run4_id, resume_revision_id=resume_revision_id)
+    out4 = _acquire(workpad, project_id, gig_id, run4_id, [posting], config=replace(_config(), location="Houston, TX"))
+    assert len(out4.selected_postings) == 1 and out4.carried_forward_assessments == ()
 
 
 def test_missing_sealed_run_input_never_carries_forward(tmp_path: Path) -> None:

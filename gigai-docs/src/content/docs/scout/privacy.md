@@ -36,7 +36,13 @@ or assessment. Scout runs `codex` with its shell tool and memories turned off, a
   details out of the resume you add. The full resume and the
   full posting text are not sent for ranking.
 - **Assessment and tailoring** send your resume text with the name and contact lines removed: an assessment sends the posting text and your resume for each posting
-  being assessed, including each posting "Assess all new" assesses. A pasted resume is used for that assessment only: its full text is never saved and never sent anywhere but your assessment model; the stored result keeps short evidence quotes on your machine.
+  being assessed, including each posting "Assess all new" assesses, with whether you need sponsorship, the countries you can
+  work from, your location as you wrote it and your target titles (a search run's assessments send the same). A pasted resume is used for that assessment only: its full text is never saved and never sent anywhere but your assessment model; the stored result keeps short evidence quotes on your machine.
+- **Your answers go with an assessment, per profile.** The answers you gave to earlier questions are part of what an assessment
+  sends (one you start on a job, and each one a search run makes), so a question is not asked twice: each answer in full, plus a one-line summary of each story bank entry (at most 40).
+  Only the answers of the profile being assessed are sent, and those of the one profile it is set to share with; another
+  profile's answers never are. An answer that holds an email, a phone number, a link, a street address or the name saved in
+  Resume display is refused when you save it, and anything of that kind in an older answer is removed again before it is sent.
 - **With a local Ollama target nothing leaves the machine.** Scout only
   talks to Ollama on a numeric loopback address (`127.0.0.1`).
 - With `codex_cli` (the Codex CLI sends it to OpenAI), `claude_cli` (the
@@ -97,3 +103,8 @@ Everything Scout writes stays under your configured GigAI home and the bound
 project's workpad. Tailored resumes are stored under the gig too
 (`scout/<project>/resumes/`, ephemeral pasted-resume runs under `ephemeral/`)
 and contain resume-derived text by design.
+
+The story bank (every answered question and added story, per profile) stays local too: the answers are records in the
+project's workpad, and who owns each one, its tag, dates and the jobs that used it are in
+`scout/<project>/story_bank/bank.json`. Deleting an entry takes it out of use; the workpad's history keeps the older
+revision of the record it was in.

@@ -697,9 +697,10 @@
       "external": "model",
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
-        "gigai scout answer q-visa --answer-text \"I need H-1B sponsorship\""
+        "gigai scout answer q-visa --answer-text \"I need H-1B sponsorship\"",
+        "gigai scout answer cloud:gcp --question \"Have you run workloads on GCP?\" --answer-text \"Yes: two years of batch workloads.\" --profile profile_1 --json"
       ],
-      "notes": "Writes the answer to the Gig's experience records. --reassess JOB_URL_OR_ID re-runs the assessment with a model (external=model)."
+      "notes": "The answer goes into one profile's story bank (--profile; default: the profile the --reassess job was assessed for, else the selected profile) and is reused by that profile's later assessments, also when a posting words the question differently. --question keeps the question's own words with it; --actor agent records that an agent wrote it. An answer holding an email, phone, link, street address or the saved name is refused (personal_info_refused). --reassess JOB_URL_OR_ID re-runs the assessment with a model (external=model)."
     },
     "scout assess": {
       "summary": "Assess ONE job against a resume right now, without a find-jobs run.",
@@ -873,6 +874,72 @@
         "gigai scout stop"
       ],
       "notes": "Stops the local server process."
+    },
+    "scout story-bank add": {
+      "summary": "Add a new story bank entry: a story, or an answer nobody asked for yet.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, schema_version, profile_id, entry}.",
+      "examples": [
+        "gigai scout story-bank add --question \"Tell me about a database migration you led\" --answer-file story.md --actor agent --json",
+        "gigai scout story-bank add --question \"Kafka?\" --answer-text \"Three years running Kafka in production.\" --id tool:kafka --tag streaming"
+      ],
+      "notes": "Local, no model call. The entry's id is --id, or story:<the question's first words>. A later assessment of this profile is offered a one-line summary of the entry and reuses it for a requirement it covers instead of asking. story_exists (with the current entry in --json) when the profile already has that id: use edit. Text holding an email, phone, link, street address or the saved name is refused (personal_info_refused)."
+    },
+    "scout story-bank delete": {
+      "summary": "Remove one of the profile's own story bank entries.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, schema_version, profile_id, deleted}.",
+      "examples": [
+        "gigai scout story-bank delete cloud:gcp --confirm --json",
+        "gigai scout story-bank delete cloud:gcp --confirm --updated-at 2026-10-01T15:00:00.000000Z --json"
+      ],
+      "notes": "Needs --confirm. The entry is never listed, offered or sent to a model again; the project's journal keeps the older revision of the record it was in. With --updated-at (the value you read) the delete is refused with story_bank_changed when the entry changed since."
+    },
+    "scout story-bank edit": {
+      "summary": "Edit one of the profile's own story bank entries: the answer, the question words and/or the tag.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, schema_version, profile_id, entry}.",
+      "examples": [
+        "gigai scout story-bank edit cloud:gcp --answer-text \"Yes: three years of batch and streaming workloads on GCP.\" --json",
+        "gigai scout story-bank edit cloud:gcp --tag \"cloud platforms\" --actor agent --updated-at 2026-10-01T15:00:00.000000Z --json"
+      ],
+      "notes": "A new answer is a new revision of the stored answer; every write bumps the entry's revision and updated_at and records who wrote it (--actor). Pass --updated-at (the updated_at you read with show --json) to be safe against a concurrent write: when the entry changed since, the edit is refused with story_bank_changed and --json carries the current entry. An empty --tag puts the automatic tag back. A shared entry is edited in the profile that owns it."
+    },
+    "scout story-bank list": {
+      "summary": "List a profile's story bank: every answered question and story, with its tag and the jobs that used it.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, schema_version, profile_id, entries, total, tags, sharing}.",
+      "examples": [
+        "gigai scout story-bank list --json",
+        "gigai scout story-bank list --profile profile_1 --search kubernetes --tag technical --json"
+      ],
+      "notes": "The profile's own entries, then (shared: true) those of the one profile it is set to share with. A profile never lists another profile's answers otherwise. Each entry carries question_id, question, answer, tag, postings (kind answered | confirmed | reused), first_answered_at, updated_at, revision, written_by (operator | agent) and history. The same body as GET /api/story-bank."
+    },
+    "scout story-bank share": {
+      "summary": "Show or set whose story bank a profile also reads.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, schema_version, profile_id, sharing}.",
+      "examples": [
+        "gigai scout story-bank share --json",
+        "gigai scout story-bank share --profile profile_2 --with profile_1 --json",
+        "gigai scout story-bank share --profile profile_2 --off"
+      ],
+      "notes": "With neither --with nor --off it only shows the setting (no write). --with makes --profile also read the OWN entries of the other profile: one hop, one way, never implicit. Profiles on one machine can be different people, so nothing is shared until this is set; --off stops it at once."
+    },
+    "scout story-bank show": {
+      "summary": "Show one story bank entry: the question, the full answer, who wrote it and the jobs that used it.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, schema_version, profile_id, entry}.",
+      "examples": [
+        "gigai scout story-bank show cloud:gcp --json"
+      ],
+      "notes": "QUESTION_ID is the entry's id from list. Read updated_at from here before an edit or delete with --updated-at."
     },
     "scout watchlist add": {
       "summary": "Add a company by its Greenhouse / Lever / Ashby board (or job) URL.",

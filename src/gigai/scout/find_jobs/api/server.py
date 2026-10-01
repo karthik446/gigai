@@ -65,6 +65,7 @@ from .common import (
 )
 from .openapi import with_allowed_keys
 from .profiles import _match_profile_id
+from .story_bank import _match_story_id
 
 # _TEST_HTTP_ENV/_TEST_MODEL_ENV live in present_api.py now -- they're only
 # read by main(), which moved there too (see the MONKEYPATCH TRAP note near
@@ -1497,6 +1498,7 @@ def _make_handler(
     from .setup import SetupRoutesMixin
     from .sources import SourcesRoutesMixin
     from .static import StaticRoutesMixin
+    from .story_bank import StoryBankRoutesMixin
     from .tailored_resumes import TailoredResumesRoutesMixin
     from .watchlist import WatchlistRoutesMixin
 
@@ -1518,6 +1520,7 @@ def _make_handler(
         ResumesRoutesMixin,
         ResumeDisplayRoutesMixin,
         SecretsStatusRoutesMixin,
+        StoryBankRoutesMixin,
         TailoredResumesRoutesMixin,
         WatchlistRoutesMixin,
         SourcesRoutesMixin,
@@ -1744,6 +1747,19 @@ def _make_handler(
                     if path == "/api/answers":
                         self._handle_get_answers()
                         return
+                    if path == "/api/story-bank":
+                        if self._check_host():
+                            self._handle_get_story_bank()
+                        return
+                    if path == "/api/story-bank/match":
+                        if self._check_host():
+                            self._handle_get_story_bank_match()
+                        return
+                    story_id = _match_story_id(path, suffix="")
+                    if story_id is not None:
+                        if self._check_host():
+                            self._handle_get_story_bank_entry(story_id)
+                        return
                     if path == "/api/runs":
                         self._handle_get_runs_list()
                         return
@@ -1840,6 +1856,9 @@ def _make_handler(
                 if path == "/api/applications":
                     self._handle_post_applications()
                     return
+                if path == "/api/story-bank":
+                    self._handle_post_story_bank()
+                    return
                 if path == "/api/watchlist":
                     self._handle_post_watchlist()
                     return
@@ -1889,6 +1908,13 @@ def _make_handler(
                 if path == "/api/tailored-resumes/lines":
                     self._handle_put_tailored_resume_line()
                     return
+                if path == "/api/story-bank/sharing":
+                    self._handle_put_story_bank_sharing()
+                    return
+                story_id = _match_story_id(path, suffix="")
+                if story_id is not None:
+                    self._handle_put_story_bank_entry(story_id)
+                    return
                 profile_id = _match_profile_id(path, suffix="")
                 if profile_id is not None:
                     self._handle_put_profile(profile_id)
@@ -1896,6 +1922,22 @@ def _make_handler(
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
             except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET
                 _logger.exception("unhandled exception in PUT %s", path)
+                self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
+
+        def do_DELETE(self) -> None:  # noqa: N802
+            if not self._check_loopback():
+                return
+            if not self._check_csrf():
+                return
+            path = urlsplit(self.path).path
+            try:
+                story_id = _match_story_id(path, suffix="")
+                if story_id is not None:
+                    self._handle_delete_story_bank_entry(story_id)
+                    return
+                self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
+            except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET
+                _logger.exception("unhandled exception in DELETE %s", path)
                 self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
 
     return Handler

@@ -337,6 +337,10 @@ class RunRoutesMixin:
             self._attach_results_job_states(run_id, body)
         except Exception:  # noqa: BLE001 - display-only enrichment must never break /results
             _logger.exception("job state skipped for run %s", run_id)
+        # 0110-034b: ``bank_suggestions``, a near match from the run's
+        # profile's story bank per question its assessments left open. Read
+        # only when there is an open question; never breaks /results.
+        self._attach_run_bank_suggestions(run_id, body)
         self._write_json(HTTPStatus.OK, body)
 
     def _attach_results_job_states(self, run_id: str, body: dict[str, object]) -> None:

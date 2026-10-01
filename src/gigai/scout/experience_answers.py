@@ -32,6 +32,16 @@ the ``experience_question.question_id`` contract
 the CLI's normal error shape) instead of reaching native-record schema
 validation and surfacing as a generic conflict. Terra review, P1: writes are
 retry-safe under the journal writer -- see ``record_answer``'s own docstring.
+
+0110-034 (story bank): a profile owns its answers. ``experience_qa`` has no
+profile field (the schema is closed), so ``story_bank.py`` keeps which record
+belongs to which profile and passes an ``AnswerScope`` to ``record_answer``:
+the one record that already holds this profile's answer to the question (if
+any) and the records this profile may append to. Without a scope every call
+behaves exactly as before (gig-wide). ``list_answer_rows`` is the unjoined
+read the bank is a view over; ``remove_answer`` is the bank's delete (a new
+revision with the question ``not_applicable``: the journal keeps the older
+revision, the answer is never read or reused again).
 """
 
 from __future__ import annotations
@@ -78,6 +88,26 @@ class PriorAnswer:
     answer: str
     record_id: str
     revision_id: str
+    # 0110-034: when the record's current revision was written (the newest
+    # date known for an answer saved before the story bank kept its own).
+    recorded_at: str = ""
+
+
+@dataclass(frozen=True)
+class AnswerScope:
+    """Which records one profile's answer may touch (0110-034, ``story_bank.py``).
+
+    ``existing_record``: the record that already holds this profile's answer
+    to the question, updated in place; ``None`` when the profile has not
+    answered it. ``append_records``: the records the profile owns, the newest
+    with room takes a new question; none with room means a fresh record.
+    ``owner``: the profile id, part of a fresh record's operation key so two
+    profiles giving the same answer never share one record.
+    """
+
+    existing_record: str | None
+    append_records: frozenset[str]
+    owner: str = ""
 
 
 def _validate_answer_text(answer: str) -> str:
@@ -141,18 +171,12 @@ def _parsed_content(raw: object) -> dict[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
-def read_answers(*, home_root: Path, requested_target: Path | None, gig_id: str | None = None) -> dict[str, PriorAnswer]:
-    """Every ANSWERED question across this gig's ``experience_qa`` records,
-    keyed by normalized ``question_id`` (a record's own questions never
-    repeat an id -- ``_semantic_content`` enforces that -- but two different
-    records can each answer the same real-world fact under a differently
-    worded raw id, and normalization is what joins them here; the record
-    read LAST in listing order wins a collision, which is stable but
-    arbitrary -- a genuine re-answer instead updates the SAME record via
-    ``record_answer``, so a same-fact collision across two records is not
-    the expected steady state)."""
+def list_answer_rows(*, home_root: Path, requested_target: Path | None, gig_id: str | None = None) -> list[PriorAnswer]:
+    """Every ANSWERED question of every ``experience_qa`` record, in listing
+    order, NOT joined by id: two records may each answer the same normalized
+    ``question_id`` (two profiles, 0110-034). One committed read."""
 
-    answers: dict[str, PriorAnswer] = {}
+    rows: list[PriorAnswer] = []
     # One committed read for the listing AND every record's content: a
     # separate read per record would repeat the whole snapshot each time.
     for row in list_native_records(home_root=home_root, requested_target=requested_target, gig_id=gig_id, content=True):
@@ -172,25 +196,52 @@ def read_answers(*, home_root: Path, requested_target: Path | None, gig_id: str 
             answer = question.get("answer")
             if not isinstance(answer, str):
                 continue
-            normalized = normalize_question_id(str(question.get("question_id", "")))
-            answers[normalized] = PriorAnswer(
-                question_id=normalized,
-                prompt=str(question.get("prompt", "")),
-                answer=answer,
-                record_id=record_id,
-                revision_id=revision_id,
+            rows.append(
+                PriorAnswer(
+                    question_id=normalize_question_id(str(question.get("question_id", ""))),
+                    prompt=str(question.get("prompt", "")),
+                    answer=answer,
+                    record_id=record_id,
+                    revision_id=revision_id,
+                    recorded_at=str(row.get("created_at", "")),
+                )
             )
-    return answers
+    return rows
 
 
-def _newest_experience_record(*, home_root: Path, requested_target: Path | None, gig_id: str | None) -> tuple[str, str, dict[str, object]] | None:
+def read_answers(*, home_root: Path, requested_target: Path | None, gig_id: str | None = None) -> dict[str, PriorAnswer]:
+    """Every ANSWERED question across this gig's ``experience_qa`` records,
+    keyed by normalized ``question_id`` (a record's own questions never
+    repeat an id -- ``_semantic_content`` enforces that -- but two different
+    records can each answer the same real-world fact under a differently
+    worded raw id, and normalization is what joins them here; the record
+    read LAST in listing order wins a collision, which is stable but
+    arbitrary -- a genuine re-answer instead updates the SAME record via
+    ``record_answer``, so a same-fact collision across two records is not
+    the expected steady state).
+
+    0110-034: gig-wide, every profile's answers together. What one profile
+    may see is ``story_bank.answers_for_profile``."""
+
+    return {
+        item.question_id: item
+        for item in list_answer_rows(home_root=home_root, requested_target=requested_target, gig_id=gig_id)
+    }
+
+
+def _newest_experience_record(
+    *, home_root: Path, requested_target: Path | None, gig_id: str | None, among: frozenset[str] | None = None
+) -> tuple[str, str, dict[str, object]] | None:
     """``(record_id, revision_id, content)`` of the newest active
-    ``experience_qa`` record with ``saved_default`` scope, or ``None``."""
+    ``experience_qa`` record with ``saved_default`` scope, or ``None``.
+    ``among`` (0110-034) narrows to those record ids."""
 
     rows = [
         row
         for row in list_native_records(home_root=home_root, requested_target=requested_target, gig_id=gig_id)
-        if row["kind"] == "experience_qa" and row.get("scope") == _SAVED_DEFAULT_SCOPE
+        if row["kind"] == "experience_qa"
+        and row.get("scope") == _SAVED_DEFAULT_SCOPE
+        and (among is None or str(row["record_id"]) in among)
     ]
     if not rows:
         return None
@@ -203,16 +254,19 @@ def _newest_experience_record(*, home_root: Path, requested_target: Path | None,
 
 
 def _find_existing_question(
-    *, home_root: Path, requested_target: Path | None, gig_id: str | None, normalized_id: str
+    *, home_root: Path, requested_target: Path | None, gig_id: str | None, normalized_id: str, among: frozenset[str] | None = None
 ) -> tuple[str, str, dict[str, object]] | None:
     """``(record_id, revision_id, content)`` of the record that already
     answers ``normalized_id``, if any -- a fresh read, never cached across a
-    retry (see ``record_answer``)."""
+    retry (see ``record_answer``). ``among`` (0110-034) narrows to those
+    record ids."""
 
     for row in list_native_records(home_root=home_root, requested_target=requested_target, gig_id=gig_id):
         if row["kind"] != "experience_qa":
             continue
         record_id = str(row["record_id"])
+        if among is not None and record_id not in among:
+            continue
         revision_id = str(row["revision_id"])
         value = _read_content(home_root=home_root, requested_target=requested_target, gig_id=gig_id, record_id=record_id, revision_id=revision_id)
         if value is None:
@@ -240,6 +294,7 @@ def _attempt_record_answer(
     normalized_id: str,
     prompt: str,
     answer: str,
+    scope: AnswerScope | None = None,
 ) -> NativeRecordResult:
     """One attempt: re-derive record selection, duplicate detection, AND the
     capacity/rollover choice from a FRESH read, then publish. Every input to
@@ -252,7 +307,11 @@ def _attempt_record_answer(
     digest = _answer_digest(normalized_id, answer)
 
     existing = _find_existing_question(
-        home_root=home_root, requested_target=requested_target, gig_id=gig_id, normalized_id=normalized_id
+        home_root=home_root, requested_target=requested_target, gig_id=gig_id, normalized_id=normalized_id,
+        # 0110-034: the profile's answered question, else the same id in one
+        # of its own records in any state (a deleted answer given again is
+        # the same question, never a second one in the record).
+        among=None if scope is None else (frozenset({scope.existing_record}) if scope.existing_record else scope.append_records),
     )
     if existing is not None:
         record_id, revision_id, value = existing
@@ -272,7 +331,8 @@ def _attempt_record_answer(
             # the already-committed record/revision rather than publishing a
             # redundant revision or risking a stale_parent/payload-mismatch
             # against a parent_revision this attempt did not originate from.
-            return NativeRecordResult(record_id, revision_id, False, "active", None, None)
+            if scope is None or current.get("prompt") == (prompt.strip() or current.get("prompt")):
+                return NativeRecordResult(record_id, revision_id, False, "active", None, None)
         updated = copy.deepcopy(value)
         updated_questions = updated["payload"]["questions"]  # type: ignore[index]
         assert isinstance(updated_questions, list)
@@ -280,6 +340,15 @@ def _attempt_record_answer(
         target_question["state"] = "answered"
         target_question["answer"] = answer
         target_question["provenance"] = dict(_PROVENANCE)
+        if scope is not None and prompt.strip():
+            # 0110-034: the bank keeps the question's own words; an answer
+            # saved before it only had the id as its prompt.
+            target_question["prompt"] = prompt.strip()
+        if scope is not None:
+            # 0110-034: keyed by the parent too. An edit back to an earlier
+            # answer (A, B, A) is a new revision, not a replay of the first
+            # one; an identical retry never gets here (the no-op above).
+            digest = _answer_digest(normalized_id, "\x00".join((answer, prompt.strip(), revision_id)))
         return update_native_record(
             home_root=home_root, requested_target=requested_target, gig_id=gig_id,
             record_id=record_id, parent_revision=revision_id, content=updated,
@@ -295,7 +364,10 @@ def _attempt_record_answer(
         "provenance": dict(_PROVENANCE),
     }
 
-    newest = _newest_experience_record(home_root=home_root, requested_target=requested_target, gig_id=gig_id)
+    newest = _newest_experience_record(
+        home_root=home_root, requested_target=requested_target, gig_id=gig_id,
+        among=None if scope is None else scope.append_records,
+    )
     if newest is not None:
         record_id, revision_id, content = newest
         payload = content.get("payload")
@@ -321,7 +393,15 @@ def _attempt_record_answer(
     return create_native_record(
         home_root=home_root, requested_target=requested_target, gig_id=gig_id,
         content=fresh, actor=_ACTOR, origin=_ORIGIN,
-        operation_key=_operation_key("create", "new", normalized_id, digest),
+        # 0110-034: a scoped (per-profile) create is keyed by what the profile
+        # already owns, so two profiles giving the same answer to the same
+        # question each get their own record.
+        operation_key=_operation_key(
+            "create",
+            "new" if scope is None else _answer_digest("scope", "|".join((scope.owner, *sorted(scope.append_records))))[:24],
+            normalized_id,
+            digest,
+        ),
     )
 
 
@@ -333,8 +413,14 @@ def record_answer(
     prompt: str,
     answer: str,
     gig_id: str | None = None,
+    scope: AnswerScope | None = None,
 ) -> NativeRecordResult:
     """Upsert one answered question into ``experience_qa``.
+
+    ``scope`` (0110-034, ``story_bank.save_answer``): the records of ONE
+    profile. Given, the question is looked up and appended only there, and a
+    non-empty ``prompt`` replaces the stored one; ``None`` keeps the gig-wide
+    behaviour below.
 
     Appends to the newest record with room (< 32 questions); rolls over to a
     fresh record once the newest one is full (operator answer 4). If the
@@ -370,7 +456,7 @@ def record_answer(
         try:
             return _attempt_record_answer(
                 home_root=home_root, requested_target=requested_target, gig_id=gig_id,
-                normalized_id=normalized_id, prompt=prompt, answer=answer,
+                normalized_id=normalized_id, prompt=prompt, answer=answer, scope=scope,
             )
         except PrivateRecordError as exc:
             attempts += 1
@@ -378,4 +464,49 @@ def record_answer(
                 raise
 
 
-__all__ = ["PriorAnswer", "read_answers", "record_answer"]
+def remove_answer(
+    *, home_root: Path, requested_target: Path | None, record_id: str, question_id: str, gig_id: str | None = None
+) -> NativeRecordResult | None:
+    """Take one answered question out of use (0110-034, the story bank's delete).
+
+    Writes a new revision of ``record_id`` with the question ``not_applicable``
+    and no answer text: ``list_answer_rows``/``read_answers`` only read
+    ``answered`` questions, so it is never listed, offered or sent again. The
+    journal keeps the older revision (records are append-only). ``None`` when
+    the record holds no answered question with that id. Retried on
+    ``stale_parent`` like ``record_answer``.
+    """
+
+    normalized_id = normalize_question_id(question_id)
+    attempts = 0
+    while True:
+        existing = _find_existing_question(
+            home_root=home_root, requested_target=requested_target, gig_id=gig_id,
+            normalized_id=normalized_id, among=frozenset({record_id}),
+        )
+        if existing is None:
+            return None
+        _record_id, revision_id, value = existing
+        updated = copy.deepcopy(value)
+        questions = updated["payload"]["questions"]  # type: ignore[index]
+        assert isinstance(questions, list)
+        target_question = next(item for item in questions if normalize_question_id(str(item.get("question_id", ""))) == normalized_id)
+        if target_question.get("state") != "answered":
+            return None
+        target_question["state"] = "not_applicable"
+        target_question["answer"] = None
+        target_question["provenance"] = dict(_PROVENANCE)
+        try:
+            return update_native_record(
+                home_root=home_root, requested_target=requested_target, gig_id=gig_id,
+                record_id=record_id, parent_revision=revision_id, content=updated,
+                actor=_ACTOR, origin=_ORIGIN,
+                operation_key=_operation_key("remove", record_id, normalized_id, revision_id.removeprefix("revision_")[:40]),
+            )
+        except PrivateRecordError as exc:
+            attempts += 1
+            if exc.code != "stale_parent" or attempts >= _MAX_STALE_PARENT_RETRIES:
+                raise
+
+
+__all__ = ["AnswerScope", "PriorAnswer", "list_answer_rows", "read_answers", "record_answer", "remove_answer"]

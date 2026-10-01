@@ -1093,6 +1093,9 @@ def assess_command(
 @click.option("--answer-text", "answer_text", help="Answer text inline.")
 @click.option("--answer-file", "answer_file", help="Answer text FILE (or - for stdin).")
 @click.option("--reassess", "reassess", help="Job URL or job_identity to re-assess with this answer applied.")
+@click.option("--profile", "profile_id", help="Scout profile ID whose story bank gets the answer (default: the re-assessed job's profile, else the selected profile).")
+@click.option("--question", "question_text", help="The question's own words, kept with the answer in the story bank.")
+@click.option("--actor", "actor", type=click.Choice(["operator", "agent"]), default="operator", show_default=True, help="Who is writing: recorded on the story bank entry.")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
@@ -1101,24 +1104,33 @@ def answer_command(
     answer_text: str | None,
     answer_file: str | None,
     reassess: str | None,
+    profile_id: str | None,
+    question_text: str | None,
+    actor: str,
     target_value: Path | None,
     home_value: Path | None,
     as_json: bool,
 ) -> None:
     """Answer QUESTION_ID once; the answer is reused across every posting.
 
-    Pass exactly one of --answer-text / --answer-file. The answer is written
-    to this gig's ``experience_qa`` records (a fresh record, or an append,
-    with automatic rollover at 32 answers per record) and reused by every
-    later ``gigai scout assess`` call whose prompt renders a matching
-    question_id (the normalizer makes a drifted id from a different call
-    still match the same real-world fact). Pass --reassess JOB_URL_OR_ID to
-    re-run the whole assessment for that job immediately, with this answer
-    applied.
+    Pass exactly one of --answer-text / --answer-file. The answer goes into
+    the story bank of one profile (0110-034: --profile, else the profile the
+    --reassess job was assessed for, else the selected profile); it is
+    written to that profile's own ``experience_qa`` record (a fresh record,
+    or an append, with automatic rollover at 32 answers per record) and
+    reused by every later ``gigai scout assess`` call for that profile: for
+    a matching question_id (the normalizer makes a drifted id from a
+    different call still match the same real-world fact) and, through the
+    story bank lines in the prompt, for the same fact worded differently.
+    An answer that holds contact details or the saved name is refused. Pass
+    --reassess JOB_URL_OR_ID to re-run the whole assessment for that job
+    immediately, with this answer applied.
     """
 
     from ..private_records import PrivateRecordError
+    from . import story_bank
     from .experience_answers import record_answer
+    from .find_jobs.api.story_bank import known_names, resolve_profile_id
     from .find_jobs.assess_contracts import AssessJobInput, AssessRequest, AssessResumeInput
     from .find_jobs.contracts import FindJobsContractError
     from .question_ids import normalize_question_id
@@ -1141,18 +1153,13 @@ def answer_command(
         _fail(exc, as_json=as_json, fallback="scout_answer_failed")
         return
 
-    try:
-        result = record_answer(home_root=home_root, requested_target=target, question_id=question_id, prompt=question_id, answer=answer)
-    except PrivateRecordError as exc:
-        _fail(exc, as_json=as_json, fallback="answer_invalid")
-        return
-
-    normalized_question_id = normalize_question_id(question_id)
-    reassessed_payload: dict[str, object] | None = None
+    # 0110-034: the job to re-assess is looked up first, so the answer lands in
+    # the bank of the profile that job was assessed for, with the posting noted.
+    previous = None
+    job_identity = reassess
     if reassess:
         try:
             previous = find_quick_assessment_by_job_identity(home_root, target, reassess)
-            job_identity = reassess
             if previous is None:
                 # Accept a raw job URL too (not only a stored job_identity):
                 # normalize it the same way resolve_job would, by reusing
@@ -1161,6 +1168,39 @@ def answer_command(
 
                 job_identity = normalize_url(reassess)
                 previous = find_quick_assessment_by_job_identity(home_root, target, job_identity)
+        except (QuickAssessError, FindJobsContractError) as exc:
+            _fail(exc, as_json=as_json, fallback="scout_answer_failed")
+            return
+
+    bank_profile_id: str | None = None
+    try:
+        try:
+            bank_profile_id = resolve_profile_id(home_root, target, profile_id or (previous.resume.profile_id if previous is not None else None))
+        except story_bank.StoryBankError:
+            if profile_id:
+                raise
+        if bank_profile_id is None:
+            # A gig with no profile yet: the gig-wide write, as before.
+            found = story_bank.personal_info_in_answer(answer, names=known_names(home_root))
+            if found:
+                raise story_bank.StoryBankError("personal_info_refused", f"this answer looks like it holds personal information ({', '.join(found)})")
+            result = record_answer(home_root=home_root, requested_target=target, question_id=question_id, prompt=question_id, answer=answer)
+        else:
+            posting = None
+            if previous is not None:
+                posting = {"job_identity": previous.job.job_identity, "title": previous.job.title, "company": previous.job.company, "url": previous.job.source_url}
+            result = story_bank.save_answer(
+                home_root=home_root, target=target, profile_id=bank_profile_id, question_id=question_id, answer=answer,
+                question=question_text, posting=posting, names=known_names(home_root), actor=actor,
+            )
+    except (PrivateRecordError, story_bank.StoryBankError) as exc:
+        _fail(exc, as_json=as_json, fallback="answer_invalid")
+        return
+
+    normalized_question_id = normalize_question_id(question_id)
+    reassessed_payload: dict[str, object] | None = None
+    if reassess:
+        try:
             if previous is None:
                 raise QuickAssessError("reassess_not_found", f"no stored assessment for {reassess!r}")
             if previous.job.source_url is None:
@@ -1180,6 +1220,7 @@ def answer_command(
         "record_id": result.record_id,
         "revision_id": result.revision_id,
         "question_id": normalized_question_id,
+        "profile_id": bank_profile_id,
         "reassessed": reassessed_payload,
     }
     if as_json:
@@ -1190,6 +1231,321 @@ def answer_command(
         result_json = reassessed_payload.get("result")
         verdict = result_json.get("verdict") if isinstance(result_json, dict) else None
         click.echo(f"  Re-assessed: verdict = {verdict}")
+
+
+# --- 0110-034: `gigai scout story-bank` -------------------------------------------
+
+
+@scout_group.group("story-bank")
+def story_bank_group() -> None:
+    """A profile's story bank: every answered question and story, kept and reused.
+
+    Local and model-free. The bank is per profile (--profile, default the
+    selected one); it never reads another profile's answers unless `share`
+    says so. Every write runs the personal-info check, and --actor records
+    who wrote (operator, or an agent working alongside).
+    """
+
+
+_STORY_OPTIONS = (
+    click.option("--profile", "profile_id", help="Scout profile ID (default: the selected profile)."),
+    click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False)),
+    click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False)),
+    click.option("--json", "as_json", is_flag=True),
+)
+_STORY_ACTOR = click.option(
+    "--actor", "actor", type=click.Choice(["operator", "agent"]), default="operator", show_default=True,
+    help="Who is writing: recorded on the entry.",
+)
+
+
+def _story_options(function):
+    for option in reversed(_STORY_OPTIONS):
+        function = option(function)
+    return function
+
+
+def _story_context(profile_id: str | None, target_value: Path | None, home_value: Path | None, *, as_json: bool) -> tuple[Path, Path, str] | None:
+    """``(home, target, profile id)`` for a story-bank command, or ``None`` after reporting the failure."""
+
+    from . import story_bank
+    from .find_jobs.api.story_bank import resolve_profile_id
+
+    home_root = home_value or default_home_root()
+    try:
+        target = _resolved_target(target_value, home_root, as_json=as_json).expanduser().resolve(strict=True)
+        return home_root, target, resolve_profile_id(home_root, target, profile_id)
+    except (ScoutTargetError, WorkpadError, OSError, ValueError, story_bank.StoryBankError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_story_bank_failed")
+        return None
+
+
+def _story_fail(exc: Exception, *, as_json: bool) -> None:
+    """Report a story bank refusal; a stale or duplicate write also prints the current entry."""
+
+    entry = getattr(exc, "entry", None)
+    if as_json and entry is not None:
+        click.echo(
+            json.dumps(
+                {"status": "error", "error": {"code": getattr(exc, "code", "scout_story_bank_failed"), "message": str(exc), "entry": entry.to_json()}},
+                sort_keys=True, separators=(",", ":"),
+            )
+        )
+        raise click.exceptions.Exit(1)
+    _fail(exc, as_json=as_json, fallback="scout_story_bank_failed")
+
+
+def _story_text(text: str | None, file: str | None, *, flag: str) -> str | None:
+    if text is not None and file is not None:
+        raise ValueError(f"pass --{flag}-text or --{flag}-file, not both")
+    if file is not None:
+        return _read_text_option(file, flag=f"--{flag}-file")
+    return text
+
+
+def _story_line(entry: dict[str, object]) -> str:
+    from .story_bank import one_line
+
+    shared = " (shared)" if entry["shared"] else ""
+    used = len(entry["postings"])  # type: ignore[arg-type]
+    return f"  {entry['question_id']}{shared} [{entry['tag']}] {one_line(str(entry['answer']), 90)} ({used} job{'' if used == 1 else 's'})"
+
+
+def _story_detail(entry: dict[str, object]) -> None:
+    click.echo(f"{entry['question_id']} [{entry['tag']}]{' (shared from ' + str(entry['owner_profile_id']) + ')' if entry['shared'] else ''}")
+    if entry["question"] != entry["question_id"]:
+        click.echo(f"  Question: {entry['question']}")
+    click.echo(f"  Answer: {entry['answer']}")
+    click.echo(f"  Written by {entry['written_by']}, updated {entry['updated_at'] or 'unknown'} (revision {entry['revision']}).")
+    for posting in entry["postings"]:  # type: ignore[union-attr]
+        label = " at ".join(part for part in (posting["title"], posting["company"]) if part) or posting["job_identity"]
+        click.echo(f"  {posting['kind']}: {label} ({posting['at']})")
+
+
+@story_bank_group.command("list")
+@click.option("--search", "search", help="Only entries whose id, question, answer or tag holds this text.")
+@click.option("--tag", "tag", help="Only entries with this tag.")
+@_story_options
+def story_bank_list_command(search: str | None, tag: str | None, profile_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """List the bank a profile sees: its own entries, then a shared profile's."""
+
+    from ..private_records import PrivateRecordError
+    from . import story_bank
+    from .find_jobs.api.story_bank import bank_response
+
+    context = _story_context(profile_id, target_value, home_value, as_json=as_json)
+    if context is None:
+        return
+    home_root, target, resolved_profile = context
+    try:
+        body = bank_response(home_root, target, resolved_profile, q=search, tag=tag)
+    except (story_bank.StoryBankError, PrivateRecordError) as exc:
+        _story_fail(exc, as_json=as_json)
+        return
+    if as_json:
+        _emit({"ok": True, **body}, True, "")
+        return
+    entries = body["entries"]
+    click.echo(f"Story bank of {resolved_profile}: {len(entries)} of {body['total']} entries.")  # type: ignore[arg-type]
+    for entry in entries:  # type: ignore[union-attr]
+        click.echo(_story_line(entry))
+    sharing = body["sharing"]
+    if sharing["share_with"]:  # type: ignore[index]
+        click.echo(f"Also reads the bank of {sharing['share_with']}.")  # type: ignore[index]
+    if sharing["read_by"]:  # type: ignore[index]
+        click.echo(f"Read by: {', '.join(sharing['read_by'])}.")  # type: ignore[index]
+
+
+@story_bank_group.command("show")
+@click.argument("question_id")
+@_story_options
+def story_bank_show_command(question_id: str, profile_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Show one entry: the question, the full answer, who wrote it and the jobs that used it."""
+
+    from ..private_records import PrivateRecordError
+    from . import story_bank
+    from .find_jobs.api.story_bank import RESPONSE_SCHEMA, bank_response
+
+    context = _story_context(profile_id, target_value, home_value, as_json=as_json)
+    if context is None:
+        return
+    home_root, target, resolved_profile = context
+    try:
+        entries = bank_response(home_root, target, resolved_profile, question_id=question_id)["entries"]
+        if not entries:
+            raise story_bank.StoryBankError("not_found", f"this profile's story bank has no entry {question_id!r}")
+    except (story_bank.StoryBankError, PrivateRecordError) as exc:
+        _story_fail(exc, as_json=as_json)
+        return
+    entry = entries[0]  # type: ignore[index]
+    if as_json:
+        _emit({"ok": True, "schema_version": RESPONSE_SCHEMA, "profile_id": resolved_profile, "entry": entry}, True, "")
+        return
+    _story_detail(entry)
+
+
+@story_bank_group.command("add")
+@click.option("--question", "question", required=True, help="What the story answers, e.g. \"Tell me about a migration you led\".")
+@click.option("--answer-text", "answer_text", help="The story or answer, inline.")
+@click.option("--answer-file", "answer_file", help="The story or answer FILE (or - for stdin).")
+@click.option("--id", "question_id", help="The entry's id (<category>:<value>); default story:<the question's first words>.")
+@click.option("--tag", "tag", help="Your own tag; default: a tag from the question.")
+@_STORY_ACTOR
+@_story_options
+def story_bank_add_command(
+    question: str, answer_text: str | None, answer_file: str | None, question_id: str | None, tag: str | None, actor: str,
+    profile_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool,
+) -> None:
+    """Add a new entry: a story, or an answer nobody asked for yet."""
+
+    from ..private_records import PrivateRecordError
+    from . import story_bank
+    from .find_jobs.api.story_bank import RESPONSE_SCHEMA, known_names
+
+    try:
+        answer = _story_text(answer_text, answer_file, flag="answer")
+        if answer is None:
+            raise ValueError("pass exactly one of --answer-text or --answer-file")
+    except (OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="answer_invalid")
+        return
+    context = _story_context(profile_id, target_value, home_value, as_json=as_json)
+    if context is None:
+        return
+    home_root, target, resolved_profile = context
+    try:
+        entry = story_bank.add_story(
+            home_root=home_root, target=target, profile_id=resolved_profile, question=question, answer=answer,
+            question_id=question_id, tag=tag, names=known_names(home_root), actor=actor,
+        )
+    except (story_bank.StoryBankError, PrivateRecordError) as exc:
+        _story_fail(exc, as_json=as_json)
+        return
+    if as_json:
+        _emit({"ok": True, "schema_version": RESPONSE_SCHEMA, "profile_id": resolved_profile, "entry": entry.to_json()}, True, "")
+        return
+    click.echo(f"Added {entry.question_id} [{entry.tag}] to the story bank of {resolved_profile}.")
+
+
+@story_bank_group.command("edit")
+@click.argument("question_id")
+@click.option("--answer-text", "answer_text", help="The new answer, inline.")
+@click.option("--answer-file", "answer_file", help="The new answer FILE (or - for stdin).")
+@click.option("--question", "question", help="The question's own words.")
+@click.option("--tag", "tag", help="Your own tag; an empty value puts the automatic tag back.")
+@click.option("--updated-at", "updated_at", help="The updated_at of the entry you read; the edit is refused when it changed since. Default: the entry as it is now.")
+@_STORY_ACTOR
+@_story_options
+def story_bank_edit_command(
+    question_id: str, answer_text: str | None, answer_file: str | None, question: str | None, tag: str | None, updated_at: str | None,
+    actor: str, profile_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool,
+) -> None:
+    """Edit one of the profile's own entries: the answer, the question words and/or the tag."""
+
+    from ..private_records import PrivateRecordError
+    from . import story_bank
+    from .find_jobs.api.story_bank import RESPONSE_SCHEMA, known_names
+
+    try:
+        answer = _story_text(answer_text, answer_file, flag="answer")
+    except (OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="answer_invalid")
+        return
+    context = _story_context(profile_id, target_value, home_value, as_json=as_json)
+    if context is None:
+        return
+    home_root, target, resolved_profile = context
+    try:
+        entry = story_bank.edit_entry(
+            home_root=home_root, target=target, profile_id=resolved_profile, question_id=question_id,
+            answer=answer, question=question, tag=tag, names=known_names(home_root), actor=actor, expected_updated_at=updated_at,
+        )
+    except (story_bank.StoryBankError, PrivateRecordError) as exc:
+        _story_fail(exc, as_json=as_json)
+        return
+    if as_json:
+        _emit({"ok": True, "schema_version": RESPONSE_SCHEMA, "profile_id": resolved_profile, "entry": entry.to_json()}, True, "")
+        return
+    click.echo(f"Updated {entry.question_id} (revision {entry.revision}, written by {entry.written_by}).")
+
+
+@story_bank_group.command("delete")
+@click.argument("question_id")
+@click.option("--updated-at", "updated_at", help="The updated_at of the entry you read; the delete is refused when it changed since.")
+@click.option("--confirm", is_flag=True, help="Required: the entry is never listed, offered or sent again.")
+@_STORY_ACTOR
+@_story_options
+def story_bank_delete_command(
+    question_id: str, updated_at: str | None, confirm: bool, actor: str,
+    profile_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool,
+) -> None:
+    """Remove one of the profile's own entries from the bank."""
+
+    from ..private_records import PrivateRecordError
+    from . import story_bank
+    from .find_jobs.api.story_bank import RESPONSE_SCHEMA
+
+    if not confirm:
+        _fail(ValueError("deleting a story bank entry requires --confirm"), as_json=as_json, fallback="confirm_required")
+        return
+    context = _story_context(profile_id, target_value, home_value, as_json=as_json)
+    if context is None:
+        return
+    home_root, target, resolved_profile = context
+    try:
+        deleted = story_bank.delete_entry(
+            home_root=home_root, target=target, profile_id=resolved_profile, question_id=question_id, expected_updated_at=updated_at
+        )
+    except (story_bank.StoryBankError, PrivateRecordError) as exc:
+        _story_fail(exc, as_json=as_json)
+        return
+    if as_json:
+        _emit({"ok": True, "schema_version": RESPONSE_SCHEMA, "profile_id": resolved_profile, "deleted": deleted}, True, "")
+        return
+    click.echo(f"Deleted {deleted} from the story bank of {resolved_profile}.")
+
+
+@story_bank_group.command("share")
+@click.option("--with", "share_with", help="The profile ID whose bank this profile also reads.")
+@click.option("--off", "off", is_flag=True, help="Read only this profile's own bank.")
+@_STORY_ACTOR
+@_story_options
+def story_bank_share_command(
+    share_with: str | None, off: bool, actor: str, profile_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool
+) -> None:
+    """Show or set whose bank this profile also reads (one other profile, never implicit).
+
+    With neither --with nor --off it only shows the setting. To let another
+    profile read THIS one's bank, run it for that profile:
+    `gigai scout story-bank share --profile <the reader> --with <this one>`.
+    """
+
+    from . import story_bank
+    from .find_jobs.api.story_bank import RESPONSE_SCHEMA
+
+    if share_with and off:
+        _fail(ValueError("pass --with PROFILE_ID or --off, not both"), as_json=as_json, fallback="invalid_value")
+        return
+    context = _story_context(profile_id, target_value, home_value, as_json=as_json)
+    if context is None:
+        return
+    home_root, target, resolved_profile = context
+    try:
+        if share_with or off:
+            result = story_bank.set_sharing(home_root=home_root, target=target, profile_id=resolved_profile, share_with=None if off else share_with)
+        else:
+            result = story_bank.sharing(home_root=home_root, target=target, profile_id=resolved_profile)
+    except story_bank.StoryBankError as exc:
+        _story_fail(exc, as_json=as_json)
+        return
+    if as_json:
+        _emit({"ok": True, "schema_version": RESPONSE_SCHEMA, "profile_id": resolved_profile, "sharing": result}, True, "")
+        return
+    click.echo(
+        f"{resolved_profile} also reads the bank of {result['share_with']}." if result["share_with"] else f"{resolved_profile} reads only its own bank."
+    )
+    if result["read_by"]:
+        click.echo(f"Read by: {', '.join(result['read_by'])}.")  # type: ignore[arg-type]
 
 
 # --- Q1 (v0.1.9, SCOPE-ADD-2): `gigai scout watchlist add <url>` -----------

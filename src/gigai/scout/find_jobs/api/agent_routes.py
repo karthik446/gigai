@@ -26,6 +26,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
 from ....canonical import parse_json_bytes
+from ... import story_bank
 from ...experience_answers import read_answers
 from ...question_ids import normalize_question_id
 from ...quick_assess import QuickAssessError, list_quick_assessments
@@ -36,6 +37,15 @@ from . import openapi
 
 JOB_RESPONSE_SCHEMA = "scout-job-response:1"
 _logger = logging.getLogger("gigai.scout.server")
+
+
+def _has_profiles(resolved) -> bool:
+    from ... import profile_records
+
+    try:
+        return bool(profile_records.list_profiles(resolved))
+    except Exception:  # noqa: BLE001 - unreadable profiles: treat the gig as profile-less
+        return False
 
 
 def _link(method: str, path: str, body: dict[str, object] | None = None) -> dict[str, object]:
@@ -194,19 +204,41 @@ class AgentRoutesMixin:
             return None
 
         assessments = [*run_assessments, *(_quick_entry(item) for item in quick_items)]
-        answers = read_answers(home_root=home_root, requested_target=target)
+        # 0110-034: an assessment's questions are answered by ITS profile's story bank
+        # (own answers plus a shared profile's), never by another profile's. A gig with
+        # no profile keeps the gig-wide answers; a pasted resume has none.
+        gig_wide: dict[str, object] | None = None
+        banks: dict[str, tuple[story_bank.BankEntry, ...]] = {}
         open_questions: list[dict[str, object]] = []
         answered: dict[str, dict[str, object]] = {}
+        bank_suggestions: list[dict[str, object]] = []
         seen: set[str] = set()
         for entry in assessments:
+            entry_profile = entry.get("profile_id")
+            entries: tuple[story_bank.BankEntry, ...] = ()
+            answers: dict[str, object] = {}
+            if isinstance(entry_profile, str) and entry_profile != "ephemeral":
+                if entry_profile not in banks:
+                    try:
+                        banks[entry_profile] = story_bank.read_bank(home_root=home_root, target=target, profile_id=entry_profile, with_postings=False)
+                    except Exception:  # noqa: BLE001 - an unreadable bank answers nothing
+                        banks[entry_profile] = ()
+                entries = banks[entry_profile]
+                answers = {item.question_id: item for item in entries}
+            elif entry_profile is None:
+                if gig_wide is None:
+                    gig_wide = dict(read_answers(home_root=home_root, requested_target=target)) if resolved is None or not _has_profiles(resolved) else {}
+                answers = gig_wide
             for question in entry.get("structured_questions") or []:  # type: ignore[union-attr]
                 normalized = normalize_question_id(str(question["question_id"]))  # type: ignore[index]
                 prior = answers.get(normalized)
                 if prior is not None:
-                    answered[normalized] = {"question_id": prior.question_id, "prompt": prior.prompt, "answer": prior.answer}
+                    text = getattr(prior, "question", None) or getattr(prior, "prompt", "")
+                    answered[normalized] = {"question_id": normalized, "prompt": text, "answer": prior.answer}  # type: ignore[attr-defined]
                 elif normalized not in seen:
                     seen.add(normalized)
                     open_questions.append(dict(question))  # type: ignore[arg-type]
+                    bank_suggestions.extend(story_bank.suggestions_for([question], entries))  # type: ignore[list-item]
 
         profile_id = getattr(getattr(joins, "profile", None), "profile_id", None)
         if profile_id is None and quick_items and quick_items[0].resume.profile_id:
@@ -261,6 +293,7 @@ class AgentRoutesMixin:
             "h1b": row.get("h1b"),
             "assessments": assessments,
             "open_questions": open_questions,
+            "bank_suggestions": bank_suggestions,
             "answers": [answered[key] for key in sorted(answered)],
             "tailored_resumes": tailored,
             "job_state": state,

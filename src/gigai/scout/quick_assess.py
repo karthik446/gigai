@@ -70,10 +70,9 @@ from ..adapters.port import ModelInvocationError
 from ..canonical import digest_imported_bytes, parse_json_bytes
 from ..config import GigAIConfig, load_config
 from ..model_targets import ModelTargetResolutionError
-from .assessment_core import INSTRUCTIONS_DIGEST, AssessContext, AssessJob
-from .assessment_core import PriorAnswer as CorePriorAnswer
+from .assessment_core import INSTRUCTIONS_DIGEST, AssessJob, build_assess_context
 from .assessment_core import POSTING_INCOMPLETE_MESSAGE, assess_once
-from .experience_answers import read_answers
+from . import story_bank
 from .find_jobs.assess_contracts import (
     ORIGIN_QUICK_ASSESS,
     AssessmentBody,
@@ -575,22 +574,25 @@ def run_quick_assessment(
         raise QuickAssessError("target_unavailable", "this folder is not bound to a GigAI project") from exc
     previous = _read_stored(path)
 
-    # 4b. Prior answers (P3's Q&A loop): every answered ``experience_qa``
-    #     question in this gig, rendered into the prompt so the model never
-    #     re-asks something the operator already answered (assess.md rule
-    #     6). A pasted-text assess with no bound gig (``_resolve_workpad``
-    #     never ran) has none to offer -- that is fine, not fatal: prior
-    #     answers are cross-posting convenience, not a requirement.
-    prior_answers: tuple[CorePriorAnswer, ...] = ()
-    try:
-        gig_resolved = resolved if resolved is not None else _resolve_workpad(home_root, target)
-        stored_answers = read_answers(home_root=home_root, requested_target=target, gig_id=gig_resolved.gig_id)
-        prior_answers = tuple(
-            CorePriorAnswer(question_id=item.question_id, prompt=item.prompt, answer=item.answer)
-            for item in stored_answers.values()
-        )
-    except QuickAssessError:
-        pass
+    # 4b. Prior answers (P3's Q&A loop), per profile since 0110-034: the
+    #     answered questions of THIS profile's story bank (its own, plus the
+    #     bank of the one profile it is set to share with), rendered into the
+    #     prompt so the model never re-asks something already answered
+    #     (assess.md rule 8). ``bank_answers`` is the same bank as short
+    #     lines (id, the question as asked, a one-line answer) for the STORY
+    #     BANK paragraph: a requirement worded differently reuses the answer
+    #     in this same call. A pasted resume has no profile: it reads the
+    #     SELECTED profile's bank (the person at the keyboard), as it read the
+    #     gig's answers before. No gig or no profile: none, not fatal.
+    #     One builder for every path that renders the assess prompt
+    #     (``story_bank.assess_bank``: this, assess-all and a find-jobs run).
+    bank = story_bank.assess_bank(
+        home_root=home_root,
+        target=target,
+        profile_id=story_bank.reader_profile_id(home_root=home_root, target=target, profile_id=resume.profile_id),
+        resume_text=resume.text,
+    )
+    bank_entries = bank.entries
 
     # 5. Model target -> adapter (C1/C11), then the shared core (P1).
     model_target = request.model_target or _default_model_target(target)
@@ -600,13 +602,13 @@ def run_quick_assessment(
         attempt = assess_once(
             binding,
             AssessJob(title=job.title, company=job.company, location=job.location, posting_text=job.text),
-            AssessContext(
+            build_assess_context(
                 resume_text=resume.text,
                 visa_sponsorship_required=preferences.visa_sponsorship_required,
                 countries=tuple(preferences.countries),
                 titles=tuple(preferences.titles),
-                prior_answers=prior_answers,
                 location=candidate_location,
+                bank=bank,
             ),
             parse=_parse_body,
         )
@@ -658,6 +660,13 @@ def run_quick_assessment(
         origin=_origin_for(request, previous),
     )
     atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
+    if bank_entries:
+        # 0110-034: which bank answers this assessment cited ("Story bank <id>: ...").
+        story_bank.record_reuse(
+            home_root=home_root, target=target, entries=bank_entries,
+            evidence=[evidence for row in body.matrix for evidence in row.resume_evidence],
+            posting={"job_identity": job.job_identity, "title": job.title, "company": job.company, "url": job.source_url},
+        )
     return response
 
 

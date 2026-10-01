@@ -373,6 +373,45 @@ def _test_model_prompt(request: httpx.Request) -> str:
 #: for this file).
 _TEST_MODEL_ANSWERED_GCP_MARKER = "cloud:gcp:"
 
+#: 0110-034 (story bank): a posting-text marker for the reuse journeys,
+#: ``GIGAI-TEST-MODEL: bank <bank_question_id> else <asked_question_id>``.
+#: The fixture then answers like a model that follows assess.md's STORY BANK
+#: paragraph: when the rendered prompt offers a bank line for
+#: ``<bank_question_id>`` (``- <id> | ...``), the requirement is met, its
+#: evidence cites ``Story bank <id>: <the line's answer>`` and nothing is
+#: asked; otherwise it asks ``<asked_question_id>`` (the same fact, worded
+#: differently). ``... else <asked_question_id> always`` asks even when the
+#: bank line is there (a model that did not reuse it: the near-match path).
+_TEST_MODEL_BANK_MARKER = re.compile(
+    r"GIGAI-TEST-MODEL: bank (?P<bank>[a-z0-9._-]+:[a-z0-9._-]+) else (?P<asked>[a-z0-9._-]+:[a-z0-9._-]+)(?P<always> always)?"
+)
+
+
+def _test_model_bank_reply(prompt: str, marker: "re.Match[str]") -> dict[str, object]:
+    bank_id, asked_id = marker.group("bank"), marker.group("asked")
+    line = re.search(r"^- " + re.escape(bank_id) + r" \|(?:.*\|)? answer: (?P<answer>.*)$", prompt, re.MULTILINE)
+    requirement = "Hands-on experience with the platform this role runs on"
+    python_row = {"requirement": "Python", "class": "hard", "resume_evidence": ["Built Python services"], "status": "met"}
+    if line is not None and not marker.group("always"):
+        return {
+            "verdict": "matched_above_threshold",
+            "matrix": [
+                python_row,
+                {"requirement": requirement, "class": "askable", "resume_evidence": [f"Story bank {bank_id}: {line.group('answer')}"], "status": "met"},
+            ],
+            "suggestions": [],
+            "questions": [],
+            "not_a_match_reason": None,
+        }
+    return {
+        "verdict": "pending_user_answers",
+        "matrix": [python_row, {"requirement": requirement, "class": "askable", "resume_evidence": [], "status": "unclear"}],
+        "suggestions": [],
+        "questions": [{"question_id": asked_id, "question": "Do you have hands-on Google Cloud Platform experience?", "requirement": requirement}],
+        "not_a_match_reason": None,
+    }
+
+
 #: P9b (v0.1.9): the first line of every ``api/extract.py`` prompt
 #: (``extract.EXTRACT_PROMPT_HEADER`` -- the literal is repeated here so the
 #: fixture never imports the route module; ``test_resume_extract_api.py``
@@ -694,6 +733,24 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
                     "done_reason": "stop",
                     "prompt_eval_count": 10,
                     "eval_count": 14,
+                },
+                request=request,
+            )
+        bank_marker = _TEST_MODEL_BANK_MARKER.search(prompt)
+        if bank_marker is not None:
+            return httpx.Response(
+                200,
+                json={
+                    "model": TEST_MODEL_NAME,
+                    "created_at": "2026-10-01T00:00:00Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps(_test_model_bank_reply(prompt, bank_marker), separators=(",", ":")),
+                    },
+                    "done": True,
+                    "done_reason": "stop",
+                    "prompt_eval_count": 10,
+                    "eval_count": 20,
                 },
                 request=request,
             )

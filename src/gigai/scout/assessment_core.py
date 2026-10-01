@@ -54,6 +54,16 @@ _MAX_PROMPT_VALIDATION_ERROR = 300
 _PLACEHOLDER = re.compile(r"\{\{([a-z_]+)\}\}")
 _VALIDATION_PLACEHOLDER = "{{validation_error}}"
 _PRIOR_ANSWERS_PLACEHOLDER = "{{prior_answers}}"
+_BANK_ANSWERS_PLACEHOLDER = "{{bank_answers}}"
+
+#: The name of the shipped ``assess.md`` wording. v4 (0110-034) adds the
+#: STORY BANK paragraph: the profile's answered questions (id, the question
+#: as asked, a one-line answer) and the rule to reuse one that covers a
+#: requirement instead of asking again. The paragraph is dropped when no
+#: bank answer is offered, so such a prompt renders exactly as v3-r2 did.
+#: ``tests/behaviors/scout_find_jobs/test_assessment_core.py`` pins it with
+#: the file's digest.
+ASSESS_PROMPT_VERSION = "assess-prompt-v4"
 
 # Exception mapping at the model boundary, exactly as the pre-P1 loop had it:
 # a transport/adapter failure whose code is one of these is the operator's own
@@ -103,6 +113,17 @@ class PriorAnswer:
 
 
 @dataclass(frozen=True)
+class BankAnswer:
+    """One story bank entry as the prompt gets it (0110-034): the id, the
+    question as it was asked ("" when only the id is known) and a one-line,
+    privacy-checked answer (``story_bank.prompt_summaries`` builds them)."""
+
+    question_id: str
+    question: str
+    summary: str
+
+
+@dataclass(frozen=True)
 class AssessContext:
     """The candidate side of one assessment."""
 
@@ -130,6 +151,60 @@ class AssessContext:
     # ``location:<country>_region`` id). Defaults empty so every earlier
     # caller and golden keeps rendering the same way.
     location: str = ""
+    # assess-prompt-v4 (0110-034): the profile's story bank, capped and
+    # privacy-checked by the caller. Empty by default: the STORY BANK
+    # paragraph is then dropped, like {{prior_answers}}, so every earlier
+    # caller (the run's assess node, the goldens) renders the same way.
+    bank_answers: tuple[BankAnswer, ...] = ()
+
+
+def build_assess_context(
+    *,
+    resume_text: str,
+    visa_sponsorship_required: bool = False,
+    countries: tuple[str, ...] = (),
+    titles: tuple[str, ...] = (),
+    location: str = "",
+    bank: object | None = None,
+) -> AssessContext:
+    """The candidate side of one assessment: the ONE builder every path uses.
+
+    0110-034b / 0110-035: the job page's quick assessment, assess-all (which
+    goes through it) and a find-jobs run's assess node all build their
+    prompt's context here, so no path can render a prompt that lacks what
+    another sends: the candidate's constraints (sponsorship need, eligible
+    countries, own location, target titles) and the profile's story bank
+    (``bank``: a ``story_bank.AssessBank``, or ``None`` for no bank).
+    """
+
+    return AssessContext(
+        resume_text=resume_text,
+        visa_sponsorship_required=bool(visa_sponsorship_required),
+        countries=tuple(countries),
+        titles=tuple(titles),
+        prior_answers=tuple(getattr(bank, "prior_answers", ()) or ()),
+        location=location or "",
+        bank_answers=tuple(getattr(bank, "bank_answers", ()) or ()),
+    )
+
+
+def constraints_digest(*, visa_sponsorship_required: bool, countries: tuple[str, ...] = (), location: str = "") -> str:
+    """A digest of the candidate constraints a verdict depends on (rules 4 and 5).
+
+    Sponsorship need, eligible countries (order and case do not matter) and
+    the candidate's own location. Target titles are left out on purpose:
+    rule 6 makes them context only, never a reason for a verdict, so a title
+    edit does not void an assessment. A find-jobs run seals this with its
+    assessments; a later run does not reuse an unchanged posting's
+    assessment made under other constraints.
+    """
+
+    value = {
+        "visa_sponsorship_required": bool(visa_sponsorship_required),
+        "countries": sorted({item.strip().upper() for item in countries if item and item.strip()}),
+        "location": " ".join((location or "").split()),
+    }
+    return digest_imported_bytes(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8"))
 
 
 @dataclass(frozen=True)
@@ -201,12 +276,20 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
         "prior_answers": "\n".join(
             f"- {item.question_id}: {item.answer}" for item in ctx.prior_answers
         ),
+        "bank_answers": "\n".join(
+            f"- {item.question_id} | asked: {item.question} | answer: {item.summary}"
+            if item.question
+            else f"- {item.question_id} | answer: {item.summary}"
+            for item in ctx.bank_answers
+        ),
     }
     blocks = load_assess_instructions().split("\n\n")
     if not validation_error:
         blocks = [block for block in blocks if _VALIDATION_PLACEHOLDER not in block]
     if not ctx.prior_answers:
         blocks = [block for block in blocks if _PRIOR_ANSWERS_PLACEHOLDER not in block]
+    if not ctx.bank_answers:
+        blocks = [block for block in blocks if _BANK_ANSWERS_PLACEHOLDER not in block]
 
     def fill(match: re.Match[str]) -> str:
         key = match.group(1)
@@ -685,13 +768,17 @@ def _normalize_and_strip(decoded: Mapping[str, object]) -> tuple[dict[str, objec
 
 
 __all__ = [
+    "ASSESS_PROMPT_VERSION",
     "AssessAttempt",
     "AssessContext",
     "AssessJob",
+    "BankAnswer",
     "INSTRUCTIONS_DIGEST",
     "POSTING_INCOMPLETE_MESSAGE",
     "PriorAnswer",
     "assess_once",
+    "build_assess_context",
+    "constraints_digest",
     "posting_looks_incomplete",
     "invoke_json_once",
     "load_assess_instructions",

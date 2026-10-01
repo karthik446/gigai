@@ -1501,6 +1501,14 @@ class _PriorAssessment:
     resume_revision_id: str
     profile_id: str | None
     run_date: str | None
+    # 0110-034b: the story bank marks the producing run sealed with its
+    # output (``AssessOutput.story_bank.entries``); ``None`` for a run from
+    # before the bank reached runs, which reads as "saw an empty bank".
+    bank_marks: Mapping[str, str] | None = None
+    # 0110-035: the assess prompt version and the candidate-constraints
+    # digest the producing run sealed; ``None`` for a run sealed before them.
+    prompt_version: str | None = None
+    constraints_digest: str | None = None
 
 
 def _prior_assessments(
@@ -1562,8 +1570,11 @@ def _prior_assessments(
             run_date = datetime.fromtimestamp(output_file.stat().st_mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
         except OSError:
             pass
+        bank_marks = None if output.story_bank is None else output.story_bank.entries
         for assessment in output.assessments:
-            result[assessment.posting.normalized_url] = _PriorAssessment(assessment, resume_revision_id, profile_id, run_date)
+            result[assessment.posting.normalized_url] = _PriorAssessment(
+                assessment, resume_revision_id, profile_id, run_date, bank_marks, output.prompt_version, output.constraints_digest
+            )
     return result
 
 
@@ -2025,6 +2036,29 @@ def _acquire_node_body(
     current_resume_revision_id = None if current_identity is None else current_identity.resume_revision_id
     current_profile_id = None if current_identity is None else current_identity.profile_id
     prior_assessments = _prior_assessments(resolved.path, context.run_id, default_profile_id=default_profile_id)
+    # 0110-034b / 0110-035: an earlier assessment is not carried forward
+    # when what it was made with has changed: the assess prompt version, the
+    # candidate's constraints (sponsorship need, eligible countries, own
+    # location), or the profile's story bank in a way that could change it
+    # (an open question the bank can now answer; a cited bank answer edited,
+    # deleted or unshared). Same rule, same function as assess's own
+    # unchanged skip (``proposal_execution._basis_stale``). No home/target
+    # (direct-call tests) or no profile: no bank.
+    from .. import story_bank
+    from ..assessment_core import constraints_digest
+    from ..proposal_execution import _basis_stale
+
+    current_constraints = constraints_digest(
+        visa_sponsorship_required=input.config.visa_sponsorship_required,
+        countries=tuple(input.config.countries or ()),
+        location=input.config.location or "",
+    )
+
+    bank = (
+        story_bank.assess_bank(home_root=home_root, target=target, profile_id=current_profile_id)
+        if home_root is not None and target is not None
+        else story_bank.AssessBank(None)
+    )
     outcomes: dict[str, RowOutcome] = {}
     candidates: list[PostingRow] = []
     carried_forward: dict[str, _PriorAssessment] = {}
@@ -2054,6 +2088,7 @@ def _acquire_node_body(
                 # must keep working unchanged, not be newly blocked by an
                 # unattributable-profile false negative.
                 and prior.profile_id == current_profile_id
+                and not _basis_stale(prior, bank=bank, constraints=current_constraints)
             ):
                 carried_forward[row.normalized_url] = prior
             else:

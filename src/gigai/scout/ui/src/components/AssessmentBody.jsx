@@ -3,14 +3,21 @@ import RequirementActions from "./RequirementActions.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { placeQuestions } from "../answersModel.js";
 import { requirementStatusLabel, sortMatrixRows } from "../jobModel.js";
+import { suggestionNotice } from "../storyBankModel.js";
 
 // One open question, inside the requirement row it settles (uat-batch1 N5):
 // the question's own words and an answer box. The id is a normalized token
 // (question_ids.py), so it is never shown on its own; it sits in the
 // tooltip. Nothing is sent from here: the ONE "Re-assess" above the table
 // saves every filled box (answerDrafts.js).
-function QuestionBox({ question, state, value, onChange, disabled, showRequirement = false }) {
+//
+// 0110-034: when the profile's story bank holds a near match for the
+// question, the box says "We already know: <answer>" with "Use it": that
+// fills the box, and the operator confirms it (Re-assess) or edits it
+// first. Nothing is filled in or saved without that click.
+function QuestionBox({ question, state, value, onChange, disabled, showRequirement = false, onUseSuggestion }) {
   const inputId = `answer-${question.question_id}`;
+  const notice = suggestionNotice(state && state.suggestion);
   return (
     <div className="row-question" data-question-id={question.question_id}>
       <label htmlFor={inputId} title={question.question_id}>
@@ -29,6 +36,16 @@ function QuestionBox({ question, state, value, onChange, disabled, showRequireme
       {state && state.recorded && !state.isNew && state.filled && (
         <p className="muted question-prior">Your saved answer. Edit it, or re-assess with it as is.</p>
       )}
+      {notice && onUseSuggestion && (
+        <div className="question-suggestion" data-role="bank-suggestion">
+          <p>{notice.text}</p>
+          <p className="muted small">{notice.source}</p>
+          <button type="button" className="button small secondary" data-action="use-suggestion" disabled={disabled} onClick={() => onUseSuggestion(question.question_id)}>
+            {notice.action}
+          </button>
+        </div>
+      )}
+      {state && state.fromBank && <p className="muted question-prior">From your story bank. Edit it if this job needs a different answer, then re-assess.</p>}
     </div>
   );
 }
@@ -84,8 +101,9 @@ export default function AssessmentBody({
   tailor,
   showVerdict = true,
   questionsFirst = false,
+  profileId,
 }) {
-  const own = useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable });
+  const own = useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable, profileId });
   const answers = controller || own;
   const { rows: questionsByRow, unplaced } = placeQuestions(assessment.matrix, answers.questions);
   const stateFor = new Map(answers.states.map((state) => [state.question_id, state]));
@@ -102,6 +120,7 @@ export default function AssessmentBody({
         state={stateFor.get(question.question_id)}
         value={answers.valueFor(question.question_id)}
         onChange={answers.setDraft}
+        onUseSuggestion={answers.applySuggestion}
         disabled={busy}
       />
     ));
@@ -191,6 +210,7 @@ export default function AssessmentBody({
                 state={stateFor.get(question.question_id)}
                 value={answers.valueFor(question.question_id)}
                 onChange={answers.setDraft}
+                onUseSuggestion={answers.applySuggestion}
                 disabled={busy}
                 showRequirement
               />

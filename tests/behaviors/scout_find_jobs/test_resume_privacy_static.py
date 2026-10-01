@@ -48,6 +48,7 @@ _READER_ALLOWLIST: dict[tuple[str, str, str], str] = {
     ("gigai.scout.find_jobs.market_acquisition", "_rank_rows_with_status", "_read_resume_text_for_rank"): "model_rank.rank_postings -> rank_digest.resume_digest",
     ("gigai.scout.find_jobs.resume_input", "resolve_resume", "resume_for_profile"): "returned to its callers (allowlisted here)",
     ("gigai.scout.find_jobs.resume_input", "resume_for_profile", "read_pinned_resume"): "returned to its callers (allowlisted here)",
+    ("gigai.scout.resume_pdf", "saved_header", "current_resume"): "local PDF header prefill (0110-032), never sent to a model",
     ("gigai.scout.interview_prep.prep", "build_prep", "current_resume"): "categories._prompt (model_resume)",
     ("gigai.scout.profile_records", "_resolve_newest_resume_for_gig", "read_record"): "hashed only",
     ("gigai.scout.proposal_execution", "_assess_node_body", "_read_pinned_resume"): "assessment_core.render_assess_prompt (model_resume)",
@@ -72,11 +73,15 @@ _BUILDERS: dict[tuple[str, str], frozenset[str]] = {
 _DISPLAY_IMPORTERS: dict[str, frozenset[str]] = {
     "gigai.scout.resume_display": frozenset({
         "gigai.scout.resume_pdf", "gigai.scout.find_jobs.api.resume_display", "gigai.scout.find_jobs.api.tailored_resumes",
+        # 0110-034: ``known_names`` reads the saved name for the story bank's LOCAL personal-info check
+        # (an answer holding it is refused); the name is never put in a prompt. ``story_bank.py`` itself,
+        # which builds the model-bound bank lines, does not import the display settings.
+        "gigai.scout.find_jobs.api.story_bank",
     }),
     "gigai.scout.find_jobs.api.resume_display": frozenset({
         "gigai.scout.find_jobs.api.server", "gigai.scout.find_jobs.api.tailored_resumes",
     }),
-    "gigai.scout.resume_pdf": frozenset({"gigai.scout.find_jobs.api.tailored_resumes"}),
+    "gigai.scout.resume_pdf": frozenset({"gigai.scout.find_jobs.api.tailored_resumes", "gigai.scout.scout_cli"}),  # scout_cli: `scout resume pdf` renders locally (0110-032)
 }
 
 

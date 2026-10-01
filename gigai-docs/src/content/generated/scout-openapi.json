@@ -100,9 +100,19 @@
     },
     "/api/answers": {
       "get": {
-        "description": "Every stored answer.",
+        "description": "The answers one profile may reuse (its own, plus a shared profile's). Never another profile's answers unless that profile's bank is shared (PUT /api/story-bank/sharing). For tags, dates and the jobs that used each answer read GET /api/story-bank.",
         "operationId": "get_api_answers",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Whose answers; omitted = the selected profile.",
+            "in": "query",
+            "name": "profile_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -141,7 +151,7 @@
               "application/json": {
                 "example": {
                   "error": {
-                    "code": "target_unavailable",
+                    "code": "profile_not_found",
                     "message": "..."
                   }
                 },
@@ -150,7 +160,23 @@
                 }
               }
             },
-            "description": "target_unavailable"
+            "description": "profile_not_found, target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key"
           }
         },
         "summary": "List stored answers",
@@ -161,21 +187,42 @@
         "x-gigai-external": "none"
       },
       "post": {
-        "description": "Answer an assessment question; with reassess the job is assessed again. Storing the answer is local; the model runs only when `reassess` is given.",
+        "description": "Answer an assessment question; with reassess the job is assessed again. Storing the answer is local; the model runs only when `reassess` is given. The answer lands in one profile's story bank (GET /api/story-bank) and is reused by that profile's later assessments. An answer holding an email, phone, link, street address or the saved name is refused with 422 personal_info_refused.",
         "operationId": "post_api_answers",
         "parameters": [],
         "requestBody": {
           "content": {
             "application/json": {
               "example": {
-                "answer": "Yes",
-                "question_id": "auth:work_authorization"
+                "answer": "Yes: two years of batch workloads on GCP.",
+                "question": "Have you run workloads on GCP?",
+                "question_id": "cloud:gcp"
               },
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "actor": {
+                    "description": "Who writes: recorded on the story bank entry. Also the X-GigAI-Actor header.",
+                    "enum": [
+                      "operator",
+                      "agent"
+                    ],
+                    "type": "string"
+                  },
                   "answer": {
                     "description": "Your answer.",
+                    "type": "string"
+                  },
+                  "from_bank": {
+                    "description": "When the answer confirms a `bank_suggestions` near match: that suggestion's `bank_question_id`.",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "description": "Whose story bank gets the answer; omitted = the profile the reassess job was assessed for, else the selected profile.",
+                    "type": "string"
+                  },
+                  "question": {
+                    "description": "The question's own words, kept with the answer in the story bank.",
                     "type": "string"
                   },
                   "question_id": {
@@ -183,8 +230,8 @@
                     "type": "string"
                   },
                   "reassess": {
-                    "description": "A job identity to assess again with the answer.",
-                    "type": "string"
+                    "description": "`{\"job_identity\": \"<id>\"}`: a job to assess again with the answer.",
+                    "type": "object"
                   }
                 },
                 "required": [
@@ -202,7 +249,11 @@
             "content": {
               "application/json": {
                 "example": {
-                  "answers": []
+                  "profile_id": "prof_1",
+                  "question_id": "cloud:gcp",
+                  "reassessed": null,
+                  "record_id": "rec_1",
+                  "revision_id": "rev_1"
                 },
                 "schema": {
                   "additionalProperties": true,
@@ -236,7 +287,7 @@
                 }
               }
             },
-            "description": "reassess_not_found, target_unavailable"
+            "description": "reassess_not_found, profile_not_found, target_unavailable"
           },
           "415": {
             "content": {
@@ -262,7 +313,7 @@
                 }
               }
             },
-            "description": "unknown_key, wrong_type, answer_invalid, reassess_unavailable"
+            "description": "unknown_key, wrong_type, answer_invalid, personal_info_refused, reassess_unavailable"
           }
         },
         "summary": "Answer an assessment question",
@@ -3151,7 +3202,7 @@
     },
     "/api/runs/{run_id}/posting": {
       "get": {
-        "description": "One posting of a run, complete with its text and assessment. For a job across runs and quick assessments use GET /api/jobs?url= instead. not_assessed_reason is one of: unchanged, duplicate, failed, over_cap, role_mismatch, no_resume, model_unavailable, model_denied, location_mismatch, sponsorship_excluded, model_output_invalid, posting_incomplete, region_only, published_too_old, work_mode_mismatch (posting_incomplete: the requirement list looked cut off, so no verdict was given). job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed.",
+        "description": "One posting of a run, complete with its text and assessment. For a job across runs and quick assessments use GET /api/jobs?url= instead. `bank_suggestions` is added when a question this assessment left open has a near match in the run profile's story bank. not_assessed_reason is one of: unchanged, duplicate, failed, over_cap, role_mismatch, no_resume, model_unavailable, model_denied, location_mismatch, sponsorship_excluded, model_output_invalid, posting_incomplete, region_only, published_too_old, work_mode_mismatch (posting_incomplete: the requirement list looked cut off, so no verdict was given). job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed.",
         "operationId": "get_api_runs_run_id_posting",
         "parameters": [
           {
@@ -3482,7 +3533,7 @@
     },
     "/api/runs/{run_id}/results": {
       "get": {
-        "description": "A run's rows with assessments; with ?limit=N a page of them, without text. Each row carries job_state. job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed.",
+        "description": "A run's rows with assessments; with ?limit=N a page of them, without text. Each row carries job_state. `bank_suggestions` (when a question the run's assessments left open has a near match in the run profile's story bank) is the same list as on assess responses. job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed.",
         "operationId": "get_api_runs_run_id_results",
         "parameters": [
           {
@@ -3637,7 +3688,7 @@
     },
     "/api/settings/background": {
       "get": {
-        "description": "The background settings: hourly refresh, model tagging, snapshot download. `settings` is what the project's settings file says (a key it does not hold shows its default): the values a form edits. `effective` is what the background jobs act on now, each block with the `source` that decided it: default, setting, environment (an environment variable overrides the file) or settings_unreadable. `readable` is false when the file exists and cannot be read: every background job is then off. `sources.auto_refresh` off stops all background work, the model tagging included; `tagging.model_enabled` lets a model tag titles the rules cannot place, `tagging.backfill_enabled` also tags titles no active profile can reach, with `tagging.tag_backfill_model`; `snapshot.enabled` allows the metadata snapshot download from `snapshot.manifest_url`.",
+        "description": "The background settings: hourly refresh, model tagging, snapshot download. `settings` is what the project's settings file says (a key it does not hold shows its default): the values a form edits. `effective` is what the background jobs act on now, each block with the `source` that decided it: default, setting, environment (an environment variable overrides the file) or settings_unreadable. `readable` is false when the file exists and cannot be read: every background job is then off. `sources.auto_refresh` off stops all background work, the model tagging included; `sources.check_times` is when the background checks run: `weekdays` and `weekends`, each 1 to 12 24-hour HH:MM times in the machine's local time (in `effective` with its own `source`, and `default`: the times a reset puts back); `tagging.model_enabled` lets a model tag titles the rules cannot place, `tagging.backfill_enabled` also tags titles no active profile can reach, with `tagging.tag_backfill_model`; `snapshot.enabled` allows the metadata snapshot download from `snapshot.manifest_url`.",
         "operationId": "get_api_settings_background",
         "parameters": [],
         "responses": {
@@ -3653,6 +3704,39 @@
                     },
                     "sources": {
                       "auto_refresh": true,
+                      "check_times": {
+                        "default": {
+                          "weekdays": [
+                            "03:00",
+                            "07:00",
+                            "09:00",
+                            "11:00",
+                            "13:00",
+                            "15:00",
+                            "17:00",
+                            "19:00"
+                          ],
+                          "weekends": [
+                            "09:00",
+                            "18:00"
+                          ]
+                        },
+                        "source": "default",
+                        "weekdays": [
+                          "03:00",
+                          "07:00",
+                          "09:00",
+                          "11:00",
+                          "13:00",
+                          "15:00",
+                          "17:00",
+                          "19:00"
+                        ],
+                        "weekends": [
+                          "09:00",
+                          "18:00"
+                        ]
+                      },
                       "source": "default"
                     },
                     "tagging": {
@@ -3670,7 +3754,23 @@
                       "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json"
                     },
                     "sources": {
-                      "auto_refresh": true
+                      "auto_refresh": true,
+                      "check_times": {
+                        "weekdays": [
+                          "03:00",
+                          "07:00",
+                          "09:00",
+                          "11:00",
+                          "13:00",
+                          "15:00",
+                          "17:00",
+                          "19:00"
+                        ],
+                        "weekends": [
+                          "09:00",
+                          "18:00"
+                        ]
+                      }
                     },
                     "tagging": {
                       "backfill_enabled": false,
@@ -3730,7 +3830,7 @@
         "x-gigai-external": "none"
       },
       "put": {
-        "description": "Change background settings. Send only the keys to change; at least one. Every other key of the project's settings.json is kept, and the file is replaced in one step. The refresh thread reads the file at every look and is woken by this call, so turning `sources.auto_refresh` off stops the hourly refresh and the model tagging at once (an update already running finishes). 409 settings_unreadable: the stored file is not one Scout can read; it is left as it is. The answer is the GET body after the change. `settings` is what the project's settings file says (a key it does not hold shows its default): the values a form edits. `effective` is what the background jobs act on now, each block with the `source` that decided it: default, setting, environment (an environment variable overrides the file) or settings_unreadable. `readable` is false when the file exists and cannot be read: every background job is then off. `sources.auto_refresh` off stops all background work, the model tagging included; `tagging.model_enabled` lets a model tag titles the rules cannot place, `tagging.backfill_enabled` also tags titles no active profile can reach, with `tagging.tag_backfill_model`; `snapshot.enabled` allows the metadata snapshot download from `snapshot.manifest_url`.",
+        "description": "Change background settings. Send only the keys to change; at least one. Every other key of the project's settings.json is kept, and the file is replaced in one step. The refresh thread reads the file at every look and is woken by this call, so turning `sources.auto_refresh` off stops the background checks and the model tagging at once (an update already running finishes), and new `sources.check_times` decide the next check. A list of check times is stored sorted, without repeats; an empty list, more than 12 times or anything that is not HH:MM (00:00 to 23:59) is 422 invalid_value. 409 settings_unreadable: the stored file is not one Scout can read; it is left as it is. The answer is the GET body after the change. `settings` is what the project's settings file says (a key it does not hold shows its default): the values a form edits. `effective` is what the background jobs act on now, each block with the `source` that decided it: default, setting, environment (an environment variable overrides the file) or settings_unreadable. `readable` is false when the file exists and cannot be read: every background job is then off. `sources.auto_refresh` off stops all background work, the model tagging included; `sources.check_times` is when the background checks run: `weekdays` and `weekends`, each 1 to 12 24-hour HH:MM times in the machine's local time (in `effective` with its own `source`, and `default`: the times a reset puts back); `tagging.model_enabled` lets a model tag titles the rules cannot place, `tagging.backfill_enabled` also tags titles no active profile can reach, with `tagging.tag_backfill_model`; `snapshot.enabled` allows the metadata snapshot download from `snapshot.manifest_url`.",
         "operationId": "put_api_settings_background",
         "parameters": [],
         "requestBody": {
@@ -3749,7 +3849,7 @@
                     "type": "object"
                   },
                   "sources": {
-                    "description": "{auto_refresh: boolean}: the hourly background refresh of the sources.",
+                    "description": "{auto_refresh: boolean, check_times: {weekdays: [HH:MM, ...], weekends: [HH:MM, ...]}}: the background checks of the sources and the local times they run at. A day left out keeps its times; null for a day, or for check_times, puts the default times back.",
                     "type": "object"
                   },
                   "tagging": {
@@ -3777,6 +3877,39 @@
                     },
                     "sources": {
                       "auto_refresh": true,
+                      "check_times": {
+                        "default": {
+                          "weekdays": [
+                            "03:00",
+                            "07:00",
+                            "09:00",
+                            "11:00",
+                            "13:00",
+                            "15:00",
+                            "17:00",
+                            "19:00"
+                          ],
+                          "weekends": [
+                            "09:00",
+                            "18:00"
+                          ]
+                        },
+                        "source": "default",
+                        "weekdays": [
+                          "03:00",
+                          "07:00",
+                          "09:00",
+                          "11:00",
+                          "13:00",
+                          "15:00",
+                          "17:00",
+                          "19:00"
+                        ],
+                        "weekends": [
+                          "09:00",
+                          "18:00"
+                        ]
+                      },
                       "source": "default"
                     },
                     "tagging": {
@@ -3794,7 +3927,23 @@
                       "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json"
                     },
                     "sources": {
-                      "auto_refresh": true
+                      "auto_refresh": true,
+                      "check_times": {
+                        "weekdays": [
+                          "03:00",
+                          "07:00",
+                          "09:00",
+                          "11:00",
+                          "13:00",
+                          "15:00",
+                          "17:00",
+                          "19:00"
+                        ],
+                        "weekends": [
+                          "09:00",
+                          "18:00"
+                        ]
+                      }
                     },
                     "tagging": {
                       "backfill_enabled": false,
@@ -4437,6 +4586,1076 @@
         ],
         "x-gigai-effect": "write",
         "x-gigai-external": "network"
+      }
+    },
+    "/api/story-bank": {
+      "get": {
+        "description": "A profile's story bank: every answered question and story, with tags, dates, writer and the jobs that used it. `entries` are the profile's own, then (with `shared: true`) those of the one profile named by `sharing.share_with`. Each entry: the `question_id` (its id in the other routes), the `question` as asked (the id itself for an answer saved before the bank), the `answer`, a model-free `tag` (technical, experience-level, eligibility, education, domain, leadership, conflict, failure, collaboration, system-design, delivery, skill, other; or your own), `postings` (the jobs that asked it, confirmed a suggestion with it, or whose assessment reused it: kind answered | confirmed | reused), `first_answered_at`, `updated_at` (send it back on PUT and DELETE), `revision`, `written_by` (operator | agent) and the last writes in `history`. `legacy: true` marks an answer saved before the bank: it belongs to the profile named in its answer history, else to the default profile. `total` counts the entries before `q` and `tag` narrow them. An assessment of this profile gets the entries as one-line summaries and reuses one that covers a requirement instead of asking again.",
+        "operationId": "get_api_story_bank",
+        "parameters": [
+          {
+            "description": "Whose bank; omitted = the selected profile.",
+            "in": "query",
+            "name": "profile_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries whose id, question, answer or tag holds this text.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries with this tag.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "entries": [
+                    {
+                      "answer": "Yes: two years of batch workloads on GCP.",
+                      "confirmed_from": null,
+                      "edited": false,
+                      "first_answered_at": "2026-10-01T15:00:00.000000Z",
+                      "history": [
+                        {
+                          "action": "answered",
+                          "at": "2026-10-01T15:00:00.000000Z",
+                          "by": "operator"
+                        }
+                      ],
+                      "legacy": false,
+                      "owner_profile_id": "prof_1",
+                      "postings": [
+                        {
+                          "at": "2026-10-01T15:00:00.000000Z",
+                          "company": "Acme",
+                          "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                          "kind": "answered",
+                          "title": "Software Engineer",
+                          "url": "https://boards.greenhouse.io/acme/jobs/101"
+                        }
+                      ],
+                      "question": "Have you run workloads on GCP?",
+                      "question_id": "cloud:gcp",
+                      "record_id": "rec_1",
+                      "revision": 1,
+                      "revision_id": "rev_1",
+                      "shared": false,
+                      "tag": "technical",
+                      "updated_at": "2026-10-01T15:00:00.000000Z",
+                      "written_by": "operator"
+                    }
+                  ],
+                  "profile_id": "prof_1",
+                  "schema_version": "scout-story-bank-response:1",
+                  "sharing": {
+                    "profiles": [
+                      {
+                        "label": "second",
+                        "profile_id": "prof_2"
+                      }
+                    ],
+                    "read_by": [],
+                    "share_with": null
+                  },
+                  "tags": [
+                    "technical"
+                  ],
+                  "total": 1
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-story-bank-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "profile_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "profile_not_found, target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key"
+          }
+        },
+        "summary": "List a profile's story bank",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
+      },
+      "post": {
+        "description": "Add a new entry: a story, or an answer nobody asked for yet. Answers 201 with the entry. Local only: no model reads it now; a later assessment of this profile is offered a one-line summary of it and reuses it for a requirement it covers. 409 story_exists (with the current `entry` in the error) when the profile already has that id: change it with PUT. 422 personal_info_refused for an email, phone, link, street address or the saved name. Example, an agent adds a STAR story from a conversation and a later assessment reuses it: POST this route with the request example (actor agent); then POST /api/assess for a posting that requires leading a database migration: the answer has no question for that requirement and its resume_evidence reads `Story bank story:database_led_migration: ...`; GET /api/story-bank/story:database_led_migration then lists that job under `postings` with kind reused.",
+        "operationId": "post_api_story_bank",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "actor": "agent",
+                "answer": "Situation: a 4 TB Postgres primary was close to its disk limit. Task: move it to a new cluster with no downtime. Action: led three engineers through a dual-write cut-over with a replayable backfill. Result: zero lost writes and p95 latency down 30%.",
+                "question": "Tell me about a database migration you led"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "actor": {
+                    "description": "Who writes: recorded on the entry. Also the X-GigAI-Actor header.",
+                    "enum": [
+                      "operator",
+                      "agent"
+                    ],
+                    "type": "string"
+                  },
+                  "answer": {
+                    "description": "The story or answer, at most 16000 characters.",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "description": "Whose bank; omitted = the selected profile.",
+                    "type": "string"
+                  },
+                  "question": {
+                    "description": "What the story answers, e.g. \"Tell me about a migration you led\".",
+                    "type": "string"
+                  },
+                  "question_id": {
+                    "description": "The entry's id (`<category>:<value>`); omitted = `story:<the question's first words>`.",
+                    "type": "string"
+                  },
+                  "tag": {
+                    "description": "Your own tag (lowercase, at most 40 characters); omitted = a tag from the question.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "question",
+                  "answer"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "entry": {
+                    "answer": "Situation: a 4 TB Postgres primary was close to its disk limit. Task: move it to a new cluster with no downtime. Action: led three engineers through a dual-write cut-over with a replayable backfill. Result: zero lost writes and p95 latency down 30%.",
+                    "confirmed_from": null,
+                    "edited": false,
+                    "first_answered_at": "2026-10-01T15:00:00.000000Z",
+                    "history": [
+                      {
+                        "action": "added",
+                        "at": "2026-10-01T15:00:00.000000Z",
+                        "by": "agent"
+                      }
+                    ],
+                    "legacy": false,
+                    "owner_profile_id": "prof_1",
+                    "postings": [],
+                    "question": "Tell me about a database migration you led",
+                    "question_id": "story:database_led_migration",
+                    "record_id": "rec_1",
+                    "revision": 1,
+                    "revision_id": "rev_1",
+                    "shared": false,
+                    "tag": "leadership",
+                    "updated_at": "2026-10-01T15:00:00.000000Z",
+                    "written_by": "agent"
+                  },
+                  "profile_id": "prof_1",
+                  "schema_version": "scout-story-bank-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-story-bank-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "profile_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "profile_not_found, target_unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "story_exists",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "story_exists"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, invalid_value, answer_invalid, personal_info_refused"
+          }
+        },
+        "summary": "Add a story or an answer to the story bank",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/story-bank/match": {
+      "get": {
+        "description": "The story bank entry closest to one question, when it is close enough to suggest. Model-free: word overlap between the question and each entry (ids and question words). `match` is null when nothing scores 0.5 or when the bank already answers this exact id (that is plain reuse). To use the suggestion, save it as the answer: POST /api/answers {question_id, answer, from_bank: match.bank_question_id}. Assess responses, GET /api/jobs and a run's /results and /posting carry the same suggestions as `bank_suggestions`.",
+        "operationId": "get_api_story_bank_match",
+        "parameters": [
+          {
+            "description": "The new question's id.",
+            "in": "query",
+            "name": "question_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The new question's words.",
+            "in": "query",
+            "name": "question",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whose bank; omitted = the selected profile.",
+            "in": "query",
+            "name": "profile_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "match": {
+                    "answer": "Yes: two years of batch workloads on GCP.",
+                    "bank_question": "Have you run workloads on GCP?",
+                    "bank_question_id": "cloud:gcp",
+                    "owner_profile_id": "prof_1",
+                    "question_id": "tooling:cloud_google_platform",
+                    "score": 1.0,
+                    "shared": false
+                  },
+                  "profile_id": "prof_1",
+                  "question_id": "tooling:google_cloud_platform",
+                  "schema_version": "scout-story-bank-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-story-bank-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "profile_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "profile_not_found, target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, invalid_value"
+          }
+        },
+        "summary": "Find a story bank answer for a question",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
+      }
+    },
+    "/api/story-bank/sharing": {
+      "put": {
+        "description": "Set which other profile's story bank this profile also reads. Explicit and one hop: prof_2 then reads prof_1's own entries (not what prof_1 reads from someone else), and prof_1 reads nothing new. Profiles on one machine can be different people: without this setting a profile never sees another profile's answers, in the list, the suggestions, the assess prompt or the tailoring.",
+        "operationId": "put_api_story_bank_sharing",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "profile_id": "prof_2",
+                "share_with": "prof_1"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "actor": {
+                    "description": "Who writes.",
+                    "enum": [
+                      "operator",
+                      "agent"
+                    ],
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "description": "The profile that reads; omitted = the selected profile.",
+                    "type": "string"
+                  },
+                  "share_with": {
+                    "description": "The profile id whose bank is also read, or null to read only this profile's own.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "share_with"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "profile_id": "prof_2",
+                  "schema_version": "scout-story-bank-response:1",
+                  "sharing": {
+                    "profiles": [
+                      {
+                        "label": "default",
+                        "profile_id": "prof_1"
+                      }
+                    ],
+                    "read_by": [],
+                    "share_with": "prof_1"
+                  }
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-story-bank-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "profile_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "profile_not_found, target_unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, invalid_value"
+          }
+        },
+        "summary": "Share a story bank between two profiles",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
+    "/api/story-bank/{story_id}": {
+      "delete": {
+        "description": "Remove one of the profile's own entries. Send Content-Type: application/json like every write (no body is read). The entry is never listed, offered or sent to a model again; the project's journal keeps the older revision of the record it was in.",
+        "operationId": "delete_api_story_bank_story_id",
+        "parameters": [
+          {
+            "description": "A story bank entry's id (its question_id, e.g. cloud:gcp or story:database_led_migration).",
+            "in": "path",
+            "name": "story_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The updated_at of the entry you read; when the entry changed since, the answer is 409.",
+            "in": "query",
+            "name": "updated_at",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whose bank; omitted = the selected profile.",
+            "in": "query",
+            "name": "profile_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Who writes.",
+            "in": "query",
+            "name": "actor",
+            "required": false,
+            "schema": {
+              "enum": [
+                "operator",
+                "agent"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "deleted": "cloud:gcp",
+                  "profile_id": "prof_1",
+                  "schema_version": "scout-story-bank-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-story-bank-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found, profile_not_found, target_unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "story_bank_changed",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "story_bank_changed"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, invalid_value"
+          }
+        },
+        "summary": "Delete a story bank entry",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      },
+      "get": {
+        "description": "One story bank entry.",
+        "operationId": "get_api_story_bank_story_id",
+        "parameters": [
+          {
+            "description": "A story bank entry's id (its question_id, e.g. cloud:gcp or story:database_led_migration).",
+            "in": "path",
+            "name": "story_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whose bank; omitted = the selected profile.",
+            "in": "query",
+            "name": "profile_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "entry": {
+                    "answer": "Yes: two years of batch workloads on GCP.",
+                    "confirmed_from": null,
+                    "edited": false,
+                    "first_answered_at": "2026-10-01T15:00:00.000000Z",
+                    "history": [
+                      {
+                        "action": "answered",
+                        "at": "2026-10-01T15:00:00.000000Z",
+                        "by": "operator"
+                      }
+                    ],
+                    "legacy": false,
+                    "owner_profile_id": "prof_1",
+                    "postings": [
+                      {
+                        "at": "2026-10-01T15:00:00.000000Z",
+                        "company": "Acme",
+                        "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                        "kind": "answered",
+                        "title": "Software Engineer",
+                        "url": "https://boards.greenhouse.io/acme/jobs/101"
+                      }
+                    ],
+                    "question": "Have you run workloads on GCP?",
+                    "question_id": "cloud:gcp",
+                    "record_id": "rec_1",
+                    "revision": 1,
+                    "revision_id": "rev_1",
+                    "shared": false,
+                    "tag": "technical",
+                    "updated_at": "2026-10-01T15:00:00.000000Z",
+                    "written_by": "operator"
+                  },
+                  "profile_id": "prof_1",
+                  "schema_version": "scout-story-bank-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-story-bank-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found, profile_not_found, target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key"
+          }
+        },
+        "summary": "Get one story bank entry",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
+      },
+      "put": {
+        "description": "Edit one of the profile's own entries: the answer, the question words and/or the tag. At least one of answer, question, tag. Every write bumps the entry's `revision` and `updated_at` and records `written_by`. 409 story_bank_changed carries the current `entry` in the error: someone (the user in the UI, or another agent) wrote it after you read it; read the entry, merge, and send again with its updated_at. A shared entry is edited in the profile that owns it (404 here).",
+        "operationId": "put_api_story_bank_story_id",
+        "parameters": [
+          {
+            "description": "A story bank entry's id (its question_id, e.g. cloud:gcp or story:database_led_migration).",
+            "in": "path",
+            "name": "story_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "actor": "agent",
+                "answer": "Yes: three years of batch and streaming workloads on GCP.",
+                "updated_at": "2026-10-01T15:00:00.000000Z"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "actor": {
+                    "description": "Who writes: recorded on the entry. Also the X-GigAI-Actor header.",
+                    "enum": [
+                      "operator",
+                      "agent"
+                    ],
+                    "type": "string"
+                  },
+                  "answer": {
+                    "description": "The new answer.",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "description": "Whose bank; omitted = the selected profile.",
+                    "type": "string"
+                  },
+                  "question": {
+                    "description": "The question's own words.",
+                    "type": "string"
+                  },
+                  "tag": {
+                    "description": "Your own tag; an empty string puts the automatic tag back.",
+                    "type": "string"
+                  },
+                  "updated_at": {
+                    "description": "The updated_at of the entry you read; when the entry changed since, the answer is 409.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "updated_at"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "entry": {
+                    "answer": "Yes: two years of batch workloads on GCP.",
+                    "confirmed_from": null,
+                    "edited": false,
+                    "first_answered_at": "2026-10-01T15:00:00.000000Z",
+                    "history": [
+                      {
+                        "action": "answered",
+                        "at": "2026-10-01T15:00:00.000000Z",
+                        "by": "operator"
+                      }
+                    ],
+                    "legacy": false,
+                    "owner_profile_id": "prof_1",
+                    "postings": [
+                      {
+                        "at": "2026-10-01T15:00:00.000000Z",
+                        "company": "Acme",
+                        "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                        "kind": "answered",
+                        "title": "Software Engineer",
+                        "url": "https://boards.greenhouse.io/acme/jobs/101"
+                      }
+                    ],
+                    "question": "Have you run workloads on GCP?",
+                    "question_id": "cloud:gcp",
+                    "record_id": "rec_1",
+                    "revision": 1,
+                    "revision_id": "rev_1",
+                    "shared": false,
+                    "tag": "technical",
+                    "updated_at": "2026-10-01T15:00:00.000000Z",
+                    "written_by": "operator"
+                  },
+                  "profile_id": "prof_1",
+                  "schema_version": "scout-story-bank-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-story-bank-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found, profile_not_found, target_unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "story_bank_changed",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "story_bank_changed"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, invalid_value, answer_invalid, personal_info_refused"
+          }
+        },
+        "summary": "Edit a story bank entry",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
       }
     },
     "/api/tailored-resumes": {

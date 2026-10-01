@@ -78,7 +78,9 @@ async function request(method, path, body) {
   try {
     response = await fetch(path, {
       method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      // A DELETE carries no body but is a write: the server's CSRF check
+      // wants the JSON content type on every write.
+      headers: body || method === "DELETE" ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch (networkError) {
@@ -363,8 +365,43 @@ export function postAnswer(fields) {
   return request("POST", "/api/answers", fields);
 }
 
-export function getAnswers() {
-  return request("GET", "/api/answers");
+// 0110-034: the answers ONE profile may reuse (its own, plus a shared
+// profile's); no profileId = the selected profile.
+export function getAnswers(profileId) {
+  return request("GET", `/api/answers${profileId ? `?profile_id=${encodeURIComponent(profileId)}` : ""}`);
+}
+
+// 0110-034: the story bank (find_jobs/api/story_bank.py). Local, no model
+// call. `updated_at` on an edit or a delete is the value this page read: a
+// stale one answers 409 story_bank_changed with the current `entry`
+// (ApiError.entry), written since by an agent or another window.
+const storyQuery = (fields) => {
+  const pairs = Object.entries(fields).filter(([, value]) => value !== undefined && value !== null && value !== "");
+  return pairs.length ? `?${pairs.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&")}` : "";
+};
+
+export function getStoryBank(profileId) {
+  return request("GET", `/api/story-bank${storyQuery({ profile_id: profileId })}`);
+}
+
+export function getStoryBankMatch({ profileId, questionId, question }) {
+  return request("GET", `/api/story-bank/match${storyQuery({ profile_id: profileId, question_id: questionId, question })}`);
+}
+
+export function addStory(body) {
+  return request("POST", "/api/story-bank", body);
+}
+
+export function putStory(questionId, body) {
+  return request("PUT", `/api/story-bank/${encodeURIComponent(questionId)}`, body);
+}
+
+export function deleteStory(questionId, { profileId, updatedAt }) {
+  return request("DELETE", `/api/story-bank/${encodeURIComponent(questionId)}${storyQuery({ profile_id: profileId, updated_at: updatedAt })}`);
+}
+
+export function putStoryBankSharing(profileId, shareWith) {
+  return request("PUT", "/api/story-bank/sharing", { profile_id: profileId, share_with: shareWith || null });
 }
 
 // SCOPE-ADD-3: the ranking pass for one run's postings, by the run's own

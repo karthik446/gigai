@@ -95,7 +95,6 @@ from typing import ClassVar
 from ..canonical import digest_imported_bytes, parse_json_bytes
 from ..config import GigAIConfig, load_config
 from .assessment_core import AssessAttempt, invoke_json_once
-from .experience_answers import read_answers
 from .find_jobs.assess_contracts import AssessJobInput, AssessResumeInput, ResolvedJob, ResolvedResume
 from .find_jobs.contracts import (
     FindJobsContractError,
@@ -2348,16 +2347,19 @@ def run_tailored_resume(
 
     # 3. Answered questions (citable sources), tolerantly: a pasted-text run
     #    with no bound gig simply has none.
+    #    0110-034: the answers of THIS profile's story bank (its own plus a
+    #    shared profile's), never another profile's; a pasted resume reads
+    #    the selected profile's.
+    from . import story_bank
+
     answers: dict[str, AnswerSource] = {}
-    try:
-        gig_resolved = resolved if resolved is not None else _resolve_workpad(home_root, target)
-        stored_answers = read_answers(home_root=home_root, requested_target=target, gig_id=gig_resolved.gig_id)
+    bank_profile_id = story_bank.reader_profile_id(home_root=home_root, target=target, profile_id=resume.profile_id)
+    if bank_profile_id is not None:
+        stored_answers = story_bank.answers_for_profile(home_root=home_root, target=target, profile_id=bank_profile_id)
         answers = {
             key: AnswerSource(question_id=item.question_id, answer=item.answer, revision_id=item.revision_id, prompt=item.prompt)
             for key, item in stored_answers.items()
         }
-    except QuickAssessError:
-        pass
 
     # 4. Storage path first (so the response can name it and ``created_at``
     #    survives a re-run), then the stored matrix (context only).

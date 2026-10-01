@@ -460,6 +460,59 @@ def posting_detail(run_id: str, rows: Mapping[str, object]) -> dict[str, object]
     }
 
 
+def open_run_questions(body: Mapping[str, object]) -> list[Mapping[str, object]]:
+    """The questions the run assessments in a ``/results`` or ``/posting`` body left open, once per id."""
+
+    results: list[object] = []
+    payload = body.get("payload")
+    if isinstance(payload, Mapping) and isinstance(payload.get("assessments"), list):
+        results.extend(payload["assessments"])  # type: ignore[arg-type]
+    results.append(body.get("assessment"))
+    carried = body.get("carried_forward_assessments")
+    for item in [*(carried if isinstance(carried, list) else ()), body.get("carried_forward")]:
+        if isinstance(item, Mapping):
+            results.append(item.get("result"))
+    seen: set[str] = set()
+    questions: list[Mapping[str, object]] = []
+    for result in results:
+        asked = result.get("structured_questions") if isinstance(result, Mapping) else None
+        for question in asked if isinstance(asked, list) else ():
+            question_id = question.get("question_id") if isinstance(question, Mapping) else None
+            if isinstance(question_id, str) and question_id not in seen:
+                seen.add(question_id)
+                questions.append(question)
+    return questions
+
+
+def attach_bank_suggestions(body: dict[str, object], *, home_root: Path, target: Path, profile_id: str | None) -> None:
+    """0110-034b: ``bank_suggestions`` on a run's ``/results`` or ``/posting`` body.
+
+    One near match from ``profile_id``'s story bank per question the served
+    run assessments left open: the same model-free match, and the same
+    entries, as the job page and ``POST /api/assess`` (``story_bank.
+    suggestions_for``). Computed when read, never stored, so a deleted
+    answer or a sharing turned off stops showing at once. The key is only
+    added when a question has a match; a body with no open question reads
+    no bank at all. Never raises: display-only.
+    """
+
+    if profile_id is None:
+        return
+    questions = open_run_questions(body)
+    if not questions:
+        return
+    try:
+        from ... import story_bank
+
+        bank = story_bank.read_bank(home_root=home_root, target=target, profile_id=profile_id, with_postings=False)
+        found = story_bank.suggestions_for(questions, bank)
+    except Exception:  # noqa: BLE001 - display-only enrichment must never break the read
+        _logger.exception("story bank suggestions skipped")
+        return
+    if found:
+        body["bank_suggestions"] = found
+
+
 def summarise_progress(progress: Mapping[str, object]) -> dict[str, object]:
     """``run_progress``'s response with no posting text and no list of skipped boards."""
 
@@ -571,6 +624,36 @@ class RunReadsRoutesMixin:
         except Exception:  # noqa: BLE001 - display-only enrichment must never break the read
             _logger.exception("job state skipped for run %s", run_id)
 
+    def _attach_run_bank_suggestions(self, run_id: str, body: dict[str, object], *, view: RunView | None = None, joins: RowJoins | None = None) -> None:
+        """``bank_suggestions`` for the run's own profile (0110-034b); see ``attach_bank_suggestions``.
+
+        Whose bank: the profile the run's assess node sealed
+        (``AssessOutput.story_bank``), else the run's sealed ``profile_ref``,
+        else the gig's selected profile (a run from before profiles).
+        """
+
+        backend = self._backend
+        target = getattr(backend, "target", None)
+        if target is None or not open_run_questions(body):
+            return
+        try:
+            profile_id = None
+            assess = view.evidence.assess_output if view is not None else None
+            if assess is not None and assess.story_bank is not None:
+                profile_id = assess.story_bank.profile_id
+            if profile_id is None:
+                from ..market_acquisition import _run_profile_identity
+
+                identity = _run_profile_identity(Path(backend._require_run(run_id).path), run_id, default_profile_id=None)
+                profile_id = None if identity is None else identity.profile_id
+            if profile_id is None:
+                profile = joins.profile if joins is not None else backend._selected_profile()
+                profile_id = getattr(profile, "profile_id", None)
+        except Exception:  # noqa: BLE001 - display-only enrichment must never break the read
+            _logger.exception("story bank suggestions skipped for run %s", run_id)
+            return
+        attach_bank_suggestions(body, home_root=backend.home_root, target=target, profile_id=profile_id)
+
     def _handle_get_run_results_page(self, run_id: str) -> None:
         query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
         unknown = set(query) - {"limit", "offset"}
@@ -600,6 +683,7 @@ class RunReadsRoutesMixin:
             return
         body = results_page(view, limit=limit, offset=offset or 0)
         self._join_row_fields(body, resolved=resolved, view=view, joins=joins)
+        self._attach_run_bank_suggestions(run_id, body, view=view, joins=joins)
         self._write_json(HTTPStatus.OK, body)
 
     def _handle_get_run_posting(self, run_id: str) -> None:
@@ -622,7 +706,9 @@ class RunReadsRoutesMixin:
             self._error(HTTPStatus.NOT_FOUND, "not_found", "the run has no such posting")
             return
         self._join_row_fields(rows, resolved=resolved, view=view, joins=joins)
-        self._write_json(HTTPStatus.OK, posting_detail(run_id, rows))
+        detail = posting_detail(run_id, rows)
+        self._attach_run_bank_suggestions(run_id, detail, view=view, joins=joins)
+        self._write_json(HTTPStatus.OK, detail)
 
     def _handle_get_run_progress_summary(self, run_id: str) -> None:
         query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)

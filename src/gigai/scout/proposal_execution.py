@@ -36,9 +36,12 @@ from .assessment_core import (  # noqa: F401 - moved in P1; re-exported by the o
     _normalize_sponsorship,
     _normalize_status,
     _normalize_string_list,
+    ASSESS_PROMPT_VERSION,
     AssessContext,
     AssessJob,
     assess_once,
+    build_assess_context,
+    constraints_digest,
     render_assess_prompt,
 )
 from .find_jobs.progress import ProgressWriter
@@ -191,6 +194,7 @@ def _assess_node_body(
         SelectionRule,
         PostingRowResult,
         ModelTarget as ContractModelTarget,
+        StoryBankStamp,
         UsageBlock,
     )
 
@@ -221,19 +225,33 @@ def _assess_node_body(
     resume = _read_pinned_resume(home_root, root, context.gig_id, input.pinned_resume)
     acquire_rows = _read_acquire_rows(root, input.acquire_batch_ref)
     policy = assess_invocation_policy(model_target, input)
+    # 0110-035: where this run's sealed input and the earlier runs' outputs
+    # are. A launched run has them in the WORKPAD while ``root`` is the
+    # target folder; reading ``root`` there found nothing, so a launched
+    # run's prompt had no candidate constraints at all.
+    run_root = _run_root(root, context)
+    # ``sealed_config`` (read from ``root``, as before) still decides the
+    # candidate labelling below: in a launched run it is ``None``, so only
+    # the selected postings are candidates and no "why not assessed" reason
+    # is written for the rest. That is unchanged on purpose: turning it on
+    # adds an over_cap / duplicate / location_mismatch row for every other
+    # posting of every run, which is a results change of its own.
+    # ``run_config`` is the run's own sealed config wherever it is: the
+    # PROMPT's constraints come from it.
     sealed_config = _read_sealed_config(root, context.run_id)
-    visa_sponsorship_required = bool(getattr(sealed_config, "visa_sponsorship_required", False))
+    run_config = sealed_config if sealed_config is not None else _read_sealed_config(run_root, context.run_id)
+    visa_sponsorship_required = bool(getattr(run_config, "visa_sponsorship_required", False))
     # P2 (v0.1.9), operator answer 5: {{countries}} comes from find-jobs.json;
     # {{titles}} is the effective config's roles (overlay_selected_profile
     # already replaces roles with the profile's titles before sealing, so
     # this is the profile's titles when one is selected, C11-adjacent).
-    prompt_countries = tuple(getattr(sealed_config, "countries", ()) or ())
-    prompt_titles = tuple(getattr(sealed_config, "roles", ()) or ())
+    prompt_countries = tuple(getattr(run_config, "countries", ()) or ())
+    prompt_titles = tuple(getattr(run_config, "roles", ()) or ())
     # assess-prompt-v2 (v0.1.9), operator decision: {{candidate_location}} is
     # the sealed config's own ``location`` (the operator's "Denver, CO" from
     # find-jobs.json), so assess.md rule 4 can decide a posting's
     # state/province restriction; None/empty renders "unknown".
-    prompt_location = str(getattr(sealed_config, "location", "") or "")
+    prompt_location = str(getattr(run_config, "location", "") or "")
 
     # Candidate resolution mirrors acquire's own selection loop exactly
     # (coordinator decision, P2 dispatch): a candidate is a new/edited,
@@ -280,12 +298,27 @@ def _assess_node_body(
     except Exception:
         resolved_for_profile = None
     default_profile_id = _default_profile_id(resolved_for_profile)
-    sealed_run_input = _read_sealed_run_input(root, context.run_id)
+    # 0110-034b: read from ``run_root`` too. From ``root`` the node took
+    # every launched run for the default profile's, and would have offered a
+    # second profile's run the default profile's story bank.
+    sealed_run_input = _read_sealed_run_input(run_root, context.run_id)
     current_profile_ref = getattr(sealed_run_input, "profile_ref", None)
     current_profile_id = (
         current_profile_ref.profile_id if current_profile_ref is not None else default_profile_id
     )
-    prior_assessments = _prior_assessments(root, context.run_id, default_profile_id=default_profile_id)
+    prior_assessments = _prior_assessments(run_root, context.run_id, default_profile_id=default_profile_id)
+    # 0110-035: what an earlier assessment must have been made with to stand.
+    current_constraints = constraints_digest(
+        visa_sponsorship_required=visa_sponsorship_required, countries=prompt_countries, location=prompt_location
+    )
+    # 0110-034b: the run's profile reads ITS story bank (own answers plus the
+    # one profile it shares with), through the same builder as the job page's
+    # quick assessment (``story_bank.assess_bank``). No profile, or a bank
+    # that cannot be read: an empty bank, and the prompt renders as before.
+    from . import story_bank
+
+    resume_text = resume.decode("utf-8", errors="replace")
+    bank = story_bank.assess_bank(home_root=home_root, target=root, profile_id=current_profile_id, resume_text=resume_text)
     rows: list[object] = []
     not_assessed: list[object] = []
     to_assess: list[tuple[object, bytes | None]] = []
@@ -317,6 +350,12 @@ def _assess_node_body(
                 # no profile has ever been migrated for this workpad at
                 # all, today's pre-F1-b behaviour, kept unchanged).
                 and prior.profile_id == current_profile_id
+                # 0110-034b / 0110-035: and nothing the verdict was made
+                # with has changed (twin predicate, same ``_basis_stale`` as
+                # acquire's): the assess prompt version, the candidate's
+                # constraints, the story bank. An open question the bank can
+                # now answer is never hidden behind "unchanged".
+                and not _basis_stale(prior, bank=bank, constraints=current_constraints)
             ):
                 # A genuinely skippable UNCHANGED row: not a candidate at
                 # all, same as before this fix. Its carried-forward result
@@ -429,12 +468,17 @@ def _assess_node_body(
     # P1: the prompt -> invoke -> extract -> normalize -> validate -> retry
     # loop is `assessment_core.assess_once`; this node keeps selection,
     # reuse/skip, sealing, journaling and progress around it.
-    assess_context = AssessContext(
-        resume_text=resume.decode("utf-8", errors="replace"),
+    # 0110-034b / 0110-035: the same builder as quick assess, so the run's
+    # prompt carries what the job page's does: the sealed config's
+    # constraints, PRIOR ANSWERS (exact question id) and the STORY BANK
+    # paragraph. A profile with no answers renders neither paragraph.
+    assess_context = build_assess_context(
+        resume_text=resume_text,
         visa_sponsorship_required=visa_sponsorship_required,
         countries=prompt_countries,
         titles=prompt_titles,
         location=prompt_location,
+        bank=bank,
     )
 
     def call_model(posting: object, posting_text: bytes) -> object:
@@ -481,6 +525,20 @@ def _assess_node_body(
         usage_values.append(outcome.usage)
         if progress is not None:
             progress.assessment_finished(posting.normalized_url, ok=True, assessment_json=parsed.to_json())
+        if bank.entries:
+            # Which bank answers this assessment cited ("Story bank <id>: ..."),
+            # noted on the entry as quick assess notes it. Never raises.
+            posting_json = posting.to_json()
+            story_bank.record_reuse(
+                home_root=home_root, target=root, entries=bank.entries,
+                evidence=[evidence for row in parsed.matrix for evidence in row.resume_evidence],
+                posting={
+                    "job_identity": posting.normalized_url,
+                    "title": str(posting_json.get("title", "")),
+                    "company": str(posting_json.get("company", "")),
+                    "url": posting_json.get("url"),
+                },
+            )
 
     cap_limit, _per_company = selection_limits(input.selection_cap)
 
@@ -572,7 +630,66 @@ def _assess_node_body(
         )
 
     usage = _usage_block(usage_values, UsageBlock)
-    return AssessOutput(tuple(input.selected_postings), input.pinned_resume, input.target, input.selection_cap, SelectionRule.NEW_OR_EDITED_ROLE_MATCH, tuple(rows), tuple(assessments), tuple(not_assessed), tuple(revisions), ContractModelTarget(model_target), producer, usage, ())
+    # 0110-034b: sealed with the output, so a later run (and a reader) knows
+    # which prompt and which bank these verdicts were made with.
+    bank_stamp = None if bank.profile_id is None else StoryBankStamp(bank.profile_id, bank.digest, dict(bank.marks))
+    return AssessOutput(tuple(input.selected_postings), input.pinned_resume, input.target, input.selection_cap, SelectionRule.NEW_OR_EDITED_ROLE_MATCH, tuple(rows), tuple(assessments), tuple(not_assessed), tuple(revisions), ContractModelTarget(model_target), producer, usage, (), ASSESS_PROMPT_VERSION, bank_stamp, current_constraints)
+
+
+def _run_root(root: Path, context: object) -> Path:
+    """The folder that holds this run's ``runs/<run_id>/`` (sealed input, outputs).
+
+    The workpad for a launched run (``run.launch_find_jobs_run`` seals
+    there, and the bindings pass the TARGET folder as ``root``); ``root``
+    itself when the run's folder is under it (direct calls, which write
+    their run under the folder they pass) or when the workpad has no folder
+    for this run either.
+    """
+
+    run_id = getattr(context, "run_id", None)
+    workpad_path = getattr(context, "workpad_path", None)
+    if not isinstance(run_id, str) or not isinstance(workpad_path, str):
+        return root
+    workpad = Path(workpad_path)
+    if (root / "runs" / run_id).is_dir() or not (workpad / "runs" / run_id).is_dir():
+        return root
+    return workpad
+
+
+def _basis_stale(prior: object, *, bank: object, constraints: str | None) -> bool:
+    """Whether an earlier run's assessment was made with something that has since changed.
+
+    ``prior`` is a ``market_acquisition._PriorAssessment``: the assessment
+    plus what its run sealed. One rule for acquire's carry-forward and
+    assess's unchanged skip, on top of the same posting digest, resume
+    revision and profile:
+
+    - the assess prompt version differs (a run sealed before 0.1.10.5 has
+      none: its prompt had no candidate constraints, 0110-035);
+    - the candidate constraints differ (``constraints``: this run's
+      ``assessment_core.constraints_digest``; ``None`` when the caller has no
+      config to compare, which skips this check);
+    - the story bank changed in a way that could change the verdict
+      (``story_bank.bank_makes_stale``): an open question the bank can newly
+      answer, or a cited bank answer that was edited, deleted or unshared.
+      A run with no profile has no bank.
+    """
+
+    from . import story_bank
+
+    if getattr(prior, "prompt_version", None) != ASSESS_PROMPT_VERSION:
+        return True
+    if constraints is not None and getattr(prior, "constraints_digest", None) != constraints:
+        return True
+    if getattr(bank, "profile_id", None) is None:
+        return False
+    result = prior.result  # type: ignore[attr-defined]
+    return story_bank.bank_makes_stale(
+        questions=[item.question_id for item in result.structured_questions],
+        evidence=[evidence for row in result.matrix for evidence in row.resume_evidence],
+        sealed_marks=getattr(prior, "bank_marks", None),
+        current_marks=bank.marks,  # type: ignore[attr-defined]
+    )
 
 
 def _resolve_configured_target_name_for_adapter(config: GigAIConfig, adapter_kind: str) -> str:

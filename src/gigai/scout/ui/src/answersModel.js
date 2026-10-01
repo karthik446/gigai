@@ -49,32 +49,71 @@ export function placeQuestions(matrix, questions) {
 // `drafts` holds only what the operator typed (question_id -> string); a
 // question they never touched shows its recorded answer, so an answer
 // given on another posting counts here without being typed again.
-export function answerStates(questions, drafts, priorAnswers) {
+//
+// 0110-034: `bank` (optional) is {suggestions, used}: `suggestions` maps a
+// question_id to its story bank near match (GET /api/story-bank/match) and
+// `used` to the bank question the operator took with "Use it". A state
+// then also carries the question's words, `suggestion` (only while the box
+// is empty and nothing is on record: nothing is filled in for the user) and
+// `fromBank`. Without `bank` a state is exactly what it was.
+export function answerStates(questions, drafts, priorAnswers, bank) {
   return (questions || []).map((question) => {
     const id = question.question_id;
     const prior = priorAnswers && priorAnswers.get ? priorAnswers.get(id) : null;
     const recorded = prior && typeof prior.answer === "string" ? prior.answer.trim() : "";
     const typed = drafts && Object.prototype.hasOwnProperty.call(drafts, id) ? drafts[id] : null;
     const value = (typed === null ? recorded : String(typed)).trim();
-    return { question_id: id, value, recorded, filled: value.length > 0, isNew: value.length > 0 && value !== recorded };
+    const state = { question_id: id, value, recorded, filled: value.length > 0, isNew: value.length > 0 && value !== recorded };
+    if (!bank) {
+      return state;
+    }
+    const suggestion = bank.suggestions && bank.suggestions.get ? bank.suggestions.get(id) || null : null;
+    const used = bank.used && Object.prototype.hasOwnProperty.call(bank.used, id) ? bank.used[id] : null;
+    return {
+      ...state,
+      question: typeof question.question === "string" ? question.question : "",
+      suggestion: suggestion && !recorded && !state.filled ? suggestion : null,
+      fromBank: used && state.filled ? used : null,
+    };
   });
+}
+
+// 0110-034: what a POST /api/answers body carries beyond the answer: the
+// question's own words (kept with it in the story bank), the bank question
+// a confirmed suggestion came from, and whose bank it is. Each only when
+// known, so a caller without them sends what it always did.
+function bankFields(state, profileId) {
+  const fields = {};
+  if (state.question) {
+    fields.question = state.question;
+  }
+  if (state.fromBank) {
+    fields.from_bank = state.fromBank;
+  }
+  if (profileId) {
+    fields.profile_id = profileId;
+  }
+  return fields;
 }
 
 // The POST /api/answers bodies for one "Re-assess": every filled box, in
 // question order, re-assessing on the last one only.
-export function answerRequests(states, jobIdentity) {
+export function answerRequests(states, jobIdentity, profileId) {
   const filled = (states || []).filter((state) => state.filled);
   return filled.map((state, index) => ({
     question_id: state.question_id,
     answer: state.value,
     reassess: jobIdentity && index === filled.length - 1 ? { job_identity: jobIdentity } : null,
+    ...bankFields(state, profileId),
   }));
 }
 
 // The bodies "Tailor resume" sends first: only the answers the record does
 // not hold yet, never re-assessing (tailoring reads the recorded answers).
-export function unsavedAnswerRequests(states) {
-  return (states || []).filter((state) => state.isNew).map((state) => ({ question_id: state.question_id, answer: state.value, reassess: null }));
+export function unsavedAnswerRequests(states, profileId) {
+  return (states || [])
+    .filter((state) => state.isNew)
+    .map((state) => ({ question_id: state.question_id, answer: state.value, reassess: null, ...bankFields(state, profileId) }));
 }
 
 const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;

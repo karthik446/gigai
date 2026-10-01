@@ -196,7 +196,10 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         assert allowed(client.get(f"/api/runs/{run_id}/progress?bogus=1")) == ["summary"]
         assert allowed(client.get("/api/watchlist?bogus=1")) == ["limit", "offset", "summary"]
         assert allowed(client.post("/api/watchlist", json={"url": "x", "bogus": 1})) == ["url"]
-        assert allowed(client.post("/api/answers", json={"question_id": "a:b", "answer": "x", "bogus": 1})) == ["answer", "question_id", "reassess"]
+        assert allowed(client.post("/api/answers", json={"question_id": "a:b", "answer": "x", "bogus": 1})) == [
+                # 0110-034: an answer goes into a profile's story bank (actor, from_bank, profile_id, question).
+                "actor", "answer", "from_bank", "profile_id", "question", "question_id", "reassess",
+            ]
         assert allowed(client.post("/api/sources/update", json={"bogus": 1})) == ["force", "full_refresh"]
         # 0110-025: the sources status carries the documented `background` block. A journey server
         # runs with the background refresh off (the harness says so), and the block says that.

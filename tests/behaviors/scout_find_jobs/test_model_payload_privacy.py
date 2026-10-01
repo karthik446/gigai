@@ -272,6 +272,28 @@ def _research_handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(200)
 
 
+def _run_assess_node(fixture: Home, posting: object):
+    """The find-jobs run's assess node over the ``run_1`` acquire output (the run's own model call on the pinned resume)."""
+
+    home, target = fixture.home, fixture.target
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=fixture.gig_id, allow_semantic_state=True)
+    run_dir = resolved.path / "runs" / "run_1"
+    context = NodeContext(
+        run_id="run_00000000-0000-4000-8000-000000000301", project_id=resolved.project_id, gig_id=fixture.gig_id,
+        graph_id="graph_find_jobs_test", graph_version=1, goal_slug="assess", manifest_digest="sha256:" + "0" * 64,
+        operation_key="payload-privacy-assess", target_observation_digest="sha256:" + "0" * 64,
+        workpad_path=str(resolved.path), redeemed_consent_ref="none", model_target=ModelTarget.OLLAMA_LOCAL,
+    )
+    assess_input = AssessInput(
+        acquire_batch_ref=str(run_dir / "outputs" / "acquire.json"), acquire_output_digest="sha256:" + "0" * 64,
+        selected_postings=(SelectedPosting(posting.normalized_url, posting.url, posting.content_sha256, True),),
+        selection_cap=10, selection_reasons=(SelectionReason(posting.normalized_url, SelectionReasonCode.NEW),),
+        pinned_resume=PinnedResume(fixture.record_id, fixture.revision_id, str(digest_imported_bytes(RESUME.encode("utf-8")))),
+        target=str(target), model_target=ModelTarget.OLLAMA_LOCAL, answer_association_version="scout-answer-association:1",
+    )
+    return assess_node(context, assess_input, home_root=home, target=target, config=fixture.config)
+
+
 def _run_every_flow(fixture: Home, seen: Capture, monkeypatch: pytest.MonkeyPatch) -> None:
     home, target = fixture.home, fixture.target
     posting = write_acquire_output(home, target, "run_1")
@@ -279,22 +301,7 @@ def _run_every_flow(fixture: Home, seen: Capture, monkeypatch: pytest.MonkeyPatc
 
     # 1. The find-jobs run's assess node (the run's own model call on the pinned resume).
     with seen.running("assess_node"):
-        resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=fixture.gig_id, allow_semantic_state=True)
-        run_dir = resolved.path / "runs" / "run_1"
-        context = NodeContext(
-            run_id="run_00000000-0000-4000-8000-000000000301", project_id=resolved.project_id, gig_id=fixture.gig_id,
-            graph_id="graph_find_jobs_test", graph_version=1, goal_slug="assess", manifest_digest="sha256:" + "0" * 64,
-            operation_key="payload-privacy-assess", target_observation_digest="sha256:" + "0" * 64,
-            workpad_path=str(resolved.path), redeemed_consent_ref="none", model_target=ModelTarget.OLLAMA_LOCAL,
-        )
-        assess_input = AssessInput(
-            acquire_batch_ref=str(run_dir / "outputs" / "acquire.json"), acquire_output_digest="sha256:" + "0" * 64,
-            selected_postings=(SelectedPosting(posting.normalized_url, posting.url, posting.content_sha256, True),),
-            selection_cap=10, selection_reasons=(SelectionReason(posting.normalized_url, SelectionReasonCode.NEW),),
-            pinned_resume=PinnedResume(fixture.record_id, fixture.revision_id, str(digest_imported_bytes(RESUME.encode("utf-8")))),
-            target=str(target), model_target=ModelTarget.OLLAMA_LOCAL, answer_association_version="scout-answer-association:1",
-        )
-        output = assess_node(context, assess_input, home_root=home, target=target, config=fixture.config)
+        output = _run_assess_node(fixture, posting)
         assert len(output.assessments) == 1, output
 
     # 2. Rank (the run's rank step and the re-rank API both call rank_postings on the raw stored resume).
@@ -411,6 +418,162 @@ def test_the_detector_finds_the_values_when_the_strip_is_disabled(
     )
     payloads = capture.model_payloads("quick_assess_profile")
     assert payloads and set(leaks(payloads[0])) == set(FORBIDDEN)
+
+
+# --- the story bank lines of an assess payload (0110-034) ------------------------------------------
+
+BANK_MARKER = "Glimmerbank"  # a clean bank answer every assess payload of the profile must carry
+OTHER_PROFILE_MARKER = "Otherperson-Only"  # another profile's answer: never in this profile's payload
+#: An answer saved before the personal-info check existed, with every contact value planted in it.
+_OLD_ANSWER = (
+    f"Six years on the ledger; {NAME} ran the cut-over. Write to {EMAIL} or call {PHONE}; "
+    f"see https://{GITHUB}/ledger, {LINKEDIN} and https://{SITE}/talk."
+)
+
+
+def _seed_story_bank(fixture: Home) -> str:
+    """An old answer with contact values, a clean one, and another profile's; returns the other profile's id."""
+
+    from gigai.scout import story_bank
+    from gigai.scout.experience_answers import record_answer
+    from gigai.scout.profile_records import create_profile, list_profiles
+
+    home, target = fixture.home, fixture.target
+    # The 0.1.10.4 write path: no profile, no personal-info check.
+    record_answer(home_root=home, requested_target=target, gig_id=fixture.gig_id, question_id="years:ledger", prompt="years:ledger", answer=_OLD_ANSWER)
+    story_bank.save_answer(
+        home_root=home, target=target, profile_id=fixture.profile_id, question_id="story:ledger_migration",
+        question="Tell me about a migration you led", answer=f"Led the {BANK_MARKER} ledger migration with zero lost writes.",
+    )
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=fixture.gig_id, allow_semantic_state=True)
+    mine = next(item for item in list_profiles(resolved) if item.profile_id == fixture.profile_id)
+    other = create_profile(resolved, label="another person", titles=("x",), titles_to_avoid=(), queries=("x",), resume_ref=mine.resume_ref)
+    story_bank.save_answer(
+        home_root=home, target=target, profile_id=other.profile_id, question_id="cloud:gcp", answer=f"{OTHER_PROFILE_MARKER}: four years on GCP.",
+    )
+    return other.profile_id
+
+
+def _assess_with_the_bank(fixture: Home, capture: Capture) -> list[bytes]:
+    capture.flow = "quick_assess_bank"
+    run_quick_assessment(
+        AssessRequest(job=AssessJobInput(job_text=_POSTING, title="Staff Software Engineer", company="Acme")),
+        home_root=fixture.home, target=fixture.target, config=fixture.config,
+    )
+    return capture.model_payloads("quick_assess_bank")
+
+
+def test_the_story_bank_lines_of_an_assess_payload_carry_no_contact_value_and_no_other_profiles_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _home(tmp_path, monkeypatch)
+    _seed_story_bank(fixture)
+    capture = arm(monkeypatch)
+
+    payloads = _assess_with_the_bank(fixture, capture)
+
+    assert capture.tripped == [] and len(payloads) == 1, "one model call, the assessment's own"
+    payload = payloads[0].decode("utf-8")
+    # Non-vacuous controls: the bank reached the model, the old answer included (redacted).
+    assert "STORY BANK (answers" in payload and "PRIOR ANSWERS (from earlier" in payload
+    assert BANK_MARKER in payload and "- story:ledger_migration | asked: Tell me about a migration you led | answer: " in payload
+    assert "- years:ledger | answer: Six years on the ledger;" in payload and "- years:ledger: Six years on the ledger;" in payload
+    assert BODY_MARKER in payload, "and the resume, as before"
+    # The assertions themselves.
+    assert leaks(payload) == [], "no name or contact value in the bank lines"
+    assert OTHER_PROFILE_MARKER not in payload and "cloud:gcp:" not in payload and "- cloud:gcp |" not in payload
+
+
+def test_the_detector_finds_the_bank_values_when_the_bank_redaction_is_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Control: with the bank's own redaction made a no-op, the same capture sees the old answer's values."""
+
+    from gigai.scout import story_bank
+
+    monkeypatch.setattr(story_bank, "redact_inline", lambda line: line)
+    monkeypatch.setattr(story_bank, "guard_name", lambda text, tokens: text)
+    monkeypatch.setattr(story_bank, "personal_info_in_answer", lambda text, names=(): [])
+    fixture = _home(tmp_path, monkeypatch)
+    _seed_story_bank(fixture)
+    capture = arm(monkeypatch)
+    capture.flow = "quick_assess_bank"
+    run_quick_assessment(
+        AssessRequest(job=AssessJobInput(job_text=_POSTING, title="Staff Software Engineer", company="Acme")),
+        home_root=fixture.home, target=fixture.target, config=fixture.config,
+    )
+    found = leaks(capture.model_payloads("quick_assess_bank")[0])
+    assert {NAME, EMAIL, PHONE, GITHUB, LINKEDIN, SITE} <= set(found), found
+
+
+# --- the same lines in a find-jobs RUN's assess payload (0110-034b) ------------------------------------
+
+
+def _run_with_the_bank(fixture: Home, capture: Capture) -> list[bytes]:
+    """The run's assess node for the fixture profile (no sealed profile_ref: the gig's default profile's run)."""
+
+    posting = write_acquire_output(fixture.home, fixture.target, "run_1")
+    # 0110-035: the run's sealed input, where a launched run has it (the workpad): the node reads the
+    # candidate constraints from it. It holds the config and the pinned resume's ids, nothing else.
+    resolved = resolve_workpad(home_root=fixture.home, requested_target=fixture.target, gig_id=fixture.gig_id, allow_semantic_state=True)
+    config = FindJobsConfig.from_json(json.loads((fixture.target / "find-jobs.json").read_text(encoding="utf-8")))
+    sealed = resolved.path / "runs" / "run_00000000-0000-4000-8000-000000000301" / "sealed"
+    sealed.mkdir(parents=True, exist_ok=True)
+    (sealed / "find-jobs-run-input.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "scout-find-jobs-run-input:1", "config": config.to_json(), "config_digest": config.digest(),
+                "selection_cap": 10, "selection_rule": "new_or_edited_role_match", "model_target": "ollama_local",
+                "pinned_resume": PinnedResume(fixture.record_id, fixture.revision_id, str(digest_imported_bytes(RESUME.encode("utf-8")))).to_json(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    capture.flow = "assess_node_bank"
+    output = _run_assess_node(fixture, posting)
+    assert len(output.assessments) == 1 and output.story_bank is not None and output.story_bank.profile_id == fixture.profile_id, output
+    return capture.model_payloads("assess_node_bank")
+
+
+def test_the_story_bank_lines_of_a_runs_assess_payload_carry_no_contact_value_and_no_other_profiles_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _home(tmp_path, monkeypatch)
+    _seed_story_bank(fixture)
+    capture = arm(monkeypatch)
+
+    payloads = _run_with_the_bank(fixture, capture)
+
+    assert capture.tripped == [] and len(payloads) == 1, "one model call, the run's own assessment"
+    payload = payloads[0].decode("utf-8")
+    # Non-vacuous controls: the bank reached the RUN's model call, the old answer included (redacted).
+    assert "STORY BANK (answers" in payload and "PRIOR ANSWERS (from earlier" in payload
+    assert BANK_MARKER in payload and "- story:ledger_migration | asked: Tell me about a migration you led | answer: " in payload
+    assert "- years:ledger | answer: Six years on the ledger;" in payload and "- years:ledger: Six years on the ledger;" in payload
+    assert BODY_MARKER in payload, "and the resume, as before"
+    # 0110-035: and the run's own sealed constraints (location, countries, sponsorship, titles).
+    assert "visa sponsorship required = no; " in payload and "): US; " in payload and "): Denver, CO; " in payload
+    assert "target titles the candidate is looking for = staff software engineer." in payload
+    # The assertions themselves.
+    assert leaks(payload) == [], "no name or contact value in the bank lines of a run"
+    assert OTHER_PROFILE_MARKER not in payload and "cloud:gcp:" not in payload and "- cloud:gcp |" not in payload
+
+
+def test_the_detector_finds_the_bank_values_in_a_runs_payload_when_the_bank_redaction_is_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control: with the bank's own redaction made a no-op, the run-path capture sees the old answer's values."""
+
+    from gigai.scout import story_bank
+
+    monkeypatch.setattr(story_bank, "redact_inline", lambda line: line)
+    monkeypatch.setattr(story_bank, "guard_name", lambda text, tokens: text)
+    monkeypatch.setattr(story_bank, "personal_info_in_answer", lambda text, names=(): [])
+    fixture = _home(tmp_path, monkeypatch)
+    _seed_story_bank(fixture)
+    capture = arm(monkeypatch)
+
+    found = leaks(_run_with_the_bank(fixture, capture)[0])
+
+    assert {NAME, EMAIL, PHONE, GITHUB, LINKEDIN, SITE} <= set(found), found
 
 
 def test_a_model_tag_payload_carries_titles_and_locations_and_no_resume_or_profile_text(

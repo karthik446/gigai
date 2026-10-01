@@ -17,22 +17,32 @@
 // without being typed again; the prompt alone decides what it means
 // (operator answer 5).
 //
+// 0110-034: `profileId` is whose story bank the answers go to (and whose
+// the suggestions come from). For each open question with nothing on
+// record the hook asks GET /api/story-bank/match once: a near match is
+// offered as "We already know: ..., use it?" (`suggestionFor`), and
+// `applySuggestion` puts that answer in the box for the operator to confirm
+// or edit. Nothing is saved until Re-assess.
+//
 // `onReassessUnavailable`: an identity neither the quick-assess store nor a
 // run knows answers 404 reassess_not_found AFTER recording the answer; the
 // job page passes a fallback that runs POST /api/assess {job_url} instead.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ApiError, postAnswer } from "./api.js";
+import { ApiError, getStoryBankMatch, postAnswer } from "./api.js";
 import { answerRequests, answerStates, reassessGate, unsavedAnswerRequests } from "./answersModel.js";
 
-export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable }) {
+export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable, profileId }) {
   const [drafts, setDrafts] = useState({});
   const [saved, setSaved] = useState({});
+  const [suggestions, setSuggestions] = useState(() => new Map());
+  const [used, setUsed] = useState({});
   const [busy, setBusy] = useState(null); // null | "reassess" | "saving"
   const [error, setError] = useState(null);
 
   useEffect(() => {
     setDrafts({});
     setSaved({});
+    setUsed({});
     setBusy(null);
     setError(null);
   }, [jobIdentity]);
@@ -46,10 +56,41 @@ export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswe
     return merged;
   }, [priorAnswers, saved]);
 
-  const states = useMemo(() => answerStates(questions, drafts, recorded), [questions, drafts, recorded]);
+  // 0110-034: one near-match lookup per open question nothing answers yet.
+  useEffect(() => {
+    let current = true;
+    const open = questions.filter((question) => !recorded.has(question.question_id));
+    if (open.length === 0) {
+      setSuggestions(new Map());
+      return undefined;
+    }
+    Promise.all(
+      open.map((question) =>
+        getStoryBankMatch({ profileId, questionId: question.question_id, question: question.question })
+          .then((response) => [question.question_id, response && response.match])
+          .catch(() => [question.question_id, null]),
+      ),
+    ).then((pairs) => current && setSuggestions(new Map(pairs.filter(([, match]) => match))));
+    return () => {
+      current = false;
+    };
+  }, [questions, recorded, profileId]);
+
+  const states = useMemo(() => answerStates(questions, drafts, recorded, { suggestions, used }), [questions, drafts, recorded, suggestions, used]);
   const gate = useMemo(() => reassessGate({ assessed: Boolean(assessment), states }), [assessment, states]);
 
   const setDraft = useCallback((id, value) => setDrafts((current) => ({ ...current, [id]: value })), []);
+  const suggestionFor = useCallback((id) => (states.find((state) => state.question_id === id) || {}).suggestion || null, [states]);
+  const applySuggestion = useCallback(
+    (id) => {
+      const suggestion = suggestions.get(id);
+      if (suggestion) {
+        setDrafts((current) => ({ ...current, [id]: suggestion.answer }));
+        setUsed((current) => ({ ...current, [id]: suggestion.bank_question_id }));
+      }
+    },
+    [suggestions],
+  );
   const valueFor = useCallback(
     (id) => {
       if (Object.prototype.hasOwnProperty.call(drafts, id)) {
@@ -62,7 +103,7 @@ export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswe
   );
 
   const reassess = useCallback(async () => {
-    const requests = answerRequests(states, jobIdentity);
+    const requests = answerRequests(states, jobIdentity, profileId);
     if (requests.length === 0 || busy) {
       return;
     }
@@ -98,12 +139,12 @@ export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswe
     } finally {
       setBusy(null);
     }
-  }, [states, jobIdentity, busy, onAnswered, onReassessUnavailable]);
+  }, [states, jobIdentity, busy, onAnswered, onReassessUnavailable, profileId]);
 
   // Rejects when a save fails, so the caller does not go on to tailor with
   // an answer missing.
   const saveUnsaved = useCallback(async () => {
-    const requests = unsavedAnswerRequests(states);
+    const requests = unsavedAnswerRequests(states, profileId);
     if (requests.length === 0) {
       return 0;
     }
@@ -123,7 +164,7 @@ export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswe
       setSaved((current) => ({ ...current, ...done }));
       setBusy(null);
     }
-  }, [states]);
+  }, [states, profileId]);
 
-  return { questions, states, gate, busy, error, setDraft, valueFor, reassess, saveUnsaved, canReassess: Boolean(jobIdentity) };
+  return { questions, states, gate, busy, error, setDraft, valueFor, reassess, saveUnsaved, suggestionFor, applySuggestion, canReassess: Boolean(jobIdentity) };
 }

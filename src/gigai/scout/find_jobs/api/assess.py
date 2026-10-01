@@ -100,7 +100,12 @@ class AssessRoutesMixin:
         except QuickAssessError as exc:
             self._error(_status_for(exc.code), exc.code, str(exc))
             return
-        self._write_json(HTTPStatus.OK, response.to_json())
+        # 0110-034: a near match from the profile's story bank, per open question.
+        from ... import story_bank
+
+        self._write_json(
+            HTTPStatus.OK, story_bank.attach_suggestions(response.to_json(), home_root=self._backend.home_root, target=target)
+        )
 
     def _handle_get_assessments(self) -> None:
         target = self._assess_target()
@@ -120,6 +125,15 @@ class AssessRoutesMixin:
             self._error(_status_for(exc.code), exc.code, str(exc))
             return
         body = AssessmentsListResponse(items).to_json()
+        served = body.get("items")
+        if isinstance(served, list):
+            # 0110-034: computed on read (one bank read per profile), never stored.
+            from ... import story_bank
+
+            banks: dict[str, tuple[story_bank.BankEntry, ...]] = {}
+            for row in served:
+                if isinstance(row, dict):
+                    story_bank.attach_suggestions(row, home_root=self._backend.home_root, target=target, cache=banks)
         try:
             self._attach_assessment_job_states(target, items, body)
         except Exception:  # noqa: BLE001 - display-only enrichment must never break the list

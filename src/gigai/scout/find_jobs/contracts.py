@@ -1868,6 +1868,44 @@ def _validate_assess_input(value: AssessInput) -> None:
 
 
 @dataclass(frozen=True)
+class StoryBankStamp(_Contract):
+    """0110-034b: which story bank a run's assess node read.
+
+    ``profile_id`` is whose bank (its own entries plus a shared profile's),
+    ``entries`` maps every answered question id the run could reuse to an
+    opaque revision mark (a list of ``{question_id, mark}`` in JSON), and ``digest`` is the digest of that map. No answer
+    text and nothing derived from it: a mark is built from record ids only.
+    A later run compares its own bank against this to decide whether an
+    unchanged posting's assessment still stands (``story_bank.
+    bank_makes_stale``).
+    """
+
+    profile_id: str
+    # ``digest`` in JSON; the attribute cannot be named that (``_Contract.digest()``).
+    bank_digest: str
+    entries: Mapping[str, str]
+
+    def to_json(self) -> dict[str, object]:
+        # A list, not an object keyed by question id: ``cloud:gcp`` is not a canonical JSON member name.
+        return {
+            "profile_id": self.profile_id,
+            "digest": self.bank_digest,
+            "entries": [{"question_id": key, "mark": self.entries[key]} for key in sorted(self.entries)],
+        }
+
+    @classmethod
+    def from_json(cls, obj: object) -> "StoryBankStamp":
+        value = _object(obj, ("profile_id", "digest", "entries"), "story_bank_stamp")
+        if type(value["entries"]) is not list:
+            _fail("wrong_type", "story_bank_stamp.entries must be an array")
+        entries: dict[str, str] = {}
+        for item in value["entries"]:
+            entry = _object(item, ("question_id", "mark"), "story_bank_stamp.entries[]")
+            entries[_string(entry["question_id"], "story_bank_stamp.entries[].question_id")] = _string(entry["mark"], "story_bank_stamp.entries[].mark")
+        return cls(_string(value["profile_id"], "story_bank_stamp.profile_id"), _digest_value(value["digest"], "story_bank_stamp.digest"), entries)
+
+
+@dataclass(frozen=True)
 class AssessOutput(_Contract):
     schema_version: ClassVar[str] = "scout-find-jobs-assess-output:1"
     selected_postings: tuple[SelectedPosting, ...]
@@ -1883,8 +1921,29 @@ class AssessOutput(_Contract):
     producer: Producer
     usage: UsageBlock | None
     failures: tuple[FailureRow, ...]
+    # 0110-034b: additive/optional (_object_with_optional). The assess prompt
+    # version these assessments were made with, and the story bank the prompt
+    # was offered (``None``: the run had no profile to read a bank for). All
+    # omitted at ``None`` so an output sealed before them reads and writes
+    # byte for byte as before.
+    prompt_version: str | None = None
+    story_bank: StoryBankStamp | None = None
+    # 0110-035: a digest of the candidate constraints the prompt carried
+    # (``assessment_core.constraints_digest``: sponsorship need, eligible
+    # countries, own location). Additive/optional like the two above.
+    constraints_digest: str | None = None
 
     def to_json(self) -> dict[str, object]:
+        value = self._required_json()
+        if self.prompt_version is not None:
+            value["prompt_version"] = self.prompt_version
+        if self.constraints_digest is not None:
+            value["constraints_digest"] = self.constraints_digest
+        if self.story_bank is not None:
+            value["story_bank"] = self.story_bank.to_json()
+        return value
+
+    def _required_json(self) -> dict[str, object]:
         return {
             "schema_version": self.schema_version,
             "selected_postings": [item.to_json() for item in self.selected_postings],
@@ -1904,13 +1963,21 @@ class AssessOutput(_Contract):
 
     @classmethod
     def from_json(cls, obj: object) -> "AssessOutput":
-        value = _object(obj, ("schema_version", "selected_postings", "pinned_resume", "target", "selection_cap", "selection_rule", "candidate_rows", "assessments", "not_assessed", "proposal_revision_refs", "model_target", "producer", "usage", "failures"), "assess_output")
+        value = _object_with_optional(
+            obj,
+            ("schema_version", "selected_postings", "pinned_resume", "target", "selection_cap", "selection_rule", "candidate_rows", "assessments", "not_assessed", "proposal_revision_refs", "model_target", "producer", "usage", "failures"),
+            ("prompt_version", "story_bank", "constraints_digest"),
+            "assess_output",
+        )
         if value["schema_version"] != cls.schema_version:
             _fail("bad_enum", "assess_output.schema_version is unsupported")
         if type(value["selected_postings"]) is not list or type(value["candidate_rows"]) is not list or type(value["assessments"]) is not list or type(value["not_assessed"]) is not list or type(value["failures"]) is not list:
             _fail("wrong_type", "assess_output arrays are malformed")
         usage = None if value["usage"] is None else UsageBlock.from_json(value["usage"])
-        result = cls(tuple(SelectedPosting.from_json(item) for item in value["selected_postings"]), PinnedResume.from_json(value["pinned_resume"]), _string(value["target"], "target"), selection_cap_value(value["selection_cap"], "selection_cap"), _enum(value["selection_rule"], SelectionRule, "selection_rule"), tuple(PostingRowResult.from_json(item) for item in value["candidate_rows"]), tuple(AssessmentResult.from_json(item) for item in value["assessments"]), tuple(NotAssessedRow.from_json(item) for item in value["not_assessed"]), _strings(value["proposal_revision_refs"], "proposal_revision_refs", allow_empty=True), _enum(value["model_target"], ModelTarget, "model_target"), Producer.from_json(value["producer"]), usage, tuple(FailureRow.from_json(item) for item in value["failures"]))
+        prompt_version = None if "prompt_version" not in value else _string(value["prompt_version"], "assess_output.prompt_version")
+        story_bank = None if "story_bank" not in value else StoryBankStamp.from_json(value["story_bank"])
+        constraints = None if "constraints_digest" not in value else _digest_value(value["constraints_digest"], "assess_output.constraints_digest")
+        result = cls(tuple(SelectedPosting.from_json(item) for item in value["selected_postings"]), PinnedResume.from_json(value["pinned_resume"]), _string(value["target"], "target"), selection_cap_value(value["selection_cap"], "selection_cap"), _enum(value["selection_rule"], SelectionRule, "selection_rule"), tuple(PostingRowResult.from_json(item) for item in value["candidate_rows"]), tuple(AssessmentResult.from_json(item) for item in value["assessments"]), tuple(NotAssessedRow.from_json(item) for item in value["not_assessed"]), _strings(value["proposal_revision_refs"], "proposal_revision_refs", allow_empty=True), _enum(value["model_target"], ModelTarget, "model_target"), Producer.from_json(value["producer"]), usage, tuple(FailureRow.from_json(item) for item in value["failures"]), prompt_version, story_bank, constraints)
         selected_urls = tuple(item.normalized_url for item in result.selected_postings)
         candidate_urls = {item.posting.normalized_url for item in result.candidate_rows}
         if len(selected_urls) != len(set(selected_urls)):
@@ -2475,7 +2542,7 @@ __all__ = [
     "NotAssessedRow", "PRESENT_CAPABILITY", "PRESENT_CAPABILITY_ID", "PRESENT_DECLARED_EFFECTS", "PRESENT_EFFECTS", "PresentInput",
     "PayPeriod", "PresentNodeCallable", "PresentOutput", "PresentPayload", "PinnedResume", "PostingPay", "PostingRow", "PostingRowResult", "Producer", "ProfileRef", "ROUTES",
     "ProgressStatus", "RequirementClass", "RequirementMatrixRow", "RowOutcome", "RouteSpec", "RunLookupRequest", "RunRequest", "RunResponse", "RunResultsResponse", "RunStatusResponse",
-    "SelectedPosting", "SelectionReason", "SelectionReasonCode", "SelectionRule", "SourceKind", "SourceToggles", "SponsorshipStatus", "UIConsentEnvelope", "URLChangeDetectionClient", "URLObservation", "URLSetDiff", "Verdict",
+    "SelectedPosting", "SelectionReason", "SelectionReasonCode", "SelectionRule", "SourceKind", "SourceToggles", "StoryBankStamp", "SponsorshipStatus", "UIConsentEnvelope", "URLChangeDetectionClient", "URLObservation", "URLSetDiff", "Verdict",
     "UsageBlock", "WatchlistClient", "WatchlistEntry", "WatchlistFixture", "WatchlistFirstSeen", "WorkMode", "WorkModePreference", "aggregate_status", "content_hash",
     "diff_url_sets", "normalize_url", "parse_board_url",
 ]
