@@ -191,6 +191,7 @@ def find_older(
     from .company_index import INDEX_EMPTY, CompanyIndex
     from .filters import exclusion_reason
     from .index_search import read_indexed_boards
+    from .title_query import open_tag_store
     from .market_acquisition import IMPORT_ROW_CAP, _dedupe_identity, _merge_exa_and_ats_rows, _public_row, _role_match
     from .sources_update import board_cache_for_home
     from .work_mode import work_mode_fit
@@ -208,8 +209,10 @@ def find_older(
             cache=board_cache_for_home(home_root),
             config=wide,
             now=now,
+            tags=open_tag_store(home_root),
             remember_search=False,  # the next run's "new since the last search" count is the runs' own
         )
+        role_tags = open_tag_store(home_root)
         state = summary.get("index")
         index = dict(state) if isinstance(state, dict) else {}
         previous = read(home_root, target, run_id)
@@ -231,7 +234,7 @@ def find_older(
         fresh: list[PostingRow] = []
         for row in _merge_exa_and_ats_rows(found):
             # The filters acquire applies after its own read of the index.
-            if exclusion_reason(row, wide, now=now) is not None or not _role_match(row, wide.roles):
+            if exclusion_reason(row, wide, now=now) is not None or not _role_match(row, wide.roles, role_tags):
                 continue
             if not work_mode_fit(row, wide).passes or public_row_refusal(_public_row(row)) is not None:
                 continue

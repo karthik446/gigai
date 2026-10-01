@@ -880,7 +880,9 @@ def _board_cache(home_root: Path | None) -> BoardCache | None:
 
     if home_root is None:
         return None
-    return BoardCache(Path(home_root) / "cache" / "scout" / "ats-boards")
+    # No index validators here: a run's own board fetch needs the body, so a 304 answered to a
+    # snapshot's ETag (no cached body) must never reach it. Only sources update uses them.
+    return BoardCache(Path(home_root) / "cache" / "scout" / "ats-boards", validator_source=lambda _provider, _url: None)
 
 
 def _seed_watchlist(

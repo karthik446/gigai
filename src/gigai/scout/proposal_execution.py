@@ -259,6 +259,7 @@ def _assess_node_body(
     from .find_jobs.contracts import PinnedResume
     from .find_jobs.filters import exclusion_reason
     from .find_jobs.market_acquisition import _default_profile_id, _prior_assessments, _role_match
+    from .find_jobs.title_query import open_tag_store
     from .find_jobs import rank_run
     from .find_jobs.selection import select_for_assessment, selection_limits
     from ..workpad import resolve_workpad
@@ -332,7 +333,7 @@ def _assess_node_body(
             # every explicitly selected posting.
             is_candidate = True
         elif sealed_config is not None:
-            is_candidate = _role_match(posting, roles)
+            is_candidate = _role_match(posting, roles, open_tag_store(home_root))
         else:
             # No sealed config and not selected: there is no config to
             # derive role-match or exclusion from, so this row is simply
