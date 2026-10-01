@@ -51,7 +51,7 @@ from ..resume_privacy import (  # noqa: F401  (re-exported)
 #: text; v3 (uat-bug-030) built it from structure and privacy-guarded it. Posting digests
 #: are unchanged from v2. The bump keys the score cache, so a score made with an older
 #: resume digest is never reused.
-DIGEST_VERSION = "digest-v4"
+DIGEST_VERSION = "digest-v5"
 
 # canonical label -> regex (case-insensitive). Kept to terms that separate one
 # engineering posting from another (the spike's vocabulary, unchanged).
@@ -97,6 +97,8 @@ _STOP_HEAD = re.compile(
     re.I,
 )
 _YEARS_RE = re.compile(r"(\d{1,2})\s*\+?\s*(?:-\s*\d{1,2}\s*)?(?:\+\s*)?(?:years|yrs)", re.I)
+# Posting side: a range ("8-12", "8–12", "7 to 10 years") reads as its lower bound (group 1).
+_REQ_YEARS_RE = re.compile(r"(\d{1,2})\s*\+?\s*(?:(?:-|–|—|to)\s*\d{1,2}\s*)?(?:\+\s*)?(?:years|yrs)", re.I)
 _LEVELS = (
     ("principal", r"principal|distinguished|fellow"), ("senior staff", r"senior staff|sr\.? staff"), ("staff", r"\bstaff\b"),
     ("lead", r"\blead\b|\btech lead\b"), ("manager", r"manager|head of|director|\bvp\b"),
@@ -215,7 +217,7 @@ def posting_digest(posting: DigestPosting, posting_id: str) -> str:
 
     text = posting.text or ""
     section, found = requirements_section(text)
-    years = [int(m.group(1)) for m in _YEARS_RE.finditer(section) if 0 < int(m.group(1)) <= 25]
+    years = [int(m.group(1)) for m in _REQ_YEARS_RE.finditer(section) if 0 < int(m.group(1)) <= 25]
     techs = techs_in(section)[:_MAX_TECHS]
     flags = constraint_flags(text)
     countries = ",".join(posting.countries or ()) or "?"
@@ -225,7 +227,7 @@ def posting_digest(posting: DigestPosting, posting_id: str) -> str:
         f"{title} @ {_field(posting.company, _MAX_TITLE)}",
         f"lvl={level_of(title)}",
         f"loc={_field(posting.location, _MAX_LOCATION)} [{countries}]",
-        f"yrs={min(years)}+" if years else "yrs=?",
+        f"yrs={max(years)}+" if years else "yrs=?",
         "req=" + (", ".join(techs) if techs else "-") + ("" if found else " (req=full)"),
     ]
     if flags:

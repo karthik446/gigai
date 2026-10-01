@@ -168,7 +168,7 @@ def test_sealed_rank_json_shape_round_trips() -> None:
         "status", "fail_open_reason", "totals", "postings", "batches",
     ]
     assert sealed["schema_version"] == RANK_SCHEMA_VERSION
-    assert (sealed["prompt_version"], sealed["digest_version"]) == ("rank-v1", "digest-v4")
+    assert (sealed["prompt_version"], sealed["digest_version"]) == ("rank-v1", "digest-v5")
     assert sealed["totals"] == {
         "postings": 3, "scored": 2, "unscored": 1, "cached": 1, "demoted": 0, "calls": 4, "batches": 3,
         "valid_batches": 1, "input_tokens": 190, "output_tokens": 35, "total_tokens": 180, "cached_input_tokens": 60,

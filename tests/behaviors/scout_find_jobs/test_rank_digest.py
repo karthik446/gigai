@@ -166,7 +166,7 @@ def test_resume_digest_defaults() -> None:
 
 
 def test_digest_version() -> None:
-    assert DIGEST_VERSION == "digest-v4"
+    assert DIGEST_VERSION == "digest-v5"
 
 
 # uat-bug-030: the ranking model never sees the resume header. Synthetic data only.
@@ -281,3 +281,24 @@ def test_location_line_comes_only_from_prefs() -> None:
     digest = resume_digest(TITLE_NAME_RESUME, CandidatePrefs(countries=("US",)))
     assert "location: unknown" in digest and "Denver" not in digest
     assert "location: Remote (remote preferred)" in resume_digest(TITLE_NAME_RESUME, CandidatePrefs(location="Remote", remote_preferred=True))
+
+
+def _yrs(requirement: str) -> str:
+    posting = _Posting("Engineer", "acme", "Remote", f"We build things.\n\nWhat you'll bring\n- {requirement}\n")
+    return next(part for part in posting_digest(posting, "p1").split(" | ") if part.startswith("yrs="))
+
+
+@pytest.mark.parametrize(
+    ("requirement", "expected"),
+    [
+        ("10+ years in software, 2+ years managing", "yrs=10+"),
+        ("8-12 years of experience", "yrs=8+"),
+        ("8–12 years of experience", "yrs=8+"),
+        ("7 to 10 years of experience", "yrs=7+"),
+        ("5 years of Python and 3 years of Go", "yrs=5+"),
+        ("at least 7 years of experience", "yrs=7+"),
+        ("strong Python skills", "yrs=?"),
+    ],
+)
+def test_years_required_reads_the_main_requirement(requirement: str, expected: str) -> None:
+    assert _yrs(requirement) == expected

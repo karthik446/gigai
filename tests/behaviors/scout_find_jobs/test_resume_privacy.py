@@ -104,4 +104,4 @@ def test_the_inline_redaction_is_narrow() -> None:
 def test_the_rank_digest_reexports_the_shared_helpers() -> None:
     for name in ("split_resume_header", "guard_private", "guard_name", "_name_tokens", "_is_contact_line", "_is_clean"):
         assert getattr(rank_digest, name) is getattr(resume_privacy, name), name
-    assert rank_digest.DIGEST_VERSION == "digest-v4", "the digest output is unchanged, so its version is too"
+    assert rank_digest.DIGEST_VERSION == "digest-v5", "the posting years figure changed (0110-023), so the digest version moved to v5"
