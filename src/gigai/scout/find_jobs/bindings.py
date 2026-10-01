@@ -983,7 +983,10 @@ def _assess_bound(
                             *(NotAssessedRow(row.posting, NotAssessedReason.UNCHANGED) for row in missing_unchanged),
                         ),
                     )
-        return output
+        # 0110-040: the rows added above are the acquire rows, text and all;
+        # a row the run did not assess is sealed without its posting text
+        # (the text stays in the run's acquire output and the board cache).
+        return output.without_unassessed_text()
     finally:
         scout_proposals.parse_assessment_proposal = parser  # type: ignore[assignment]
 

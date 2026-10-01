@@ -641,7 +641,9 @@ def _assess_node_body(
     # 0110-034b: sealed with the output, so a later run (and a reader) knows
     # which prompt and which bank these verdicts were made with.
     bank_stamp = None if bank.profile_id is None else StoryBankStamp(bank.profile_id, bank.digest, dict(bank.marks))
-    return AssessOutput(tuple(input.selected_postings), input.pinned_resume, input.target, input.selection_cap, SelectionRule.NEW_OR_EDITED_ROLE_MATCH, tuple(rows), tuple(assessments), tuple(not_assessed), tuple(revisions), ContractModelTarget(model_target), producer, usage, (), assess_prompt_version(prompt_work_mode), bank_stamp, current_constraints)
+    # 0110-040: a row the run did not assess is sealed without its posting
+    # text (identity, digest and reason only); see ``without_unassessed_text``.
+    return AssessOutput(tuple(input.selected_postings), input.pinned_resume, input.target, input.selection_cap, SelectionRule.NEW_OR_EDITED_ROLE_MATCH, tuple(rows), tuple(assessments), tuple(not_assessed), tuple(revisions), ContractModelTarget(model_target), producer, usage, (), assess_prompt_version(prompt_work_mode), bank_stamp, current_constraints).without_unassessed_text()
 
 
 def _run_root(root: Path, context: object) -> Path:

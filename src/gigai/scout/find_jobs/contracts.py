@@ -9,7 +9,7 @@ packets.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 import re
@@ -1488,12 +1488,49 @@ class RequirementMatrixRow(_Contract):
         return cls(_string(value["requirement"], "requirement"), _strings(value["resume_evidence"], "resume_evidence", allow_empty=True), _enum(value["status"], MatrixStatus, "status"), requirement_class)
 
 
+def posting_identity(posting: PostingRow) -> PostingRow:
+    """``posting`` without its ``text``: what a run seals for a row it did not assess.
+
+    Every other field stays (identity, digest, and the title/company/location
+    the list shows); ``text`` is optional on ``PostingRow`` and omitted from
+    JSON at ``None``, so this is the same sealed shape, minus one key.
+    """
+
+    return posting if posting.text is None else replace(posting, text=None)
+
+
+def with_row_text(not_assessed: Iterable["NotAssessedRow"], rows: Iterable[PostingRowResult]) -> tuple["NotAssessedRow", ...]:
+    """``not_assessed`` with each text-less posting given the text of the run's own row.
+
+    0110-040: a not-assessed row is sealed without its posting text; the
+    run's acquire rows still carry it. A row sealed before that (with its
+    text) is returned as it is, and one whose run row has no text stays
+    without.
+    """
+
+    text_by_url = {row.posting.normalized_url: row.posting.text for row in rows if row.posting.text is not None}
+    return tuple(
+        replace(item, posting=replace(item.posting, text=text_by_url[item.posting.normalized_url]))
+        if item.posting.text is None and item.posting.normalized_url in text_by_url
+        else item
+        for item in not_assessed
+    )
+
+
 @dataclass(frozen=True)
 class NotAssessedRow(_Contract):
-    """One candidate row intentionally left visible but not sent to assess."""
+    """One candidate row intentionally left visible but not sent to assess.
+
+    0110-040: sealed with identity, digest and reason only -- ``posting`` has
+    no ``text`` (``identity_only``). The reader accepts both shapes: a row
+    sealed earlier, with its text, reads as before.
+    """
 
     posting: PostingRow
     reason: NotAssessedReason
+
+    def identity_only(self) -> "NotAssessedRow":
+        return self if self.posting.text is None else replace(self, posting=posting_identity(self.posting))
 
     def to_json(self) -> dict[str, object]:
         return {"posting": self.posting.to_json(), "reason": _json_enum(self.reason)}
@@ -1942,6 +1979,29 @@ class AssessOutput(_Contract):
         if self.story_bank is not None:
             value["story_bank"] = self.story_bank.to_json()
         return value
+
+    def without_unassessed_text(self) -> "AssessOutput":
+        """This output as a run seals it (0110-040): no posting text on a row it did not assess.
+
+        A not-assessed row, and its entry in ``candidate_rows``, keep
+        identity, digest and the list's label fields; the text stays in the
+        run's acquire rows (and the board cache), where the reads take it
+        from. Assessed rows are untouched.
+        """
+
+        unassessed = {item.posting.normalized_url for item in self.not_assessed}
+        if not any(item.posting.text is not None for item in self.not_assessed) and not any(
+            row.posting.text is not None for row in self.candidate_rows if row.posting.normalized_url in unassessed
+        ):
+            return self
+        return replace(
+            self,
+            candidate_rows=tuple(
+                replace(row, posting=posting_identity(row.posting)) if row.posting.normalized_url in unassessed else row
+                for row in self.candidate_rows
+            ),
+            not_assessed=tuple(item.identity_only() for item in self.not_assessed),
+        )
 
     def _required_json(self) -> dict[str, object]:
         return {
@@ -2544,5 +2604,5 @@ __all__ = [
     "ProgressStatus", "RequirementClass", "RequirementMatrixRow", "RowOutcome", "RouteSpec", "RunLookupRequest", "RunRequest", "RunResponse", "RunResultsResponse", "RunStatusResponse",
     "SelectedPosting", "SelectionReason", "SelectionReasonCode", "SelectionRule", "SourceKind", "SourceToggles", "StoryBankStamp", "SponsorshipStatus", "UIConsentEnvelope", "URLChangeDetectionClient", "URLObservation", "URLSetDiff", "Verdict",
     "UsageBlock", "WatchlistClient", "WatchlistEntry", "WatchlistFixture", "WatchlistFirstSeen", "WorkMode", "WorkModePreference", "aggregate_status", "content_hash",
-    "diff_url_sets", "normalize_url", "parse_board_url",
+    "diff_url_sets", "normalize_url", "parse_board_url", "posting_identity", "with_row_text",
 ]

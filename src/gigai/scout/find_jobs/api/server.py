@@ -919,7 +919,15 @@ class ScoutFindJobsBackend:
             )
 
     def run_results(self, run_id: str) -> RunResultsResponse:
+        from dataclasses import replace
+
+        from ..contracts import with_row_text
+
         payload = self._payload(run_id)
+        # 0110-040: a not-assessed row is sealed without its posting text.
+        # This read answers it as before, with the text of the run's own row
+        # (a run sealed earlier, with the text, is answered as it is).
+        payload = replace(payload, not_assessed=with_row_text(payload.not_assessed, payload.rows))
         return RunResultsResponse(run_id, payload)
 
     def run_progress(self, run_id: str) -> dict[str, object]:
