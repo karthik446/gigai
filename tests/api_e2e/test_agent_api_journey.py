@@ -186,6 +186,10 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         assert {name: set(background[name]) for name in ("auto_refresh", "tags", "text")} == {name: set(documented["background"][name]) for name in ("auto_refresh", "tags", "text")}
         assert background["auto_refresh"] == {"enabled": False, "source": "environment", "active": True}
         assert (background["state"], background["next_tick_at"]) == ("disabled", None)
+        # 0110-026: and the documented `snapshot` block. Reading it asks nobody: nothing was imported here.
+        snapshot_block = sources_status["snapshot"]
+        assert set(snapshot_block) == set(documented["snapshot"])
+        assert (snapshot_block["as_of"], snapshot_block["last_attempt_at"], snapshot_block["counts"]) == (None, None, None)
         assert allowed(client.post("/api/applications", json={"bogus": 1})) == ["event_kind", "job_identity", "normalized_url", "notes", "occurred_at"]
         assert allowed(client.put("/api/resume-display", json={"bogus": 1})) == ["auto_fit", "contact", "name", "spacing_scale", "titles"]
         assert allowed(client.post("/api/resumes", json={"bogus": 1})) == ["content_base64", "file_name", "text"]

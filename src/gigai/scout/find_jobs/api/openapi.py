@@ -473,6 +473,20 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
                 "tags": {"available": True, "titles": 5200, "with_function": 4400, "lacking_function": 800},
                 "text": {"available": True, "postings": 9000, "with_text": 6100, "unchecked": 2900},
             },
+            "snapshot": {
+                "enabled": True,
+                "setting_source": "default",
+                "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json",
+                "as_of": "2026-10-01T06:00:00Z",
+                "source": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json",
+                "kind": "full",
+                "imported_at": "2026-10-01T11:49:00.000Z",
+                "last_attempt_at": "2026-10-01T11:49:00.000Z",
+                "last_result": "imported",
+                "last_reason": None,
+                "last_message": "Imported the snapshot as of 2026-10-01T06:00:00Z.",
+                "counts": {"boards": 120, "postings": 9000, "tags": 5200, "boards_kept_local": 0, "boards_removed": 0, "postings_removed": 0},
+            },
         },
         schema_version="scout-sources-update-status:1",
         description=(
@@ -484,7 +498,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "background refresh never fills an empty index), running, waiting or due; `in_progress` and `trigger` describe the live "
             "update, `last_update` the last finished one; `next_tick_at` is null unless a tick is scheduled; `tags` counts stored "
             "titles and those still lacking a function; `text.unchecked` counts postings with no stored text, which a text search "
-            "cannot match."
+            "cannot match. `snapshot` is the downloaded metadata snapshot (titles, locations, links, title tags and board "
+            "validators; never descriptions): `enabled` and `setting_source` (default|setting|environment|settings_unreadable) say "
+            "whether it may be downloaded, `as_of` when the one in use was built (null: none imported), `kind` full or delta, "
+            "`last_result` imported, up_to_date, skipped, refused or failed, `last_reason` why nothing was imported (offline, "
+            "not_published, local_fresher, checked_recently, digest_mismatch, ...), `counts` what the last import wrote. Reading "
+            "this makes no request."
         ),
     ),
 )

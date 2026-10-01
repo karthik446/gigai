@@ -17,6 +17,9 @@ uses in this API, not a blocking request:
   0110-025 adds ``background`` (additive): the hourly refresh (on or off,
   its state, the last update and who started it, the next tick time, whether
   an update is in progress) and the tag-store and text-index counts.
+  0110-026 adds ``snapshot`` (additive): the metadata snapshot in use (its
+  ``as_of`` and where it came from), the last attempt and its result, and
+  whether the download is turned on. Reading it makes no request.
 
 The update itself is ``find_jobs.sources_update`` (the CLI's ``gigai scout
 sources update`` calls the same function); the snapshot lives beside the
@@ -134,13 +137,16 @@ class SourcesRoutesMixin:
         if home_root is None:
             return
         from ..refresh_tick import background_status
+        from ..snapshot import snapshot_status
 
+        target = getattr(self._backend, "target", None)
         status = read_status(home_root)
         status["background"] = background_status(
             home_root,
-            getattr(self._backend, "target", None),
+            target,
             ticker=getattr(self.server, "refresh_ticker", None),
         )
+        status["snapshot"] = snapshot_status(home_root, target)
         self._write_json(HTTPStatus.OK, status)
 
 

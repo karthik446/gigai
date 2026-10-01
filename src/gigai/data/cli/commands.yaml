@@ -804,6 +804,26 @@
       ],
       "notes": "No descriptions and no private paths are written (scanned before success); every file is re-opened and its SHA-256 checked. With --base, a delta file and a removal list of boards and postings that are gone are added. Never publishes: the gh commands are printed as text for you to run."
     },
+    "scout snapshot import": {
+      "summary": "Download the published metadata snapshot (postings, title tags, board validators; no descriptions) and add it to the stored company index.",
+      "effect": "write",
+      "external": "network",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout snapshot import",
+        "gigai scout snapshot import --from ./snapshot"
+      ],
+      "notes": "Takes the full files, or only the delta when the stored snapshot is the delta's base. Every file's SHA-256 is checked before it is read. A board checked on this machine at or after the snapshot is left alone, and nothing local is deleted except boards the snapshot itself added and later lists as removed. Unreachable or not published is a quiet no-op (exit 0); a snapshot that fails its checks or cannot be written exits 1 with the stored postings unchanged. Makes no request when the snapshot.enabled setting (or GIGAI_SCOUT_SNAPSHOT=0) turns it off."
+    },
+    "scout snapshot status": {
+      "summary": "Show which snapshot is in use, the last import attempt and whether the download is turned on.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout snapshot status"
+      ]
+    },
     "scout sources status": {
       "summary": "Show the last sources update and whether a search can use the stored postings.",
       "effect": "read",

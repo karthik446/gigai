@@ -90,6 +90,22 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
             "tags": {"available": False, "titles": 0, "with_function": 0, "lacking_function": 0},
             "text": {"available": False, "postings": 0, "with_text": 0, "unchecked": 0},
         }
+        # 0110-026: the snapshot block. Nothing was imported, and reading the status asked nobody.
+        assert before_body.pop("snapshot") == {
+            "enabled": True,
+            "setting_source": "default",
+            "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json",
+            "as_of": None,
+            "source": None,
+            "kind": None,
+            "imported_at": None,
+            "last_attempt_at": None,
+            "last_result": None,
+            "last_reason": None,
+            "last_message": None,
+            "counts": None,
+        }
+        assert not (home / "cache" / "scout" / "snapshot").exists()
         assert before_body == {
             "schema_version": "scout-sources-update-status:1",
             "running": False,

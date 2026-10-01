@@ -1466,12 +1466,12 @@ def sources_status_command(home_value: Path | None, as_json: bool) -> None:
         click.echo(str(index["message"]))
 
 
-# --- 0110-026b: `gigai scout snapshot export` ----------------------------
+# --- 0110-026b/e: `gigai scout snapshot export|import|status` ------------
 
 
 @scout_group.group("snapshot")
 def snapshot_group() -> None:
-    """Build the metadata snapshot of the stored company index (for the operator to publish)."""
+    """The metadata snapshot of the company index: build one to publish, or import the published one."""
 
 
 @snapshot_group.command("export")
@@ -1508,6 +1508,64 @@ def snapshot_export_command(out_value: Path, base_value: Path | None, home_value
     click.echo("Nothing was published. To publish, run (the first command only the first time):")
     for command in result.gh_commands:
         click.echo(f"  {command}")
+
+
+def _snapshot_target(target_value: Path | None, home_root: Path) -> Path | None:
+    # The setting is per project. Nothing is created to find it: no project yet means the defaults.
+    if target_value is not None:
+        return target_value
+    default = Path(home_root) / "scout"
+    return default if default.is_dir() else None
+
+
+@snapshot_group.command("import")
+@click.option("--from", "source_value", help="A manifest URL, a snapshot directory or its manifest.json. Default: the snapshot.manifest_url setting.")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def snapshot_import_command(source_value: str | None, home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
+    """Download the published snapshot and add it to the stored postings; newer local data is kept."""
+
+    from .find_jobs.snapshot import RESULT_FAILED, RESULT_REFUSED, import_snapshot
+
+    home_root = home_value or default_home_root()
+    result = import_snapshot(home_root, source_value, target=_snapshot_target(target_value, home_root))
+    if as_json:
+        _emit(result.to_json(), True, "")
+    elif result.imported:
+        counts = result.counts
+        click.echo(
+            f"{result.message} {counts['postings']} postings on {counts['boards']} boards and {counts['tags']} title tags were added "
+            f"({result.kind}); {counts['boards_kept_local']} boards were newer here and were left alone."
+        )
+    else:
+        click.echo(result.message)
+    if result.status in (RESULT_REFUSED, RESULT_FAILED):
+        raise click.exceptions.Exit(1)
+
+
+@snapshot_group.command("status")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def snapshot_status_command(home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
+    """Show which snapshot is in use, the last attempt and whether the download is on. Makes no request."""
+
+    from .find_jobs.snapshot import snapshot_status
+
+    home_root = home_value or default_home_root()
+    status = snapshot_status(home_root, _snapshot_target(target_value, home_root))
+    if as_json:
+        _emit(status, True, "")
+        return
+    click.echo(f"Snapshot download: {'on' if status['enabled'] else 'off'} ({status['setting_source']}).")
+    if status["as_of"]:
+        click.echo(f"Snapshot in use: as of {status['as_of']}, imported {status['imported_at']} from {status['source']}.")
+    else:
+        click.echo("No snapshot has been imported.")
+    if status["last_attempt_at"]:
+        reason = f" ({status['last_reason']})" if status["last_reason"] else ""
+        click.echo(f"Last attempt {status['last_attempt_at']}: {status['last_result']}{reason}.")
 
 
 __all__ = ["scout_group", "write_starter_find_jobs_config", "STARTER_FIND_JOBS_CONFIG"]

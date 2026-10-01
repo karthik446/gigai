@@ -3740,7 +3740,7 @@
     },
     "/api/sources/update": {
       "get": {
-        "description": "State of the last or running sources update. `update` is the running or last update's snapshot (null when none ever ran): `trigger` is manual or auto (the hourly background refresh), `failures` counts boards that did not answer by code, `stores` counts what the update wrote to the tag store and the text index. `index` says whether a search can read the stored postings. `background` is the hourly refresh and the two stores: `auto_refresh` {enabled, source: default|setting|environment|settings_unreadable, active: a refresh thread runs in this server}; `state` is disabled, inactive, needs_first_update (run Update sources once: the background refresh never fills an empty index), running, waiting or due; `in_progress` and `trigger` describe the live update, `last_update` the last finished one; `next_tick_at` is null unless a tick is scheduled; `tags` counts stored titles and those still lacking a function; `text.unchecked` counts postings with no stored text, which a text search cannot match.",
+        "description": "State of the last or running sources update. `update` is the running or last update's snapshot (null when none ever ran): `trigger` is manual or auto (the hourly background refresh), `failures` counts boards that did not answer by code, `stores` counts what the update wrote to the tag store and the text index. `index` says whether a search can read the stored postings. `background` is the hourly refresh and the two stores: `auto_refresh` {enabled, source: default|setting|environment|settings_unreadable, active: a refresh thread runs in this server}; `state` is disabled, inactive, needs_first_update (run Update sources once: the background refresh never fills an empty index), running, waiting or due; `in_progress` and `trigger` describe the live update, `last_update` the last finished one; `next_tick_at` is null unless a tick is scheduled; `tags` counts stored titles and those still lacking a function; `text.unchecked` counts postings with no stored text, which a text search cannot match. `snapshot` is the downloaded metadata snapshot (titles, locations, links, title tags and board validators; never descriptions): `enabled` and `setting_source` (default|setting|environment|settings_unreadable) say whether it may be downloaded, `as_of` when the one in use was built (null: none imported), `kind` full or delta, `last_result` imported, up_to_date, skipped, refused or failed, `last_reason` why nothing was imported (offline, not_published, local_fresher, checked_recently, digest_mismatch, ...), `counts` what the last import wrote. Reading this makes no request.",
         "operationId": "get_api_sources_update",
         "parameters": [],
         "responses": {
@@ -3790,6 +3790,27 @@
                   },
                   "running": false,
                   "schema_version": "scout-sources-update-status:1",
+                  "snapshot": {
+                    "as_of": "2026-10-01T06:00:00Z",
+                    "counts": {
+                      "boards": 120,
+                      "boards_kept_local": 0,
+                      "boards_removed": 0,
+                      "postings": 9000,
+                      "postings_removed": 0,
+                      "tags": 5200
+                    },
+                    "enabled": true,
+                    "imported_at": "2026-10-01T11:49:00.000Z",
+                    "kind": "full",
+                    "last_attempt_at": "2026-10-01T11:49:00.000Z",
+                    "last_message": "Imported the snapshot as of 2026-10-01T06:00:00Z.",
+                    "last_reason": null,
+                    "last_result": "imported",
+                    "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json",
+                    "setting_source": "default",
+                    "source": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json"
+                  },
                   "update": null
                 },
                 "schema": {
