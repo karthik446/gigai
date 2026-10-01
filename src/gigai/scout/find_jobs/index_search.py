@@ -8,7 +8,8 @@ selection after it are untouched; only where the rows come from changes:
 1. every watchlist company's index file is read
    (``<home>/cache/scout/companies/<ats>:<slug>.json``);
 2. its live postings are filtered on the indexed fields alone -- the title
-   (``matches_roles``, the fetch path's own prefilter), the publication
+   (``title_query.TitleMatcher``: the fetch path's whole-word rule plus the
+   profile's tag query, the same matcher ``_role_match`` uses), the publication
    window and the country rule (``filters``) -- so most companies never
    have their board body opened;
 3. the postings that remain are read back as the acquire-shaped
@@ -44,7 +45,7 @@ from pathlib import Path
 import threading
 import time
 
-from .ats_board_clients import BoardCache, matches_roles
+from .ats_board_clients import BoardCache
 from .company_index import (
     DEFAULT_STALE_AFTER_HOURS,
     INDEX_EMPTY,
@@ -57,6 +58,8 @@ from .company_index import (
 )
 from .contracts import ATSProvider, FailureRow, FindJobsConfig, PostingRow, SourceKind, WatchlistEntry, normalize_url
 from .filters import country_match, published_too_old
+from .tag_store import TagStore
+from .title_query import TitleMatcher
 from .work_mode import work_mode_fit
 
 SOURCES_UPDATE_REQUIRED_CODE = "sources_update_required"
@@ -131,6 +134,7 @@ def read_indexed_boards(
     now: datetime | None = None,
     stale_after_hours: float = DEFAULT_STALE_AFTER_HOURS,
     remember_search: bool = True,
+    tags: TagStore | None = None,
 ) -> tuple[list[PostingRow], list[FailureRow], dict[str, object]]:
     """Read the watchlist's postings from the company index. Makes no request.
 
@@ -138,7 +142,9 @@ def read_indexed_boards(
     replaces: rows in watchlist order (user-added boards first, then by
     provider and token), one ``sources_update_required`` failure when the
     search has nothing current to read, and a summary whose ``requests`` is
-    always ``0``.
+    always ``0``. ``tags`` is the title-tag store for the tag query (``None``:
+    the whole-word rule alone); the summary's ``title_match`` block counts what
+    matched by rule, by tag only, and what the rule judged alone for want of a tag.
     """
 
     began = time.monotonic() if started_at is None else started_at
@@ -148,6 +154,7 @@ def read_indexed_boards(
         key=lambda board: (board.first_seen.query_key.startswith("catalog:"), board.provider.value, board.board_token),
     )
     since = read_last_search(index)
+    title_matcher = TitleMatcher(config.roles, tags)
     planned = getattr(progress, "boards_planned", None)
     if callable(planned):
         planned(total=len(ordered), budget_seconds=None, rotation=None)
@@ -171,7 +178,7 @@ def read_indexed_boards(
             fresh: set[str] = set()
             for posting in entry.live():
                 live_count += 1
-                if not matches_roles(posting.title, config.roles):
+                if not title_matcher.matches(posting.title):
                     prefiltered_out += 1
                     continue
                 if not _keep(entry, posting, config, moment):
@@ -227,6 +234,7 @@ def read_indexed_boards(
         "cache_hits": companies_read,
         "listed": listed,
         "prefiltered_out": prefiltered_out,
+        "title_match": title_matcher.counts.to_json(),
         "filtered_out": filtered_out,
         "work_mode_filtered_out": work_mode_filtered_out,
         "detail_fetched": 0,

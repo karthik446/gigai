@@ -32,7 +32,7 @@ from ..acquisition_records import (
     preflight_public_import,
     public_row_refusal,
 )
-from .ats_board_clients import BoardCache, BoardFetchIndex, BoardFetchStats, matches_roles
+from .ats_board_clients import BoardCache, BoardFetchIndex, BoardFetchStats
 from .contracts import (
     ATSBoardClient,
     ATSProvider,
@@ -64,6 +64,8 @@ from .contracts import (
 )
 from .filters import exclusion_reason, location_mismatch_detail
 from .work_mode import work_mode_fit
+from .tag_store import TagStore
+from .title_query import open_tag_store, title_matches
 from .progress import ProgressWriter
 from .selection import normalize_title, rank_rows, select_for_assessment, selection_limits
 from ...workpad import ResolvedWorkpad, resolve_workpad
@@ -748,6 +750,7 @@ def _read_index(
         progress=progress,
         started_at=started_at,
         remember_search=root is not None,
+        tags=open_tag_store(root),
     )
 
 
@@ -1061,11 +1064,11 @@ def _merge_exa_and_ats_rows(rows: Sequence[PostingRow]) -> list[PostingRow]:
     return [by_identity[key] for key in identity_order]
 
 
-def _role_match(row: PostingRow, roles: Sequence[str]) -> bool:
-    # One shared whole-word title rule (same as the board listers / index search).
-    # Company and location no longer count: roles name job titles, and the old
-    # substring-in-haystack match let a role word hit a company or place name.
-    return matches_roles(row.title, tuple(str(role) for role in roles))
+def _role_match(row: PostingRow, roles: Sequence[str], tags: TagStore | None = None) -> bool:
+    # ONE shared title matcher (``title_query``), the same one index search
+    # uses: the whole-word rule, plus the profile's tag query when a tag store
+    # is given. Company and location no longer count: roles name job titles.
+    return title_matches(row.title, roles, tags)
 
 
 def _digest(row: PostingRow) -> str:
@@ -1946,13 +1949,14 @@ def _acquire_node_body(
     # `exclusion_reason` itself is still what actually decides whether the
     # row is dropped at all (identical result either way; this only changes
     # which key the drop gets counted under).
+    role_tags = open_tag_store(home_root)
     kept_rows: list[PostingRow] = []
     drop_counts: dict[NotAssessedReason, int] = {}
     for row in rows:
         reason = exclusion_reason(row, input.config)
         if reason is NotAssessedReason.LOCATION_MISMATCH:
             reason = location_mismatch_detail(row, input.config) or reason
-        if reason is None and not _role_match(row, input.config.roles):
+        if reason is None and not _role_match(row, input.config.roles, role_tags):
             reason = NotAssessedReason.ROLE_MISMATCH
         # uat-bug-028: the config's work mode + area, for every source's
         # rows (the index search already applied it to the rows it read).
