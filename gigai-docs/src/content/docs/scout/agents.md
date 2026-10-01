@@ -174,10 +174,17 @@ What to know:
   seen, or when it cites a bank answer that was edited, deleted or is no longer shared.
   `GET /api/runs/{run_id}/results` and `.../posting` carry `bank_suggestions` for the questions
   that remain.
+- **A run says why it did not assess a posting.** Each row a run kept but did not assess has a
+  reason: `payload.not_assessed[].reason` on `GET /api/runs/{run_id}/results` (for the rows of
+  that page), `not_assessed_reason` on `.../posting`, and `not_assessed_counts` on
+  `.../progress`. `over_cap` is a posting the run's assess cap left out, `duplicate` a copy
+  of one it kept (same company, title and country), `unchanged` one whose earlier assessment
+  still stands. The reason never changes which postings the run assessed.
 - **A near match is offered, not assumed.** When an assessment still asks something close to
   an entry, the response carries `bank_suggestions` (also on `GET /api/jobs?url=`, and for one
   question on `GET /api/story-bank/match?question_id=&question=`): the bank's answer, the
-  entry it came from and a score. It is word overlap, no model. To accept it, save it as the
+  entry it came from and a score. For a run's assessment the bank is the one of the run's own
+  profile, whichever profile is selected when you read it. It is word overlap, no model. To accept it, save it as the
   answer: `POST /api/answers {"question_id": "<the new question>", "answer": "<the suggested
   answer, or your edit>", "from_bank": "<bank_question_id>", "reassess": {"job_identity": "..."}}`.
   The UI shows it as "We already know: ..., use it?".

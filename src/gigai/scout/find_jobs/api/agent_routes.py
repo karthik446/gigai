@@ -163,7 +163,7 @@ class AgentRoutesMixin:
             try:
                 latest_run = run_hits[0][0]
                 run_resolved, view, joins = self._run_view(latest_run)
-                from .run_reads import posting_detail, posting_rows
+                from .run_reads import posting_detail, posting_rows, run_profile_id as profile_of_run
 
                 url = next(
                     (
@@ -173,7 +173,10 @@ class AgentRoutesMixin:
                     ),
                     identity,
                 )
-                run_profile_id = getattr(joins.profile, "profile_id", None)
+                # 0110-037: the run's own profile, not the one selected now. Its
+                # assessments' questions are answered and matched below from THAT
+                # profile's story bank (sharing rules unchanged).
+                run_profile_id = profile_of_run(view.evidence, run_resolved)
                 rows = posting_rows(view, url)
                 if rows is not None:
                     self._join_row_fields(rows, resolved=run_resolved, view=view, joins=joins)

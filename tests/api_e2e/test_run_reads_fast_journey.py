@@ -26,7 +26,9 @@ What it pins:
    bound), where the full reads are megabytes;
 3. the first page is the top of the grid (the assessed postings first) and
    carries no posting text; the pages cover the run once; a posting read on
-   its own is complete, text and assessment;
+   its own is complete, text and assessment; every row the run did not
+   assess says why (``over_cap``, ``duplicate``) on the page that lists it
+   (0110-037);
 4. the no-query reads still answer every row with its text.
 
 The model and the boards are the suite's fixture transports; Jev has no key
@@ -62,6 +64,8 @@ INDEXED_BOARDS = 50
 POSTINGS_PER_BOARD = 10
 POSTINGS = INDEXED_BOARDS * POSTINGS_PER_BOARD
 ASSESSED = 50  # the run request's cap, and its maximum
+DUPLICATES = POSTINGS - 2 * INDEXED_BOARDS  # a board's ten postings are two titles, five times each
+OVER_CAP = 2 * INDEXED_BOARDS - ASSESSED  # the kept postings the cap left out
 DESCRIPTION = "Build reliable Python services. " * 115  # about 3.7 KB
 
 PAGE = 100
@@ -210,14 +214,27 @@ def test_the_jobs_page_reads_a_full_catalog_run_in_under_a_second_each(
         # Every assessed posting is on the first page, above the others.
         assert [row["posting"]["normalized_url"] for row in rows[:ASSESSED]] == assessed
         assert all(item["verdict"] == "pending_user_answers" and item["matrix"] for item in page["payload"]["assessments"])
-        assert page["payload"]["not_assessed"] == [] and page["carried_forward_assessments"] == []
+        # 0110-037: the page says why each of its other rows was not assessed. Before, a launched run
+        # sealed no reason at all (its assess node looked for the run's config in the wrong folder), and
+        # this line pinned that as an empty list. The rows are real: 500 postings and a cap of 50, so the
+        # 50 rows under the assessed ones were left out by the cap or as a copy of a posting the run kept.
+        reasons = {item["posting"]["normalized_url"]: item["reason"] for item in page["payload"]["not_assessed"]}
+        assert list(reasons) == [row["posting"]["normalized_url"] for row in rows[ASSESSED:]]
+        assert set(reasons.values()) <= {"over_cap", "duplicate"}
+        assert all("text" not in item["posting"] for item in page["payload"]["not_assessed"])
+        assert page["carried_forward_assessments"] == []
         assert page["payload"]["status"] == "succeeded" and page["payload"]["failures"] == []
 
-        assert len(progress["postings"]) == POSTINGS and len(progress["assessments"]) == ASSESSED
+        # One progress entry a posting: the assessed ones, and (0110-037) each of the others with its reason.
+        assert len(progress["postings"]) == POSTINGS == len(progress["assessments"])
+        assert sum(1 for item in progress["assessments"] if item["status"] == "assessed") == ASSESSED
         assert all("text" not in posting for posting in progress["postings"])
         assert progress["boards"]["source"] == "index" and progress["boards"]["requests"] == 0
         assert "skipped_boards" not in progress["boards"]
         assert progress["not_imported_count"] == 0
+        # Each board lists the same two titles five times: two postings a board are kept (100), the
+        # other 400 are copies; the cap takes 50 of the 100.
+        assert progress["not_assessed_counts"] == {"duplicate": DUPLICATES, "over_cap": OVER_CAP}
 
         # -- 3. the next pages, and one posting complete -----------------------
         seen = [row["posting"]["normalized_url"] for row in rows]
@@ -227,8 +244,12 @@ def test_the_jobs_page_reads_a_full_catalog_run_in_under_a_second_each(
             )
             assert (following["total"], following["offset"]) == (POSTINGS, offset)
             assert following["payload"]["assessments"] == []
+            reasons.update((item["posting"]["normalized_url"], item["reason"]) for item in following["payload"]["not_assessed"])
             seen.extend(row["posting"]["normalized_url"] for row in following["payload"]["rows"])
         assert len(seen) == POSTINGS == len(set(seen)), "the pages cover the run's postings once each"
+        # Every row the run did not assess has its reason, on the page that lists the row.
+        assert sorted(reasons) == sorted(set(seen) - set(assessed))
+        assert sorted(reasons.values()).count("duplicate") == DUPLICATES and sorted(reasons.values()).count("over_cap") == OVER_CAP
         past = client.get(f"/api/runs/{first_run}/results", params={"limit": PAGE, "offset": POSTINGS}).json()
         assert past["payload"]["rows"] == []
 
@@ -247,6 +268,7 @@ def test_the_jobs_page_reads_a_full_catalog_run_in_under_a_second_each(
             bytes_max=SMALL_BYTES_MAX,
         )
         assert unassessed["row"]["posting"]["text"] and unassessed["assessment"] is None
+        assert unassessed["not_assessed_reason"] == reasons[seen[-1]]
 
         # -- the second run: unchanged rows; 50 assessments carried forward, 50 new ones
         carried_page = _read(client, f"/api/runs/{second_run}/results?limit={PAGE}", bytes_max=PAGE_BYTES_MAX)
@@ -258,6 +280,8 @@ def test_the_jobs_page_reads_a_full_catalog_run_in_under_a_second_each(
         # Both kinds have a verdict, so both are the top of the grid: the first page is exactly them.
         assert {row["posting"]["normalized_url"] for row in carried_page["payload"]["rows"]} == set(carried) | set(newly_assessed)
         assert all(row["outcome"] == "unchanged" for row in carried_page["payload"]["rows"])
+        # A carried-forward row is "unchanged", as before; a newly assessed one has no reason.
+        assert {item["posting"]["normalized_url"]: item["reason"] for item in carried_page["payload"]["not_assessed"]} == dict.fromkeys(carried, "unchanged")
         carried_detail = client.get(f"/api/runs/{second_run}/posting", params={"url": carried[0]}).json()
         assert carried_detail["carried_forward"]["result"]["verdict"] == "pending_user_answers"
         assert carried_detail["assessment"] is None and carried_detail["row"]["posting"]["text"]

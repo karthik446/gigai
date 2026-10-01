@@ -513,6 +513,25 @@ def attach_bank_suggestions(body: dict[str, object], *, home_root: Path, target:
         body["bank_suggestions"] = found
 
 
+def run_profile_id(evidence, resolved) -> str | None:
+    """Whose run this is (0110-037): the profile a run assessment's questions belong to.
+
+    The run's sealed ``profile_ref``; a run sealed with none (before
+    profiles) is the gig's default profile's, as acquire and assess take it
+    (``market_acquisition._default_profile_id``). Never the profile selected
+    now: a run of profile 2 read while profile 1 is selected is still
+    profile 2's. ``None`` when the gig has no profile at all.
+    """
+
+    from ..market_acquisition import _default_profile_id
+
+    run_input = getattr(evidence, "run_input", None)
+    profile_ref = getattr(run_input, "profile_ref", None)
+    if profile_ref is not None:
+        return profile_ref.profile_id
+    return _default_profile_id(resolved)
+
+
 def summarise_progress(progress: Mapping[str, object]) -> dict[str, object]:
     """``run_progress``'s response with no posting text and no list of skipped boards."""
 
@@ -629,7 +648,8 @@ class RunReadsRoutesMixin:
 
         Whose bank: the profile the run's assess node sealed
         (``AssessOutput.story_bank``), else the run's sealed ``profile_ref``,
-        else the gig's selected profile (a run from before profiles).
+        else the gig's default profile (a run from before profiles), else
+        the selected one.
         """
 
         backend = self._backend
@@ -646,6 +666,10 @@ class RunReadsRoutesMixin:
 
                 identity = _run_profile_identity(Path(backend._require_run(run_id).path), run_id, default_profile_id=None)
                 profile_id = None if identity is None else identity.profile_id
+            if profile_id is None and view is not None:
+                # 0110-037: a run sealed with no profile is the default
+                # profile's, as on ``GET /api/jobs`` (``run_profile_id``).
+                profile_id = run_profile_id(view.evidence, backend._require_run(run_id))
             if profile_id is None:
                 profile = joins.profile if joins is not None else backend._selected_profile()
                 profile_id = getattr(profile, "profile_id", None)
@@ -741,6 +765,7 @@ __all__ = [
     "results_page",
     "row_joins",
     "run_assess_cap",
+    "run_profile_id",
     "stored_rank",
     "run_counts",
     "stored_rank_scores",

@@ -232,16 +232,15 @@ def _assess_node_body(
     # target folder; reading ``root`` there found nothing, so a launched
     # run's prompt had no candidate constraints at all.
     run_root = _run_root(root, context)
-    # ``sealed_config`` (read from ``root``, as before) still decides the
-    # candidate labelling below: in a launched run it is ``None``, so only
-    # the selected postings are candidates and no "why not assessed" reason
-    # is written for the rest. That is unchanged on purpose: turning it on
-    # adds an over_cap / duplicate / location_mismatch row for every other
-    # posting of every run, which is a results change of its own.
-    # ``run_config`` is the run's own sealed config wherever it is: the
-    # PROMPT's constraints come from it.
-    sealed_config = _read_sealed_config(root, context.run_id)
-    run_config = sealed_config if sealed_config is not None else _read_sealed_config(run_root, context.run_id)
+    # 0110-037: the run's own sealed config, wherever it is, decides both the
+    # PROMPT's constraints and the candidate labelling below. Read from
+    # ``root`` alone (before), a launched run had none, so only its selected
+    # postings were candidates and no "why not assessed" reason was written
+    # for the rest. The selection itself is the sealed
+    # ``input.selected_postings`` either way: the config only labels the rows
+    # that are not in it.
+    sealed_config = _read_sealed_config(run_root, context.run_id)
+    run_config = sealed_config
     visa_sponsorship_required = bool(getattr(run_config, "visa_sponsorship_required", False))
     # P2 (v0.1.9), operator answer 5: {{countries}} comes from find-jobs.json;
     # {{titles}} is the effective config's roles (overlay_selected_profile
