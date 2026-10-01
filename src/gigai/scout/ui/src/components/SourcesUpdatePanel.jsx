@@ -84,10 +84,10 @@ export default function SourcesUpdatePanel() {
   const [startError, setStartError] = useState(null);
 
   const start = useCallback(
-    (force) => {
+    (force, fullRefresh = false) => {
       setStarting(true);
       setStartError(null);
-      startSourcesUpdate({ force })
+      startSourcesUpdate({ force, fullRefresh })
         .then(() => read())
         .catch((error) => {
           setStartError(startErrorText(error));
@@ -162,6 +162,9 @@ export default function SourcesUpdatePanel() {
       <div className="actions" style={{ justifyContent: "flex-start", marginTop: 12 }}>
         <button type="button" className="button" onClick={() => start(false)} disabled={running || starting || !status} data-action="update-sources">
           {running ? "Updating sources…" : starting ? "Starting…" : "Update sources"}
+        </button>
+        <button type="button" className="button secondary" onClick={() => start(false, true)} disabled={running || starting || !status} data-action="full-refresh-sources" title="Check every company board again, even ones checked recently">
+          Full refresh
         </button>
         {stuck && (
           <span className="muted sources-stuck">

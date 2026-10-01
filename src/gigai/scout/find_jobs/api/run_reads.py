@@ -62,6 +62,7 @@ import threading
 from urllib.parse import parse_qs, urlsplit
 
 from ..contracts import PostingRow, RowOutcome, Verdict
+from ..posted_window import added_rows as posted_window_rows, with_added
 from ..rank_contracts import RankScore
 from ..work_mode import work_mode_fit
 from .server import _logger
@@ -306,6 +307,7 @@ class RunView:
         *,
         scores: Mapping[str, RankScore],
         rank_detail: Mapping[str, Mapping[str, object]] | None = None,
+        added_rows: Sequence[object] = (),
     ) -> None:
         self.evidence = evidence
         acquire = evidence.acquire_output
@@ -319,7 +321,9 @@ class RunView:
         self.rank_detail = rank_detail or {}
         run_input = getattr(evidence, "run_input", None)
         self.config = run_input.config if run_input is not None else None
-        rows = acquire.rows if acquire is not None else ()
+        # 0110-019: the postings "Find postings from the last N days" added
+        # (``posted_window``) are rows of the run too, after its own.
+        rows = with_added(acquire.rows if acquire is not None else (), added_rows)  # type: ignore[arg-type]
         # N33: the order is a total order (the sealed acquire position breaks
         # every tie), so pages read one after the other never overlap or skip.
         ordered = sorted(enumerate(rows), key=lambda item: (*self._sort_key(item[1]), item[0]))
@@ -511,9 +515,11 @@ class RunReadsRoutesMixin:
         resolved = require_run(run_id)
         evidence = read_run_evidence(resolved, run_id)
         joins = row_joins(backend, resolved)
-        rows = tuple(item.posting for item in (evidence.acquire_output.rows if evidence.acquire_output is not None else ()))
+        added = posted_window_rows(getattr(backend, "home_root", None), backend.target, run_id)
+        own = evidence.acquire_output.rows if evidence.acquire_output is not None else ()
+        rows = tuple(item.posting for item in with_added(own, added))
         stored = stored_rank(rows, evidence=evidence, joins=joins, workpad=Path(resolved.path))
-        return resolved, RunView(evidence, scores=stored.scores, rank_detail=stored.detail), joins
+        return resolved, RunView(evidence, scores=stored.scores, rank_detail=stored.detail, added_rows=added), joins
 
     def _run_stored_rank_scores(self, run_id: str) -> tuple[RankScore, ...]:
         """The no-query ``/results``' ``rank_scores``, read and never scored.

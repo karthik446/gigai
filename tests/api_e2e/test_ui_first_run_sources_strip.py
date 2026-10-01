@@ -77,7 +77,7 @@ def test_board_count_comes_from_the_server_never_a_constant(out: dict) -> None:
 
 def test_fresh_store_shows_count_and_age_and_runs(out: dict) -> None:
     fresh = out["fresh"]
-    assert fresh["line"] == "Company postings: 10,360 companies stored · updated 3 hours ago"
+    assert fresh["line"] == "Company postings: 10,360 companies stored · updated 3 hours ago · up to date"
     assert fresh["amber"] is False and fresh["steps"] is None and fresh["runBlocked"] == ""
 
 

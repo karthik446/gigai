@@ -63,6 +63,8 @@ class _Skip:
 class _Resolved:
     source: rank_records.RankInput
     acquire: AcquireOutput
+    #: The run's postings in its own order, then the ones added after it ended (``posted_window``).
+    rows: tuple = ()
 
 
 def _skip(run_id: str, reason: str, *, total: int = 0, exc: BaseException | None = None) -> _Skip:
@@ -93,7 +95,10 @@ def _resolve(*, home_root, target, run_id: str, profile_id: str | None) -> _Reso
         acquire = AcquireOutput.from_json(json.loads(raw))
     except (JournalArtifactMissingError, ValueError, FindJobsContractError, OSError) as exc:
         return _skip(run_id, "no_run_output", exc=exc)
-    rows = tuple(item.posting for item in acquire.rows)
+    from ..posted_window import added_rows, with_added
+
+    # 0110-019: the postings added to the run after it ended are ranked with it.
+    rows = tuple(item.posting for item in with_added(acquire.rows, added_rows(home_root, target, run_id)))
     if not rows:
         return _skip(run_id, "no_candidates")
     total = len(rows)
@@ -147,7 +152,7 @@ def _resolve(*, home_root, target, run_id: str, profile_id: str | None) -> _Reso
         model_target=run_input.model_target.value,
         home_root=Path(home_root),
     )
-    return _Resolved(source, acquire)
+    return _Resolved(source, acquire, rows)
 
 
 def _scores_from_record(
@@ -228,7 +233,7 @@ def rank_request(
         return _body(run_id, (), _status("skipped", 0, found.total, found.reason), None)
 
     source = found.source
-    rows = tuple(item.posting for item in found.acquire.rows)
+    rows = found.rows
     total = len(rows)
     outcome = rank_records.start_or_join(source, start=start and not cancel)
     record = outcome.record
@@ -313,9 +318,32 @@ class RankRoutesMixin:
         )
 
 
+def rank_added(*, home_root, target, run_id: str):
+    """0110-019: rank the postings just added to ``run_id`` (``posted_window``); the pass's outcome, or ``None``.
+
+    A new pass over the run's rows with the added ones, also when the newest
+    record is ``complete`` (that one never saw them). It is cache-first, so
+    every row the run or an earlier pass scored is read from the score cache
+    and only the added rows cost a model call. ``None`` when the run cannot
+    be ranked (no profile, no resume): the added rows then stay unranked.
+    """
+
+    try:
+        found = _resolve(home_root=home_root, target=target, run_id=run_id, profile_id=None)
+    except Exception as exc:  # noqa: BLE001 - display-only: the type is logged
+        found = _skip(run_id, f"error:{type(exc).__name__}", exc=exc)
+    if isinstance(found, _Skip):
+        _logger.warning("rank (%s, added postings): skipped: %s", run_id, found.reason)
+        return None
+    outcome = rank_records.start_or_join(found.source, start=True, rows_added=True)
+    _logger.info("rank (%s, added postings): %s %s", run_id, outcome.action, outcome.record.record_id if outcome.record else "-")
+    return outcome
+
+
 __all__ = [
     "RankRoutesMixin",
     "newest_rank_result",
+    "rank_added",
     "rank_request",
     "wait_for_rank",
 ]

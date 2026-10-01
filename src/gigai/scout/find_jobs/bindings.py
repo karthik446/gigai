@@ -172,6 +172,28 @@ _TEST_BULK_BEST_OLDEST = 20
 _TEST_BULK_BEST_OLDEST_SMALL = 3  # a bulk of at most 100 jobs: the 3 oldest
 
 
+_TEST_BULK_AGE_DAYS_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_BULK_AGE_DAYS"
+
+
+def _test_bulk_age_days() -> list[int]:
+    """0110-019: ``GIGAI_SCOUT_FIND_JOBS_TEST_BULK_AGE_DAYS=2,5,20`` -- bulk job ``i`` was posted ``ages[i]`` days ago.
+
+    The posted-window journeys need postings of known ages relative to
+    today; a job with no entry keeps its fixed date. ``[]`` when unset.
+    """
+
+    try:
+        return [int(item) for item in os.environ.get(_TEST_BULK_AGE_DAYS_ENV, "").split(",") if item.strip()]
+    except ValueError:
+        return []
+
+
+def _test_days_ago(days: int) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) - timedelta(days=days)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def _test_bulk_postings() -> list[dict[str, object]]:
     """``N`` Greenhouse listing rows when ``GIGAI_SCOUT_FIND_JOBS_TEST_BULK_POSTINGS=N`` (``[]`` otherwise).
 
@@ -189,6 +211,7 @@ def _test_bulk_postings() -> list[dict[str, object]]:
         count = int(os.environ.get(_TEST_BULK_ENV, "0"))
     except ValueError:
         return []
+    ages = _test_bulk_age_days()
     best_oldest = _TEST_BULK_BEST_OLDEST if count > 100 else _TEST_BULK_BEST_OLDEST_SMALL
     jobs: list[dict[str, object]] = []
     for index in range(max(count, 0)):
@@ -206,7 +229,7 @@ def _test_bulk_postings() -> list[dict[str, object]]:
                 "title": f"Software Engineer fit {fit}",
                 "absolute_url": f"https://boards.greenhouse.io/acme/jobs/{1000 + index}",
                 "location": {"name": "Denver, CO"},
-                "updated_at": f"2026-09-22T{23 - hours:02d}:{59 - minutes:02d}:00Z",
+                "updated_at": _test_days_ago(ages[index]) if index < len(ages) else f"2026-09-22T{23 - hours:02d}:{59 - minutes:02d}:00Z",
                 "company_name": "Acme",
                 "content": f"&lt;p&gt;{note} Posting {index}.&lt;/p&gt;",
             }

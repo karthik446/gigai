@@ -7,10 +7,12 @@ import { startErrorText } from "../sourcesModel.js";
 export default function SourcesStrip({ strip, read }) {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState(null);
-  const start = useCallback(() => {
+  // 0110-020: an update starts only from these buttons, never from a
+  // profile switch (the boards are shared by every profile).
+  const start = useCallback((fullRefresh = false) => {
     setStarting(true);
     setError(null);
-    startSourcesUpdate({ force: false })
+    startSourcesUpdate({ force: false, fullRefresh })
       .then(() => read())
       .catch((err) => {
         setError(startErrorText(err));
@@ -23,9 +25,16 @@ export default function SourcesStrip({ strip, read }) {
     return null;
   }
   const button = (
-    <button type="button" className="button secondary" onClick={start} disabled={strip.running || starting} data-action="update-sources-strip">
-      {strip.running ? "Updating sources…" : starting ? "Starting…" : "Update sources"}
-    </button>
+    <>
+      <button type="button" className="button secondary" onClick={() => start(false)} disabled={strip.running || starting} data-action="update-sources-strip">
+        {strip.running ? "Updating sources…" : starting ? "Starting…" : "Update sources"}
+      </button>
+      {strip.kind !== "empty" && (
+        <button type="button" className="link-button" onClick={() => start(true)} disabled={strip.running || starting} data-action="full-refresh-sources-strip" title="Check every company board again, even ones checked recently">
+          Full refresh
+        </button>
+      )}
+    </>
   );
   return (
     <div className={`sources-strip${strip.amber ? " amber" : ""}`} data-role="sources-strip" data-kind={strip.kind}>

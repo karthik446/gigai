@@ -1025,7 +1025,7 @@ def test_the_settings_action_and_the_jobs_message_are_wired() -> None:
     api = (UI_SRC / "api.js").read_text(encoding="utf-8")
     # POST with a JSON body ({} or {"force": true}), so the CSRF guard's
     # content-type rule is met.
-    assert 'request("POST", "/api/sources/update", force ? { force: true } : {})' in api
+    assert 'request("POST", "/api/sources/update", body)' in api and "body.force = true" in api
     assert 'request("GET", "/api/sources/update")' in api
     panel = (UI_SRC / "components" / "SourcesUpdatePanel.jsx").read_text(encoding="utf-8")
     assert "disabled={running || starting || !status}" in panel

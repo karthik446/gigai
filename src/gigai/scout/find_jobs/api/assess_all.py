@@ -56,12 +56,15 @@ def _quick_verdicts(home_root: Path, target: Path, profile_id: str) -> dict[str,
     return verdicts
 
 
-def live_counts(evidence, quick: dict[str, str | None], events) -> dict[str, int]:
-    """Assessed / Matched / Need your answers over the run's postings (see the module docstring)."""
+def live_counts(evidence, quick: dict[str, str | None], events, added_urls=()) -> dict[str, int]:
+    """Assessed / Matched / Need your answers over the run's postings (see the module docstring).
+
+    ``added_urls`` are the postings added to the run after it ended (``posted_window``).
+    """
 
     acquire = evidence.acquire_output
     assess = evidence.assess_output
-    urls = [row.posting.normalized_url for row in (acquire.rows if acquire is not None else ())]
+    urls = [row.posting.normalized_url for row in (acquire.rows if acquire is not None else ())] + list(added_urls)
     run_verdicts = {
         item.posting.normalized_url: (item.verdict.value if item.verdict is not None else None)
         for item in (assess.assessments if assess is not None else ())
@@ -82,10 +85,18 @@ def live_counts(evidence, quick: dict[str, str | None], events) -> dict[str, int
     return {"assessed": assessed, "matched": matched, "needs_answers": needs_answers}
 
 
-def assess_all_request(backend, run_id: str, *, start: bool = False, cancel: bool = False) -> dict[str, object]:
-    """What ``POST /assess-all`` answers, at once. ``LookupError`` when there is no such run."""
+def assess_all_request(
+    backend, run_id: str, *, start: bool = False, cancel: bool = False, only=None, limit: int | None = None
+) -> dict[str, object]:
+    """What ``POST /assess-all`` answers, at once. ``LookupError`` when there is no such run.
+
+    0110-019: ``only`` (posting identities) and ``limit`` narrow the queue to
+    the first ``limit`` of those postings, in the grid's order: how "Find
+    postings from the last N days" assesses what it added and nothing else.
+    """
 
     from ...projection import read_run_evidence
+    from ..posted_window import added_rows, with_added
     from .run_reads import RunView, row_joins, stored_rank
 
     resolved = backend._require_run(run_id)
@@ -100,7 +111,8 @@ def assess_all_request(backend, run_id: str, *, start: bool = False, cancel: boo
         return body
     profile_id = profile.profile_id
     quick = _quick_verdicts(home_root, target, profile_id)
-    body["counts"] = live_counts(evidence, quick, joins.events)
+    added = added_rows(home_root, target, run_id)
+    body["counts"] = live_counts(evidence, quick, joins.events, [row.posting.normalized_url for row in added])
     records = [record for record in assess_all.list_records(home_root, target, run_id=run_id) if record.profile_id == profile_id]
     if cancel:
         for record in records:
@@ -112,15 +124,17 @@ def assess_all_request(backend, run_id: str, *, start: bool = False, cancel: boo
         body["job"] = assess_all.summary(records[0]) if records else None
         return body
 
-    rows = tuple(item.posting for item in evidence.acquire_output.rows)
+    rows = tuple(item.posting for item in with_added(evidence.acquire_output.rows, added))
     stored = stored_rank(rows, evidence=evidence, joins=joins, workpad=Path(resolved.path))
-    view = RunView(evidence, scores=stored.scores, rank_detail=stored.detail)
+    view = RunView(evidence, scores=stored.scores, rank_detail=stored.detail, added_rows=added)
     queue = assess_all.build_queue(
         view.rows,
         run_assessed=set(view.assessments) | set(view.carried_forward),
         not_assessed_reasons={url: row.reason.value for url, row in view.not_assessed.items()},
         already_assessed=quick,
     )
+    if only is not None:
+        queue = [item for item in queue if item.normalized_url in only][:limit]
     model_target = run_input.model_target.value
     concurrency = assess_all.assess_concurrency()
     body["plan"] = assess_all.plan(

@@ -9,6 +9,7 @@ import {
   getRuns,
   getRunStatus,
   postAssessAll,
+  postPostedWindow,
   postRank,
   startRun,
   storedRankScores,
@@ -120,6 +121,14 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 // finished). While it runs the store is re-read as results land, so cards
 // and the header's Assessed / Matched / Need your answers move with it.
 //
+// 0110-019: the grid's "Posted" chips filter the cards by posting date with
+// no request. POST /posted-window {} says how many days the shown run
+// searched; when the chosen chip is wider, the grid's "Find postings from
+// the last N days" posts {days}: the stored boards are searched (no
+// download, no new run), the older postings join this run's rows, and only
+// those are ranked and assessed. The results are read again, and the rank
+// pass and the "assess all" job it started are followed like any other.
+//
 // Still DROPPED from the mockup (no backing API): "New since last run".
 // Phase 2 fields (work_mode / pay / H-1B count, tailored resume) render
 // only once their APIs carry them -- see jobModel.js / JobPage.jsx.
@@ -200,6 +209,11 @@ export default function FindJobsView({
   const [assessAllConfirm, setAssessAllConfirm] = useState(false);
   const [assessAllError, setAssessAllError] = useState(null);
   const assessAllPoll = useRef(null);
+  // 0110-019: what POST /posted-window last said about the shown run;
+  // whether a search is on its way.
+  const [postedWindow, setPostedWindow] = useState(null);
+  const [findingOlder, setFindingOlder] = useState(false);
+  const [findOlderError, setFindOlderError] = useState(null);
   const [quickItems, setQuickItems] = useState([]);
   // Assessments made against a PASTED resume: the store files them under no
   // profile, so the profile's list never has them. Cards on Assessments
@@ -259,6 +273,9 @@ export default function FindJobsView({
     setAssessAll(null);
     setAssessAllConfirm(false);
     setAssessAllError(null);
+    setPostedWindow(null);
+    setFindingOlder(false);
+    setFindOlderError(null);
   }, []);
 
   useEffect(
@@ -520,6 +537,10 @@ export default function FindJobsView({
           // one is followed until it ends.
           followRankPass(id, "read");
           followAssessAll(id, "read");
+          // How many days this run searched (the "Posted" chips' button).
+          postPostedWindow(id, {})
+            .then((response) => shownRunId.current === id && setPostedWindow((known) => (known && known.run_id === id && known.assess ? { ...response, assess: known.assess } : response)))
+            .catch(() => {});
         })
         .catch((error) => {
           if (shownRunId.current !== id) {
@@ -563,6 +584,34 @@ export default function FindJobsView({
   }, []);
 
   reloadResults.current = loadResults;
+
+  // 0110-019: "Find postings from the last N days" for the shown run. The
+  // rows it added are read with the results; the rank pass it started is
+  // followed by loadResults' own read, and the assess job that follows the
+  // pass by the read after the pass ends.
+  const findOlder = useCallback(
+    (days) => {
+      const id = shownRunId.current;
+      if (!id) {
+        return;
+      }
+      setFindingOlder(true);
+      setFindOlderError(null);
+      postPostedWindow(id, { days })
+        .then((response) => {
+          if (shownRunId.current !== id) {
+            return;
+          }
+          setPostedWindow(response);
+          if (response.search && response.search.added > 0) {
+            loadResults(id);
+          }
+        })
+        .catch((error) => shownRunId.current === id && setFindOlderError(error.message || String(error)))
+        .finally(() => shownRunId.current === id && setFindingOlder(false));
+    },
+    [loadResults],
+  );
 
   const runsReload = runsState.reload;
   const pollStatus = useCallback(
@@ -932,6 +981,10 @@ export default function FindJobsView({
           total={runActive ? null : resultsTotal}
           onWantRows={runActive ? null : wantResultRows}
           loadingMore={pagesLoading}
+          postedWindow={postedWindow && postedWindow.run_id === runId ? postedWindow : null}
+          onFindOlder={runActive ? null : findOlder}
+          findingOlder={findingOlder}
+          findOlderError={findOlderError}
         />
       )}
     </>
@@ -1012,6 +1065,10 @@ export default function FindJobsView({
             total={runActive ? null : resultsTotal}
             onWantRows={runActive ? null : wantResultRows}
             loadingMore={pagesLoading}
+            postedWindow={postedWindow && postedWindow.run_id === runId ? postedWindow : null}
+            onFindOlder={runActive ? null : findOlder}
+            findingOlder={findingOlder}
+            findOlderError={findOlderError}
           />
         )}
       </div>

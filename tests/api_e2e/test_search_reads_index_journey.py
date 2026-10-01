@@ -103,7 +103,7 @@ def test_a_search_never_fetches_a_board_and_says_when_to_update_sources(
 
         # -- 2. Update sources: the one place boards are fetched ---------------
         update = _update_sources(client)["update"]
-        assert update["boards"] == {"total": 1, "done": 1, "checked": 1, "fetched": 1, "cached": 0, "failed": 0, "skipped": 0, "never_checked": 0}
+        assert update["boards"] == {"total": 1, "done": 1, "checked": 1, "fetched": 1, "cached": 0, "failed": 0, "skipped": 0, "never_checked": 0, "up_to_date": 0}
         assert update["summary"] == "1 company with new postings: 1 new, 0 changed, 0 removed"
 
         # -- 3. the search reads the index: zero board requests -----------------

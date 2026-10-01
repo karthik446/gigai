@@ -264,6 +264,8 @@ class _Listener:
         self.done = 0  # boards settled: checked, or skipped by the budget
         self.checked = 0  # boards that were asked (fetched, unchanged or did not answer)
         self.never_checked: int | None = None
+        self.up_to_date = 0  # boards left alone: checked within the stale window
+        self.full_refresh = False
         self.rotation: dict[str, object] | None = None
         self.watchlist_seed: dict[str, object] | None = None
         self.state: dict[str, object] = {
@@ -346,7 +348,9 @@ class _Listener:
                 "checked": self.checked,
                 **self.counts,
                 "never_checked": self.never_checked,
+                "up_to_date": self.up_to_date,
             },
+            "full_refresh": self.full_refresh,
             "companies": {
                 "checked": totals.companies,
                 "indexed": totals.indexed,
@@ -401,6 +405,9 @@ def update_sources(
     catalog_counts: Mapping[tuple[str, str], int] | None = None,
     watchlist_seed: Mapping[str, object] | None = None,
     force: bool = False,
+    full_refresh: bool = False,
+    stale_after_hours: float = DEFAULT_STALE_AFTER_HOURS,
+    now: datetime | None = None,
 ) -> SourcesUpdateResult:
     """Refresh ``boards`` through the rotation and bring the company index in step.
 
@@ -410,10 +417,21 @@ def update_sources(
     :class:`SourcesUpdateRunningError` when another update is live (its
     snapshot was rewritten in the last :data:`HEARTBEAT_TIMEOUT_SECONDS`)
     unless ``force``.
+
+    Incremental: a board already checked within ``stale_after_hours`` (its
+    rotation stamp) whose company file is in the index is left alone, so an
+    update right after an update asks ~0 boards. ``full_refresh`` asks every
+    board anyway. (``force`` is a different thing: it overrides a live
+    snapshot.)
     """
 
     if not force and snapshot_is_live(index.read_update_summary()):
         raise SourcesUpdateRunningError()
+    all_boards = boards
+    up_to_date = 0
+    if not full_refresh:
+        boards = _stale_boards(boards, cache, index, stale_after_hours=stale_after_hours, now=now)
+        up_to_date = len(all_boards) - len(boards)
     config = config if config is not None else listing_config()
     limits = limits if limits is not None else AcquireLimits.from_environment()
     listener = _Listener(
@@ -427,7 +445,9 @@ def update_sources(
     )
     if watchlist_seed is not None:
         listener.watchlist_seeded(watchlist_seed)
-    listener.never_checked = _never_checked(cache, boards)
+    listener.up_to_date = up_to_date
+    listener.full_refresh = full_refresh
+    listener.never_checked = _never_checked(cache, all_boards)
     listener.publish(force=True)
     try:
         _rows, _failures, summary = _fetch_boards(
@@ -442,9 +462,9 @@ def update_sources(
             catalog_counts=catalog_counts,
         )
         listener.boards_finished(summary)
-        listener.never_checked = _never_checked(cache, boards)
+        listener.never_checked = _never_checked(cache, all_boards)
         attempted = listener.checked
-        if boards and attempted > 0 and listener.counts.get("failed", 0) == attempted:
+        if boards and attempted > 0 and up_to_date == 0 and listener.counts.get("failed", 0) == attempted:
             listener.state["status"] = STATUS_FAILED
             listener.state["error"] = {"code": "every_board_failed", "message": "no board could be fetched"}
         elif listener.counts.get("skipped", 0):
@@ -460,6 +480,29 @@ def update_sources(
     listener.state["finished_at"] = index_stamp()
     final = listener.publish(force=True) or listener.snapshot()
     return SourcesUpdateResult(final)
+
+
+def _stale_boards(
+    boards: Sequence[WatchlistEntry],
+    cache: BoardCache,
+    index: CompanyIndex,
+    *,
+    stale_after_hours: float,
+    now: datetime | None,
+) -> list[WatchlistEntry]:
+    """The boards an incremental update still has to ask: never checked, checked long ago, or not in the index."""
+
+    moment = datetime.now(timezone.utc) if now is None else now
+    cutoff = timedelta(hours=stale_after_hours)
+    stamps = cache.load_fetch_index().boards
+    indexed = set(index.keys())
+    due: list[WatchlistEntry] = []
+    for board in boards:
+        checked = _parse(stamps.get(f"{board.provider.value}:{board.board_token}"))
+        fresh = checked is not None and moment - checked <= cutoff and (board.provider.value, board.board_token) in indexed
+        if not fresh:
+            due.append(board)
+    return due
 
 
 def _never_checked(cache: BoardCache, boards: Sequence[WatchlistEntry]) -> int:
@@ -480,6 +523,7 @@ def run_sources_update(
     on_progress: Callable[[dict[str, object]], None] | None = None,
     update_id: str | None = None,
     force: bool = False,
+    full_refresh: bool = False,
 ) -> SourcesUpdateResult:
     """The whole command for one Scout project: seed, list the watchlist, update.
 
@@ -513,6 +557,7 @@ def run_sources_update(
         catalog_counts=_catalog_us_counts(),
         watchlist_seed=seed.payload,
         force=force,
+        full_refresh=full_refresh,
     )
 
 
@@ -539,7 +584,8 @@ def _blank_snapshot(update_id: str, status: str, *, error: Mapping[str, object] 
         "limits": None,
         "error": dict(error) if error is not None else None,
         "elapsed_seconds": 0.0,
-        "boards": {"total": 0, "done": 0, "checked": 0, "fetched": 0, "cached": 0, "failed": 0, "skipped": 0, "never_checked": None},
+        "boards": {"total": 0, "done": 0, "checked": 0, "fetched": 0, "cached": 0, "failed": 0, "skipped": 0, "never_checked": None, "up_to_date": 0},
+        "full_refresh": False,
         "companies": {"checked": 0, "indexed": 0, "updated": 0, "untouched": 0, "unreadable": 0, "with_new": 0, "with_changes": 0},
         "postings": {"new": 0, "changed": 0, "removed": 0, "live": 0},
         "requests": 0,
@@ -561,6 +607,7 @@ def start_background_update(
     config: FindJobsConfig | None = None,
     limits: AcquireLimits | None = None,
     force: bool = False,
+    full_refresh: bool = False,
     on_finished: Callable[[dict[str, object]], None] | None = None,
 ) -> str:
     """Start :func:`run_sources_update` on a daemon thread; return its ``update_id``.
@@ -593,6 +640,7 @@ def start_background_update(
                     limits=limits,
                     update_id=update_id,
                     force=True,  # the live snapshot is this update's own
+                    full_refresh=full_refresh,
                 )
             finally:
                 close = getattr(client, "close", None)

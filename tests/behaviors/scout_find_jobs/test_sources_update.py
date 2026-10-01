@@ -135,7 +135,7 @@ def test_an_update_indexes_every_board_and_prints_the_operator_summary(tmp_path:
     assert result.summary == "3 companies with new postings: 5 new, 0 changed, 0 removed"
     snapshot = result.to_json()
     assert snapshot["update_id"].startswith("sources_update_")
-    assert snapshot["boards"] == {"total": 4, "done": 4, "checked": 4, "fetched": 3, "cached": 0, "failed": 1, "skipped": 0, "never_checked": 0}
+    assert snapshot["boards"] == {"total": 4, "done": 4, "checked": 4, "fetched": 3, "cached": 0, "failed": 1, "skipped": 0, "never_checked": 0, "up_to_date": 0}
     assert snapshot["companies"] == {"checked": 3, "indexed": 3, "updated": 0, "untouched": 0, "unreadable": 0, "with_new": 3, "with_changes": 3}
     assert snapshot["postings"] == {"new": 5, "changed": 0, "removed": 0, "live": 5}
     assert snapshot["remaining"] == 0 and snapshot["error"] is None
@@ -174,12 +174,12 @@ def test_a_second_update_makes_one_conditional_request_per_board_and_changes_not
     before = {key: index.read(*key) for key in index.keys()}
     boards.requests.clear()
 
-    result = _update(tmp_path, boards)
+    result = _update(tmp_path, boards, full_refresh=True)
 
     assert result.status == STATUS_SUCCEEDED
     assert result.summary == "0 companies with new postings: 0 new, 0 changed, 0 removed"
     snapshot = result.to_json()
-    assert snapshot["boards"] == {"total": 4, "done": 4, "checked": 4, "fetched": 0, "cached": 3, "failed": 1, "skipped": 0, "never_checked": 0}
+    assert snapshot["boards"] == {"total": 4, "done": 4, "checked": 4, "fetched": 0, "cached": 3, "failed": 1, "skipped": 0, "never_checked": 0, "up_to_date": 0}
     assert snapshot["companies"]["untouched"] == 3 and snapshot["companies"]["updated"] == 0
     assert snapshot["postings"]["live"] == 5
     assert sorted(boards.requests) == [
@@ -195,6 +195,51 @@ def test_a_second_update_makes_one_conditional_request_per_board_and_changes_not
         assert {**after.to_json(), "checked_at": entry.checked_at} == entry.to_json()
 
 
+def test_two_updates_in_a_row_check_no_board_the_second_time(tmp_path: Path) -> None:
+    boards = _Boards()
+    live = [_board(ATSProvider.GREENHOUSE, "acme"), _board(ATSProvider.GREENHOUSE, "globex", catalog=True), _board(ATSProvider.LEVER, "initech", catalog=True)]
+
+    first = _update(tmp_path, boards, watchlist=live).to_json()
+    assert first["boards"]["checked"] == 3 and first["boards"]["up_to_date"] == 0
+    boards.requests.clear()
+
+    started = time.monotonic()
+    second = _update(tmp_path, boards, watchlist=live)
+    elapsed = time.monotonic() - started
+
+    # The symptom: the fake board fetcher was never called.
+    assert boards.requests == []
+    assert second.status == STATUS_SUCCEEDED
+    assert second.to_json()["boards"]["checked"] == 0 and second.to_json()["boards"]["up_to_date"] == 3
+    assert second.to_json()["requests"] == 0 and second.to_json()["full_refresh"] is False
+    assert elapsed < 5.0
+
+
+def test_a_full_refresh_checks_every_board_even_when_all_are_fresh(tmp_path: Path) -> None:
+    boards = _Boards()
+    live = [_board(ATSProvider.GREENHOUSE, "acme"), _board(ATSProvider.GREENHOUSE, "globex", catalog=True), _board(ATSProvider.LEVER, "initech", catalog=True)]
+    _update(tmp_path, boards, watchlist=live)
+    boards.requests.clear()
+
+    full = _update(tmp_path, boards, watchlist=live, full_refresh=True).to_json()
+
+    assert full["boards"]["checked"] == 3 and full["boards"]["up_to_date"] == 0 and full["full_refresh"] is True
+    assert len(boards.requests) == 3
+
+
+def test_boards_checked_longer_ago_than_the_stale_window_are_asked_again(tmp_path: Path) -> None:
+    boards = _Boards()
+    live = [_board(ATSProvider.GREENHOUSE, "acme"), _board(ATSProvider.LEVER, "initech", catalog=True)]
+    _update(tmp_path, boards, watchlist=live)
+    boards.requests.clear()
+
+    later = datetime.now(timezone.utc) + timedelta(hours=sources_update.DEFAULT_STALE_AFTER_HOURS + 1)
+    result = _update(tmp_path, boards, watchlist=live, now=later).to_json()
+
+    assert result["boards"]["checked"] == 2 and result["boards"]["up_to_date"] == 0
+    assert len(boards.requests) == 2
+
+
 def test_an_update_reports_new_changed_and_removed_postings(tmp_path: Path) -> None:
     boards = _Boards()
     _update(tmp_path, boards)
@@ -205,7 +250,7 @@ def test_an_update_reports_new_changed_and_removed_postings(tmp_path: Path) -> N
         {"id": 13, "title": "Data Engineer", "absolute_url": "https://boards.greenhouse.io/acme/jobs/13", "location": {"name": "Remote"}, "updated_at": "2026-09-27T00:00:00Z"},
     ]
     boards.lever["initech"] = boards.lever["initech"][:1]
-    result = _update(tmp_path, boards)
+    result = _update(tmp_path, boards, full_refresh=True)
 
     assert result.summary == "1 company with new postings: 1 new, 1 changed, 2 removed"
     snapshot = result.to_json()
@@ -227,7 +272,7 @@ def test_a_deleted_index_is_rebuilt_by_the_next_update_without_refetching_bodies
         item.unlink()
     boards.requests.clear()
 
-    result = _update(tmp_path, boards)
+    result = _update(tmp_path, boards)  # no company files: nothing counts as up to date
 
     # The boards answer 304 / the same bytes; the index comes back from the cached bodies.
     assert ("/v1/boards/acme/jobs", 'W/"acme-1"') in boards.requests
@@ -246,10 +291,12 @@ def test_a_board_that_does_not_answer_was_checked_and_is_asked_once_per_update(t
     second = _update(tmp_path, boards).to_json()
 
     # A dead board is not backlog: it was asked and it rotates like a live
-    # one, one request per update, never more.
+    # one, one request per update, never more. It has no company file, so
+    # an incremental update asks it again (the three live boards are fresh).
     for snapshot in (first, second):
         assert snapshot["boards"]["failed"] == 1 and snapshot["boards"]["never_checked"] == 0
         assert snapshot["remaining"] == 0 and snapshot["status"] == STATUS_SUCCEEDED
+    assert second["boards"]["up_to_date"] == 3 and second["boards"]["total"] == 1
     assert [path for path, _etag in boards.requests].count("/v0/postings/dead") == 1
 
 
@@ -321,7 +368,7 @@ def test_a_budget_stop_is_partial_and_the_next_update_continues_where_it_stopped
     snapshot = first.to_json()
     # `checked` is what was asked; `done` also counts the two the budget
     # skipped. Those two have never been asked by anything: the backlog.
-    assert snapshot["boards"] == {"total": 6, "done": 6, "checked": 4, "fetched": 4, "cached": 0, "failed": 0, "skipped": 2, "never_checked": 2}
+    assert snapshot["boards"] == {"total": 6, "done": 6, "checked": 4, "fetched": 4, "cached": 0, "failed": 0, "skipped": 2, "never_checked": 2, "up_to_date": 0}
     assert snapshot["remaining"] == 2
     assert snapshot["rotation"]["first"] == 1 and snapshot["rotation"]["last"] == 4
     assert sorted(slug for _ats, slug in index.keys()) == ["b0", "b1", "b2", "b3"]
@@ -329,13 +376,12 @@ def test_a_budget_stop_is_partial_and_the_next_update_continues_where_it_stopped
     second_ats = _ClockATS(clock)
     second = run(second_ats)
 
-    # The two boards the budget left behind lead the next update.
-    assert second_ats.calls[:2] == ["b4", "b5"]
-    # This update did not reach two OTHER boards (asked last time), so
-    # `remaining` is 2 again while the backlog is gone.
-    assert second.status == STATUS_PARTIAL
-    assert second.to_json()["remaining"] == 2 and second.to_json()["boards"]["never_checked"] == 0
-    assert second.to_json()["boards"]["checked"] == 4
+    # Incremental: the four boards just checked are fresh, so the next
+    # update asks only the two the budget left behind.
+    assert second_ats.calls == ["b4", "b5"]
+    assert second.status == STATUS_SUCCEEDED
+    assert second.to_json()["remaining"] == 0 and second.to_json()["boards"]["never_checked"] == 0
+    assert second.to_json()["boards"]["checked"] == 2 and second.to_json()["boards"]["up_to_date"] == 4
     assert sorted(slug for _ats, slug in index.keys()) == ["b0", "b1", "b2", "b3", "b4", "b5"]
     assert second.to_json()["postings"]["new"] == 2
 
@@ -448,8 +494,9 @@ def test_cli_sources_update_refreshes_the_watchlist_and_prints_the_summary(tmp_p
     payload = json.loads(second.stdout)
     assert payload["status"] == "succeeded"
     assert payload["summary"] == "0 companies with new postings: 0 new, 0 changed, 0 removed"
-    assert payload["boards"] == {"total": 2, "done": 2, "checked": 2, "fetched": 0, "cached": 2, "failed": 0, "skipped": 0, "never_checked": 0}
-    assert len(boards.requests) == 2
+    # Incremental: both boards were checked seconds ago, so none is asked.
+    assert payload["boards"] == {"total": 0, "done": 0, "checked": 0, "fetched": 0, "cached": 0, "failed": 0, "skipped": 0, "never_checked": 0, "up_to_date": 2}
+    assert boards.requests == []
     assert_managed_workpad_clean(_workpad(home, target))
 
     status = CliRunner().invoke(cli, ["scout", "sources", "status", "--home", str(home)])
@@ -546,7 +593,7 @@ def test_api_update_sources_starts_in_the_background_and_reports_status(running_
     assert finished["schema_version"] == SOURCES_UPDATE_STATUS_SCHEMA
     update = finished["update"]
     assert update["update_id"] == body["update_id"] and update["status"] == "succeeded"
-    assert update["boards"] == {"total": 2, "done": 2, "checked": 2, "fetched": 1, "cached": 0, "failed": 1, "skipped": 0, "never_checked": 0}
+    assert update["boards"] == {"total": 2, "done": 2, "checked": 2, "fetched": 1, "cached": 0, "failed": 1, "skipped": 0, "never_checked": 0, "up_to_date": 0}
     assert update["summary"] == "1 company with new postings: 2 new, 0 changed, 0 removed"
     assert update["postings"] == {"new": 2, "changed": 0, "removed": 0, "live": 2}
     assert finished["index"]["status"] == "ready" and finished["index"]["needs_update"] is False
@@ -554,12 +601,20 @@ def test_api_update_sources_starts_in_the_background_and_reports_status(running_
     assert list(CompanyIndex.for_home(home).keys()) == [("greenhouse", "acme")]
     assert_managed_workpad_clean(_workpad(home, target))
 
-    # Again: nothing changed, one conditional request for the live board.
+    # Again: incremental, so only the dead board (no company file) is asked.
     boards.requests.clear()
     assert client.post("/api/sources/update", json={}).status_code == 202
     again = _poll(client)["update"]
     assert again["update_id"] != body["update_id"]
-    assert again["boards"]["cached"] == 1 and again["postings"]["new"] == 0
+    assert again["boards"]["up_to_date"] == 1 and again["boards"]["checked"] == 1 and again["status"] == "succeeded"
+    assert ("/v1/boards/acme/jobs", 'W/"acme-1"') not in boards.requests
+
+    # A full refresh asks every board: one conditional request for the live one.
+    boards.requests.clear()
+    assert client.post("/api/sources/update", json={"full_refresh": True}).status_code == 202
+    full = _poll(client)["update"]
+    assert full["full_refresh"] is True and full["boards"]["up_to_date"] == 0
+    assert full["boards"]["cached"] == 1 and full["postings"]["new"] == 0
     assert ("/v1/boards/acme/jobs", 'W/"acme-1"') in boards.requests
 
 
@@ -567,6 +622,7 @@ def test_api_update_sources_starts_in_the_background_and_reports_status(running_
     ("body", "code"),
     [
         ({"force": "yes"}, "wrong_type"),
+        ({"full_refresh": "yes"}, "wrong_type"),
         ({"boards": ["acme"]}, "unknown_key"),
         (["force"], "wrong_type"),
     ],
@@ -589,3 +645,4 @@ def test_api_update_sources_is_csrf_guarded(running_server) -> None:
     assert evil.status_code == 403, evil.text
     assert evil.json()["error"]["code"] == "forbidden_origin"
     assert boards.requests == [] and CompanyIndex.for_home(home).read_update_summary() is None
+

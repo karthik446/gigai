@@ -5,6 +5,7 @@ import { EMPTY_FILTERS, filterJobs, hasActiveFilter, sortByAssessedAt, sortJobs 
 import { stateOptions } from "../jobStateModel.js";
 import { filtersKey, hasMore, initialShown, pageOf, rowsWanted, showMoreLabel, showMoreShown, showingLine } from "../pageModel.js";
 import { RANK_HONEST_NOTE, RANK_ORDER_NOTE, sameOrder, streamOrder } from "../rankModel.js";
+import { canFindOlder, findOlderHint, findOlderLabel, postedOptions, searchLine } from "../postedWindowModel.js";
 
 // Q4a: the card grid that replaces the Find-jobs postings list
 // (FindJobsPostingsBoard.jsx), per mockups/cards-and-job-page.html.
@@ -34,6 +35,12 @@ import { RANK_HONEST_NOTE, RANK_ORDER_NOTE, sameOrder, streamOrder } from "../ra
 // counted over the jobs every OTHER filter leaves, so a chip's number is
 // what clicking it shows. Only the states some job is in have a chip. They
 // took the place of the "Assessed" chips (the verdicts are states).
+//
+// 0110-019: the "Posted" chips (7d / 10d / 30d / 60d / Any, beside Rank)
+// filter the cards by the posting's own date, at once and with no request
+// (postedWindowModel.js). When the chosen window is wider than what the run
+// searched (`postedWindow.searched_days`), one button asks the view to
+// search the stored boards for the older postings (`onFindOlder(days)`).
 //
 // uat-batch2 (uat-bug-016): the Assessments page is this same grid with
 // `from="assessments"`: newest assessment first (jobModel.sortByAssessedAt).
@@ -94,7 +101,20 @@ function StateChips({ options, value, onChange }) {
   );
 }
 
-export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, from, total = null, onWantRows = null, loadingMore = false }) {
+export default function JobsGrid({
+  jobs,
+  visaRequired,
+  runLabel,
+  emptyMessage,
+  from,
+  total = null,
+  onWantRows = null,
+  loadingMore = false,
+  postedWindow = null,
+  onFindOlder = null,
+  findingOlder = false,
+  findOlderError = null,
+}) {
   const assessments = from === "assessments";
   const noun = assessments ? "assessments" : "postings";
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -192,6 +212,16 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, f
           </div>
           <div className="filter-row">
             {!assessments && <ChipGroup label="Rank" options={FIT_OPTIONS} value={filters.fit} onChange={(value) => setFilter("fit", value)} />}
+            {!assessments && (
+              <div data-role="posted-filter">
+                <ChipGroup
+                  label="Posted"
+                  options={postedOptions(postedWindow ? postedWindow.choices : undefined)}
+                  value={filters.posted}
+                  onChange={(value) => setFilter("posted", value)}
+                />
+              </div>
+            )}
             {visaRequired && (
               <ChipGroup
                 label="Sponsorship"
@@ -204,6 +234,33 @@ export default function JobsGrid({ jobs, visaRequired, runLabel, emptyMessage, f
           <div className="filter-row">
             <StateChips options={states} value={filters.state} onChange={(value) => setFilter("state", value)} />
           </div>
+          {!assessments && onFindOlder && (canFindOlder(postedWindow, filters.posted) || findingOlder || findOlderError || searchLine(postedWindow)) && (
+            <div className="rank-bar" data-role="find-older-bar" style={{ margin: 0 }}>
+              {canFindOlder(postedWindow, filters.posted) && (
+                <button
+                  type="button"
+                  className="button small secondary"
+                  data-action="find-older"
+                  disabled={findingOlder}
+                  title={findOlderHint(postedWindow)}
+                  onClick={() => onFindOlder(filters.posted)}
+                >
+                  {findingOlder ? "Searching the stored boards…" : findOlderLabel(filters.posted)}
+                </button>
+              )}
+              {canFindOlder(postedWindow, filters.posted) && !findingOlder && (
+                <span className="muted" data-role="find-older-hint">
+                  {findOlderHint(postedWindow)}
+                </span>
+              )}
+              {!canFindOlder(postedWindow, filters.posted) && !findingOlder && searchLine(postedWindow) && (
+                <span className="muted" data-role="find-older-result">
+                  {searchLine(postedWindow)}
+                </span>
+              )}
+              {findOlderError && <span className="muted">Find older postings: {findOlderError}</span>}
+            </div>
+          )}
           <div className="result-count">
             <span>
               {paged ? showingLine({ drawn: drawn.length, matching, noun }) : `${visible.length} of ${jobs.length} ${noun}`}

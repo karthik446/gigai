@@ -384,6 +384,14 @@ export function postAssessAll(runId, fields) {
   return request("POST", `/api/runs/${encodeURIComponent(runId)}/assess-all`, fields || {});
 }
 
+// 0110-019: the run's posted window: {} reads what was searched (run_days,
+// searched_days); {days: N} searches the stored boards for the postings of
+// the last N days the run does not hold, adds them, and ranks and assesses
+// only those. See postedWindowModel.js.
+export function postPostedWindow(runId, fields) {
+  return request("POST", `/api/runs/${encodeURIComponent(runId)}/posted-window`, fields || {});
+}
+
 // P9c: every find-jobs run for this target (newest first), with per-run
 // counts (found/new/assessed/matched) -- the dashboard's "last run"/"new
 // since last run", the Profiles run-history table, and the Find-jobs
@@ -506,8 +514,17 @@ export function pdfFileName(disposition) {
 // target_unavailable with no target); GET is polled for its progress and
 // carries `index`, what the Jobs page needs to know about the stored
 // postings. `force` starts over a stuck update.
-export function startSourcesUpdate({ force = false } = {}) {
-  return request("POST", "/api/sources/update", force ? { force: true } : {});
+// 0110-020: `fullRefresh` asks every board; the default update is
+// incremental (boards checked within the stale window are left alone).
+export function startSourcesUpdate({ force = false, fullRefresh = false } = {}) {
+  const body = {};
+  if (force) {
+    body.force = true;
+  }
+  if (fullRefresh) {
+    body.full_refresh = true;
+  }
+  return request("POST", "/api/sources/update", body);
 }
 
 export function getSourcesUpdate() {

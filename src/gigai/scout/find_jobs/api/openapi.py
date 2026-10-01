@@ -267,6 +267,18 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {"state": "idle", "counts": {}}, params=(_RUN_ID, _b("start", "boolean", "true starts."), _b("cancel", "boolean", "true stops.")),
         request_example={"start": True}, errors=(_UNKNOWN_KEY, _NOT_FOUND),
     ),
+    RouteSpec(
+        "POST", "/api/runs/{run_id}/posted-window",
+        "Search the stored boards for postings of the last N days a finished run does not hold, and add them to it (read / search).",
+        "write", "model",
+        {"run_id": "run_1", "run_days": 10, "searched_days": 30, "choices": [7, 10, 30, 60], "added_total": 4, "skip_reason": None},
+        params=(_RUN_ID, _b("days", "integer", "Search this many days back (1 to 365); omitted = read what was searched.")),
+        request_example={"days": 30}, errors=(_INVALID, _WRONG_TYPE, _UNKNOWN_KEY, _NOT_FOUND),
+        description=(
+            "No board is downloaded: the search reads the company index and board cache on this machine. No run is created. "
+            "Only the added postings are ranked and assessed (at most the run's assess cap); existing assessments and answers are untouched."
+        ),
+    ),
     # --- discovery -------------------------------------------------------------------
     RouteSpec(
         "POST", "/api/discover", "Start a company-discovery pass (Exa).", "write", "network", {"request_id": "disc_1"},
@@ -431,8 +443,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     ),
     RouteSpec(
         "POST", "/api/sources/update", "Refresh the board catalog and index (\"Update sources\").", "write", "network", {"state": "running"},
-        params=(_b("force", "boolean", "Refresh even if recent."),), request_example={}, errors=(_UNKNOWN_KEY, _WRONG_TYPE),
-        description="Reads public boards; returns immediately; poll GET /api/sources/update.",
+        params=(
+            _b("force", "boolean", "Start even if another update looks live."),
+            _b("full_refresh", "boolean", "Check every board; by default boards checked recently are skipped."),
+        ),
+        request_example={}, errors=(_UNKNOWN_KEY, _WRONG_TYPE),
+        description="Reads public boards; incremental by default; returns immediately; poll GET /api/sources/update.",
     ),
     RouteSpec("GET", "/api/sources/update", "State of the last or running sources update.", "read", "none", {"state": "idle"}),
 )
@@ -460,6 +476,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/api/runs/{run_id}/posting"): ("Get one posting of a run", "Runs"),
     ("POST", "/api/runs/{run_id}/rank"): ("Rank a run's postings", "Runs"),
     ("POST", "/api/runs/{run_id}/assess-all"): ("Assess every posting of a run", "Runs"),
+    ("POST", "/api/runs/{run_id}/posted-window"): ("Find older postings for a run", "Runs"),
     ("POST", "/api/discover"): ("Start a company-discovery pass", "Sources"),
     ("GET", "/api/discover/latest"): ("Get the latest discovery pass", "Sources"),
     ("GET", "/api/profiles"): ("List profiles", "Profiles and resume"),

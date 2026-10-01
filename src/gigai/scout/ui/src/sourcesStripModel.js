@@ -110,7 +110,7 @@ export function sourcesStrip(status, { now = Date.now(), hasRun = true } = {}) {
     kind: stale ? "stale" : "fresh",
     running,
     progress,
-    line: `Company postings: ${companies}${age ? ` · updated ${age}` : ""}${stale ? " · out of date" : ""}`,
+    line: `Company postings: ${companies}${age ? ` · updated ${age}` : ""}${stale ? " · out of date" : " · up to date"}`,
     amber: stale,
     steps,
     runBlocked: "",

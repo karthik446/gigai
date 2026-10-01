@@ -397,8 +397,14 @@ class StartOutcome:
     action: str  # "started" | "resumed" | "joined" | "done" | "none"
 
 
-def start_or_join(source: RankInput, *, start: bool) -> StartOutcome:
-    """Single flight for ``source.key()``; only ``start=True`` can start or resume a pass."""
+def start_or_join(source: RankInput, *, start: bool, rows_added: bool = False) -> StartOutcome:
+    """Single flight for ``source.key()``; only ``start=True`` can start or resume a pass.
+
+    0110-019: ``rows_added`` says ``source.rows`` holds postings the newest
+    record never saw (added to the run after it ended), so a ``complete``
+    record does not answer the start: a new record is made (cache-first, so
+    only the added rows cost a call).
+    """
 
     key_digest = source.key().digest()
     workpad = source.workpad_resolved.path
@@ -415,7 +421,7 @@ def start_or_join(source: RankInput, *, start: bool) -> StartOutcome:
                 return StartOutcome(newest, "none")
             _spawn(source, newest)  # interrupted: resume in place, cache-first
             return StartOutcome(newest, "resumed")
-        if newest is not None and newest.status == "complete":
+        if newest is not None and newest.status == "complete" and not (start and rows_added):
             return StartOutcome(newest, "done")
         if not start:
             return StartOutcome(newest, "none")
@@ -450,6 +456,14 @@ def wait_for_passes(*, timeout: float | None = None) -> bool:
     with _LOCK:
         running = [item for item in _REGISTRY.values() if not item.done.is_set()]
     return all(item.done.wait(timeout) for item in running)
+
+
+def wait_for_record(record_id: str, *, timeout: float | None = None) -> bool:
+    """Wait until this process's pass for ``record_id`` ends (at once when it runs none); false on ``timeout``."""
+
+    with _LOCK:
+        current = _REGISTRY.get(record_id)
+    return True if current is None else current.done.wait(timeout)
 
 
 def live_scores(record: RankRecord) -> dict[str, dict[str, object]]:
@@ -496,4 +510,5 @@ __all__ = [
     "record_summary",
     "start_or_join",
     "wait_for_passes",
+    "wait_for_record",
 ]

@@ -30,6 +30,7 @@
 //                       from the location text, never the board's field
 import { displayCompanyName, notAssessedReasonLabel, sponsorshipLabel } from "./display.js";
 import { compareRank, isRanked, mergeRank, rankEntry, rankFilterValue } from "./rankModel.js";
+import { POSTED_ANY, isPostedWindow, postedWithin } from "./postedWindowModel.js";
 
 export const VERDICT_LABELS = {
   matched_above_threshold: "Matched",
@@ -682,7 +683,9 @@ export function sortJobs(jobs) {
 // `fit` filters by the model's rank (rankModel.rankFilterValue: strong,
 // maybe, no, blocked, unranked). Nothing is hidden by default: a posting
 // with a blocker is demoted, never hidden (SCOPE-ADD-3).
-export const EMPTY_FILTERS = { search: "", company: "", fit: "all", sponsorship: "all", assessed: "all", state: "all" };
+// 0110-019: `posted` is the "Posted" chip: a number of days (the posting's
+// own date is within them; postedWindowModel.postedWithin) or "any".
+export const EMPTY_FILTERS = { search: "", company: "", fit: "all", sponsorship: "all", assessed: "all", state: "all", posted: POSTED_ANY };
 
 export function hasActiveFilter(filters) {
   return Boolean(
@@ -691,12 +694,16 @@ export function hasActiveFilter(filters) {
       filters.fit !== "all" ||
       filters.sponsorship !== "all" ||
       filters.assessed !== "all" ||
-      (filters.state && filters.state !== "all"),
+      (filters.state && filters.state !== "all") ||
+      isPostedWindow(filters.posted),
   );
 }
 
-export function jobMatchesFilters(job, filters) {
+export function jobMatchesFilters(job, filters, now = Date.now()) {
   if (filters.company && job.posting.company !== filters.company) {
+    return false;
+  }
+  if (!postedWithin(job.posting.published_at, filters.posted, now)) {
     return false;
   }
   if (filters.fit !== "all") {
@@ -735,8 +742,8 @@ export function jobMatchesFilters(job, filters) {
   return true;
 }
 
-export function filterJobs(jobs, filters) {
-  return jobs.filter((job) => jobMatchesFilters(job, filters));
+export function filterJobs(jobs, filters, now = Date.now()) {
+  return jobs.filter((job) => jobMatchesFilters(job, filters, now));
 }
 
 // uat-bug-025: what the run says about the jobs it left unassessed. A run

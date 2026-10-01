@@ -7,7 +7,9 @@ uses in this API, not a blocking request:
 * ``POST /api/sources/update`` starts the update on a background thread and
   answers ``202 {"update_id", "status": "running"}`` at once; ``409
   sources_update_running`` while one is live (``{"force": true}`` in the
-  body overrides a stale one). The body may be empty.
+  body overrides a stale one). The body may be empty. The update is
+  incremental (boards checked within the stale window are left alone);
+  ``{"full_refresh": true}`` asks every board.
 * ``GET /api/sources/update`` answers ``200 {"running", "update", "index"}``:
   ``update`` is the running (or last finished) update's snapshot, ``null``
   when none has ever run; ``index`` says whether a search can read the
@@ -68,13 +70,17 @@ class SourcesRoutesMixin:
         if not isinstance(body, dict):
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "request body must be a JSON object")
             return
-        unknown = set(body) - {"force"}
+        unknown = set(body) - {"force", "full_refresh"}
         if unknown:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown field(s): {sorted(unknown)}")
             return
         force = body.get("force", False)
         if not isinstance(force, bool):
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "force must be true or false")
+            return
+        full_refresh = body.get("full_refresh", False)
+        if not isinstance(full_refresh, bool):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "full_refresh must be true or false")
             return
         home_root = self._sources_home()
         if home_root is None:
@@ -107,6 +113,7 @@ class SourcesRoutesMixin:
                 client_factory=_board_http_client,
                 config=config,
                 force=force,
+                full_refresh=full_refresh,
                 on_finished=_finished,
             )
         except SourcesUpdateRunningError as exc:

@@ -75,7 +75,7 @@ def _us_config(**changes):
     return replace(_config(), countries=("US",), **changes)
 
 
-def _update(home: Path, boards: _Boards, config=None):
+def _update(home: Path, boards: _Boards, config=None, full_refresh: bool = False):
     with httpx.Client(transport=httpx.MockTransport(boards.handler)) as client:
         return update_sources(
             _watchlist(),
@@ -84,6 +84,7 @@ def _update(home: Path, boards: _Boards, config=None):
             client=client,
             config=config if config is not None else _us_config(),
             limits=_limits(concurrency=2),
+            full_refresh=full_refresh,
         )
 
 
@@ -199,7 +200,7 @@ def test_the_summary_counts_what_is_new_or_changed_since_the_last_search(tmp_pat
 
     boards.version = 2
     boards.greenhouse[0] = {**boards.greenhouse[0], "updated_at": "2026-09-26T00:00:00Z"}
-    _update(tmp_path, boards)
+    _update(tmp_path, boards, full_refresh=True)  # the boards were just checked: force the re-check
     rows, _failures, third = _search(tmp_path, now=datetime.now(timezone.utc))
     assert third["touched_since_last_search"] == 1
     assert rows[0].text == "Build 11 v2." and rows[0].published_at == "2026-09-26T00:00:00Z"

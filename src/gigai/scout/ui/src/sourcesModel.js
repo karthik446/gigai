@@ -66,7 +66,8 @@ function checkedLine(update) {
   const boards = update.boards || {};
   const total = count(boards.total);
   if (total === 0) {
-    return "";
+    const fresh = count(boards.up_to_date);
+    return fresh ? `All ${formatCount(fresh)} ${boardsNoun(fresh)} were checked recently; nothing to refresh.` : "";
   }
   const failed = count(boards.failed);
   return `Checked ${formatCount(boardsChecked(boards))} of ${formatCount(total)} ${boardsNoun(total)}${failed ? `; ${formatCount(failed)} did not answer` : ""}.`;

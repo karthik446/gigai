@@ -107,7 +107,7 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
         update = first["update"]
         assert update["update_id"] == start_body["update_id"]
         assert update["status"] == "succeeded", update
-        assert update["boards"] == {"total": 2, "done": 2, "checked": 2, "fetched": 1, "cached": 0, "failed": 1, "skipped": 0, "never_checked": 0}
+        assert update["boards"] == {"total": 2, "done": 2, "checked": 2, "fetched": 1, "cached": 0, "failed": 1, "skipped": 0, "never_checked": 0, "up_to_date": 0}
         assert update["companies"]["checked"] == 1 and update["companies"]["indexed"] == 1
         assert update["postings"] == {"new": 1, "changed": 0, "removed": 0, "live": 1}
         assert update["summary"] == "1 company with new postings: 1 new, 0 changed, 0 removed"
@@ -132,13 +132,13 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
         assert posting["first_seen"] == posting["last_seen"] == acme["checked_at"]
         assert "removed_at" not in posting
 
-        # -- second update: nothing changed ----------------------------------
-        again = client.post("/api/sources/update", json={})
+        # -- second update (a full refresh): nothing changed ------------------
+        again = client.post("/api/sources/update", json={"full_refresh": True})
         assert again.status_code == 202, again.text
         assert again.json()["update_id"] != start_body["update_id"]
         second = _poll_until_settled(client)["update"]
         assert second["status"] == "succeeded", second
-        assert second["boards"] == {"total": 2, "done": 2, "checked": 2, "fetched": 0, "cached": 1, "failed": 1, "skipped": 0, "never_checked": 0}
+        assert second["boards"] == {"total": 2, "done": 2, "checked": 2, "fetched": 0, "cached": 1, "failed": 1, "skipped": 0, "never_checked": 0, "up_to_date": 0}
         assert second["companies"]["untouched"] == 1
         assert second["summary"] == "0 companies with new postings: 0 new, 0 changed, 0 removed"
         unchanged = json.loads((companies / "greenhouse:acme.json").read_text(encoding="utf-8"))
@@ -153,3 +153,38 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
     # journaled workpad holds the two watchlist adds and nothing else new.
     assert not list(workpad.rglob("greenhouse:acme.json"))
     assert_clean_and_healthy(workpad, home)
+
+
+def test_a_profile_switch_starts_no_update_and_asks_no_board(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home, target = setup_and_init(tmp_path)
+    add_resume(home, target, tmp_path)
+    write_offline_find_jobs_config(target, sources_live=True)
+    server = start_server(home, target, monkeypatch=monkeypatch)
+    try:
+        client = server.client
+        assert client.post("/api/watchlist", json={"url": ACME_BOARD}).status_code == 201
+        assert client.post("/api/sources/update", json={}).status_code == 202
+        finished = _poll_until_settled(client)
+        assert finished["update"]["status"] == "succeeded"
+        snapshot = (home / "cache" / "scout" / "companies" / "last-update.json").read_bytes()
+
+        created = client.post("/api/profiles", json={"label": "Other profile", "titles": ["data engineer"]})
+        assert created.status_code == 201, created.text
+        switched = client.post("/api/profiles/selection", json={"profile_id": created.json()["profile"]["profile_id"]})
+        assert switched.status_code == 200, switched.text
+
+        after = client.get("/api/sources/update").json()
+        # No update is running or was started; the snapshot file is byte-identical
+        # (an update, even one that checked 0 boards, would have rewritten it).
+        assert after["running"] is False
+        assert after["update"]["update_id"] == finished["update"]["update_id"]
+        assert (home / "cache" / "scout" / "companies" / "last-update.json").read_bytes() == snapshot
+        # The boards are shared: the stored postings are still current for the new profile.
+        assert after["index"]["needs_update"] is False
+
+        # And the explicit second update, right after the first, asks no board.
+        assert client.post("/api/sources/update", json={}).status_code == 202
+        second = _poll_until_settled(client)["update"]
+        assert second["boards"]["checked"] == 0 and second["boards"]["up_to_date"] == 1 and second["requests"] == 0
+    finally:
+        stop_server(server)
