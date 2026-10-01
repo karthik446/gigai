@@ -22,6 +22,56 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.1.10.5
+
+#### Added
+
+- **Story bank.** Every answer you give to a question about a job goes into your profile's story
+  bank, kept per profile (a profile can read another profile's bank only if you set that). A new
+  Story bank page lists, searches, edits and deletes entries and shows which jobs used each. When a
+  later job asks a similar question, the assessment reuses your answer instead of asking again, or
+  shows "We already know: ... use it?" prefilled. Agents can read and write the bank too:
+  `gigai scout story-bank add|list|show|edit|delete|share` and the matching API, with a stale-write
+  check and a record of who wrote each entry. Answers are checked for personal contact details.
+- **Agents can render a resume PDF.** `gigai scout resume pdf` and `POST /api/resume/pdf` turn
+  resume markdown into a PDF with your saved header, and a tailored line can be replaced with your
+  own text (`use: custom`), marked as edited, with the same personal-info check.
+- **Work mode in assessments.** The assessment now knows whether you want remote, hybrid or on-site
+  work, so a remote-only profile no longer gets "Matched" on an on-site role.
+- **Older assessments are flagged.** An assessment made before your settings changed (or before this
+  release) shows "Assessed with older settings: re-assess". "Assess all" counts them separately and
+  re-assesses them only when you click. A story bank answer flags only the assessments whose own
+  open question it answers.
+- **Check times setting.** Settings > Background updates lets you change when the background check
+  runs.
+
+#### Changed
+
+- **Background checks run 8 times a day in work hours, at a moderate pace.** On weekdays at 03:00 and
+  every two hours from 07:00 to 19:00, on weekend days at 09:00 and 18:00 (your local time), busy
+  boards every time and quiet boards about twice a day, a few requests a second, backing off when a
+  site asks. One catch-up check runs if Scout was closed. The strip says when the next check is;
+  Update sources still runs at full speed.
+- **First runs after this upgrade re-assess postings once, which means more model calls once.**
+  Runs now give the assessment your real settings (see Fixed), so earlier verdicts are not carried
+  forward. Runs also say why a posting was not assessed, and keep much less in their saved history.
+
+#### Fixed
+
+- **Runs assessed without your settings.** A search run's assessment did not see your location,
+  countries, sponsorship need or target titles, so it could call a New York hybrid role with "no
+  H1B" a fit for a Houston profile that needs sponsorship. It now does.
+- **Pages loaded in 4 to 7 seconds.** The profile, config, setup, applications and runs reads are
+  now tens of milliseconds, and Mark applied and the first applications read no longer slow down as
+  your history grows.
+- **The first background check no longer looks frozen.** The one-time tagging and keyword-index
+  work now runs after the first boards, with a heartbeat. Tag counts say what they count, and only
+  titles a model will tag are called "waiting". Tagging has its own thread and no longer starves.
+- **The "Where this data comes from" link and the README links no longer 404.**
+- **Keyword search and tagging on Debian 12** and other systems with an older SQLite no longer
+  return nothing.
+- **A rare "complete with the wrong counts" in Assess all** is fixed.
+
 ### 0.1.10.4
 
 #### Added

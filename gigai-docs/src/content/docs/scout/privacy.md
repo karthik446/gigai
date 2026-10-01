@@ -37,7 +37,7 @@ or assessment. Scout runs `codex` with its shell tool and memories turned off, a
   full posting text are not sent for ranking.
 - **Assessment and tailoring** send your resume text with the name and contact lines removed: an assessment sends the posting text and your resume for each posting
   being assessed, including each posting "Assess all new" assesses, with whether you need sponsorship, the countries you can
-  work from, your location as you wrote it and your target titles (a search run's assessments send the same). A pasted resume is used for that assessment only: its full text is never saved and never sent anywhere but your assessment model; the stored result keeps short evidence quotes on your machine.
+  work from, your location as you wrote it, your work mode (remote, hybrid or on-site) and your target titles (a search run's assessments send the same). A pasted resume is used for that assessment only: its full text is never saved and never sent anywhere but your assessment model; the stored result keeps short evidence quotes on your machine.
 - **Your answers go with an assessment, per profile.** The answers you gave to earlier questions are part of what an assessment
   sends (one you start on a job, and each one a search run makes), so a question is not asked twice: each answer in full, plus a one-line summary of each story bank entry (at most 40).
   Only the answers of the profile being assessed are sent, and those of the one profile it is set to share with; another
