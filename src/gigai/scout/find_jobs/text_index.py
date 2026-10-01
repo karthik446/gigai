@@ -15,7 +15,18 @@ never raises for those cases.
   posting whose detail is not cached yet) is never returned by a text query;
   :func:`search` counts it so the caller can say "text not checked".
 * Deleting from a contentless table needs SQLite 3.43 (``contentless_delete``).
-  Older SQLite still works: every replace/remove becomes a rebuild.
+  Older SQLite (Debian 12 ships 3.40) still works, with a SOFT delete: a
+  replace/remove deletes the ``postings`` rows only. The FTS rows stay behind
+  as garbage and are never returned, because :func:`search` joins ``postings``
+  on rowid; new rows get rowids that were never used. ``meta`` counts the
+  garbage, and :func:`compact_if_needed` (an idle path, never a write) or any
+  :func:`rebuild_from_cache` clears it.
+  ``GIGAI_SCOUT_TEXT_INDEX_SOFT_DELETE=1`` forces this mode on a newer SQLite.
+* :func:`rebuild_from_cache` is the only full build (25 s on 283k postings).
+  A read runs it on first use. So does a write, unless the caller passes
+  ``build_if_missing=False``: then a write on an unbuilt index returns
+  ``False`` and the caller builds once, later (:func:`is_built` tells that
+  ``False`` from "unavailable"). A write never rebuilds a BUILT index.
 
 Concurrency, as in ``tag_store.py``: WAL, one writer at a time (a process
 lock plus SQLite's write lock), a connection per thread, and a connection
@@ -27,7 +38,7 @@ existing readers (:class:`CompanyIndex`, :func:`cached_posting_rows`).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -47,8 +58,21 @@ _TITLE_WEIGHT = 10.0
 _DESCRIPTION_WEIGHT = 1.0
 _TOKENIZE = "unicode61 remove_diacritics 2"
 
-#: ``contentless_delete`` arrived in SQLite 3.43.
-_SUPPORTS_CONTENTLESS_DELETE = sqlite3.sqlite_version_info >= (3, 43, 0)
+#: Forces the soft-delete mode (what a SQLite older than 3.43 gets) for new index files.
+SOFT_DELETE_ENV = "GIGAI_SCOUT_TEXT_INDEX_SOFT_DELETE"
+
+#: ``contentless_delete`` arrived in SQLite 3.43. Decides how a NEW file is
+#: created; an existing file keeps the mode recorded in its ``can_delete`` meta.
+_CONTENTLESS_DELETE = sqlite3.sqlite_version_info >= (3, 43, 0) and not os.environ.get(SOFT_DELETE_ENV, "").strip()
+
+#: Read by ``sources_update.py`` as "one company can be written without a
+#: rebuild". That is true on every SQLite with FTS5 now, so it is always True;
+#: the mode itself is :data:`_CONTENTLESS_DELETE`.
+_SUPPORTS_CONTENTLESS_DELETE = True
+
+#: :func:`compact_if_needed` rebuilds when the garbage is at least this many
+#: FTS rows AND more than half of all FTS rows.
+_COMPACT_MIN_GARBAGE = 1000
 
 _FTS_DDL = (
     "CREATE VIRTUAL TABLE text USING fts5(title, description, content='', contentless_delete=1, "
@@ -106,6 +130,8 @@ class TextIndexStats:
     with_text: int = 0
     without_text: int = 0
     reason: str | None = None
+    #: Soft-deleted FTS rows still in the file (always 0 with ``contentless_delete``).
+    garbage: int = 0
 
 
 class _Unavailable(Exception):
@@ -168,8 +194,8 @@ class _Store:
             conn.execute(statement)
         can_delete = 1
         try:
-            conn.execute(_FTS_DDL if _SUPPORTS_CONTENTLESS_DELETE else _FTS_DDL_NO_DELETE)
-            can_delete = 1 if _SUPPORTS_CONTENTLESS_DELETE else 0
+            conn.execute(_FTS_DDL if _CONTENTLESS_DELETE else _FTS_DDL_NO_DELETE)
+            can_delete = 1 if _CONTENTLESS_DELETE else 0
         except sqlite3.OperationalError as error:
             if "no such module" in str(error):
                 raise _Unavailable("this SQLite has no FTS5") from None
@@ -178,8 +204,14 @@ class _Store:
                 can_delete = 0
             except sqlite3.OperationalError as fallback:
                 raise _Unavailable(f"FTS5 table cannot be created: {fallback}") from None
-        for key, value in (("schema_version", str(SCHEMA_VERSION)), ("built", "0"), ("can_delete", str(can_delete))):
-            conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
+        for key, value in (
+            ("schema_version", str(SCHEMA_VERSION)),
+            ("built", "0"),
+            ("can_delete", str(can_delete)),
+            ("garbage", "0"),
+            ("next_rowid", "1"),
+        ):
+            _set_meta(conn, key, value)
 
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
         has_meta = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone()
@@ -248,6 +280,17 @@ def _meta(conn: sqlite3.Connection, key: str) -> str | None:
     return row[0] if row else None
 
 
+def _set_meta(conn: sqlite3.Connection, key: str, value: object) -> None:
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, str(value)))
+
+
+def _meta_int(conn: sqlite3.Connection, key: str) -> int:
+    try:
+        return int(_meta(conn, key) or 0)
+    except ValueError:
+        return 0
+
+
 def _clean(value: str | None) -> str:
     return value.strip() if isinstance(value, str) else ""
 
@@ -258,68 +301,106 @@ def _clean(value: str | None) -> str:
 
 
 def _delete_company(conn: sqlite3.Connection, key: str) -> None:
-    rowids = [row[0] for row in conn.execute("SELECT rowid FROM postings WHERE company_key=?", (key,))]
-    for rowid in rowids:
-        conn.execute("DELETE FROM text WHERE rowid=?", (rowid,))
+    """Drop one company's rows (inside the caller's transaction).
+
+    Without ``contentless_delete`` the FTS rows cannot be deleted: they stay
+    as garbage that no ``postings`` row points at, and are counted.
+    """
+
+    if _meta(conn, "can_delete") == "1":
+        rowids = [row[0] for row in conn.execute("SELECT rowid FROM postings WHERE company_key=?", (key,))]
+        for rowid in rowids:
+            conn.execute("DELETE FROM text WHERE rowid=?", (rowid,))
+    else:
+        stale = conn.execute("SELECT COUNT(*) FROM postings WHERE company_key=? AND has_text=1", (key,)).fetchone()[0]
+        if stale:
+            _set_meta(conn, "garbage", _meta_int(conn, "garbage") + stale)
     conn.execute("DELETE FROM postings WHERE company_key=?", (key,))
 
 
 def _insert_postings(conn: sqlite3.Connection, key: str, postings: Iterable[TextPosting]) -> None:
+    # Soft-delete mode: a rowid is never used twice (a reused one would still
+    # match its old words), so rowids come from a counter, not from SQLite.
+    soft = _meta(conn, "can_delete") != "1"
+    next_rowid = 0
+    if soft:
+        highest = conn.execute("SELECT COALESCE(MAX(rowid), 0) FROM postings").fetchone()[0]
+        next_rowid = max(_meta_int(conn, "next_rowid"), highest + 1, 1)
     seen: set[str] = set()
     for posting in postings:
         if not posting.posting_id or posting.posting_id in seen:
             continue
         seen.add(posting.posting_id)
         text = _clean(posting.text)
-        cursor = conn.execute(
-            "INSERT INTO postings (company_key, posting_id, has_text) VALUES (?, ?, ?)",
-            (key, posting.posting_id, 1 if text else 0),
-        )
+        if soft:
+            rowid = next_rowid
+            next_rowid += 1
+            conn.execute(
+                "INSERT INTO postings (rowid, company_key, posting_id, has_text) VALUES (?, ?, ?, ?)",
+                (rowid, key, posting.posting_id, 1 if text else 0),
+            )
+        else:
+            rowid = conn.execute(
+                "INSERT INTO postings (company_key, posting_id, has_text) VALUES (?, ?, ?)",
+                (key, posting.posting_id, 1 if text else 0),
+            ).lastrowid
         if text:
             conn.execute(
                 "INSERT INTO text (rowid, title, description) VALUES (?, ?, ?)",
-                (cursor.lastrowid, posting.title or "", text),
+                (rowid, posting.title or "", text),
             )
+    if soft:
+        _set_meta(conn, "next_rowid", next_rowid)
 
 
-def _cached_company_postings(home_root: Path) -> dict[str, list[TextPosting]]:
-    """Every indexed company's live postings with the text the board cache still holds."""
+def _cached_postings(index: CompanyIndex, cache: BoardCache, ats: str, slug: str) -> list[TextPosting] | None:
+    """One indexed company's live postings with the text the board cache still holds."""
 
-    index = CompanyIndex.for_home(home_root)
-    cache = BoardCache(Path(home_root) / "cache" / "scout" / "ats-boards")
-    out: dict[str, list[TextPosting]] = {}
-    for ats, slug in index.keys():
-        entry = index.read(ats, slug)
-        if entry is None:
-            continue
-        live = entry.live()
-        cached = cached_posting_rows(cache, ats, slug, (posting.posting_id for posting in live))
-        postings = []
-        for posting in live:
-            row = cached.rows.get(posting.posting_id)
-            postings.append(TextPosting(posting.posting_id, posting.title, row.text if row is not None else None))
-        out[company_key(ats, slug)] = postings
-    return out
+    entry = index.read(ats, slug)
+    if entry is None:
+        return None
+    live = entry.live()
+    cached = cached_posting_rows(cache, ats, slug, (posting.posting_id for posting in live))
+    postings = []
+    for posting in live:
+        row = cached.rows.get(posting.posting_id)
+        postings.append(TextPosting(posting.posting_id, posting.title, row.text if row is not None else None))
+    return postings
 
 
-def rebuild_from_cache(home_root: Path) -> TextIndexStats:
+def rebuild_from_cache(home_root: Path, *, progress: Callable[[int, int], None] | None = None) -> TextIndexStats:
     """Drop the index and refill it from the stored company files and board bodies.
 
-    The old index stays readable until the new one commits. Returns the new
-    stats, or an unavailable stats (never raises) when FTS5 cannot be used.
+    The ONLY full build. The old index stays readable until the new one
+    commits. Returns the new stats, or an unavailable stats (never raises)
+    when FTS5 cannot be used. The new index has no garbage (see
+    :func:`compact_if_needed`).
+
+    ``progress(done, total)`` is called once before the first company and
+    after each one (companies, not postings), on the calling thread, so a
+    caller can keep a heartbeat. An exception it raises ends the build: the
+    old index is kept and the exception propagates.
     """
 
     store = _store(home_root)
     try:
         with store.write_lock:
             conn = store.conn()
-            companies = _cached_company_postings(home_root)
+            index = CompanyIndex.for_home(home_root)
+            cache = BoardCache(Path(home_root) / "cache" / "scout" / "ats-boards")
+            companies = list(index.keys())
+            if progress is not None:
+                progress(0, len(companies))
             conn.execute("BEGIN IMMEDIATE")
             try:
                 store._create(conn)
-                for key, postings in companies.items():
-                    _insert_postings(conn, key, postings)
-                conn.execute("UPDATE meta SET value='1' WHERE key='built'")
+                for done, (ats, slug) in enumerate(companies, start=1):
+                    postings = _cached_postings(index, cache, ats, slug)
+                    if postings is not None:
+                        _insert_postings(conn, company_key(ats, slug), postings)
+                    if progress is not None:
+                        progress(done, len(companies))
+                _set_meta(conn, "built", "1")
                 conn.execute("COMMIT")
             except BaseException:  # noqa: BLE001 - cleans up (rollback/undo) and re-raises: nothing is swallowed
                 conn.execute("ROLLBACK")
@@ -332,8 +413,61 @@ def rebuild_from_cache(home_root: Path) -> TextIndexStats:
 build = rebuild_from_cache
 
 
+def is_built(home_root: Path) -> bool:
+    """Whether the index file exists and a build filled it. No side effects.
+
+    Never creates, repairs or replaces the file (it opens it read-only), never
+    builds, never raises. ``False`` for a missing, unreadable, half-created or
+    other-version file: all of them need :func:`rebuild_from_cache`.
+    """
+
+    path = text_index_path(home_root)
+    if not path.is_file():
+        return False
+    try:
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=_BUSY_TIMEOUT_MS / 1000)
+    except sqlite3.Error:
+        return False
+    try:
+        rows = dict(conn.execute("SELECT key, value FROM meta WHERE key IN ('built', 'schema_version')").fetchall())
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+    return rows.get("built") == "1" and rows.get("schema_version") == str(SCHEMA_VERSION)
+
+
+def compact_if_needed(home_root: Path, *, progress: Callable[[int, int], None] | None = None) -> bool:
+    """Rebuild from the cache when soft deletes left too much garbage. ``True`` when it rebuilt.
+
+    For an IDLE path only (about 10 s on 290k postings): a write never calls
+    it. Garbage is "too much" at :data:`_COMPACT_MIN_GARBAGE` rows or more AND
+    more than half of the FTS rows. It never creates the file, never raises,
+    and does nothing on an index with ``contentless_delete``. Like every
+    rebuild it keeps only what the company files and board cache hold;
+    ``progress`` is :func:`rebuild_from_cache`'s.
+    """
+
+    store = _store(home_root)
+    try:
+        if not store.path.is_file():
+            return False
+        conn = store.conn()
+        if _meta(conn, "built") != "1" or _meta(conn, "can_delete") == "1":
+            return False
+        garbage = _meta_int(conn, "garbage")
+        if garbage < _COMPACT_MIN_GARBAGE:
+            return False
+        live = conn.execute("SELECT COALESCE(SUM(has_text), 0) FROM postings").fetchone()[0]
+        if garbage <= live:
+            return False
+    except (_Unavailable, sqlite3.DatabaseError):
+        return False
+    return rebuild_from_cache(home_root, progress=progress).available
+
+
 def _ready(home_root: Path) -> sqlite3.Connection:
-    """The connection, built from the cache first when the file is new or was reset."""
+    """For a READ: the connection, built from the cache first when the file is new or was reset."""
 
     store = _store(home_root)
     conn = store.conn()
@@ -345,18 +479,52 @@ def _ready(home_root: Path) -> sqlite3.Connection:
     return conn
 
 
-def upsert_company(home_root: Path, key: str, postings: Sequence[TextPosting]) -> bool:
-    """Replace one company's postings in the index. ``False`` when the index is unavailable.
+def _ready_to_write(home_root: Path, build_if_missing: bool) -> sqlite3.Connection | None:
+    """For a WRITE: the connection, or ``None`` when the index is unbuilt and the caller forbade the build.
 
-    ``key`` is :func:`company_index.company_key`. Without SQLite
-    ``contentless_delete`` the whole index is rebuilt from the cache instead.
+    With ``build_if_missing=False`` the full build never runs here. Only a
+    home with no company file at all gets its (empty, instant) index created.
+    """
+
+    if build_if_missing:
+        return _ready(home_root)
+    store = _store(home_root)
+    conn = store.conn()
+    if _meta(conn, "built") == "1":
+        return conn
+    if next(iter(CompanyIndex.for_home(home_root).keys()), None) is not None:
+        return None
+    with store.write_lock:
+        conn = store.conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            # Nothing to read: the empty index is the built index.
+            if _meta(conn, "built") != "1":
+                store._create(conn)
+                _set_meta(conn, "built", "1")
+            conn.execute("COMMIT")
+        except BaseException:  # noqa: BLE001 - cleans up (rollback/undo) and re-raises: nothing is swallowed
+            conn.execute("ROLLBACK")
+            raise
+    return conn
+
+
+def upsert_company(home_root: Path, key: str, postings: Sequence[TextPosting], *, build_if_missing: bool = True) -> bool:
+    """Replace one company's postings in the index. ``False`` when nothing was written.
+
+    ``key`` is :func:`company_index.company_key`. A built index is never
+    rebuilt: without SQLite ``contentless_delete`` the old rows are
+    soft-deleted. An UNBUILT index is first built from the cache (the full
+    build), unless ``build_if_missing=False``: then nothing is built, the
+    result is ``False`` (:func:`is_built` tells it from "unavailable") and
+    the caller runs :func:`rebuild_from_cache` once, off the hot path.
     """
 
     store = _store(home_root)
     try:
-        conn = _ready(home_root)
-        if _meta(conn, "can_delete") != "1":
-            return rebuild_from_cache(home_root).available
+        conn = _ready_to_write(home_root, build_if_missing)
+        if conn is None:
+            return False
         with store.write_lock:
             conn.execute("BEGIN IMMEDIATE")
             try:
@@ -371,14 +539,14 @@ def upsert_company(home_root: Path, key: str, postings: Sequence[TextPosting]) -
     return True
 
 
-def remove_company(home_root: Path, key: str) -> bool:
-    """Drop one company from the index. ``False`` when the index is unavailable."""
+def remove_company(home_root: Path, key: str, *, build_if_missing: bool = True) -> bool:
+    """Drop one company from the index. ``False`` when nothing was done (``build_if_missing`` as in :func:`upsert_company`)."""
 
     store = _store(home_root)
     try:
-        conn = _ready(home_root)
-        if _meta(conn, "can_delete") != "1":
-            return rebuild_from_cache(home_root).available
+        conn = _ready_to_write(home_root, build_if_missing)
+        if conn is None:
+            return False
         with store.write_lock:
             conn.execute("BEGIN IMMEDIATE")
             try:
@@ -411,9 +579,10 @@ def stats(home_root: Path) -> TextIndexStats:
         with_text, without_text = conn.execute(
             "SELECT COALESCE(SUM(has_text), 0), COALESCE(SUM(1 - has_text), 0) FROM postings"
         ).fetchone()
+        garbage = _meta_int(conn, "garbage")
     except (_Unavailable, sqlite3.DatabaseError) as error:
         return TextIndexStats(False, reason=str(error))
-    return TextIndexStats(True, with_text + without_text, with_text, without_text)
+    return TextIndexStats(True, with_text + without_text, with_text, without_text, garbage=garbage)
 
 
 def postings_with_text(home_root: Path, key: str) -> frozenset[str] | None:
