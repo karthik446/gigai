@@ -39,6 +39,70 @@ needs `Content-Type: application/json`. Each route and command carries an **effe
 (`none` offline, `model` spends a model call and sends text to your model target,
 `network` reads the public internet).
 
+## Change a resume and render a new PDF
+
+All of this is local: no model call, no network. The name, title and contact line at
+the top of every PDF come from the saved Resume display settings (`PUT /api/resume-display`),
+never from the resume text.
+
+A worked example, **an agent changes two bullets and renders a new PDF**, for a job that
+already has a tailored resume:
+
+```sh
+B=http://127.0.0.1:8765; J='https://boards.greenhouse.io/acme/jobs/101'; P='<profile_id>'
+H='Content-Type: application/json'
+
+# 1. Read the resume: every body line has an id (L<n>); note updated_at.
+curl -s -G "$B/api/tailored-resumes" --data-urlencode "profile_id=$P" --data-urlencode "job_identity=$J"
+
+# 2. Change two bullets (one PUT per line; updated_at is the one you read and does not change).
+curl -s -X PUT "$B/api/tailored-resumes/lines" -H "$H" -d "{\"profile_id\": \"$P\", \"job_identity\": \"$J\",
+  \"updated_at\": \"<updated_at>\", \"line_id\": \"L7\", \"use\": \"custom\",
+  \"text\": \"Rebuilt the scheduling service on Python and Postgres for 4 teams.\"}"
+curl -s -X PUT "$B/api/tailored-resumes/lines" -H "$H" -d "{\"profile_id\": \"$P\", \"job_identity\": \"$J\",
+  \"updated_at\": \"<updated_at>\", \"line_id\": \"L8\", \"use\": \"custom\",
+  \"text\": \"Ran the release calendar and the on-call rota.\"}"
+
+# 3. Render the new PDF.
+curl -s -X POST "$B/api/tailored-resumes/pdf" -H "$H" -d "{\"profile_id\": \"$P\", \"job_identity\": \"$J\"}" -o resume.pdf
+```
+
+The same with the CLI, which needs no running server for the render:
+
+```sh
+gigai scout resume pdf --tailored --job-url "$J" --out resume.pdf --json    # the stored resume, edits included
+
+# or work on the markdown yourself: edit the two "- " lines in a file, then render it
+gigai scout resume pdf --in resume.md --out resume.pdf --json
+```
+
+What to know:
+
+- An edited line is marked `kind: custom` with `origin: user`. It cites no source (`refs` is
+  empty) and the no-loss check does not cover it: it is your text. `edited_from` keeps the line it
+  replaced, so `"use": "original"` or `"use": "rewritten"` brings that back. The UI shows the line as
+  edited, with the same way back.
+- `text` is one line of at most 400 characters. Body lines only (a summary, skills or other line, or
+  an entry's bullet), never an entry heading.
+- A text that looks like your name or a contact detail (email, phone, link, street address) is
+  refused with `422 personal_info_refused`: put those in Resume display.
+- `POST /api/resume/pdf` renders markdown you send: `{"markdown": "...", "spacing_scale": 0.9,
+  "auto_fit": false, "profile_id": "..."}` (only `markdown` is required) answers `application/pdf`,
+  with the page count in `X-GigAI-Pages`. The markdown is rendered and dropped: not stored, not
+  logged, not sent to a model.
+- The markdown format is the one a tailored resume's `markdown` field uses: `## Summary`,
+  `## Experience`, `## Skills`, `## Education`, `## Projects`, `## Other`; in Experience, Projects and
+  Education an entry starts with `### <employer, project or school>`, may continue with plain
+  heading lines (`Staff Engineer | Jun 2020 - Present`), and lists `- ` bullets. Trailing
+  `<!-- ... -->` comments are dropped and lines above the first `## ` are not printed. Text prints
+  as written (inline markdown such as `**bold**` is not interpreted). Summary lines print as one
+  paragraph and Skills as tags, so a summary or other line that was a bullet in your original
+  resume can print differently from the stored tailored resume's PDF; use `--tailored` (or
+  `POST /api/tailored-resumes/pdf`) when you want exactly that PDF.
+- Errors are 422s that say what is wrong: `resume_markdown_invalid` names the line number and the
+  rule, `resume_markdown_too_large` the limit (65536 bytes), `invalid_value` a `spacing_scale`
+  outside 0.7 to 1.4.
+
 ## Install and run
 
 Everything below runs from an installed package (`uv tool install gigai`),

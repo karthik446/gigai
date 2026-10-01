@@ -7,7 +7,7 @@ import {
   changeSummary,
   inlineSegments,
   latestStored,
-  lineAction,
+  lineActions,
   lostLabels,
   previewLines,
   previewStats,
@@ -139,12 +139,14 @@ function CleanCopy({ lines }) {
 // model rewrote it (its reason), what a rejected rewrite dropped, and the one
 // button (Keep original / Use rewrite anyway / Undo). Model text goes in as
 // React text children, like everywhere else in the panel.
+// 0110-032: an edited line (its text was typed by the operator or their agent,
+// PUT use: "custom") says so and offers the way back: Use original / Use rewrite.
 function LineControls({ line, onChoose, busy }) {
-  const action = onChoose ? lineAction(line) : null;
+  const actions = onChoose ? lineActions(line) : [];
   const reason = line.kind === "rewritten" ? reasonLabel(line.reason) : "";
   const fallback = line.origin === "fallback" && line.kind === "copy" && line.alternative && line.alternative.kind === "rewritten";
   const lost = fallback ? lostLabels(line.alternative) : [];
-  if (!action && !reason && !fallback) {
+  if (actions.length === 0 && !reason && !fallback && !line.edited) {
     return null;
   }
   return (
@@ -157,11 +159,16 @@ function LineControls({ line, onChoose, busy }) {
             Kept your line: the rewrite dropped {lost.length > 0 ? lost.join("; ") : "a fact"}.
           </span>
         )}
-        {action && (
-          <button type="button" className="button small secondary" data-action={action.use} disabled={busy} onClick={() => onChoose(line.id, action.use)}>
+        {line.edited && (
+          <span className="src-item muted" data-role="edited">
+            Edited: your own text, no source cited.
+          </span>
+        )}
+        {actions.map((action) => (
+          <button key={action.use} type="button" className="button small secondary" data-action={action.use} disabled={busy} onClick={() => onChoose(line.id, action.use)}>
             {action.label}
           </button>
-        )}
+        ))}
       </span>
     </div>
   );
@@ -213,6 +220,10 @@ function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onCh
         <span className="prov resume" title="Copied verbatim from the resume">
           R
         </span>
+      ) : line.edited ? (
+        <span className="prov rewritten edited" data-role="edited-mark" title="Edited: your own text, no source cited">
+          E
+        </span>
       ) : (
         <span className="prov rewritten" title="Rewritten; click for sources">
           ✎
@@ -229,7 +240,7 @@ function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onCh
         )}
         {open && (
           <span className="src-list">
-            {line.refs.length === 0 && <span className="src-item muted">No source cited.</span>}
+            {line.refs.length === 0 && <span className="src-item muted">{line.edited ? "Edited: your own text, no source cited." : "No source cited."}</span>}
             {line.refs.map((ref, refIndex) => (
               <span className="src-item" key={`${ref.kind}-${ref.line || ref.question_id || refIndex}`}>
                 <span className={`src-kind ${ref.kind}`}>{sourceLabel(ref, promptFor)}</span>
@@ -290,6 +301,11 @@ export function Preview({ response, profileLabel, promptFor, initialView = "chan
         <span>
           <span className="prov rewritten">✎</span> rewritten from the resume lines / answers it cites
         </span>
+        {(stats.edited || 0) > 0 && (
+          <span>
+            <span className="prov rewritten edited">E</span> edited: your own text, no source cited
+          </span>
+        )}
         <span className="muted">Hover or click a line to see its sources.</span>
       </div>
       )}

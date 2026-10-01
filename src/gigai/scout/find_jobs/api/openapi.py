@@ -417,23 +417,49 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         description="Carries resume-derived text (the product). For a job's ids and links use GET /api/jobs?url=.",
     ),
     RouteSpec(
-        "PUT", "/api/tailored-resumes/lines", "Show the original or the rewrite of one line of a stored tailored resume.", "write", "none",
+        "PUT", "/api/tailored-resumes/lines", "Show the original, the rewrite, or your own text on one line of a stored tailored resume.", "write", "none",
         {"schema_version": "scout-tailor-response:1", "job": {"job_identity": _JOB_URL}, "markdown": "# ..."}, schema_version="scout-tailor-response:1",
         params=(
             _b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True),
             _b("updated_at", "string", "The updated_at of the tailored resume you read; a newer tailoring answers 409.", required=True),
             _b("line_id", "string", "A line id (`L<n>`) from the tailored resume.", required=True),
-            _b("use", "string", "Which version to show.", required=True, enum=("original", "rewritten")),
+            _b("use", "string", "Which version to show; custom shows `text`.", required=True, enum=("original", "rewritten", "custom")),
+            _b("text", "string", "With use custom only: the line's new text, one line of at most 400 characters, without a bullet marker."),
         ),
-        request_example={"profile_id": "prof_1", "job_identity": _JOB_URL, "updated_at": "2026-09-29T10:05:00Z", "line_id": "L3", "use": "original"},
-        errors=(_INVALID, (404, "tailored_resume_not_found"), (409, "tailored_resume_changed"), _NO_TARGET),
-        description="Idempotent: choosing what is already shown changes nothing. The PDF and the markdown follow the choice; updated_at is unchanged.",
+        request_example={"profile_id": "prof_1", "job_identity": _JOB_URL, "updated_at": "2026-09-29T10:05:00Z", "line_id": "L3", "use": "custom", "text": "Rebuilt the scheduling service on Python and Postgres for 4 teams."},
+        errors=(_INVALID, (422, "personal_info_refused"), (404, "tailored_resume_not_found"), (409, "tailored_resume_changed"), _NO_TARGET),
+        description=(
+            "Idempotent: choosing what is already shown changes nothing. The PDF and the markdown follow the choice; updated_at is unchanged. "
+            "use custom edits a body line (a summary, skills or other line, or an entry's bullet; never an entry heading): the line becomes kind custom, origin user, "
+            "with no refs (no source is claimed for it and the no-loss check does not cover it) and edited_from holding the line it replaced, so use original or "
+            "use rewritten brings that back. Local only: no model reads the text. A text that looks like your name or a contact detail (email, phone, link, address) "
+            "is refused with 422 personal_info_refused: those come from PUT /api/resume-display. "
+            "Example, change two bullets then render: PUT this route twice (line_id L3, then L4, each with use custom and text), then POST /api/tailored-resumes/pdf with the same profile_id and job_identity."
+        ),
     ),
     RouteSpec(
         "POST", "/api/tailored-resumes/pdf", "Render the stored tailored resume as a PDF (binary).", "read", "none", {"content_type": "application/pdf"},
         params=(_b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True)),
         request_example=_IDENTITY_KEY, content_type="application/pdf", errors=(_INVALID, (404, "tailored_resume_not_found"), (500, "pdf_render_failed"), _NO_TARGET),
         description="Returns application/pdf with Content-Disposition: attachment; changes nothing.",
+    ),
+    RouteSpec(
+        "POST", "/api/resume/pdf", "Render resume markdown you send as a PDF (binary), with the saved header and layout.", "read", "none", {"content_type": "application/pdf"},
+        params=(
+            _b("markdown", "string", "Resume markdown in GigAI's format, at most 65536 bytes: `## Summary|Experience|Skills|Education|Projects|Other` sections; in Experience, Projects and Education `### <heading>` entries with `- ` bullets.", required=True),
+            _b("spacing_scale", "number", "The spacing scale for this render, 0.7 to 1.4; turns auto fit off unless auto_fit is sent. Default: the saved setting."),
+            _b("auto_fit", "boolean", "Pick the spacing scale that ends the content near a page boundary. Default: the saved setting."),
+            _b("profile_id", "string", "A profile id: its saved title prints under the name."),
+        ),
+        request_example={"markdown": "## Summary\n\n- Platform engineer with nine years building billing systems.\n\n## Experience\n\n### Northwind Health\nStaff Engineer | Jun 2020 - Present\n\n- Rebuilt the scheduling service on Python and Postgres.\n", "auto_fit": True},
+        content_type="application/pdf",
+        errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "resume_markdown_invalid"), (422, "resume_markdown_too_large"), (500, "pdf_render_failed"), _NO_TARGET),
+        description=(
+            "Returns application/pdf with Content-Disposition: attachment, X-GigAI-Pages and X-GigAI-Spacing-Scale; changes nothing. "
+            "Local only: the markdown is not sent to a model, not stored and not logged. The header (name, title, contact line) comes from the saved display "
+            "settings (PUT /api/resume-display), exactly as for a tailored resume; lines above the first `## ` section are not printed. Trailing `<!-- ... -->` "
+            "comments are dropped, so a tailored resume's `markdown` renders as it is. 422 resume_markdown_invalid names the line number and the rule."
+        ),
     ),
     RouteSpec(
         "GET", "/api/resume-display", "The saved PDF header settings and the suggestion to prefill them.", "read", "none",
@@ -685,8 +711,9 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/api/applications"): ("List application events", "Jobs"),
     ("POST", "/api/tailored-resumes"): ("Tailor the resume to one posting", "Tailored resumes"),
     ("GET", "/api/tailored-resumes"): ("List tailored resumes", "Tailored resumes"),
-    ("PUT", "/api/tailored-resumes/lines"): ("Keep the original or the rewrite of one line", "Tailored resumes"),
+    ("PUT", "/api/tailored-resumes/lines"): ("Keep the original or the rewrite of one line, or edit it", "Tailored resumes"),
     ("POST", "/api/tailored-resumes/pdf"): ("Render a tailored resume as a PDF", "Tailored resumes"),
+    ("POST", "/api/resume/pdf"): ("Render resume markdown as a PDF", "Tailored resumes"),
     ("GET", "/api/resume-display"): ("Get the PDF header settings", "Tailored resumes"),
     ("PUT", "/api/resume-display"): ("Save the PDF header settings", "Tailored resumes"),
     ("POST", "/api/resume/extract"): ("Extract search preferences from a resume", "Profiles and resume"),
@@ -914,6 +941,10 @@ def llms_text() -> str:
         "- Errors are {\"error\": {\"code\", \"message\"}}; an unknown_key 422 lists allowed_keys.\n"
         "- Routes marked x-gigai-external model spend a model call (assess, tailor, rank, run); network reads the public internet. Prefer read routes first.\n"
         "- Tailored resumes: POST /api/tailored-resumes, then POST /api/tailored-resumes/pdf {profile_id, job_identity} for the PDF; PUT /api/tailored-resumes/lines picks the original or the rewrite of one line.\n"
+        "- Edit a resume and render a new PDF (local, no model call): read the lines with GET /api/tailored-resumes?profile_id=&job_identity= (each body line has an id L<n>), "
+        "PUT /api/tailored-resumes/lines {profile_id, job_identity, updated_at, line_id, use: \"custom\", text} once per line you change (use original or rewritten undoes it), "
+        "then POST /api/tailored-resumes/pdf. To render your own markdown instead: POST /api/resume/pdf {markdown}. "
+        "The name and contact line always come from the saved display settings (PUT /api/resume-display); a line holding them is refused (422 personal_info_refused).\n"
     )
 
 

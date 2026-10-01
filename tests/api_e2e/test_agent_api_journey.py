@@ -9,6 +9,8 @@
 3. typed errors: 404 for an unknown job, 422 for no/blank/bad ``url`` and unknown query keys
    (which name the allowed ones), 403 for a foreign Host.
 4. ``unknown_key`` 422s from the other routes list the allowed keys.
+5. 0110-032: the documented way to change a line and render a new PDF works as documented (the
+   spec's ``use: custom`` + ``text``, then the PDF link; the resume's markdown through ``POST /api/resume/pdf``).
 """
 
 from __future__ import annotations
@@ -72,10 +74,18 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         assert job_op["x-gigai-effect"] == "read" and job_op["x-gigai-external"] == "none"
         assert [p["name"] for p in job_op["parameters"]] == ["url"] and "#/jobs/" in job_op["description"]
         assert document["paths"]["/api/assess"]["post"]["x-gigai-external"] == "model"
+        # 0110-032: editing a line and rendering markdown are local (no model), and say how.
+        line_op, md_op = document["paths"]["/api/tailored-resumes/lines"]["put"], document["paths"]["/api/resume/pdf"]["post"]
+        line_props = line_op["requestBody"]["content"]["application/json"]["schema"]["properties"]
+        assert line_props["use"]["enum"] == ["original", "rewritten", "custom"] and "text" in line_props
+        assert line_op["x-gigai-external"] == md_op["x-gigai-external"] == "none" and md_op["x-gigai-effect"] == "read"
+        assert "application/pdf" in md_op["responses"]["200"]["content"] and "422" in md_op["responses"]
+        assert "personal_info_refused" in line_op["description"] and "not sent to a model" in md_op["description"]
 
         llms = client.get("/llms.txt")
         assert llms.status_code == 200 and llms.headers["content-type"].startswith("text/plain")
         assert "/api/openapi.json" in llms.text and "/api/jobs?url=" in llms.text and "application/json" in llms.text
+        assert 'use: "custom", text' in llms.text and "POST /api/resume/pdf {markdown}" in llms.text and "no model call" in llms.text
         assert client.get("/llms.txt", headers={"Host": "evil.example"}).status_code == 403
 
         # ---- 2. one job ----------------------------------------------------------------
@@ -144,6 +154,18 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         assert line_link["method"] == "PUT" and line_link["path"] == "/api/tailored-resumes/lines"
         assert set(line_link["body"]) == {"profile_id", "job_identity", "updated_at", "line_id", "use"}
         assert line_link["body"]["updated_at"] == tailored.json()["updated_at"]
+        # 0110-032: change one line with the link's body (use custom + text), then the same PDF link prints it;
+        # the resume's own markdown renders through POST /api/resume/pdf. No model call in any of it.
+        body_lines = [line for section in tailored.json()["result"]["sections"] for line in (section.get("lines") or [bullet for entry in section.get("entries", []) for bullet in entry["bullets"]])]
+        wording = "Agent journey wording for one resume line."
+        edited = client.put(line_link["path"], json={**line_link["body"], "line_id": body_lines[0]["id"], "use": "custom", "text": wording})
+        assert edited.status_code == 200, edited.text
+        assert f"- {wording} <!-- edited -->" in edited.json()["markdown"]
+        assert client.post(link["path"], json=link["body"]).status_code == 200
+        from_markdown = client.post("/api/resume/pdf", json={"markdown": edited.json()["markdown"]})
+        assert from_markdown.status_code == 200 and from_markdown.headers["content-type"] == "application/pdf" and from_markdown.content.startswith(b"%PDF")
+        undone = client.put(line_link["path"], json={**line_link["body"], "line_id": body_lines[0]["id"], "use": "original" if body_lines[0]["kind"] == "copy" else "rewritten"})
+        assert undone.status_code == 200 and undone.json()["result"] == tailored.json()["result"]
 
         # the mark-applied link works as given, and the job then accepts the pipeline events
         mark = job["links"]["mark_applied"]
@@ -210,6 +232,7 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         assert allowed(client.post("/api/applications", json={"bogus": 1})) == ["event_kind", "job_identity", "normalized_url", "notes", "occurred_at"]
         assert allowed(client.put("/api/resume-display", json={"bogus": 1})) == ["auto_fit", "contact", "name", "spacing_scale", "titles"]
         assert allowed(client.post("/api/resumes", json={"bogus": 1})) == ["content_base64", "file_name", "text"]
+        assert allowed(client.post("/api/resume/pdf", json={"markdown": "## Summary\n- x\n", "bogus": 1})) == ["auto_fit", "markdown", "profile_id", "spacing_scale"]
         profiles = client.post("/api/profiles", json={"label": "x", "titles": ["a"], "bogus": 1})
         assert "bogus" in profiles.json()["error"]["field_errors"]["_"] and "allowed: " in profiles.json()["error"]["field_errors"]["_"]
         assert "label" in allowed(profiles)

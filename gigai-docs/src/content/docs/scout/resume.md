@@ -33,6 +33,18 @@ gigai scout resume add ./resume.md --json    # import + wrap your resume for fin
 drafts: review each line; every line shows its sources. **Download PDF** saves
 the result as a PDF.
 
+A line can also carry your own wording: an agent (or a script) sets it with `PUT
+/api/tailored-resumes/lines` and `"use": "custom"`. The line is then shown as
+**edited**: it cites no source, because the text is yours, and **Use original** (or
+**Use rewrite**) brings back the line it replaced. A text that looks like your name or
+a contact detail is refused; those belong in Resume display below.
+
+`gigai scout resume pdf` renders a PDF without the UI: `--tailored --job-url <url>`
+for a stored tailored resume, or `--in resume.md` for resume markdown of your own
+(`POST /api/resume/pdf` over the API). Both run on this computer only, with no model
+call. [For agents](../agents/#change-a-resume-and-render-a-new-pdf) has a worked
+example and the markdown format.
+
 ## Resume display
 
 Under Settings > Profiles, **Resume display** holds the name, title and contact

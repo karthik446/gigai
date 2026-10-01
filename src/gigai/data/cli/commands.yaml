@@ -773,6 +773,18 @@
       ],
       "notes": "Works as the very first command on a fresh machine: writes the default GigAI settings (like 'gigai scout run'), installs Scout if needed, then imports the file. Never rewrites an existing config."
     },
+    "scout resume pdf": {
+      "summary": "Render a resume to PDF locally: your own markdown, or a stored tailored resume.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, out_path, source, pages, bytes, spacing_scale}.",
+      "examples": [
+        "gigai scout resume pdf --in resume.md --out resume.pdf --json",
+        "gigai scout resume pdf --in resume.md --out resume.pdf --profile profile_1 --spacing 0.9",
+        "gigai scout resume pdf --tailored --job-url https://boards.greenhouse.io/acme/jobs/1 --out acme.pdf --json"
+      ],
+      "notes": "No model call and no network: the markdown is only rendered, never stored. --in takes resume markdown in GigAI's format (## Summary, ## Experience with ### entries and - bullets, ## Skills, ## Education, ## Projects, ## Other; trailing <!-- ... --> comments are dropped), so the markdown of a tailored resume renders as it is. The PDF header (name, title, contact line) always comes from the saved Resume display settings, never from the markdown. --spacing (0.7-1.4) and --auto-fit/--no-auto-fit change the layout for this render only; --spacing alone turns auto fit off. Writes only --out. To change two bullets and render: edit the two lines in the markdown file and run the first example; for a stored tailored resume, change the lines with PUT /api/tailored-resumes/lines (use: custom) and run the --tailored example."
+    },
     "scout resume tailor": {
       "summary": "Tailor a resume to ONE job posting right now: markdown, every line sourced.",
       "effect": "write",

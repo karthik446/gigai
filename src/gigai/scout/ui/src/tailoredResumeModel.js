@@ -4,7 +4,7 @@
 //
 // Input is one TailorResponse from POST/GET /api/tailored-resumes
 // (src/gigai/scout/tailored_resume.py): `result.header[]` copy lines and
-// `result.sections[]`, each line `{kind: "copy"|"rewritten", text, refs[]}`
+// `result.sections[]`, each line `{kind: "copy"|"rewritten"|"custom", text, refs[]}`
 // with every ref carrying the cited source text
 // (`{kind:"resume", line, text}` / `{kind:"answer", question_id, text}`).
 //
@@ -104,12 +104,22 @@ export function inlineSegments(text) {
   return out;
 }
 
+// A line's text as it prints: a copy without its own markers, anything else as written.
+function shownText(line) {
+  return line && line.kind === "copy" ? displayText(line.text) : String((line && line.text) || "");
+}
+
 // 0110-006: the optional keys a line may carry (`id`, `origin`, `reason`,
 // `alternative`); an older stored line has none of them and shows no buttons.
+// 0110-032: `kind: "custom"` is a line the operator (or their agent) typed; it
+// cites nothing and `edited_from` holds the line it replaced.
 function contentLine(line, display, where, role, plain, heading = false) {
-  const kind = line.kind === "copy" ? "copy" : "rewritten";
+  const kind = line.kind === "copy" || line.kind === "custom" ? line.kind : "rewritten";
   const alternative = line.alternative && typeof line.alternative === "object" ? line.alternative : null;
+  const editedFrom = kind === "custom" && line.edited_from && typeof line.edited_from === "object" ? line.edited_from : null;
   const row = {
+    edited: kind === "custom",
+    editedFrom,
     id: typeof line.id === "string" ? line.id : null,
     origin: line.origin === "fallback" || line.origin === "user" ? line.origin : "model",
     reason: line.reason && typeof line.reason === "object" ? line.reason : null,
@@ -125,6 +135,11 @@ function contentLine(line, display, where, role, plain, heading = false) {
   };
   if (kind === "rewritten") {
     row.original = originalLines(row);
+    row.diff = diffSegments(row.original.map((item) => item.text).join(" "), plain);
+  }
+  if (kind === "custom") {
+    // What changed is shown against the line the edit replaced.
+    row.original = editedFrom ? [{ label: "Before the edit", text: shownText(editedFrom) }] : [];
     row.diff = diffSegments(row.original.map((item) => item.text).join(" "), plain);
   }
   return row;
@@ -215,14 +230,19 @@ export function addedKeywords(lines) {
 // Entry headings and the header are not rewritable lines (the server's
 // tailor_line_stats leaves them out too), so they stay out of the counts.
 // `keptOriginal` is the copies the no-loss check put back (a fallback).
+// `edited` is the lines showing the operator's own text (0110-032): neither
+// copied nor rewritten, and not "unsourced" (no source is claimed for them).
 export function previewStats(lines) {
-  const content = lines.filter((line) => (line.kind === "copy" || line.kind === "rewritten") && !line.heading);
+  const content = lines.filter((line) => (line.kind === "copy" || line.kind === "rewritten" || line.kind === "custom") && !line.heading);
   const copied = content.filter((line) => line.kind === "copy").length;
+  const edited = content.filter((line) => line.kind === "custom").length;
   const keptOriginal = content.filter((line) => line.kind === "copy" && line.origin === "fallback").length;
-  const rewritten = content.length - copied;
+  const rewritten = content.length - copied - edited;
   const citingAnswers = content.filter((line) => line.refs.some((ref) => ref.kind === "answer")).length;
-  const unsourced = content.filter((line) => line.refs.length === 0).length;
-  return { total: content.length, copied, keptOriginal, rewritten, citingAnswers, unsourced, keywords: addedKeywords(content) };
+  const unsourced = content.filter((line) => line.kind !== "custom" && line.refs.length === 0).length;
+  const stats = { total: content.length, copied, keptOriginal, rewritten, citingAnswers, unsourced, keywords: addedKeywords(content) };
+  // Present only when a line is edited, so a resume without edits counts as before.
+  return edited > 0 ? { ...stats, edited } : stats;
 }
 
 // "N of M lines rewritten · K kept as your original (the rewrite dropped facts) · C copied;
@@ -235,6 +255,9 @@ export function changeSummary(stats) {
     parts.push(`${kept} kept as your original (the rewrite dropped facts)`);
   }
   parts.push(`${stats.copied - kept} copied`);
+  if ((stats.edited || 0) > 0) {
+    parts.push(`${stats.edited} edited`);
+  }
   const base = parts.join(" · ");
   const keywords = stats.keywords || [];
   return keywords.length > 0 ? `${base}; New words (not in the cited lines): ${keywords.join(", ")}` : base;
@@ -246,6 +269,9 @@ export function statsLine(stats) {
     `${stats.copied} copied verbatim`,
     `${stats.rewritten} rewritten${stats.citingAnswers > 0 ? ` (${stats.citingAnswers} citing your answers)` : ""}`,
   ];
+  if ((stats.edited || 0) > 0) {
+    parts.push(`${stats.edited} edited`);
+  }
   if (stats.unsourced > 0) {
     parts.push(`${stats.unsourced} unsourced`);
   }
@@ -330,8 +356,38 @@ export function lineAction(line) {
   return null;
 }
 
+// 0110-032: the ways back from an edited line, as `{use, label}` for the same
+// PUT: the versions the line it replaced has (its own kind, and its alternative's).
+export function editedActions(line) {
+  if (!line || !line.id || !line.edited || !line.editedFrom || line.heading) {
+    return [];
+  }
+  const base = line.editedFrom;
+  const kinds = [base.kind, base.alternative && typeof base.alternative === "object" ? base.alternative.kind : null];
+  const out = [];
+  if (kinds.includes("copy")) {
+    out.push({ use: "original", label: "Use original" });
+  }
+  if (kinds.includes("rewritten")) {
+    out.push({ use: "rewritten", label: "Use rewrite" });
+  }
+  return out;
+}
+
+// Every button a line offers: the ways back from an edit, else lineAction's one.
+export function lineActions(line) {
+  if (line && line.edited) {
+    return editedActions(line);
+  }
+  const action = lineAction(line);
+  return action ? [action] : [];
+}
+
 // The hover text for one preview line: one "<label>: <cited text>" per ref.
 export function sourcesHover(line, promptFor) {
+  if (line && line.edited) {
+    return "Edited: your own text, no source cited.";
+  }
   return (line.refs || []).map((ref) => `${sourceLabel(ref, promptFor)}: ${ref.text}`).join("\n");
 }
 

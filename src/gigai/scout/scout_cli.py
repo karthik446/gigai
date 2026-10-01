@@ -485,6 +485,112 @@ def resume_tailor_command(
         click.echo(f"  Copied to {out_path}")
 
 
+@resume_group.command("pdf")
+@click.option("--in", "in_file", help="Resume markdown FILE in GigAI's resume format (or - for stdin).")
+@click.option("--tailored", "tailored", is_flag=True, help="Render the STORED tailored resume for --job-url instead of a markdown file.")
+@click.option("--job-url", "job_url", help="With --tailored: the posting URL the resume was tailored to.")
+@click.option("--out", "out_file", required=True, type=click.Path(path_type=Path, dir_okay=False), help="Write the PDF to FILE.")
+@click.option("--profile", "profile_id", help="Scout profile ID: its saved title prints under the name; with --tailored, the resume identity (default: the newest).")
+@click.option("--spacing", "spacing", type=float, help="Spacing scale 0.7-1.4 for this render (turns auto fit off unless --auto-fit is given). Default: the saved setting.")
+@click.option("--auto-fit/--no-auto-fit", "auto_fit", default=None, help="Pick the spacing that ends the content near a page boundary. Default: the saved setting.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def resume_pdf_command(
+    in_file: str | None,
+    tailored: bool,
+    job_url: str | None,
+    out_file: Path,
+    profile_id: str | None,
+    spacing: float | None,
+    auto_fit: bool | None,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Render a resume to PDF, locally: no model call, no network (0110-032).
+
+    Pass exactly one of --in FILE (resume markdown in GigAI's format: `## Summary`,
+    `## Experience` with `### <employer>` entries and `- ` bullets, `## Skills`,
+    `## Education`, `## Projects`, `## Other`) or --tailored --job-url URL (the
+    stored tailored resume for that posting). Either way the PDF uses the same
+    template as the Scout UI's "Download PDF", and its header (name, title,
+    contact line) comes from the saved Resume display settings, never from the
+    markdown. --spacing / --auto-fit change the layout for this render only.
+    """
+
+    from datetime import datetime, timezone
+
+    from .find_jobs.contracts import FindJobsContractError
+    from .find_jobs.job_state import normalize_job_identity
+    from .quick_assess import QuickAssessError
+    from .resume_pdf import ResumeMarkdownError, layout, parse_resume_markdown, render_markdown_pdf, saved_header, stored_resume_pdf
+    from .tailored_resume import list_tailored_resumes
+    from .target_resolution import home_scout_target
+
+    home_root = home_value or default_home_root()
+    if bool(in_file) == bool(tailored):
+        _fail(ValueError("pass exactly one of --in FILE or --tailored --job-url URL"), as_json=as_json, fallback="invalid_value")
+        return
+    if bool(job_url) != bool(tailored):
+        _fail(ValueError("--tailored and --job-url go together"), as_json=as_json, fallback="invalid_value")
+        return
+    try:
+        if tailored:
+            target: Path | None = _resolved_target(target_value, home_root, as_json=as_json).expanduser().resolve(strict=True)
+        else:
+            # Rendering a file never creates a Scout folder: the target only supplies a name when none is saved.
+            candidate = target_value or home_scout_target(home_root)
+            target = candidate.expanduser().resolve() if candidate.is_dir() else None
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_resume_pdf_failed")
+        return
+
+    failure: tuple[Exception, str] | None = None
+    rendered = None
+    try:
+        if tailored:
+            assert job_url is not None and target is not None
+            items = list_tailored_resumes(home_root, target, profile_id=profile_id or None, job_identity=normalize_job_identity(job_url))
+            if not items:
+                raise QuickAssessError("tailored_resume_not_found", "no stored tailored resume for that job; run `gigai scout resume tailor --job-url ...` first")
+            rendered, _name = stored_resume_pdf(items[0], home_root=home_root, target=target, spacing_scale=spacing, auto_fit=auto_fit, count_pages=True)
+        else:
+            assert in_file is not None
+            markdown = _read_text_option(in_file, flag="--in")
+            name_hint, _sections = parse_resume_markdown(markdown)
+            header, settings = saved_header(home_root, target, profile_id, name_hint)
+            scale, fit = layout(settings, spacing, auto_fit)
+            rendered = render_markdown_pdf(markdown, header, timestamp=datetime.now(timezone.utc), spacing_scale=scale, auto_fit=fit)
+    except OSError as exc:
+        failure = (exc, "input_file_unreadable")
+    except (ResumeMarkdownError, QuickAssessError, FindJobsContractError, ValueError) as exc:  # ValueError: --spacing out of range, undecodable input
+        failure = (exc, "invalid_value")
+    except Exception:  # noqa: BLE001 - a render failure is typed, and never echoes the resume
+        failure = (RuntimeError("the PDF could not be rendered"), "pdf_render_failed")
+    if failure is not None or rendered is None:
+        exc, fallback = failure or (RuntimeError("the PDF could not be rendered"), "pdf_render_failed")
+        _fail(exc, as_json=as_json, fallback=fallback)
+        return
+
+    out_path = out_file.expanduser()
+    try:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(rendered.pdf)
+    except OSError as exc:
+        _fail(exc, as_json=as_json, fallback="output_file_unwritable")
+        return
+    payload: dict[str, object] = {
+        "ok": True,
+        "out_path": str(out_path),
+        "source": "tailored" if tailored else "markdown",
+        "pages": rendered.pages,
+        "bytes": len(rendered.pdf),
+        "spacing_scale": rendered.spacing_scale,
+    }
+    _emit(payload, as_json, f"Wrote {out_path} ({rendered.pages} page{'' if rendered.pages == 1 else 's'}, spacing {rendered.spacing_scale:g}).")
+
+
 def _other_server_label(other: OtherScoutServer) -> str:
     """The folder another project's Scout server serves, the way the operator types it."""
 

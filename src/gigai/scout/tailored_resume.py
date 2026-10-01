@@ -116,7 +116,8 @@ from .find_jobs.discovery.storage import atomic_write, project_id
 from .find_jobs.job_input import job_fetch_client, resolve_job
 from .find_jobs.resume_input import resolve_profile, resolve_resume, resume_for_profile
 from .question_ids import normalize_question_id
-from .resume_privacy import ModelResume, model_resume
+from .resume_pii import detect_contact_details
+from .resume_privacy import ModelResume, is_name_line, model_resume, redact_inline
 from .quick_assess import (
     EPHEMERAL_RESUME_KEY,
     QuickAssessError,
@@ -966,6 +967,12 @@ class TailoredLine(_Contract):
     document order, assigned once when the result is settled), ``reason``
     (a shown rewrite's validated reason), ``origin`` (``model`` when absent,
     ``fallback``, ``user``) and ``alternative`` (``LineAlternative``).
+
+    0110-032 added the kind ``custom`` and the OPTIONAL key ``edited_from``:
+    a line whose text the operator (or their agent) typed.  It cites nothing
+    (``refs`` is empty), has no ``reason`` and no ``alternative`` -- no source
+    and no no-loss claim is made for it -- and ``edited_from`` holds the line
+    it replaced, whole, so the original or the rewrite can be shown again.
     """
 
     schema_version: ClassVar[str] = "scout-tailored-line:1"
@@ -976,6 +983,7 @@ class TailoredLine(_Contract):
     reason: LineReason | None = None
     origin: str | None = None
     alternative: LineAlternative | None = None
+    edited_from: "TailoredLine | None" = None
 
     def to_json(self) -> dict[str, object]:
         out: dict[str, object] = {"kind": self.kind, "text": self.text, "refs": [ref.to_json() for ref in self.refs]}
@@ -987,16 +995,23 @@ class TailoredLine(_Contract):
             out["origin"] = self.origin
         if self.alternative is not None:
             out["alternative"] = self.alternative.to_json()
+        if self.edited_from is not None:
+            out["edited_from"] = self.edited_from.to_json()
         return out
 
     @classmethod
     def from_json(cls, obj: object) -> "TailoredLine":
-        value = _object_with_optional(obj, ("kind", "text", "refs"), ("id", "reason", "origin", "alternative"), "tailored_line")
+        value = _object_with_optional(obj, ("kind", "text", "refs"), ("id", "reason", "origin", "alternative", "edited_from"), "tailored_line")
         kind = _string(value["kind"], "tailored_line.kind")
-        if kind not in {"copy", "rewritten"}:
-            _fail("bad_enum", "tailored_line.kind must be copy or rewritten")
+        if kind not in {"copy", "rewritten", "custom"}:
+            _fail("bad_enum", "tailored_line.kind must be copy, rewritten or custom")
         if type(value["refs"]) is not list:
             _fail("wrong_type", "tailored_line.refs must be an array")
+        edited_from = None if value.get("edited_from") is None else cls.from_json(value["edited_from"])
+        if (kind == "custom") != (edited_from is not None) or (edited_from is not None and edited_from.kind == "custom"):
+            _fail("invalid_value", "tailored_line.edited_from is the copy or rewritten line a custom line replaced")
+        if kind == "custom" and (value["refs"] or value.get("reason") is not None or value.get("alternative") is not None):
+            _fail("invalid_value", "a custom tailored_line carries no refs, reason or alternative")
         origin = _optional_string(value.get("origin"), "tailored_line.origin")
         if origin is not None and origin not in LINE_ORIGINS:
             _fail("bad_enum", "tailored_line.origin must be model, fallback or user")
@@ -1010,6 +1025,7 @@ class TailoredLine(_Contract):
             None if reason is None else LineReason.from_json(reason),
             origin,
             None if alternative is None else LineAlternative.from_json(alternative),
+            edited_from,
         )
 
 
@@ -1690,46 +1706,77 @@ def apply_no_loss(result: TailoredResume, job: TailorJob, ctx: TailorContext, *,
 # --- the operator's per-line choice and the line counts (0110-006) -----------------------------
 
 LINE_CHOICES: frozenset[str] = frozenset({"original", "rewritten"})
+#: ``PUT /api/tailored-resumes/lines``'s ``use``: a choice, or ``custom`` with the caller's ``text`` (0110-032).
+LINE_USES: frozenset[str] = LINE_CHOICES | {"custom"}
+#: A custom line's length bound: the same as a model line's.
+MAX_CUSTOM_TEXT_CHARS = MAX_TEXT_CHARS
+_CUSTOM_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_CUSTOM_MARKER = re.compile(r"\A[-*•](?:\s+|\Z)")
 
 
-def apply_line_choice(stored: "TailorResponse", line_id: str, use: str) -> "TailorResponse":
-    """Show the ``original`` or the ``rewritten`` version of line ``line_id``.
+def personal_info_found(text: str, *, names: Iterable[str] = ()) -> list[str]:
+    """What looks personal in one line of text (0110-032): ``[]`` when nothing does.
 
-    The chosen version is materialized into ``result`` (the shown line and
-    its ``alternative`` swap; ``origin`` becomes ``user``; ``id``, ``lost``
-    and the flags stay with the pair) and ``markdown`` is re-rendered;
-    ``updated_at`` is unchanged.  A line with no alternative, or a choice
-    already shown, returns ``stored`` unchanged (idempotent).  Choosing
-    ``rewritten`` on a fallback restores a rewrite that already passed every
-    fabrication guard.  An unknown id or choice is ``TailorError("invalid_value")``.
-    Pure: the caller stores the result (``save_tailor_response``).
+    The paste path's local check (``resume_pii.detect_contact_details``: email, phone,
+    linkedin/github links, a street address), plus anything ``resume_privacy.redact_inline``
+    would remove before a model sees the line (other links), plus ``name``: the line holds
+    one of ``names`` (the name saved for the PDF header) or, when no name is known, is
+    strictly name-shaped (``resume_privacy.is_name_line``).  Local and pure: no model, no I/O.
     """
 
-    if use not in LINE_CHOICES:
-        raise TailorError("invalid_value", "use must be original or rewritten")
+    found = list(detect_contact_details(text))
+    if not found and redact_inline(text) != text:
+        found.append("links")
+    flat = " ".join(text.split()).casefold()
+    known = [" ".join(name.split()).casefold() for name in names if isinstance(name, str) and name.strip()]
+    if any(name in flat for name in known) or (not known and is_name_line(text)):
+        found.append("name")
+    return found
+
+
+def custom_line_text(text: object, *, names: Iterable[str] = ()) -> str:
+    """The text a custom line stores, or ``TailorError``: ``invalid_value`` / ``personal_info_refused``.
+
+    One line, at most ``MAX_CUSTOM_TEXT_CHARS`` characters after trimming; a leading
+    bullet marker (``- ``) is dropped because the renderers add their own.
+    """
+
+    if not isinstance(text, str):
+        raise TailorError("invalid_value", "text must be a string")
+    if _CUSTOM_CONTROL.search(text):
+        raise TailorError("invalid_value", "text must be one line without control characters")
+    clean = _CUSTOM_MARKER.sub("", text.strip()).strip()
+    if not clean:
+        raise TailorError("invalid_value", "text must not be empty")
+    if len(clean) > MAX_CUSTOM_TEXT_CHARS:
+        raise TailorError("invalid_value", f"text is longer than {MAX_CUSTOM_TEXT_CHARS} characters")
+    found = personal_info_found(clean, names=names)
+    if found:
+        raise TailorError(
+            "personal_info_refused",
+            f"text looks like a name or contact line ({', '.join(found)}); your name and contact details are added to the PDF "
+            "from the Resume display settings (PUT /api/resume-display), never from a resume line",
+        )
+    return clean
+
+
+def _map_body_line(stored: "TailorResponse", line_id: str, change: Callable[[TailoredLine], TailoredLine]) -> "TailorResponse":
+    """``stored`` with ``change`` applied to body line ``line_id`` (never an entry heading); markdown re-rendered."""
+
     found = False
 
-    def choose(line: TailoredLine) -> TailoredLine:
+    def visit(line: TailoredLine) -> TailoredLine:
         nonlocal found
         if line.id != line_id:
             return line
         found = True
-        alternative = line.alternative
-        wanted = "copy" if use == "original" else "rewritten"
-        if alternative is None or line.kind == wanted or alternative.kind != wanted:
-            return line
-        return TailoredLine(
-            alternative.kind, alternative.text, alternative.refs, line.id,
-            alternative.reason if alternative.kind == "rewritten" else None,
-            "user",
-            replace(alternative, kind=line.kind, text=line.text, refs=line.refs, reason=line.reason),
-        )
+        return change(line)
 
     sections = tuple(
         replace(
             section,
-            lines=tuple(choose(line) for line in section.lines),
-            entries=tuple(replace(entry, bullets=tuple(choose(line) for line in entry.bullets)) for entry in section.entries),
+            lines=tuple(visit(line) for line in section.lines),
+            entries=tuple(replace(entry, bullets=tuple(visit(line) for line in entry.bullets)) for entry in section.entries),
         )
         for section in stored.result.sections
     )
@@ -1739,6 +1786,68 @@ def apply_line_choice(stored: "TailorResponse", line_id: str, use: str) -> "Tail
     if result == stored.result:
         return stored
     return replace(stored, result=result, markdown=render_markdown(result))
+
+
+def apply_line_edit(stored: "TailorResponse", line_id: str, text: object, *, names: Iterable[str] = ()) -> "TailorResponse":
+    """Show the caller's own ``text`` on body line ``line_id`` (0110-032).
+
+    The line becomes ``kind: custom``, ``origin: user``, with no refs, reason or
+    alternative; ``edited_from`` keeps the line it replaced (an edit of an edit keeps the
+    first one's), so ``apply_line_choice`` can show the original or the rewrite again.
+    ``text`` goes through ``custom_line_text`` (length, one line, the personal-info check).
+    The same text again returns ``stored`` unchanged; ``updated_at`` is unchanged.  Pure.
+    """
+
+    clean = custom_line_text(text, names=names)
+
+    def edit(line: TailoredLine) -> TailoredLine:
+        if line.kind == "custom" and line.text == clean:
+            return line
+        return TailoredLine("custom", clean, (), line.id, None, "user", None, line.edited_from if line.kind == "custom" else line)
+
+    return _map_body_line(stored, line_id, edit)
+
+
+def apply_line_choice(stored: "TailorResponse", line_id: str, use: str) -> "TailorResponse":
+    """Show the ``original`` or the ``rewritten`` version of line ``line_id``.
+
+    The chosen version is materialized into ``result`` (the shown line and
+    its ``alternative`` swap; ``origin`` becomes ``user``; ``id``, ``lost``
+    and the flags stay with the pair) and ``markdown`` is re-rendered;
+    ``updated_at`` is unchanged.  A line with no alternative, or a choice
+    already shown, returns ``stored`` unchanged (idempotent).  On an EDITED
+    line (``kind: custom``, 0110-032) the line it replaced comes back first and
+    the choice applies to that; asking for a version that line never had is
+    ``invalid_value`` naming the one it has.  Choosing
+    ``rewritten`` on a fallback restores a rewrite that already passed every
+    fabrication guard.  An unknown id or choice is ``TailorError("invalid_value")``.
+    Pure: the caller stores the result (``save_tailor_response``).
+    """
+
+    if use not in LINE_CHOICES:
+        raise TailorError("invalid_value", "use must be original or rewritten")
+    wanted = "copy" if use == "original" else "rewritten"
+
+    def choose(line: TailoredLine) -> TailoredLine:
+        # An edited line (0110-032) goes back to the line it replaced first, then the choice applies to that.
+        edited = line.kind == "custom" and line.edited_from is not None
+        base = replace(line.edited_from, id=line.id) if edited else line  # type: ignore[arg-type]
+        alternative = base.alternative
+        if base.kind == wanted:
+            return base
+        if alternative is None or alternative.kind != wanted:
+            if edited:
+                other = "rewritten" if use == "original" else "original"
+                raise TailorError("invalid_value", f"line {line_id!r} has no {use} version; use {other}")
+            return line
+        return TailoredLine(
+            alternative.kind, alternative.text, alternative.refs, base.id,
+            alternative.reason if alternative.kind == "rewritten" else None,
+            "user",
+            replace(alternative, kind=base.kind, text=base.text, refs=base.refs, reason=base.reason),
+        )
+
+    return _map_body_line(stored, line_id, choose)
 
 
 @dataclass(frozen=True)
@@ -1763,6 +1872,8 @@ class TailorLineStats:
     fallbacks_by_rule: Mapping[str, int]
     kept_original_by_user: int
     dropped_bullets: int
+    #: Lines showing the operator's own text (``kind: custom``, 0110-032): neither copied nor rewritten.
+    edited: int = 0
 
     @property
     def model_rewrite_rate(self) -> float:
@@ -1773,7 +1884,9 @@ class TailorLineStats:
         return self.shown_rewritten / self.rewritable_lines if self.rewritable_lines else 0.0
 
     def to_json(self) -> dict[str, object]:
+        # ``edited`` is serialized only when a line is edited, so a result without edits reads as before.
         return {
+            **({"edited": self.edited} if self.edited else {}),
             "rewritable_lines": self.rewritable_lines,
             "shown_rewritten": self.shown_rewritten,
             "copied": self.copied,
@@ -1791,7 +1904,9 @@ class TailorLineStats:
 def tailor_line_stats(result: TailoredResume) -> TailorLineStats:
     """Count a result's lines (see ``TailorLineStats``)."""
 
-    body = [line for section in result.sections for line in section.body_lines()]
+    shown = [line for section in result.sections for line in section.body_lines()]
+    # What the model proposed is counted on the line an edit replaced; what is shown, on the line itself.
+    body = [line.edited_from if line.kind == "custom" and line.edited_from is not None else line for line in shown]
     dropped = [item for section in result.sections for item in (*section.dropped, *(d for entry in section.entries for d in entry.dropped))]
     rules = {rule: 0 for rule in (*LOST_RULES, *FALLBACK_FLAGS)}
     rejected = [line.alternative for line in body if line.origin == "fallback" and line.alternative is not None and line.alternative.kind == "rewritten"]
@@ -1801,19 +1916,20 @@ def tailor_line_stats(result: TailoredResume) -> TailorLineStats:
             rules[rule] += 1
         for flag in FALLBACK_FLAGS:
             rules[flag] += int(getattr(item, flag))
-    shown_rewritten = sum(line.kind == "rewritten" for line in body)
+    shown_rewritten = sum(line.kind == "rewritten" for line in shown)
     return TailorLineStats(
         rewritable_lines=len(body),
         shown_rewritten=shown_rewritten,
-        copied=sum(line.kind == "copy" for line in body),
-        answer_only_lines=sum(line.kind == "rewritten" and not any(ref.kind == "resume" for ref in line.refs) for line in body),
-        model_rewrites=shown_rewritten
+        copied=sum(line.kind == "copy" for line in shown),
+        answer_only_lines=sum(line.kind == "rewritten" and not any(ref.kind == "resume" for ref in line.refs) for line in shown),
+        model_rewrites=sum(line.kind == "rewritten" for line in body)
         + sum(line.kind == "copy" and line.alternative is not None and line.alternative.kind == "rewritten" for line in body)
         + sum(item.kind == "rewritten" for item in dropped),
         fallbacks=len(rejected),
         fallbacks_by_rule=rules,
-        kept_original_by_user=sum(line.origin == "user" and line.kind == "copy" for line in body),
+        kept_original_by_user=sum(line.origin == "user" and line.kind == "copy" for line in shown),
         dropped_bullets=sum(item.kind == "copy" for item in dropped),
+        edited=sum(line.kind == "custom" for line in shown),
     )
 
 
@@ -1843,7 +1959,15 @@ def shown_text(line: TailoredLine) -> str:
 
 
 def _refs_comment(line: TailoredLine) -> str:
+    if line.kind == "custom":  # the operator's own text: no source is claimed
+        return "<!-- edited -->"
     return "<!-- " + ", ".join(ref.label() for ref in line.refs) + " -->"
+
+
+def replaced_line(line: TailoredLine) -> TailoredLine:
+    """The line an edit replaced (``edited_from``), else the line itself: what the resume-line bookkeeping reads."""
+
+    return line.edited_from if line.kind == "custom" and line.edited_from is not None else line
 
 
 def _resume_numbers(line: TailoredLine) -> set[int]:
@@ -1862,7 +1986,7 @@ def _printed_lines(lines: Sequence[TailoredLine]) -> list[TailoredLine]:
     for line in lines:
         if line.kind == "copy" and out:
             numbers = _resume_numbers(line)
-            previous = out[-1]
+            previous = replaced_line(out[-1])
             if numbers and numbers <= _resume_numbers(previous) and _flat(line.text) in _flat(previous.text):
                 continue
         out.append(line)
@@ -2313,6 +2437,8 @@ __all__ = [
     "LENGTH_RULE",
     "LINE_CHOICES",
     "LINE_ORIGINS",
+    "LINE_USES",
+    "MAX_CUSTOM_TEXT_CHARS",
     "LOST_RULES",
     "MAX_POSTING_PHRASE_CHARS",
     "REASON_KINDS",
@@ -2346,6 +2472,10 @@ __all__ = [
     "TailoredResumesListResponse",
     "TailoredSection",
     "apply_line_choice",
+    "apply_line_edit",
+    "custom_line_text",
+    "personal_info_found",
+    "replaced_line",
     "apply_no_loss",
     "canonical_term",
     "check_rewritten_line",

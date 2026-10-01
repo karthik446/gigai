@@ -1831,6 +1831,9 @@ def _make_handler(
                 if path == "/api/resume/check":
                     self._handle_post_resume_check()
                     return
+                if path == "/api/resume/pdf":
+                    self._handle_post_resume_pdf()
+                    return
                 if path == "/api/resumes":
                     self._handle_post_resumes()
                     return

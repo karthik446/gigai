@@ -3,6 +3,11 @@
 The header comes from display settings (``resume_display.pdf_header``), never from
 ``result.header``.  Body lines go through the same ``shown_text`` mapping as the markdown
 renderer (a copy -- the model's or a no-loss fallback -- loses its own markers).  ``typst`` is imported lazily so CLI startup never loads its native library.
+
+0110-032: ``render_markdown_pdf`` renders resume markdown in GigAI's format (what ``render_markdown``
+writes: ``## Section``, ``### entry heading``, ``- `` bullets) through the SAME template, header and
+auto fit; ``stored_resume_pdf`` is the one stored-resume path the API and ``gigai scout resume pdf
+--tailored`` share.  Nothing here calls a model, the network, or a logger.
 """
 
 from __future__ import annotations
@@ -16,8 +21,21 @@ from importlib import resources
 from pathlib import Path
 from collections.abc import Callable
 
-from gigai.scout.resume_display import SPACING_DEFAULT, SPACING_MAX, SPACING_MIN, ContactItem, PdfHeader
-from gigai.scout.tailored_resume import ENTRY_SECTIONS, _LEADING_MARKERS, TailoredLine, TailoredResume, _display, shown_text
+from dataclasses import dataclass
+
+from gigai.scout.resume_display import SPACING_DEFAULT, SPACING_MAX, SPACING_MIN, ContactItem, DisplaySettings, PdfHeader, load_display, pdf_header, suggest, valid_spacing
+from gigai.scout.tailored_resume import (
+    ENTRY_SECTIONS,
+    MAX_HEADING_LINES,
+    SECTION_HEADINGS,
+    _LEADING_MARKERS,
+    TailoredLine,
+    TailoredResume,
+    TailorResponse,
+    _display,
+    replaced_line,
+    shown_text,
+)
 
 _PART_MAX = 40
 
@@ -42,7 +60,10 @@ def _flat(text: str) -> str:
 
 
 def _source_is_bullet(line: TailoredLine) -> bool:
-    """True when the resume line this text came from was a real bullet (a marker other than a heading)."""
+    """True when the resume line this text came from was a real bullet (a marker other than a heading).
+
+    An edited line (``kind: custom``) keeps the shape of the line it replaced."""
+    line = replaced_line(line)
     source = line.text if line.kind == "copy" or not line.refs else line.refs[0].text
     return _LEADING_MARKERS.match(source.lstrip()) is not None and not source.lstrip().startswith("#")
 
@@ -67,8 +88,8 @@ def _paragraphs(lines: tuple[TailoredLine, ...]) -> list[dict[str, object]]:
             continue
         if line.kind == "copy" and line.refs and line.refs[0].line in printed:
             continue
-        if line.kind == "copy":
-            printed |= _covered(line)
+        if replaced_line(line).kind == "copy":
+            printed |= _covered(replaced_line(line))
         if _source_is_bullet(line):
             out.append({"text": text, "bullet": True})
         elif out and not out[-1]["bullet"]:
@@ -179,28 +200,273 @@ def clamp_scale(value: float) -> float:
     return min(SPACING_MAX, max(SPACING_MIN, float(value)))
 
 
-def render_pdf(
-    result: TailoredResume, header: PdfHeader, *, company: str, timestamp: datetime,
-    spacing_scale: float = SPACING_DEFAULT, auto_fit: bool = True,
-) -> bytes:
-    """``auto_fit`` picks the spacing scale (``fit_scale``); otherwise ``spacing_scale`` is used as given."""
+@dataclass(frozen=True)
+class RenderedPdf:
+    pdf: bytes
+    #: The page count; ``None`` when the caller did not ask for it (``count_pages``) and auto fit did not measure it.
+    pages: int | None
+    spacing_scale: float
+
+
+def _render(
+    sections: list[dict[str, object]], header: PdfHeader, *, company: str, timestamp: datetime, spacing_scale: float, auto_fit: bool,
+    count_pages: bool = False,
+) -> RenderedPdf:
     doc_title = " ".join(part for part in (header.name, "resume", company.strip()) if part)
     data = {
         "doc_title": doc_title,
         "name": header.name,
         "title": header.title,
         "contact": [{"text": c.text, "url": c.url} for c in header.contact],
-        "sections": _body(result),
+        "sections": sections,
     }
     root = resources.files("gigai.scout").joinpath("data", "resume")
     with ExitStack() as stack:
         directory = str(stack.enter_context(resources.as_file(root)))
         template = (Path(directory) / "resume.typ").read_bytes()
-        if auto_fit:
-            scale = fit_scale(lambda candidate: _end(template, directory, data, candidate))
+        measured: dict[float, tuple[int, float]] = {}
+
+        def measure(candidate: float) -> tuple[int, float]:
+            if candidate not in measured:
+                measured[candidate] = _end(template, directory, data, candidate)
+            return measured[candidate]
+
+        scale = fit_scale(measure) if auto_fit else clamp_scale(spacing_scale)
+        # Auto fit already measured the scale it chose; otherwise the count costs one layout query, only on request.
+        pages = measured[scale][0] if scale in measured else (measure(scale)[0] if count_pages else None)
+        return RenderedPdf(_compile(template, directory, data, scale, timestamp), pages, scale)
+
+
+def render_pdf(
+    result: TailoredResume, header: PdfHeader, *, company: str, timestamp: datetime,
+    spacing_scale: float = SPACING_DEFAULT, auto_fit: bool = True,
+) -> bytes:
+    """``auto_fit`` picks the spacing scale (``fit_scale``); otherwise ``spacing_scale`` is used as given."""
+    return _render(_body(result), header, company=company, timestamp=timestamp, spacing_scale=spacing_scale, auto_fit=auto_fit).pdf
+
+
+# --- resume markdown in, PDF out (0110-032) --------------------------------------------------
+
+#: The markdown a caller may send: bytes of UTF-8, and lines.
+MAX_MARKDOWN_BYTES = 64 * 1024
+MAX_MARKDOWN_LINES = 600
+
+_COMMENT = re.compile(r"\s*<!--.*?-->\s*\Z")
+_HASHES = re.compile(r"\A(#{1,6})\s+(.*)\Z")
+_BULLET = re.compile(r"\A[-*•]\s+(.*)\Z")
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+class ResumeMarkdownError(ValueError):
+    """The markdown is not a resume in GigAI's format; ``code`` is the API/CLI error code.
+
+    Messages name a line number and the rule, never the line's text."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _bad(number: int, message: str) -> None:
+    raise ResumeMarkdownError("resume_markdown_invalid", f"line {number}: {message}")
+
+
+def parse_resume_markdown(markdown: str) -> tuple[str, list[dict[str, object]]]:
+    """``(name hint, sections)`` from resume markdown in GigAI's format; ``ResumeMarkdownError`` otherwise.
+
+    The format is what ``tailored_resume.render_markdown`` writes:
+
+    * ``## Summary|Experience|Skills|Education|Projects|Other`` opens a section (each at most once);
+    * in Experience, Projects and Education, ``### <heading>`` opens an entry; plain lines under it
+      (up to ``MAX_HEADING_LINES`` in all, e.g. ``Title | Jun 2022 - Present``) belong to the heading,
+      ``- `` lines are its bullets;
+    * in Summary, Skills and Other, ``- `` lines and plain lines are the content: Summary prints as
+      prose (lines with no blank line between them join into one paragraph), Skills as tags, and in
+      Other a ``- `` line is a bullet and a plain line a paragraph;
+    * a plain line right under a bullet continues that bullet (a hard wrap);
+    * a trailing ``<!-- ... -->`` comment (the source refs) is dropped, text prints literally (inline
+      markdown is not interpreted), and anything above the first ``## `` is NOT printed: the PDF header
+      comes from the saved display settings.  A leading ``# Name`` there is only the name hint.
+
+    The sections come back in ``_body``'s shape, so the same template prints them.
+    """
+
+    if len(markdown.encode("utf-8")) > MAX_MARKDOWN_BYTES:
+        raise ResumeMarkdownError("resume_markdown_too_large", f"markdown is larger than {MAX_MARKDOWN_BYTES} bytes")
+    raw_lines = markdown.splitlines()
+    if len(raw_lines) > MAX_MARKDOWN_LINES:
+        raise ResumeMarkdownError("resume_markdown_too_large", f"markdown has more than {MAX_MARKDOWN_LINES} lines")
+    name = ""
+    sections: list[dict[str, object]] = []
+    seen: set[str] = set()
+    heading = ""  # the open section; "" above the first one
+    lines: list[dict[str, object]] = []  # the open lines-section's content
+    entries: list[dict[str, object]] = []  # the open entry-section's entries
+    after_blank = True
+    last_bullet = False  # the previous non-blank line was a bullet (or continued one)
+
+    def close() -> None:
+        if not heading or (not lines and not entries):
+            return
+        tags = _tags(lines) if heading == "skills" else []
+        shown = [{"heading": [_heading_line(text) for text in entry["heading"]], "bullets": entry["bullets"]} for entry in entries]  # type: ignore[union-attr]
+        sections.append({"heading": heading.upper(), "lines": [] if tags else lines, "tags": tags, "entries": shown, "caps": heading in ("experience", "education")})
+
+    for number, raw in enumerate(raw_lines, 1):
+        if _CONTROL.search(raw):
+            _bad(number, "control characters are not allowed")
+        line = raw
+        while _COMMENT.search(line):
+            line = _COMMENT.sub("", line)
+        line = line.strip()
+        if not line:
+            after_blank = True
+            continue
+        blank_before, after_blank = after_blank, False
+        hashes = _HASHES.match(line)
+        if hashes and len(hashes.group(1)) == 2:
+            close()
+            heading = _flat(hashes.group(2)).rstrip(":").lower()
+            if heading not in SECTION_HEADINGS:
+                heading = ""
+                _bad(number, "unknown section; use ## " + ", ## ".join(item.capitalize() for item in SECTION_HEADINGS))
+            if heading in seen:
+                _bad(number, f"the {heading.capitalize()} section appears twice")
+            seen.add(heading)
+            lines, entries, last_bullet = [], [], False
+            continue
+        if not heading:
+            if hashes and len(hashes.group(1)) == 1 and not name:
+                name = _flat(_display(hashes.group(2)))
+            continue  # header lines are never printed from the markdown
+        if hashes and len(hashes.group(1)) == 1:
+            _bad(number, "a '# ' title belongs above the first section")
+        in_entries = heading in ENTRY_SECTIONS
+        if hashes:
+            if not in_entries:
+                _bad(number, f"'{hashes.group(1)} ' entry headings belong in Experience, Projects or Education")
+            entries.append({"heading": [line], "bullets": []})
+            last_bullet = False
+            continue
+        bullet = _BULLET.match(line)
+        text = _flat(bullet.group(1) if bullet else line)
+        if not text:
+            continue
+        if in_entries:
+            if not entries:
+                _bad(number, "start the entry with '### <employer, project or school>' first")
+            entry = entries[-1]
+            bullets: list[str] = entry["bullets"]  # type: ignore[assignment]
+            if bullet:
+                bullets.append(text)
+            elif not bullets:
+                if len(entry["heading"]) >= MAX_HEADING_LINES:  # type: ignore[arg-type]
+                    _bad(number, f"an entry heading has at most {MAX_HEADING_LINES} lines; bullets start with '- '")
+                entry["heading"].append(line)  # type: ignore[union-attr]
+            elif last_bullet and not blank_before:
+                bullets[-1] = f"{bullets[-1]} {text}"
+            else:
+                _bad(number, "text after an entry's bullets; start a bullet with '- ' or a new entry with '### '")
+            last_bullet = bool(bullets)
+            continue
+        if not bullet and lines and not blank_before and (last_bullet or not lines[-1]["bullet"]):
+            lines[-1]["text"] = f"{lines[-1]['text']} {text}"  # a hard wrap, or the same paragraph
+            continue
+        as_bullet = bullet is not None and heading != "summary"
+        if heading == "summary" and bullet and lines and not blank_before:
+            lines[-1]["text"] = f"{lines[-1]['text']} {text}"
         else:
-            scale = clamp_scale(spacing_scale)
-        return _compile(template, directory, data, scale, timestamp)
+            lines.append({"text": text, "bullet": as_bullet})
+        last_bullet = as_bullet
+    close()
+    if not sections:
+        raise ResumeMarkdownError(
+            "resume_markdown_invalid",
+            "no resume content: add at least one '## ' section (" + ", ".join(item.capitalize() for item in SECTION_HEADINGS) + ") with lines under it",
+        )
+    return name, sections
 
 
-__all__ = ["ContactItem", "PdfHeader", "clamp_scale", "fit_scale", "pdf_file_name", "render_pdf"]
+def render_markdown_pdf(
+    markdown: str, header: PdfHeader, *, timestamp: datetime, spacing_scale: float = SPACING_DEFAULT, auto_fit: bool = True, company: str = "",
+) -> RenderedPdf:
+    """Resume markdown (``parse_resume_markdown``) through the tailored-resume template, header and auto fit; pages counted."""
+
+    _name, sections = parse_resume_markdown(markdown)
+    return _render(sections, header, company=company, timestamp=timestamp, spacing_scale=spacing_scale, auto_fit=auto_fit, count_pages=True)
+
+
+# --- the header and layout both entry points use ---------------------------------------------
+
+
+def saved_header(home_root: Path, target: Path | None, profile_id: str | None, fallback_name: str = "") -> tuple[PdfHeader, DisplaySettings]:
+    """The PDF header from the saved display settings, and the settings (defaults when none are saved).
+
+    Saved values only.  When no name is saved, the name falls back to the profile's pinned resume
+    header (the local ``suggest`` prefill; ``profile_id`` ``None`` or ``ephemeral`` reads the selected
+    profile), then to ``fallback_name``.  Reads only; never writes the prefill.
+    """
+
+    settings = load_display(home_root)
+    fallback = ""
+    if settings is None or not settings.name:
+        suggested = ""
+        if target is not None:
+            try:
+                from gigai.scout.interview_prep.resume import current_resume
+
+                wanted = None if profile_id in (None, "", "ephemeral") else profile_id
+                _identity, data = current_resume(home_root=home_root, requested_target=target, gig_id=None, profile_id=wanted)
+                suggested = suggest(data.decode("utf-8", errors="replace")).name
+            except Exception:  # noqa: BLE001 - a prefill is a convenience; any failure means "no suggestion"
+                suggested = ""
+        fallback = suggested or fallback_name
+    return pdf_header(settings, profile_id, fallback), settings or DisplaySettings()
+
+
+def layout(settings: DisplaySettings, spacing_scale: float | None = None, auto_fit: bool | None = None) -> tuple[float, bool]:
+    """``(spacing_scale, auto_fit)``: the saved layout unless the caller gives one.
+
+    A ``spacing_scale`` given without ``auto_fit`` turns auto fit off (the scale would otherwise be ignored).
+    ``ValueError`` when the scale is outside ``SPACING_MIN``..``SPACING_MAX``.
+    """
+
+    if spacing_scale is not None and not valid_spacing(spacing_scale):
+        raise ValueError(f"spacing must be between {SPACING_MIN} and {SPACING_MAX}")
+    fit = auto_fit if auto_fit is not None else (False if spacing_scale is not None else settings.auto_fit)
+    return (float(spacing_scale) if spacing_scale is not None else settings.spacing_scale), fit
+
+
+def stored_resume_pdf(
+    stored: TailorResponse, *, home_root: Path, target: Path | None, spacing_scale: float | None = None, auto_fit: bool | None = None,
+    count_pages: bool = False,
+) -> tuple[RenderedPdf, str]:
+    """``(the PDF, its file name)`` for one stored tailored resume: what ``POST /api/tailored-resumes/pdf`` serves."""
+
+    profile_id = stored.resume.profile_id or "ephemeral"
+    header, settings = saved_header(home_root, target, profile_id, stored.result.header[0].text if stored.result.header else "")
+    stamp = datetime.fromisoformat(stored.updated_at.replace("Z", "+00:00"))
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    scale, fit = layout(settings, spacing_scale, auto_fit)
+    rendered = _render(_body(stored.result), header, company=stored.job.company, timestamp=stamp, spacing_scale=scale, auto_fit=fit, count_pages=count_pages)
+    return rendered, pdf_file_name(header.name, stored.job.company)
+
+
+__all__ = [
+    "MAX_MARKDOWN_BYTES",
+    "MAX_MARKDOWN_LINES",
+    "ContactItem",
+    "PdfHeader",
+    "RenderedPdf",
+    "ResumeMarkdownError",
+    "clamp_scale",
+    "fit_scale",
+    "layout",
+    "parse_resume_markdown",
+    "pdf_file_name",
+    "render_markdown_pdf",
+    "render_pdf",
+    "saved_header",
+    "stored_resume_pdf",
+]
