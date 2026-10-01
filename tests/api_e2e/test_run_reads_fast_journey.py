@@ -30,8 +30,10 @@ What it pins:
    assess says why (``over_cap``, ``duplicate``) on the page that lists it
    (0110-037);
 4. the no-query reads still answer every row with its text;
-5. a run seals no posting text for a row it did not assess (0110-040):
-   ``assess.json`` stays under 1 MB and ``present.json`` under 3 MB.
+5. a run seals no posting text for a row it did not assess (0110-040), and
+   none at all in ``present.json``, whose rows reference the run's acquire
+   rows (0110-042): ``assess.json`` stays under 1 MB and ``present.json``
+   under 768 KB.
 
 The model and the boards are the suite's fixture transports; Jev has no key
 here, so no page carries a score (``test_run_reads.py`` covers the scores).
@@ -68,7 +70,8 @@ POSTINGS = INDEXED_BOARDS * POSTINGS_PER_BOARD
 ASSESSED = 50  # the run request's cap, and its maximum
 DUPLICATES = POSTINGS - 2 * INDEXED_BOARDS  # a board's ten postings are two titles, five times each
 OVER_CAP = 2 * INDEXED_BOARDS - ASSESSED  # the kept postings the cap left out
-DESCRIPTION = "Build reliable Python services. " * 115  # about 3.7 KB
+SENTENCE = "Build reliable Python services."
+DESCRIPTION = f"{SENTENCE} " * 115  # about 3.7 KB
 
 PAGE = 100
 ROUTE_BUDGET_SECONDS = 1.0
@@ -77,10 +80,11 @@ PROGRESS_SUMMARY_BYTES_MAX = 512 * 1024
 SMALL_BYTES_MAX = 16 * 1024  # the runs list, a run's status, one posting
 FULL_READ_BYTES_MIN = 1024 * 1024  # what the page reads are measured against
 # 0110-040: what one run seals. assess.json is the 50 assessed postings (text and matrix) plus an
-# identity row for each of the other 450, twice (candidate and reason); present.json is the run's 500
-# rows with their text plus the same identity rows. Measured: 0.72 MB and 2.37 MB.
+# identity row for each of the other 450, twice (candidate and reason). 0110-042: present.json is an
+# identity row for each of the run's 500 rows (no text: that is acquire.json's), the 50 assessments
+# and the same 450 reasons. Measured: 0.72 MB and 0.52 MB (present.json was 2.37 MB with the text).
 SEALED_ASSESS_BYTES_MAX = 1024 * 1024
-SEALED_PRESENT_BYTES_MAX = 3 * 1024 * 1024
+SEALED_PRESENT_BYTES_MAX = 768 * 1024
 
 
 def _jobs(slug: str, updated_at: str) -> list[dict[str, object]]:
@@ -307,10 +311,12 @@ def test_the_jobs_page_reads_a_full_catalog_run_in_under_a_second_each(
         assert len(full_not_assessed) == POSTINGS - ASSESSED and all(len(item["posting"]["text"]) > 3000 for item in full_not_assessed)
 
         workpad = resolve_workpad_path(home, target)
-        # -- 5. what the runs sealed (0110-040) ---------------------------------
+        # -- 5. what the runs sealed (0110-040, 0110-042) ------------------------
         # A row a run did not assess is sealed with identity, digest and reason, never its posting text
         # (3.7 KB a row here): the first run's over_cap/duplicate rows and the second's unchanged ones.
         # Before, each run sealed 4.06 MB (assess.json) and 4.04 MB (present.json).
+        # 0110-042: a present row references its acquire row (identity, digest, labels, outcome); the
+        # posting text is sealed once, in acquire.json, where sections 3 and 4's reads took it from.
         for run_id in (first_run, second_run):
             outputs = workpad / "runs" / run_id / "outputs"
             sealed_assess = json.loads((outputs / "assess.json").read_text(encoding="utf-8"))
@@ -319,10 +325,25 @@ def test_the_jobs_page_reads_a_full_catalog_run_in_under_a_second_each(
             assert len(unassessed) == POSTINGS - ASSESSED
             for item in (*sealed_assess["not_assessed"], *sealed_present["payload"]["not_assessed"]):
                 assert "text" not in item["posting"] and item["posting"]["content_sha256"] and item["posting"]["title"]
-            assert DESCRIPTION not in json.dumps(sealed_assess["not_assessed"])
-            assert DESCRIPTION not in json.dumps(sealed_present["payload"]["not_assessed"])
+            # The sentence, not DESCRIPTION: a stored posting's text has no trailing space.
+            assert SENTENCE not in json.dumps(sealed_assess["not_assessed"])
+            assert SENTENCE not in json.dumps(sealed_present["payload"]["not_assessed"])
             candidates = {row["posting"]["normalized_url"]: row["posting"] for row in sealed_assess["candidate_rows"]}
             assert all("text" not in candidates[url] for url in unassessed)
+            acquired = {
+                row["posting"]["normalized_url"]: row
+                for row in json.loads((outputs / "acquire.json").read_text(encoding="utf-8"))["rows"]
+            }
+            present_rows = sealed_present["payload"]["rows"]
+            assert len(present_rows) == POSTINGS == len(acquired)
+            for row in present_rows:
+                source = acquired[row["posting"]["normalized_url"]]
+                assert SENTENCE in source["posting"]["text"], "the run's acquire row has the text"
+                assert row == {
+                    "posting": {key: value for key, value in source["posting"].items() if key != "text"},
+                    "outcome": source["outcome"],
+                }
+            assert SENTENCE not in (outputs / "present.json").read_text(encoding="utf-8")
             assert (outputs / "assess.json").stat().st_size < SEALED_ASSESS_BYTES_MAX
             assert (outputs / "present.json").stat().st_size < SEALED_PRESENT_BYTES_MAX
     finally:

@@ -2135,6 +2135,30 @@ class PresentOutput(_Contract):
     payload: PresentPayload
     aggregate_status: AggregateStatus
 
+    def without_row_text(self) -> "PresentOutput":
+        """This output as a run seals it (0110-042): its rows reference the run's acquire rows.
+
+        A row keeps identity (``normalized_url``, ``url``, ``content_sha256``),
+        the list's label fields and its outcome; the posting text is sealed
+        once, in the run's acquire output, where every read takes it from
+        (the reads build their payload from the acquire and assess outputs,
+        never from this one). An output sealed earlier, with the text, reads
+        and re-writes as it is.
+        """
+
+        rows = self.payload.rows
+        not_assessed = self.payload.not_assessed
+        if not any(row.posting.text is not None for row in rows) and not any(item.posting.text is not None for item in not_assessed):
+            return self
+        return replace(
+            self,
+            payload=replace(
+                self.payload,
+                rows=tuple(row if row.posting.text is None else replace(row, posting=posting_identity(row.posting)) for row in rows),
+                not_assessed=tuple(item.identity_only() for item in not_assessed),
+            ),
+        )
+
     def to_json(self) -> dict[str, object]:
         return {"schema_version": self.schema_version, "payload": self.payload.to_json(), "aggregate_status": _json_enum(self.aggregate_status)}
 

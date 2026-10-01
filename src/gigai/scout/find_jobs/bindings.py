@@ -851,17 +851,21 @@ def _present_bound(context: object, input: PresentInput, *, home_root: Path, tar
     at the runner's output path.  The run ID is authoritative, so this small
     integration adapter keeps the C-1 callable unchanged and points it at the
     authenticated runner artifact.
+
+    0110-042: C-1 returns the run's acquire rows whole, text and all; what a
+    run seals references them (identity, digest and the list's labels) and
+    leaves the text in the run's acquire output, where the reads take it from.
     """
 
     run_id = getattr(context, "run_id", None)
     if not isinstance(run_id, str) or not run_id:
-        return present_node(context, input, home_root=home_root, target=target)  # type: ignore[arg-type]
+        return present_node(context, input, home_root=home_root, target=target).without_row_text()  # type: ignore[arg-type]
     normalized = PresentInput(
         f"runs/{run_id}/outputs/acquire.json",
         input.assessment_ref,
         input.node_receipts,
     )
-    return present_node(context, normalized, home_root=home_root, target=target)  # type: ignore[arg-type]
+    return present_node(context, normalized, home_root=home_root, target=target).without_row_text()  # type: ignore[arg-type]
 
 
 def _assess_bound(
