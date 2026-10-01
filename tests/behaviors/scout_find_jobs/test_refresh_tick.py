@@ -518,10 +518,9 @@ def test_after_an_update_the_tag_store_and_the_text_index_hold_the_new_postings(
     assert _tag(home, "UX Designer").function == "design"
     assert _text_hits(home, "kanban") == {("lever:initech", "lev-3")}
     assert _text_hits(home, "office") == set()  # the removed posting left the text index
-    # Greenhouse lists carry no description and this update fetched no detail:
-    # those postings are in the index as "text not checked", never as a hit.
+    # 0110-026d: the Greenhouse fill brought the descriptions with the list, so those postings are hits.
     stats = text_index.stats(home)
-    assert _text_hits(home, "data") == set() and stats.without_text == 3 and stats.with_text == 2
+    assert _text_hits(home, "data") == {("greenhouse:acme", "13")} and stats.without_text == 0 and stats.with_text == 5
     assert stats.postings == sum(len(CompanyIndex.for_home(home).read(ats, slug).live()) for ats, slug in CompanyIndex.for_home(home).keys())
 
 

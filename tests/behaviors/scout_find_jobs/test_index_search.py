@@ -39,6 +39,7 @@ class _Boards:
     def __init__(self) -> None:
         self.requests: list[str] = []
         self.version = 1
+        self.honor_content = False  # 0110-026d: True = the board answers ?content=true with descriptions (the fill)
         self.greenhouse = [
             {"id": 11, "title": "Software Engineer", "absolute_url": "https://boards.greenhouse.io/acme/jobs/11", "location": {"name": "Denver, CO"}, "updated_at": "2026-09-20T00:00:00Z"},
             {"id": 12, "title": "Marketing Manager", "absolute_url": "https://boards.greenhouse.io/acme/jobs/12", "location": {"name": "Remote"}, "updated_at": "2026-09-20T00:00:00Z"},
@@ -57,6 +58,9 @@ class _Boards:
         if path == "/v1/boards/acme/jobs":
             if request.headers.get("if-none-match") == etag:
                 return httpx.Response(304, headers={"etag": etag})
+            if self.honor_content and request.url.params.get("content") == "true":
+                jobs = [{**job, "content": f"&lt;p&gt;Build {job['id']} v{self.version}.&lt;/p&gt;"} for job in self.greenhouse]
+                return httpx.Response(200, json={"jobs": jobs}, headers={"etag": etag})
             return httpx.Response(200, json={"jobs": self.greenhouse}, headers={"etag": etag})
         for job in self.greenhouse:
             if path == f"/v1/boards/acme/jobs/{job['id']}":
@@ -199,6 +203,7 @@ def test_the_summary_counts_what_is_new_or_changed_since_the_last_search(tmp_pat
     assert second["matched"] == 2, "unchanged postings are still returned: acquire's reuse rule decides what to do with them"
 
     boards.version = 2
+    boards.honor_content = True  # a Full refresh redoes the description fill, which brings the new text
     boards.greenhouse[0] = {**boards.greenhouse[0], "updated_at": "2026-09-26T00:00:00Z"}
     _update(tmp_path, boards, full_refresh=True)  # the boards were just checked: force the re-check
     rows, _failures, third = _search(tmp_path, now=datetime.now(timezone.utc))

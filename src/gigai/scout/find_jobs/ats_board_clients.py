@@ -852,6 +852,8 @@ class BoardFetchStats:
     detail_fetched: int = 0
     detail_cached: int = 0
     detail_failed: int = 0
+    #: 1 when this call ran the board's one-time ``?content=true`` fill pass.
+    content_filled: int = 0
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -862,6 +864,7 @@ class BoardFetchStats:
             "detail_fetched": self.detail_fetched,
             "detail_cached": self.detail_cached,
             "detail_failed": self.detail_failed,
+            "content_filled": self.content_filled,
         }
 
 
@@ -1073,6 +1076,55 @@ class BoardCache:
         tmp_meta.write_text(json.dumps(meta, separators=(",", ":")), encoding="utf-8")
         os.replace(tmp_meta, meta_path)
 
+    # -- 0110-026d: the one-time Greenhouse description fill ------------------
+
+    def _filled_path(self, provider: str, board_token: str) -> Path:
+        name = digest_imported_bytes(f"{provider}:{board_token}".encode("utf-8")).removeprefix("sha256:")[:40]
+        return self.root / "content-filled" / f"{name}.json"
+
+    def content_filled(self, provider: str, board_token: str) -> bool:
+        """Whether this board's one-time ``?content=true`` fill pass has completed (a missing/corrupt marker reads ``False``)."""
+
+        try:
+            marker = json.loads(self._filled_path(provider, board_token).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return isinstance(marker, dict) and marker.get("provider") == provider and marker.get("board") == board_token
+
+    def mark_content_filled(self, provider: str, board_token: str) -> None:
+        path = self._filled_path(provider, board_token)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + f".tmp{os.getpid()}")
+        stamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        tmp.write_text(json.dumps({"provider": provider, "board": board_token, "filled_at": stamp}, separators=(",", ":")), encoding="utf-8")
+        os.replace(tmp, path)
+
+    def clear_content_filled(self, provider: str, board_token: str) -> None:
+        """Forget the marker so the next update redoes the fill (a Full refresh)."""
+
+        try:
+            self._filled_path(provider, board_token).unlink()
+        except OSError:
+            pass
+
+    def filled_jobs(self, board_token: str) -> dict[str, dict[str, object]]:
+        """``{job id: job}`` from the cached ``?content=true`` body (descriptions included); ``{}`` when there is none."""
+
+        entry = self.lookup("greenhouse", _GREENHOUSE_URL.format(token=board_token))
+        if entry is None:
+            return {}
+        try:
+            payload = json.loads(entry.body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return {}
+        jobs = payload.get("jobs") if isinstance(payload, dict) else None
+        found: dict[str, dict[str, object]] = {}
+        for job in jobs if isinstance(jobs, list) else ():
+            job_id = job.get("id") if isinstance(job, dict) else None
+            if isinstance(job_id, (int, str)) and not isinstance(job_id, bool) and str(job_id):
+                found[str(job_id)] = job
+        return found
+
     # -- acquire-rotation: the last-fetched index ---------------------------
 
     @property
@@ -1189,6 +1241,60 @@ def _decode_json(body: bytes, provider: str, board_token: str) -> object:
         raise AssertionError("unreachable")
 
 
+def _fill_greenhouse_board(
+    client: "httpx.Client",
+    board_token: str,
+    config: FindJobsConfig,
+    cache: BoardCache,
+    stats: BoardFetchStats,
+) -> BoardFetchResult | None:
+    """The one-time ``?content=true`` pass; ``None`` (nothing marked) when it failed, so the plain path runs.
+
+    The full body is cached under its own URL (descriptions for the text
+    index and later lookups); the plain list URL gets the same body with the
+    ``content`` fields stripped (and the fill's validators), which every later
+    plain list request replaces. One request, through the caller's paced client.
+    """
+
+    try:
+        body, status = _cached_request(client, _GREENHOUSE_URL.format(token=board_token), "greenhouse", board_token, cache=cache, stats=stats)
+        payload = _decode_json(body, "greenhouse", board_token)
+    except ATSBoardClientError:
+        return None
+    if type(payload) is not dict or type(payload.get("jobs")) is not list:
+        return None
+    if payload["jobs"] and not any(type(job) is dict and type(job.get("content")) is str for job in payload["jobs"]):
+        return None  # the board ignored ?content=true: not a fill, not marked; the plain two-phase path runs
+    stats.cache = status
+    stats.content_filled = 1
+    stripped = {**payload, "jobs": [{k: v for k, v in job.items() if k != "content"} if type(job) is dict else job for job in payload["jobs"]]}
+    full = cache.lookup("greenhouse", _GREENHOUSE_URL.format(token=board_token))
+    cache.store(
+        "greenhouse",
+        _GREENHOUSE_LIST_URL.format(token=board_token),
+        body=json.dumps(stripped, separators=(",", ":")).encode("utf-8"),
+        etag=full.etag if full is not None else None,
+        last_modified=full.last_modified if full is not None else None,
+        marker=None,
+    )
+    rows: list[PostingRow] = []
+    for job in payload["jobs"]:
+        if type(job) is not dict:
+            continue
+        stats.listed += 1
+        title = job.get("title")
+        absolute_url = job.get("absolute_url")
+        if type(title) is not str or not matches_roles(title, config.roles):
+            stats.prefiltered_out += 1
+            continue
+        if type(absolute_url) is not str or not absolute_url:
+            continue
+        content = job.get("content")
+        rows.append(_greenhouse_row(job, title, absolute_url, content if type(content) is str else None, board_token, job))
+    cache.mark_content_filled("greenhouse", board_token)
+    return BoardFetchResult(tuple(rows), stats)
+
+
 def fetch_greenhouse_board(
     client: "httpx.Client",
     board_token: str,
@@ -1196,6 +1302,7 @@ def fetch_greenhouse_board(
     *,
     cache: BoardCache | None = None,
     stats: BoardFetchStats | None = None,
+    descriptions: bool = False,
 ) -> BoardFetchResult:
     """Two-phase Greenhouse: content-free list -> title prefilter -> detail per match.
 
@@ -1204,10 +1311,25 @@ def fetch_greenhouse_board(
     failed detail call (a 404, a shape change) falls back to the list's
     inline ``content`` when it carries one, else the row ships without text
     (sponsorship unknown) -- one bad posting never fails the board.
+
+    ``descriptions=True`` (the sources update, 0110-026d) adds a one-time
+    fill: while the board has no ``content_filled`` marker, ONE
+    ``?content=true`` list request brings every posting WITH its
+    description (kept in the cache body, never in the shipped snapshot),
+    after which the board is marked. From then on lists are plain and a
+    detail request is made only for a matching posting the board has no
+    description for at all (a NEW one); a posting whose ``updated_at``
+    alone changed keeps its cached description (not proven that the text
+    changed; a Full refresh re-fills).
     """
 
     stats = stats if stats is not None else BoardFetchStats()
+    if descriptions and cache is not None and not cache.content_filled("greenhouse", board_token):
+        filled = _fill_greenhouse_board(client, board_token, config, cache, stats)
+        if filled is not None:
+            return filled
     list_url = _GREENHOUSE_LIST_URL.format(token=board_token)
+    known: dict[str, dict[str, object]] | None = None
     body, status = _cached_request(client, list_url, "greenhouse", board_token, cache=cache, stats=stats)
     stats.cache = "hit" if status == "unchanged" else status
     if status == "unchanged":
@@ -1236,10 +1358,26 @@ def fetch_greenhouse_board(
             updated_at = job.get("updated_at")
             marker = updated_at if type(updated_at) is str and updated_at else None
             before = stats.requests
+            have = None
+            if descriptions and cache is not None:
+                have = cache.lookup("greenhouse", detail_url)
+                if have is not None:
+                    pass  # updated_at-only change: the cached description stands, no request
+                else:
+                    if known is None:
+                        known = cache.filled_jobs(board_token)
+                    filled_job = known.get(str(job_id))
+                    if filled_job is not None and type(filled_job.get("content")) is str:
+                        stats.detail_cached += 1
+                        rows.append(_greenhouse_row(job, title, absolute_url, filled_job["content"], board_token, filled_job))  # type: ignore[arg-type]
+                        continue
             try:
-                detail_body, _detail_status = _cached_request(
-                    client, detail_url, "greenhouse", board_token, cache=cache, stats=stats, marker=marker
-                )
+                if have is not None:
+                    detail_body = have.body
+                else:
+                    detail_body, _detail_status = _cached_request(
+                        client, detail_url, "greenhouse", board_token, cache=cache, stats=stats, marker=marker
+                    )
                 detail = json.loads(detail_body.decode("utf-8"))
                 if type(detail) is not dict or type(detail.get("content")) is not str:
                     detail = None
@@ -1317,12 +1455,19 @@ class ATSBoardClients:
         config: FindJobsConfig,
         *,
         cache: BoardCache | None = None,
+        descriptions: bool = False,
     ) -> BoardFetchResult:
-        """Q2: the cached, prefiltered path acquire uses (see module docstring)."""
+        """Q2: the cached, prefiltered path acquire uses (see module docstring).
+
+        ``descriptions`` (the sources update only) turns on Greenhouse's
+        one-time description fill; Lever and Ashby already list descriptions.
+        """
 
         fetcher = _FETCHERS.get(provider)
         if fetcher is None:
             raise ATSBoardClientError("unsupported_provider", f"unsupported ATS provider {provider!r}")
+        if descriptions and provider == "greenhouse":
+            return fetch_greenhouse_board(client, board_token, config, cache=cache, descriptions=True)
         return fetcher(client, board_token, config, cache=cache)
 
 

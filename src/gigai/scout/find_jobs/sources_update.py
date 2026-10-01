@@ -400,7 +400,7 @@ class _PostingStores:
                 # time on this SQLite: rebuild once, when the update ends.
                 self._text_rebuild_due = True
                 return
-            cached = cached_posting_rows(self._cache, change.ats, change.slug, (posting.posting_id for posting in live))
+            cached = cached_posting_rows(self._cache, change.ats, change.slug, (posting.posting_id for posting in live), allow_stale=True)
             postings = []
             for posting in live:
                 row = cached.rows.get(posting.posting_id)
@@ -736,6 +736,25 @@ def update_sources(
     )
 
 
+class _FillingClients:
+    """The update's view of the real ``ATSBoardClients``: it also fills Greenhouse descriptions (0110-026d)."""
+
+    def __init__(self, inner: ATSBoardClients) -> None:
+        self._inner = inner
+
+    def list_board(self, *args: Any, **kwargs: Any) -> Any:
+        return self._inner.list_board(*args, **kwargs)
+
+    def fetch_board(self, client: Any, provider: str, board_token: str, config: FindJobsConfig, *, cache: BoardCache | None = None) -> Any:
+        return self._inner.fetch_board(client, provider, board_token, config, cache=cache, descriptions=True)
+
+
+def _with_fill(ats: Any) -> Any:
+    """Only the real clients fill; a test's fake is called exactly as before."""
+
+    return _FillingClients(ats) if isinstance(ats, ATSBoardClients) else ats
+
+
 def _run_update(
     boards: Sequence[WatchlistEntry],
     *,
@@ -791,9 +810,12 @@ def _run_update(
     try:
         if stores is not None and not (stop is not None and stop.is_set()):
             stores.prepare()
+        if full_refresh:
+            for board in boards:  # a Full refresh redoes the one-time Greenhouse description fill
+                cache.clear_content_filled(board.provider.value, board.board_token)
         _rows, _failures, summary = _fetch_boards(
             boards,
-            ats=ats if ats is not None else ATSBoardClients(),
+            ats=_with_fill(ats if ats is not None else ATSBoardClients()),
             client=client,
             config=config,
             limits=limits,

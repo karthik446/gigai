@@ -88,6 +88,8 @@ class _Boards:
             if len(parts) == 4:
                 if request.headers.get("if-none-match") == self.etag(token):
                     return httpx.Response(304, headers={"etag": self.etag(token)})
+                if request.url.params.get("content") == "true":  # 0110-026d: the one-time description fill
+                    return httpx.Response(200, json={"jobs": [{**job, "content": f"&lt;p&gt;Build {job['id']}.&lt;/p&gt;"} for job in jobs]}, headers={"etag": self.etag(token)})
                 return httpx.Response(200, json={"jobs": jobs}, headers={"etag": self.etag(token)})
             for job in jobs:
                 if parts[4] == str(job["id"]):
@@ -142,9 +144,10 @@ def test_an_update_indexes_every_board_and_prints_the_operator_summary(tmp_path:
     assert snapshot["finished_at"] is not None and snapshot["started_at"] <= snapshot["finished_at"]
     assert snapshot["roles"] == list(_config().roles)
     assert snapshot["rotation"]["total"] == 4 and snapshot["rotation"]["runs_per_rotation"] == 1
-    # acme list + detail 11, globex list + detail 21 (the two titles the
-    # roles match), one Lever list, one dead board.
-    assert snapshot["requests"] == 5 and len(boards.requests) == 6
+    # 0110-026d: acme and globex are each ONE ?content=true fill (descriptions
+    # included, so no detail requests), plus one Lever list; the dead board
+    # answers 404 (counted by the fake, not as a successful request).
+    assert snapshot["requests"] == 3 and len(boards.requests) == 4
 
     index = CompanyIndex.for_home(tmp_path)
     assert sorted(index.keys()) == [("greenhouse", "acme"), ("greenhouse", "globex"), ("lever", "initech")]
@@ -153,7 +156,8 @@ def test_an_update_indexes_every_board_and_prints_the_operator_summary(tmp_path:
     # Every listed title is stored, not only the ones the roles match.
     assert sorted(posting.title for posting in acme.postings.values()) == ["Marketing Manager", "Software Engineer"]
     assert acme.postings["11"].content_sha256 == content_hash(b"Software Engineer\nBuild 11.")
-    assert acme.postings["12"].content_sha256 is None
+    # 0110-026d: the fill brings every posting's description for free, matching title or not.
+    assert acme.postings["12"].content_sha256 == content_hash(b"Marketing Manager\nBuild 12.")
     # The snapshot a status poll reads is the one the update returned.
     assert index.read_update_summary() == {**snapshot, "schema_version": "scout-sources-update:1"}
     assert seen[0]["status"] == "running" and seen[-1] == snapshot

@@ -613,18 +613,33 @@ def parse_board_body(
     return observed
 
 
-def cached_detail_lookup(cache: BoardCache, slug: str) -> DetailLookup:
-    """Greenhouse job details from the board cache, only when they match the listed ``updated_at``."""
+def cached_detail_lookup(cache: BoardCache, slug: str, *, allow_stale: bool = False) -> DetailLookup:
+    """Greenhouse job details from the board cache, only when they match the listed ``updated_at``.
+
+    0110-026d: a posting the one-time ``?content=true`` fill brought in is read
+    from that cached body when it has no detail entry of its own.
+    ``allow_stale`` (the text index) accepts a description whose ``updated_at``
+    no longer matches: stale text beats none.
+    """
+
+    filled: dict[str, dict[str, object]] | None = None
 
     def lookup(job_id: str, marker: str | None) -> dict[str, object] | None:
+        nonlocal filled
         entry = cache.lookup("greenhouse", _GREENHOUSE_JOB_URL.format(token=slug, job_id=job_id))
-        if entry is None or entry.marker != marker:
-            return None
-        try:
-            payload = json.loads(entry.body.decode("utf-8"))
-        except (UnicodeDecodeError, ValueError):
-            return None
-        return payload if isinstance(payload, dict) else None
+        if entry is not None and (allow_stale or entry.marker == marker):
+            try:
+                payload = json.loads(entry.body.decode("utf-8"))
+            except (UnicodeDecodeError, ValueError):
+                payload = None
+            if isinstance(payload, dict):
+                return payload
+        if filled is None:
+            filled = cache.filled_jobs(slug)
+        job = filled.get(job_id)
+        if job is not None and isinstance(job.get("content"), str) and (allow_stale or job.get("updated_at") == marker):
+            return job
+        return None
 
     return lookup
 
@@ -641,7 +656,7 @@ class CachedRows:
     missing: tuple[str, ...] = ()
 
 
-def cached_posting_rows(cache: BoardCache, ats: str, slug: str, posting_ids: Iterable[str]) -> CachedRows:
+def cached_posting_rows(cache: BoardCache, ats: str, slug: str, posting_ids: Iterable[str], *, allow_stale: bool = False) -> CachedRows:
     """The acquire-shaped ``PostingRow`` for each wanted posting, from cached bodies only."""
 
     wanted = tuple(dict.fromkeys(posting_ids))
@@ -652,7 +667,7 @@ def cached_posting_rows(cache: BoardCache, ats: str, slug: str, posting_ids: Ite
         jobs = _jobs(ats, slug, entry.body)
     except CompanyIndexError:
         return CachedRows({}, missing=wanted)
-    lookup = cached_detail_lookup(cache, slug) if ats == "greenhouse" else None
+    lookup = cached_detail_lookup(cache, slug, allow_stale=allow_stale) if ats == "greenhouse" else None
     remaining = set(wanted)
     found: dict[str, PostingRow] = {}
     without_text: list[str] = []
