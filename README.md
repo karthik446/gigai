@@ -32,12 +32,12 @@ Scout removes your name and contact lines (email, phone, address, links) before 
 model sees your resume, but it can't catch personal details elsewhere in the text,
 so keep those out. The contact and Resume display fields never leave your machine.
 With Ollama the resume stays on this machine. See
-[Privacy and security](https://karthik446.github.io/gigai/scout/privacy/) for exactly what is sent, and to whom.
+[Privacy and security](https://karthik446.github.io/gigai/latest/scout/privacy/) for exactly what is sent, and to whom.
 
 ## Links
 
 - [Documentation](https://karthik446.github.io/gigai/): quickstart, concepts, CLI and API reference, known limitations
-- [Roadmap](https://karthik446.github.io/gigai/roadmap/): what is planned, without dates
+- [Roadmap](https://karthik446.github.io/gigai/latest/roadmap/): what is planned, without dates
 - [CHANGELOG](https://github.com/karthik446/gigai/blob/main/CHANGELOG.md) and [Releases](https://github.com/karthik446/gigai/releases)
 - [CONTRIBUTING](CONTRIBUTING.md) and [issues](https://github.com/karthik446/gigai/issues)
 

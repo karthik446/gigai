@@ -270,7 +270,7 @@ def test_snapshot_line_is_never_an_error(out: dict) -> None:
 def test_the_data_source_note_is_one_short_line_with_a_docs_link(out: dict) -> None:
     note, url = out["note"]
     assert note.startswith("Company and title data comes from public job boards;") and len(note) < 100
-    assert url.startswith("https://karthik446.github.io/gigai/scout/sources/")
+    assert url.startswith("https://karthik446.github.io/gigai/latest/scout/sources/")
     docs = Path(__file__).resolve().parents[2] / "gigai-docs" / "src" / "content" / "docs" / "scout" / "sources.md"
     assert "## Where the data comes from" in docs.read_text(encoding="utf-8"), "the link's anchor exists on the docs page"
 

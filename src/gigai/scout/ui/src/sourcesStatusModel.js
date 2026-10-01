@@ -24,7 +24,7 @@ import { formatCount } from "./runText.js";
 
 // The one-line data-source and removal note, with the docs page behind it.
 export const DATA_SOURCE_NOTE = "Company and title data comes from public job boards; a company can ask to be left out.";
-export const DATA_SOURCE_DOCS_URL = "https://karthik446.github.io/gigai/scout/sources/#where-the-data-comes-from";
+export const DATA_SOURCE_DOCS_URL = "https://karthik446.github.io/gigai/latest/scout/sources/#where-the-data-comes-from";
 
 const MAX_ERROR_LENGTH = 160;
 
