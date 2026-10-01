@@ -1466,4 +1466,48 @@ def sources_status_command(home_value: Path | None, as_json: bool) -> None:
         click.echo(str(index["message"]))
 
 
+# --- 0110-026b: `gigai scout snapshot export` ----------------------------
+
+
+@scout_group.group("snapshot")
+def snapshot_group() -> None:
+    """Build the metadata snapshot of the stored company index (for the operator to publish)."""
+
+
+@snapshot_group.command("export")
+@click.option("--out", "out_value", required=True, type=click.Path(path_type=Path, file_okay=False), help="Directory to write the snapshot into.")
+@click.option("--base", "base_value", type=click.Path(path_type=Path, dir_okay=False), help="A previous export's manifest.json (its files beside it): adds a delta and a removal list.")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def snapshot_export_command(out_value: Path, base_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Write index, title tags and board validators (no descriptions) plus a manifest; publish nothing."""
+
+    from .find_jobs.snapshot import SnapshotError, export_snapshot
+
+    try:
+        result = export_snapshot(home_value or default_home_root(), out_value, base_manifest=base_value)
+    except SnapshotError as error:
+        if as_json:
+            _emit({"ok": False, "code": error.code, "message": str(error)}, True, "")
+        else:
+            click.echo(f"Snapshot not written: {error}", err=True)
+        raise click.exceptions.Exit(1) from error
+    if as_json:
+        _emit(
+            {"ok": True, "out_dir": str(result.out_dir), "manifest": result.manifest, "files": list(result.files), "gh_commands": list(result.gh_commands)},
+            True,
+            "",
+        )
+        return
+    counts = result.manifest["counts"]
+    assert isinstance(counts, dict)
+    click.echo(
+        f"Snapshot as of {result.manifest['as_of']}: {counts['postings']} postings, {counts['boards']} boards, {counts['tags']} title tags. "
+        f"Read-back verified {len(result.files)} files in {result.out_dir}."
+    )
+    click.echo("Nothing was published. To publish, run (the first command only the first time):")
+    for command in result.gh_commands:
+        click.echo(f"  {command}")
+
+
 __all__ = ["scout_group", "write_starter_find_jobs_config", "STARTER_FIND_JOBS_CONFIG"]
