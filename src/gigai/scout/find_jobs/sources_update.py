@@ -915,6 +915,7 @@ def run_sources_update(
     index = CompanyIndex.for_home(home)
     if not force and snapshot_is_live(index.read_update_summary()):
         raise SourcesUpdateRunningError()
+    _import_shipped_snapshot(home, target)
     resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=None, allow_semantic_state=True)
     seed = _Seed()
     _seed_watchlist(resolved, home_root=home, target=target, progress=seed)  # type: ignore[arg-type]
@@ -936,6 +937,20 @@ def run_sources_update(
         stop=stop,
         home_root=home,
     )
+
+
+def _import_shipped_snapshot(home: Path, target: Path) -> None:
+    """First run / stale index: take the shipped metadata snapshot before listing boards (0110-026e).
+
+    Quiet by design: offline, opted out, not published or any failure leaves the update exactly as it was.
+    """
+
+    try:
+        from .snapshot import maybe_import_snapshot
+
+        maybe_import_snapshot(home, target=target)
+    except Exception:  # noqa: BLE001 - the snapshot is an optimisation, never a reason for an update to fail
+        return
 
 
 def read_board_facts(index: CompanyIndex, boards: Sequence[WatchlistEntry]) -> dict[str, BoardFacts]:

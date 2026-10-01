@@ -228,3 +228,10 @@ def _no_background_model_tags(monkeypatch: pytest.MonkeyPatch) -> None:
     """No test server may spend a real model call on background tagging; tests of the tag queue pass the setting explicitly."""
 
     monkeypatch.setenv("GIGAI_SCOUT_MODEL_TAGS", "0")
+
+
+@pytest.fixture(autouse=True)
+def _no_snapshot_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Update sources tries the shipped snapshot first: no test may reach the real release URL. Snapshot tests pass their own environ/client."""
+
+    monkeypatch.setenv("GIGAI_SCOUT_SNAPSHOT", "0")
