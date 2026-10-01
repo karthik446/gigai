@@ -1,13 +1,15 @@
-"""Validate the inputs of a manually dispatched release before any tag exists.
+"""Validate that a commit may be released as its ``pyproject.toml`` version.
 
-``release.yml`` can be started with ``workflow_dispatch`` (``sha`` + ``version``).
-Everything is checked against the named commit, not the checkout, and the check
-fails closed: the SHA must be a full commit id on ``main`` or a
-``karthik446/gigai-v*`` branch, and ``pyproject.toml``, ``CATALOG_REVISION`` and
-``CHANGELOG.md`` at that commit must all name ``<version>``. The tag ``v<version>``
-must not exist yet, except that a re-dispatch after a partial run may reuse a tag
-that already peels to exactly ``sha`` while the version is not on PyPI and no
-GitHub Release exists for it.
+Run twice, on the same commit: by the pre-check (``pull_request.yaml``, profile
+``release``, with ``--precheck``) and again by ``release.yml`` just before it
+creates the tag. Everything is checked against the named commit, not the
+checkout, and the check fails closed: the SHA must be a full commit id on
+``main`` or a ``karthik446/gigai-v*`` branch, and ``pyproject.toml``,
+``CATALOG_REVISION`` and ``CHANGELOG.md`` at that commit must all name
+``<version>``. ``<version>`` must not be on PyPI. The tag ``v<version>`` must not
+exist yet, except that ``release.yml`` (not the pre-check) may reuse a tag that
+already peels to exactly ``sha`` while no GitHub Release exists for it: a second
+run after a partial one.
 """
 
 from __future__ import annotations
@@ -29,7 +31,6 @@ ALLOWED_BRANCHES = ("main", "karthik446/gigai-v*")
 
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 _VERSION = re.compile(r"^[0-9]+(\.[0-9]+)+$")
-_PATCH_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+\.[1-9][0-9]*$")
 _CATALOG_REVISION = re.compile(r'^CATALOG_REVISION\s*=\s*"(?P<value>[^"]*)"\s*$', re.MULTILINE)
 
 
@@ -67,16 +68,6 @@ def _project_version(pyproject: str) -> str:
     return version
 
 
-def release_kind(version: str) -> str:
-    """Return ``patch`` for a four-part version (0.1.10.4), else ``minor``.
-
-    A patch releases without a person. Everything else (0.1.11, 0.2.0, 1.0.0,
-    and any spelling this does not recognise) needs the operator's approval.
-    """
-
-    return "patch" if _PATCH_VERSION.match(version) else "minor"
-
-
 def allowed_branches(branches: Iterable[str]) -> list[str]:
     """Return the branches a release may come from."""
 
@@ -87,8 +78,19 @@ def allowed_branches(branches: Iterable[str]) -> list[str]:
     ]
 
 
-def validate_dispatch(sha: str, version: str, facts: DispatchFacts) -> None:
-    """Raise :class:`ReleaseDispatchError` unless ``sha`` may be released as ``version``."""
+def validate_dispatch(
+    sha: str,
+    version: str,
+    facts: DispatchFacts,
+    *,
+    branch: str | None = None,
+    precheck: bool = False,
+) -> None:
+    """Raise :class:`ReleaseDispatchError` unless ``sha`` may be released as ``version``.
+
+    ``branch`` is the branch the workflow was started on. ``precheck`` is the
+    pre-check's stricter rule: no tag ``v<version>`` at all.
+    """
 
     if not _FULL_SHA.match(sha):
         raise ReleaseDispatchError(f"sha {sha!r} must be a full 40-character lowercase commit id")
@@ -101,7 +103,15 @@ def validate_dispatch(sha: str, version: str, facts: DispatchFacts) -> None:
             f"sha {sha} is on no allowed branch ({', '.join(ALLOWED_BRANCHES)}); "
             f"found on: {', '.join(facts.branches) or 'no branch'}"
         )
+    if branch is not None and not allowed_branches([branch]):
+        raise ReleaseDispatchError(
+            f"{branch!r} is not a release branch ({', '.join(ALLOWED_BRANCHES)})"
+        )
     if facts.tag_exists:
+        if precheck:
+            raise ReleaseDispatchError(
+                f"tag v{version} already exists; a pre-check is for a version that is not tagged yet"
+            )
         if facts.release_exists:
             raise ReleaseDispatchError(
                 f"tag v{version} already exists and a GitHub Release exists for it"
@@ -112,6 +122,8 @@ def validate_dispatch(sha: str, version: str, facts: DispatchFacts) -> None:
             raise ReleaseDispatchError(
                 f"tag v{version} already exists at {facts.tag_commit or 'an unknown commit'}, not {sha}"
             )
+    if facts.on_pypi:
+        raise ReleaseDispatchError(f"{version} is already on PyPI")
     project_version = _project_version(facts.pyproject)
     if project_version != version:
         raise ReleaseDispatchError(
@@ -168,7 +180,7 @@ def gather_facts(sha: str, version: str, remote: str = "origin") -> DispatchFact
         changelog=_show(sha, "CHANGELOG.md"),
         tag_commit=tag_commit,
         release_exists=_release_exists(f"v{version}") if tag_exists else False,
-        on_pypi=_on_pypi(version) if tag_exists else False,
+        on_pypi=_on_pypi(version),
     )
 
 
@@ -220,18 +232,20 @@ def _release_exists(tag: str) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--kind", metavar="VERSION", help="print kind=patch or kind=minor and exit")
-    parser.add_argument("--sha")
-    parser.add_argument("--version")
+    parser.add_argument("--sha", required=True)
+    parser.add_argument("--version", required=True)
+    parser.add_argument("--branch", help="the branch the workflow was started on")
+    parser.add_argument("--precheck", action="store_true", help="pre-check rule: no tag v<version> at all")
     parser.add_argument("--remote", default="origin")
     args = parser.parse_args(argv)
-    if args.kind is not None:
-        print(f"kind={release_kind(args.kind)}")
-        return 0
-    if not args.sha or not args.version:
-        parser.error("--sha and --version are required")
     try:
-        validate_dispatch(args.sha, args.version, gather_facts(args.sha, args.version, args.remote))
+        validate_dispatch(
+            args.sha,
+            args.version,
+            gather_facts(args.sha, args.version, args.remote),
+            branch=args.branch,
+            precheck=args.precheck,
+        )
     except (ReleaseDispatchError, subprocess.CalledProcessError) as error:
         print(f"release dispatch rejected: {error}")
         return 1

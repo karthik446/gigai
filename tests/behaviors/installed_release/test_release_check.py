@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from email.message import EmailMessage
 import io
-import re
 from pathlib import Path
 import tarfile
 import zipfile
@@ -19,68 +18,68 @@ def _read_release_workflow() -> str:
     return workflow_path.read_text(encoding="utf-8")
 
 
-def test_pypi_publish_jobs_receive_only_distributions() -> None:
+def test_pypi_publish_job_receives_only_distributions() -> None:
     workflow = _read_release_workflow()
 
-    assert workflow.count("name: Prepare package-only publisher input") == 2
-    assert workflow.count("cp dist/*.whl dist/*.tar.gz publish/") == 2
-    assert workflow.count("packages-dir: publish/") == 2
+    assert workflow.count("name: Prepare package-only publisher input") == 1
+    assert workflow.count("cp dist/*.whl dist/*.tar.gz publish/") == 1
+    assert workflow.count("packages-dir: publish/") == 1
     assert "packages-dir: dist/" not in workflow
-    assert "--index https://test.pypi.org/simple" in workflow
-    assert "--index https://pypi.org/simple" in workflow
-    assert "--index-strategy unsafe-best-match" in workflow
+    # TestPyPI is not on the release path: the pre-check installs the built files.
+    assert "test.pypi.org" not in workflow and "testpypi" not in workflow.lower()
 
 
-def test_release_job_graph_does_not_let_verify_pypi_block_the_release() -> None:
+def test_release_job_graph_is_the_fast_path_then_the_post_release_checks() -> None:
     graph = release_notes.parse_workflow_job_needs(_read_release_workflow())
 
-    expected_jobs = {
-        "preflight",
-        "build",
-        "publish-pypi",
-        "verify-pypi",
-        "github-release",
-        "post-release-compatibility",
-        "verify-testpypi",
-        "docs",
+    assert graph == {
+        "preflight": [],
+        "tag": ["preflight"],
+        "publish-pypi": ["preflight", "tag"],
+        "github-release": ["preflight", "publish-pypi"],
+        "docs": ["preflight", "github-release"],
+        "advance-main": ["preflight", "github-release"],
+        "verify-pypi": ["preflight", "github-release"],
+        "post-release-compatibility": ["preflight", "github-release"],
     }
-    assert expected_jobs <= graph.keys(), sorted(expected_jobs - graph.keys())
-
-    # The Release is created right after publish-pypi succeeds; a slow or
-    # flaky post-publish install check must not be able to withhold it.
-    assert "verify-pypi" not in graph["github-release"]
-    assert set(graph["github-release"]) == {"preflight", "build", "publish-pypi"}
-
-    # verify-pypi becomes a post-release check gated on the Release existing.
-    assert "github-release" in graph["verify-pypi"]
-
-    # publish-pypi is gated on the TestPyPI publish step, not on the
-    # (post-publish, continue-on-error) TestPyPI install check.
-    assert set(graph["publish-pypi"]) == {"preflight", "publish-testpypi"}
-    assert "verify-testpypi" not in graph["publish-pypi"]
-
-    # verify-testpypi is a post-publish check that nothing waits on.
-    assert set(graph["verify-testpypi"]) == {"preflight", "publish-testpypi"}
-    assert all("verify-testpypi" not in needs for needs in graph.values())
-
-    # The full post-release compatibility matrix must not wait on the
-    # post-release install check either.
-    assert "verify-pypi" not in graph["post-release-compatibility"]
+    # The post-release checks are leaves: nothing waits on them.
+    for check in ("verify-pypi", "post-release-compatibility", "advance-main", "docs"):
+        assert all(check not in needs for needs in graph.values()), check
 
 
-def test_reusable_workflow_callers_grant_the_called_jobs_permissions() -> None:
-    # pull_request.yaml's `changes` job requests `actions: read` (it looks up
-    # the previous PR run via `gh api`) in addition to `contents: read`.
-    # release.yml's top-level `permissions:` is `contents: read` only, so the
-    # two jobs that call pull_request.yaml via `uses:` must each grant
-    # `actions: read` at the job level, or GitHub refuses to start the called
-    # workflow.
-    jobs = release_notes.parse_workflow_jobs(_read_release_workflow())
+def test_post_release_checks_never_fail_or_hold_the_release_run() -> None:
+    workflow = _read_release_workflow()
+    jobs = release_notes.parse_workflow_jobs(workflow)
 
-    for caller in ("ci", "post-release-compatibility"):
-        assert jobs[caller].permissions == {"contents": "read", "actions": "read"}, caller
+    verify = workflow.split("\n  verify-pypi:\n", 1)[1].split("\n  post-release-compatibility:\n", 1)[0]
+    assert "    continue-on-error: true\n" in verify
+    assert 'uv tool install --refresh "gigai==${VERSION}"' in verify
+
+    # The sweep is started as its own run on the tag (compatibility_job.yaml), not
+    # called with `uses:`, so this run does not wait an hour for macOS or take its result.
+    sweep = workflow.split("\n  post-release-compatibility:\n", 1)[1]
+    assert "    continue-on-error: true\n" in sweep
+    assert 'gh workflow run compatibility_job.yaml --repo "${GITHUB_REPOSITORY}" --ref "${TAG}"' in sweep
+    assert "uses:" not in sweep
+    assert jobs["post-release-compatibility"].permissions == {"actions": "write"}
+    compatibility = Path(__file__).resolve().parents[3] / ".github/workflows/compatibility_job.yaml"
+    assert "workflow_dispatch:" in compatibility.read_text(encoding="utf-8")
+
+
+def test_release_jobs_permissions() -> None:
+    workflow = _read_release_workflow()
+    jobs = release_notes.parse_workflow_jobs(workflow)
+
+    assert "\npermissions:\n  contents: read\n" in workflow
+    # No job calls pull_request.yaml: the release runs no CI.
+    assert "pull_request.yaml" not in "".join(
+        line for line in workflow.splitlines(keepends=True) if "uses:" in line
+    )
     # docs.yml's publish job pushes the gh-pages branch.
     assert jobs["docs"].permissions == {"contents": "write"}
+    assert jobs["publish-pypi"].permissions == {"id-token": "write"}
+    assert jobs["advance-main"].permissions == {"contents": "write"}
+    assert jobs["verify-pypi"].permissions == {}
 
 
 def _write_project(path: Path, version: str = "0.1.0") -> Path:
@@ -212,114 +211,26 @@ def test_checksum_manifest_rejects_tampering(tmp_path: Path) -> None:
         release_check.verify_checksums(tmp_path / "dist", artifacts)
 
 
-def _job_conditions(workflow: str) -> dict[str, str]:
-    """Return each job's job-level ``if:`` text (empty when it has none)."""
+def test_no_release_job_can_be_skipped() -> None:
+    """Every release job runs on the implicit success() of its needs.
 
-    conditions: dict[str, str] = {}
-    current = ""
-    in_jobs = False
-    for line in workflow.splitlines():
-        if line == "jobs:":
-            in_jobs = True
-        elif in_jobs and line.startswith("  ") and not line.startswith("   ") and line.rstrip().endswith(":"):
-            current = line.strip().removesuffix(":")
-            conditions[current] = ""
-        elif in_jobs and current and line.startswith("    if:"):
-            conditions[current] = line.removeprefix("    if:").strip()
-    return conditions
-
-
-def _ancestors(graph: dict[str, list[str]], job: str) -> set[str]:
-    found: set[str] = set()
-    pending = list(graph[job])
-    while pending:
-        need = pending.pop()
-        if need not in found:
-            found.add(need)
-            pending.extend(graph[need])
-    return found
-
-
-def test_jobs_downstream_of_skippable_jobs_have_explicit_status_guards() -> None:
-    """A skipped `ci` (gate green) or `dispatch` (tag push) must not skip the release.
-
-    Run 36665265416 reported success and published nothing: a job without an
-    `if:` gets the implicit `success()`, which is false when a skipped job sits
-    in its needs chain.
+    Run 36665265416 reported success and published nothing: a job behind a
+    skippable job was skipped with it. The release now has no skippable job (no
+    dry run, no tag-push path, no optional CI), so no job carries an `if:` and a
+    green run means every job ran.
     """
 
     workflow = _read_release_workflow()
-    graph = release_notes.parse_workflow_job_needs(workflow)
-    conditions = _job_conditions(workflow)
-
-    downstream = sorted(job for job in graph if _ancestors(graph, job) & {"dispatch", "ci"})
-    assert {"preflight", "ci", "build", "smoke-artifacts", "publish-pypi", "verify-pypi"} <= set(downstream)
-    for job in downstream:
-        condition = conditions[job]
-        assert "!cancelled()" in condition, f"{job} relies on the implicit success()"
-        for need in graph[job]:
-            assert f"needs.{need}.result" in condition, (job, need)
+    job_level_ifs = [line for line in workflow.splitlines() if line.startswith("    if:")]
+    assert job_level_ifs == []
+    assert "cancelled()" not in workflow and "always()" not in workflow
 
 
-def _evaluate(condition: str, results: dict[str, str], *, dry_run: bool, gate_green: bool) -> bool:
-    expression = condition.removeprefix("${{").removesuffix("}}").strip()
-    expression = expression.replace("!cancelled()", "True").replace("!inputs.dry_run", "(not DRY)")
-    expression = expression.replace("needs.preflight.outputs.gate_green", "GATE")
-    expression = re.sub(r"needs\.([\w-]+)\.result", r'R["\1"]', expression)
-    expression = expression.replace("&&", " and ").replace("||", " or ")
-    expression = re.sub(r"!(?!=)", " not ", expression)
-    assert "needs." not in expression and "inputs." not in expression, condition
-    return bool(eval(expression, {"__builtins__": {}}, {"R": results, "DRY": dry_run, "GATE": "true" if gate_green else "false"}))  # noqa: S307
-
-
-def _simulate(*, dispatch: bool, dry_run: bool, gate_green: bool) -> dict[str, str]:
-    """Walk the release graph the way GitHub does: no `if:` means implicit success()."""
-
+def test_every_post_tag_job_uses_the_tag_and_commit_from_preflight() -> None:
     workflow = _read_release_workflow()
-    graph = release_notes.parse_workflow_job_needs(workflow)
-    conditions = _job_conditions(workflow)
-    results: dict[str, str] = {}
-    remaining = list(graph)
-    while remaining:
-        job = next(name for name in remaining if all(need in results for need in graph[name]))
-        remaining.remove(job)
-        needs = {need: results[need] for need in graph[job]}
-        if job in {"classify", "dispatch"}:
-            # both run only for a workflow_dispatch; a pushed tag skips them
-            run = dispatch
-        elif conditions[job]:
-            run = _evaluate(conditions[job], results, dry_run=dry_run, gate_green=gate_green)
-        else:
-            run = all(result == "success" for result in needs.values())
-        results[job] = "success" if run else "skipped"
-    return results
-
-
-@pytest.mark.parametrize("gate_green", [True, False])
-@pytest.mark.parametrize(
-    ("dispatch", "dry_run"), [(True, False), (False, False)], ids=["dispatch", "tag-push"]
-)
-def test_release_reaches_every_publish_job_on_both_trigger_paths(
-    dispatch: bool, dry_run: bool, gate_green: bool
-) -> None:
-    results = _simulate(dispatch=dispatch, dry_run=dry_run, gate_green=gate_green)
-    assert results["dispatch"] == ("success" if dispatch else "skipped")
-    assert results["ci"] == ("skipped" if gate_green else "success")
-    skipped = sorted(job for job, result in results.items() if result != "success" and job not in {"classify", "dispatch", "ci"})
-    assert not skipped, f"skipped after build: {skipped}"
-
-
-@pytest.mark.parametrize("gate_green", [True, False])
-def test_dry_run_reaches_smoke_and_stops_before_publish(gate_green: bool) -> None:
-    results = _simulate(dispatch=True, dry_run=True, gate_green=gate_green)
-    assert results["preflight"] == results["build"] == results["smoke-artifacts"] == "success"
-    for job in ("publish-testpypi", "publish-pypi", "github-release", "post-release-compatibility",
-                "verify-testpypi", "verify-pypi", "docs", "advance-main"):
-        assert results[job] == "skipped", job
-
-
-def test_dry_run_never_tags_and_builds_the_sha() -> None:
-    workflow = _read_release_workflow()
-    assert "name: Create the annotated tag on the SHA\n        if: ${{ !inputs.dry_run }}" in workflow
-    assert "inputs.dry_run && inputs.sha ||" in workflow  # preflight checks out the SHA in a dry run
-    assert workflow.count("ref: ${{ needs.preflight.outputs.ref }}") == 5  # ci, build, github-release, post-release, docs
+    assert workflow.count("ref: ${{ needs.preflight.outputs.ref }}") == 2  # github-release, docs
+    assert workflow.count("COMMIT: ${{ needs.preflight.outputs.commit }}") == 2  # manifest, advance-main
+    assert 'echo "ref=refs/tags/v${version}" >> "${GITHUB_OUTPUT}"' in workflow
+    assert 'echo "commit=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"' in workflow
+    # the published files come from the tag job's upload, which is the pre-check's download
+    assert workflow.count("name: release-dist\n") == 3  # tag uploads; publish-pypi, github-release download

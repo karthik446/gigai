@@ -30,7 +30,13 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
-### Unreleased
+### 0.1.10.4
+
+#### Added
+
+- **Releases are now one click after a green pre-check.** The release gate also builds and smoke
+  tests the package, and Release publishes exactly that tested build. A `rollback` workflow can
+  yank a bad version and point the docs `latest` alias back.
 
 #### Changed
 

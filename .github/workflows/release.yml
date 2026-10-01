@@ -1,92 +1,117 @@
 name: Release
 
+# The operator's half of a release. One click, nothing to fill in:
+#   Actions > Release > Run workflow > pick the branch > Run
+#   (gh workflow run release.yml --ref karthik446/gigai-vX.Y.Z)
+#
+# It releases the head commit of that branch as the version in pyproject.toml.
+# It runs no checks. The checks are the pre-check, dispatched beforehand (by the
+# coordinator, as often as needed):
+#   gh workflow run pull_request.yaml --ref <branch> -f profile=release
+# `preflight` finds the green pre-check run on exactly this commit, or fails at
+# once naming the pre-check to dispatch. Then: tag v<version> on the commit,
+# publish that run's files to PyPI (nothing is rebuilt), GitHub Release, docs,
+# fast-forward main. The PyPI install check and the compatibility sweep come
+# after the release and never fail this run.
+#
+# There is no tag-push trigger: a pushed tag would skip the pre-check rule.
+run-name: Release ${{ github.ref_name }}
+
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
-    inputs:
-      sha:
-        description: Full commit SHA to release (on main or a karthik446/gigai-v* branch)
-        required: true
-        type: string
-      version:
-        description: Version to release, e.g. 0.1.9.1 (tag v<version> is created on the SHA)
-        required: true
-        type: string
-      dry_run:
-        description: Run validate, preflight, CI (or its skip), build and smoke, then stop before creating the tag and before any publish
-        required: true
-        type: boolean
-        default: true
 
 concurrency:
-  group: release-${{ inputs.version || github.ref_name }}
+  group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  classify:
-    name: Patch or minor release?
-    # workflow_dispatch only. A four-part version (0.1.10.4) is a patch and
-    # releases without a person; anything else (0.1.11, 0.2.0, 1.0.0) waits for
-    # the operator's approval in the `release-minor` environment.
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 2
-    outputs:
-      kind: ${{ steps.kind.outputs.kind }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          sparse-checkout: tools
-      - id: kind
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: python -m tools.release_dispatch --kind "${RELEASE_VERSION}" >> "${GITHUB_OUTPUT}"
-
-  dispatch:
-    name: Validate dispatch inputs and tag the release
-    # workflow_dispatch only; a pushed v* tag skips this job (the tag exists).
-    needs: classify
-    if: github.event_name == 'workflow_dispatch'
+  preflight:
+    name: Find the green pre-check on this commit
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # `release-patch` has no protection rule. `release-minor` has the operator as
-    # a required reviewer, so a real minor/major release pauses here, before the
-    # tag exists, until the operator approves it in GitHub (web or mobile).
-    # A dry run never waits: it creates no tag and publishes nothing.
-    environment: ${{ (inputs.dry_run || needs.classify.outputs.kind == 'patch') && 'release-patch' || 'release-minor' }}
     permissions:
-      contents: write
+      contents: read
+      actions: read
     outputs:
-      tag: ${{ steps.name.outputs.tag }}
+      tag: ${{ steps.metadata.outputs.tag }}
+      ref: ${{ steps.metadata.outputs.ref }}
+      commit: ${{ steps.metadata.outputs.commit }}
+      version: ${{ steps.metadata.outputs.version }}
+      precheck_run: ${{ steps.precheck.outputs.run_id }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Validate sha and version
+      - id: metadata
+        run: |
+          if [ "${GITHUB_REF_TYPE}" != branch ]; then
+            echo "::error::Release runs on a branch (main or karthik446/gigai-v*), not on the ${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          # the head of the branch when Run was clicked; everything below uses this commit
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
+          echo "ref=refs/tags/v${version}" >> "${GITHUB_OUTPUT}"
+          echo "commit=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+      - id: precheck
+        name: Green pre-check run on exactly this commit, with its release files
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ inputs.sha }}
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: python -m tools.release_dispatch --sha "${RELEASE_SHA}" --version "${RELEASE_VERSION}"
-      - id: name
-        name: Name the release tag
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: python3 tools/release_gate.py --commit "${GITHUB_SHA}" --branch "${GITHUB_REF_NAME}" --version "${VERSION}" >> "${GITHUB_OUTPUT}"
+      - name: The version is still free (no PyPI release, no tag on another commit)
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: echo "tag=v${RELEASE_VERSION}" >> "${GITHUB_OUTPUT}"
-      - name: Create the annotated tag on the SHA
-        if: ${{ !inputs.dry_run }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: python3 -m tools.release_dispatch --sha "${GITHUB_SHA}" --version "${VERSION}" --branch "${GITHUB_REF_NAME}"
+      - name: Require the pypi publication environment
         env:
-          RELEASE_SHA: ${{ inputs.sha }}
-          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/environments/pypi" --silent
+
+  tag:
+    name: Tag the commit and stage the pre-check's release files
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      attestations: write
+      artifact-metadata: write
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.preflight.outputs.commit }}
+      - name: Download the release files the pre-check built and smoke-tested
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dist-${{ needs.preflight.outputs.version }}
+          path: dist
+          run-id: ${{ needs.preflight.outputs.precheck_run }}
+          github-token: ${{ github.token }}
+      # Not a rebuild: the downloaded wheel and sdist must be this version and
+      # match the SHA256SUMS the pre-check wrote next to them.
+      - run: python3 tools/release_check.py verify-checksums
+      - name: Attest wheel and source distribution provenance
+        uses: actions/attest@v4
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: Create the annotated tag on the commit
+        env:
+          RELEASE_SHA: ${{ needs.preflight.outputs.commit }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          # tools.release_dispatch already accepted an existing tag only when it
-          # peels to exactly this SHA and has no GitHub Release (re-dispatch after
-          # a partial run), so a matching tag is reused instead of re-created.
+          # tools.release_dispatch (preflight) accepted an existing tag only when it
+          # peels to exactly this commit and has no GitHub Release (a second run
+          # after a partial one), so a matching tag is reused instead of re-created.
           if [ "$(git rev-parse -q --verify "refs/tags/v${RELEASE_VERSION}^{}" || true)" = "${RELEASE_SHA}" ]; then
             echo "tag v${RELEASE_VERSION} already exists at ${RELEASE_SHA}; reusing it"
           else
@@ -95,193 +120,15 @@ jobs:
             git tag -a "v${RELEASE_VERSION}" -m "GigAI ${RELEASE_VERSION}" "${RELEASE_SHA}"
             git push origin "refs/tags/v${RELEASE_VERSION}"
           fi
-      - name: Dry run creates no tag
-        if: ${{ inputs.dry_run }}
-        run: echo "dry run - v${{ inputs.version }} at ${{ inputs.sha }} validated; no tag created, the later jobs build and smoke the SHA"
-
-  preflight:
-    name: Release preflight
-    needs: dispatch
-    # A pushed tag skips `dispatch`; a dispatch (dry run or real) continues once
-    # its validation passed. A dry run checks out the SHA, a real run the tag.
-    if: ${{ !cancelled() && (needs.dispatch.result == 'skipped' || needs.dispatch.result == 'success') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      tag: ${{ steps.metadata.outputs.tag }}
-      ref: ${{ steps.metadata.outputs.ref }}
-      commit: ${{ steps.metadata.outputs.commit }}
-      version: ${{ steps.metadata.outputs.version }}
-      gate_green: ${{ steps.gate.outputs.gate_green }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ref: ${{ inputs.dry_run && inputs.sha || format('refs/tags/{0}', needs.dispatch.outputs.tag || github.ref_name) }}
-      - id: metadata
-        env:
-          RELEASE_TAG: ${{ needs.dispatch.outputs.tag || github.ref_name }}
-          DISPATCH_SHA: ${{ inputs.sha }}
-          DRY_RUN: ${{ inputs.dry_run }}
-        run: |
-          if [ "${DRY_RUN}" = true ]; then
-            # dry run: no tag exists yet; everything below runs on the SHA itself
-            test "$(git rev-parse HEAD)" = "${DISPATCH_SHA}"
-            echo "ref=${DISPATCH_SHA}" >> "${GITHUB_OUTPUT}"
-            echo "commit=${DISPATCH_SHA}" >> "${GITHUB_OUTPUT}"
-          else
-            test "$(git cat-file -t "refs/tags/${RELEASE_TAG}")" = tag
-            if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then
-              test "$(git rev-parse "refs/tags/${RELEASE_TAG}^{}")" = "${DISPATCH_SHA}"
-            else
-              test "${GITHUB_REF_TYPE}" = tag
-            fi
-            echo "ref=refs/tags/${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
-            echo "commit=$(git rev-parse "refs/tags/${RELEASE_TAG}^{}")" >> "${GITHUB_OUTPUT}"
-          fi
-          echo "tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
-          python tools/release_check.py verify-tag --tag "${RELEASE_TAG}"
-          python tools/release_check.py verify-lockfile
-          echo "version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "${GITHUB_OUTPUT}"
-      - id: gate
-        name: Was the release gate already green on this tree?
-        env:
-          GH_TOKEN: ${{ github.token }}
-          COMMIT: ${{ steps.metadata.outputs.commit }}
-        run: python tools/release_gate.py --commit "${COMMIT}" >> "${GITHUB_OUTPUT}"
-      - name: Require named publication environments
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for environment in testpypi pypi; do
-            gh api "repos/${GITHUB_REPOSITORY}/environments/${environment}" --silent
-          done
-
-  ci:
-    name: Exact-tag CI
-    needs: preflight
-    # ci-spike: skip the duplicate run when the release gate ("Pull request
-    # (release)", workflow_dispatch) already passed on this exact TREE. Compared
-    # by tree, not commit: a squash merge gives the tag a new commit id with the
-    # same tree as the tested PR head (v0.1.9: 80865ec and 9728387 share tree 12e7cfa).
-    # Explicit status check: on the tag-push path `dispatch` (an ancestor) is skipped.
-    if: needs.preflight.outputs.gate_green != 'true' && !cancelled() && needs.preflight.result == 'success'
-    uses: ./.github/workflows/pull_request.yaml
-    permissions:
-      contents: read
-      actions: read
-    with:
-      profile: release
-      ref: ${{ needs.preflight.outputs.ref }}
-
-  build:
-    name: Build and attest release artifacts
-    needs: [preflight, ci]
-    # `ci` is skipped (not failed) when the gate already passed on this tree.
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      attestations: write
-      artifact-metadata: write
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.preflight.outputs.ref }}
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-      - uses: astral-sh/setup-uv@v8.0.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - run: rm -rf dist
-      - run: uv build --no-sources
-      - run: python tools/release_check.py verify-artifacts
-      - run: python tools/release_check.py write-checksums
-      - run: python tools/release_check.py verify-checksums
-      - name: Attest wheel and source distribution provenance
-        uses: actions/attest@v4
-        with:
-          subject-checksums: dist/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: release-dist
           if-no-files-found: error
           path: dist/
 
-  smoke-artifacts:
-    name: Fresh wheel and source-distribution smoke test
-    needs: [preflight, build]
-    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
-    # would skip this job through the implicit success(), so gate on direct needs.
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-      - uses: astral-sh/setup-uv@v8.0.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-dist
-          path: dist
-      - env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          for artifact in dist/*.whl dist/*.tar.gz; do
-            root="$(mktemp -d)"
-            uv venv --python 3.11 "${root}/venv"
-            uv pip install --python "${root}/venv/bin/python" "${artifact}"
-            "${root}/venv/bin/gigai" --version | grep -Fx "gigai ${VERSION}"
-            "${root}/venv/bin/gigai" --help >/dev/null
-            "${root}/venv/bin/gigai" setup --non-interactive --home "${root}/home" --workpad-root "${root}/workpad" --editor /usr/bin/true \
-              --credential-ref provider=environment:GIGAI_PROVIDER_TOKEN \
-              --endpoint remote=openai_api:provider:https://api.example.test \
-              --model-target remote=remote:smoke-test \
-              --create-model-target remote \
-              --json >/dev/null
-            "${root}/venv/bin/gigai" doctor --home "${root}/home" --json >/dev/null
-          done
-
-  publish-testpypi:
-    name: Publish to TestPyPI
-    needs: [preflight, smoke-artifacts]
-    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
-    # would skip this job through the implicit success(), so gate on direct needs.
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.smoke-artifacts.result == 'success' && !inputs.dry_run }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    environment: testpypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-dist
-          path: dist
-      - name: Prepare package-only publisher input
-        run: |
-          mkdir publish
-          cp dist/*.whl dist/*.tar.gz publish/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish/
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
-
   publish-pypi:
     name: Publish to PyPI
-    needs: [preflight, publish-testpypi]
-    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
-    # would skip this job through the implicit success(), so gate on direct needs.
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.publish-testpypi.result == 'success' && !inputs.dry_run }}
+    needs: [preflight, tag]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: pypi
@@ -302,10 +149,7 @@ jobs:
 
   github-release:
     name: Verify provenance and create GitHub Release
-    needs: [preflight, build, publish-pypi]
-    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
-    # would skip this job through the implicit success(), so gate on direct needs.
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' && needs.publish-pypi.result == 'success' && !inputs.dry_run }}
+    needs: [preflight, publish-pypi]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -395,26 +239,11 @@ jobs:
               --generate-notes
           fi
 
-  post-release-compatibility:
-    name: Full compatibility matrix (post-release)
-    needs: [preflight, github-release]
-    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
-    # would skip this job through the implicit success(), so gate on direct needs.
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.github-release.result == 'success' }}
-    uses: ./.github/workflows/pull_request.yaml
-    permissions:
-      contents: read
-      actions: read
-    with:
-      profile: full
-      ref: ${{ needs.preflight.outputs.ref }}
-
   docs:
     name: Publish this version's docs (GitHub Pages)
     needs: [preflight, github-release]
-    # Same direct-needs gate as post-release-compatibility. Runs after the Release exists, so a
-    # docs failure never withholds a release; re-run it with docs.yml's workflow_dispatch.
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.github-release.result == 'success' }}
+    # Runs after the Release exists, so a docs failure never withholds a release;
+    # re-run it with docs.yml's workflow_dispatch.
     uses: ./.github/workflows/docs.yml
     permissions:
       contents: write
@@ -429,7 +258,6 @@ jobs:
     # main is the latest release and has no commits of its own, so it moves by a
     # fast-forward push: no post-release PR, no merge commit. A hotfix to an older
     # line (0.1.9.2 after 0.1.10) is not a descendant of main and is left alone.
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.github-release.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     continue-on-error: true
@@ -457,62 +285,10 @@ jobs:
             echo "::warning::main is not an ancestor of ${TAG} (older release line, or main has its own commits); main left unchanged"
           fi
 
-  verify-testpypi:
-    name: TestPyPI clean install on ${{ matrix.os }} (post-publish)
-    needs: [preflight, publish-testpypi]
-    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
-    # would skip this job through the implicit success(), so gate on direct needs.
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.publish-testpypi.result == 'success' }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-latest]
-    steps:
-      - uses: astral-sh/setup-uv@v8.0.0
-        with:
-          enable-cache: true
-      - env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          root="$(mktemp -d)"
-          export HOME="${root}/home"
-          export XDG_BIN_HOME="${root}/bin"
-          export XDG_DATA_HOME="${root}/data"
-          export PATH="${XDG_BIN_HOME}:${PATH}"
-
-          deadline=$((SECONDS + 600))
-          until uv tool install --refresh \
-            --index https://test.pypi.org/simple \
-            --index https://pypi.org/simple \
-            --index-strategy unsafe-best-match \
-            "gigai==${VERSION}"; do
-            if [ "${SECONDS}" -ge "${deadline}" ]; then
-              echo "gigai==${VERSION} did not appear on TestPyPI within 10 minutes" >&2
-              exit 1
-            fi
-            echo "gigai==${VERSION} not yet available on TestPyPI; retrying in 15s"
-            sleep 15
-          done
-
-          gigai --version | grep -Fx "gigai ${VERSION}"
-          gigai --help >/dev/null
-          gigai setup --non-interactive --home "${root}/gigai-home" --workpad-root "${root}/workpad" --editor /usr/bin/true \
-            --credential-ref provider=environment:GIGAI_PROVIDER_TOKEN \
-            --endpoint remote=openai_api:provider:https://api.example.test \
-            --model-target remote=remote:smoke-test \
-            --create-model-target remote \
-            --json >/dev/null
-          gigai doctor --home "${root}/gigai-home" --json >/dev/null
-
   verify-pypi:
     name: PyPI clean install on ${{ matrix.os }} (post-publish)
     needs: [preflight, github-release]
-    # `ci` is skipped when the gate already passed on this tree; a skipped ancestor
-    # would skip this job through the implicit success(), so gate on direct needs.
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.github-release.result == 'success' }}
+    # After the release; continue-on-error, so it never fails this run.
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     continue-on-error: true
@@ -552,3 +328,24 @@ jobs:
             --create-model-target remote \
             --json >/dev/null
           gigai doctor --home "${root}/gigai-home" --json >/dev/null
+
+  post-release-compatibility:
+    name: Start the compatibility sweep (its own run)
+    needs: [preflight, github-release]
+    # The sweep (compatibility_job.yaml: profile full, up to an hour on macOS) is
+    # started as a separate run on the tag, so this run neither waits for it nor
+    # takes its result.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          gh workflow run compatibility_job.yaml --repo "${GITHUB_REPOSITORY}" --ref "${TAG}" || {
+            echo "::warning::could not start the compatibility sweep; run: gh workflow run compatibility_job.yaml --ref ${TAG}"
+            exit 1
+          }

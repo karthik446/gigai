@@ -1,14 +1,18 @@
-"""Decide whether the release gate already passed on the tagged commit's tree.
+"""Find the green pre-check run on exactly the commit being released.
 
-A squash merge gives the tag a new commit id but keeps the tree of the tested
-PR head, so the lookup compares tree ids, not commit ids. When no successful
-gate run matches, the caller runs the exact-tag CI instead (fail closed).
+The pre-check is ``pull_request.yaml`` dispatched with ``profile=release``. It
+tests the commit, builds the release files and uploads them as the artifact
+``release-dist-<version>``. ``release.yml`` runs no checks of its own: it asks
+here for that run and publishes its files. The match is by commit id, not by
+tree: the operator releases the branch head, so a head that moved after the
+pre-check needs a new pre-check. Anything else fails closed with one line that
+names the pre-check to dispatch.
 """
 
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 import json
 import os
 import subprocess
@@ -17,26 +21,72 @@ import sys
 GATE_DISPLAY_TITLE = "Pull request (release)"
 GATE_WORKFLOW = "pull_request.yaml"
 GATE_RUN_LIMIT = 30
+DIST_ARTIFACT_PREFIX = "release-dist-"
+
+Run = Mapping[str, object]
 
 
-def find_gate_commit(
-    tree: str,
-    runs: Iterable[Mapping[str, object]],
-    tree_of_commit: Callable[[str], str | None],
-) -> str | None:
-    """Return the head sha of a successful gate run whose commit has ``tree``."""
+class PrecheckError(ValueError):
+    """Raised when the commit has no usable green pre-check run."""
 
-    for run in runs:
-        if run.get("display_title") != GATE_DISPLAY_TITLE:
-            continue
-        if run.get("conclusion", "success") != "success":
-            continue
-        head_sha = run.get("head_sha")
-        if not isinstance(head_sha, str) or not head_sha:
-            continue
-        if tree_of_commit(head_sha) == tree:
-            return head_sha
-    return None
+
+def precheck_command(branch: str) -> str:
+    """Return the command that dispatches the pre-check on ``branch``."""
+
+    return f"gh workflow run {GATE_WORKFLOW} --ref {branch} -f profile=release"
+
+
+def dist_artifact_name(version: str) -> str:
+    """Return the name of the artifact the pre-check uploads for ``version``."""
+
+    return f"{DIST_ARTIFACT_PREFIX}{version}"
+
+
+def find_precheck_run(sha: str, branch: str, runs: Iterable[Run]) -> int:
+    """Return the id of the newest green pre-check run on exactly ``sha``.
+
+    ``runs`` are ``pull_request.yaml`` runs, newest first: the ones on ``sha``
+    and the recent ones on ``branch`` (used only to say that the head moved).
+    """
+
+    prechecks = [run for run in runs if run.get("display_title") == GATE_DISPLAY_TITLE]
+    on_sha = [run for run in prechecks if run.get("head_sha") == sha]
+    for run in on_sha:
+        run_id = run.get("id")
+        if run.get("status") == "completed" and run.get("conclusion") == "success" and isinstance(run_id, int):
+            return run_id
+    again = f"dispatch a new one: {precheck_command(branch)}"
+    for run in on_sha:
+        if run.get("status") != "completed":
+            raise PrecheckError(
+                f"pre-check run {run.get('id')} on {sha} is still running; "
+                "run Release again when it is green"
+            )
+    if on_sha:
+        run = on_sha[0]
+        raise PrecheckError(
+            f"pre-check run {run.get('id')} on {sha} ended {run.get('conclusion')}, not success; {again}"
+        )
+    if prechecks:
+        run = prechecks[0]
+        raise PrecheckError(
+            f"{branch} moved after its last pre-check: run {run.get('id')} checked "
+            f"{run.get('head_sha')}, the head is now {sha}; {again}"
+        )
+    raise PrecheckError(f"no pre-check run on {sha}; {again}")
+
+
+def require_dist_artifact(run_id: int, version: str, branch: str, artifacts: Iterable[Run]) -> None:
+    """Require the pre-check run to still hold the release files for ``version``."""
+
+    name = dist_artifact_name(version)
+    for artifact in artifacts:
+        if artifact.get("name") == name and not artifact.get("expired"):
+            return
+    raise PrecheckError(
+        f"pre-check run {run_id} has no {name} artifact (expired, or not built for {version}); "
+        f"dispatch a new one: {precheck_command(branch)}"
+    )
 
 
 def _gh_json(path: str) -> object:
@@ -46,51 +96,45 @@ def _gh_json(path: str) -> object:
     return json.loads(result.stdout)
 
 
-def _github_runs(repository: str) -> list[Mapping[str, object]]:
-    payload = _gh_json(
-        f"repos/{repository}/actions/workflows/{GATE_WORKFLOW}/runs"
-        f"?event=workflow_dispatch&status=success&per_page={GATE_RUN_LIMIT}"
-    )
-    runs = payload.get("workflow_runs", []) if isinstance(payload, dict) else []
-    return [run for run in runs if isinstance(run, dict)]
+def _listed(path: str, key: str) -> list[Run]:
+    payload = _gh_json(path)
+    items = payload.get(key, []) if isinstance(payload, dict) else []
+    return [item for item in items if isinstance(item, dict)]
 
 
-def _github_tree(repository: str, sha: str) -> str | None:
-    try:
-        payload = _gh_json(f"repos/{repository}/git/commits/{sha}")
-    except subprocess.CalledProcessError:
-        return None
-    tree = payload.get("tree") if isinstance(payload, dict) else None
-    sha_value = tree.get("sha") if isinstance(tree, dict) else None
-    return sha_value if isinstance(sha_value, str) else None
+def _github_runs(repository: str, sha: str, branch: str) -> list[Run]:
+    runs = f"repos/{repository}/actions/workflows/{GATE_WORKFLOW}/runs?event=workflow_dispatch"
+    on_sha = _listed(f"{runs}&head_sha={sha}&per_page=100", "workflow_runs")
+    on_branch = _listed(f"{runs}&branch={branch}&per_page={GATE_RUN_LIMIT}", "workflow_runs")
+    return on_sha + on_branch
+
+
+def _github_artifacts(repository: str, run_id: int) -> list[Run]:
+    return _listed(f"repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100", "artifacts")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--commit", required=True, help="the tagged commit")
+    parser.add_argument("--commit", required=True, help="the full commit id being released")
+    parser.add_argument("--branch", required=True, help="the branch the release was started on")
+    parser.add_argument("--version", required=True, help="the version in pyproject.toml at the commit")
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
     args = parser.parse_args(argv)
 
-    tree = subprocess.run(
-        ["git", "rev-parse", f"{args.commit}^{{tree}}"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
     try:
-        gate = find_gate_commit(
-            tree,
-            _github_runs(args.repository),
-            lambda sha: _github_tree(args.repository, sha),
+        run_id = find_precheck_run(
+            args.commit, args.branch, _github_runs(args.repository, args.commit, args.branch)
         )
+        require_dist_artifact(
+            run_id, args.version, args.branch, _github_artifacts(args.repository, run_id)
+        )
+    except PrecheckError as error:
+        print(f"::error::{error}", file=sys.stderr)
+        return 1
     except (subprocess.CalledProcessError, json.JSONDecodeError, OSError) as error:
-        print(f"gate lookup failed, running exact-tag CI: {error}", file=sys.stderr)
-        gate = None
-    if gate:
-        print(f"gate run on {gate} passed for tree {tree}", file=sys.stderr)
-    else:
-        print(f"no passing gate run for tree {tree}; exact-tag CI will run", file=sys.stderr)
-    print(f"gate_green={'true' if gate else 'false'}")
+        print(f"::error::pre-check lookup failed, nothing released: {error}", file=sys.stderr)
+        return 1
+    print(f"run_id={run_id}")
     return 0
 
 

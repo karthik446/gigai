@@ -36,7 +36,7 @@
   "info": {
     "description": "Loopback-only HTTP API of `gigai scout`. Writes need Content-Type: application/json and a Host of the bound 127.0.0.1/localhost port. Errors are {\"error\": {\"code\", \"message\"}}. x-gigai-effect says whether a route changes stored state; x-gigai-external says whether it spends a model call or reads the network.",
     "title": "GigAI Scout local API",
-    "version": "0.1.10.3"
+    "version": "0.1.10.4"
   },
   "openapi": "3.1.0",
   "paths": {
