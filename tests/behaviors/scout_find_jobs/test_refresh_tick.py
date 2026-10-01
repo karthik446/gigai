@@ -112,6 +112,21 @@ def _wait_for(condition, *, seconds: float = 20.0) -> None:
         time.sleep(0.01)
 
 
+class _Gate:
+    """Holds every board request until ``set()``; ``entered`` is set as the first one arrives (no polling for "is it on the wire")."""
+
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self._released = threading.Event()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        self.entered.set()
+        return self._released.wait(timeout)
+
+    def set(self) -> None:
+        self._released.set()
+
+
 # --- the decision (pure) ---------------------------------------------------------
 
 
@@ -293,13 +308,15 @@ def test_no_manual_update_starts_while_a_tick_is_live_but_a_full_refresh_stops_t
     index = CompanyIndex.for_home(home)
 
     boards.requests.clear()
-    boards.gate = threading.Event()
+    gate = boards.gate = _Gate()
     outcome: list[str] = []
     ticking = threading.Thread(target=lambda: outcome.append(ticker.step()), daemon=True)
     ticking.start()
     try:
-        # One request per provider is on the wire (held at the gate); globex waits behind acme.
-        _wait_for(lambda: index.root in sources_update._LIVE_TICKS and (index.read_update_summary() or {}).get("tick") is not None)
+        # A request is on the wire, held at the gate: the tick is registered and cannot settle until the gate opens.
+        # (Stopping a tick before its first request would let it settle at once: that was the flake.)
+        assert gate.entered.wait(timeout=20), "the tick never asked a board"
+        assert index.root in sources_update._LIVE_TICKS and (index.read_update_summary() or {}).get("tick") is not None
         tick_id = index.read_update_summary()["update_id"]
 
         # A plain Update sources is refused: the tick is the live update.
@@ -310,9 +327,10 @@ def test_no_manual_update_starts_while_a_tick_is_live_but_a_full_refresh_stops_t
         # A Full refresh wins: it stops the tick, waits for it to settle, then starts.
         finished: list[dict] = []
         started: list[str] = []
+        finished_event = threading.Event()
         manual = threading.Thread(
             target=lambda: started.append(
-                start_background_update(home_root=home, target=target, client_factory=boards.client, limits=FAST, full_refresh=True, on_finished=finished.append)
+                start_background_update(home_root=home, target=target, client_factory=boards.client, limits=FAST, full_refresh=True, on_finished=lambda snap: (finished.append(snap), finished_event.set()))
             ),
             daemon=True,
         )
@@ -320,10 +338,11 @@ def test_no_manual_update_starts_while_a_tick_is_live_but_a_full_refresh_stops_t
         _wait_for(lambda: sources_update._LIVE_TICKS[index.root].stop.is_set())
         assert started == []  # still waiting for the tick: never two at once
     finally:
-        boards.gate.set()
-    ticking.join(timeout=20)
-    manual.join(timeout=20)
-    _wait_for(lambda: finished != [])
+        gate.set()
+    # Completion waits, not races: the tick settles, then the manual update runs to its end (git work, slow under load).
+    ticking.join()
+    manual.join()
+    finished_event.wait()
 
     assert outcome == ["ticked"] and not ticking.is_alive()
     assert started and started[0] != tick_id
