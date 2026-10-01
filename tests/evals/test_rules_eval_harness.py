@@ -109,3 +109,31 @@ def test_the_summary_scores_each_case_against_its_expected_verdicts() -> None:
     assert summary["wrong_v5"] == ["remote-only-city-mode-not-stated"]
     assert summary["v5"] == {"passed": 2, "of": 3, "rate": 0.6667}
     assert summary["calls"] == 5
+
+
+def test_case_flag_selects_only_the_named_cases(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    payload = rules.load_cases()
+    with_mode = next(case["id"] for case in payload["cases"] if payload["candidates"][case["candidate"]]["work_mode"])
+    without_mode = next(case["id"] for case in payload["cases"] if not payload["candidates"][case["candidate"]]["work_mode"])
+
+    assert rules.main(["--dry-run", "--case", with_mode, "--case", without_mode]) == 0
+    listed = [line.split()[1:3] for line in capsys.readouterr().out.splitlines()]
+    assert sorted(listed) == sorted([["v5", with_mode], ["v4", with_mode], ["v5", without_mode]])
+
+    assert rules.main(["--dry-run", "--case", with_mode, "--only-version", "v5"]) == 0
+    assert [line.split()[1:3] for line in capsys.readouterr().out.splitlines()] == [["v5", with_mode]]
+
+    report_path = tmp_path / "report.json"
+    assert rules.main(["--fake-model", "--case", without_mode, "--report", str(report_path), "--quiet"]) == 0
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert [row["case"] for row in report["rows"]] == [without_mode]
+    assert [item["case"] for item in report["summary"]["cases"]] == [without_mode]
+    assert report["run"]["planned_calls"] == 1
+
+
+def test_an_unknown_case_name_is_a_clear_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert rules.main(["--dry-run", "--case", "no-such-case"]) == 2
+    err = capsys.readouterr().err
+    assert "unknown case 'no-such-case'" in err and "known cases:" in err
+    assert rules.main(["--fake-model", "--case", "no-such-case", "--report", str(tmp_path / "r.json")]) == 2
+    assert not (tmp_path / "r.json").exists()

@@ -83,6 +83,18 @@ def posting_text(payload: Mapping[str, Any], case: Mapping[str, Any]) -> str:
     return f"{intro}\n\n{case['statement']}\n\n{payload['requirements']}"
 
 
+def select_cases(payload: Mapping[str, Any], names: Sequence[str] | None) -> dict[str, Any]:
+    """The payload narrowed to the named cases, in fixture order; an unknown name is a ValueError."""
+
+    if not names:
+        return dict(payload)
+    known = [case["id"] for case in payload["cases"]]
+    unknown = [name for name in names if name not in known]
+    if unknown:
+        raise ValueError(f"unknown case {', '.join(repr(name) for name in unknown)}; known cases: {', '.join(known)}")
+    return {**payload, "cases": [case for case in payload["cases"] if case["id"] in set(names)]}
+
+
 def plan(payload: Mapping[str, Any]) -> list[tuple[Mapping[str, Any], str]]:
     """``(case, version)`` calls in fixture order: v5 for every case, then v4 where its prompt differs."""
 
@@ -275,6 +287,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--concurrency", type=int, default=1, help="calls in flight at once (default 1)")
     parser.add_argument("--fake-model", action="store_true", help="offline: a temp home and the GIGAI_SCOUT_FIND_JOBS_TEST_MODEL seam")
     parser.add_argument("--dry-run", action="store_true", help="print the planned calls and exit without any model call")
+    parser.add_argument("--case", action="append", default=None, metavar="NAME", help="run only this labelled case (repeatable); default: every case")
+    parser.add_argument("--only-version", choices=(SHIPPED, BEFORE), default=None, help="call only this prompt version (default: both where a case has two)")
     parser.add_argument("--quiet", action="store_true")
     return parser
 
@@ -282,7 +296,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     payload = load_cases()
-    calls = plan(payload)
+    try:
+        payload = select_cases(payload, args.case)
+    except ValueError as exc:
+        print(f"--case: {exc}", file=sys.stderr)
+        return 2
+    calls = [call for call in plan(payload) if args.only_version in (None, call[1])]
     if args.dry_run:
         for index, (case, version) in enumerate(calls, 1):
             print(f"{index:3} {version} {case['id']} ({case['candidate']}) expects {case['expected']}")
