@@ -243,6 +243,19 @@ def _optional_str(value: object) -> str | None:
     return value if type(value) is str and value else None
 
 
+def slug_from_list_url(ats: str, url: str) -> str | None:
+    """The board slug when ``url`` is ``ats``'s list URL, else ``None`` (a detail URL, another provider's)."""
+
+    template = _LIST_URLS.get(ats)
+    if template is None:
+        return None
+    prefix, _, suffix = template.partition("{token}")
+    if not url.startswith(prefix) or not url.endswith(suffix) or len(url) <= len(prefix) + len(suffix):
+        return None
+    slug = url[len(prefix) : len(url) - len(suffix)]
+    return slug if slug and "/" not in slug and "?" not in slug else None
+
+
 @dataclass(frozen=True)
 class CompanyIndexEntry:
     """One company's index file."""
@@ -690,6 +703,20 @@ class CompanyIndex:
         # a plain filename character so it can never name another directory.
         return self.root / f"{ats}:{quote(slug, safe='')}.json"
 
+    def validators_for_url(self, ats: str, url: str) -> tuple[str | None, str | None] | None:
+        """``(etag, last_modified)`` the index holds for the board behind list ``url``; ``None`` when it holds neither.
+
+        Only a list URL maps to a company; a detail URL, an unindexed board
+        or an entry with no validators reads as ``None`` (the request stays
+        unconditional).
+        """
+
+        slug = slug_from_list_url(ats, url)
+        entry = self.read(ats, slug) if slug is not None else None
+        if entry is None or not (entry.etag or entry.last_modified):
+            return None
+        return entry.etag, entry.last_modified
+
     def read(self, ats: str, slug: str) -> CompanyIndexEntry | None:
         """The company's entry, or ``None`` when it is missing, corrupt or another company's."""
 
@@ -788,10 +815,27 @@ def refresh_company(
     """
 
     stamp = observed_at if observed_at is not None else index_stamp()
-    entry = cache.lookup(ats, board_list_url(ats, slug))
-    if entry is None:
-        return CompanyChange(ats, slug, STATUS_MISSING, code="not_cached")
+    list_url = board_list_url(ats, slug)
+    entry = cache.lookup(ats, list_url)
     previous = index.read(ats, slug)
+    if entry is None:
+        # A board that answered 304 to the index's own validators has no
+        # body on disk; the cache left a validator-only record saying so.
+        unchanged = cache.lookup_unchanged(ats, list_url) if previous is not None else None
+        if unchanged is None:
+            return CompanyChange(ats, slug, STATUS_MISSING, code="not_cached")
+        updated, change = observe_company(
+            previous,
+            company=company or previous.company,
+            ats=ats,
+            slug=slug,
+            observed_at=stamp,
+            not_modified=True,
+        )
+        etag, last_modified = unchanged
+        updated = replace(updated, etag=etag or updated.etag, last_modified=last_modified or updated.last_modified)
+        index.write(updated)
+        return change
     name = company or (previous.company if previous is not None else slug)
     observed: dict[str, ObservedPosting] | None = None
     digest = indexed_body_digest(ats, entry.sha256)
@@ -992,4 +1036,5 @@ __all__ = [
     "observe_company",
     "parse_board_body",
     "refresh_company",
+    "slug_from_list_url",
 ]

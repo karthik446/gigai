@@ -46,7 +46,7 @@ import json
 import os
 from pathlib import Path
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import pycountry
 
@@ -963,8 +963,59 @@ class BoardCache:
     *headers* other than ``ETag``/``Last-Modified`` are never stored.
     """
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, validator_source: "Callable[[str, str], tuple[str | None, str | None] | None] | None" = None) -> None:
         self.root = Path(root)
+        #: ``(provider, url) -> (etag, last_modified)`` for a board whose body is not cached; default: the
+        #: company index next to this cache (``<root>/../companies``), when that directory exists.
+        self._validator_source = validator_source
+
+    def indexed_validators(self, provider: str, url: str) -> tuple[str | None, str | None] | None:
+        """The company index's ETag/Last-Modified for ``url`` (e.g. from an imported snapshot), or ``None``."""
+
+        source = self._validator_source
+        if source is None:
+            companies = self.root.parent / "companies"
+            if not companies.is_dir():
+                return None
+            from .company_index import CompanyIndex
+
+            source = CompanyIndex(companies).validators_for_url
+            self._validator_source = source
+        try:
+            return source(provider, url)
+        except Exception:  # noqa: BLE001 - a broken index never blocks a board fetch; the request stays unconditional
+            return None
+
+    def store_unchanged(self, provider: str, url: str, *, etag: str | None, last_modified: str | None) -> None:
+        """Record a ``304`` answered to index validators when no body is cached: validators only, no body file."""
+
+        meta_path, _ = self._paths(provider, url)
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        meta = {
+            "url": url,
+            "sha256": None,
+            "etag": etag,
+            "last_modified": last_modified,
+            "marker": None,
+            "not_modified": True,
+            "stored_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        tmp_meta = meta_path.with_name(meta_path.name + f".tmp{os.getpid()}")
+        tmp_meta.write_text(json.dumps(meta, separators=(",", ":")), encoding="utf-8")
+        os.replace(tmp_meta, meta_path)
+
+    def lookup_unchanged(self, provider: str, url: str) -> tuple[str | None, str | None] | None:
+        """``(etag, last_modified)`` of a validator-only ``304`` record for ``url``; ``None`` for anything else."""
+
+        meta_path, body_path = self._paths(provider, url)
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(meta, dict) or meta.get("url") != url or meta.get("not_modified") is not True or body_path.exists():
+            return None
+        etag, last_modified = meta.get("etag"), meta.get("last_modified")
+        return etag if isinstance(etag, str) else None, last_modified if isinstance(last_modified, str) else None
 
     def _paths(self, provider: str, url: str) -> tuple[Path, Path]:
         name = digest_imported_bytes(url.encode("utf-8")).removeprefix("sha256:")[:40]
@@ -1073,7 +1124,8 @@ def _cached_request(
     ``marker`` (Greenhouse: the job's ``updated_at`` from the list) short-
     circuits without any request when the cached entry carries the same
     marker. Otherwise a conditional GET: ``304`` -> the cached body
-    (``hit``); ``200`` with an unchanged digest -> ``revalidated``; a new
+    (``hit``); with no cached body but validators in the company index, the request is conditional and a
+    ``304`` returns ``(b"", "unchanged")`` (nothing stored but the validators); ``200`` with an unchanged digest -> ``revalidated``; a new
     body -> ``miss`` and the entry is rewritten. Failure codes are exactly
     ``_request``'s (``network_error``/``http_error``), redacted the same way.
     """
@@ -1084,6 +1136,15 @@ def _cached_request(
     if entry is not None and marker is not None and entry.marker == marker:
         return entry.body, "hit"
     headers = BoardCache.conditional_headers(entry)
+    seeded: tuple[str | None, str | None] | None = None
+    if entry is None and cache is not None:
+        # No body on disk, but the company index (an imported snapshot, say) holds this board's validators.
+        seeded = cache.indexed_validators(provider, url)
+        if seeded is not None:
+            if seeded[0]:
+                headers["If-None-Match"] = seeded[0]
+            if seeded[1]:
+                headers["If-Modified-Since"] = seeded[1]
     try:
         response = client.get(url, headers=headers) if headers else client.get(url)
     except httpx.HTTPError:
@@ -1094,6 +1155,14 @@ def _cached_request(
         if cache is not None and marker != entry.marker:
             cache.store(provider, url, body=entry.body, etag=entry.etag, last_modified=entry.last_modified, marker=marker)
         return entry.body, "hit"
+    if response.status_code == 304 and seeded is not None and cache is not None:
+        cache.store_unchanged(
+            provider,
+            url,
+            etag=response.headers.get("etag") or seeded[0],
+            last_modified=response.headers.get("last-modified") or seeded[1],
+        )
+        return b"", "unchanged"
     if response.status_code != 200:
         _redacted_fail("http_error", provider, board_token)
     body = bytes(response.content)
@@ -1140,7 +1209,9 @@ def fetch_greenhouse_board(
     stats = stats if stats is not None else BoardFetchStats()
     list_url = _GREENHOUSE_LIST_URL.format(token=board_token)
     body, status = _cached_request(client, list_url, "greenhouse", board_token, cache=cache, stats=stats)
-    stats.cache = status
+    stats.cache = "hit" if status == "unchanged" else status
+    if status == "unchanged":
+        return BoardFetchResult((), stats)
     payload = _decode_json(body, "greenhouse", board_token)
     if type(payload) is not dict or type(payload.get("jobs")) is not list:
         _redacted_fail("bad_json", "greenhouse", board_token)
@@ -1194,7 +1265,9 @@ def fetch_lever_board(
 ) -> BoardFetchResult:
     stats = stats if stats is not None else BoardFetchStats()
     body, status = _cached_request(client, _LEVER_URL.format(token=board_token), "lever", board_token, cache=cache, stats=stats)
-    stats.cache = status
+    stats.cache = "hit" if status == "unchanged" else status
+    if status == "unchanged":
+        return BoardFetchResult((), stats)
     payload = _decode_json(body, "lever", board_token)
     if type(payload) is not list:
         _redacted_fail("bad_json", "lever", board_token)
@@ -1211,7 +1284,9 @@ def fetch_ashby_board(
 ) -> BoardFetchResult:
     stats = stats if stats is not None else BoardFetchStats()
     body, status = _cached_request(client, _ASHBY_URL.format(token=board_token), "ashby", board_token, cache=cache, stats=stats)
-    stats.cache = status
+    stats.cache = "hit" if status == "unchanged" else status
+    if status == "unchanged":
+        return BoardFetchResult((), stats)
     payload = _decode_json(body, "ashby", board_token)
     if type(payload) is not dict or type(payload.get("jobs")) is not list:
         _redacted_fail("bad_json", "ashby", board_token)
