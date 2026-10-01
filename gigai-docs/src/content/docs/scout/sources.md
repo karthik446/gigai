@@ -59,18 +59,24 @@ sources**.
 
 While Scout is open it keeps the store current by itself. The strip above
 **Run find jobs** says what it did, for example `updated 12 min ago · next
-check in 48 min`, and never starts anything itself: an update starts from the
+check at 13:00`, and never starts anything itself: an update starts from the
 **Update sources** and **Full refresh** buttons, or from the automatic check.
 
-- **Automatic checks.** About once an hour Scout checks the busy company
-  boards, and the quiet ones a slice at a time over about six hours. It waits
-  for your first **Update sources**, and steps aside while an update you
-  started is running.
+- **Automatic checks.** Eight times a day on weekdays (03:00, then every two
+  hours from 07:00 to 19:00) and twice on weekend days (09:00 and 18:00), in
+  your local time, Scout checks the busy company boards, and each quiet board
+  about twice a day. A check runs at a moderate pace on purpose (a few
+  requests a second, backing off when a site asks it to), so it takes ten to
+  fifteen minutes and then idles. If Scout was closed, one catch-up check runs
+  when you open it. It waits for your first **Update sources**, and steps
+  aside while an update you started is running. **Update sources** itself runs
+  at full speed.
 - **Title tags.** Each stored title gets a level and a function, first from
   built-in rules (no model). Titles the rules cannot place are sent to the
   model Scout is set up with, only for the roles your profiles search for.
-  The strip counts them: `Titles tagged: 4,400 by rules, 600 by model, 150
-  waiting`. If the model cannot be reached the strip says so in one line and
+  The strip counts them, for example `Function: 4,400 by rules, 600 by model,
+  150 waiting for the model, 3,000 not tagged by a model (background tagging of
+  the rest is off)`; only titles a model will actually tag are called waiting. If the model cannot be reached the strip says so in one line and
   Scout tries again later; searching keeps working.
 - **Descriptions.** `Descriptions checked for 6,100 postings, 2,900 not yet`
   is how many stored postings have their description text indexed on this
