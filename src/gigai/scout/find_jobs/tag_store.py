@@ -12,7 +12,9 @@ dropped and reopened, so a deleted store rebuilds in place.
 
 No model call lives here. ``function`` may later be filled by a model
 (``function_source`` = ``"model"``); ``titles_lacking_function`` lists what is
-still waiting for one.
+still waiting for one. A model that was asked and found no family leaves
+``function`` empty with ``function_source`` = ``"model"``: such a title is
+not asked again (``titles_awaiting_model`` leaves it out).
 """
 
 from __future__ import annotations
@@ -64,6 +66,9 @@ class TitleTag:
     prompt_version: str | None = None
 
 
+_OPEN_LOCK = threading.Lock()
+
+
 class TagStore:
     """Thread-safe (one writer, many readers) title-tag cache."""
 
@@ -89,6 +94,12 @@ class TagStore:
         return (st.st_dev, st.st_ino)
 
     def _open(self) -> sqlite3.Connection:
+        # Opening a brand-new store from two threads at once made one of them see a transient error and
+        # delete the file the other was writing: opens (and the rebuild) are serialised process-wide.
+        with _OPEN_LOCK:
+            return self._open_locked()
+
+    def _open_locked(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         for attempt in (0, 1):
             conn = sqlite3.connect(self.path, timeout=_BUSY_TIMEOUT_MS / 1000, isolation_level=None)
@@ -98,9 +109,10 @@ class TagStore:
                 conn.execute("PRAGMA synchronous=NORMAL")
                 self._ensure_schema(conn)
                 return conn
-            except sqlite3.DatabaseError:
+            except sqlite3.DatabaseError as exc:
                 conn.close()
-                if attempt:
+                # A locked/busy database is not a damaged one: never discard the file for it.
+                if attempt or isinstance(exc, sqlite3.OperationalError):
                     raise
                 self._discard_files()  # a cache: an unreadable file is rebuilt, not repaired
         raise AssertionError("unreachable")
@@ -190,6 +202,52 @@ class TagStore:
         ).fetchall()
         return [r[0] for r in rows]
 
+    @staticmethod
+    def _level_filter(levels: Iterable[str] | None, exclude_levels: Iterable[str] | None) -> tuple[str, list[str]]:
+        clause, values = "", []
+        for names, operator in ((levels, "IN"), (exclude_levels, "NOT IN")):
+            if names is None:
+                continue
+            listed = list(dict.fromkeys(names))
+            if not listed:
+                if operator == "IN":
+                    clause += " AND 0"  # no level asked for: nothing matches
+                continue
+            clause += f" AND level {operator} ({','.join('?' * len(listed))})"
+            values.extend(listed)
+        return clause, values
+
+    def titles_awaiting_model(
+        self,
+        limit: int = 1000,
+        *,
+        levels: Iterable[str] | None = None,
+        exclude_levels: Iterable[str] | None = None,
+    ) -> list[str]:
+        """Normalized titles no rule and no model has given a function, oldest first.
+
+        ``levels`` keeps only titles at those rules levels (the demand set:
+        the levels the active profiles ask for); ``exclude_levels`` leaves
+        those out (the backfill: everything else).
+        """
+
+        clause, values = self._level_filter(levels, exclude_levels)
+        rows = self._conn().execute(
+            "SELECT title_key FROM title_tags WHERE tagger_version = ? AND function IS NULL AND function_source IS NULL"
+            f"{clause} ORDER BY tagged_at, title_key LIMIT ?",
+            (self.tagger_version, *values, limit),
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def count_awaiting_model(self, *, levels: Iterable[str] | None = None, exclude_levels: Iterable[str] | None = None) -> int:
+        """How many titles ``titles_awaiting_model`` would list with no limit."""
+
+        clause, values = self._level_filter(levels, exclude_levels)
+        return self._conn().execute(
+            f"SELECT COUNT(*) FROM title_tags WHERE tagger_version = ? AND function IS NULL AND function_source IS NULL{clause}",
+            (self.tagger_version, *values),
+        ).fetchone()[0]
+
     # -- writes ----------------------------------------------------------
 
     def write_rules(self, tags: Iterable[TitleTag]) -> int:
@@ -233,8 +291,11 @@ class TagStore:
                 raise
         return written
 
-    def set_model_function(self, title_key: str, function: str, *, model: str, prompt_version: str) -> bool:
-        """Record a model's function for an already-tagged title; False if the title is not stored."""
+    def set_model_function(self, title_key: str, function: str | None, *, model: str, prompt_version: str) -> bool:
+        """Record a model's function for an already-tagged title; False if the title is not stored.
+
+        ``function`` ``None`` records that the model was asked and found no family.
+        """
 
         with self._write_lock:
             cur = self._conn().execute(

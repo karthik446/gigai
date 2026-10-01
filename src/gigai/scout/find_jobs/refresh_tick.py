@@ -28,8 +28,20 @@ The setting lives in ``<home>/scout/<project_id>/settings.json`` (beside
 that cannot be read is OFF (a background job that makes requests does not
 guess). :data:`AUTO_REFRESH_ENV` overrides the file either way.
 
+The model tag queue (0110-024 P3, ``model_tag.TagQueue``) rides the same
+thread: after every look, :meth:`RefreshTicker.step` lets the queue drain a
+bounded number of batches, unless an update is live (the queue yields to it)
+or the thread is stopping. The queue has its own setting
+(``tagging.model_enabled`` in the same settings file), so it also drains
+with the refresh off. :meth:`RefreshTicker.kick_tags` wakes the thread for a
+drain now (a profile changed, an update finished) instead of at the next
+poll. A drain never changes what :meth:`RefreshTicker.step` returns.
+
 :func:`background_status` is the one status block the refresh and the tag
-queue share (``GET /api/sources/update`` -> ``background``).
+queue share (``GET /api/sources/update`` -> ``background``). The queue's own
+counters (calls, failures, the last error, the backoff) are
+:meth:`RefreshTicker.tag_queue_status`; adding them to the block is the
+status packet's (P4).
 """
 
 from __future__ import annotations
@@ -46,6 +58,7 @@ import threading
 from typing import Any
 
 from .company_index import CompanyIndex, index_stamp
+from .model_tag import TagQueue
 from .refresh_plan import TICK_INTERVAL_SECONDS
 from .sources_update import (
     TRIGGER_MANUAL,
@@ -212,10 +225,12 @@ def _has_companies(index: CompanyIndex) -> bool:
 class RefreshTicker:
     """The hourly refresh thread of one Scout server.
 
-    ``clock``, ``wait``, ``run_tick`` and ``client_factory`` are seams for
-    tests (a fake clock, a fake fetcher); production passes none of them.
-    :meth:`step` is one look at the snapshot and, when a tick is due, the
-    tick itself, on the calling thread.
+    ``clock``, ``wait``, ``run_tick``, ``client_factory`` and ``tag_queue``
+    are seams for tests (a fake clock, a fake fetcher, a queue over a fake
+    model); production passes none of them. :meth:`step` is one look at the
+    snapshot and, when a tick is due, the tick itself, then one bounded drain
+    of the model tag queue, on the calling thread. ``model_tags=False`` runs
+    the refresh with no tag queue at all.
     """
 
     def __init__(
@@ -232,6 +247,8 @@ class RefreshTicker:
         poll_seconds: float = POLL_SECONDS,
         environ: Mapping[str, str] | None = None,
         logger: logging.Logger | None = None,
+        tag_queue: TagQueue | None = None,
+        model_tags: bool = True,
     ) -> None:
         self.home_root = Path(home_root)
         self.target = Path(target)
@@ -239,7 +256,8 @@ class RefreshTicker:
         self._client_factory = client_factory
         self._clock = clock if clock is not None else (lambda: datetime.now(timezone.utc))
         self._stop = threading.Event()
-        self._wait = wait if wait is not None else self._stop.wait
+        self._wake = threading.Event()  # set by a kick and by stop: ends the wait between looks
+        self._wait = wait if wait is not None else self._sleep
         self._run_tick = run_tick
         self._config_loader = config_loader
         self._poll_seconds = float(poll_seconds)
@@ -249,6 +267,9 @@ class RefreshTicker:
         self._tick_stop: threading.Event | None = None
         self._retry_after: datetime | None = None
         self._last_state: str | None = None
+        if tag_queue is None and model_tags:
+            tag_queue = TagQueue(home_root=self.home_root, target=self.target, clock=self._clock, environ=environ, logger=self._logger)
+        self._tag_queue = tag_queue
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -262,6 +283,7 @@ class RefreshTicker:
         """End the thread; a running tick stops between boards. ``True`` once the thread is gone."""
 
         self._stop.set()
+        self._wake.set()
         tick = self._tick_stop
         if tick is not None:
             tick.set()
@@ -279,6 +301,12 @@ class RefreshTicker:
     def stopping(self) -> bool:
         return self._stop.is_set()
 
+    def _sleep(self, seconds: float) -> None:
+        """Wait for the next look: ``seconds``, or less when the thread is stopped or kicked."""
+
+        if self._wake.wait(seconds):
+            self._wake.clear()
+
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
@@ -295,8 +323,47 @@ class RefreshTicker:
         return auto_refresh_setting(self.home_root, self.target, environ=self._environ)
 
     def step(self) -> str:
-        """Decide, and run a tick when one is due. Returns what happened (a ``STATE_*``, ``ticked``, ``yielded`` or ``failed``)."""
+        """Decide, and run a tick when one is due. Returns what happened (a ``STATE_*``, ``ticked``, ``yielded`` or ``failed``).
 
+        Then the model tag queue drains its batches for this look; what it did
+        is in :meth:`tag_queue_status`, never in the return value.
+        """
+
+        outcome = self._refresh_step()
+        self._drain_tags(outcome)
+        return outcome
+
+    # -- the model tag queue -----------------------------------------------
+
+    @property
+    def tag_queue(self) -> TagQueue | None:
+        return self._tag_queue
+
+    def kick_tags(self, *, reset_backoff: bool = False) -> None:
+        """Drain the tag queue now instead of at the next poll (the roles are read again)."""
+
+        if self._tag_queue is not None:
+            self._tag_queue.kick(reset_backoff=reset_backoff)
+        self._wake.set()
+
+    def tag_queue_status(self) -> dict[str, object] | None:
+        """The queue's counters, last error and backoff; ``None`` when this thread has no queue."""
+
+        return None if self._tag_queue is None else self._tag_queue.status()
+
+    def _drain_tags(self, outcome: str) -> None:
+        queue = self._tag_queue
+        if queue is None or self._stop.is_set() or outcome in (STATE_RUNNING, "yielded"):
+            return  # stopping, or an update is live: one thing at a time
+        try:
+            result = queue.drain(stop=self._stop)
+        except Exception as exc:  # noqa: BLE001 - the tag queue never takes the refresh thread down
+            self._logger.warning("model tags: the drain hit %s; it goes on", type(exc).__name__)
+            return
+        if result.batches:
+            self._logger.info("model tags: %s batches=%s tagged=%s rejected=%s calls=%s", result.state, result.batches, result.tagged, result.rejected, result.calls)
+
+    def _refresh_step(self) -> str:
         if not self.setting().enabled:
             return self._note(STATE_DISABLED)
         now = self._clock()

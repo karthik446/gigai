@@ -413,6 +413,52 @@ def test_the_detector_finds_the_values_when_the_strip_is_disabled(
     assert payloads and set(leaks(payloads[0])) == set(FORBIDDEN)
 
 
+def test_a_model_tag_payload_carries_titles_and_locations_and_no_resume_or_profile_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0110-024 P3: the background tag queue's model call, through the same capture and tripwires."""
+
+    from gigai.scout.find_jobs import posting_tags
+    from gigai.scout.find_jobs.company_index import CompanyIndex, CompanyIndexEntry, IndexedPosting, index_stamp
+    from gigai.scout.find_jobs.model_tag import TagQueue, load_demand
+
+    fixture = _home(tmp_path, monkeypatch)
+    # Titles at the profile's own level ("staff software engineer" -> staff) that the rules cannot place.
+    stamp = index_stamp()
+    listed = {"1": ("Staff Alchemist", "Denver, CO"), "2": ("Staff Wizard", "Remote - US")}
+    CompanyIndex.for_home(fixture.home).write(CompanyIndexEntry(
+        company="Initrode", ats="greenhouse", slug="initrode", checked_at=stamp, etag=None, body_sha256=None,
+        postings={
+            key: IndexedPosting(posting_id=key, title=title, location=location, url=f"https://boards.greenhouse.io/initrode/jobs/{key}", updated_at=None, content_sha256=None, first_seen=stamp, last_seen=stamp)
+            for key, (title, location) in listed.items()
+        },
+    ))
+    store = posting_tags.default_store(fixture.home)
+    try:
+        assert posting_tags.tag_new_titles(store, [title for title, _location in listed.values()]).tagged == 2
+    finally:
+        store.close()
+    assert load_demand(fixture.home, fixture.target).levels == ("staff",)  # the real profile is the one asking
+
+    capture = arm(monkeypatch)
+    with capture.running("tags"):
+        queue = TagQueue(home_root=fixture.home, target=fixture.target, config=fixture.config, live_update=lambda: False)
+        result = queue.drain()
+
+    assert capture.tripped == [], "an un-faked network path or child process ran"
+    payloads = capture.model_payloads("tags")
+    # Non-vacuous: the call went out with both titles and their locations in it.
+    # (The fixture model answers with an assessment, so the answer is refused AFTER the payload was sent.)
+    assert payloads and result.calls >= 1 and result.tagged == 0
+    for wanted in (b"Staff Alchemist", b"Denver, CO", b"Staff Wizard", b"Remote - US"):
+        assert wanted in payloads[0]
+    for payload in payloads:
+        assert leaks(payload) == []
+        # Titles and locations only: no resume text, no headline, no skill token, no role text, no company.
+        for absent in (BODY_MARKER, RANK_MARKER, HEADLINE, "Kubernetes", "staff software engineer", "Initrode", "initrode"):
+            assert absent.encode() not in payload, absent
+
+
 # --- the CLI adapters: the prompt goes on stdin, nothing else is sent -------------------------------------
 
 
