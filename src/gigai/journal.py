@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from typing import Callable, Iterable, Iterator, TypeVar
+from typing import Callable, Collection, Iterable, Iterator, TypeVar
 
 from .canonical import (
     EntityPrefix,
@@ -39,7 +39,10 @@ from .workpad import (
     layout_paths_touched,
     read_cache_key_lock as _read_cache_key_lock,
     read_still_holds,
+    repository_check_holds,
+    straight_commits_between,
     workpad_fingerprint,
+    workpad_head_without_git,
     workpad_layout_version,
 )
 
@@ -250,6 +253,45 @@ class JournalWriter:
         return _capture_committed_snapshot(
             self.root, self.project_id, self.gig_id, prefixes
         )
+
+    # 0110-036: what a caller that keeps a family between writes asks under
+    # the lock, of the workpad this section already checked.
+
+    def head(self) -> str | None:
+        """The journal head now; it cannot move while this section holds the lock."""
+
+        return _committed_head(self.root)
+
+    def is_committed(self, path: str) -> bool:
+        """Whether ``path`` is in the tree at the head."""
+
+        checked = _validate_artifacts((JournalArtifact(path, b""),))[0].path
+        head = self.head()
+        if head is None:
+            return False
+        return _git(self.root, "cat-file", "-e", f"{head}:{checked}", check=False).returncode == 0
+
+    def additions(self, old_head: str, prefix: str, known: Collection[str]) -> dict[str, tuple[str, bytes]] | None:
+        """:func:`read_committed_additions` from ``old_head`` to the head now."""
+
+        head = self.head()
+        if head is None:
+            return None
+        return _read_committed_additions(self.root, self.gig_id, old_head, head, prefix, known)
+
+    def family(self, prefix: str) -> tuple["JournalSnapshot", frozenset[str]]:
+        """:func:`read_committed_family`."""
+
+        if not _snapshot_prefix_is_valid(prefix):
+            raise JournalConflictError("journal snapshot prefixes are invalid")
+        history: dict[str, list[str]] = {}
+        snapshot = _capture_committed_snapshot(self.root, self.project_id, self.gig_id, (prefix,), history)
+        return snapshot, frozenset(history)
+
+    def blob_ids(self, head: str, prefix: str) -> dict[str, str] | None:
+        """:func:`committed_blob_ids`."""
+
+        return _committed_blob_ids(self.root, head, prefix)
 
 
 @dataclass(frozen=True)
@@ -743,7 +785,12 @@ def _validate_workpad(workpad: Path, project_id: str, gig_id: str) -> Path:
     with _read_cache_key_lock(("workpad", *cache_key)):
         with _READ_CACHE_LOCK:
             passed_at = _validated_workpads.get(cache_key)
-        if passed_at is None or not read_still_holds(root, passed_at, checked_at, layout_paths_touched):
+        if (passed_at is None or not read_still_holds(root, passed_at, checked_at, layout_paths_touched)) and not (
+            # 0110-036: ``workpad``'s repository check asks git for everything
+            # these checks ask (and more); passed at this fingerprint, it is
+            # not asked a second time (10 subprocesses a first read).
+            repository_check_holds(root, project_id, gig_id, checked_at)
+        ):
             _check_workpad(root, project_id, gig_id)
             if workpad_fingerprint(root) != checked_at:
                 return root  # it moved while it was checked: this pass is not kept
@@ -1517,6 +1564,12 @@ def _batch_publishing_commits(
 
 
 def _batch_read_blobs(root: Path, refs: list[str]) -> dict[str, bytes]:
+    """:func:`_batch_read_blob_objects` without the object ids."""
+
+    return {ref: data for ref, (_object_id, data) in _batch_read_blob_objects(root, refs).items()}
+
+
+def _batch_read_blob_objects(root: Path, refs: list[str]) -> dict[str, tuple[str, bytes]]:
     """``git cat-file --batch`` for every ``<ref>:<path>`` in ``refs`` at once,
 
     instead of one ``git show <ref>:<path>`` subprocess per blob. Missing
@@ -1524,6 +1577,9 @@ def _batch_read_blobs(root: Path, refs: list[str]) -> dict[str, bytes]:
     ``_git_bytes(root, "show", ref)`` would (via its non-zero exit), not
     silently -- ``git cat-file --batch`` reports those as a ``missing``
     line rather than exiting non-zero, so that line is checked explicitly.
+
+    Each blob comes with the object id git names it by (0110-036: what a kept
+    family files a proven artifact under).
     """
 
     if not refs:
@@ -1540,7 +1596,7 @@ def _batch_read_blobs(root: Path, refs: list[str]) -> dict[str, bytes]:
     if process.returncode != 0:
         raise JournalConflictError("journal Git object lookup failed")
     stdout = process.stdout
-    blobs: dict[str, bytes] = {}
+    blobs: dict[str, tuple[str, bytes]] = {}
     offset = 0
     for ref in refs:
         header_end = stdout.index(b"\n", offset)
@@ -1552,7 +1608,7 @@ def _batch_read_blobs(root: Path, refs: list[str]) -> dict[str, bytes]:
         if len(parts) != 3:
             raise JournalConflictError("journal Git object lookup failed")
         size = int(parts[2])
-        blobs[ref] = stdout[offset : offset + size]
+        blobs[ref] = (parts[0], stdout[offset : offset + size])
         offset += size + 1  # the trailing newline after each blob's content
     return blobs
 
@@ -1600,6 +1656,7 @@ def _capture_committed_snapshot(
     project_id: str,
     gig_id: str,
     prefixes: tuple[str, ...],
+    history: dict[str, list[str]] | None = None,
 ) -> JournalSnapshot:
     """Enumerate private authority from a pinned Git tree, never ``glob``.
 
@@ -1680,6 +1737,11 @@ def _capture_committed_snapshot(
         paths.append(path)
 
     publishing_commits = _batch_publishing_commits(root, head, prefixes)
+    if history is not None:
+        # 0110-036: every path under the prefixes that ever had a publisher,
+        # for a caller that keeps the family (``read_committed_family``).
+        history.clear()
+        history.update(publishing_commits)
     checked_paths: dict[str, str] = {
         path: _validate_artifacts((JournalArtifact(path, b""),))[0].path for path in paths
     }
@@ -1942,6 +2004,7 @@ def _read_committed_snapshot(
     prefixes: tuple[str, ...],
     child_prefixes: tuple[tuple[str, str], ...],
     lock_timeout_seconds: float,
+    history: dict[str, list[str]] | None = None,
 ) -> JournalSnapshot:
     """:func:`read_committed_snapshot` after its argument checks, read from git every time."""
 
@@ -1956,7 +2019,10 @@ def _read_committed_snapshot(
         )
         if not selected:
             return JournalSnapshot(head, {})
-        snapshot = _capture_committed_snapshot(root, project_id, gig_id, selected)
+        if history is None:
+            snapshot = _capture_committed_snapshot(root, project_id, gig_id, selected)
+        else:
+            snapshot = _capture_committed_snapshot(root, project_id, gig_id, selected, history)
         if snapshot.head != head:
             raise JournalConflictError("journal head moved during a snapshot read")
         return snapshot
@@ -1966,6 +2032,156 @@ def _read_committed_snapshot(
     except JournalConflictError:
         with _writer_lock(root / ".git" / LOCK_FILENAME, lock_timeout_seconds):
             return capture()
+
+
+# --- 0110-036: one immutable family, read from where the last read stopped ---
+#
+# A snapshot of a family walks every commit that ever published into it (one
+# ``git log --name-only`` over the family, one ``git show --name-only`` of the
+# publishing commits): with one commit an application event, a read after
+# every write cost the whole history again. A caller that keeps what it read
+# at one head asks only for what the commits since added; every artifact it
+# gets back passed ``_validate_committed_artifact`` and the working-tree
+# comparison, exactly as in a snapshot. Anything that is not a plain addition
+# answers ``None``: the caller takes a snapshot, and any refusal comes from
+# there.
+
+
+def committed_head(*, workpad: Path, project_id: str, gig_id: str) -> str | None:
+    """The journal head of a checked workpad (from the ``.git`` files when they say; else asked of git)."""
+
+    _validate_ids(project_id, gig_id, None)
+    return _committed_head(_validate_workpad(workpad, project_id, gig_id))
+
+
+def _committed_head(root: Path) -> str | None:
+    return workpad_head_without_git(root) or _head_commit(root, required=False)
+
+
+def read_committed_family(
+    *, workpad: Path, project_id: str, gig_id: str, prefix: str, lock_timeout_seconds: float = LOCK_TIMEOUT_SECONDS,
+) -> tuple[JournalSnapshot, frozenset[str]]:
+    """A snapshot of ``prefix`` and every path under it that ever had a publisher, still there or not.
+
+    The snapshot is :func:`read_committed_snapshot`'s (no writer lock, retried
+    once under it), read from git every time. The paths are what
+    :func:`read_committed_additions` takes as ``known`` at the snapshot's head;
+    they come from the walk the snapshot makes anyway.
+    """
+
+    _validate_ids(project_id, gig_id, None)
+    if not _snapshot_prefix_is_valid(prefix):
+        raise JournalConflictError("journal snapshot prefixes are invalid")
+    history: dict[str, list[str]] = {}
+    snapshot = _read_committed_snapshot(workpad, project_id, gig_id, (prefix,), (), lock_timeout_seconds, history)
+    return snapshot, frozenset(history)
+
+
+def committed_blob_ids(*, workpad: Path, project_id: str, gig_id: str, head: str, prefix: str) -> dict[str, str] | None:
+    """``path -> blob id`` of everything under ``prefix`` at ``head``; ``None`` when ``head`` cannot be listed."""
+
+    _validate_ids(project_id, gig_id, None)
+    return _committed_blob_ids(_validate_workpad(workpad, project_id, gig_id), head, prefix)
+
+
+def _committed_blob_ids(root: Path, head: str, prefix: str) -> dict[str, str] | None:
+    if not _snapshot_prefix_is_valid(prefix):
+        raise JournalConflictError("journal snapshot prefixes are invalid")
+    try:
+        listing = _git_bytes(root, "ls-tree", "-r", "-z", head, "--", prefix)
+    except JournalConflictError:
+        return None
+    found: dict[str, str] = {}
+    for item in listing.split(b"\0"):
+        if not item:
+            continue
+        entry, tab, raw_path = item.partition(b"\t")
+        fields = entry.decode("ascii", errors="replace").split(" ")
+        if len(fields) != 3 or not tab or fields[1] != "blob":
+            return None
+        found[raw_path.decode("utf-8", errors="replace")] = fields[2]
+    return found
+
+
+def read_committed_additions(
+    *,
+    workpad: Path,
+    project_id: str,
+    gig_id: str,
+    old_head: str,
+    new_head: str,
+    prefix: str,
+    known: Collection[str],
+) -> dict[str, tuple[str, bytes]] | None:
+    """What the commits after ``old_head`` up to ``new_head`` added under ``prefix``, each artifact proven: ``path -> (blob id, bytes)``.
+
+    ``known`` is every path under ``prefix`` that had a publisher at
+    ``old_head`` (``read_committed_family``). ``None``, "take a snapshot",
+    unless ``new_head`` descends straight from ``old_head`` and every path the
+    commits between touched under ``prefix`` is new, was touched by exactly
+    one of them, passes the publication checks of a snapshot and is in the
+    working tree with the committed bytes. Two subprocesses whatever the
+    journal holds: the commits between (shared with the other kept reads) and
+    one ``git cat-file --batch``.
+    """
+
+    _validate_ids(project_id, gig_id, None)
+    root = _validate_workpad(workpad, project_id, gig_id)
+    return _read_committed_additions(root, gig_id, old_head, new_head, prefix, known)
+
+
+def _read_committed_additions(
+    root: Path, gig_id: str, old_head: str, new_head: str, prefix: str, known: Collection[str]
+) -> dict[str, tuple[str, bytes]] | None:
+    if not _snapshot_prefix_is_valid(prefix):
+        raise JournalConflictError("journal snapshot prefixes are invalid")
+    commits = straight_commits_between(root, old_head, new_head)
+    if commits is None:
+        return None
+    publisher: dict[str, str] = {}
+    for commit, names in commits:
+        for name in names:
+            if not name.startswith(prefix):
+                continue
+            if name in known or name in publisher or "\n" in name:
+                return None  # a second publisher, or a path removed and published again
+            publisher[name] = commit
+    if not publisher:
+        return {}
+    files = {commit: _CommitFiles.from_names(names) for commit, names in commits if commit in publisher.values()}
+    try:
+        checked = {path: _validate_artifacts((JournalArtifact(path, b""),))[0].path for path in publisher}
+        handoff_refs: dict[str, str] = {}
+        for path, commit in publisher.items():
+            handoffs = files[commit].handoffs
+            if len(handoffs) != 1:
+                return None
+            handoff_refs[path] = f"{commit}:{handoffs[0]}"
+        blobs = _batch_read_blob_objects(root, sorted({f"{new_head}:{path}" for path in publisher} | set(handoff_refs.values())))
+        handoffs_parsed: dict[str, _HandoffIndex] = {}
+        added: dict[str, tuple[str, bytes]] = {}
+        for path, commit in sorted(publisher.items()):
+            blob_id, data = blobs[f"{new_head}:{path}"]
+            ref = handoff_refs[path]
+            handoff = handoffs_parsed.get(ref)
+            if handoff is None:
+                handoff = handoffs_parsed[ref] = _HandoffIndex(blobs[ref][1])
+            _validate_committed_artifact(
+                path=path, checked=checked[path], gig_id=gig_id, candidates=[commit], commit=commit,
+                files=files[commit], handoff=handoff, data=data,
+                allow_replaced_run_details=True, allow_replaced_manifests=True,
+            )
+            current = root
+            for component in Path(path).parts:
+                current = current / component
+                if current.is_symlink():
+                    return None
+            if not current.is_file() or current.read_bytes() != data:
+                return None
+            added[path] = (blob_id, data)
+    except (JournalConflictError, OSError, ValueError):
+        return None
+    return added
 
 
 def _mount_identity(root: Path) -> tuple[int, int]:
@@ -2056,7 +2272,11 @@ __all__ = [
     "record_transition",
     "record_transition_chain",
     "reconcile_journal",
+    "committed_blob_ids",
+    "committed_head",
+    "read_committed_additions",
     "read_committed_artifact",
+    "read_committed_family",
     "read_committed_snapshot",
     "run_with_journal_writer",
 ]

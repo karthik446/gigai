@@ -103,8 +103,8 @@ _READ_CACHE_LOCK = threading.Lock()
 _validated_repositories: dict[tuple[object, ...], tuple[object, ...]] = {}
 _resolved_targets: dict[tuple[object, ...], tuple[tuple[object, ...], ResolvedTarget]] = {}
 _GIT_DISCOVERY_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM")
-# (workpad, old head, new head) -> the paths the commits between them touched; None: not a straight descendant.
-_committed_between: dict[tuple[str, str, str], frozenset[str] | None] = {}
+# (workpad, old head, new head) -> the commits between them, newest first, each with the paths it touched; None: not a straight descendant.
+_committed_between: dict[tuple[str, str, str], tuple[tuple[str, frozenset[str]], ...] | None] = {}
 _COMMITTED_BETWEEN_MAX = 64
 
 
@@ -191,13 +191,15 @@ def workpad_fingerprint(root: Path) -> tuple[object, ...] | None:
     )
 
 
-def paths_committed_between(root: Path, old: str, new: str) -> frozenset[str] | None:
-    """Every path the commits after ``old`` up to ``new`` touched; ``None`` unless ``new`` descends straight from ``old``.
+def straight_commits_between(root: Path, old: str, new: str) -> tuple[tuple[str, frozenset[str]], ...] | None:
+    """Each commit after ``old`` up to ``new``, newest first, with the paths it touched; ``None`` unless ``new`` descends straight from ``old``.
 
     "Straight": each commit from ``new`` back has exactly one parent and the
     chain ends at ``old``, which is how the journal grows. Anything else (a
     rewritten or reset history, a merge) answers ``None``: nothing kept at
-    ``old`` is trusted at ``new``.
+    ``old`` is trusted at ``new``. One ``git log`` for each pair of heads,
+    kept for the readers that ask next (0110-036: the per-commit lists are
+    what an incremental read applies).
     """
 
     key = (os.fspath(root), old, new)
@@ -205,28 +207,52 @@ def paths_committed_between(root: Path, old: str, new: str) -> frozenset[str] | 
         if key in _committed_between:
             return _committed_between[key]
     listing = _git(root, "log", "-z", "--format=%x01%H %P", "--name-only", f"{old}..{new}", check=False)
-    touched: set[str] = set()
-    chain: list[tuple[str, list[str]]] = []
+    chain: list[tuple[str, list[str], set[str]]] = []
     if listing.returncode == 0:
         for chunk in listing.stdout.split("\x00"):
             if not chunk:
                 continue
             if chunk[0] == "\x01":
                 commit, _space, parents = chunk[1:].partition(" ")
-                chain.append((commit, parents.split()))
+                chain.append((commit, parents.split(), set()))
                 continue
             name = chunk[1:] if chunk[0] == "\n" else chunk
-            if name:
-                touched.add(name)
+            if name and chain:
+                chain[-1][2].add(name)
     straight = bool(chain) and chain[0][0] == new and chain[-1][1] == [old] and all(
-        parents == [chain[index + 1][0]] for index, (_commit, parents) in enumerate(chain[:-1])
+        parents == [chain[index + 1][0]] for index, (_commit, parents, _names) in enumerate(chain[:-1])
     )
-    result = frozenset(touched) if straight else None
+    result = tuple((commit, frozenset(names)) for commit, _parents, names in chain) if straight else None
     with _READ_CACHE_LOCK:
         if len(_committed_between) >= _COMMITTED_BETWEEN_MAX:
             _committed_between.pop(next(iter(_committed_between)))
         _committed_between[key] = result
     return result
+
+
+def paths_committed_between(root: Path, old: str, new: str) -> frozenset[str] | None:
+    """Every path the commits after ``old`` up to ``new`` touched; ``None`` unless ``new`` descends straight from ``old``.
+
+    See :func:`straight_commits_between` for "straight".
+    """
+
+    commits = straight_commits_between(root, old, new)
+    if commits is None:
+        return None
+    return frozenset().union(*(names for _commit, names in commits))
+
+
+def repository_check_holds(root: Path, project_id: str, gig_id: str, now: tuple[object, ...]) -> bool:
+    """Whether this workpad passed :func:`_validate_workpad_repository` at a fingerprint that still holds at ``now``.
+
+    0110-036: the journal's own workpad check asks git for a subset of what
+    that check asks (the layout marker, the ignore rules, the four ownership
+    markers, no remote), so inside a read it need not ask again.
+    """
+
+    with _READ_CACHE_LOCK:
+        passed = [at for key, at in _validated_repositories.items() if key[:3] == (os.fspath(root), project_id, gig_id)]
+    return any(read_still_holds(root, at, now, layout_paths_touched) for at in passed)
 
 
 def read_still_holds(
@@ -1144,6 +1170,8 @@ __all__ = [
     "provision_workpad",
     "read_cache_key_lock",
     "read_still_holds",
+    "repository_check_holds",
+    "straight_commits_between",
     "register_existing_workpad",
     "resolve_bound_project",
     "resolve_workpad",

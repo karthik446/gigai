@@ -266,10 +266,34 @@ def test_one_request_reads_the_events_once(tmp_path: Path, monkeypatch: pytest.M
         reads.append(tuple(kwargs["prefixes"]))
         return real(**kwargs)
 
-    monkeypatch.setattr("gigai.scout.find_jobs.job_state.read_committed_snapshot", counting)
+    # 0110-036: the events come from the ones kept at the journal head (one
+    # ask a request); the snapshot of the events family is what answers when
+    # they cannot.
+    import gigai.application_event_index as event_index
+    import gigai.scout.find_jobs.job_state as job_state_module
+
+    kept_reads: list[object] = []
+    real_kept = event_index.committed_application_events
+
+    def counting_kept(resolved, **kwargs):
+        kept_reads.append(resolved)
+        return real_kept(resolved, **kwargs)
+
+    monkeypatch.setattr(job_state_module, "read_committed_snapshot", counting)
+    monkeypatch.setattr(job_state_module, "committed_application_events", counting_kept)
     sources = JobStateSources(home_root=home, target=target, resolved=resolved)
     states = [sources.state_for(f"https://boards.greenhouse.io/acme/jobs/{job}", profile_id=None).state for job in range(100, 140)]
 
     assert states.count("applied") == 1 and states.count("not_assessed") == 39
+    # One read for forty jobs.
+    assert len(kept_reads) == 1 and reads == []
+
+    def unavailable(resolved, **kwargs):
+        raise event_index.ApplicationEventIndexUnavailable("off")
+
+    monkeypatch.setattr(job_state_module, "committed_application_events", unavailable)
+    sources = JobStateSources(home_root=home, target=target, resolved=resolved)
+    again = [sources.state_for(f"https://boards.greenhouse.io/acme/jobs/{job}", profile_id=None).state for job in range(100, 140)]
+    assert again == states
     # One read for forty jobs, and only of the events family.
     assert reads == [("records/applications/events/",)]

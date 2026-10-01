@@ -568,6 +568,20 @@ def _validate_input(data):
         )
 
 
+def _kept_prior_events(resolved: ResolvedWorkpad, writer: Any, receipt_path: str) -> list[dict[str, Any]] | None:
+    """Every committed event, from the kept index, under the writer's lock; ``None``: take the snapshot."""
+
+    from .application_event_index import ApplicationEventIndexUnavailable, committed_application_events
+    from .journal import JournalError
+
+    try:
+        if writer.is_committed(receipt_path):
+            return None
+        return list(committed_application_events(resolved, writer=writer).events.values())
+    except (ApplicationEventIndexUnavailable, JournalError):
+        return None
+
+
 def record_application(
     *, resolved: ResolvedWorkpad, data: dict[str, Any], confirm: bool = False,
     opportunity_reader: Any | None = None,
@@ -644,78 +658,89 @@ def record_application(
     receipt_path = f"records/operations/application-record-{digest_imported_bytes(operation_key.encode()).removeprefix('sha256:')}.json"
 
     def publish(writer):
-        # Include the immutable discovery Run tree when it exists so the
-        # mutation can authenticate opportunity_ref against the same pinned
-        # view used by the report.  Legacy event-only Gigs remain readable and
-        # explicitly unresolved; they do not gain fabricated authority.
-        # Discovery opportunity authentication needs the immutable approved
-        # Graph Set contracts referenced by its sealed Plan; these live under
-        # manifests and are journaled alongside the Run tree.
-        snap = writer.snapshot(("records/", "runs/", "run-plans/", "references/", "run-inputs/", "manifests/"))
-        resolver = opportunity_reader
-        if resolver is None and any(path.startswith("runs/") and "/receipts/" in path for path in snap.artifacts):
-            from .scout.report_readers import opportunity_reader as make_opportunity_reader
-            resolver = make_opportunity_reader(resolved)
-        if resolver is not None:
-            try:
-                validate_application_links(
-                    event,
-                    snapshot=snap,
-                    project_id=project_id,
-                    gig_id=gig_id,
-                    opportunity_reader=resolver,
+        # 0110-036: an event that names no document and no Discover
+        # opportunity reads nothing but the events themselves, so it takes
+        # them from what is kept at the journal head (proven and validated
+        # once) instead of a snapshot of every record and every run: that
+        # snapshot was 2 s of each "Mark applied" and grew with every one.
+        # Everything else, and an operation key that already has a receipt,
+        # takes the snapshot as before.
+        prior = None
+        if not source["document_refs"] and ref_field == "external_ref":
+            prior = _kept_prior_events(resolved, writer, receipt_path)
+        if prior is None:
+            # Include the immutable discovery Run tree when it exists so the
+            # mutation can authenticate opportunity_ref against the same pinned
+            # view used by the report.  Legacy event-only Gigs remain readable and
+            # explicitly unresolved; they do not gain fabricated authority.
+            # Discovery opportunity authentication needs the immutable approved
+            # Graph Set contracts referenced by its sealed Plan; these live under
+            # manifests and are journaled alongside the Run tree.
+            snap = writer.snapshot(("records/", "runs/", "run-plans/", "references/", "run-inputs/", "manifests/"))
+            resolver = opportunity_reader
+            if resolver is None and any(path.startswith("runs/") and "/receipts/" in path for path in snap.artifacts):
+                from .scout.report_readers import opportunity_reader as make_opportunity_reader
+                resolver = make_opportunity_reader(resolved)
+            if resolver is not None:
+                try:
+                    validate_application_links(
+                        event,
+                        snapshot=snap,
+                        project_id=project_id,
+                        gig_id=gig_id,
+                        opportunity_reader=resolver,
+                    )
+                except ApplicationEventError:
+                    raise
+            existing = None
+            if receipt_path in snap.artifacts:
+                existing = parse_json_bytes(snap.artifacts[receipt_path])
+                if not isinstance(existing, dict) or not isinstance(
+                    existing.get("event"), dict
+                ):
+                    raise ApplicationEventError(
+                        "application_receipt_invalid",
+                        "committed application receipt is malformed",
+                    )
+                original = _validate_event(
+                    existing["event"],
+                    f"records/applications/events/{existing['event'].get('event_id')}.json",
+                    project_id,
+                    gig_id,
                 )
-            except ApplicationEventError:
-                raise
-        existing = None
-        if receipt_path in snap.artifacts:
-            existing = parse_json_bytes(snap.artifacts[receipt_path])
-            if not isinstance(existing, dict) or not isinstance(
-                existing.get("event"), dict
-            ):
-                raise ApplicationEventError(
-                    "application_receipt_invalid",
-                    "committed application receipt is malformed",
-                )
-            original = _validate_event(
-                existing["event"],
-                f"records/applications/events/{existing['event'].get('event_id')}.json",
-                project_id,
-                gig_id,
-            )
-            committed_event_path = f"records/applications/events/{original.get('event_id')}.json"
-            committed_event = snap.artifacts.get(committed_event_path)
-            if committed_event is None:
-                raise ApplicationEventError(
-                    "application_receipt_invalid",
-                    "application receipt event is not separately committed",
-                )
-            try:
-                committed_value = _validate_event(
-                    parse_json_bytes(committed_event), committed_event_path, project_id, gig_id
-                )
-            except ApplicationEventError as exc:
-                raise ApplicationEventError(
-                    "application_receipt_invalid",
-                    "application receipt event artifact is invalid",
-                ) from exc
-            if (
-                Path(receipt_path).name
-                != f"application-record-{digest_imported_bytes(str(original.get('operation_key')).encode()).removeprefix('sha256:')}.json"
-                or original.get("operation_key") != operation_key
-                or existing.get("operation_key") != original.get("operation_key")
-                or existing.get("requested_event_sha256") != requested
-                or existing.get("payload_sha256") != original.get("payload_sha256")
-                or canonical_json_bytes(existing["event"])
-                != canonical_json_bytes(committed_value)
-            ):
-                raise ApplicationEventError(
-                    "application_operation_conflict",
-                    "operation key requested event conflicts",
-                )
-            return {"status": "already_recorded", "event": original}
-        _redeem_documents(source, snap, project_id, gig_id, resolved.path)
-        prior = _events(snap, project_id, gig_id)
+                committed_event_path = f"records/applications/events/{original.get('event_id')}.json"
+                committed_event = snap.artifacts.get(committed_event_path)
+                if committed_event is None:
+                    raise ApplicationEventError(
+                        "application_receipt_invalid",
+                        "application receipt event is not separately committed",
+                    )
+                try:
+                    committed_value = _validate_event(
+                        parse_json_bytes(committed_event), committed_event_path, project_id, gig_id
+                    )
+                except ApplicationEventError as exc:
+                    raise ApplicationEventError(
+                        "application_receipt_invalid",
+                        "application receipt event artifact is invalid",
+                    ) from exc
+                if (
+                    Path(receipt_path).name
+                    != f"application-record-{digest_imported_bytes(str(original.get('operation_key')).encode()).removeprefix('sha256:')}.json"
+                    or original.get("operation_key") != operation_key
+                    or existing.get("operation_key") != original.get("operation_key")
+                    or existing.get("requested_event_sha256") != requested
+                    or existing.get("payload_sha256") != original.get("payload_sha256")
+                    or canonical_json_bytes(existing["event"])
+                    != canonical_json_bytes(committed_value)
+                ):
+                    raise ApplicationEventError(
+                        "application_operation_conflict",
+                        "operation key requested event conflicts",
+                    )
+                return {"status": "already_recorded", "event": original}
+            _redeem_documents(source, snap, project_id, gig_id, resolved.path)
+            prior = _events(snap, project_id, gig_id)
         if any(event.get("event_id") == event_id for event in prior):
             raise ApplicationEventError(
                 "application_event_identity_conflict",

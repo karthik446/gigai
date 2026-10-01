@@ -118,7 +118,7 @@ def test_a_whole_page_load_after_a_start_shares_what_it_reads(client: httpx.Clie
 
 
 def test_a_write_costs_only_the_reads_it_touched(client: httpx.Client, spawns: list[str]) -> None:
-    """A recorded application: the applications read is made again, the others are not."""
+    """A recorded application: the applications read takes the new event, the others are not made again."""
 
     recorded = _post(client, "/api/applications", {"normalized_url": "https://boards.greenhouse.io/acme/jobs/7", "event_kind": "applied"})
     assert recorded.status_code == 201, recorded.text
@@ -129,10 +129,18 @@ def test_a_write_costs_only_the_reads_it_touched(client: httpx.Client, spawns: l
         after[path] = len(spawns)
     # One ``git log`` over the commits since says what they touched; the profile reads stay as they were.
     assert after["/api/profiles"] <= 1, after
-    assert after["/api/applications"] >= 5, after  # read again: the event is new
+    # The first application there ever was: its event is taken from the one commit, and the acquired postings are read once.
+    assert 1 <= after["/api/applications"] <= 6, after
     # /api/config: the backend's own head-keyed profile and resume caches miss (they key on the head alone).
     assert after["/api/config"] <= FIRST_SPAWNS_MAX["/api/config"], after
     assert len(client.get("/api/applications").json()["applications"]) == 1
+    # 0110-036: every application after it is caught up from its one commit
+    # (the commits since, and one cat-file for the new event), not read again.
+    again = _post(client, "/api/applications", {"normalized_url": "https://boards.greenhouse.io/acme/jobs/8", "event_kind": "applied"})
+    assert again.status_code == 201, again.text
+    spawns.clear()
+    assert len(client.get("/api/applications").json()["applications"]) == 2
+    assert 1 <= len(spawns) <= 2, spawns
 
 
 # --------------------------------------------------------------------------

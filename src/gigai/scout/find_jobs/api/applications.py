@@ -53,6 +53,20 @@ uat-bug-018 (job state):
   this server cannot both pass the check; the read itself takes no journal
   writer lock. The response carries the job's new ``job_state``.
 
+0110-036 (flat in the number of events):
+
+- ``GET`` takes the projection's ``applications`` rows from the events kept at
+  the journal head and the acquired postings kept beside them
+  (``scout.application_rows.kept_application_rows``: the same rows, value for
+  value and key for key), and builds the projection from a snapshot, as
+  before, only when a row depends on more than that (an event that names a
+  document or a Discover opportunity).
+- ``POST`` reads the job's events from the same kept events, and core's
+  ``record_application`` reads the prior events from them under its writer
+  lock instead of a snapshot of every record and every run. The workpad
+  checks around the write are the kept ones while the workpad is unchanged
+  (``workpad.committed_read_cache``); the publication itself is unchanged.
+
 Every mutating call goes through the Handler's existing loopback + CSRF
 guards (``do_POST``, same as every other state-changing route in this API).
 Typed errors: ``{"error": {"code", "message"}}``.
@@ -66,7 +80,7 @@ from datetime import UTC, datetime
 from http import HTTPStatus
 
 from ....application_events import EVENT_KINDS, ApplicationEventError, record_application
-from ....workpad import resolve_workpad
+from ....workpad import committed_read_cache, resolve_workpad
 from ..contracts import normalize_url as _find_jobs_normalize_url
 from ..job_state import (
     JobStateError,
@@ -77,6 +91,7 @@ from ..job_state import (
     normalize_job_identity,
     read_application_events,
 )
+from ...application_rows import kept_application_rows
 from ...projection import projection_from_snapshot, read_projection_snapshot
 from ...report_readers import default_reader_set
 from .common import reads_committed
@@ -156,28 +171,41 @@ class ApplicationsRoutesMixin:
         if resolved is None:
             return
 
-        snapshot = read_projection_snapshot(resolved)
         cache_key = (str(resolved.path), resolved.project_id, resolved.gig_id)
+        # 0110-036: the projection's own rows, from the events kept at the
+        # journal head (``application_rows``); ``None`` when a row depends on
+        # more than its event and the acquired postings, and the projection
+        # is then built from a snapshot as before.
+        kept_rows = kept_application_rows(resolved)
+        if kept_rows is not None:
+            read_token: object | None = ("kept", *kept_rows.token)
+            projected: tuple[dict[str, object], ...] | None = kept_rows.rows
+            snapshot = None
+        else:
+            snapshot = read_projection_snapshot(resolved)
+            read_token = snapshot.read_token
+            projected = None
         with _ROWS_CACHE_LOCK:
             kept = _rows_cache.get(cache_key)
-        if kept is not None and snapshot.read_token is not None and kept[0] == snapshot.read_token:
+        if kept is not None and read_token is not None and kept[0] == read_token:
             applications = kept[1]
         else:
-            projection = projection_from_snapshot(
-                snapshot=snapshot,
-                project_id=resolved.project_id,
-                gig_id=resolved.gig_id,
-                readers=default_reader_set(resolved),
-            )
-            applications = [_application_to_json(dict(item)) for item in projection.applications]
+            if projected is None:
+                projected = projection_from_snapshot(
+                    snapshot=snapshot,
+                    project_id=resolved.project_id,
+                    gig_id=resolved.gig_id,
+                    readers=default_reader_set(resolved),
+                ).applications
+            applications = [_application_to_json(dict(item)) for item in projected]
             # uat-bug-018: the rows just read are every event there is, so the
             # state needs no second read.
             states = {identity: _job_state_json(events) for identity, events in group_events(applications).items()}
             for row in applications:
                 row["job_state"] = states.get(event_identity(row) or "")
-            if snapshot.read_token is not None:
+            if read_token is not None:
                 with _ROWS_CACHE_LOCK:
-                    _rows_cache[cache_key] = (snapshot.read_token, applications)
+                    _rows_cache[cache_key] = (read_token, applications)
         self._write_json(
             HTTPStatus.OK,
             {
@@ -254,7 +282,10 @@ class ApplicationsRoutesMixin:
             return
 
         try:
-            resolved = self._resolve_applications_gig()
+            # 0110-036: as in a read, a workpad check that passed for this
+            # exact workpad is not asked of git again (13 subprocesses).
+            with committed_read_cache():
+                resolved = self._resolve_applications_gig()
         except LookupError:
             self._error(HTTPStatus.NOT_FOUND, "not_found", "no target is configured")
             return
@@ -282,7 +313,11 @@ class ApplicationsRoutesMixin:
                 self._error(HTTPStatus.CONFLICT, exc.code, str(exc))
                 return
             try:
-                result = record_application(resolved=resolved, data=data, confirm=True)
+                # 0110-036: the writer's own workpad check is the kept one
+                # while the workpad is unchanged (10 git subprocesses a write).
+                # The publication itself asks git as it always did.
+                with committed_read_cache():
+                    result = record_application(resolved=resolved, data=data, confirm=True)
             except ApplicationEventError as exc:
                 self._error(_status_for(exc.code), exc.code, str(exc))
                 return

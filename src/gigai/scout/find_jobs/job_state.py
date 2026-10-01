@@ -55,7 +55,8 @@ from pathlib import Path
 import re
 
 from ...canonical import digest_imported_bytes, parse_json_bytes
-from ...journal import read_committed_snapshot
+from ...application_event_index import ApplicationEventIndexUnavailable, committed_application_events
+from ...journal import JournalError, read_committed_snapshot
 from .assess_contracts import AssessResponse
 from .contracts import Verdict, normalize_url
 
@@ -419,6 +420,15 @@ def read_application_events(resolved: object) -> dict[str, list[Mapping[str, obj
     where an event is validated against its hashes.
     """
 
+    # 0110-036: the events kept at the journal head (proven and validated
+    # once, caught up by the commits since) when they can answer; the
+    # snapshot below otherwise, as before.
+    try:
+        kept = committed_application_events(resolved)
+    except (ApplicationEventIndexUnavailable, JournalError):
+        kept = None
+    if kept is not None:
+        return group_events(dict(event) for event in kept.events.values())  # in path order, as below
     snapshot = read_committed_snapshot(
         workpad=resolved.path,  # type: ignore[attr-defined]
         project_id=resolved.project_id,  # type: ignore[attr-defined]
