@@ -25,6 +25,15 @@ that have no application recorded.
 
 ``skip_reason`` names why nothing can be queued: ``no_profile``,
 ``no_run_input``, ``run_not_finished``. An empty queue is ``plan.count`` 0.
+
+0110-039: a posting of the run whose stored assessment for the profile was
+made with an older prompt, other candidate settings or a story bank that has
+since changed (``assessment_basis``) is in the queue too, and ``plan`` says
+how many: ``count`` = ``new_count`` + ``stale_count``. Only a current stored
+assessment is skipped. A read (``{}``) still starts nothing and calls no
+model: a stale assessment is re-assessed by the click, never by a read. A
+stale stored assessment the run itself assessed LATER is not counted (the
+run's verdict is the one shown).
 """
 
 from __future__ import annotations
@@ -41,7 +50,10 @@ _logger = logging.getLogger("gigai.scout.server")
 RESPONSE_SCHEMA = "scout-find-jobs-assess-all:1"
 
 
-def _quick_verdicts(home_root: Path, target: Path, profile_id: str) -> dict[str, str | None]:
+def _quick_verdicts(home_root: Path, target: Path, profile_id: str, latest: dict | None = None) -> dict[str, str | None]:
+    """The profile's stored verdict per posting. ``latest`` (0110-039), when given, is filled
+    with the stored item itself per posting, so the one store read serves the stale check too."""
+
     from ...quick_assess import QuickAssessError, list_quick_assessments
 
     try:
@@ -53,7 +65,38 @@ def _quick_verdicts(home_root: Path, target: Path, profile_id: str) -> dict[str,
         identity = item.job.job_identity
         if identity not in verdicts:
             verdicts[identity] = item.result.verdict.value if item.result.verdict is not None else None
+            if latest is not None:
+                latest[identity] = item
     return verdicts
+
+
+def stale_stored(latest: dict, view, *, home_root: Path, target: Path, resolved) -> set[str]:
+    """0110-039: the postings whose stored assessment is the one shown and was made with older settings.
+
+    ``latest`` is the profile's stored item per posting. An item the run
+    itself assessed (or carried forward) later is left out: ``job_state``
+    shows the newer of the two, the stored one on a tie.
+    """
+
+    from ...assessment_basis import BasisCheck
+    from ..job_state import _EPOCH, _instant
+
+    check = BasisCheck(home_root=home_root, target=target, resolved=resolved)
+    started = getattr(view.evidence, "started_at", None)
+    stale: set[str] = set()
+    for identity, item in latest.items():
+        if check.reason(item) is None:
+            continue
+        run_at = None
+        if identity in view.assessments:
+            run_at = started
+        elif identity in view.carried_forward:
+            run_at = view.carried_forward[identity].from_run_date or started
+        stored_at = _instant(item.updated_at or item.created_at) or _EPOCH
+        if run_at is not None and (_instant(run_at) or _EPOCH) > stored_at:
+            continue
+        stale.add(identity)
+    return stale
 
 
 def live_counts(evidence, quick: dict[str, str | None], events, added_urls=()) -> dict[str, int]:
@@ -119,7 +162,8 @@ def assess_all_request(
             if record.status == "running":
                 assess_all.cancel(home_root, target, record.record_id)
         records = [record for record in assess_all.list_records(home_root, target, run_id=run_id) if record.profile_id == profile_id]
-    quick = _quick_verdicts(home_root, target, profile_id)
+    latest: dict = {}
+    quick = _quick_verdicts(home_root, target, profile_id, latest)
     added = added_rows(home_root, target, run_id)
     body["counts"] = live_counts(evidence, quick, joins.events, [row.posting.normalized_url for row in added])
     if run_input is None or evidence.acquire_output is None:
@@ -130,11 +174,13 @@ def assess_all_request(
     rows = tuple(item.posting for item in with_added(evidence.acquire_output.rows, added))
     stored = stored_rank(rows, evidence=evidence, joins=joins, workpad=Path(resolved.path))
     view = RunView(evidence, scores=stored.scores, rank_detail=stored.detail, added_rows=added)
+    stale = stale_stored(latest, view, home_root=home_root, target=target, resolved=resolved)
     queue = assess_all.build_queue(
         view.rows,
         run_assessed=set(view.assessments) | set(view.carried_forward),
         not_assessed_reasons={url: row.reason.value for url, row in view.not_assessed.items()},
         already_assessed=quick,
+        stale=stale,
     )
     if only is not None:
         queue = [item for item in queue if item.normalized_url in only][:limit]
@@ -146,6 +192,7 @@ def assess_all_request(
         concurrency=concurrency,
         job_seconds=assess_all.finished_call_seconds(records),
         run_seconds=assess_all.run_call_seconds(Path(resolved.path) / "runs" / run_id),
+        stale_count=sum(1 for item in queue if item.normalized_url in stale),
     )
     if start and not cancel:
         if not evidence.terminal:
@@ -163,7 +210,8 @@ def assess_all_request(
                         home_root=home_root, target=target, profile_id=profile_id, model_target=model_target
                     ),
                     concurrency=concurrency,
-                    is_assessed=assess_all.stored_for_profile(home_root, target, profile_id),
+                    # 0110-039: a stored assessment made with older settings is not "already assessed".
+                    is_assessed=assess_all.current_for_profile(home_root, target, profile_id),
                 )
             )
             _logger.info(
@@ -209,4 +257,4 @@ def wait_for_assess_all(*, timeout: float | None = None) -> bool:
     return assess_all.wait_for_jobs(timeout=timeout)
 
 
-__all__ = ["AssessAllRoutesMixin", "RESPONSE_SCHEMA", "assess_all_request", "live_counts", "wait_for_assess_all"]
+__all__ = ["AssessAllRoutesMixin", "RESPONSE_SCHEMA", "assess_all_request", "live_counts", "stale_stored", "wait_for_assess_all"]

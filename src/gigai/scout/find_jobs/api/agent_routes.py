@@ -14,6 +14,11 @@ posting URL (raw or normalized; a pasted job's ``text:sha256:...`` identity work
 * ``job_state`` with the events it accepts next, and the job's application events;
 * ``links``: the calls that act on the job (assess, tailor, PDF, mark applied).
 
+0110-039: each ``source: "quick"`` assessment carries ``basis_stale`` (true | false) and, when
+true, ``basis_stale_reason``: whether it was made with what its profile would be assessed with
+now (``assessment_basis``); ``job_state.assessment_stale`` carries the same reason when that
+assessment gives the state. Derived on read; a run's own assessments carry neither.
+
 ``404 not_found`` when no run, quick assessment, tailored resume or application event names the
 job; ``422`` for a missing/blank/unparseable ``url`` or an unknown query key (naming the allowed one).
 """
@@ -60,13 +65,14 @@ def _run_assessment_entry(run_id: str, source: str, profile_id: str | None, asse
     return {"source": source, "run_id": run_id, "profile_id": profile_id, **body}
 
 
-def _quick_entry(item) -> dict[str, object]:
+def _quick_entry(item, basis) -> dict[str, object]:
     return {
         "source": "quick",
         "run_id": None,
         "profile_id": item.resume.profile_id or "ephemeral",
         "created_at": item.created_at,
         "updated_at": item.updated_at or item.created_at,
+        **basis.served(item),
         **item.result.to_json(),
     }
 
@@ -206,7 +212,7 @@ class AgentRoutesMixin:
         if posting is None and not run_hits and not quick_items and not tailored_items and not events:
             return None
 
-        assessments = [*run_assessments, *(_quick_entry(item) for item in quick_items)]
+        assessments = [*run_assessments, *(_quick_entry(item, sources.basis) for item in quick_items)]
         # 0110-034: an assessment's questions are answered by ITS profile's story bank
         # (own answers plus a shared profile's), never by another profile's. A gig with
         # no profile keeps the gig-wide answers; a pasted resume has none.

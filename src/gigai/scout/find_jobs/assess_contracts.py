@@ -22,6 +22,7 @@ from .contracts import (
     Producer,
     RequirementMatrixRow,
     SponsorshipStatus,
+    StoryBankStamp,
     UsageBlock,
     Verdict,
     _Contract,
@@ -531,6 +532,19 @@ class AssessResponse(_Contract):
     # before this field; the UI then decides from the job's identity and the
     # runs it has loaded. Omitted from JSON when ``None``.
     origin: str | None = None
+    # 0110-039 (additive): the BASIS of this assessment, what a find-jobs run
+    # seals on its ``AssessOutput``: the assess prompt version it was made
+    # with, a digest of the candidate constraints the prompt carried
+    # (``assessment_core.constraints_digest``: sponsorship need, eligible
+    # countries, own location, work mode) and the story bank the prompt was
+    # offered (``None``: no profile to read a bank for). No constraint and no
+    # answer text is in any of them. All ``None`` for a file written before
+    # these fields; each is omitted from JSON when ``None``.
+    # ``assessment_basis.stale_reason`` compares them with what the profile
+    # would be assessed with now.
+    prompt_version: str | None = None
+    constraints_digest: str | None = None
+    story_bank: StoryBankStamp | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -575,6 +589,12 @@ class AssessResponse(_Contract):
             value["rank_skip_reason"] = self.rank_skip_reason
         if self.origin is not None:
             value["origin"] = self.origin
+        if self.prompt_version is not None:
+            value["prompt_version"] = self.prompt_version
+        if self.constraints_digest is not None:
+            value["constraints_digest"] = self.constraints_digest
+        if self.story_bank is not None:
+            value["story_bank"] = self.story_bank.to_json()
         return value
 
     @classmethod
@@ -585,7 +605,10 @@ class AssessResponse(_Contract):
                 "schema_version", "job", "resume", "preferences", "result", "producer", "usage",
                 "instructions_digest", "created_at", "stored_path",
             ),
-            ("updated_at", "history", "posting_text", "rank_score", "rank_skip_reason", "origin"),
+            (
+                "updated_at", "history", "posting_text", "rank_score", "rank_skip_reason", "origin",
+                "prompt_version", "constraints_digest", "story_bank",
+            ),
             "assess_response",
         )
         if value["schema_version"] != cls.schema_version:
@@ -631,6 +654,13 @@ class AssessResponse(_Contract):
             rank_score=rank_score,
             rank_skip_reason=rank_skip_reason,
             origin=origin,
+            prompt_version=_string(value["prompt_version"], "assess_response.prompt_version") if "prompt_version" in value else None,
+            constraints_digest=(
+                _digest_value(value["constraints_digest"], "assess_response.constraints_digest")
+                if "constraints_digest" in value
+                else None
+            ),
+            story_bank=StoryBankStamp.from_json(value["story_bank"]) if "story_bank" in value else None,
         )
 
 

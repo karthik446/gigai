@@ -6,6 +6,7 @@ import QuickAssessChip from "./QuickAssessChip.jsx";
 import StateChip from "./StateChip.jsx";
 import { displayCompanyName, unchangedSinceLabel } from "../display.js";
 import { ageLabel, assessedAt, notAssessedLine, payLabel, requirementSummary, whyPassedLine, workModeChip } from "../jobModel.js";
+import { olderSettingsChip } from "../jobStateModel.js";
 import { rankBlockersLine, rankReasonsLine } from "../rankModel.js";
 import { assessmentHash, jobHash } from "../routing.js";
 
@@ -46,6 +47,11 @@ import { assessmentHash, jobHash } from "../routing.js";
 // raw ids); the card is tighter -- the age joins the mode/pay
 // line instead of a row of its own, the title clamps to two lines -- and
 // every card in the grid has the same height (styles.css .card-grid).
+//
+// 0110-039: a card whose stored assessment was made with older settings
+// (older prompt, changed work mode / countries / location / sponsorship
+// need, or a changed story bank) says so in a quiet tag; the job page has
+// the one-click Re-assess.
 function RequirementSummary({ assessment }) {
   const { shown, more } = requirementSummary(assessment);
   if (shown.length === 0) {
@@ -117,6 +123,7 @@ export default function JobCard({ job, visaRequired, from }) {
   const whyPassed = whyPassedLine(job.workModeFit);
   const pay = payLabel(posting.pay);
   const companyLine = [displayCompanyName(posting.company), posting.location].filter(Boolean).join(" · ");
+  const olderSettings = job.assessment ? olderSettingsChip(job) : null;
 
   return (
     <a className={`job-card${dimmed ? " dimmed" : ""}`} href={from === "assessments" ? assessmentHash(job.id) : jobHash(job.id)} data-job-id={job.id}>
@@ -155,6 +162,11 @@ export default function JobCard({ job, visaRequired, from }) {
         <StateChip state={job.state} />
         {visaRequired && <SponsorshipBadge sponsorship={job.sponsorship} h1b={job.h1b} />}
         {job.status === "carried_forward" && <span className="tag">{unchangedSinceLabel(job.fromRunDate)}</span>}
+        {olderSettings && (
+          <span className="tag" data-role="assessment-older-settings" title={olderSettings.title}>
+            {olderSettings.label}
+          </span>
+        )}
       </div>
 
       {job.assessment ? (

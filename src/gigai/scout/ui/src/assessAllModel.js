@@ -58,8 +58,31 @@ export function fullAssessmentsHelp(cap, modelTarget) {
   return "Every matching posting is ranked. This many of the top-ranked ones are then assessed in full; you can assess the rest one at a time with Assess.";
 }
 
+// 0110-039: `plan.stale_count` of the `plan.count` postings already have a
+// stored assessment made with older settings (older prompt, changed work
+// mode / countries / location / sponsorship need, or a changed story bank);
+// the click re-assesses them. `plan.new_count` is the rest.
+export function staleCount(plan) {
+  return plan && Number.isInteger(plan.stale_count) && plan.stale_count > 0 ? plan.stale_count : 0;
+}
+
 export function assessAllButtonLabel(plan) {
-  return `Assess all new (${plan && Number.isInteger(plan.count) ? plan.count : 0})`;
+  const count = plan && Number.isInteger(plan.count) ? plan.count : 0;
+  const stale = staleCount(plan);
+  if (stale === 0) {
+    return `Assess all new (${count})`;
+  }
+  const fresh = Number.isInteger(plan.new_count) ? plan.new_count : Math.max(0, count - stale);
+  return `Assess all (${fresh} new, ${stale} with older settings)`;
+}
+
+// The confirm line's extra sentence when some are re-assessments.
+export function staleLine(plan) {
+  const stale = staleCount(plan);
+  if (stale === 0) {
+    return "";
+  }
+  return `${stale} ${stale === 1 ? "was" : "were"} assessed with older settings and ${stale === 1 ? "is" : "are"} assessed again.`;
 }
 
 // "406 postings, one Codex call each, about 72 min at 4 at a time." With no

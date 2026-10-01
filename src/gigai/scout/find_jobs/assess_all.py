@@ -19,6 +19,13 @@ of a posting it kept, an unchanged posting), and that are not a near-copy
 (``selection.duplicate_key``: same company, title and country) of a posting
 assessed or queued before it -- the run's own selection drops those too.
 
+0110-039: a posting whose stored assessment for the profile was made with an
+older prompt, other candidate settings or a story bank that has since
+changed (``assessment_basis``) is queued again, whatever the run's outcome
+or reason for it: the click re-assesses it. Only a CURRENT stored assessment
+is skipped. The plan counts the two apart (``new_count``, ``stale_count``).
+Nothing is re-assessed without the click.
+
 Bounded: :func:`assess_concurrency` calls at a time -- K=4
 (``model_rank.SMALL_MACHINE_CONCURRENCY``): each codex/claude child is
 ~260-330 MB of RSS, and the ranker's small-machine K is the bound that is
@@ -146,19 +153,24 @@ def build_queue(
     run_assessed: Iterable[str],
     not_assessed_reasons: Mapping[str, str],
     already_assessed: Iterable[str],
+    stale: Iterable[str] = (),
 ) -> list[QueueItem]:
     """The postings "Assess all new" would assess, in ``rows`` order (the grid's).
 
     ``rows`` are ``PostingRowResult``-like (``.posting``, ``.outcome``);
     ``run_assessed`` the URLs the run assessed or carried forward;
     ``not_assessed_reasons`` the run's reason per not-assessed URL;
-    ``already_assessed`` the URLs the quick-assess store holds for the profile.
+    ``already_assessed`` the URLs the quick-assess store holds for the profile;
+    ``stale`` (0110-039) those of them whose stored assessment is the one
+    shown and was made with older settings: queued again wherever they are
+    in the run (an unchanged posting too), never skipped as a near-copy.
     """
 
     from .selection import duplicate_key
 
     rows = list(rows)
-    skip = set(run_assessed) | set(already_assessed)
+    stale = set(stale)
+    skip = (set(run_assessed) | set(already_assessed)) - stale
     # Near-copies of a posting already assessed are not queued; of two
     # near-copies not assessed, the first in ``rows`` order is.
     covered = {_duplicate_key(row.posting, duplicate_key) for row in rows if row.posting.normalized_url in skip}
@@ -168,15 +180,16 @@ def build_queue(
         posting = row.posting
         identity = posting.normalized_url
         outcome = getattr(row.outcome, "value", row.outcome)
-        if identity in seen or identity in skip or outcome not in _NEW_OUTCOMES:
+        again = identity in stale
+        if identity in seen or identity in skip or (not again and outcome not in _NEW_OUTCOMES):
             continue
-        if not_assessed_reasons.get(identity) in EXCLUDED_REASONS:
+        if not again and not_assessed_reasons.get(identity) in EXCLUDED_REASONS:
             continue
         url = getattr(posting, "url", None) or ""
         if not url:
             continue
         key = _duplicate_key(posting, duplicate_key)
-        if key in covered:
+        if key in covered and not again:
             continue
         covered.add(key)
         seen.add(identity)
@@ -236,8 +249,13 @@ def plan(
     concurrency: int,
     job_seconds: Sequence[float] = (),
     run_seconds: Sequence[float] = (),
+    stale_count: int = 0,
 ) -> dict[str, object]:
-    """What a start would do: ``count`` calls, K at a time, and a minute figure only from measured times."""
+    """What a start would do: ``count`` calls, K at a time, and a minute figure only from measured times.
+
+    ``stale_count`` (0110-039) of the ``count`` are re-assessments of a stored
+    assessment made with older settings; ``new_count`` is the rest.
+    """
 
     if job_seconds:
         samples, source = list(job_seconds), "assess_all"
@@ -248,6 +266,8 @@ def plan(
     per_call = round(statistics.median(samples), 1) if samples else None
     return {
         "count": count,
+        "new_count": max(0, count - stale_count),
+        "stale_count": stale_count,
         "model_target": model_target,
         "concurrency": concurrency,
         "per_call_seconds": per_call,
@@ -412,6 +432,14 @@ def summary(record: AssessAllRecord | None) -> dict[str, object] | None:
     assessed = sum(1 for line in finished.values() if line.get("ok"))
     failed = len(finished) - assessed
     status = record.live_status()
+    if status == "interrupted":
+        # The record was read while the job ran, and a request builds this
+        # last. A job that ENDED in between is not "interrupted": it reads
+        # "running" this once (as it was when the request's counts were
+        # read), and the next read says how it ended, with counts to match.
+        now = _read_json(record.root / _RECORD_FILENAME)
+        if isinstance(now, dict) and now.get("status") in FINISHED:
+            status = "running"
     in_flight = len(started - set(finished)) if status == "running" else 0
     done = assessed + failed + len(skipped)
     text = f"{assessed} of {total} assessed"
@@ -683,6 +711,34 @@ def stored_for_profile(home_root: Path, target: Path, profile_id: str) -> Callab
     return is_assessed
 
 
+def current_for_profile(home_root: Path, target: Path, profile_id: str) -> Callable[[QueueItem], bool]:
+    """True when the store holds a CURRENT assessment of ``item`` for ``profile_id`` (0110-039).
+
+    What the job checks just before each call: a posting assessed meanwhile
+    (a click on its card) is skipped, a stored assessment made with older
+    settings is not. The settings are read again at each check, so a change
+    made while the job runs is seen. A stored file that cannot be read
+    counts as assessed, as it did before.
+    """
+
+    from ..assessment_basis import BasisCheck
+    from ..quick_assess import _read_stored, quick_assess_path
+
+    def is_assessed(item: QueueItem) -> bool:
+        try:
+            path = quick_assess_path(Path(home_root), Path(target), profile_id, item.normalized_url)
+            if not path.is_file():
+                return False
+            stored = _read_stored(path)
+            if stored is None:
+                return True
+            return BasisCheck(home_root=Path(home_root), target=Path(target)).reason(stored) is None
+        except Exception:  # noqa: BLE001 - unknown means "not known to be assessed"
+            return False
+
+    return is_assessed
+
+
 __all__ = [
     "ASSESS_CONCURRENCY",
     "EXCLUDED_REASONS",
@@ -695,6 +751,7 @@ __all__ = [
     "assess_concurrency",
     "build_queue",
     "cancel",
+    "current_for_profile",
     "estimate_minutes",
     "finished_call_seconds",
     "list_records",

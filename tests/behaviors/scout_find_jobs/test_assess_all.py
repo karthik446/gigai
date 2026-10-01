@@ -192,6 +192,8 @@ def test_a_minute_figure_only_from_measured_seconds() -> None:
         "per_call_source": "run",
         "per_call_samples": 3,
         "estimate_minutes": 72,  # ceil(406 / 4) = 102 waves x 42 s = 71.4 min
+        "new_count": 406,  # 0110-039: none of them is a re-assessment
+        "stale_count": 0,
     }
     earlier = assess_all.plan(count=10, model_target="codex_cli", concurrency=4, job_seconds=[30.0], run_seconds=[99.0])
     assert earlier["per_call_source"] == "assess_all" and earlier["per_call_seconds"] == 30.0 and earlier["estimate_minutes"] == 2

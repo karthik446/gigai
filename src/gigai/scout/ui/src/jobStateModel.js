@@ -153,17 +153,74 @@ export function jobStateFor(job, states, tailoredIds) {
 // page only adds a marker next to it. Read from the raw served states.
 export const STALE_ASSESSMENT_TEXT = "Posting text changed since this assessment: re-assess";
 
+// 0110-039: the same marker also says a stored assessment was made with an
+// older prompt, other candidate settings (work mode, countries, location,
+// sponsorship need) or a story bank that has since changed
+// (assessment_basis.py). A quiet note, never an error: the verdict still
+// reads, and one click re-assesses. Nothing re-assesses on its own.
+export const BASIS_STALE_REASONS = ["older_prompt", "settings_changed", "story_bank_changed"];
+export const OLDER_SETTINGS_TEXT = "Assessed with older settings: re-assess";
+export const STORY_BANK_CHANGED_TEXT = "Your story bank changed since this assessment: re-assess";
+export const OLDER_SETTINGS_CHIP = "Older settings";
+
+export function isBasisStaleReason(reason) {
+  return BASIS_STALE_REASONS.includes(reason);
+}
+
+// A stored item that was just made on this page (the POST /api/assess or
+// POST /api/answers response replaces job.quick) carries its basis and is
+// not flagged: the run row's marker, read before it, no longer applies.
+function quickIsCurrent(quick) {
+  if (!quick || typeof quick !== "object" || quick.basis_stale === true) {
+    return false;
+  }
+  if (quick.job_state && typeof quick.job_state === "object" && quick.job_state.assessment_stale) {
+    return false;
+  }
+  return quick.basis_stale === false || Boolean(quick.prompt_version);
+}
+
 export function assessmentStaleFor(job) {
   if (!job) {
     return null;
   }
   const raws = [job.quick && job.quick.job_state, job.row && job.row.jobState];
   const found = raws.find((raw) => raw && typeof raw === "object" && raw.assessment_stale && typeof raw.assessment_stale === "object");
-  return found ? { reason: found.assessment_stale.reason || "posting_changed" } : null;
+  if (!found) {
+    return null;
+  }
+  const reason = found.assessment_stale.reason || "posting_changed";
+  if (isBasisStaleReason(reason) && quickIsCurrent(job.quick)) {
+    return null;
+  }
+  return { reason };
 }
 
 export function staleAssessmentNote(job) {
-  return assessmentStaleFor(job) ? STALE_ASSESSMENT_TEXT : null;
+  const stale = assessmentStaleFor(job);
+  if (!stale) {
+    return null;
+  }
+  if (stale.reason === "story_bank_changed") {
+    return STORY_BANK_CHANGED_TEXT;
+  }
+  return isBasisStaleReason(stale.reason) ? OLDER_SETTINGS_TEXT : STALE_ASSESSMENT_TEXT;
+}
+
+// The card's short marker: only for an assessment made with older settings
+// (a changed posting text keeps its own line on the job page).
+export function olderSettingsChip(job) {
+  const stale = assessmentStaleFor(job);
+  return stale && isBasisStaleReason(stale.reason) ? { label: OLDER_SETTINGS_CHIP, title: staleAssessmentNote(job) } : null;
+}
+
+export function olderSettingsCount(jobs) {
+  return (jobs || []).filter((job) => olderSettingsChip(job)).length;
+}
+
+// "3 assessed with older settings: open one to re-assess it."
+export function olderSettingsLine(count) {
+  return count > 0 ? `${count} assessed with older settings: open ${count === 1 ? "it" : "one"} to re-assess it.` : "";
 }
 
 export function withJobStates(jobs, applications, tailoredIds) {

@@ -24,6 +24,14 @@ state for the resume the item was assessed with, where the item itself is
 the latest assessment. Added to the served JSON only; the stored file and
 ``AssessResponse`` are untouched. A failure to derive it leaves the items
 as they were.
+
+0110-039: a served assessment carries ``basis_stale`` (true | false) and,
+when true, ``basis_stale_reason`` (``older_prompt`` | ``settings_changed`` |
+``story_bank_changed``): whether it was made with what its profile would be
+assessed with now (``assessment_basis``). Derived on read, never stored, and
+no model is called. ``POST /api/assess`` answers ``basis_stale: false`` for
+an assessment made with the profile's own settings. In the list, a stale
+item's ``job_state`` carries ``assessment_stale`` with the same reason.
 """
 
 from __future__ import annotations
@@ -102,10 +110,11 @@ class AssessRoutesMixin:
             return
         # 0110-034: a near match from the profile's story bank, per open question.
         from ... import story_bank
+        from ...assessment_basis import BasisCheck
 
-        self._write_json(
-            HTTPStatus.OK, story_bank.attach_suggestions(response.to_json(), home_root=self._backend.home_root, target=target)
-        )
+        served = story_bank.attach_suggestions(response.to_json(), home_root=self._backend.home_root, target=target)
+        served.update(BasisCheck(home_root=self._backend.home_root, target=target).served(response))
+        self._write_json(HTTPStatus.OK, served)
 
     def _handle_get_assessments(self) -> None:
         target = self._assess_target()
@@ -155,6 +164,7 @@ class AssessRoutesMixin:
             if isinstance(row, dict):
                 state = sources.state_for(item.job.job_identity, profile_id=item.resume.profile_id, quick=item)
                 row["job_state"] = state.to_json()
+                row.update(sources.basis.served(item))  # 0110-039: settings read once per resume identity
 
 
 __all__ = ["AssessRoutesMixin"]

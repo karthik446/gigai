@@ -71,7 +71,7 @@ from ..canonical import digest_imported_bytes, parse_json_bytes
 from ..config import GigAIConfig, load_config
 from ..model_targets import ModelTargetResolutionError
 from .assessment_core import INSTRUCTIONS_DIGEST, AssessJob, build_assess_context
-from .assessment_core import POSTING_INCOMPLETE_MESSAGE, assess_once
+from .assessment_core import POSTING_INCOMPLETE_MESSAGE, assess_once, assess_prompt_version, constraints_digest
 from . import story_bank
 from .find_jobs.assess_contracts import (
     ORIGIN_QUICK_ASSESS,
@@ -87,6 +87,7 @@ from .find_jobs.contracts import (
     ModelTarget,
     NotAssessedReason,
     Producer,
+    StoryBankStamp,
     UsageBlock,
 )
 from .find_jobs.discovery.storage import atomic_write, project_id
@@ -451,6 +452,33 @@ def _config_work_mode(home_root: Path, target: Path) -> str:
     return "" if settings is None else settings.work_mode
 
 
+def candidate_location_and_work_mode(preferences, profile, *, home_root: Path, target: Path) -> tuple[str, str]:
+    """The candidate's own location and work mode, as the assess prompt gets them.
+
+    ``preferences`` are the effective ones (``resolve_preferences``); its
+    ``location`` is set only when the request carried one. One rule for the
+    assessment itself and for ``assessment_basis`` (what a stored assessment
+    is compared with), so the two cannot drift.
+
+    Location (assess-prompt-v2): the request's ``preferences.location`` when
+    given, else the profile's own (0110-022: a profile with its own search
+    settings is assessed for ITS location), else find-jobs.json's. Work mode
+    (0110-038): the profile's own, else the default's (the shared
+    find-jobs.json, filled from the setup's saved answer like a run's sealed
+    config); "any"/none adds nothing to the prompt.
+    """
+
+    own_settings = None if profile is None else profile.search_settings
+    if preferences.location is not None:
+        location = preferences.location
+    elif own_settings is not None:
+        location = own_settings.location or ""
+    else:
+        location = _config_location(target)
+    work_mode = own_settings.work_mode if own_settings is not None else _config_work_mode(home_root, target)
+    return location, work_mode
+
+
 def _default_model_target(target: Path) -> ModelTarget:
     """``find-jobs.json``'s ``default_model_target``, tolerantly (missing/
     unreadable/starter -> the contract default, ``ollama_local``)."""
@@ -575,17 +603,10 @@ def run_quick_assessment(
     #     object is unchanged for every caller that never sends one.
     # 0110-022: a profile with its own search settings is assessed for ITS
     #     location, not the default profile's.
-    own_settings = None if profile is None else profile.search_settings
-    if preferences.location is not None:
-        candidate_location = preferences.location
-    elif own_settings is not None:
-        candidate_location = own_settings.location or ""
-    else:
-        candidate_location = _config_location(target)
-    # 0110-038: the profile's own work mode, else the default's (the shared
-    # find-jobs.json, filled from the setup's saved answer like a run's
-    # sealed config). "any"/none adds nothing to the prompt.
-    candidate_work_mode = own_settings.work_mode if own_settings is not None else _config_work_mode(home_root, target)
+    # 0110-038: and for its own work mode ("any"/none adds nothing to the prompt).
+    candidate_location, candidate_work_mode = candidate_location_and_work_mode(
+        preferences, profile, home_root=home_root, target=target
+    )
 
     # 4. Storage path first, so the response can name it and a prior
     #    ``created_at`` survives a re-assessment.
@@ -680,6 +701,17 @@ def run_quick_assessment(
         history=history,
         posting_text=None if job.fetch_kind == "pasted" else job.text,
         origin=_origin_for(request, previous),
+        # 0110-039: the basis, as a run seals it: what this verdict was made
+        # with, so a later read can tell it from what the profile would be
+        # assessed with now (``assessment_basis``).
+        prompt_version=assess_prompt_version(candidate_work_mode),
+        constraints_digest=constraints_digest(
+            visa_sponsorship_required=preferences.visa_sponsorship_required,
+            countries=tuple(preferences.countries),
+            location=candidate_location,
+            work_mode=candidate_work_mode,
+        ),
+        story_bank=None if bank.profile_id is None else StoryBankStamp(bank.profile_id, bank.digest, dict(bank.marks)),
     )
     atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
     if bank_entries:
@@ -698,6 +730,7 @@ __all__ = [
     "TRIGGER_ASSESS",
     "TRIGGER_REASSESS",
     "QuickAssessError",
+    "candidate_location_and_work_mode",
     "find_quick_assessment_by_job_identity",
     "list_quick_assessments",
     "quick_assess_dir",

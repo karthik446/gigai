@@ -238,6 +238,8 @@ def test_url_posting_text_is_served_and_listed_and_no_rank_score_is_written(runn
     # item; the stored file never carries it.
     job_state = listed[0].pop("job_state")
     assert job_state == {"state": "matched", "since": body["created_at"], "next_events": ["applied"]}
+    # 0110-039: and the derived ``basis_stale`` (made just now with the profile's own settings: current).
+    assert listed[0].pop("basis_stale") is False and "basis_stale_reason" not in listed[0]
     assert listed[0] == json.loads(Path(body["stored_path"]).read_text(encoding="utf-8"))
 
 

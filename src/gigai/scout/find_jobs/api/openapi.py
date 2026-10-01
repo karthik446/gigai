@@ -72,7 +72,16 @@ class RouteSpec:
 _NOT_ASSESSED_REASONS = ", ".join(reason.value for reason in NotAssessedReason)
 _STALE_NOTE = (
     "job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the "
-    "state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed."
+    "state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. "
+    "The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored "
+    "quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship "
+    "need) or a story bank that has since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all)."
+)
+_BASIS_NOTE = (
+    "A stored assessment records its basis (`prompt_version`, `constraints_digest`, `story_bank`: digests and ids, no settings "
+    "or answer text). Served with `basis_stale` (true | false) and, when true, `basis_stale_reason` (`older_prompt` | "
+    "`settings_changed` | `story_bank_changed`): whether it is what its profile would be assessed with now. Derived on read; "
+    "no model is called."
 )
 
 
@@ -240,6 +249,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "Read only; never calls a model or the network. Aggregates the newest run posting, its rank, every run or quick "
             "assessment of the job (with the requirement matrix), the questions still unanswered, stored tailored resumes, the job's "
             "state with the events it accepts next, and the action links. The UI route `#/jobs/<posting url>` maps to this route. "
+            "Each `source: \"quick\"` assessment carries `basis_stale` (and `basis_stale_reason` when true). "
             + _STALE_NOTE
         ),
     ),
@@ -356,6 +366,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         "POST", "/api/runs/{run_id}/assess-all", "Assess every unassessed posting of a finished run (start / cancel / read).", "write", "model",
         {"state": "idle", "counts": {}}, params=(_RUN_ID, _b("start", "boolean", "true starts."), _b("cancel", "boolean", "true stops.")),
         request_example={"start": True}, errors=(_UNKNOWN_KEY, _NOT_FOUND),
+        description=(
+            "`{}` reads the plan and starts nothing. The queue is the run's new postings not assessed yet, plus every posting of "
+            "the run whose stored assessment for the selected profile was made with older settings (see `basis_stale` on "
+            "GET /api/assessments): `plan.count` = `plan.new_count` + `plan.stale_count`. A current stored assessment is "
+            "skipped. Only `{\"start\": true}` calls a model."
+        ),
     ),
     RouteSpec(
         "POST", "/api/runs/{run_id}/posted-window",
@@ -419,12 +435,13 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         schema_version="scout-assess-response:1", params=(*_JOB_INPUT, _b("preferences", "object", "Override the effective preferences."), _b("origin", "string", "quick_assess | job_page.")),
         request_example={"job": {"job_url": _JOB_URL}},
         errors=(*_ROW_ERRORS, (422, "job_input_invalid"), (502, "job_fetch_failed"), (504, "assess_timeout"), *_MODEL_ERRORS, _NO_TARGET),
-        description="Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=.",
+        description="Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=. " + _BASIS_NOTE,
     ),
     RouteSpec(
         "GET", "/api/assessments", "Stored quick assessments, newest first, each with its job_state.", "read", "none",
         {"schema_version": "scout-assessments-list-response:1", "items": []}, schema_version="scout-assessments-list-response:1",
         params=(_q("profile_id", "string", "Only this resume identity."), _q("verdict", "string", "Only this verdict.")), errors=((422, "bad_enum"), _NO_TARGET),
+        description=_BASIS_NOTE + " " + _STALE_NOTE,
     ),
     RouteSpec(
         "POST", "/api/answers", "Answer an assessment question; with reassess the job is assessed again.", "write", "model",

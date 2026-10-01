@@ -37,6 +37,7 @@ import {
   planLine,
   privacyLine,
   skipReasonText,
+  staleLine,
   withLiveCounts,
 } from "../assessAllModel.js";
 import { indexNotice } from "../sourcesModel.js";
@@ -902,7 +903,7 @@ export default function FindJobsView({
             className="button small secondary"
             data-action="assess-all"
             onClick={() => setAssessAllConfirm(true)}
-            title="Assess every new posting of this run that is not assessed yet, likely fits first."
+            title="Assess every new posting of this run that is not assessed yet, likely fits first, and again every one assessed with older settings."
           >
             {assessAllButtonLabel(assessAllPlan)}
           </button>
@@ -910,6 +911,11 @@ export default function FindJobsView({
         {!assessAllBusy && assessAllConfirm && assessAllPlan && (
           <span data-role="assess-all-confirm">
             <span data-role="assess-all-plan">{planLine(assessAllPlan)}</span>{" "}
+            {staleLine(assessAllPlan) && (
+              <span className="muted" data-role="assess-all-stale">
+                {staleLine(assessAllPlan)}{" "}
+              </span>
+            )}
             <span className="muted" data-role="assess-all-estimate">
               {estimateSourceLine(assessAllPlan)}
             </span>{" "}

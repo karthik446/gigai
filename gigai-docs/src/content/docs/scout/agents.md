@@ -180,6 +180,28 @@ What to know:
   `.../progress`. `over_cap` is a posting the run's assess cap left out, `duplicate` a copy
   of one it kept (same company, title and country), `unchanged` one whose earlier assessment
   still stands. The reason never changes which postings the run assessed.
+- **A stored assessment says when it was made with older settings.** An assessment made by
+  `POST /api/assess`, the job page or "Assess all new" is stored once and read many times. It
+  records what it was made with, as a run does: `prompt_version`, `constraints_digest`
+  (sponsorship need, countries, location, work mode) and `story_bank` (digests and ids, never
+  the settings or the answers). `GET /api/assessments` items and the `source: "quick"`
+  assessments of `GET /api/jobs` carry `basis_stale` (true or false) and, when true,
+  `basis_stale_reason`: `older_prompt`, `settings_changed` (the profile's work mode, countries,
+  location or sponsorship need changed) or `story_bank_changed` (it left a question open and
+  the bank has an answer it had not seen, or it cites an answer that was edited, deleted or
+  unshared). `job_state.assessment_stale.reason` carries the same reason when that assessment
+  gives the job's state. The verdict still reads. Each profile is compared with its own
+  settings.
+- **An assessment stored before that is stale only for what its prompt missed.** It has no
+  recorded basis. It is `older_prompt` when the profile has a work mode now (the prompt had
+  none before 0.1.10.5), and `settings_changed` when the sponsorship need or the countries it
+  stored differ from the profile's now. Otherwise it stays current.
+- **Nothing is re-assessed until you ask.** No read calls a model. Re-assess one job with
+  `POST /api/assess` (`{"job": {"job_url": "..."}}`), or all of a run's with
+  `POST /api/runs/{run_id}/assess-all` `{"start": true}`: its queue is the run's new postings
+  plus the ones with a stale stored assessment, and `{}` reads the plan
+  (`count` = `new_count` + `stale_count`) without starting anything. A current stored
+  assessment is skipped.
 - **A near match is offered, not assumed.** When an assessment still asks something close to
   an entry, the response carries `bank_suggestions` (also on `GET /api/jobs?url=`, and for one
   question on `GET /api/story-bank/match?question_id=&question=`): the bank's answer, the

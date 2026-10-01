@@ -136,6 +136,12 @@ class JobState:
     the verdict still reads, and the job should be re-assessed. ``None`` (and
     absent from the JSON) whenever nothing says so, which includes every
     assessment stored before the digest was comparable.
+
+    0110-039: the same marker carries ``older_prompt``, ``settings_changed``
+    or ``story_bank_changed`` (``assessment_basis``) when the state comes from
+    a stored quick assessment made with an older prompt, other candidate
+    settings or a story bank that has since changed. A changed posting text
+    is named first.
     """
 
     state: str
@@ -165,6 +171,8 @@ class AssessmentFact:
     since: str | None = None
     #: ``PostingRow.content_sha256`` the assessment was made on; ``None`` when unknown.
     content_sha256: str | None = None
+    #: 0110-039: why its basis is not the profile's now (``assessment_basis``); ``None`` when current or unknown.
+    basis_stale: str | None = None
 
 
 def next_events(state: str) -> tuple[str, ...]:
@@ -275,7 +283,7 @@ def derive_job_state(
         and assessment.content_sha256 != current_content_sha256
     ):
         stale = STALE_POSTING_CHANGED
-    return JobState(state, assessment.since or assessment.at, next_events(state), stale)
+    return JobState(state, assessment.since or assessment.at, next_events(state), stale or assessment.basis_stale)
 
 
 def check_transition(
@@ -372,7 +380,7 @@ def group_events(events: Iterable[Mapping[str, object]]) -> dict[str, list[Mappi
 # --- the quick store's item as a fact --------------------------------------------------
 
 
-def quick_assessment_fact(item: AssessResponse) -> AssessmentFact:
+def quick_assessment_fact(item: AssessResponse, *, basis_stale: str | None = None) -> AssessmentFact:
     """The quick store's item as an :class:`AssessmentFact`.
 
     ``content_sha256`` is recomputed the way an ATS board row hashes itself
@@ -396,7 +404,7 @@ def quick_assessment_fact(item: AssessResponse) -> AssessmentFact:
     content = None
     if item.job.fetch_kind == "ats_board" and item.posting_text:
         content = digest_imported_bytes("\n".join(part for part in (item.job.title, item.posting_text) if part).encode("utf-8"))
-    return AssessmentFact(at=at, verdict=verdict, since=since, content_sha256=content)
+    return AssessmentFact(at=at, verdict=verdict, since=since, content_sha256=content, basis_stale=basis_stale)
 
 
 # --- reading the stores ----------------------------------------------------------------
@@ -465,6 +473,17 @@ class JobStateSources:
         self._events = events
         self._roots: dict[str, Path | None] = {}
         self._names: dict[Path, frozenset[str]] = {}
+        self._basis: object | None = None
+
+    @property
+    def basis(self):
+        """0110-039: this request's ``assessment_basis.BasisCheck`` (settings read once per resume identity)."""
+
+        if self._basis is None:
+            from ..assessment_basis import BasisCheck
+
+            self._basis = BasisCheck(home_root=self._home_root, target=self._target, resolved=self._resolved)
+        return self._basis
 
     def events_for(self, job_identity: str) -> list[Mapping[str, object]]:
         if self._events is None:
@@ -551,7 +570,7 @@ class JobStateSources:
         if stored:
             return derive_job_state(has_tailored_resume=True, tailored_at=tailored_at)
         item = quick if quick is not None else self.quick_assessment(job_identity, profile_id)
-        facts = (run_assessment, None if item is None else quick_assessment_fact(item))
+        facts = (run_assessment, None if item is None else quick_assessment_fact(item, basis_stale=self.basis.reason(item)))
         return derive_job_state(assessments=facts, current_content_sha256=current_content_sha256)
 
 

@@ -1,4 +1,5 @@
 import JobsGrid from "../components/JobsGrid.jsx";
+import { olderSettingsCount, olderSettingsLine } from "../jobStateModel.js";
 import { ASSESS_HASH } from "../routing.js";
 
 // uat-bug-016 (operator UAT N21): Assessments (#/assessments). Every
@@ -15,7 +16,11 @@ import { ASSESS_HASH } from "../routing.js";
 // `jobs` is jobModel.assessmentJobs() over the quick-assess store
 // (GET /api/assessments?profile_id=…), built by FindJobsView, which owns
 // the store's state so a new assessment shows here at once.
+//
+// 0110-039: an assessment made with older settings is marked on its card
+// ("Older settings") and counted in the header; its page re-assesses it.
 export default function AssessmentsView({ jobs, loading, profileLabel, visaRequired }) {
+  const olderSettings = olderSettingsLine(olderSettingsCount(jobs));
   return (
     <div>
       <section className="panel jobs-header">
@@ -34,6 +39,11 @@ export default function AssessmentsView({ jobs, loading, profileLabel, visaRequi
             Postings you assessed on demand with "+ Assess a job", newest first. A posting a search found stays under Jobs, with every
             assessment you run from its page.
           </p>
+          {olderSettings && (
+            <p className="muted small" style={{ margin: "6px 0 0" }} data-role="assessments-older-settings">
+              {olderSettings}
+            </p>
+          )}
         </div>
       </section>
 
