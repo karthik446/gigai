@@ -838,8 +838,10 @@ def test_the_demand_set_is_tagged_while_a_background_check_runs_not_after_it(tmp
         while not port.requests:
             assert time.monotonic() < deadline, "the demand set waited for the background check to end"
             time.sleep(0.01)
-        while queue.status()["last_drain"] is None or queue.status()["last_drain"]["tagged"] != 3:
-            assert time.monotonic() < deadline
+        # What is stored, not the status' last_drain: an idle drain after the one that tagged overwrites last_drain
+        # (tagged=0), so a poller that is slow (a loaded CI shard) never saw tagged == 3 and waited out the deadline.
+        while len([row for row in _rows(home).values() if row[0] == "operations"]) != 3:
+            assert time.monotonic() < deadline, "the three demand titles were never tagged"
             time.sleep(0.01)
         assert not release.is_set() and index.read_update_summary()["status"] == "running"  # the check is still running
     finally:
