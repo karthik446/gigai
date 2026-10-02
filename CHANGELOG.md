@@ -71,7 +71,8 @@ mechanics here. Those belong in the internal changelog.
   H1B" a fit for a Houston profile that needs sponsorship. It now does.
 - **Pages loaded in 4 to 7 seconds.** The profile, config, setup, applications and runs reads are
   now tens of milliseconds, and Mark applied and the first applications read no longer slow down as
-  your history grows.
+  your history grows. The workpad check behind every page and command no longer walks the whole
+  history either.
 - **The first background check no longer looks frozen.** The one-time tagging and keyword-index
   work now runs after the first boards, with a heartbeat. Tag counts say what they count, and only
   titles a model will tag are called "waiting". Tagging has its own thread and no longer starves.
