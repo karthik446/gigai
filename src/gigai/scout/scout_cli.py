@@ -10,6 +10,7 @@ idempotent for the same inputs.
 
 from __future__ import annotations
 
+import functools
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -19,7 +20,7 @@ import click
 from ..canonical import canonical_json_bytes
 from ..private_records import PrivateRecordError
 from ..setup import default_home_root
-from ..workpad import WorkpadError
+from ..workpad import WorkpadError, committed_read_cache
 from .find_jobs.contracts import FindJobsConfig, ModelTarget, SourceToggles
 from .find_jobs.discovery import (
     DiscoveryBudgetExceeded,
@@ -36,6 +37,23 @@ from .template import ScoutInstallError, install_scout
 
 if TYPE_CHECKING:
     from .run_supervisor import OtherScoutServer
+
+
+def _reads_committed(command):
+    """A command that only reads: one ``workpad.committed_read_cache`` around all of it (0110-044).
+
+    Outside that block every ``resolve_workpad`` and every journal read checks
+    the workpad again (ten git subprocesses each; ``story-bank list`` did it
+    nine times). Inside it a check that passed, and a committed read that was
+    made, are reused while the workpad's fingerprint is the same.
+    """
+
+    @functools.wraps(command)
+    def reading(*args, **kwargs):
+        with committed_read_cache():
+            return command(*args, **kwargs)
+
+    return reading
 
 
 def _resolved_target(
@@ -702,6 +720,7 @@ def stop_command(target_value: Path | None, home_value: Path | None, as_json: bo
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
+@_reads_committed
 def status_command(target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     """Show whether this project's Scout instance is running, stopped, or crashed."""
 
@@ -1326,6 +1345,7 @@ def _story_detail(entry: dict[str, object]) -> None:
 @click.option("--search", "search", help="Only entries whose id, question, answer or tag holds this text.")
 @click.option("--tag", "tag", help="Only entries with this tag.")
 @_story_options
+@_reads_committed
 def story_bank_list_command(search: str | None, tag: str | None, profile_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     """List the bank a profile sees: its own entries, then a shared profile's."""
 
@@ -1359,6 +1379,7 @@ def story_bank_list_command(search: str | None, tag: str | None, profile_id: str
 @story_bank_group.command("show")
 @click.argument("question_id")
 @_story_options
+@_reads_committed
 def story_bank_show_command(question_id: str, profile_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     """Show one entry: the question, the full answer, who wrote it and the jobs that used it."""
 
@@ -1658,6 +1679,7 @@ def _settings_line(settings: dict[str, object] | None) -> str:
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
+@_reads_committed
 def profile_list_command(target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     """List the profiles and what each one searches with.
 
@@ -2014,6 +2036,7 @@ def snapshot_import_command(source_value: str | None, home_value: Path | None, t
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
+@_reads_committed
 def snapshot_status_command(home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
     """Show which snapshot is in use, the last attempt and whether the download is on. Makes no request."""
 

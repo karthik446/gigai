@@ -113,7 +113,8 @@ def test_index_repair_temp_stays_inside_allowed_scratch_surface(
         workpad=created.workpad, project_id=created.project_id, gig_id=created.gig_id
     )
     assert repaired.project_id == created.project_id
-    assert not list((created.workpad / "scratch").iterdir())
+    # 0110-044: the journal's entries are kept there for the head; no temporary file is left next to them.
+    assert [path.name for path in (created.workpad / "scratch").iterdir()] == [index_module.ENTRIES_FILENAME]
     assert not (created.workpad / ".state.sqlite.tmp").exists()
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 from collections.abc import Mapping
@@ -127,10 +128,28 @@ from .target_binding import TargetBindingError, resolve_target
 from .workpad import (
     ResolvedWorkpad,
     WorkpadError,
+    committed_read_cache,
     open_locations,
     resolve_workpad,
     select_active_workpad,
 )
+
+
+def _reads_committed(command):
+    """A command that only reads: one ``workpad.committed_read_cache`` around all of it (0110-044).
+
+    Outside that block every ``resolve_workpad`` and every journal read checks
+    the workpad again (ten git subprocesses each). Inside it a check that
+    passed is reused while the workpad's fingerprint is the same, so the
+    command checks it once. A command that writes never opens it here.
+    """
+
+    @functools.wraps(command)
+    def reading(*args, **kwargs):
+        with committed_read_cache():
+            return command(*args, **kwargs)
+
+    return reading
 
 
 class InvocationGroup(click.Group):
@@ -248,6 +267,7 @@ def reference_add_command(kind: str, source: Path, label: str | None, operation_
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
+@_reads_committed
 def reference_list_command(gig: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     try:
         records = list_imports(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig, family="reference")
@@ -263,6 +283,7 @@ def reference_list_command(gig: str | None, target_value: Path | None, home_valu
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
+@_reads_committed
 def reference_show_command(reference_id: str, gig: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     try:
         record = read_import(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig, family="reference", item_id=reference_id)
@@ -313,6 +334,7 @@ def run_input_add_command(kind: str, source: Path | None, from_stdin: bool, labe
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
+@_reads_committed
 def run_input_show_command(run_input_id: str, gig: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     try:
         record = read_import(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig, family="run_input", item_id=run_input_id)
@@ -357,6 +379,7 @@ def record_create_command(kind: str, content_family: str, content_id: str, opera
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
+@_reads_committed
 def record_read_command(record_id: str, revision_id: str | None, include_content: bool, gig: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     try:
         payload = read_record(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig, record_id=record_id, revision_id=revision_id, content=include_content)
@@ -788,6 +811,7 @@ comparison_group.add_command(comparison_start_command, name="run")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
+@_reads_committed
 def comparison_show_command(comparison_id: str, gig_id: str, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     """Read one journal-authenticated comparison without rerunning it."""
     try:
@@ -807,6 +831,7 @@ def comparison_show_command(comparison_id: str, gig_id: str, target_value: Path 
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
+@_reads_committed
 def comparison_status_command(comparison_id: str, gig_id: str, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     """Read authenticated attempt and per-case checkpoint status."""
     try:
@@ -2983,6 +3008,7 @@ def run_plan_approve_baseline_command(gig_id: str | None, baseline_path: Path, c
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
+@_reads_committed
 def run_plan_list_command(gig_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     try:
         plans = list_run_plans(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id)
@@ -3003,6 +3029,7 @@ def run_plan_list_command(gig_id: str | None, target_value: Path | None, home_va
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
+@_reads_committed
 def run_plan_show_command(run_plan_id: str, gig_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
     try:
         result = read_run_plan(home_root=home_value or default_home_root(), requested_target=target_value, gig_id=gig_id, run_plan_id=run_plan_id)
@@ -3281,6 +3308,7 @@ def tailor_command(
 )
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
+@_reads_committed
 def run_details_command(
     run_id: str,
     gig_id: str | None,
@@ -3630,6 +3658,7 @@ def _projection_options(command):
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
 @click.option("--all", "all_projects", is_flag=True, help="List Gigs from all registered projects.")
+@_reads_committed
 def gigs_command(
     target_value: Path | None,
     home_value: Path | None,
@@ -3751,6 +3780,7 @@ def gig_use_command(
 
 @cli.command("proposals")
 @_projection_options
+@_reads_committed
 def proposals_command(
     gig_id: str | None,
     target_value: Path | None,
@@ -3779,6 +3809,7 @@ def proposals_command(
 
 @cli.command("status")
 @_projection_options
+@_reads_committed
 def status_command(
     gig_id: str | None,
     target_value: Path | None,
@@ -3820,6 +3851,7 @@ def status_command(
 
 @cli.command("show")
 @_projection_options
+@_reads_committed
 def show_command(
     gig_id: str | None,
     target_value: Path | None,
@@ -3848,6 +3880,7 @@ def show_command(
 
 @cli.command("history")
 @_projection_options
+@_reads_committed
 def history_command(
     gig_id: str | None,
     target_value: Path | None,
@@ -3876,6 +3909,7 @@ def history_command(
 
 @cli.command("plan")
 @_projection_options
+@_reads_committed
 def plan_command(
     gig_id: str | None,
     target_value: Path | None,

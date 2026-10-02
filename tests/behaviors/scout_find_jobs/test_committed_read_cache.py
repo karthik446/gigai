@@ -104,6 +104,9 @@ def test_outside_a_read_nothing_is_reused(gig: SimpleNamespace, spawns: list[lis
     _resolve(gig)
     assert first > 0 and len(spawns) == 2 * first
 
+    # 0110-044: the first snapshot at a new journal head lists the commits since
+    # the head every path's publishers were kept for (one subprocess, once).
+    _profiles_snapshot(gig)
     spawns.clear()
     _profiles_snapshot(gig)
     one = len(spawns)

@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import threading
@@ -40,7 +41,9 @@ from .workpad import (
     read_cache_key_lock as _read_cache_key_lock,
     read_still_holds,
     repository_check_holds,
+    scratch_cache_path,
     straight_commits_between,
+    straight_history,
     workpad_fingerprint,
     workpad_head_without_git,
     workpad_layout_version,
@@ -1563,6 +1566,326 @@ def _batch_publishing_commits(
     return _parse_z_name_only_log(result.stdout)
 
 
+# --- 0110-044: the publishers of a snapshot's paths, kept at the journal head --
+#
+# ``_batch_publishing_commits`` (``git log --name-only <head> -- <prefixes>``)
+# visits every journal commit for each snapshot: 200 to 300 ms at 3,000
+# commits, two to four times a command. What it answers depends on nothing but
+# the commits reachable from the head, so ``scratch/journal-publishers.sqlite``
+# keeps it (``scratch/`` is ignored by git in both layouts and never
+# transferred; deleting the file is always safe):
+#
+# * for each prefix a snapshot asked for, every change under it in the journal
+#   up to the head the file was made at (its "base"), listed once
+#   (``straight_history`` limited to the prefix: what one walk cost);
+# * every change of every commit since the base, added by one listing of only
+#   the new commits whenever the head has moved.
+#
+# A change is kept with what it did (added, modified, removed, ...) and the
+# commit's place in the journal, so a selection is a range of one table. It is
+# a cache, not a defence, and it answers only when all of this holds:
+#
+# * it is this schema's, this project's and this Gig's, and well formed;
+# * the snapshot's head is its head, or one it descends from or leads to in a
+#   straight line (one parent each: how the journal grows);
+# * nothing under the selected prefixes was ever removed or changed type. The
+#   walk pairs a removed file with an added one as a rename, and then lists it
+#   differently depending on the paths it is limited to; with only additions
+#   and modifications there is nothing to pair, and the walk lists exactly the
+#   changed paths under the prefixes. The journal itself only ever adds or
+#   replaces;
+# * the prefixes are plain directory paths (nothing git reads as a pattern).
+#
+# A journal that is not a straight line from its first commit (a merge) is
+# recorded as such for its head, so the walk is taken without listing again
+# while the journal only grows from there. Everything a snapshot checks of a
+# publisher (its file list, its handoff, the digests, the working bytes) is
+# checked as before, and any refusal is the walk's (``_capture_committed_snapshot``).
+
+PUBLISHERS_FILENAME = "journal-publishers.sqlite"
+PUBLISHERS_SCHEMA = "journal-publishers/1"
+_PUBLISHERS_META = frozenset({"schema", "project_id", "gig_id", "head", "commits", "base_head", "base", "usable"})
+_PUBLISHERS_BUSY_SECONDS = 2.0
+_PLAIN_PREFIX = re.compile(r"(?:(?!\.{1,2}/)[A-Za-z0-9._-]+/)+")
+_History = tuple[tuple[str, tuple[tuple[str, str], ...]], ...]  # ``workpad.straight_history``'s
+
+
+@dataclass(frozen=True)
+class _KeptPublishers:
+    head: str
+    commits: int  # the head's place in the journal: 1 for the first commit
+    base_head: str
+    base: int
+    usable: bool
+    covered: frozenset[str]  # the selected prefixes whose changes up to the base are kept
+    changes: dict[tuple[str, int], tuple[str, str]]  # (path, place) -> (commit, status), under the selected prefixes
+
+
+def _is_commit_id(value: object) -> bool:
+    return isinstance(value, str) and len(value) in (40, 64) and all(character in "0123456789abcdef" for character in value)
+
+
+def _kept_publishing_commits(
+    root: Path, project_id: str, gig_id: str, head: str, prefixes: tuple[str, ...]
+) -> dict[str, list[str]] | None:
+    """What :func:`_batch_publishing_commits` answers, from the kept publishers; ``None``: walk."""
+
+    if not _is_commit_id(head) or not prefixes or not all(_PLAIN_PREFIX.fullmatch(prefix) for prefix in prefixes):
+        return None
+    # A prefix inside another one selects nothing more.
+    selected = tuple(prefix for prefix in dict.fromkeys(prefixes) if not any(prefix != other and prefix.startswith(other) for other in prefixes))
+    try:
+        # Readers of one process arriving together list the journal once.
+        with _read_cache_key_lock(("publishers", os.fspath(root))):
+            return _publishers_at(root, project_id, gig_id, head, selected)
+    except (sqlite3.Error, OSError, ValueError):
+        return None
+
+
+def _publishers_at(
+    root: Path, project_id: str, gig_id: str, head: str, selected: tuple[str, ...]
+) -> dict[str, list[str]] | None:
+    kept = _read_publishers(root, project_id, gig_id, selected)
+    if kept is not None:
+        last: int | None = None  # the place of ``head`` in the journal, when the file can tell
+        since: _History = ()
+        if kept.head == head:
+            last = kept.commits
+        else:
+            between = straight_history(root, kept.head, head)
+            if between is not None:
+                _extend_publishers(root, kept, head, between)
+                last, since = kept.commits + len(between), between
+            else:
+                # Another process may have carried the file past the head this snapshot is pinned to.
+                behind = straight_history(root, head, kept.head)
+                if behind is not None:
+                    last = kept.commits - len(behind)
+        if last is not None:
+            if not kept.usable:
+                return None
+            changes = dict(kept.changes)
+            _add_changes(changes, since, kept.commits + 1, selected)
+            uncovered = tuple(prefix for prefix in selected if prefix not in kept.covered)
+            listed: _History | None = ()
+            if uncovered:
+                if last < kept.base:
+                    return None
+                listed = straight_history(root, None, kept.base_head, *uncovered)
+                if listed is not None and len(listed) == kept.base:
+                    _cover_publishers(root, kept, uncovered, listed)
+                    _add_changes(changes, listed, 1, uncovered)
+                else:
+                    listed = None  # not the journal the file was made for
+            if listed is not None:
+                return _publishers_of(changes, last)
+    # No file, one that cannot be used, or a journal that is not its head's: made anew, from one listing of the selection.
+    if not _publishers_writable(root):
+        return None
+    whole = straight_history(root, None, head, *selected)
+    _write_publishers(root, project_id, gig_id, head, selected, whole)
+    if whole is None:
+        return None
+    changes = {}
+    _add_changes(changes, whole, 1, selected)
+    return _publishers_of(changes, len(whole))
+
+
+def _add_changes(
+    changes: dict[tuple[str, int], tuple[str, str]], history: _History, first_place: int, selected: tuple[str, ...]
+) -> None:
+    """Add the changes under ``selected`` of commits given newest first; the oldest one is at ``first_place``."""
+
+    for place, (commit, changed) in enumerate(reversed(history), start=first_place):
+        for status, name in changed:
+            if any(name.startswith(prefix) for prefix in selected):
+                changes[(name, place)] = (commit, status)
+
+
+def _publishers_of(changes: dict[tuple[str, int], tuple[str, str]], last: int) -> dict[str, list[str]] | None:
+    """``path -> [commits]`` newest first, of the changes up to place ``last``; ``None`` when one is not an addition or a modification."""
+
+    found: dict[str, list[str]] = {}
+    for (name, place), (commit, status) in sorted(changes.items(), key=lambda item: -item[0][1]):
+        if place > last:
+            continue
+        if status not in ("A", "M"):
+            return None
+        found.setdefault(name, []).append(commit)
+    return found
+
+
+def _publishers_writable(root: Path) -> bool:
+    """Whether the kept file can be written at all: a workpad where it cannot never pays for a listing."""
+
+    path = scratch_cache_path(root, PUBLISHERS_FILENAME, create=True)
+    if path is None:
+        return False
+    try:
+        descriptor, staged = tempfile.mkstemp(prefix=f".{PUBLISHERS_FILENAME}.", dir=path.parent)
+        os.close(descriptor)
+        os.unlink(staged)
+    except OSError:
+        return False
+    return True
+
+
+def _open_publishers(path: Path, *, write: bool) -> sqlite3.Connection:
+    # ``isolation_level=None``: every transaction is opened and closed here, by name.
+    if write:
+        return sqlite3.connect(path, timeout=_PUBLISHERS_BUSY_SECONDS, isolation_level=None)
+    return sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=_PUBLISHERS_BUSY_SECONDS, isolation_level=None)
+
+
+def _read_publishers(root: Path, project_id: str, gig_id: str, selected: tuple[str, ...]) -> _KeptPublishers | None:
+    """What the file keeps for ``selected``; ``None``: no usable file."""
+
+    path = scratch_cache_path(root, PUBLISHERS_FILENAME, create=False)
+    if path is None:
+        return None
+    try:
+        connection = _open_publishers(path, write=False)
+    except sqlite3.Error:
+        return None
+    try:
+        connection.execute("BEGIN")  # the head and the rows are of one moment
+        meta = dict(connection.execute("SELECT key, value FROM meta").fetchall())
+        if set(meta) != _PUBLISHERS_META or not all(isinstance(value, str) for value in meta.values()):
+            return None
+        if meta["schema"] != PUBLISHERS_SCHEMA or meta["project_id"] != project_id or meta["gig_id"] != gig_id:
+            return None
+        if not (_is_commit_id(meta["head"]) and _is_commit_id(meta["base_head"]) and meta["usable"] in ("0", "1")):
+            return None
+        if not (meta["commits"].isdigit() and meta["base"].isdigit()) or not 1 <= int(meta["base"]) <= int(meta["commits"]):
+            return None
+        commits = int(meta["commits"])
+        kept_prefixes = [prefix for (prefix,) in connection.execute("SELECT prefix FROM covered")]
+        if not all(isinstance(prefix, str) for prefix in kept_prefixes):
+            return None
+        covered = frozenset(prefix for prefix in selected if any(prefix.startswith(other) for other in kept_prefixes))
+        changes: dict[tuple[str, int], tuple[str, str]] = {}
+        if meta["usable"] == "1":
+            for prefix in selected:
+                # Every path under ``prefix``: "/" is followed by "0" in byte order.
+                for name, place, commit, status in connection.execute(
+                    "SELECT path, place, commit_id, status FROM changed WHERE path >= ? AND path < ?", (prefix, prefix[:-1] + "0")
+                ):
+                    if not isinstance(name, str) or type(place) is not int or not 1 <= place <= commits:
+                        return None
+                    if not _is_commit_id(commit) or not isinstance(status, str):
+                        return None
+                    changes[(name, place)] = (commit, status)
+        return _KeptPublishers(meta["head"], commits, meta["base_head"], int(meta["base"]), meta["usable"] == "1", covered, changes)
+    except sqlite3.Error:
+        return None
+    finally:
+        connection.close()
+
+
+def _change_rows(history: _History, first_place: int) -> Iterator[tuple[str, int, str, str]]:
+    """``(path, place, commit, status)`` for commits given newest first; the oldest one is at ``first_place``."""
+
+    for place, (commit, changed) in enumerate(reversed(history), start=first_place):
+        for status, name in changed:
+            yield name, place, commit, status
+
+
+def _change_publishers(root: Path, expected: dict[str, str], statements: Callable[[sqlite3.Connection], None]) -> None:
+    """Change the kept file in one transaction, only while it still says ``expected``; a failure changes nothing."""
+
+    path = scratch_cache_path(root, PUBLISHERS_FILENAME, create=False)
+    if path is None:
+        return
+    try:
+        connection = _open_publishers(path, write=True)
+    except sqlite3.Error:
+        return
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        now = dict(connection.execute("SELECT key, value FROM meta").fetchall())
+        if any(now.get(key) != value for key, value in expected.items()):
+            connection.execute("ROLLBACK")  # another process moved it
+            return
+        statements(connection)
+        connection.execute("COMMIT")
+    except sqlite3.Error:
+        pass
+    finally:
+        connection.close()
+
+
+def _extend_publishers(root: Path, kept: _KeptPublishers, head: str, between: _History) -> None:
+    """Carry the kept file from its head to ``head``: every change of the commits between."""
+
+    def statements(connection: sqlite3.Connection) -> None:
+        if kept.usable:
+            connection.executemany(
+                "INSERT OR REPLACE INTO changed(path, place, commit_id, status) VALUES (?, ?, ?, ?)", _change_rows(between, kept.commits + 1)
+            )
+        connection.execute("UPDATE meta SET value = ? WHERE key = 'head'", (head,))
+        connection.execute("UPDATE meta SET value = ? WHERE key = 'commits'", (str(kept.commits + len(between)),))
+
+    _change_publishers(root, {"head": kept.head, "commits": str(kept.commits)}, statements)
+
+
+def _cover_publishers(root: Path, kept: _KeptPublishers, prefixes: tuple[str, ...], listed: _History) -> None:
+    """Keep the changes under ``prefixes`` up to the file's base."""
+
+    def statements(connection: sqlite3.Connection) -> None:
+        connection.executemany("INSERT OR REPLACE INTO changed(path, place, commit_id, status) VALUES (?, ?, ?, ?)", _change_rows(listed, 1))
+        connection.executemany("INSERT OR IGNORE INTO covered(prefix) VALUES (?)", [(prefix,) for prefix in prefixes])
+
+    _change_publishers(root, {"base_head": kept.base_head, "base": str(kept.base), "usable": "1"}, statements)
+
+
+def _write_publishers(
+    root: Path, project_id: str, gig_id: str, head: str, selected: tuple[str, ...], whole: _History | None
+) -> None:
+    """Write the kept file anew with ``head`` as its base (``whole`` ``None``: a journal that cannot be kept); a failure changes nothing."""
+
+    path = scratch_cache_path(root, PUBLISHERS_FILENAME, create=True)
+    if path is None:
+        return
+    commits = "1" if whole is None else str(len(whole))
+    staged: str | None = None
+    try:
+        descriptor, staged = tempfile.mkstemp(prefix=f".{PUBLISHERS_FILENAME}.", dir=path.parent)
+        os.close(descriptor)
+        connection = _open_publishers(Path(staged), write=True)
+        try:
+            connection.execute("BEGIN")
+            connection.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            connection.execute("CREATE TABLE covered (prefix TEXT PRIMARY KEY)")
+            connection.execute(
+                "CREATE TABLE changed (path TEXT NOT NULL, place INTEGER NOT NULL, commit_id TEXT NOT NULL, status TEXT NOT NULL, "
+                "PRIMARY KEY (path, place)) WITHOUT ROWID"
+            )
+            connection.executemany(
+                "INSERT INTO meta(key, value) VALUES (?, ?)",
+                {
+                    "schema": PUBLISHERS_SCHEMA, "project_id": project_id, "gig_id": gig_id,
+                    "head": head, "commits": commits, "base_head": head, "base": commits,
+                    "usable": "0" if whole is None else "1",
+                }.items(),
+            )
+            if whole is not None:
+                connection.executemany("INSERT INTO changed(path, place, commit_id, status) VALUES (?, ?, ?, ?)", _change_rows(whole, 1))
+                connection.executemany("INSERT INTO covered(prefix) VALUES (?)", [(prefix,) for prefix in selected])
+            connection.execute("COMMIT")
+        finally:
+            connection.close()
+        os.replace(staged, path)
+        staged = None
+    except (sqlite3.Error, OSError):
+        pass
+    finally:
+        if staged is not None:
+            try:
+                os.unlink(staged)
+            except OSError:
+                pass
+
+
 def _batch_read_blobs(root: Path, refs: list[str]) -> dict[str, bytes]:
     """:func:`_batch_read_blob_objects` without the object ids."""
 
@@ -1658,7 +1981,33 @@ def _capture_committed_snapshot(
     prefixes: tuple[str, ...],
     history: dict[str, list[str]] | None = None,
 ) -> JournalSnapshot:
+    """:func:`_capture_snapshot` with the publishers kept at the journal head (0110-044) when they can answer.
+
+    A refusal met with the kept publishers is never returned: the capture is
+    made again with the walk of the journal, and what that says stands.
+    """
+
+    kept_used: list[bool] = []
+    try:
+        return _capture_snapshot(root, project_id, gig_id, prefixes, history, kept_used)
+    except JournalConflictError:
+        if not kept_used:
+            raise
+    return _capture_snapshot(root, project_id, gig_id, prefixes, history, None)
+
+
+def _capture_snapshot(
+    root: Path,
+    project_id: str,
+    gig_id: str,
+    prefixes: tuple[str, ...],
+    history: dict[str, list[str]] | None,
+    kept_used: list[bool] | None,
+) -> JournalSnapshot:
     """Enumerate private authority from a pinned Git tree, never ``glob``.
+
+    ``kept_used`` ``None``: the publishers are walked. A list: the kept ones
+    are asked first, and the list is given an item when they answered.
 
     uat-bug-008: this used to call ``read_committed_artifact`` once per
     committed path, each doing 3-4 of its own ``git`` subprocess calls --
@@ -1736,7 +2085,11 @@ def _capture_committed_snapshot(
             continue
         paths.append(path)
 
-    publishing_commits = _batch_publishing_commits(root, head, prefixes)
+    publishing_commits = None if kept_used is None else _kept_publishing_commits(root, project_id, gig_id, head, prefixes)
+    if publishing_commits is None:
+        publishing_commits = _batch_publishing_commits(root, head, prefixes)
+    else:
+        kept_used.append(True)  # type: ignore[union-attr]
     if history is not None:
         # 0110-036: every path under the prefixes that ever had a publisher,
         # for a caller that keeps the family (``read_committed_family``).

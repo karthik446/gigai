@@ -130,7 +130,8 @@ def test_a_write_costs_only_the_reads_it_touched(client: httpx.Client, spawns: l
     # One ``git log`` over the commits since says what they touched; the profile reads stay as they were.
     assert after["/api/profiles"] <= 1, after
     # The first application there ever was: its event is taken from the one commit, and the acquired postings are read once.
-    assert 1 <= after["/api/applications"] <= 6, after
+    # 0110-044: the publishers of that family are listed once (and kept), next to the listing of the new commit.
+    assert 1 <= after["/api/applications"] <= 7, after
     # /api/config: the backend's own head-keyed profile and resume caches miss (they key on the head alone).
     assert after["/api/config"] <= FIRST_SPAWNS_MAX["/api/config"], after
     assert len(client.get("/api/applications").json()["applications"]) == 1

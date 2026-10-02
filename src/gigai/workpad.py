@@ -1026,6 +1026,17 @@ def _journal_head(root: Path) -> str | None:
 
 
 def _layout_check_path(root: Path, *, create: bool) -> Path | None:
+    return scratch_cache_path(root, LAYOUT_CHECK_FILENAME, create=create)
+
+
+def scratch_cache_path(root: Path, filename: str, *, create: bool) -> Path | None:
+    """Where a kept-at-head file of this workpad lives in its private ``scratch/``; ``None`` when it cannot be used.
+
+    Never through a redirected ``scratch/`` or a name that is not a plain
+    file. Without ``create`` the file must exist; with it the directory is
+    made when missing.
+    """
+
     directory = root / LAYOUT_CHECK_DIRECTORY
     try:
         if directory.is_symlink():
@@ -1034,7 +1045,7 @@ def _layout_check_path(root: Path, *, create: bool) -> Path | None:
             if not create or directory.exists():
                 return None
             directory.mkdir(mode=0o700)
-        path = directory / LAYOUT_CHECK_FILENAME
+        path = directory / filename
         if path.is_symlink() or (path.exists() and not path.is_file()):
             return None
         if not create and not path.exists():
@@ -1177,6 +1188,72 @@ def _git_blobs(root: Path, names: tuple[str, ...]) -> list[tuple[str, bytes] | N
         blob = header[0].decode("ascii", "replace")
         found.append((blob, content) if header[1] == b"blob" and _is_object_id(blob) else None)
     return found if position == len(output) else None
+
+
+# --- 0110-044: what the other kept-at-head files are built from --------------
+#
+# ``index`` keeps the journal's entries and ``journal`` keeps the publishers of
+# every path, each for a journal head in ``scratch/``, under the rules of the
+# layout check above: a cache, never a defence; carried to a later head only
+# along a straight line of commits; any doubt is the full computation.
+
+
+def journal_head(root: Path) -> str | None:
+    """The journal head commit (the ``.git`` files, or git when only it can tell); ``None`` when there is none."""
+
+    return _journal_head(root)
+
+
+def read_git_blobs(root: Path, names: tuple[str, ...]) -> list[tuple[str, bytes] | None] | None:
+    """Each named blob's id and bytes from one ``git cat-file --batch``; ``None`` for a name that is not a blob."""
+
+    return _git_blobs(root, names)
+
+
+def straight_history(
+    root: Path, old: str | None, new: str, *only: str
+) -> tuple[tuple[str, tuple[tuple[str, str], ...]], ...] | None:
+    """Each commit after ``old`` up to ``new`` (``old`` ``None``: from the first commit), newest first, with what it changed.
+
+    A change is ``(status, path)`` as ``git log --name-status --no-renames``
+    gives it (``A`` added, ``M`` modified, ``D`` deleted, ...): a caller that
+    needs "only additions" can see it. ``None`` unless the commits are a
+    straight line (one parent each, down to ``old`` or to a first commit with
+    none), or when git cannot list them or a path is not UTF-8. With ``only``
+    every commit is still listed and its changes are limited to those paths.
+    One ``git log``, whose cost is the commits listed.
+    """
+
+    if not _is_object_id(new) or not (old is None or _is_object_id(old)):
+        return None
+    limited = (("--full-history", "--sparse"), ("--", *only)) if only else ((), ())
+    try:
+        listing = _git_bytes(
+            root, "log", "-z", "--format=%x01%H %P", "--name-status", "--no-renames", *limited[0],
+            new if old is None else f"{old}..{new}", *limited[1],
+        ).decode("utf-8")
+    except (WorkpadConflictError, UnicodeDecodeError):
+        return None
+    chain: list[tuple[str, list[str], list[tuple[str, str]]]] = []
+    status: str | None = None
+    for chunk in listing.split("\x00"):
+        if status is not None:
+            chain[-1][2].append((status, chunk))
+            status = None
+        elif not chunk:
+            continue
+        elif chunk[0] == "\x01":
+            commit, _space, parents = chunk[1:].partition(" ")
+            chain.append((commit, parents.split(), []))
+        elif chain:
+            status = chunk[1:] if chunk[0] == "\n" else chunk
+        else:
+            return None
+    if status is not None or not chain or chain[0][0] != new or chain[-1][1] != ([] if old is None else [old]):
+        return None
+    if any(parents != [chain[index + 1][0]] for index, (_commit, parents, _changes) in enumerate(chain[:-1])):
+        return None
+    return tuple((commit, tuple(changes)) for commit, _parents, changes in chain)
 
 
 def _register_record(home: Path, record: WorkpadRecord) -> bool:
@@ -1403,14 +1480,18 @@ __all__ = [
     "committed_read_cache",
     "committed_read_cache_active",
     "ensure_run_local_artifact_excludes",
+    "journal_head",
     "layout_paths_touched",
     "open_locations",
     "paths_committed_between",
     "provision_workpad",
     "read_cache_key_lock",
+    "read_git_blobs",
     "read_still_holds",
     "repository_check_holds",
+    "scratch_cache_path",
     "straight_commits_between",
+    "straight_history",
     "register_existing_workpad",
     "resolve_bound_project",
     "resolve_workpad",

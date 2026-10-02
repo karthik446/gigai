@@ -4,15 +4,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from contextlib import contextmanager
+import json
 import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import tempfile
 import time
 from typing import Iterator
 
-from .canonical import canonical_json_bytes, parse_json_bytes, parse_json_front_matter
-from .workpad import ensure_run_local_artifact_excludes
+from .canonical import canonical_json_bytes, digest_imported_bytes, parse_json_bytes, parse_json_front_matter
+from .workpad import (
+    ensure_run_local_artifact_excludes,
+    journal_head,
+    read_git_blobs,
+    scratch_cache_path,
+    straight_history,
+)
 
 
 class JournalIndexError(RuntimeError):
@@ -85,6 +93,37 @@ def _authoritative_projection(
         # performs are these additive exclude-line repairs.
         ensure_run_local_artifact_excludes(root)
         _require_clean_authority(root)
+    # 0110-044: the entries are a function of the journal head alone. They
+    # are kept for a head in ``scratch/`` and carried to a later head by one
+    # listing of only the new commits; whatever that cannot settle, and every
+    # refusal, is the commit-by-commit walk's.
+    known_head = journal_head(root)
+    entries = None if known_head is None else _kept_entries(root, project_id, gig_id, known_head)
+    if entries is None or known_head is None:
+        head, entries = _walked_entries(root, gig_id)
+        _keep_entries(root, project_id, gig_id, head, entries)
+    else:
+        head = known_head
+    proposal = _json_at(
+        root,
+        head,
+        "manifests/gig-proposal.json",
+        tolerate_invalid=tolerate_manifest_errors,
+    )
+    active_version = _json_at(
+        root,
+        head,
+        "manifests/active-gig-version.json",
+        tolerate_invalid=tolerate_manifest_errors,
+    )
+    return JournalProjection(
+        project_id, gig_id, head, tuple(entries), proposal, active_version
+    )
+
+
+def _walked_entries(root: Path, gig_id: str) -> tuple[str, list[dict[str, object]]]:
+    """The journal's head and its entries, read commit by commit (two git calls each): the authority, and every refusal."""
+
     commits = tuple(
         line
         for line in _git(root, "rev-list", "--reverse", "HEAD").splitlines()
@@ -127,22 +166,176 @@ def _authoritative_projection(
             }
         )
         expected_sequence += 1
-    head = commits[-1]
-    proposal = _json_at(
-        root,
-        head,
-        "manifests/gig-proposal.json",
-        tolerate_invalid=tolerate_manifest_errors,
-    )
-    active_version = _json_at(
-        root,
-        head,
-        "manifests/active-gig-version.json",
-        tolerate_invalid=tolerate_manifest_errors,
-    )
-    return JournalProjection(
-        project_id, gig_id, head, tuple(entries), proposal, active_version
-    )
+    return commits[-1], entries
+
+
+# --- 0110-044: the journal's entries, kept at the journal head ---------------
+#
+# ``_walked_entries`` asks git twice for every journal commit, on every read:
+# 6,000 calls and 37 s at 3,000 commits for one ``gigai status``. The entries
+# depend on nothing but the commits reachable from the head, so
+# ``scratch/journal-index-entries.json`` keeps them for one head (``scratch/``
+# is ignored by git in both layouts and never transferred; deleting the file
+# is always safe). It is a cache, not a defence, used only when all of this
+# holds:
+#
+# * it is this schema's, this project's and this Gig's, its body has the
+#   digest its first line names, and every entry is well formed, numbered
+#   from 1 without a gap and ends at the head it names;
+# * the journal head is that head, or descends from it in a straight line of
+#   commits each of which added exactly one handoff and changed nothing else
+#   under ``handoffs/`` (``straight_history``: one listing of only the new
+#   commits). The new handoffs are read by one ``git cat-file --batch`` and
+#   pass the walk's own checks (sequence, Gig, identity).
+#
+# With no file the same listing is made once from the first commit. Anything
+# else (a merge, a rewritten history, a commit with no handoff or two, a
+# removed handoff, a sequence or a Gig that diverges, a name git would quote)
+# is settled by the walk, with its errors; a refusal is never kept.
+
+ENTRIES_FILENAME = "journal-index-entries.json"
+ENTRIES_SCHEMA = "journal-index-entries/1"
+_ENTRIES_MAX_BYTES = 256 * 1024 * 1024
+_ENTRY_KEYS = ("commit", "handoff_id", "path", "sequence", "transition")
+
+
+def _is_commit_id(value: object) -> bool:
+    return isinstance(value, str) and len(value) in (40, 64) and all(character in "0123456789abcdef" for character in value)
+
+
+def _read_kept_entries(root: Path, project_id: str, gig_id: str) -> tuple[str, list[dict[str, object]]] | None:
+    """The kept ``(head, entries)`` when the file is this Gig's, undamaged and well formed."""
+
+    path = scratch_cache_path(root, ENTRIES_FILENAME, create=False)
+    if path is None:
+        return None
+    try:
+        with path.open("rb") as stream:
+            data = stream.read(_ENTRIES_MAX_BYTES + 1)
+        first, newline, body = data.partition(b"\n")
+        if not newline or len(data) > _ENTRIES_MAX_BYTES:
+            return None
+        header = json.loads(first)
+        if not isinstance(header, dict) or set(header) != {"schema", "project_id", "gig_id", "head", "count", "body_sha256"}:
+            return None
+        if header["schema"] != ENTRIES_SCHEMA or header["project_id"] != project_id or header["gig_id"] != gig_id:
+            return None
+        if header["body_sha256"] != digest_imported_bytes(body):
+            return None
+        entries = json.loads(body)
+    except (OSError, ValueError):
+        return None
+    head = header["head"]
+    if not _is_commit_id(head) or not isinstance(entries, list) or not entries or type(header["count"]) is not int or header["count"] != len(entries):
+        return None
+    for position, entry in enumerate(entries, start=1):
+        if not isinstance(entry, dict) or tuple(entry) != _ENTRY_KEYS:
+            return None
+        if type(entry["sequence"]) is not int or entry["sequence"] != position or not _is_commit_id(entry["commit"]):
+            return None
+        if not all(isinstance(entry[key], str) for key in ("handoff_id", "path", "transition")):
+            return None
+    if entries[-1]["commit"] != head:
+        return None
+    return head, entries
+
+
+def _listed_entries(
+    root: Path, gig_id: str, old: str | None, new: str, first_sequence: int
+) -> list[dict[str, object]] | None:
+    """The entries of the commits after ``old`` up to ``new`` (``old`` ``None``: all of them); ``None``: walk."""
+
+    chain = straight_history(root, old, new, "handoffs/")
+    if chain is None:
+        return None
+    found: list[tuple[str, str]] = []
+    for commit, changes in reversed(chain):
+        if any(status != "A" or not _is_plain_name(name) for status, name in changes):
+            return None
+        handoffs = [name for _status, name in changes if name.startswith("handoffs/") and name.endswith(".txt")]
+        if len(handoffs) != 1:
+            return None
+        found.append((commit, handoffs[0]))
+    blobs = read_git_blobs(root, tuple(f"{commit}:{handoff}" for commit, handoff in found))
+    if blobs is None or len(blobs) != len(found):
+        return None
+    entries: list[dict[str, object]] = []
+    for sequence, ((commit, handoff), blob) in enumerate(zip(found, blobs), start=first_sequence):
+        if blob is None:
+            return None
+        try:
+            metadata, _body = parse_json_front_matter(blob[1])
+        except ValueError:
+            return None
+        transition = metadata.get("transition")
+        handoff_id = metadata.get("handoff_id")
+        if (
+            type(metadata.get("sequence")) is not int
+            or metadata.get("sequence") != sequence
+            or metadata.get("gig_id") != gig_id
+            or not isinstance(transition, str)
+            or not isinstance(handoff_id, str)
+        ):
+            return None
+        entries.append({"commit": commit, "handoff_id": handoff_id, "path": handoff, "sequence": sequence, "transition": transition})
+    return entries
+
+
+def _is_plain_name(name: str) -> bool:
+    """A path git prints as it is; any other is quoted by the walk's listing, which then reads it differently."""
+
+    return all(" " <= character <= "~" and character not in '"\\' for character in name)
+
+
+def _kept_entries(root: Path, project_id: str, gig_id: str, head: str) -> list[dict[str, object]] | None:
+    """The journal's entries at ``head`` from the kept file, caught up or listed once; ``None``: walk."""
+
+    kept = _read_kept_entries(root, project_id, gig_id)
+    if kept is not None and kept[0] == head:
+        return kept[1]
+    entries: list[dict[str, object]] | None = None
+    if kept is not None:
+        added = _listed_entries(root, gig_id, kept[0], head, len(kept[1]) + 1)
+        if added is not None:
+            entries = kept[1] + added
+    if entries is None:
+        entries = _listed_entries(root, gig_id, None, head, 1)
+    if entries is None:
+        return None
+    _keep_entries(root, project_id, gig_id, head, entries)
+    return entries
+
+
+def _keep_entries(root: Path, project_id: str, gig_id: str, head: str, entries: list[dict[str, object]]) -> None:
+    """Record the entries for ``head``; a failure to write changes nothing but the next read."""
+
+    path = scratch_cache_path(root, ENTRIES_FILENAME, create=True)
+    if path is None or not entries or entries[-1].get("commit") != head:
+        return
+    body = json.dumps(entries, separators=(",", ":")).encode("utf-8")
+    header = json.dumps(
+        {
+            "schema": ENTRIES_SCHEMA,
+            "project_id": project_id,
+            "gig_id": gig_id,
+            "head": head,
+            "count": len(entries),
+            "body_sha256": digest_imported_bytes(body),
+        },
+        sort_keys=True,
+    ).encode("utf-8")
+    staged: str | None = None
+    try:
+        descriptor, staged = tempfile.mkstemp(prefix=f".{ENTRIES_FILENAME}.", dir=path.parent)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(header + b"\n" + body)
+        os.replace(staged, path)
+    except OSError:
+        if staged is not None:
+            try:
+                os.unlink(staged)
+            except OSError:
+                pass
 
 
 def read_index(*, workpad: Path, project_id: str, gig_id: str) -> JournalProjection:
