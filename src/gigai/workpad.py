@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+import json
 import os
 from pathlib import Path
 import shutil
@@ -206,7 +207,24 @@ def straight_commits_between(root: Path, old: str, new: str) -> tuple[tuple[str,
     with _READ_CACHE_LOCK:
         if key in _committed_between:
             return _committed_between[key]
-    listing = _git(root, "log", "-z", "--format=%x01%H %P", "--name-only", f"{old}..{new}", check=False)
+    result = _straight_chain(root, old, new)
+    with _READ_CACHE_LOCK:
+        if len(_committed_between) >= _COMMITTED_BETWEEN_MAX:
+            _committed_between.pop(next(iter(_committed_between)))
+        _committed_between[key] = result
+    return result
+
+
+def _straight_chain(root: Path, old: str, new: str, *only: str) -> tuple[tuple[str, frozenset[str]], ...] | None:
+    """One ``git log old..new``: each commit, newest first, with the paths it touched; ``None`` unless a straight line.
+
+    With ``only``, every commit is still listed (no history simplification)
+    and its paths are limited to those: the cost of a commit is then one look
+    at those paths, not a whole diff (0110-043).
+    """
+
+    limited = (("--full-history", "--sparse"), ("--", *only)) if only else ((), ())
+    listing = _git(root, "log", "-z", "--format=%x01%H %P", "--name-only", *limited[0], f"{old}..{new}", *limited[1], check=False)
     chain: list[tuple[str, list[str], set[str]]] = []
     if listing.returncode == 0:
         for chunk in listing.stdout.split("\x00"):
@@ -222,12 +240,7 @@ def straight_commits_between(root: Path, old: str, new: str) -> tuple[tuple[str,
     straight = bool(chain) and chain[0][0] == new and chain[-1][1] == [old] and all(
         parents == [chain[index + 1][0]] for index, (_commit, parents, _names) in enumerate(chain[:-1])
     )
-    result = tuple((commit, frozenset(names)) for commit, _parents, names in chain) if straight else None
-    with _READ_CACHE_LOCK:
-        if len(_committed_between) >= _COMMITTED_BETWEEN_MAX:
-            _committed_between.pop(next(iter(_committed_between)))
-        _committed_between[key] = result
-    return result
+    return tuple((commit, frozenset(names)) for commit, _parents, names in chain) if straight else None
 
 
 def paths_committed_between(root: Path, old: str, new: str) -> frozenset[str] | None:
@@ -884,33 +897,64 @@ def workpad_layout_version(root: Path, *, project_id: str, gig_id: str) -> int:
         return 1
     if not marker.is_file():
         raise WorkpadConflictError("workpad layout marker is invalid")
-    try:
-        from .canonical import parse_json_bytes, parse_json_front_matter
+    # 0110-043: the walk below visits every journal commit. Its answer for a
+    # journal head is kept in ``scratch/`` and carried to a later head by one
+    # listing of only the new commits; the kept publisher is then admitted by
+    # the same checks. Whatever the kept answer cannot settle, and every
+    # refusal, is the walk's.
+    head = _journal_head(root)
+    kept = _kept_layout_publisher(root, project_id, gig_id, head) if head is not None else None
+    if kept is not None and head is not None:
+        commit, marker_blob, read = kept
+        try:
+            version = _admitted_layout_version(root, marker, project_id, gig_id, commit, read)
+        except WorkpadError:
+            pass
+        else:
+            _keep_layout_publisher(root, project_id, gig_id, head, commit, marker_blob)
+            return version
+    # A shaped working-tree marker is not authority.  Resolve its one
+    # immutable publisher and use the committed bytes for admission.
+    walked = _git(root, "log", "--format=%H", *(() if head is None else (head,)), "--", WORKPAD_LAYOUT_PATH, check=False)
+    publishers = [line for line in walked.stdout.splitlines() if line]
+    if len(publishers) != 1:
+        raise WorkpadConflictError("workpad layout marker is invalid") from ValueError()
+    commit = publishers[0]
+    version = _admitted_layout_version(
+        root, marker, project_id, gig_id, commit, lambda path: _git_bytes(root, "show", f"{commit}:{path}")
+    )
+    if head is not None and _layout_check_path(root, create=True) is not None:
+        found = _git_blobs(root, (f"{head}:{WORKPAD_LAYOUT_PATH}",))
+        if found is not None and found[0] is not None:
+            _keep_layout_publisher(root, project_id, gig_id, head, commit, found[0][0])
+    return version
 
-        # A shaped working-tree marker is not authority.  Resolve its one
-        # immutable publisher and use the committed bytes for admission.
-        publishers = [
-            line for line in _git(root, "log", "--format=%H", "--", WORKPAD_LAYOUT_PATH, check=False).stdout.splitlines()
-            if line
-        ]
-        if len(publishers) != 1:
-            raise ValueError
-        commit = publishers[0]
+
+def _admitted_layout_version(
+    root: Path,
+    marker: Path,
+    project_id: str,
+    gig_id: str,
+    commit: str,
+    read: Callable[[str], bytes],
+) -> int:
+    """Admit the layout marker as published by ``commit``; ``read`` gives that commit's bytes of a path."""
+
+    try:
+        from .canonical import digest_imported_bytes, parse_json_bytes, parse_json_front_matter
+
         changed = _git(root, "show", "--format=", "--name-only", commit).stdout.splitlines()
         handoffs = [item for item in changed if item.startswith("handoffs/") and item.endswith(".txt")]
         if len(handoffs) != 1 or WORKPAD_LAYOUT_PATH not in changed or ".gitignore" not in changed:
             raise ValueError
-        metadata, _body = parse_json_front_matter(
-            _git_bytes(root, "show", f"{commit}:{handoffs[0]}")
-        )
-        marker_bytes = _git_bytes(root, "show", f"{commit}:{WORKPAD_LAYOUT_PATH}")
-        ignore_bytes = _git_bytes(root, "show", f"{commit}:.gitignore")
+        metadata, _body = parse_json_front_matter(read(handoffs[0]))
+        marker_bytes = read(WORKPAD_LAYOUT_PATH)
+        ignore_bytes = read(".gitignore")
         if metadata.get("transition") != "workpad_layout_migrated" or metadata.get("gig_id") != gig_id:
             raise ValueError
         references = metadata.get("artifact_refs")
         if not isinstance(references, list):
             raise ValueError
-        from .canonical import digest_imported_bytes
 
         expected_refs = {
             WORKPAD_LAYOUT_PATH: digest_imported_bytes(marker_bytes),
@@ -941,6 +985,198 @@ def workpad_layout_version(root: Path, *, project_id: str, gig_id: str) -> int:
     if payload.get("ignore_sha256") != digest_imported_bytes(WORKPAD_V2_GITIGNORE):
         raise WorkpadConflictError("workpad layout marker ignore policy is invalid")
     return 2
+
+
+# --- 0110-043: the layout marker's publisher, kept at the journal head ------
+#
+# ``scratch/workpad-layout-check.json`` says: at journal head H the walk found
+# exactly one publisher P of the layout marker, whose blob there is B.
+# ``scratch/`` is ignored by git in both layouts and never transferred;
+# deleting the file is always safe (the next check walks once and writes it
+# again). It is a cache, not a defence: it only ever replaces the walk, never
+# an admission check, and it is used only when all of this holds:
+#
+# * it is this schema's, this project's and this Gig's, and well formed;
+# * the head is H, or descends from H in a straight line of commits none of
+#   which touched the marker (``_straight_chain``: one listing of only the
+#   new commits, limited to the marker's path);
+# * the marker's blob at the head is B and is P's blob of it.
+#
+# P is then admitted exactly as a walked publisher is (its handoff, digests,
+# the working files' bytes, the marker's identity). Anything else, including
+# any refusal on the way, is settled by the full walk with its own errors.
+
+LAYOUT_CHECK_DIRECTORY = "scratch"
+LAYOUT_CHECK_FILENAME = "workpad-layout-check.json"
+LAYOUT_CHECK_SCHEMA = "workpad-layout-check/1"
+_LAYOUT_CHECK_MAX_BYTES = 4096
+
+
+def _is_object_id(value: object) -> bool:
+    return isinstance(value, str) and len(value) in (40, 64) and all(character in "0123456789abcdef" for character in value)
+
+
+def _journal_head(root: Path) -> str | None:
+    """The journal head commit: from the ``.git`` files, or from git when only it can tell; ``None`` when there is none."""
+
+    head = workpad_head_without_git(root)
+    if head is None:
+        head = _git(root, "rev-parse", "--verify", "--quiet", "HEAD", check=False).stdout.strip()
+    return head if _is_object_id(head) else None
+
+
+def _layout_check_path(root: Path, *, create: bool) -> Path | None:
+    directory = root / LAYOUT_CHECK_DIRECTORY
+    try:
+        if directory.is_symlink():
+            return None
+        if not directory.is_dir():
+            if not create or directory.exists():
+                return None
+            directory.mkdir(mode=0o700)
+        path = directory / LAYOUT_CHECK_FILENAME
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            return None
+        if not create and not path.exists():
+            return None
+    except OSError:
+        return None
+    return path
+
+
+def _read_layout_check(root: Path, project_id: str, gig_id: str) -> tuple[str, str, str] | None:
+    """The kept (head, publisher, marker blob) when the file is this Gig's and well formed."""
+
+    path = _layout_check_path(root, create=False)
+    if path is None:
+        return None
+    try:
+        with path.open("rb") as stream:
+            data = stream.read(_LAYOUT_CHECK_MAX_BYTES + 1)
+        kept = json.loads(data) if len(data) <= _LAYOUT_CHECK_MAX_BYTES else None
+    except (OSError, ValueError):
+        return None
+    if not isinstance(kept, dict) or set(kept) != {"schema", "project_id", "gig_id", "head", "publisher", "marker_blob"}:
+        return None
+    if kept["schema"] != LAYOUT_CHECK_SCHEMA or kept["project_id"] != project_id or kept["gig_id"] != gig_id:
+        return None
+    found = (kept["head"], kept["publisher"], kept["marker_blob"])
+    if not all(_is_object_id(value) for value in found):
+        return None
+    return found
+
+
+def _kept_layout_publisher(
+    root: Path, project_id: str, gig_id: str, head: str
+) -> tuple[str, str, Callable[[str], bytes]] | None:
+    """The marker's one publisher as kept for ``head``, its marker blob, and a reader of its bytes; ``None``: walk."""
+
+    kept = _read_layout_check(root, project_id, gig_id)
+    if kept is None:
+        return None
+    kept_head, commit, marker_blob = kept
+    if kept_head != head:
+        between = _straight_chain(root, kept_head, head, WORKPAD_LAYOUT_PATH)
+        if between is None or any(names for _commit, names in between):
+            return None
+    blobs: dict[str, bytes] = {}
+
+    def read(path: str) -> bytes:
+        # One ``git cat-file --batch`` for the publisher's three files and
+        # the marker at the head, on the first ask (the handoff's name).
+        if not blobs:
+            names = tuple(dict.fromkeys((path, WORKPAD_LAYOUT_PATH, ".gitignore")))
+            found = _git_blobs(root, (f"{head}:{WORKPAD_LAYOUT_PATH}", *(f"{commit}:{name}" for name in names)))
+            objects = [item for item in found or () if item is not None]
+            if len(objects) != len(names) + 1:
+                raise WorkpadConflictError("Git workpad object lookup failed")
+            published = dict(zip(names, objects[1:]))
+            if not published[WORKPAD_LAYOUT_PATH][0] == objects[0][0] == marker_blob:
+                raise WorkpadConflictError("workpad layout marker is invalid")
+            blobs.update((name, content) for name, (_blob, content) in published.items())
+        if path not in blobs:
+            raise WorkpadConflictError("Git workpad object lookup failed")
+        return blobs[path]
+
+    return commit, marker_blob, read
+
+
+def _keep_layout_publisher(root: Path, project_id: str, gig_id: str, head: str, commit: str, marker_blob: str) -> None:
+    """Record the proven publisher for ``head``; a failure to write changes nothing but the next check."""
+
+    if _read_layout_check(root, project_id, gig_id) == (head, commit, marker_blob):
+        return
+    path = _layout_check_path(root, create=True)
+    if path is None:
+        return
+    content = json.dumps(
+        {
+            "schema": LAYOUT_CHECK_SCHEMA,
+            "project_id": project_id,
+            "gig_id": gig_id,
+            "head": head,
+            "publisher": commit,
+            "marker_blob": marker_blob,
+        },
+        sort_keys=True,
+    ).encode("ascii")
+    staged: str | None = None
+    try:
+        descriptor, staged = tempfile.mkstemp(prefix=f".{LAYOUT_CHECK_FILENAME}.", dir=path.parent)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content)
+        os.replace(staged, path)
+    except OSError:
+        if staged is not None:
+            try:
+                os.unlink(staged)
+            except OSError:
+                pass
+
+
+def _git_blobs(root: Path, names: tuple[str, ...]) -> list[tuple[str, bytes] | None] | None:
+    """Each named blob's id and bytes from one ``git cat-file --batch``; ``None`` for a name that is not a blob."""
+
+    executable = shutil.which("git")
+    if executable is None:
+        raise WorkpadUnavailableError("Git executable is unavailable")
+    if any("\n" in name for name in names):
+        return None
+    completed = subprocess.run(
+        [executable, "-C", os.fspath(root), "cat-file", "--batch"],
+        input="".join(f"{name}\n" for name in names).encode("utf-8"),
+        env={
+            **os.environ,
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+        },
+        capture_output=True,
+        check=False,
+        shell=False,
+    )
+    if completed.returncode != 0:
+        return None
+    output = completed.stdout
+    found: list[tuple[str, bytes] | None] = []
+    position = 0
+    for _name in names:
+        end = output.find(b"\n", position)
+        if end < 0:
+            return None
+        header = output[position:end].split(b" ")
+        position = end + 1
+        if len(header) != 3 or not header[2].isdigit():
+            found.append(None)  # "<name> missing" and the like
+            continue
+        size = int(header[2])
+        content = output[position:position + size]
+        if len(content) != size or output[position + size:position + size + 1] != b"\n":
+            return None
+        position += size + 1
+        blob = header[0].decode("ascii", "replace")
+        found.append((blob, content) if header[1] == b"blob" and _is_object_id(blob) else None)
+    return found if position == len(output) else None
 
 
 def _register_record(home: Path, record: WorkpadRecord) -> bool:
@@ -1146,6 +1382,9 @@ def _git_bytes(root: Path, *args: str) -> bytes:
 __all__ = [
     "BoundProject",
     "EditorInvocationError",
+    "LAYOUT_CHECK_DIRECTORY",
+    "LAYOUT_CHECK_FILENAME",
+    "LAYOUT_CHECK_SCHEMA",
     "NoActiveGigError",
     "OpenResult",
     "PROVISION_FAILPOINTS",

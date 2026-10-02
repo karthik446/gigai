@@ -95,6 +95,10 @@ def test_the_head_read_from_the_files_is_gits_head(gig: SimpleNamespace) -> None
 
 def test_outside_a_read_nothing_is_reused(gig: SimpleNamespace, spawns: list[list[str]]) -> None:
     assert not committed_read_cache_active()
+    # 0110-043: the first check at a new journal head lists the commits since the
+    # head the layout marker's publisher was kept for (one more subprocess, once).
+    _resolve(gig)
+    spawns.clear()
     _resolve(gig)
     first = len(spawns)
     _resolve(gig)
