@@ -71,6 +71,7 @@ from ...adapters.codex_cli import CodexCLIAdapter
 from ...adapters.port import ModelInvocationError
 from ...canonical import canonical_json_digest, digest_imported_bytes
 from ..call_metrics import KIND_RANK, CallMeter
+from ..untrusted_text import UNTRUSTED_POSTING_RULE, fence_untrusted_posting
 from .discovery.storage import atomic_write
 from .rank_digest import DIGEST_VERSION, CandidatePrefs, posting_digest, resume_digest
 
@@ -78,7 +79,10 @@ if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
     from ...config import GigAIConfig
     from .contracts import ModelTarget, PostingRow
 
-PROMPT_VERSION = "rank-v1"
+#: rank-v2 (0.1.10.7 P5): the posting lines are fenced as untrusted and the prompt states the
+#: rule (``untrusted_text``). The version is part of the score cache key (``cache_key``), so a
+#: score made with rank-v1 is never served as if the fenced prompt had made it.
+PROMPT_VERSION = "rank-v2"
 RANK_SCHEMA_VERSION = "scout-rank:1"
 DEFAULT_BATCH_SIZE = 50
 DEFAULT_CONCURRENCY = 8
@@ -110,6 +114,8 @@ Posting lines are: id | title @ company | lvl | loc [countries] | yrs=min years 
 
 {candidate}
 
+{untrusted_rule}
+
 POSTINGS ({n}):
 {lines}
 
@@ -127,9 +133,11 @@ You cannot see that answer. Produce a fresh, complete answer following the forma
 
 
 def render_rank_prompt(lines: Sequence[str], candidate: str, error: str | None = None) -> str:
-    """The rank-v1 prompt for one batch of digest lines (the spike's text, unchanged)."""
+    """The rank-v2 prompt for one batch of digest lines: the spike's text, with the lines fenced as untrusted (P5)."""
 
-    text = PROMPT.format(candidate=candidate, n=len(lines), lines="\n".join(lines))
+    text = PROMPT.format(
+        candidate=candidate, n=len(lines), lines=fence_untrusted_posting("\n".join(lines)), untrusted_rule=UNTRUSTED_POSTING_RULE
+    )
     if error:
         text += RETRY.format(error=error[:_MAX_FED_BACK_ERROR])
     return text

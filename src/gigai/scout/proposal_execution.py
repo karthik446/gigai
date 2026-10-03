@@ -708,9 +708,9 @@ def _basis_stale(prior: object, *, bank: object, constraints: str | None, prompt
 
     from . import story_bank
 
-    # 0110-038: v5 (with a CANDIDATE WORK MODE paragraph) and v4 (without
-    # one: the same bytes as before) are both what the shipped prompt renders;
-    # which of the two an assessment needed is in the constraints digest.
+    # Which CANDIDATE WORK MODE paragraph an assessment needed is in the
+    # constraints digest; the version says the wording (0.1.10.7 P5: v7, the
+    # posting fenced as untrusted, for every work mode).
     if getattr(prior, "prompt_version", None) not in CURRENT_ASSESS_PROMPT_VERSIONS:
         return True
     if prompt_version is not None and getattr(prior, "prompt_version", None) != prompt_version:

@@ -13,7 +13,9 @@ version). Level stays the rules' (the spike: a model's level is worse).
 posting's own title and location as its board listed them (public data).
 Nothing else: no resume, profile or contact text, no company name, no
 description. The prompt is the spike's ``tag-v1``
-(``research/posting-index-spike/scripts/models.py``), unchanged.
+(``research/posting-index-spike/scripts/models.py``) with the lines fenced
+as untrusted and the rule that says so (``tag-v2``, 0.1.10.7 P5): a title is
+a stranger's words.
 
 **Order.** The DEMAND SET first: titles whose rules level is the level of a
 role of an active profile (only those can ever match a tag query, see
@@ -77,12 +79,16 @@ from typing import Any
 
 from ...adapters.port import ModelInvocationError
 from ..call_metrics import KIND_TAG, CallMeter
+from ..untrusted_text import UNTRUSTED_POSTING_RULE, fence_untrusted_posting
 from . import model_rank
 from .posting_tags import FUNCTIONS, normalize_title
 from .tag_store import TagStore
 from .title_query import open_tag_store, tag_query_for_roles
 
-PROMPT_VERSION = "tag-v1"
+#: tag-v2 (0.1.10.7 P5): the title lines are fenced as untrusted and the prompt states the rule
+#: (``untrusted_text``). A function a model set is stored with the version that set it
+#: (``TagStore.set_model_function``); a title tagged under tag-v1 keeps its tag and its "tag-v1".
+PROMPT_VERSION = "tag-v2"
 BATCH_SIZE = model_rank.DEFAULT_BATCH_SIZE
 #: Model calls' worth of batches one drain may start (retries and halves are extra calls of the same batch).
 DEFAULT_BATCHES_PER_TICK = 4
@@ -129,14 +135,17 @@ _MAX_ERROR = 200
 
 _logger = logging.getLogger("gigai.scout.refresh")
 
-# The spike's prompt, byte for byte (the accuracy tables were measured with it).
-# It still asks for a level: the answer's level is read and thrown away.
+# The spike's prompt (the accuracy tables were measured with its tag-v1 text); tag-v2 adds
+# the untrusted-text rule and fences the lines. It still asks for a level: the answer's
+# level is read and thrown away.
 PROMPT = """Tag each job posting below with its level and job function. Judge from the title (and the excerpt, when one is given).
 
 level codes: I intern/co-op; J junior, entry, associate or assistant; M mid (no seniority word); S senior; T staff; P principal/distinguished; L lead (tech lead, team lead); G manager (including senior manager); D director (including senior/associate director); V vice president (VP, SVP, AVP); H "head of"; C chief / C-level.
 fn codes: sw software engineering; ai AI/ML engineering and applied science; da data (analytics, data engineering, data science); pr product management; de design/creative; se security and IT; hw hardware, mechanical, electrical, manufacturing, civil and other non-software engineering; sa sales, business development, partnerships, account management; so solutions/sales engineering, technical consulting, professional services; ma marketing/communications; cu customer success/support; op operations, program/project management, strategy; fi finance/accounting; le legal/compliance; pe people/HR/recruiting; he healthcare/clinical; rs research/science (not AI); ot other.
 
 Posting lines are: id | title | location{extra}
+
+{untrusted_rule}
 
 POSTINGS ({n}):
 {lines}
@@ -184,9 +193,9 @@ def tag_line(posting_id: str, title: str, location: str | None) -> str:
 
 
 def render_tag_prompt(lines: Sequence[str], error: str | None = None) -> str:
-    """The tag-v1 prompt for one batch of ``id | title | location`` lines."""
+    """The tag-v2 prompt for one batch of ``id | title | location`` lines, fenced as untrusted (P5)."""
 
-    text = PROMPT.format(n=len(lines), lines="\n".join(lines), extra="")
+    text = PROMPT.format(n=len(lines), lines=fence_untrusted_posting("\n".join(lines)), extra="", untrusted_rule=UNTRUSTED_POSTING_RULE)
     if error:
         text += model_rank.RETRY.format(error=error[: model_rank._MAX_FED_BACK_ERROR])
     return text

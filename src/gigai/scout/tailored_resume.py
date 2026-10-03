@@ -118,6 +118,7 @@ from .find_jobs.resume_input import resolve_profile, resolve_resume, resume_for_
 from .question_ids import normalize_question_id
 from .resume_pii import detect_contact_details
 from .resume_privacy import ModelResume, is_name_line, model_resume, redact_inline
+from .untrusted_text import fence_untrusted_posting
 from .quick_assess import (
     EPHEMERAL_RESUME_KEY,
     QuickAssessError,
@@ -482,13 +483,17 @@ def render_tailor_prompt(job: TailorJob, ctx: TailorContext, validation_error: s
         f"A {item.question_id}: {item.answer[:_MAX_PROMPT_ANSWER_TEXT]}" for item in ctx.answers.values()
     )
     matrix = "\n".join(f"M{index}: {row.requirement} [{row.status}]" for index, row in enumerate(ctx.matrix, 1))
+    # 0.1.10.7 P5: the title, the company and the posting text are a stranger's words, and so
+    # are the matrix's requirement strings (the assess model copied them from the posting).
+    posting = (
+        f"ROLE: {job.title or 'unspecified'}\nCOMPANY: {job.company or 'unspecified'}\n"
+        f"POSTING TEXT:\n{job.posting_text[:_MAX_PROMPT_POSTING_TEXT]}"
+    )
     values = {
-        "title": job.title or "unspecified",
-        "company": job.company or "unspecified",
-        "posting_text": job.posting_text[:_MAX_PROMPT_POSTING_TEXT],
+        "posting": fence_untrusted_posting(posting),
         "resume_lines": numbered[:_MAX_PROMPT_RESUME_TEXT],
         "answers": answers,
-        "matrix": matrix,
+        "matrix": fence_untrusted_posting(matrix) if matrix else "",
         "validation_error": (validation_error or "")[:_MAX_PROMPT_VALIDATION_ERROR],
         "max_pages": str(LENGTH_RULE.max_pages),
         "old_role_years": str(LENGTH_RULE.old_role_years),

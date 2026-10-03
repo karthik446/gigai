@@ -14,10 +14,10 @@ the same three things a find-jobs run seals on its ``AssessOutput``:
 assessed with now, and names why the two differ:
 
 - ``older_prompt``: the prompt version is not one the shipped ``assess.md``
-  renders (``CURRENT_ASSESS_PROMPT_VERSIONS``), or, with the same
-  constraints, it is not the one this work mode renders now (decision #207:
-  a hybrid profile's assessment sealed as v5, before the hybrid paragraph's
-  words changed);
+  renders (``CURRENT_ASSESS_PROMPT_VERSIONS``; since 0.1.10.7 P5 that is
+  every assessment sealed as v4, v5 or v6, before the posting was fenced as
+  untrusted), or, with the same constraints, it is not the one this work
+  mode renders now (decision #207);
 - ``settings_changed``: the constraints digest differs (a changed work
   mode, countries, location or sponsorship need);
 - ``story_bank_changed``: ``story_bank.bank_matches`` (0110-041, targeted): a
@@ -31,20 +31,13 @@ assessed with now, and names why the two differ:
 The same three checks, in the same order, as a run's unchanged skip
 (``proposal_execution._basis_stale``).
 
-A record with NO basis (written before 0110-039) is judged by what its
-prompt can have missed, never re-assessed wholesale:
-
-- quick assess always sent the sponsorship need, the countries and the
-  location, but no work mode before 0110-038. So it is ``older_prompt`` when
-  the profile has a work mode now (remote / hybrid / onsite), and only then;
-- the sponsorship need and the countries it used are in its stored
-  ``preferences``: it is ``settings_changed`` when they differ from the
-  profile's now. The location it used was not stored, so it is taken as
-  unchanged;
-- it has no bank stamp, so the bank rule is not applied to it.
-
-A profile with no work mode whose sponsorship need and countries are what
-the record says has nothing the old prompt missed: its old verdicts stay.
+A record with NO basis (written before 0110-039) is ``older_prompt``,
+whatever the profile. Until 0.1.10.7 P5 it was judged by what its prompt can
+have missed (a work mode, a changed sponsorship need or country list), and a
+profile with none of those kept its old verdicts. P5 fenced the posting as
+untrusted in every assess prompt (assess-prompt-v7, ``untrusted_text``), so
+no prompt that can have made such a record is the wording the profile would
+be assessed with now.
 
 0.1.10.7 PL2: a new record also carries the rest of what a run seals, so the
 provenance survives without runs: ``profile_ref`` (the profile's id,
@@ -102,10 +95,6 @@ def posting_sha256(title: str, text: str) -> str:
     return content_hash(_text_bytes(title, text or None))
 
 
-def _countries(values: object) -> frozenset[str]:
-    return frozenset(item.strip().upper() for item in (values or ()) if isinstance(item, str) and item.strip())  # type: ignore[union-attr]
-
-
 @dataclass(frozen=True)
 class CurrentBasis:
     """What one resume identity would be assessed with now (no request overrides)."""
@@ -149,12 +138,8 @@ def staleness(item: AssessResponse, current: CurrentBasis, bank_now) -> Stalenes
     from . import story_bank
 
     if item.prompt_version is None and item.constraints_digest is None:
-        if normalize_work_mode(current.work_mode):
-            return Staleness(REASON_OLDER_PROMPT)
-        said = item.preferences
-        if bool(said.visa_sponsorship_required) != current.visa_sponsorship_required or _countries(said.countries) != _countries(current.countries):
-            return Staleness(REASON_SETTINGS_CHANGED)
-        return None
+        # No basis: written before 0110-039, so before the posting was fenced (P5).
+        return Staleness(REASON_OLDER_PROMPT)
     if item.prompt_version not in CURRENT_ASSESS_PROMPT_VERSIONS:
         return Staleness(REASON_OLDER_PROMPT)
     if item.constraints_digest != current.constraints_digest:

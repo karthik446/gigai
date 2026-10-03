@@ -16,6 +16,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from .find_jobs.contracts import AssessmentResult, FindJobsContractError
+from .untrusted_text import UNTRUSTED_POSTING_RULE, fence_untrusted_posting
 
 from ..adapters.port import InvocationRequest
 from ..canonical import (
@@ -303,11 +304,13 @@ def build_proposal_prompt(request: ScoutProposalRequest) -> str:
         "Required output sections: fit_reasons, hard_blockers, unknowns, preference_rejection_reason, proposed_resume_focus, focused_experience_questions, ranking, requested_user_actions. Focus and questions each require an explicit state; use not_applicable or none_needed only with an explanation.",
         "Output status must be complete only when the assessment is meaningful: include at least one fit reason, explicit focus and questions states, ranking rationale, and requested action. Blockers and unknowns may both be empty when selected evidence supports no known concern; do not invent one.",
     ]
+    blocks.append(UNTRUSTED_POSTING_RULE)
     for source in (request.posting, *request.private_sources):
         label = "POSTING DATA" if source.purpose == "posting" else "PRIVATE USER DATA"
-        blocks.append(
-            f"{label} [{source.handle}] family={source.family}\n{source.content.decode('utf-8')}\nEND {label}"
-        )
+        text = source.content.decode("utf-8")
+        if source.purpose == "posting":
+            text = fence_untrusted_posting(text)  # 0.1.10.7 P5: a stranger's words, fenced
+        blocks.append(f"{label} [{source.handle}] family={source.family}\n{text}\nEND {label}")
     prompt = "\n\n".join(blocks)
     if len(prompt) > _MAX_PROMPT_CHARS:
         _raise("prompt_too_large", "proposal prompt exceeds bounded size")

@@ -231,7 +231,7 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
         assert {name: tags[name] for name in ("available", "titles", "tagged_by_rules", "tagged_by_model", "model_other", "awaiting_model")} == {
             "available": True, "titles": 1, "tagged_by_rules": 1, "tagged_by_model": 0, "model_other": 0, "awaiting_model": 0,
         }
-        assert tags["queue"] is not None and tags["queue"]["prompt_version"] == "tag-v1"
+        assert tags["queue"] is not None and tags["queue"]["prompt_version"] == "tag-v2"
         assert first["text_index"] == {"available": True, "postings_with_text": 1, "unchecked": 0}
         refresh = first["refresh"]
         assert (refresh["enabled"], refresh["state"], refresh["in_progress"], refresh["trigger"]) == (True, "waiting", False, "manual")
