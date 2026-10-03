@@ -1,8 +1,8 @@
 {
   "schema": "gigai-media-manifest:1",
-  "version": "0.1.10.6",
+  "version": "0.1.10.7",
   "generated_on": "2026-10-03",
-  "total_bytes": 1010214,
+  "total_bytes": 1026674,
   "images": [
     {
       "file": "answers-dark.png",
@@ -41,8 +41,8 @@
       "alt": "The approval dialog: Scout says how many postings and what it costs before it assesses anything.",
       "width": 1280,
       "height": 800,
-      "bytes": 55675,
-      "sha256": "d520d8eaba6b3cab449ec4acfeb74e6b437c07aae02c04d7511fcaf1f6b50ea1"
+      "bytes": 55674,
+      "sha256": "21db07929f4ec5b985ade4675b59582b038c2493607415fca974eca225f0cb3d"
     },
     {
       "file": "background-dark.png",
@@ -51,8 +51,8 @@
       "alt": "The Background pipeline panel, with jobs waiting for your approval.",
       "width": 1280,
       "height": 800,
-      "bytes": 39778,
-      "sha256": "96a6cd85c06defa9361308eee728ac88e433973d069fca2960a404fcbefe9c09"
+      "bytes": 39758,
+      "sha256": "3654a3c58b0c9f450fa68dbb9681c3e1e45838270ddf023494921df5e1761f5b"
     },
     {
       "file": "background-light.png",
@@ -61,8 +61,8 @@
       "alt": "The Background pipeline panel, with jobs waiting for your approval.",
       "width": 1280,
       "height": 800,
-      "bytes": 39826,
-      "sha256": "2418af89ac7ab6193e3bca1f1bdcc2b8926dc790ef6289a7ede103a8848da2ac"
+      "bytes": 39823,
+      "sha256": "eedeb14959c23c92f98c78a90152a4cc4a194ddaa5d36a94b4f2284c8070cd43"
     },
     {
       "file": "job-page-dark.png",
@@ -71,8 +71,8 @@
       "alt": "A job page: the posting, its verdict and the requirements against your resume and answers.",
       "width": 1280,
       "height": 800,
-      "bytes": 40309,
-      "sha256": "e79a7030388299b9d6b683f15a215337d70f6f96cae5a41d173ffabae44db9a1"
+      "bytes": 41664,
+      "sha256": "8bcecf89da8225398c2525b7faa6263535ade697087bf6659160c95a88b373cf"
     },
     {
       "file": "job-page-light.png",
@@ -81,8 +81,8 @@
       "alt": "A job page: the posting, its verdict and the requirements against your resume and answers.",
       "width": 1280,
       "height": 800,
-      "bytes": 40464,
-      "sha256": "4a0b685e86312b3da5975a60002e9e4362a2d6e896f16425a01b3e8637dc34f8"
+      "bytes": 41624,
+      "sha256": "8c2b908e077e11997c8b3dc91bf27746a717e6163a09c6934f0596013f3d85e6"
     },
     {
       "file": "job-pipeline-dark.png",
@@ -91,8 +91,8 @@
       "alt": "The same job page further down: the background pipeline's steps, the Scout label and the Scout ATS score, then the tailored resume.",
       "width": 1280,
       "height": 800,
-      "bytes": 44548,
-      "sha256": "a209c7cbcab63e516d83839e6af950b31e1cb97c7da8b935a5968a61e420e8db"
+      "bytes": 45343,
+      "sha256": "e538ed728f29394c871b3959ee001879b5dd83f197b750bd4ba13c3b2c695e76"
     },
     {
       "file": "job-pipeline-light.png",
@@ -101,8 +101,8 @@
       "alt": "The same job page further down: the background pipeline's steps, the Scout label and the Scout ATS score, then the tailored resume.",
       "width": 1280,
       "height": 800,
-      "bytes": 44342,
-      "sha256": "990e28b443d477dd3183132f0d0dd97f5b517f5ae473cf61179ca9861bcdb375"
+      "bytes": 45098,
+      "sha256": "6b6c197b52bf90292603ef8518c6fc444099704958c9cf33fd4e82f7f1420305"
     },
     {
       "file": "jobs-dark.png",
@@ -111,8 +111,8 @@
       "alt": "The Jobs page: every stored posting your profiles match, with filter chips, profile tags and Scout's chips.",
       "width": 1280,
       "height": 800,
-      "bytes": 57677,
-      "sha256": "ec2d3e1e1f71a5426347d5635b82aaa7c6efad1bb7039693010755d2dd5d4740"
+      "bytes": 57716,
+      "sha256": "dfe35597ee970e67e685dd3beca1097f002738c495625e260eb1b2035e6280ca"
     },
     {
       "file": "jobs-light.png",
@@ -121,8 +121,8 @@
       "alt": "The Jobs page: every stored posting your profiles match, with filter chips, profile tags and Scout's chips.",
       "width": 1280,
       "height": 800,
-      "bytes": 57579,
-      "sha256": "554ab496c35d0b317f0cc4a7b79f707daf86eb5a374c0c96b6bd5b5b14c0452a"
+      "bytes": 57691,
+      "sha256": "63f606d16917b114f36a6f2d946537f74ae5216f329954112203d92da17954a0"
     },
     {
       "file": "jobs-new-dark.png",
@@ -151,8 +151,8 @@
       "alt": "Generate PDF: you add your own name and contact details in the browser; GigAI stores none.",
       "width": 1280,
       "height": 800,
-      "bytes": 25905,
-      "sha256": "e93c5295228e51c121a04fac19b08f7a7d0482b2b65b5451b79674c8bea7a621"
+      "bytes": 31935,
+      "sha256": "5393c4cc27aefbe27f279604f56024818efb07f17870bcffefceaaf21e0cbe01"
     },
     {
       "file": "pdf-light.png",
@@ -161,8 +161,8 @@
       "alt": "Generate PDF: you add your own name and contact details in the browser; GigAI stores none.",
       "width": 1280,
       "height": 800,
-      "bytes": 26048,
-      "sha256": "667e45fb9491dca5252ad85859936ea2038a0bc2951b094d37a11a48519c107d"
+      "bytes": 32082,
+      "sha256": "d392258eb642a051e79a389896ad3cf106f07d05e5dd584712b568d45af2cb47"
     },
     {
       "file": "stories-dark.png",
@@ -201,8 +201,8 @@
       "alt": "After your yes, the agent assesses the new postings and shows them ranked.",
       "width": 1280,
       "height": 584,
-      "bytes": 32896,
-      "sha256": "7096dc518d15ce2392449d25c4c5e43712fe5a29ccdf4806b17b6d0a073466e5"
+      "bytes": 33074,
+      "sha256": "e58c2324728bba60f52f173b632379789cca8706f5043845e687934ecb6716a7"
     },
     {
       "file": "terminal-new.png",
@@ -211,8 +211,8 @@
       "alt": "An agent runs `gigai scout new`: what is new, and the cost, before anything is assessed.",
       "width": 1280,
       "height": 625,
-      "bytes": 33043,
-      "sha256": "1250b5d1a9d1f42de80f8f99dc7b9bfd10b16cf88ee4d2355d82a719fd198bbd"
+      "bytes": 33154,
+      "sha256": "7c3469d88fbe427ace7cf0cdb615af06139a3be011377178ee82ad4f2742c886"
     },
     {
       "file": "terminal-pdf.png",
@@ -221,8 +221,8 @@
       "alt": "The agent renders the tailored resume as a headerless PDF and hands you the link to finish it in Scout.",
       "width": 1280,
       "height": 215,
-      "bytes": 20310,
-      "sha256": "a3c89bbaebef0687eb279f38287c16be4ff90932a003ff641e665c1aed94c1d1"
+      "bytes": 20210,
+      "sha256": "92c93bb6ad457363990b30b72c679f8de98a2346b15386fe97c641cbc50951de"
     },
     {
       "file": "terminal-story.png",
@@ -241,8 +241,8 @@
       "alt": "`gigai scout new --yours`: what matches, from your own resume and answers, as a separate call.",
       "width": 1280,
       "height": 330,
-      "bytes": 18169,
-      "sha256": "a05a7af9ae485f00fc0c44a7f6c3c3cb11457d744dda31a269fecbd57da9a601"
+      "bytes": 18183,
+      "sha256": "efe32e2a003f8f5ec082553317aba4e58a055cb0204c1a1f2dea2d9c1be9306f"
     }
   ]
 }
