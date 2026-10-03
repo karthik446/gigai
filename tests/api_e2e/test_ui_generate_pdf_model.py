@@ -70,11 +70,18 @@ def test_the_header_body_is_every_field_trimmed_and_capped() -> None:
     assert out["can"] == [True, False, False]
 
 
-def test_the_form_carries_no_privacy_wording() -> None:
-    """The privacy wording is rewritten later in one pass (operator, 2026-10-02): the form has labels and a button only."""
+def test_the_form_carries_the_one_privacy_notice_and_spells_out_none_of_it() -> None:
+    """0.1.10.7 K, the one wording pass: the form shows the bold promise and the PDF line, from ``wording.js``.
+
+    Was ``test_the_form_carries_no_privacy_wording`` (the wording was frozen until this pass: "PROMISE" and
+    "never stores" had to be absent). The model still exports no wording of its own, and the form spells no
+    sentence out: it shows the two shared constants.
+    """
     assert _run()["exports"] == ["FIELDS", "MAX_VALUE", "canGenerate", "cleanupNotice", "emptyValues", "headerBody"]
     form = (UI_SRC / "components" / "GeneratePdfForm.jsx").read_text(encoding="utf-8")
-    assert "PROMISE" not in form and "LIMITS" not in form and "never stores" not in form
+    assert 'import { PRIVACY_PDF_LINE, PRIVACY_PROMISE } from "../wording.js";' in form
+    assert "<strong>{PRIVACY_PROMISE}</strong> {PRIVACY_PDF_LINE}" in form and 'data-role="pdf-privacy"' in form
+    assert "LIMITS" not in form and "never stores" not in form
 
 
 def test_the_form_keeps_nothing_and_sends_the_values_only_in_the_render_request() -> None:

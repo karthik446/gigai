@@ -1,3 +1,4 @@
+import HelpLink from "./HelpLink.jsx";
 import { RANK_HONEST_NOTE, isRanked, rankBlockersLine, rankReasonsLine, rankTileText, rankTooltip } from "../rankModel.js";
 
 // SCOPE-ADD-3 D: the model's rank for one posting, as a tile: the score and
@@ -24,6 +25,7 @@ export default function RankBadge({ rank, detail = false, hideWhenNone = false }
         <span className="rank-score">{tile.score}</span>
         {tile.label}
       </span>
+      {detail && <HelpLink topic="rank" />}
       {detail && (
         <div className="rank-detail" data-role="rank-detail">
           {reasons && <div className="rank-reasons">Why: {reasons}</div>}

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { FIELDS, canGenerate, emptyValues, headerBody } from "../generatePdfModel.js";
+import { PRIVACY_PDF_LINE, PRIVACY_PROMISE } from "../wording.js";
 
 function saveBlob(blob, fileName) {
   const url = URL.createObjectURL(blob);
@@ -46,6 +47,9 @@ export default function GeneratePdfForm({ render, disabled = false }) {
 
   return (
     <form className="generate-pdf-form" data-role="generate-pdf-form" autoComplete="on" onSubmit={submit}>
+      <p className="muted small" data-role="pdf-privacy">
+        <strong>{PRIVACY_PROMISE}</strong> {PRIVACY_PDF_LINE}
+      </p>
       <div className="generate-pdf-fields">
         {FIELDS.map((field) => (
           <div className="form-group" key={field.key}>

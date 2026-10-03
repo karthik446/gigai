@@ -5,6 +5,8 @@ import AssessmentBody from "../components/AssessmentBody.jsx";
 import RequirementActions from "../components/RequirementActions.jsx";
 import RankBadge from "../components/RankBadge.jsx";
 import VerdictChip from "../components/VerdictChip.jsx";
+import HelpLink from "../components/HelpLink.jsx";
+import { VERDICT_WORDING } from "../wording.js";
 import SponsorshipBadge from "../components/SponsorshipBadge.jsx";
 import ProviderBadge from "../components/ProviderBadge.jsx";
 import QuickAssessChip from "../components/QuickAssessChip.jsx";
@@ -448,9 +450,15 @@ export default function JobPage({
               {mode && <span className="mode-chip">{mode}</span>}
               {pay && <span className="pay">{pay}</span>}
               <VerdictChip verdict={job.verdict} assessment={assessment} />
+              <HelpLink topic="verdict" />
               {visaRequired && <SponsorshipBadge sponsorship={job.sponsorship} h1b={job.h1b} />}
               {job.status === "carried_forward" && <span className="tag">{unchangedSinceLabel(job.fromRunDate)}</span>}
             </div>
+            {assessment && (
+              <p className="muted small" data-role="verdict-wording">
+                {VERDICT_WORDING}
+              </p>
+            )}
             {assessment && staleAssessmentNote(job) && (
               <p className="muted small" data-role="assessment-stale">
                 {staleAssessmentNote(job)}

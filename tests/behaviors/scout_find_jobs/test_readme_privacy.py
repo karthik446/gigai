@@ -199,7 +199,11 @@ def test_assess_all_new_is_described_and_keeps_the_privacy_statement_true() -> N
 
     assert assess_all.ASSESS_CONCURRENCY == 4
     text = _flat(_page("scout/privacy.md"))
-    assert "## Assess all new A run assesses its top-ranked postings automatically" in text
+    # 0.1.10.7 I/K: no run starts from the UI any more, so the section is "Assessing many postings" and opens with
+    # the approval rule; "Assess all new" is a past run's action. Was
+    # "## Assess all new A run assesses its top-ranked postings automatically".
+    assert "## Assessing many postings A posting is assessed for the first time only when you approve it." in text
+    assert "On a past run's page, **Assess all new** assesses that run's remaining postings in the background" in text
     assert "one model call per posting, 4 at a time" in text
     assert "per-token" not in text and "Scout passes them no API key" in text
     assert "each posting's assessment sends your resume and that posting to that provider" in text
@@ -228,8 +232,11 @@ def test_the_quickstart_is_numbered_and_asks_for_a_resume_without_personal_info(
     assert "Scout users do not need it: the first `gigai scout run`" in advanced
     assert "run `gigai setup` once first" not in text
     assert "uv tool upgrade gigai" in quickstart and "@<tag>" in quickstart and "@v0" not in quickstart
-    for button in ("Update sources", "Run find jobs", "Assess all new", "Tailor resume"):
+    # 0.1.10.7 I: "Run find jobs" is removed (M4b) and first assessments are approval-gated ("Assess these");
+    # was ("Update sources", "Run find jobs", "Assess all new", "Tailor resume").
+    for button in ("Update sources", "Jobs", "Assess these", "Tailor resume"):
         assert f"**{button}**" in quickstart, button
+    assert "Run find jobs" not in text and "Run find jobs" not in README.read_text(encoding="utf-8")
     # the human quickstart no longer starts with gigai init / gigai gigs
     assert "gigai init" not in quickstart and "gigai gigs" not in quickstart
     # the resume input rule is the code's
@@ -242,14 +249,27 @@ def test_the_quickstart_is_numbered_and_asks_for_a_resume_without_personal_info(
 
 
 def test_resume_display_ships_and_the_never_sent_guarantee_moved_out_of_the_roadmap() -> None:
-    """0.1.10-003: Download PDF, Resume display and the never-sent guarantee are shipped (present tense), not roadmap items."""
+    """0.1.10-003: the PDF and Resume display are shipped (present tense), not roadmap items.
+
+    0.1.10.7 K (0110-046): Resume display holds the title and the layout only; the name and contact details are
+    typed in the Generate PDF form for one PDF and never stored."""
     roadmap = _flat(_page("scout/roadmap.md"))
     assert "Download PDF for tailored resumes" not in roadmap and "- [ ] Resume display settings" not in roadmap
     shipped = _flat(_page("scout/quickstart.md") + _page("scout/resume.md"))
-    assert "**Download PDF** saves it as a PDF" in shipped and "**Resume display**" in shipped
+    # Was "**Download PDF** saves it as a PDF": the button is "Generate PDF" and opens the form.
+    assert "**Generate PDF** opens a small form" in shipped and "**Resume display**" in shipped
+    assert "GigAI does not save them, so you type them each time" in shipped
+    # Still true of what Resume display holds now (the title and the layout).
     assert "stored only on your computer, never sent to a model, and added to the PDF locally" in shipped
+    assert "It no longer holds a name or a contact line" in shipped
     assert "Keep the Resume display fields" not in roadmap
-    assert "The Resume display fields (name, title, contact line) are never sent to a model or the network" in _privacy()
+    # Was "The Resume display fields (name, title, contact line) are never sent to a model or the network": there
+    # are no such stored fields any more. The page now carries the promise and its limits.
+    privacy = _privacy()
+    assert "Resume display fields (name, title, contact line)" not in privacy
+    assert "**You type them only when you make a PDF, and GigAI forgets them right after.**" in privacy
+    assert "**Older copies can remain in GigAI's local history on your computer.**" in privacy
+    assert "It does not rewrite history" in privacy and "`gigai scout privacy`" in privacy
     assert "Alpine/musl Linux isn't supported yet: the PDF renderer (Typst) has no musl wheel, so installing there fails." in _flat(_page("scout/limitations.md"))
     assert "jev" not in roadmap.lower()
 
@@ -268,17 +288,36 @@ def test_the_roadmap_parks_interview_prep_and_the_docs_never_present_it_as_a_fea
 
 
 def test_the_short_readme_keeps_its_promises_and_points_at_the_docs() -> None:
-    """0110-011: a short README with the 3-step quickstart, a true privacy one-liner and the links."""
+    """0110-011: a short README with the 3-step quickstart, a true privacy section and the links.
+
+    0.1.10.7 I2/K: the README is the PyPI page: what GigAI is, the quickstart, the agent workflow and the privacy
+    promise with its limits."""
+    from gigai.scout import wording
+
     readme = README.read_text(encoding="utf-8")
-    assert len(readme.splitlines()) <= 60
-    for command in ("uv tool install gigai", "gigai scout run"):
+    # Was <= 60. Raised on purpose: the page gained the agent workflow and the limits of the privacy promise.
+    assert len(readme.splitlines()) <= 90
+    for command in ("uv tool install gigai", "gigai scout run", "gigai scout new", "gigai agent-skill", "gigai agent-permissions"):
         assert command in readme
     flat = _flat(readme)
-    assert "removes your name and contact lines" in flat and "can't catch personal details elsewhere in the text" in flat
-    assert "contact and Resume display fields never leave your machine" in flat
+    # Was "removes your name and contact lines": the import now stores the resume without them (0110-046).
+    assert "A resume you add is stored without its name and contact lines" in flat and "can't catch personal details elsewhere in the text" in flat
+    # Was "contact and Resume display fields never leave your machine": GigAI no longer has them at all.
+    assert "Resume display" not in flat
+    assert f"**{wording.PRIVACY_PROMISE}** {wording.PRIVACY_PDF_LINE}" in flat
+    assert f"**{wording.AGENT_WORDING}**" in flat
+    assert "older copies can remain in GigAI's local history on your computer" in flat
+    assert "stays on your computer unless you or your agent send it somewhere" in flat
+    assert "send your resume (without the contact lines) and your answers to the model you picked" in flat
+    # The spot the release screenshots go in (packet J).
+    # 0110-049 J: the README shows two release screenshots by ABSOLUTE URL (PyPI renders the README outside the
+    # repo, so a relative path would be a broken image); the files are the ones `make media` publishes.
+    for image in ("terminal-new.png", "jobs-light.png"):
+        assert f"https://raw.githubusercontent.com/karthik446/gigai/main/gigai-docs/public/media/{image}" in readme
+        assert (ROOT / "gigai-docs" / "public" / "media" / image).is_file()
     for link in ("https://karthik446.github.io/gigai/", "CHANGELOG", "Releases", "CONTRIBUTING"):
         assert link in readme, link
     # everything the README used to carry is on the site
     _need_docs()
-    for rel in ("scout/privacy.md", "scout/quickstart.md", "scout/resume.md", "scout/limitations.md", "scout/roadmap.md", "agents.md", "scout/agents.md"):
+    for rel in ("scout/privacy.md", "scout/quickstart.md", "scout/resume.md", "scout/numbers.md", "scout/limitations.md", "scout/roadmap.md", "agents.md", "scout/agents.md"):
         assert (DOCS / rel).is_file(), rel

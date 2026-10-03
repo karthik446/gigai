@@ -1,14 +1,287 @@
 ---
 title: For agents
-description: Drive Scout from scripts and agents, through the CLI and the local API.
+description: Use Scout from your own AI agent. The daily workflow, setup, the security model, and the CLI and local API behind it.
 ---
 
-It's mostly agents (Claude, Codex, and similar) driving GigAI, so these
-commands are non-interactive and scriptable. The general CLI discovery commands
-are on [For agents](../../agents/).
+Scout is built to be driven by your own AI agent (Claude Code, Codex and similar): you ask
+"what are the new jobs?", the agent asks Scout, shows you a grid, asks you the open questions and
+saves what you say. The browser UI is there when you want it: for reading a job, for tailoring
+and for the PDF.
 
-`gigai agent-skill` prints the instructions that teach your agent the daily Scout loop,
-and `gigai agent-permissions` prints a recommended Claude Code permissions snippet.
+**Anything GigAI gives your agent is sent to that agent's model provider. Agents get no contact data from GigAI, but an agent with shell access can read local files.**
+
+Read [The security model](#the-security-model) before you let an agent use Scout. The general
+CLI discovery commands are on [For agents](../../agents/).
+
+## The daily workflow
+
+Every command below is local. A step that spends a model call says so, and none is made until
+you say yes.
+
+### 1. What is new
+
+```sh
+gigai scout new --json
+```
+
+This reads the stored postings (the background checks keep them fresh; no job board is asked)
+and lists what is new since your last check, across all your active profiles. The first time it
+looks back 7 days. At most 50 new postings are listed, best score first; the count covers all of
+them.
+
+**It asks before it assesses.** When new postings are not assessed yet, the reply carries a
+question with the count and an estimate from your own past calls, for example "12 new postings.
+Assess them? ~12 calls". The postings are shown ranked, not assessed. Nothing is assessed until
+you answer:
+
+```sh
+gigai scout new --yes --json          # yes: assess the new postings (one model call each), then show the grid
+gigai scout new --no-assess --json    # no: show the grid with ranks only
+```
+
+The agent's job is to tell you the count and the estimate, and wait for your word. When the
+question was asked by an earlier call, the reply gives the exact command for a yes, with
+`--since`, so the yes covers the postings you were shown.
+
+With nothing new, the reply reads "Nothing new since your last check" and lists the 10 postings
+that still need your attention.
+
+The grid has four columns: the posting (company, role, work mode, salary if stated, and the
+profiles it matches), its score, whether it needs tailoring (with the requirements not yet met),
+and its open questions.
+
+A plain `gigai scout new` moves the "new since" mark to now. `--peek` and `--profile ID` look
+without moving it.
+
+### 2. Public and private are separate calls
+
+`gigai scout new` never mixes text written by strangers with text about you. The default reply
+holds only posting data (public, untrusted) and your open questions. "What matches", which is
+built from your own resume, answers and stories, is a second call:
+
+```sh
+gigai scout new --yours --json
+```
+
+Its reply holds your evidence only and names each posting by its link, never by its text. An
+agent should not paste the two side by side: a posting can contain text meant to steer an agent,
+and keeping your own text out of that context is the point of the split. Over the API the same
+two calls are `GET /api/new` and `GET /api/new/yours`, and every reply says what it holds in the
+`X-GigAI-Labels` header (`public-untrusted`, `user-private`, both for a route that mixes them,
+or `none`).
+
+### 3. Answers, and "make this a story?"
+
+The agent asks you the open questions. What you say is kept once and reused by every later
+assessment, for every profile.
+
+- A short fact is saved as an **answer**:
+
+  ```sh
+  gigai scout answers save cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE and BigQuery" --actor agent --json
+  ```
+
+- A reply with substance (a project, a problem, an outcome) gets the question "Want me to make
+  this a story?". On a yes the agent drafts a short narrative from your own words, shows it to
+  you, and saves it when you agree:
+
+  ```sh
+  gigai scout story save --title "Cut CI time 60% at Acme" --raw-text "Our builds took forty minutes, so I moved the runners to Kubernetes and cached the layers." --situation "Builds took forty minutes and blocked every merge." --action "Moved the runners to Kubernetes and cached the image layers." --result "Build time fell 60 percent." --tag ci --answers "Tell me about a time you improved a slow process" --actor agent --json
+  ```
+
+Every write is checked on your computer: text that looks like an email address, a phone number, a
+link or a street address is refused (`personal_info_refused`). The check works on shapes. It does
+not recognise a name, so don't put yours in an answer or a story.
+[Answers and stories](#answers-and-stories-kept-once-reused) below has the full reference.
+
+### 4. Process waiting work
+
+Saving an answer puts the jobs that asked that question into the **background pipeline**: tailor
+a resume for the job, assess the tailored resume, compute the Scout ATS score, set the Scout
+label. The pipeline is on by default and works only on jobs you engaged with (you answered one of
+their questions, or you said "process now"). Its limits:
+
+- **10 jobs per trigger.** One answer can concern many jobs. The first 10 run; the rest wait for
+  your approval.
+- **40 model calls a day** for the pipeline. The call that would go over the limit is not made;
+  the job waits until the next day.
+- **First assessments are never automatic.** A posting is assessed for the first time only when
+  you say yes (step 1, or **Assess these** on the Jobs page).
+
+While Scout runs, the pipeline works by itself. `gigai scout new` tells you when work waits
+("3 waiting (2 need your approval), process now? ~6 calls"). On your yes:
+
+```sh
+gigai scout new --process --json                 # approve what waits, run it now
+gigai scout pipeline status --json               # what is queued, running, done; today's counts
+gigai scout pipeline approvals list --json       # what waits for a yes, with the estimate
+gigai scout pipeline process <job-url> --json    # one job, now
+```
+
+`gigai scout pipeline approvals approve <approval-id>` and `approvals deny <approval-id>` decide
+one approval. An agent approves only on your word.
+
+**A tailored resume you edited is never replaced by the background.** If you tailored a job's
+resume yourself, or changed a line of it, the pipeline keeps it and works with your text. To get a
+new tailoring for that job, tailor it yourself (`gigai scout resume tailor`, or **Tailor resume**
+on the job page).
+
+### 5. Tailor and the PDF
+
+```sh
+gigai scout resume tailor --job-url <job-url> --json           # one model call
+gigai scout resume pdf --tailored --job-url <job-url> --json   # local, no model call
+```
+
+**The PDF an agent makes has no name and no contact details**, because GigAI has none to give
+it. The command prints a line like
+
+```text
+Open in Scout to add your name and contact details and download: http://127.0.0.1:8765/#/pdf/<profile>/<job>
+```
+
+(`finish_url` in the JSON). The agent gives you that link. You open it, type your details in the
+Generate PDF form in your own browser, and download the finished PDF. The details go into that
+one PDF and are not kept. An agent can't do this step for you unless it controls your browser,
+and it should not ask you for those details.
+
+Every line comes from your resume, answers or stories. Read it before you send it.
+
+## Set up your agent
+
+### The skill file
+
+GigAI ships the instructions that teach an agent this loop. It prints them; you decide where
+they go:
+
+```sh
+gigai agent-skill                        # a Claude Code skill (SKILL.md), printed
+gigai agent-skill --out SKILL.md         # written to the file you name
+gigai agent-skill --format agents-md     # the same text as a section for an AGENTS.md
+```
+
+For Claude Code, save it as `~/.claude/skills/gigai-scout/SKILL.md`. For Codex and other agents
+that read an `AGENTS.md`, paste the `agents-md` form into yours. `--out` refuses to replace a file
+that exists unless you add `--force`.
+
+### Permissions
+
+```sh
+gigai agent-permissions
+```
+
+This prints a snippet for Claude Code's `settings.json`: it allows the `gigai` command and Scout's
+local API, and denies reading `~/.gigai` directly. **GigAI prints it and never applies it.** It
+does not read or write your agent's settings; you paste the snippet in yourself.
+
+The snippet is a guard against accidents, not a security boundary: see the next section. The rule
+syntax has not been tested against every Claude Code version; check that your Claude Code accepts
+it.
+
+## The security model
+
+**Anything GigAI gives your agent is sent to that agent's model provider. Agents get no contact data from GigAI, but an agent with shell access can read local files.**
+
+What that means, plainly:
+
+- **Your agent's provider sees what your agent reads.** When Claude Code or Codex reads a job
+  grid, your answers or a tailored resume from Scout, that text goes to Anthropic or OpenAI as
+  part of the conversation. GigAI can't stop that. The only way to keep everything on your
+  computer is to run both Scout and your agent on a local model.
+- **GigAI has no contact data to give.** It never stores your name, email, phone, address or
+  links, so no command and no API route can return them. See
+  [Privacy and security](../privacy/) for the limits of that promise.
+- **An agent that can run commands can read GigAI's files.** It runs as you, so file permissions
+  do not separate it from your answers, stories and resume under `~/.gigai`. The permissions
+  snippet above lowers the chance of an accident. It can't stop an agent that decides to read the
+  files another way.
+- **Job postings are written by strangers and can contain text meant to trick your agent.**
+  Scout marks posting text as untrusted, keeps it apart from your own text in `gigai scout new`,
+  and fences it in its own prompts with a rule that it is data, never instructions. That lowers
+  the risk. It does not remove it. Keep your agent's permission prompts on.
+- **Scout checks what it sends out, as a backstop.** Every JSON reply from the local API is
+  scanned, and text shaped like an email address, a phone number, a profile link or a street
+  address in your own fields is replaced by a marker such as `[removed: email]`. Posting text is
+  left alone (a recruiter's address in a posting is public). The scan works on shapes: it can miss
+  an unusual phone format, it does not know your name, and it does not cover what the `gigai`
+  command prints. Don't rely on it; keep contact details out of your answers and stories.
+- **The local API answers this computer only.** Every request must come from this machine and
+  carry a `Host` of `127.0.0.1:<port>` or `localhost:<port>`, so a web page you visit can't read
+  it through your browser. There is no login: any program you run on this computer can call it.
+
+## Example session
+
+A fictional user, Robin, with two profiles ("Backend" and "Platform"). Robin's words are plain
+text; what the agent runs is shown under each step.
+
+> **Robin:** What's new in Scout?
+
+```sh
+gigai scout new --json
+```
+
+> **Agent:** 6 new postings across 2 profiles (Backend 4, Platform 2). They are ranked but not
+> assessed. Assessing them is about 6 model calls on your Codex login. Go ahead?
+>
+> **Robin:** Yes.
+
+```sh
+gigai scout new --yes --since 2026-10-01T14:02:00Z --json
+gigai scout new --yours --json
+```
+
+> **Agent:** Assessed 6 of 6. The top three:
+>
+> | Posting | Score | Needs tailoring | Open questions |
+> | --- | --- | --- | --- |
+> | Northwind: Staff Backend Engineer (remote) | 82% of requirements met | yes: Terraform | Have you run Kafka in production? |
+> | Globex: Platform Engineer (hybrid) | 73% of requirements met | yes: SOC 2, on-call lead | Do you have GCP experience? |
+> | Initech: Senior SRE (remote) | 64% of requirements met | yes: Go | none |
+>
+> Two questions. Have you run Kafka in production?
+>
+> **Robin:** Yes, three years at my last job. We moved the order pipeline off a nightly batch
+> onto Kafka and cut the delay from a day to under a minute.
+>
+> **Agent:** That is more than a yes. Want me to make this a story? Draft: "Order pipeline moved
+> from a nightly batch to Kafka. Situation: orders were processed once a day. Action: moved the
+> pipeline onto Kafka. Result: delay fell from a day to under a minute."
+>
+> **Robin:** Yes, save it. And GCP: four years, GKE and BigQuery.
+
+```sh
+gigai scout answers save streaming:kafka --question "Have you run Kafka in production?" --answer-text "Yes, three years" --actor agent --json
+gigai scout story save --title "Order pipeline moved from nightly batch to Kafka" --raw-text "We moved the order pipeline off a nightly batch onto Kafka and cut the delay from a day to under a minute." --situation "Orders were processed once a day." --action "Moved the pipeline onto Kafka." --result "Delay fell from a day to under a minute." --tag streaming --answers "Tell me about a time you improved a slow process" --actor agent --json
+gigai scout answers save cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE and BigQuery" --actor agent --json
+gigai scout new --peek --json
+```
+
+> **Agent:** Saved. Two jobs asked those questions and now wait in the pipeline: about 4 model
+> calls, inside today's limit of 40. Process them now?
+>
+> **Robin:** Go.
+
+```sh
+gigai scout new --process --json
+gigai scout pipeline status --json
+```
+
+> **Agent:** Done. Northwind: requirements met went from 82 to 91 after tailoring, Scout ATS 88,
+> Scout label: recommended. That label is Scout's own suggestion from your settings, resume and
+> answers, not a prediction of what an employer will decide. Globex still needs attention: the
+> SOC 2 requirement is not met.
+>
+> **Robin:** Make me the Northwind PDF.
+
+```sh
+gigai scout resume pdf --tailored --job-url https://jobs.lever.co/northwind/1a2b3c --json
+```
+
+> **Agent:** The PDF is written without your name and contact details. Open this link to add
+> them and download the finished one: `http://127.0.0.1:8765/#/pdf/default/https%3A%2F%2Fjobs.lever.co%2Fnorthwind%2F1a2b3c`.
+> Read the resume before you send it.
+
+The agent never asked Robin for a name, an email or a phone number, and never read `~/.gigai`.
 
 ## Screenshots
 
@@ -86,9 +359,12 @@ needs `Content-Type: application/json`. Each route and command carries an **effe
 
 ## Change a resume and render a new PDF
 
-All of this is local: no model call, no network. The name, title and contact line at
-the top of every PDF come from the saved Resume display settings (`PUT /api/resume-display`),
-never from the resume text.
+All of this is local: no model call, no network. GigAI stores no name and no contact details,
+so a PDF made by an agent, the CLI or the API has no header: a blank block keeps the page layout.
+The reply carries `X-GigAI-Finish-Url` (the CLI prints it as "Open in Scout to add your name and
+contact details and download"), the local Scout page where you type your details in the Generate
+PDF form and download the finished PDF. The saved Resume display settings hold only the title
+under the name and the layout (spacing, auto fit).
 
 A worked example, **an agent changes two bullets and renders a new PDF**, for a job that
 already has a tailored resume:
@@ -108,14 +384,14 @@ curl -s -X PUT "$B/api/tailored-resumes/lines" -H "$H" -d "{\"profile_id\": \"$P
   \"updated_at\": \"<updated_at>\", \"line_id\": \"L8\", \"use\": \"custom\",
   \"text\": \"Ran the release calendar and the on-call rota.\"}"
 
-# 3. Render the new PDF.
-curl -s -X POST "$B/api/tailored-resumes/pdf" -H "$H" -d "{\"profile_id\": \"$P\", \"job_identity\": \"$J\"}" -o resume.pdf
+# 3. Render the new PDF (no header; -D - prints the response headers, X-GigAI-Finish-Url among them).
+curl -s -D - -X POST "$B/api/tailored-resumes/pdf" -H "$H" -d "{\"profile_id\": \"$P\", \"job_identity\": \"$J\"}" -o resume.pdf
 ```
 
 The same with the CLI, which needs no running server for the render:
 
 ```sh
-gigai scout resume pdf --tailored --job-url "$J" --out resume.pdf --json    # the stored resume, edits included
+gigai scout resume pdf --tailored --job-url "$J" --out resume.pdf --json    # the stored resume, edits included; prints finish_url
 
 # or work on the markdown yourself: edit the two "- " lines in a file, then render it
 gigai scout resume pdf --in resume.md --out resume.pdf --json
@@ -129,8 +405,15 @@ What to know:
   edited, with the same way back.
 - `text` is one line of at most 400 characters. Body lines only (a summary, skills or other line, or
   an entry's bullet), never an entry heading.
-- A text that looks like your name or a contact detail (email, phone, link, street address) is
-  refused with `422 personal_info_refused`: put those in Resume display.
+- A text that looks like a name line or a contact detail (email, phone, link, street address) is
+  refused with `422 personal_info_refused`: GigAI stores none of those. You add them in the
+  Generate PDF form.
+- Both PDF routes accept an optional `header` object (`name`, `email`, `phone`, `location`,
+  `linkedin`, `link`) that fills this one PDF's header and is never stored, logged or returned.
+  It is there for the Generate PDF form. Details an agent sends in it went through that agent and
+  its model provider first, so an agent should leave it out and hand over the finish link.
+- Without `--out`, the CLI names the file `<company>-<role>-<date>.pdf` (or `resume-<date>.pdf`
+  for markdown) in the current folder. Your name is never in a file name.
 - `POST /api/resume/pdf` renders markdown you send: `{"markdown": "...", "spacing_scale": 0.9,
   "auto_fit": false, "profile_id": "..."}` (only `markdown` is required) answers `application/pdf`,
   with the page count in `X-GigAI-Pages`. The markdown is rendered and dropped: not stored, not
@@ -150,8 +433,8 @@ What to know:
 
 ## Answers and stories: kept once, reused
 
-Scout keeps two things you tell your agent, for every profile at once (they are yours, not one
-profile's):
+The reference for step 3 of the daily workflow. Scout keeps two things you tell your agent, for
+every profile at once (they are yours, not one profile's):
 
 - An **answer** is a short fact a posting asked for: "Do you have GCP experience?" -> "Yes, 4 years,
   GKE + BigQuery".
@@ -284,10 +567,10 @@ What to know:
   words, never an answer). `job_state.assessment_stale.reason` carries the same reason when that assessment
   gives the job's state. The verdict still reads. Each profile is compared with its own
   settings.
-- **An assessment stored before that is stale only for what its prompt missed.** It has no
-  recorded basis. It is `older_prompt` when the profile has a work mode now (the prompt had
-  none before 0.1.10.5), and `settings_changed` when the sponsorship need or the countries it
-  stored differ from the profile's now. Otherwise it stays current.
+- **Every assessment stored before 0.1.10.7 reads `older_prompt`.** The assess prompt changed in
+  0.1.10.7 (posting text is fenced as untrusted), so an assessment made by an earlier version,
+  with or without a recorded basis, is flagged as made with older settings. The verdict still
+  reads, and nothing is assessed again until you ask.
 - **Nothing is re-assessed until you ask.** No read calls a model. Re-assess one job with
   `POST /api/assess` (`{"job": {"job_url": "..."}}`), or all of a run's with
   `POST /api/runs/{run_id}/assess-all` `{"start": true}`: its queue is the run's new postings
@@ -309,13 +592,63 @@ What to know:
 - **Tags** are model-free: `technical`, `experience-level`, `eligibility`, `education`, `domain`,
   `leadership`, `conflict`, `failure`, `collaboration`, `system-design`, `delivery`, `skill`, `other`,
   from the id's category and the question's words. Set your own with `tag`.
-- **No personal details.** Every write is checked locally: an email, a phone number, a link, a
-  street address or the name saved in Resume display is refused with `422 personal_info_refused`
-  (the message names what was found, never the text). What a model sees of the bank is a one-line
-  summary per entry, at most 40 entries, redacted again.
+- **No contact details.** Every write is checked locally: an email, a phone number, a link or a
+  street address is refused with `422 personal_info_refused` (the message names what was found,
+  never the text). The check works on shapes; GigAI has no saved name to compare with, so it does
+  not recognise a name. What a model sees of your answers is a one-line summary per entry, at
+  most 40 entries, redacted again.
 - **Delete** (`DELETE /api/answers/<id>?revision=` or `DELETE /api/stories/<id>?revision=`, with
   `Content-Type: application/json` like every write) takes it out of use for good. For an answer,
   the project's journal keeps the older revision of the record it was in.
+
+## The background pipeline
+
+The reference for step 4 of the daily workflow. For a job you engaged with, the pipeline runs
+four steps: tailor a resume, assess the tailored resume (kept beside the first assessment, never
+in its place), compute the Scout ATS score, set the Scout label.
+[What Scout's numbers and labels mean](../numbers/) explains the last two.
+
+| Setting (Settings > Background pipeline) | Default |
+| --- | --- |
+| Pipeline | on |
+| Jobs started by one trigger | 10; the rest wait for your approval |
+| Pipeline model calls a day | 40 |
+| Rank model calls a day, all profiles together | 100, with a warning past 60 |
+| Minimum Scout ATS score for "recommended" | 0 (the score is shown, never a gate) |
+
+```sh
+gigai scout pipeline status --json                  # jobs, steps, today's counts
+gigai scout pipeline status --job <job-url> --json  # one job's steps and outputs
+gigai scout pipeline process <job-url> --json       # "process now" for one assessed job
+gigai scout pipeline cancel <job-url> --json
+gigai scout pipeline retry <job-url> --json
+gigai scout pipeline approvals list --json
+gigai scout pipeline run --once --json              # run what waits once, with no Scout server
+gigai scout metrics --json                          # what your model calls cost, per kind and model
+```
+
+The routes: `GET /api/pipeline`, `GET /api/pipeline/job`, `GET /api/pipeline/approvals`,
+`POST /api/pipeline/approvals/{approval_id}`, `POST /api/pipeline/process`, and the `pipeline` and
+`rank` blocks of `GET` / `PUT /api/settings/background`.
+
+What to know:
+
+- **What starts it.** Saving or editing an answer or a story (for the jobs whose assessment left
+  that question open), "process now", and a change to a profile's resume or search settings (for
+  jobs whose pipeline had finished). Deleting an answer or a story starts nothing.
+- **A job must be assessed first.** The pipeline works from the posting text stored with the
+  job's assessment and never fetches a posting. A job assessed from pasted text can't enter it.
+- **Nothing runs twice.** A step whose inputs did not change is skipped: no model call.
+- **A failed call still counts** toward the day's 40.
+- **It waits for other work.** While a batch of first assessments or a find-jobs run is going,
+  the pipeline waits.
+- **A resume that is yours is kept.** A stored tailored resume the pipeline did not write itself
+  (you tailored it, or changed a line) is never replaced, not even with `--force`. The step
+  finishes with `tailor_kept_user_edits`, and the assessment, the ATS score and the label use your
+  text.
+- **No contact data.** A tailored resume, an ATS line or a keyword that holds a contact shape
+  fails its step (`contact_data_found`), and the pipeline's own file holds ids, codes and numbers
+  only, no text.
 
 ## Install and run
 
@@ -375,3 +708,12 @@ assessments run Claude Code's default model whatever the target names.
 Without `claude` on your `PATH`, ranking is skipped (`model_target_unavailable:
 claude executable is not available on PATH`, the same as for a missing
 `codex`) and assessments fail with `model_target_unavailable`.
+
+## Reference
+
+- [Scout CLI reference](../reference/cli/): every `gigai scout` command, with its effect and what
+  it may call.
+- [API reference](../reference/api/): every route of the local API, from the same spec Scout
+  serves at `GET /api/openapi.json`.
+- [What Scout's numbers and labels mean](../numbers/): rank, verdict, Scout label, Scout ATS score.
+- [Privacy and security](../privacy/): what is stored, what is sent, and to whom.

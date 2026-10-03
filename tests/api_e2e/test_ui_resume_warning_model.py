@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from gigai.scout.find_jobs.api import static as static_module
-from gigai.scout.resume_pii import RESUME_WARNING
+from gigai.scout.resume_pii import RESUME_WARNING, heads_up
 
 UI_SRC = Path(static_module.__file__).resolve().parents[2] / "ui" / "src"
 
@@ -54,17 +54,27 @@ def test_the_warning_is_model_aware_and_matches_the_cli_wording() -> None:
     for key in ("general", "codex", "claude", "openrouter", "ollama"):
         text = out[key]
         assert text.startswith("Scout removes your name and contact lines (email, phone, address, links) before sending your resume to")
-        assert "adds them back only in your PDF, on this machine." in text
+        # 0.1.10.7 K: GigAI stores no contact details (0110-046), so nothing is "added back": was
+        # "adds them back only in your PDF, on this machine."
+        assert ", and never stores them." in text and "adds them back" not in text
         # the known gaps are named, and nothing promises more than the strip does
         assert "It can't catch personal details elsewhere in the text" in text and "keep those out" in text
         assert "contact details inside a sentence" in text and "title and your name" in text
-        assert text.endswith("Your contact line lives in Settings > Resume display.")
+        # 0.1.10.7 K: Resume display holds no contact line any more; the Generate PDF form takes the details for
+        # one PDF. Was "Your contact line lives in Settings > Resume display."
+        assert text.endswith("You type your name and contact details only when you make a PDF.")
+        assert "Resume display" not in text
         assert "does not remove" not in text and "Remove your personal info" not in text
 
 
 def test_the_heads_up_lists_what_was_found_and_says_nothing_otherwise() -> None:
     out = _run()
-    assert out["flagged"] == "This resume seems to contain: email, phone. Remove them before continuing?"
+    # 0.1.10.7 K: the import removes them itself, so the heads-up no longer asks the user to. Was
+    # "... Remove them before continuing?"
+    assert out["flagged"] == heads_up(["email", "phone"]) == (
+        "This resume seems to contain: email, phone. Scout removes contact lines when it stores the resume. "
+        "Check that nothing else personal is in the text."
+    )
     assert out["stored"] == "This stored resume seems to contain: email."
     assert out["none"] is None
 

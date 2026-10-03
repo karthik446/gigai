@@ -20,12 +20,14 @@ from dataclasses import dataclass, field
 
 RESUME_WARNING = (
     "Scout removes your name and contact lines (email, phone, address, links) before sending your resume to "
-    "the model you pick (Codex -> OpenAI, Claude -> Anthropic, OpenRouter -> your provider), and adds them back "
-    "only in your PDF, on this machine. It can't catch personal details elsewhere in the text (a first line that holds both a title and your name, or contact details inside a sentence), so keep those out. "
-    "Your contact line lives in Settings > Resume display."
+    "the model you pick (Codex -> OpenAI, Claude -> Anthropic, OpenRouter -> your provider), and never stores them. "
+    "It can't catch personal details elsewhere in the text (a first line that holds both a title and your name, or contact details inside a sentence), so keep those out. "
+    "You type your name and contact details only when you make a PDF."
 )
 #: Shown (UI, CLI, API ``contact_removed.message``) when an import removed contact lines.
 REMOVED_MESSAGE = "We removed your contact lines; you'll add them when you make a PDF."
+#: The end of the heads-up for a resume that is about to be imported (0.1.10.7 K: the import removes them).
+HEADS_UP_REMOVED = "Scout removes contact lines when it stores the resume. Check that nothing else personal is in the text."
 
 # Tried only from the first character of a run (a match from inside one is a match from its start), so a long run is read once.
 _EMAIL = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
@@ -54,7 +56,7 @@ def heads_up(found: list[str]) -> str | None:
 
     if not found:
         return None
-    return f"This resume seems to contain: {', '.join(found)}. Remove them before continuing?"
+    return f"This resume seems to contain: {', '.join(found)}. {HEADS_UP_REMOVED}"
 
 
 # --- the import strip (0110-046) -------------------------------------------------------------

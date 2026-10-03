@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getPipelineJob, postPipelineProcess } from "../api.js";
+import HelpLink from "./HelpLink.jsx";
 import { atsChip, labelChip, pipelineLive, processAction, processResultLine, stepTimeline, variantLine } from "../pipelineModel.js";
 
 const POLL_MS = 3000;
@@ -149,6 +150,7 @@ export default function PipelineTimeline({ jobIdentity, profileId, assessed, ref
               {ats.wording && <p className="muted">{ats.wording}</p>}
             </ChipPopover>
           )}
+          {ats && <HelpLink topic="ats" />}
           {label && (
             <ChipPopover label={label.label} tone={label.tone} testId="scout-label-chip">
               {label.reasons.length > 0 ? (
@@ -163,6 +165,7 @@ export default function PipelineTimeline({ jobIdentity, profileId, assessed, ref
               {label.wording && <p className="muted">{label.wording}</p>}
             </ChipPopover>
           )}
+          {label && <HelpLink topic="scout-label" />}
           {variant && <span className="muted">{variant.detail}</span>}
         </div>
       )}

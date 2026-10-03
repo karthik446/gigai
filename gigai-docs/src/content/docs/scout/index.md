@@ -16,8 +16,8 @@ gets no special runtime treatment: it is one Gig among others GigAI can host.
   pre-filters hard blockers (a no-sponsorship or citizenship line, a
   clearance requirement) by moving those postings down, never by hiding
   them. It does not claim to put the best match first.
-- **Assess**: build a requirements-by-resume matrix for the top-ranked
-  postings, in the background, while you browse. Defaults to a local model
+- **Assess**: build a requirements-by-resume matrix for the postings you
+  approve (Scout asks first, with the count and an estimate). Defaults to a local model
   target; hosted targets are only used when explicitly configured.
 - **Present**: a localhost API and a small web UI show acquired and assessed
   postings. What your model target sees is
@@ -38,9 +38,10 @@ reviewed as a wording difference, not a new fact; 1 minor precision flag in each
 The diagram shows the steps in order and where your data goes. The boundary is
 the one in [Privacy and security](privacy/): your model target sees ranking
 lines with a compact resume digest, and the posting text plus your resume with
-name and contact lines removed for assessment and tailoring. Your Resume display
-fields, the PDF and everything Scout stores stay on this machine. With a local
-Ollama target nothing goes to a provider.
+name and contact lines removed for assessment and tailoring. The PDF and
+everything Scout stores stay on this machine, and Scout stores no name or contact
+details: you type them when you make a PDF. With a local Ollama target nothing
+goes to a provider.
 
 <!--
 Grounding (src/gigai/scout/...): Update sources = find_jobs/sources_update.py (one conditional GET per
@@ -49,7 +50,8 @@ board; Greenhouse/Lever/Ashby via find_jobs/ats_board_clients.py), stored in fin
 find_jobs/rank_run.py on the run's model target; assessment of top-ranked / all new = find_jobs/selection.py,
 find_jobs/assess_all.py, proposal_execution.py. Job page state = find_jobs/job_state.py. Tailor = tailored_resume.py
 (copy by default) + tailor_no_loss.py lost_items (no-loss check) + ui/src/tailoredResumeModel.js ("Keep original").
-PDF = resume_pdf.py render_pdf with resume_display.py pdf_header (Resume display, local only).
+PDF = resume_pdf.py render_pdf; the header comes from the Generate PDF form (ui/src/components/GeneratePdfForm.jsx), used for that one render and never stored (0110-046).
+Jobs page = posting_search.py search_postings (no run); background = pipeline/runner.py, pipeline/steps.py, pipeline/rank_lane.py.
 Privacy edge to the model = resume_privacy.py model_resume (name and contact lines removed) for assess, tailor;
 rank digest = find_jobs/rank_digest.py (compact digest). Wording = scout/privacy.md.
 -->
@@ -57,11 +59,11 @@ rank digest = find_jobs/rank_digest.py (compact digest). Wording = scout/privacy
 flowchart TB
   subgraph Local["Your machine"]
     Boards["Update sources<br/>public ATS boards to the local company store"]
-    Run["Run find jobs<br/>your filters, rank, then full assessments"]
+    Run["Jobs<br/>your filters, background rank,<br/>assessments you approve"]
     Page["Job page<br/>requirements, questions, state"]
     Tailor["Tailor<br/>copy by default, no-loss check,<br/>Keep original per line"]
-    Pdf["PDF<br/>Resume display header added locally"]
-    Kept["Never leaves: Resume display fields,<br/>contact lines, the PDF, stored data"]
+    Pdf["PDF<br/>your details typed in the form,<br/>used once, never stored"]
+    Kept["Never leaves: the PDF, stored data.<br/>Never stored: name and contact details"]
     Boards --> Run --> Page --> Tailor --> Pdf
     Pdf --- Kept
   end
@@ -78,7 +80,8 @@ flowchart TB
 
 - [Quickstart](quickstart/): from zero to a running Scout.
 - [Privacy and security](privacy/): read this before you add a resume.
-- [Resume and PDF](resume/): preparing a resume, tailoring, Resume display.
+- [Resume and PDF](resume/): preparing a resume, tailoring, the PDF.
+- [What Scout's numbers and labels mean](numbers/): rank, verdict, Scout label, Scout ATS score.
 - [Update sources](sources/) and [Configuration](configuration/): the company store, `find-jobs.json`, Exa.
-- [For agents](agents/): scripting Scout through the CLI and the local API.
+- [For agents](agents/): the daily workflow from your own AI agent, setup, the security model.
 - [Known limitations](limitations/) and [Roadmap](roadmap/).

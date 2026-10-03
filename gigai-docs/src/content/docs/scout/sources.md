@@ -57,8 +57,8 @@ sources**.
 
 ## Background updates
 
-While Scout is open it keeps the store current by itself. The strip above
-**Run find jobs** says what it did, for example `updated 12 min ago · next
+While Scout is open it keeps the store current by itself. The strip at the top
+of the Jobs page says what it did, for example `updated 12 min ago · next
 check at 13:00`, and never starts anything itself: an update starts from the
 **Update sources** and **Full refresh** buttons, or from the automatic check.
 
