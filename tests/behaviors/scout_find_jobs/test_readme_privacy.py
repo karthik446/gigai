@@ -295,8 +295,9 @@ def test_the_short_readme_keeps_its_promises_and_points_at_the_docs() -> None:
     from gigai.scout import wording
 
     readme = README.read_text(encoding="utf-8")
-    # Was <= 60. Raised on purpose: the page gained the agent workflow and the limits of the privacy promise.
-    assert len(readme.splitlines()) <= 90
+    # Was <= 60, then <= 90 (0.1.10.7: the agent workflow and the limits of the privacy promise). Raised again on
+    # purpose in 0.1.10.8: the network notice, the starter prompt an agent is given, and how each agent picks Scout up.
+    assert len(readme.splitlines()) <= 120
     for command in ("uv tool install gigai", "gigai scout run", "gigai scout new", "gigai agent-skill", "gigai agent-permissions"):
         assert command in readme
     flat = _flat(readme)
@@ -307,6 +308,19 @@ def test_the_short_readme_keeps_its_promises_and_points_at_the_docs() -> None:
     assert f"**{wording.PRIVACY_PROMISE}** {wording.PRIVACY_PDF_LINE}" in flat
     assert f"**{wording.AGENT_WORDING}**" in flat
     assert "older copies can remain in GigAI's local history on your computer" in flat
+    # 0.1.10.8: the network notice is in the install section (before the install command), in the constant's
+    # words; the resume warning opens the agent section; the per-agent lines name where each agent reads from.
+    quickstart = flat.split("## Quickstart", 1)[1].split("## Let your agent set it up", 1)[0]
+    assert wording.NETWORK_NOTICE in quickstart and quickstart.index(wording.NETWORK_NOTICE) < quickstart.index("uv tool install gigai")
+    assert "You can turn the background checks off under Settings > Background updates." in quickstart
+    agent_setup = flat.split("## Let your agent set it up", 1)[1].split("## Use it from your AI agent", 1)[0]
+    assert agent_setup.strip().startswith("**Remove your name, email, phone, address and links from your resume before you give it to an agent.**")
+    assert "checks your resume file for contact details before it reads it" in agent_setup
+    for line in ("**Claude Code:** `gigai agent-skill --format skill --out ~/.claude/skills/gigai-scout/SKILL.md`",
+                 "**Codex:** add what `gigai agent-skill --format agents-md` prints to `~/.codex/AGENTS.md`",
+                 "**Any other agent:** the same `AGENTS.md` section, or paste what `gigai agent-context` prints."):
+        assert line in flat, line
+    assert "the first run is the expensive one" in flat
     assert "stays on your computer unless you or your agent send it somewhere" in flat
     assert "send your resume (without the contact lines) and your answers to the model you picked" in flat
     # The spot the release screenshots go in (packet J).

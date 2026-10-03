@@ -46,8 +46,10 @@ def test_only_button_handlers_start_an_update_never_a_profile_change() -> None:
 
 def test_full_refresh_is_an_explicit_control_that_sends_the_flag() -> None:
     strip = _source("components", "SourcesStrip.jsx")
-    assert 'data-action="full-refresh-sources-strip"' in strip and "onClick={() => start(true)}" in strip
-    assert "onClick={() => start(false)}" in strip
+    # 0.1.10.8: both buttons start through the one-time network notice (was `onClick={() => start(true)}` /
+    # `start(false)`); the flag each sends is unchanged.
+    assert 'data-action="full-refresh-sources-strip"' in strip and "onClick={() => notice.guard(() => start(true))}" in strip
+    assert "onClick={() => notice.guard(() => start(false))}" in strip
     assert "full_refresh = true" in _source("api.js").replace("body.full_refresh = true", "full_refresh = true")
     assert 'data-action="full-refresh-sources"' in _source("components", "SourcesUpdatePanel.jsx")
 

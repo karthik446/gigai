@@ -78,10 +78,13 @@ flowchart TB
 
 ## Where to go next
 
+- [Your first 10 minutes](first-10-minutes/): install, set up a profile, ask your agent what is new, make a PDF.
 - [Quickstart](quickstart/): from zero to a running Scout.
 - [Privacy and security](privacy/): read this before you add a resume.
 - [Resume and PDF](resume/): preparing a resume, tailoring, the PDF.
 - [What Scout's numbers and labels mean](numbers/): rank, verdict, Scout label, Scout ATS score.
 - [Update sources](sources/) and [Configuration](configuration/): the company store, `find-jobs.json`, Exa.
 - [For agents](agents/): the daily workflow from your own AI agent, setup, the security model.
+- [Start here](agents/start/): the page you give your agent so it sets GigAI up for you.
+- [Token usage](tokens/): what each step costs in tokens and time, on Codex and on Claude Code.
 - [Known limitations](limitations/) and [Roadmap](roadmap/).

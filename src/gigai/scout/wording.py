@@ -35,4 +35,25 @@ AGENT_WORDING = (
     "Agents get no contact data from GigAI, but an agent with shell access can read local files."
 )
 
-__all__ = ["AGENT_WORDING", "ATS_WORDING", "LABEL_WORDING", "PRIVACY_PDF_LINE", "PRIVACY_PROMISE", "TAILORED_WORDING", "VERDICT_WORDING"]
+#: 0.1.10.8: where to run GigAI, said before the first Update sources (README install section, the agent
+#: start page, the first-10-minutes page, the public llms.txt and a one-time notice in the UI). The lead is
+#: bold wherever it is shown; ``NETWORK_NOTICE`` is the whole notice as Markdown.
+NETWORK_NOTICE_LEAD = "Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi."
+NETWORK_NOTICE_BODY = (
+    "Scout checks about 10,000 public job boards (Greenhouse, Lever, Ashby): thousands of requests, "
+    "and it keeps checking 8 times a day. An employer can see that traffic."
+)
+NETWORK_NOTICE = f"**{NETWORK_NOTICE_LEAD}** {NETWORK_NOTICE_BODY}"
+
+__all__ = [
+    "AGENT_WORDING",
+    "ATS_WORDING",
+    "LABEL_WORDING",
+    "NETWORK_NOTICE",
+    "NETWORK_NOTICE_BODY",
+    "NETWORK_NOTICE_LEAD",
+    "PRIVACY_PDF_LINE",
+    "PRIVACY_PROMISE",
+    "TAILORED_WORDING",
+    "VERDICT_WORDING",
+]

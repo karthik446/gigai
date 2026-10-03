@@ -1,11 +1,15 @@
 import { useCallback, useState } from "react";
 import { startSourcesUpdate } from "../api.js";
 import { startErrorText } from "../sourcesModel.js";
+import { useNetworkNotice } from "./NetworkNotice.jsx";
 import SourcesStatusLines from "./SourcesStatusLines.jsx";
 
 // uat-bug-048: the strip at the top of Jobs. `strip` is
 // sourcesStripModel.sourcesStrip(status); `read` re-reads the status.
-export default function SourcesStrip({ strip, read }) {
+// `status` is the GET /api/sources/update answer the strip was built from:
+// the very first update asks once before it starts (0.1.10.8, the network notice).
+export default function SourcesStrip({ strip, read, status = null }) {
+  const notice = useNetworkNotice(status);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState(null);
   // 0110-020: an update starts only from these buttons, never from a
@@ -27,11 +31,11 @@ export default function SourcesStrip({ strip, read }) {
   }
   const button = (
     <>
-      <button type="button" className="button secondary" onClick={() => start(false)} disabled={strip.running || starting} data-action="update-sources-strip">
+      <button type="button" className="button secondary" onClick={() => notice.guard(() => start(false))} disabled={strip.running || starting} data-action="update-sources-strip">
         {strip.running ? "Updating sources…" : starting ? "Starting…" : "Update sources"}
       </button>
       {strip.kind !== "empty" && (
-        <button type="button" className="link-button" onClick={() => start(true)} disabled={strip.running || starting} data-action="full-refresh-sources-strip" title="Check every company board again, even ones checked recently">
+        <button type="button" className="link-button" onClick={() => notice.guard(() => start(true))} disabled={strip.running || starting} data-action="full-refresh-sources-strip" title="Check every company board again, even ones checked recently">
           Full refresh
         </button>
       )}
@@ -78,6 +82,7 @@ export default function SourcesStrip({ strip, read }) {
       {/* 0110-024/025/026: what the background did; reading it starts nothing. */}
       <SourcesStatusLines lines={strip.details} />
       {error && <div className="field-error" data-role="sources-strip-error">{error}</div>}
+      {notice.dialog}
     </div>
   );
 }

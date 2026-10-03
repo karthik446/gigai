@@ -3,6 +3,7 @@ import { getSourcesUpdate, startSourcesUpdate } from "../api.js";
 import { relativeTimeLabel } from "../display.js";
 import { SOURCES_POLL_MS, isRunning, looksStuck, sourcesProgress, sourcesResult, startErrorText, storedLine } from "../sourcesModel.js";
 import { statusLines } from "../sourcesStatusModel.js";
+import { useNetworkNotice } from "./NetworkNotice.jsx";
 import SourcesStatusLines from "./SourcesStatusLines.jsx";
 
 // uat-batch2 (N11-C): GET /api/sources/update, read when the page opens and
@@ -102,6 +103,10 @@ export default function SourcesUpdatePanel() {
     [read],
   );
 
+  // 0.1.10.8: the very first update asks once before it starts (the network notice).
+  const notice = useNetworkNotice(status);
+  const guardedStart = (force, fullRefresh = false) => notice.guard(() => start(force, fullRefresh));
+
   const update = status ? status.update : null;
   const index = status ? status.index : null;
   const running = isRunning(status);
@@ -164,21 +169,22 @@ export default function SourcesUpdatePanel() {
       )}
 
       <div className="actions" style={{ justifyContent: "flex-start", marginTop: 12 }}>
-        <button type="button" className="button" onClick={() => start(false)} disabled={running || starting || !status} data-action="update-sources">
+        <button type="button" className="button" onClick={() => guardedStart(false)} disabled={running || starting || !status} data-action="update-sources">
           {running ? "Updating sources…" : starting ? "Starting…" : "Update sources"}
         </button>
-        <button type="button" className="button secondary" onClick={() => start(false, true)} disabled={running || starting || !status} data-action="full-refresh-sources" title="Check every company board again, even ones checked recently">
+        <button type="button" className="button secondary" onClick={() => guardedStart(false, true)} disabled={running || starting || !status} data-action="full-refresh-sources" title="Check every company board again, even ones checked recently">
           Full refresh
         </button>
         {stuck && (
           <span className="muted sources-stuck">
             No progress for a while.{" "}
-            <button type="button" className="link-button" onClick={() => start(true)} disabled={starting} data-action="update-sources-force">
+            <button type="button" className="link-button" onClick={() => guardedStart(true)} disabled={starting} data-action="update-sources-force">
               Start over
             </button>
           </span>
         )}
       </div>
+      {notice.dialog}
     </section>
   );
 }

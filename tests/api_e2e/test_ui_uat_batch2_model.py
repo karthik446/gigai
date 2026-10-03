@@ -1037,7 +1037,7 @@ def test_the_settings_action_and_the_jobs_message_are_wired() -> None:
     # 0.1.10.7 M4b: the Jobs list reads the same status for its sources strip (uat-bug-048 made the strip say
     # what the Settings-link notice said; the notice went with the run-centric landing).
     jobs = (UI_SRC / "views" / "JobsView.jsx").read_text(encoding="utf-8")
-    assert "useSourcesStatus({ enabled: true })" in jobs and "<SourcesStrip strip={strip} read={sources.read} />" in jobs
+    assert "useSourcesStatus({ enabled: true })" in jobs and "<SourcesStrip strip={strip} read={sources.read} status={sources.status} />" in jobs  # 0.1.10.8: + status, for the one-time network notice
 
 
 # --- uat-bug-011 ------------------------------------------------------------------

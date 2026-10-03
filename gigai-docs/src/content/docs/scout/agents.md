@@ -13,6 +13,10 @@ and for the PDF.
 Read [The security model](#the-security-model) before you let an agent use Scout. The general
 CLI discovery commands are on [For agents](../../agents/).
 
+New here? [Use it from your agent](#use-it-from-your-agent) says what to install and what to
+type for Claude Code, Codex and other agents. To have the agent do the whole setup, give it
+[Start here](start/).
+
 ## The daily workflow
 
 Every command below is local. A step that spends a model call says so, and none is made until
@@ -26,8 +30,13 @@ gigai scout new --json
 
 This reads the stored postings (the background checks keep them fresh; no job board is asked)
 and lists what is new since your last check, across all your active profiles. The first time it
-looks back 7 days. At most 50 new postings are listed, best score first; the count covers all of
-them.
+looks back 7 days. At most 50 new postings are listed; the count covers all of them.
+
+**The order of the grid.** Postings with a current assessment come first, then postings whose
+only assessment is old, then postings not assessed yet. Inside each group: Scout's
+`recommended` label first, then the verdict (matched, needs your answers, other, not a match),
+then the rank score, then the newest. `gigai scout jobs list` and the Jobs page use the same
+order.
 
 **It asks before it assesses.** When new postings are not assessed yet, the reply carries a
 question with the count and an estimate from your own past calls, for example "12 new postings.
@@ -43,12 +52,35 @@ The agent's job is to tell you the count and the estimate, and wait for your wor
 question was asked by an earlier call, the reply gives the exact command for a yes, with
 `--since`, so the yes covers the postings you were shown.
 
+**Old assessments are a second question.** A posting whose only assessment was made with an
+older prompt, other settings or an old run is not "new", so `--yes` never touches it. The reply
+asks about those separately, with their own count and estimate, for example "497 have only an
+old assessment; re-assess? ~497 calls". The yes to that question is its own flag:
+
+```sh
+gigai scout new --reassess-stale --json         # yes to the old ones only (one model call each)
+gigai scout new --yes --reassess-stale --json   # yes to both questions
+```
+
+In the JSON, `counts.to_assess` is the new postings that no matching profile has assessed, and
+`counts.only_stale` is the postings that have only an old assessment. After a full `--yes`,
+`to_assess` is the ones that failed, if any.
+
+**Progress while it assesses.** A batch prints lines like `assessed 120 of 333 · ~18 min left`
+to the error stream (stderr), so with `--json` the standard output is still the reply alone. A
+batch of 20 or fewer prints every result; a larger one at most one line every 10 seconds, and
+always the last. The reply's `ranking` block says how far the background ranking is, per
+profile (`ranked` of `total`).
+
 With nothing new, the reply reads "Nothing new since your last check" and lists the 10 postings
 that still need your attention.
 
 The grid has four columns: the posting (company, role, work mode, salary if stated, and the
 profiles it matches), its score, whether it needs tailoring (with the requirements not yet met),
-and its open questions.
+and its open questions. The score column is words, never a bare percent: the verdict, how many
+requirements are met, and the rank, for example `Matched · 9 of 11 requirements · rank 96`,
+`Matched (old assessment: older prompt) · 3 of 3 requirements · rank 95` or
+`rank 97 · not assessed`.
 
 A plain `gigai scout new` moves the "new since" mark to now. `--peek` and `--profile ID` look
 without moving it.
@@ -147,36 +179,115 @@ and it should not ask you for those details.
 
 Every line comes from your resume, answers or stories. Read it before you send it.
 
-## Set up your agent
+## Use it from your agent
 
-### The skill file
+Three ways to teach an agent the daily loop. They carry the same instructions; pick the one
+your agent reads.
 
-GigAI ships the instructions that teach an agent this loop. It prints them; you decide where
-they go:
+| Your agent | Use | How it is picked up |
+| --- | --- | --- |
+| Claude Code | The skill file: `gigai agent-skill --format skill` | Claude Code loads it by itself when you ask about Scout or job postings, or when you type `/gigai-scout` |
+| Codex | An `AGENTS.md` section: `gigai agent-skill --format agents-md` | Codex reads `AGENTS.md` at the start of every run |
+| Any other agent | The same `AGENTS.md` section, or paste what `gigai agent-context` prints | Whatever instruction file your agent reads; or the chat itself |
 
-```sh
-gigai agent-skill                        # a Claude Code skill (SKILL.md), printed
-gigai agent-skill --out SKILL.md         # written to the file you name
-gigai agent-skill --format agents-md     # the same text as a section for an AGENTS.md
-```
+`gigai agent-context` prints a one-line summary of the CLI, and with `--json` the full manual of
+every command. It teaches the commands, not the loop: use it when your agent has no instruction
+file at all.
 
-For Claude Code, save it as `~/.claude/skills/gigai-scout/SKILL.md`. For Codex and other agents
-that read an `AGENTS.md`, paste the `agents-md` form into yours. `--out` refuses to replace a file
-that exists unless you add `--force`.
+### Claude Code
 
-### Permissions
+1. Install the skill. The command creates the folders it needs:
 
-```sh
-gigai agent-permissions
-```
+   ```sh
+   gigai agent-skill --format skill --out ~/.claude/skills/gigai-scout/SKILL.md
+   ```
 
-This prints a snippet for Claude Code's `settings.json`: it allows the `gigai` command and Scout's
-local API, and denies reading `~/.gigai` directly. **GigAI prints it and never applies it.** It
-does not read or write your agent's settings; you paste the snippet in yourself.
+   That folder is for all your projects. For one project only, write it to
+   `.claude/skills/gigai-scout/SKILL.md` inside that project instead. `--out` refuses to replace
+   a file that exists unless you add `--force`.
+2. Print the permissions snippet and merge it into your settings yourself:
 
-The snippet is a guard against accidents, not a security boundary: see the next section. The rule
-syntax has not been tested against every Claude Code version; check that your Claude Code accepts
-it.
+   ```sh
+   gigai agent-permissions
+   ```
+
+   Put it in `~/.claude/settings.json` (all projects) or `.claude/settings.local.json` (this
+   project only), merged into the `permissions` you already have. It allows the `gigai` command
+   and Scout's local API at `http://127.0.0.1:8765/`, and denies reading `~/.gigai` directly.
+   **GigAI prints it and never applies it.** It does not read or write your agent's settings.
+3. Start a new Claude Code session, so that the skill is listed.
+4. Type:
+
+   > What's new on Scout?
+
+What a first session should look like (an illustration with a made-up user and made-up
+postings, not a recording):
+
+> **You:** What's new on Scout?
+>
+> **Claude Code:** *(loads the gigai-scout skill, runs `gigai scout new --json`)* 14 new postings
+> across your 2 profiles. They are ranked, not assessed. Assessing them is about 14 model calls
+> on your Codex login. Go ahead?
+>
+> **You:** Yes.
+>
+> **Claude Code:** *(runs `gigai scout new --yes --since 2026-10-03T14:02:00Z --json`)* Assessed
+> 14 of 14. The top one: Northwind, Staff Backend Engineer, remote: needs your answers, 9 of 11
+> requirements, rank 96. It asks: have you run Kafka in production?
+
+The snippet is a guard against accidents, not a security boundary: see
+[The security model](#the-security-model). The curl rules cover only a command written exactly
+as `curl http://127.0.0.1:8765/...`; the agent should prefer the `gigai` command. Without the
+snippet everything still works: Claude Code asks you before each command.
+
+If your project already has a `CLAUDE.md`, Claude Code does not read an `AGENTS.md` there; the
+skill file is the simpler route.
+
+### Codex
+
+1. Print the instructions as an `AGENTS.md` section:
+
+   ```sh
+   gigai agent-skill --format agents-md
+   ```
+
+2. Add the section to the end of the file Codex reads, after a blank line:
+   `~/.codex/AGENTS.md` for every project, or the `AGENTS.md` at the root of one repository.
+   (If you keep an `AGENTS.override.md` there, Codex reads that one instead.)
+3. Start Codex and type "What's new on Scout?".
+
+What to expect from Codex's own safety settings. By default Codex runs commands in a sandbox
+that can write only inside the folder you started it in (`workspace-write`), with network access
+off, and asks you when a command needs more (`on-request`). GigAI keeps its data in `~/.gigai`,
+outside that folder, and installing or **Update sources** needs the network. So expect Codex to
+ask for approval for those commands. We have not tested every case; approve what you recognise.
+
+Do not turn the sandbox off for GigAI (`danger-full-access`, or bypassing approvals). Nothing
+here needs it.
+
+To give Codex a docs page such as [Start here](start/): by default Codex's web search reads a
+cached index, not the live page, so it may not find a new page. Either start it with live web
+search (`codex --search "<your prompt>"`), or put "run `curl -fsSL <the page address>` and read
+it" in the prompt. The starter prompt in the
+[README](https://github.com/karthik446/gigai#let-your-agent-set-it-up) does the second.
+
+### Any other agent
+
+- Paste the `AGENTS.md` section (`gigai agent-skill --format agents-md`) into the instruction
+  file your agent reads.
+- While Scout runs, the local API describes itself: `GET http://127.0.0.1:8765/llms.txt` is a
+  short plain-text guide, and `GET http://127.0.0.1:8765/api/openapi.json` is the full OpenAPI
+  spec. See [Discover the API](#discover-the-api).
+- The docs site has a plain-text entry point too: `llms.txt` beside these pages, with the setup
+  steps and links.
+
+### What it costs
+
+`gigai scout new` asks before it assesses, with the count and an estimate from your own past
+calls. `gigai scout metrics` shows the averages after the first calls. Background work has
+daily caps: 40 pipeline model calls and 100 rank calls. The first run is the expensive one; a
+normal day is a few dozen new postings. [Token usage](../tokens/) has measured numbers for
+Codex and Claude Code.
 
 ## The security model
 
@@ -193,7 +304,7 @@ What that means, plainly:
   [Privacy and security](../privacy/) for the limits of that promise.
 - **An agent that can run commands can read GigAI's files.** It runs as you, so file permissions
   do not separate it from your answers, stories and resume under `~/.gigai`. The permissions
-  snippet above lowers the chance of an accident. It can't stop an agent that decides to read the
+  snippet lowers the chance of an accident. It can't stop an agent that decides to read the
   files another way.
 - **Job postings are written by strangers and can contain text meant to trick your agent.**
   Scout marks posting text as untrusted, keeps it apart from your own text in `gigai scout new`,
@@ -234,9 +345,9 @@ gigai scout new --yours --json
 >
 > | Posting | Score | Needs tailoring | Open questions |
 > | --- | --- | --- | --- |
-> | Northwind: Staff Backend Engineer (remote) | 82% of requirements met | yes: Terraform | Have you run Kafka in production? |
-> | Globex: Platform Engineer (hybrid) | 73% of requirements met | yes: SOC 2, on-call lead | Do you have GCP experience? |
-> | Initech: Senior SRE (remote) | 64% of requirements met | yes: Go | none |
+> | Northwind: Staff Backend Engineer (remote) | Needs your answers · 9 of 11 requirements · rank 96 | yes: Terraform | Have you run Kafka in production? |
+> | Globex: Platform Engineer (hybrid) | Needs your answers · 8 of 11 requirements · rank 91 | yes: SOC 2, on-call lead | Do you have GCP experience? |
+> | Initech: Senior SRE (remote) | Matched · 7 of 11 requirements · rank 84 | yes: Go | none |
 >
 > Two questions. Have you run Kafka in production?
 >
@@ -266,7 +377,7 @@ gigai scout new --process --json
 gigai scout pipeline status --json
 ```
 
-> **Agent:** Done. Northwind: requirements met went from 82 to 91 after tailoring, Scout ATS 88,
+> **Agent:** Done. Northwind: requirements met went from 9 to 10 of 11 after tailoring, Scout ATS 88,
 > Scout label: recommended. That label is Scout's own suggestion from your settings, resume and
 > answers, not a prediction of what an employer will decide. Globex still needs attention: the
 > SOC 2 requirement is not met.

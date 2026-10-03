@@ -16,6 +16,8 @@ agent.
 
 ## Quickstart
 
+**Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks about 10,000 public job boards (Greenhouse, Lever, Ashby): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
+
 1. **Requirements.** macOS or Linux with Python 3.11+, [`uv`](https://docs.astral.sh/uv/getting-started/installation/),
    and one model CLI installed and logged in: Codex (`codex login`) or Claude Code (`claude`, then `/login`).
 2. **Install.**
@@ -34,6 +36,21 @@ agent.
    roles. Then **Update sources** fills the store, the **Jobs** page lists what
    matches, **Assess these** assesses what you approve, and **Tailor resume**
    drafts a resume for one job. Update later with `uv tool upgrade gigai`.
+   You can turn the background checks off under Settings > Background updates.
+
+## Let your agent set it up
+
+**Remove your name, email, phone, address and links from your resume before you give it to an agent.**
+
+Paste this into Claude Code or Codex. The agent installs what is missing, checks your resume
+file for contact details before it reads it, and asks before anything that uses the network or
+a model.
+
+```text
+Set up GigAI for me. Read https://karthik446.github.io/gigai/0.1.10.8/scout/agents/start/ first (if you cannot open the page, run `curl -fsSL https://karthik446.github.io/gigai/0.1.10.8/llms.txt` and read that) and follow it exactly. Check whether `uv` is installed; if not, install it (macOS with Homebrew: `brew install uv`; otherwise `curl -LsSf https://astral.sh/uv/install.sh | sh`; on Windows use WSL) and tell me what you installed; do not use sudo without asking me. Then `uv tool install gigai`, open a new shell if `gigai` is not found (`uv tool update-shell`), and run `gigai scout run --no-browser`. Before anything touches my resume, run GigAI's contact-details check on the file and stop if it finds any. Ask me before any step that makes thousands of network requests (Update sources) or spends model calls (assessing). When it is set up, show me what's new on Scout.
+```
+
+With Codex, `codex --search "<the prompt>"` turns on live web search; the `curl` line in the prompt is the fallback either way.
 
 ## Use it from your AI agent
 
@@ -52,7 +69,19 @@ gigai scout new            # what is new since your last check
 5. For a PDF the agent gives you an "open in Scout" link. You add your name and contact
    details there, in your browser. The agent never gets them.
 
-[For agents](https://karthik446.github.io/gigai/latest/scout/agents/) has the full workflow, the setup and an example session.
+How each agent picks it up:
+
+- **Claude Code:** `gigai agent-skill --format skill --out ~/.claude/skills/gigai-scout/SKILL.md`,
+  merge what `gigai agent-permissions` prints into your Claude Code settings, start a new
+  session, and ask "what's new on Scout?".
+- **Codex:** add what `gigai agent-skill --format agents-md` prints to `~/.codex/AGENTS.md` (every
+  project) or a repository's `AGENTS.md`. Codex asks for approval for commands that use the
+  network or write outside the folder it was started in.
+- **Any other agent:** the same `AGENTS.md` section, or paste what `gigai agent-context` prints.
+  A running Scout serves `/llms.txt` and `/api/openapi.json` on `http://127.0.0.1:8765`.
+
+[For agents](https://karthik446.github.io/gigai/latest/scout/agents/) has the full workflow, the per-agent setup and an example session.
+[Token usage](https://karthik446.github.io/gigai/latest/scout/tokens/) says what it costs: the first run is the expensive one.
 
 ## Privacy
 
