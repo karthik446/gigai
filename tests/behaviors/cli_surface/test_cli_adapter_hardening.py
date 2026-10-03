@@ -1,4 +1,7 @@
-"""0110-004: every Scout CLI call runs with the shell tool, memories and user config off."""
+"""0110-004: every Scout CLI call runs with the shell tool, memories and user config off.
+
+0110-8-07 adds web search, MCP servers and every other tool feature: ``test_tool_surface_off.py``.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +13,7 @@ import subprocess
 import pytest
 
 from gigai.adapters.claude_cli import ClaudeCLIAdapter
-from gigai.adapters.cli_probe import reset_probe_cache
+from gigai.adapters.cli_probe import CodexLockdown, codex_lockdown, reset_probe_cache
 from gigai.adapters.codex_cli import CodexCLIAdapter
 from gigai.adapters.port import InvocationRequest, ModelInvocationError
 
@@ -39,9 +42,10 @@ def test_codex_argv_disables_shell_tool_and_memories_in_every_mode(adapter_kind:
     adapter = CodexCLIAdapter(executable="/opt/fake/codex")
     if adapter_kind == "effort":
         adapter = adapter.effort_copy()
-    argv = adapter.argv(_request(model=model, effort="low"), _DIR)
+    argv = adapter.argv(_request(model=model, effort="low"), _DIR, CodexLockdown())
 
     assert _pairs(argv, "--disable") == ["shell_tool", "memories"]
+    assert 'web_search="disabled"' in _pairs(argv, "-c")  # 0110-8-07: the default is "cached", which is ON
     assert argv[argv.index("--sandbox") + 1] == "read-only"
     # --ignore-user-config would skip config.toml (custom providers / default model): never added
     assert "--ignore-user-config" not in argv
@@ -74,7 +78,10 @@ def _fake(tmp_path: Path, name: str, probe_args: str, probe_out: str, probe_exit
     log = tmp_path / f"{name}.calls"
     exe.write_text(
         f"#!/bin/sh\necho \"$@\" >> {log}\n"
-        f"if [ \"$*\" = \"{probe_args}\" ]; then printf '%s' '{probe_out}'; exit {probe_exit}; fi\n{rest}\n"
+        f"if [ \"$*\" = \"{probe_args}\" ]; then printf '%s' '{probe_out}'; exit {probe_exit}; fi\n"
+        # 0110-8-07: codex is asked for its MCP servers before every call; this one has none
+        f"if [ \"$1 $2\" = \"mcp list\" ]; then echo '[]'; exit 0; fi\n"
+        f"if [ \"$*\" = \"debug models\" ]; then echo '{{\"models\": []}}'; exit 0; fi\n{rest}\n"
     )
     exe.chmod(0o755)
     return exe
@@ -89,7 +96,9 @@ def test_codex_probe_passes_and_runs_once_per_process(tmp_path: Path) -> None:
     adapter.invoke(_request())
     adapter.invoke(_request())
     calls = (tmp_path / "codex.calls").read_text().splitlines()
-    assert calls.count("features list") == 1 and len(calls) == 3
+    # the feature list is read once per process; the MCP list and the model catalog before EVERY call (0110-8-07)
+    assert calls.count("features list") == 1 and calls.count("debug models") == 2 and len(calls) == 7
+    assert [call for call in calls if call.startswith("mcp list")] == ["mcp list --json --disable shell_tool --disable memories"] * 2
 
 
 def test_codex_missing_memories_fails_closed_naming_it(tmp_path: Path) -> None:
@@ -162,11 +171,11 @@ def test_live_hardened_codex_call_runs_zero_commands(tmp_path: Path) -> None:
 
     reset_probe_cache()
     require_codex_capabilities(adapter._executable)  # the real probe, no model
-    argv = adapter.argv(request, str(tmp_path))
+    argv = adapter.argv(request, str(tmp_path), codex_lockdown(adapter._executable))
     done = subprocess.run(argv, input=request.prompt, capture_output=True, text=True, cwd=tmp_path, timeout=200)
     events = [json.loads(line) for line in done.stdout.splitlines() if line.strip().startswith("{")]
     _live_summary("CODEX", events)
-    commands = [e for e in events if (e.get("item") or {}).get("type") in {"command_execution", "mcp_tool_call"}]
+    commands = [e for e in events if (e.get("item") or {}).get("type") in {"command_execution", "mcp_tool_call", "web_search", "collab_tool_call"}]
     assert done.returncode == 0 and commands == []
 
 

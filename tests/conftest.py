@@ -256,7 +256,7 @@ __all__ = [
 
 @pytest.fixture(autouse=True)
 def _canned_cli_probe(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The CLI capability probe (codex features list / claude --help) is answered locally: fake CLIs in tests only know the call under test. test_cli_adapter_hardening overrides this fixture to exercise the real probe."""
+    """The CLI capability probe (codex features list / mcp list / debug models, claude --help) is answered locally: fake CLIs in tests only know the call under test. test_cli_adapter_hardening overrides this fixture to exercise the real probe."""
 
     from gigai.adapters import cli_probe
 
@@ -267,6 +267,10 @@ def _canned_cli_probe(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda argv: (
             "shell_tool stable true\nmemories stable false\n"
             if argv[1:] == ("features", "list")
+            else "[]"  # 0110-8-07: `codex mcp list --json`, no MCP server configured
+            if argv[1:3] == ("mcp", "list")
+            else '{"models": []}'  # 0110-8-07: `codex debug models`
+            if argv[1:3] == ("debug", "models")
             else "--setting-sources\n--strict-mcp-config\n--tools\n"
         ),
     )
