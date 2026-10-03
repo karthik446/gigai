@@ -212,8 +212,11 @@ def test_cli_default_out_is_dated_and_never_the_persons_name(tmp_path: Path, mon
     monkeypatch.chdir(tmp_path)
     code, payload = _cli("--in", str(source), "--home", str(home))
     assert code == 0, payload
-    written = Path(payload["out_path"])
-    assert written.parent == tmp_path.resolve() or written.parent == tmp_path
+    # fix2 privacy contract: the default is printed as the bare file name (no absolute path), and the file really sits in the cwd.
+    printed = Path(payload["out_path"])
+    assert printed == Path(printed.name), payload["out_path"]
+    written = tmp_path / printed.name
+    assert written.is_file()
     assert written.name.startswith("resume-") and written.name.endswith(".pdf") and len(written.name) == len("resume-2026-10-02.pdf")
     assert "riley" not in written.name.lower() and written.read_bytes().startswith(b"%PDF")
 

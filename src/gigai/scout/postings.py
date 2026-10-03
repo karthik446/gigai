@@ -60,12 +60,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-import hashlib
 import json
 import os
 from pathlib import Path
 from urllib.parse import quote, unquote
 
+from ..canonical import digest_imported_bytes
 from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, RunAssessment, pipeline_path
 
 #: Bump when what a row is matched by, or what its facts are read from, changes.
@@ -88,7 +88,7 @@ class PostingModelError(ValueError):
 
 def _digest(*parts: object) -> str:
     rendered = json.dumps(parts, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
-    return "sha256:" + hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+    return digest_imported_bytes(rendered.encode("utf-8"))
 
 
 def stamp(value: object) -> str | None:

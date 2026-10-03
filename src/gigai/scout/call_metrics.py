@@ -37,13 +37,13 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
-import hashlib
 import logging
 import math
 from pathlib import Path
 import threading
 import time
 
+from ..canonical import digest_imported_bytes
 from .pipeline.store import (
     OUTCOME_ERROR,
     OUTCOME_OK,
@@ -217,7 +217,7 @@ def record_call(
                 job=job if fits("job", job) else None,
                 items=items if type(items) is int and items >= 0 else 1,
                 input_digest=(
-                    "sha256:" + hashlib.sha256(prompt.encode("utf-8")).hexdigest() if isinstance(prompt, str) else None
+                    digest_imported_bytes(prompt.encode("utf-8")) if isinstance(prompt, str) else None
                 ),
                 started_at=started_at,
             )

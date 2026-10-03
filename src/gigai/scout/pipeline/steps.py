@@ -78,12 +78,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-import hashlib
 import json
 import os
 from pathlib import Path
 import re
 
+from ...canonical import digest_imported_bytes
 from ..call_metrics import lane_for
 from ..wording import LABEL_WORDING
 from .settings import PipelineSetting
@@ -166,15 +166,15 @@ class StepResult:
 
 def _digest(*parts: object) -> str:
     rendered = json.dumps(parts, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
-    return "sha256:" + hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+    return digest_imported_bytes(rendered.encode("utf-8"))
 
 
 def _bytes_digest(data: bytes) -> str:
-    return "sha256:" + hashlib.sha256(data).hexdigest()
+    return digest_imported_bytes(data)
 
 
 def _job_key(job: str) -> str:
-    return hashlib.sha256(job.encode("utf-8")).hexdigest()
+    return digest_imported_bytes(job.encode("utf-8")).removeprefix("sha256:")
 
 
 def _scout_root(home_root: Path, target: Path) -> Path:

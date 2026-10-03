@@ -54,11 +54,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
-import hashlib
 from pathlib import Path
 import re
 import textwrap
 
+from ..canonical import digest_imported_bytes
 from . import postings
 from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, USER_PRIVATE, assert_not_mixed, labels_envelope
 from .pipeline.busy import LiveBatch, assess_batch
@@ -288,7 +288,7 @@ def _assess(
         resolved_job = ResolvedJob(
             job_identity=job, source_url=text.url, normalized_url=job, fetch_kind="ats_board", title=text.title,
             company=text.company, location=text.location, text=body,
-            text_sha256="sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest(),
+            text_sha256=digest_imported_bytes(body.encode("utf-8")),
         )
         request = AssessRequest(
             job=AssessJobInput(job_url=text.url), resume=AssessResumeInput(profile_id=profile_id), origin=ORIGIN_JOB_PAGE
