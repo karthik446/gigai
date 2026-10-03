@@ -87,7 +87,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           }
         },
         "summary": "List every route",
@@ -95,7 +95,8 @@
           "Agents and meta"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       }
     },
     "/api/answers": {
@@ -144,7 +145,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -184,7 +185,8 @@
           "Assessment"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       },
       "post": {
         "description": "Answer an assessment question; with reassess the job is assessed again. Storing the answer is local; the model runs only when `reassess` is given. The answer lands in one profile's story bank (GET /api/story-bank) and is reused by that profile's later assessments. An answer holding an email, phone, link, street address or the saved name is refused with 422 personal_info_refused.",
@@ -271,7 +273,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -352,7 +354,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -376,7 +378,8 @@
           "Jobs"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       },
       "post": {
         "description": "Record an application event (applied, interview_scheduled, ...) for a job.",
@@ -452,7 +455,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -774,7 +777,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -814,7 +817,8 @@
           "Assessment"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       }
     },
     "/api/config": {
@@ -847,7 +851,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -871,7 +875,8 @@
           "Settings"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       }
     },
     "/api/config/sources": {
@@ -927,7 +932,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -1008,7 +1013,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "409": {
             "content": {
@@ -1090,7 +1095,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           }
         },
         "summary": "Get the latest discovery pass",
@@ -1098,7 +1103,8 @@
           "Sources"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       }
     },
     "/api/health": {
@@ -1129,7 +1135,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           }
         },
         "summary": "Check the server is alive",
@@ -1137,7 +1143,8 @@
           "Agents and meta"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       }
     },
     "/api/jobs": {
@@ -1397,7 +1404,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           }
         },
         "summary": "Get the OpenAPI document",
@@ -1405,7 +1412,8 @@
           "Agents and meta"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       }
     },
     "/api/privacy/cleanup": {
@@ -1539,7 +1547,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -1653,7 +1661,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -1677,7 +1685,8 @@
           "Profiles and resume"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       },
       "post": {
         "description": "Create a profile. Every profile but the default one has its own location, work mode, countries and posted window. The first profile is the default and uses the setup settings.",
@@ -1776,7 +1785,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -1896,7 +1905,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -1934,6 +1943,105 @@
       }
     },
     "/api/profiles/{profile_id}": {
+      "delete": {
+        "description": "Delete a profile: it is archived as `deleted` and the journal keeps its history. Send Content-Type: application/json like every write (no body is read). The profile leaves GET /api/profiles, the switcher, new runs and background tagging; its runs and assessments stay readable (GET /api/runs?profile_id=... or include_deleted=1). The default profile and the only active profile are a 409. Deleting the selected profile selects the default; `selected_profile_id` is the selection after the delete. The story bank and answers are untouched.",
+        "operationId": "delete_api_profiles_profile_id",
+        "parameters": [
+          {
+            "description": "A profile id from GET /api/profiles.",
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "deleted": "prof_2",
+                  "schema_version": "scout-profile-delete-response:1",
+                  "selected_profile_id": "prof_1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-profile-delete-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "scout_profile_default_delete",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "scout_profile_default_delete, scout_profile_last_active, scout_profile_deleted"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          }
+        },
+        "summary": "Delete a profile",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      },
       "put": {
         "description": "Update a profile. search_settings on the default profile is a 409: it uses the setup settings (PUT /api/setup). An unknown key inside search_settings lists that object's allowed_keys.",
         "operationId": "put_api_profiles_profile_id",
@@ -2040,7 +2148,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -2182,7 +2290,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -2334,7 +2442,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "415": {
             "content": {
@@ -2424,7 +2532,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "415": {
             "content": {
@@ -2662,7 +2770,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -2789,7 +2897,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "415": {
             "content": {
@@ -2922,7 +3030,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -2993,7 +3101,7 @@
     },
     "/api/runs": {
       "get": {
-        "description": "Every run, newest first, with counts.",
+        "description": "Every run, newest first, with counts. Runs of a deleted profile are left out unless include_deleted=1 or profile_id names that profile.",
         "operationId": "get_api_runs",
         "parameters": [
           {
@@ -3021,6 +3129,19 @@
             "required": false,
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "description": "1 to include the runs of deleted profiles (hidden by default).",
+            "in": "query",
+            "name": "include_deleted",
+            "required": false,
+            "schema": {
+              "enum": [
+                "0",
+                "1"
+              ],
+              "type": "string"
             }
           }
         ],
@@ -3069,7 +3190,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -3109,7 +3230,8 @@
           "Runs"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       }
     },
     "/api/runs/{run_id}": {
@@ -3151,7 +3273,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -3175,7 +3297,8 @@
           "Runs"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       }
     },
     "/api/runs/{run_id}/assess-all": {
@@ -3242,7 +3365,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -3364,7 +3487,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -3477,7 +3600,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -3517,7 +3640,8 @@
           "Runs"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       }
     },
     "/api/runs/{run_id}/progress": {
@@ -3573,7 +3697,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -3613,7 +3737,8 @@
           "Runs"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       }
     },
     "/api/runs/{run_id}/rank": {
@@ -3695,7 +3820,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -3819,7 +3944,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -3859,7 +3984,8 @@
           "Runs"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       }
     },
     "/api/secrets/status": {
@@ -3892,7 +4018,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           }
         },
         "summary": "Show which provider keys are set",
@@ -3900,7 +4026,8 @@
           "Settings"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       }
     },
     "/api/settings/background": {
@@ -4020,7 +4147,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -4044,7 +4171,8 @@
           "Settings"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       },
       "put": {
         "description": "Change background settings. Send only the keys to change; at least one. Every other key of the project's settings.json is kept, and the file is replaced in one step. The refresh thread reads the file at every look and is woken by this call, so turning `sources.auto_refresh` off stops the background checks and the model tagging at once (an update already running finishes), and new `sources.check_times` decide the next check. A list of check times is stored sorted, without repeats; an empty list, more than 12 times or anything that is not HH:MM (00:00 to 23:59) is 422 invalid_value. 409 settings_unreadable: the stored file is not one Scout can read; it is left as it is. The answer is the GET body after the change. `settings` is what the project's settings file says (a key it does not hold shows its default): the values a form edits. `effective` is what the background jobs act on now, each block with the `source` that decided it: default, setting, environment (an environment variable overrides the file) or settings_unreadable. `readable` is false when the file exists and cannot be read: every background job is then off. `sources.auto_refresh` off stops all background work, the model tagging included; `sources.check_times` is when the background checks run: `weekdays` and `weekends`, each 1 to 12 24-hour HH:MM times in the machine's local time (in `effective` with its own `source`, and `default`: the times a reset puts back); `tagging.model_enabled` lets a model tag titles the rules cannot place, `tagging.backfill_enabled` also tags titles no active profile can reach, with `tagging.tag_backfill_model`; `snapshot.enabled` allows the metadata snapshot download from `snapshot.manifest_url`.",
@@ -4193,7 +4321,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -4295,7 +4423,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -4319,7 +4447,8 @@
           "Settings"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       },
       "put": {
         "description": "Save preferences and derive the find-jobs config from them.",
@@ -4465,7 +4594,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -4708,7 +4837,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           }
         },
         "summary": "Get the board refresh status",
@@ -4716,7 +4845,8 @@
           "Sources"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       },
       "post": {
         "description": "Refresh the board catalog and index (\"Update sources\"). Reads public boards; incremental by default; returns immediately; poll GET /api/sources/update.",
@@ -4768,7 +4898,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "415": {
             "content": {
@@ -4920,7 +5050,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -5074,7 +5204,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -5218,7 +5348,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -5345,7 +5475,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -5477,7 +5607,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -5634,7 +5764,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -5806,7 +5936,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -5931,7 +6061,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -5955,7 +6085,8 @@
           "Tailored resumes"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       },
       "post": {
         "description": "Tailor the resume to one posting (markdown + structure, each line cited). Synchronous: blocks for the model call (one retry on a rejected answer).",
@@ -6237,7 +6368,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -6364,7 +6495,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -6498,7 +6629,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -6538,7 +6669,8 @@
           "Sources"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
       },
       "post": {
         "description": "Add a company board by its posting or board URL.",
@@ -6600,7 +6732,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           },
           "404": {
             "content": {
@@ -6678,7 +6810,7 @@
                 }
               }
             },
-            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
           }
         },
         "summary": "Get the agent guide",

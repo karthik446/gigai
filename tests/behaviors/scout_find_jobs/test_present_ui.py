@@ -6,6 +6,7 @@ import threading
 import time
 from email.message import Message
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 import httpx
@@ -599,12 +600,13 @@ def _invoke_handler(backend: Backend, *, client_address: tuple[str, int], method
     handler.request_version = "HTTP/1.1"
     handler.requestline = f"{method} {path} HTTP/1.1"
     headers = Message()
+    headers["Host"] = "127.0.0.1:8765"  # the Host check (P1) compares against the bound host:port
     if body:
         headers["Content-Length"] = str(len(body))
     handler.headers = headers
     handler.rfile = io.BytesIO(body)
     handler.wfile = io.BytesIO()
-    handler.server = None
+    handler.server = SimpleNamespace(server_address=("127.0.0.1", 8765))
     if method == "GET":
         handler.do_GET()
     else:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import io
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from importlib import resources
 from pathlib import Path
 
@@ -24,7 +24,7 @@ from gigai.scout.resume_pdf import pdf_file_name, render_markdown_pdf
 
 STAMP = datetime(2026, 10, 2, tzinfo=timezone.utc)
 HEADER = PdfHeader("Jordan Example", "Senior Platform Engineer", (ContactItem("jordan@example.invalid", "mailto:jordan@example.invalid"), ContactItem("555-0100", None)))
-FILE_NAME = pdf_file_name("Jordan Example", "Example Corp")
+FILE_NAME = pdf_file_name("Jordan Example", "Example Corp", date(2026, 10, 2))
 KEYWORDS = PostingKeywords(
     must=("Kubernetes", "Terraform", "AWS", "CI/CD", "SOC 2"),
     nice=("Go", "Python", "Prometheus", "Datadog", "ArgoCD", "Helm"),

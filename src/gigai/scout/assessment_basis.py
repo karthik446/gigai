@@ -45,8 +45,8 @@ the record says has nothing the old prompt missed: its old verdicts stay.
 
 0.1.10.7 PL2: a new record also carries the rest of what a run seals, so the
 provenance survives without runs: ``profile_ref`` (the profile's id,
-revision and content digest), ``posting_sha256`` (:func:`posting_sha256`, the
-company index's ``content_sha256`` for the same posting) and ``model`` (the
+revision and digest), ``posting_sha256`` (:func:`posting_sha256`, the
+company index's stored digest for the same posting) and ``model`` (the
 model id that answered). They are recorded, not yet compared: a record
 without them (written before 0.1.10.7) reads exactly as before.
 
@@ -85,7 +85,7 @@ BASIS_STALE_REASONS: tuple[str, ...] = (REASON_OLDER_PROMPT, REASON_SETTINGS_CHA
 
 
 def posting_sha256(title: str, text: str) -> str:
-    """A posting's content digest: what the company index stores as ``content_sha256``.
+    """A posting's content digest: what the company index stores as its posting digest.
 
     The ATS parsers hash the title and the plain posting text, joined by a
     newline (``ats_board_clients._text_bytes``), so an assessment of an

@@ -80,7 +80,9 @@ _DISPLAY_IMPORTERS: dict[str, frozenset[str]] = {
     "gigai.scout.find_jobs.api.resume_display": frozenset({
         "gigai.scout.find_jobs.api.server", "gigai.scout.find_jobs.api.tailored_resumes",
     }),
-    "gigai.scout.resume_pdf": frozenset({"gigai.scout.find_jobs.api.tailored_resumes", "gigai.scout.scout_cli"}),  # scout_cli: `scout resume pdf` renders locally (0110-032)
+    # posting_keywords (0.1.10.7 D): reads the resume's Skills tags through resume_pdf's markdown parser (the chips the PDF prints);
+    # it never touches resume_display, so the display settings stay out of the keyword path.
+    "gigai.scout.resume_pdf": frozenset({"gigai.scout.find_jobs.api.tailored_resumes", "gigai.scout.scout_cli", "gigai.scout.posting_keywords"}),  # scout_cli: `scout resume pdf` renders locally (0110-032)
 }
 
 

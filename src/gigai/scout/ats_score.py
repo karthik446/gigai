@@ -40,7 +40,7 @@ _WEIGHTS = {
 _FIDELITY_CLEAN = 36.0
 _DATE_RANGE = re.compile(r"\b(?:[A-Z][a-z]{2} )?(?:19|20)\d\d\s*[-–]\s*(?:(?:[A-Z][a-z]{2} )?(?:19|20)\d\d|Present)\b")
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
-_FILE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*-resume(?:-[a-z0-9-]+)?\.pdf$")
+_FILE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*-\d{4}-\d{2}-\d{2}\.pdf$")
 _WORD = re.compile(r"[a-z0-9][a-z0-9+#.]*[a-z0-9+#]|[a-z0-9]")
 _ROLE_LINE = re.compile(r"(?m)^(.+?) \| ((?:[A-Z][a-z]{2} )?\d{4} - .+)$")
 _LETTER_SPACED = re.compile(r"(?:\b\S {1,2}){5,}\S\b")  # "J O R D A N" (tracking can double the gaps)
@@ -201,7 +201,7 @@ def _unreadable() -> AtsScore:
 def score(pdf_bytes: bytes, source: str | TailoredResume, keywords: PostingKeywords, *, file_name: str | None = None) -> AtsScore:
     """Score one rendered resume PDF against the markdown (or ``TailoredResume``) it came from and a posting's keywords.
 
-    ``file_name`` is the name the PDF is offered under (``resume_pdf.pdf_file_name``); ``None`` skips that rule."""
+    ``file_name`` is the name the PDF is offered under (the PDF download name); ``None`` skips that rule."""
     try:
         read = _read(pdf_bytes)
     except Exception:  # noqa: BLE001 - pypdf raises many types on damaged or encrypted input; all mean "no readable text layer"
