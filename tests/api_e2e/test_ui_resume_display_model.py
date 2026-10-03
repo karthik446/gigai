@@ -35,7 +35,6 @@ console.log(JSON.stringify({
   putClearsTitle: m.buildPutBody({ title: "" }, "p1"),
   prefillUntitled: m.draftFromResponse({ saved: false, title: "", suggested: { title: "Engineer" } }),
   prefillTitled: m.draftFromResponse({ saved: true, title: "Staff Engineer", suggested: { title: "Other" } }),
-  prefillNone: m.draftFromResponse({ saved: false, title: "" }),
   legacyResponse: m.draftFromResponse({ saved: true, name: "Jane Doe", contact: [{ kind: "email", value: "j@x.io" }], title: "Staff", suggested: { name: "Jane", contact: [] } }),
   layoutAuto: m.layoutLine({ title: "Staff Engineer", auto_fit: true, spacing_scale: 1 }),
   layoutManual: m.layoutLine({ title: "", auto_fit: false, spacing_scale: 0.85 }),
@@ -72,7 +71,7 @@ def test_the_model_has_no_name_or_contact_helpers() -> None:
     exports = _run()["exports"]
     for gone in ("KINDS", "KIND_LABELS", "previewHeader", "addEntry", "hasContactLine", "headerLine", "savedHeaderLine"):
         assert gone not in exports
-    source = "\n".join(line for line in _code(UI_SRC / "resumeDisplayModel.js").splitlines() if "PRIVACY_NOTE =" not in line)
+    source = _code(UI_SRC / "resumeDisplayModel.js")
     assert "contact" not in source and "name" not in source
 
 
@@ -83,13 +82,12 @@ def test_the_put_body_saves_this_profiles_title_and_the_layout_never_a_name_or_c
     assert out["putClearsTitle"] == {"spacing_scale": 1.0, "auto_fit": True, "titles": {"p1": ""}}
 
 
-def test_a_suggested_title_prefills_once_and_never_overwrites_a_saved_one() -> None:
+def test_nothing_is_prefilled_and_an_older_servers_fields_are_ignored() -> None:
     out = _run()
-    assert out["prefillUntitled"] == {"title": "Engineer", "spacing_scale": 1.0, "auto_fit": True, "prefilled": True}
-    assert out["prefillTitled"] == {"title": "Staff Engineer", "spacing_scale": 1.0, "auto_fit": True, "prefilled": False}
-    assert out["prefillNone"] == {"title": "", "spacing_scale": 1.0, "auto_fit": True, "prefilled": False}
-    # an older server's name/contact never enter the draft
-    assert out["legacyResponse"] == {"title": "Staff", "spacing_scale": 1.0, "auto_fit": True, "prefilled": False}
+    assert out["prefillUntitled"] == {"title": "", "spacing_scale": 1.0, "auto_fit": True}
+    assert out["prefillTitled"] == {"title": "Staff Engineer", "spacing_scale": 1.0, "auto_fit": True}
+    # an older server's name/contact/suggested never enter the draft
+    assert out["legacyResponse"] == {"title": "Staff", "spacing_scale": 1.0, "auto_fit": True}
 
 
 def test_the_layout_reads_as_one_line() -> None:
@@ -100,7 +98,7 @@ def test_the_layout_reads_as_one_line() -> None:
 
 def test_the_note_and_the_download_file_name() -> None:
     out = _run()
-    assert out["note"] == "Stored on this machine only; never sent to a model. Your name and contact details are not stored: you type them when you generate a PDF."
+    assert out["note"] == "Stored on this machine only; never sent to a model; added to your PDF locally."
     assert out["fileName"] == "acme-staff-engineer-2026-10-02.pdf" and out["fileNameFallback"] == "resume.pdf"
 
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FIELDS, LIMITS, PROMISE, canGenerate, emptyValues, headerBody } from "../generatePdfModel.js";
+import { FIELDS, canGenerate, emptyValues, headerBody } from "../generatePdfModel.js";
 
 function saveBlob(blob, fileName) {
   const url = URL.createObjectURL(blob);
@@ -46,12 +46,6 @@ export default function GeneratePdfForm({ render, disabled = false }) {
 
   return (
     <form className="generate-pdf-form" data-role="generate-pdf-form" autoComplete="on" onSubmit={submit}>
-      <p data-role="pdf-promise">
-        <strong>{PROMISE}</strong>
-      </p>
-      <p className="muted" data-role="pdf-limits" style={{ fontSize: "0.82rem" }}>
-        {LIMITS}
-      </p>
       <div className="generate-pdf-fields">
         {FIELDS.map((field) => (
           <div className="form-group" key={field.key}>

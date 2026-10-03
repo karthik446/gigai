@@ -2,8 +2,8 @@ import { ResumeDisplayFields } from "../components/ResumeDisplayPanel.jsx";
 import { PRIVACY_NOTE } from "../resumeDisplayModel.js";
 
 // Screen 2 (0110-013) -- "Resume display": this profile's title and the PDF
-// layout. It is the settings panel's own form (ResumeDisplayFields), the
-// title filled from the resume header as there; skippable. 0110-046: no name
+// layout. It is the settings panel's own form (ResumeDisplayFields);
+// skippable. 0110-046: no name
 // or contact fields: GigAI stores none (they are typed at Generate PDF time).
 // Nothing is sent from here: Finish saves it with PUT /api/resume-display
 // (wizardFinish.js), and never to a model endpoint.
@@ -18,7 +18,6 @@ export default function ResumeDisplayScreen({ fields, loadError, onChange, onSki
       {draft && (
         <>
           {fields.displaySkipped && <div className="callout info">Skipped: your saved title and layout stay as they are. Edit anything to include them.</div>}
-          {!fields.displaySkipped && draft.prefilled && <div className="callout info">Title filled in from your resume. Check it; Finish saves it.</div>}
           <ResumeDisplayFields draft={draft} onChange={onChange} />
         </>
       )}

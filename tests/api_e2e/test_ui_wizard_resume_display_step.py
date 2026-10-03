@@ -26,7 +26,7 @@ const model = await import(input.modelUrl);
 
 const base = state.initialFields({ prefs: {}, config: null, selectedProfile: null, resumes: [] });
 const filled = { ...base, profileName: "Staff", resumeText: "Jane", titles: ["Staff Engineer"] };
-const draft = model.draftFromResponse({ saved: false, title: "", suggested: { title: "Engineer" } });
+const draft = model.draftFromResponse({ saved: false, title: "" });
 
 async function run(fields) {
   const calls = [];
@@ -55,7 +55,7 @@ console.log(JSON.stringify({
   rowOpened: state.reviewRows(opened, []).find(([key]) => key === "PDF layout"),
   rowSkipped: state.reviewRows(skipped, []).find(([key]) => key === "PDF layout"),
   rowNever: state.reviewRows(filled, []).find(([key]) => key === "PDF layout"),
-  rowManual: state.reviewRows({ ...opened, display: { title: "", spacing_scale: 0.9, auto_fit: false, prefilled: false } }, []).find(([key]) => key === "PDF layout"),
+  rowManual: state.reviewRows({ ...opened, display: { title: "", spacing_scale: 0.9, auto_fit: false } }, []).find(([key]) => key === "PDF layout"),
   finishOpened: await run(opened),
   finishSkipped: await run(skipped),
   finishNever: await run(filled),

@@ -2005,7 +2005,7 @@
     },
     "/api/resume-display": {
       "get": {
-        "description": "The saved PDF layout (per-profile title, spacing, auto fit) and a title suggestion. GigAI stores no name or contact details (they are typed in the Generate PDF form for one PDF), so this carries none. The Host header must match the bound server. spacing_scale and auto_fit read as 1.0 and true until saved.",
+        "description": "The saved PDF layout (per-profile title, spacing, auto fit). GigAI stores no name or contact details (they are typed in the Generate PDF form for one PDF), so this carries none. The Host header must match the bound server. spacing_scale and auto_fit read as 1.0 and true until saved.",
         "operationId": "get_api_resume_display",
         "parameters": [],
         "responses": {
@@ -2401,7 +2401,7 @@
                     "type": "boolean"
                   },
                   "header": {
-                    "description": "The Generate PDF form: {name, email, phone, location, linkedin, link}, each an optional string of at most 200 characters. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header.",
+                    "description": "The Generate PDF form: {name, email, phone, location, linkedin, link}, each an optional string of at most 200 characters. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF and the person finishing it in Scout.",
                     "type": "object"
                   },
                   "markdown": {
@@ -6106,7 +6106,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "header": {
-                    "description": "The Generate PDF form: {name, email, phone, location, linkedin, link}, each an optional string of at most 200 characters. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header.",
+                    "description": "The Generate PDF form: {name, email, phone, location, linkedin, link}, each an optional string of at most 200 characters. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF and the person finishing it in Scout.",
                     "type": "object"
                   },
                   "job_identity": {

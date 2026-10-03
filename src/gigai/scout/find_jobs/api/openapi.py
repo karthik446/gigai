@@ -120,7 +120,9 @@ _IDENTITY_KEY: dict[str, object] = {"profile_id": "prof_1", "job_identity": _JOB
 _HEADER_PARAM = _b(
     "header", "object",
     "The Generate PDF form: {name, email, phone, location, linkedin, link}, each an optional string of at most 200 characters. "
-    "Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header.",
+    "Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. "
+    "Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF "
+    "and the person finishing it in Scout.",
 )
 _HEADER_NOTE = (
     "GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout); "
@@ -674,7 +676,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
     ),
     RouteSpec(
-        "GET", "/api/resume-display", "The saved PDF layout (per-profile title, spacing, auto fit) and a title suggestion.", "read", "none",
+        "GET", "/api/resume-display", "The saved PDF layout (per-profile title, spacing, auto fit).", "read", "none",
         {"saved": False, "titles": {}, "title": "", "spacing_scale": 1.0, "auto_fit": True}, host_checked=True, errors=((403, "forbidden_origin"),),
         description=(
             "GigAI stores no name or contact details (they are typed in the Generate PDF form for one PDF), so this carries none. "

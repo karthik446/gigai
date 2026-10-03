@@ -13,7 +13,7 @@ export const SPACING_DEFAULT = 1.0;
 export const SPACING_STEP = 0.05;
 export const AUTO_FIT_HELP = "Adjusts spacing (never font size) so your resume fills its pages; turn off to use the slider as set.";
 
-export const PRIVACY_NOTE = "Stored on this machine only; never sent to a model. Your name and contact details are not stored: you type them when you generate a PDF.";
+export const PRIVACY_NOTE = "Stored on this machine only; never sent to a model; added to your PDF locally.";
 
 function text(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -46,22 +46,14 @@ export function previewGap(value) {
   return Math.round(clampSpacing(value) * 8 * 100) / 100;
 }
 
-// The draft the form edits: {title, spacing_scale, auto_fit, prefilled}. A
-// saved title is never overwritten by `suggested` (the server only sends a
-// suggestion while this profile has no title). A response from an older
-// server may still carry name/contact: they are ignored.
+// The draft the form edits: {title, spacing_scale, auto_fit}. Nothing is
+// prefilled from the stored resume (its header is not kept). A response from
+// an older server may still carry name/contact/suggested: they are ignored.
 export function draftFromResponse(response) {
   const body = response || {};
-  const suggested = body.suggested || null;
-  let title = text(body.title);
-  let prefilled = false;
-  if (!title && suggested && text(suggested.title)) {
-    title = text(suggested.title);
-    prefilled = true;
-  }
   const spacing_scale = typeof body.spacing_scale === "number" ? clampSpacing(body.spacing_scale) : SPACING_DEFAULT;
   const auto_fit = typeof body.auto_fit === "boolean" ? body.auto_fit : true;
-  return { title, spacing_scale, auto_fit, prefilled };
+  return { title: text(body.title), spacing_scale, auto_fit };
 }
 
 // The PUT body: only this profile's title is sent (the server merges titles

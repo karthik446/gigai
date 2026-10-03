@@ -9,9 +9,9 @@ is stored, and the response says so (``ignored``).
 
 Stored once per home by ``gigai.scout.resume_display`` (``<home>/scout/resume-display.json``,
 0600); this module is only the HTTP wiring.  ``GET`` returns the saved values (or
-``saved: false``) plus a local ``suggested`` title while the profile has none -- the prefill is
-never written, only a user ``PUT`` saves.  ``do_GET`` runs the Host check (``_check_host``)
-before it; ``PUT`` goes through ``_check_csrf``.  Nothing here logs a value.
+``saved: false``); there is no ``suggested`` prefill any more (it was parsed from the stored
+resume header, which 0110-046 no longer keeps).  ``do_GET`` runs the Host check
+(``_check_host``) before it; ``PUT`` goes through ``_check_csrf``.  Nothing here logs a value.
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ from ...resume_display import (
     load_display,
     profile_title,
     save_display,
-    suggest_title,
     valid_spacing,
 )
 
@@ -37,26 +36,7 @@ _PUT_KEYS = frozenset({"titles", "spacing_scale", "auto_fit", *LEGACY_CONTACT_KE
 IGNORED_NOTE = "GigAI no longer stores your name or contact details; you type them when you generate a PDF."
 
 
-def suggested_title(backend: object, profile_id: str | None) -> str | None:
-    """The local title prefill from a profile's pinned resume header; ``None`` when unreadable.
-
-    ``profile_id=None`` reads the selected profile.  Never raises, never logs a value.
-    """
-
-    home_root = getattr(backend, "home_root", None)
-    target = getattr(backend, "target", None)
-    if home_root is None or target is None:
-        return None
-    try:
-        from ...interview_prep.resume import current_resume
-
-        _identity, data = current_resume(home_root=home_root, requested_target=target, gig_id=None, profile_id=profile_id or None)
-        return suggest_title(data.decode("utf-8", errors="replace"))
-    except Exception:  # noqa: BLE001 - a prefill is a convenience; any failure means "no suggestion"
-        return None
-
-
-def settings_json(settings: DisplaySettings | None, profile_id: str | None, suggestion: str | None, ignored: list[str] | None = None) -> dict[str, object]:
+def settings_json(settings: DisplaySettings | None, profile_id: str | None, ignored: list[str] | None = None) -> dict[str, object]:
     body: dict[str, object] = {
         "schema_version": "scout-resume-display-response:1",
         "saved": settings is not None,
@@ -66,8 +46,6 @@ def settings_json(settings: DisplaySettings | None, profile_id: str | None, sugg
         "auto_fit": settings.auto_fit if settings else True,
         "updated_at": settings.updated_at if settings else "",
     }
-    if suggestion:
-        body["suggested"] = {"title": suggestion}
     if ignored:
         body["ignored"] = ignored
         body["note"] = IGNORED_NOTE
@@ -89,11 +67,7 @@ class ResumeDisplayRoutesMixin:
             return
         query = parse_qs(urlsplit(self.path).query, keep_blank_values=False)
         profile_id = (query.get("profile_id") or [None])[0]
-        settings = load_display(home_root)
-        suggestion = None
-        if not profile_title(settings, profile_id) and (settings is None or profile_id):
-            suggestion = suggested_title(self._backend, profile_id)
-        self._write_json(HTTPStatus.OK, settings_json(settings, profile_id, suggestion))
+        self._write_json(HTTPStatus.OK, settings_json(load_display(home_root), profile_id))
 
     def _handle_put_resume_display(self) -> None:
         home_root = self._display_home()
@@ -135,7 +109,7 @@ class ResumeDisplayRoutesMixin:
         except OSError:
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "display_write_failed", "could not save the resume display settings")
             return
-        self._write_json(HTTPStatus.OK, settings_json(saved, None, None, ignored))
+        self._write_json(HTTPStatus.OK, settings_json(saved, None, ignored))
 
 
 __all__ = ["IGNORED_NOTE", "ResumeDisplayRoutesMixin", "settings_json"]

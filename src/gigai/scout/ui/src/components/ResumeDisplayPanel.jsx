@@ -69,7 +69,6 @@ export function ResumeDisplayFields({ draft, onChange }) {
 // 0.1.10-003 1b / 0110-046: "Resume display" on the profile page: this
 // profile's title and the PDF layout (GET/PUT /api/resume-display). The
 // layout is stored once per machine; the title is this profile's.
-// `suggested` prefills the title once and is only saved when the user does.
 export default function ResumeDisplayPanel({ profileId }) {
   const [draft, setDraft] = useState(null);
   const [error, setError] = useState(null);
@@ -99,7 +98,7 @@ export default function ResumeDisplayPanel({ profileId }) {
     setError(null);
     try {
       const response = await putResumeDisplay(buildPutBody(draft, profileId));
-      setDraft({ ...draftFromResponse({ ...response, title: draft.title }), prefilled: false });
+      setDraft(draftFromResponse({ ...response, title: draft.title }));
       setSavedNote(true);
     } catch (err) {
       setError(err.message || String(err));
@@ -116,7 +115,6 @@ export default function ResumeDisplayPanel({ profileId }) {
       {!draft && !error && <p className="muted">Loading…</p>}
       {draft && (
         <>
-          {draft.prefilled && <div className="callout info">Title filled in from your resume. Check it, then save.</div>}
           <ResumeDisplayFields draft={draft} onChange={change} />
           <div className="actions">
             {savedNote && <span className="muted">Saved.</span>}

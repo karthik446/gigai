@@ -152,10 +152,12 @@ def personal_info_in_answer(text: str, *, names: Iterable[str] = ()) -> list[str
     shapes (``resume_pii.detect_contact_details``: email, phone,
     linkedin/github links, a street address), any other link
     ``resume_privacy.redact_inline`` would remove, and ``name`` when the text
-    holds one of ``names`` (the name saved for the PDF header). One
-    difference: with no name known there is no name-shape fallback. A resume
-    line that is two capitalised words is a name; an answer that is
-    ("Apache Kafka", "Google Cloud") is usually the answer.
+    holds one of ``names`` (a name the caller knows). One difference: with
+    no name known there is no name-shape fallback. A resume line that is two
+    capitalised words is a name; an answer that is ("Apache Kafka", "Google
+    Cloud") is usually the answer. 0110-046: GigAI stores no name, so the
+    callers pass none and only the contact shapes are caught; a name inside
+    an answer is not (test_story_bank_name_check.py pins this).
     """
 
     found = list(detect_contact_details(text))

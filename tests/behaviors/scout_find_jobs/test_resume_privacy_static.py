@@ -43,7 +43,6 @@ _READER_ALLOWLIST: dict[tuple[str, str, str], str] = {
     ("gigai.scout.find_jobs.api.extract", "ResumeExtractRoutesMixin._handle_post_resume_check", "read_stored_resume"): "local contact-details check, no model",
     ("gigai.scout.find_jobs.api.profiles", "ProfilesRoutesMixin._resolve_resume_ref", "read_record"): "hashed only",
     ("gigai.scout.find_jobs.api.rank", "_resolve", "read_record"): "model_rank.rank_postings -> rank_digest.resume_digest",
-    ("gigai.scout.find_jobs.api.resume_display", "suggested_title", "current_resume"): "local title prefill parser, no model",
     ("gigai.scout.find_jobs.api.run_reads", "_resume_text", "read_record"): "local run reads (RowJoins), never sent",
     ("gigai.scout.find_jobs.market_acquisition", "_read_resume_text_for_rank", "read_record"): "returned to the rank step below",
     ("gigai.scout.find_jobs.market_acquisition", "_rank_rows_with_status", "_read_resume_text_for_rank"): "model_rank.rank_postings -> rank_digest.resume_digest",

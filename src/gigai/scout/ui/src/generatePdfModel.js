@@ -22,10 +22,6 @@ export const FIELDS = [
 
 export const MAX_VALUE = 200;
 
-export const PROMISE = "GigAI never stores your name, email, phone, address or links. You type them only when you generate a PDF.";
-export const LIMITS =
-  "Your story bank, answers and application notes are private and stay on this machine, but an agent you give access to can read them.";
-
 export function emptyValues() {
   return Object.fromEntries(FIELDS.map((field) => [field.key, ""]));
 }

@@ -8,8 +8,8 @@ reads ignore them, any save drops them, and ``legacy_contact_fields`` counts the
 cleanup.  The PDF header's name and contact items come from the Generate PDF form for ONE render
 (``parse_header_form`` + ``form_header``) and are never written anywhere.  Reads are tolerant
 (missing, symlinked or malformed means "not saved"; a file written before 0110-017 has no
-``spacing_scale``/``auto_fit`` and reads as the defaults).  ``suggest_title`` is a local, pure
-prefill parser: it never writes and never overrides a saved title.
+``spacing_scale``/``auto_fit`` and reads as the defaults).  Nothing is prefilled from the stored
+resume any more (0110-046: its header is not kept).
 """
 
 from __future__ import annotations
@@ -214,83 +214,6 @@ def profile_title(settings: DisplaySettings | None, profile_id: str | None) -> s
     return settings.titles.get(profile_id or "", "") if settings is not None else ""
 
 
-# --- local prefill parser ------------------------------------------------------------------
-
-_MAX_HEADER_LINES = 8
-_HEADING = re.compile(r"\A\s*(?:#{1,6}\s+\S|(?:summary|profile|experience|work experience|skills|education|projects|objective)\s*:?\s*\Z)", re.IGNORECASE)
-_EMAIL = re.compile(r"\A[^\s@|]+@[^\s@|]+\.[A-Za-z]{2,}\Z")
-_PHONE = re.compile(r"\A\+?\(?\d[\d\s().-]{6,}\d\Z")
-_URLISH = re.compile(r"\A(?:https?://|www\.)\S+\Z|\A[\w-]+(?:\.[\w-]+)*\.(?:com|io|dev|me|net|org|co|app|ai)(?:/\S*)?\Z", re.IGNORECASE)
-_WORKAUTH = re.compile(r"\b(?:visa|h-?1b|green card|citizen|authori[sz]ed|authori[sz]ation|sponsor\w*|ead|opt|tn)\b", re.IGNORECASE)
-_LOCATION = re.compile(r"\A[A-Z][\w.'’ -]+,\s*(?:[A-Z]{2}|[A-Z][\w.'’ -]+)(?:,\s*[A-Z][\w.'’ -]+)?\Z")
-_TITLE_WORD = re.compile(
-    r"\b(?:engineer|developer|manager|architect|scientist|analyst|designer|lead|director|consultant|administrator|specialist|programmer|founder|head|principal|staff|intern)\b",
-    re.IGNORECASE,
-)
-_MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
-_SPLIT = re.compile(r"\s*[|•·]\s*|\s+[–—-]\s+|\t+|\s{2,}")
-_NAME_WORD = re.compile(r"\A[A-Za-z][A-Za-z.'’-]*\Z")
-
-
-def _strip_markers(line: str) -> str:
-    return re.sub(r"\A[#>\s]+", "", line).replace("**", "").replace("__", "").strip()
-
-
-def _header_block(resume_text: str) -> list[str]:
-    lines: list[str] = []
-    started = False
-    has_heading = any(_HEADING.match(line) and not line.lstrip().startswith("# ") for line in resume_text.splitlines()[1:])
-    for raw in resume_text.splitlines():
-        if not raw.strip():
-            if started and not has_heading:
-                break
-            continue
-        if started and _HEADING.match(raw):
-            break
-        started = True
-        lines.append(_strip_markers(raw) if not lines else raw.strip())
-        if len(lines) >= _MAX_HEADER_LINES:
-            break
-    return lines
-
-
-def _looks_like_name(line: str) -> bool:
-    words = line.split()
-    if not 2 <= len(words) <= 4 or _TITLE_WORD.search(line) or any(ch.isdigit() for ch in line) or line.endswith((".", ":", ",")):
-        return False
-    return all(_NAME_WORD.match(word) and (word[0].isupper()) for word in words)
-
-
-def _is_contact(segment: str) -> bool:
-    """A header segment that is a contact value (email, phone, link, work authorization, location)."""
-
-    text = segment.strip().strip("*_").strip()
-    if not text:
-        return False
-    if _EMAIL.match(text) or _PHONE.match(text) or _URLISH.match(text):
-        return True
-    if _WORKAUTH.search(text) and len(text.split()) <= 8:
-        return True
-    return bool(_LOCATION.match(text) and not _TITLE_WORD.search(text))
-
-
-def suggest_title(resume_text: str) -> str:
-    """A local title prefill from the resume's header block only.  Pure: no model, no network, no writes.
-
-    The first one-segment header line that reads like a job title (a resume stored since 0.1.10.7
-    has no name or contact lines; an older one's are skipped, never returned)."""
-
-    block = _header_block(resume_text)
-    if not block:
-        return ""
-    for line in block[1 if _looks_like_name(block[0]) else 0 :]:
-        line = _MD_LINK.sub(lambda m: m.group(2), line)
-        segments = [s for s in _SPLIT.split(line) if s.strip()]
-        if len(segments) == 1 and len(line.split()) <= 8 and not line.rstrip().endswith(".") and _TITLE_WORD.search(line) and not _is_contact(line):
-            return _strip_markers(line)
-    return ""
-
-
 __all__ = [
     "ContactItem",
     "DisplaySettings",
@@ -310,6 +233,5 @@ __all__ = [
     "parse_header_form",
     "profile_title",
     "save_display",
-    "suggest_title",
     "valid_spacing",
 ]

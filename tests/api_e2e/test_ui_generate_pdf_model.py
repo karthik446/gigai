@@ -30,13 +30,9 @@ console.log(JSON.stringify({
   body: m.headerBody({ name: "  Zora Quillfeather ", email: "zora.q@example.invalid", phone: 5550142, extra: "x", link: "y".repeat(300) }),
   bodyNull: m.headerBody(null),
   can: [m.canGenerate({ name: "Zora" }), m.canGenerate({ name: "  ", email: "a@b.c" }), m.canGenerate(null)],
-  promise: m.PROMISE,
-  limits: m.LIMITS,
+  exports: Object.keys(m).sort(),
 }));
 """
-
-PROMISE = "GigAI never stores your name, email, phone, address or links. You type them only when you generate a PDF."
-
 
 def _run() -> dict[str, object]:
     if shutil.which("node") is None:
@@ -68,10 +64,11 @@ def test_the_header_body_is_every_field_trimmed_and_capped() -> None:
     assert out["can"] == [True, False, False]
 
 
-def test_the_promise_and_its_limits() -> None:
-    out = _run()
-    assert out["promise"] == PROMISE
-    assert "story bank, answers and application notes are private" in out["limits"] and "an agent you give access to can read them" in out["limits"]
+def test_the_form_carries_no_privacy_wording() -> None:
+    """The privacy wording is rewritten later in one pass (operator, 2026-10-02): the form has labels and a button only."""
+    assert _run()["exports"] == ["FIELDS", "MAX_VALUE", "canGenerate", "emptyValues", "headerBody"]
+    form = (UI_SRC / "components" / "GeneratePdfForm.jsx").read_text(encoding="utf-8")
+    assert "PROMISE" not in form and "LIMITS" not in form and "never stores" not in form
 
 
 def test_the_form_keeps_nothing_and_sends_the_values_only_in_the_render_request() -> None:
@@ -84,7 +81,6 @@ def test_the_form_keeps_nothing_and_sends_the_values_only_in_the_render_request(
         for kept in ("localStorage", "sessionStorage", "document.cookie", "indexedDB", "location.hash", "history.", "console."):
             assert kept not in source, kept
     assert 'autoComplete={field.autocomplete}' in form and 'onSubmit={submit}' in form and "Generate PDF" in form
-    assert "<strong>{PROMISE}</strong>" in form and "{LIMITS}" in form
     assert "render(headerBody(values))" in form
     # The only fetches that carry `header` are the two PDF routes.
     assert re.findall(r"body\.header = header", api) == ["body.header = header", "body.header = header"]

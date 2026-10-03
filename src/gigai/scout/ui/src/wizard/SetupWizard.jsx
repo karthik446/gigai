@@ -175,8 +175,8 @@ export default function SetupWizard({ onDone, onCancel }) {
   }
 
   // 0110-013: the Resume display draft loads once, when the step is first
-  // opened (prefilled from the resume header by the server, as on the profile
-  // page). A failed read leaves the draft empty so the step still works.
+  // opened, as on the profile page. A failed read leaves the draft empty so
+  // the step still works.
   useEffect(() => {
     if (step !== 2 || !fields || fields.display) {
       return undefined;

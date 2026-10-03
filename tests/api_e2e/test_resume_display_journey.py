@@ -1,7 +1,7 @@
 """0110-003 P3 / 0110-046: ``GET`` / ``PUT /api/resume-display`` over HTTP against the real supervised server.
 
-(a) nothing saved -> ``saved: false`` and a local ``suggested`` title from the resume header (never a name
-or contact item: 0110-046);
+(a) nothing saved -> ``saved: false``, no name, contact or ``suggested`` prefill (0110-046: the stored
+resume's header is not kept);
 (b) PUT saves layout and titles, the file is 0600; an old client's ``name`` / ``contact`` are accepted,
 ignored with a note, and never stored;
 (c) validation 422s; (d) CSRF/Host rejections on PUT and the Host check on GET.
@@ -47,13 +47,13 @@ def test_resume_display_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         client = server.client
         path = home / "scout" / "resume-display.json"
 
-        # (a) nothing saved: saved:false + a local title prefill; no name or contact field; nothing written.
+        # (a) nothing saved: saved:false; no name, contact or suggested field; nothing written.
         first = client.get("/api/resume-display")
         assert first.status_code == 200, first.text
         body = first.json()
         assert body["saved"] is False and "name" not in body and "contact" not in body
         assert body["spacing_scale"] == 1.0 and body["auto_fit"] is True  # 0110-017 defaults before any save
-        assert body["suggested"] == {"title": "Staff Engineer"}
+        assert "suggested" not in body and "Staff Engineer" not in first.text
         assert not path.exists()
 
         # (b) 0110-046: an older client's name/contact are accepted, ignored with a note, and never stored.

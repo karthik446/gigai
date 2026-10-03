@@ -1,4 +1,4 @@
-"""0110-003 P2 / 0110-046: resume display settings (storage, tolerant read, title prefill) and the
+"""0110-003 P2 / 0110-046: resume display settings (storage, tolerant read) and the
 Generate PDF form's header (parsed per render, never stored)."""
 
 from __future__ import annotations
@@ -12,15 +12,6 @@ import pytest
 
 from gigai.scout import resume_display as rd
 from gigai.scout.resume_display import DisplaySettings
-
-RESUME = (
-    "# Zed Quixote\n"
-    "Staff Engineer\n"
-    "Denver, CO | github.com/zq | zq@example.test | (555) 013-7731 | H-1B visa | mystery segment here\n"
-    "[LinkedIn](https://linkedin.com/in/zq)\n\n"
-    "## Experience\n"
-    "Built things at https://body.example.com and other@example.test\n"
-)
 
 #: Synthetic marker values (0110-046): never a real person.
 FORM = {
@@ -77,16 +68,9 @@ def test_a_legacy_name_and_contact_are_ignored_counted_and_dropped_by_a_save(tmp
     assert rd.legacy_contact_fields(tmp_path) == {"empty_fields": 2}
 
 
-def test_suggest_title_is_local_and_never_returns_contact() -> None:
-    assert rd.suggest_title(RESUME) == "Staff Engineer"
-    assert rd.suggest_title("") == "" and rd.suggest_title("Built a thing.\nMore text.") == ""
-    assert rd.suggest_title("Zed Quixote\nzq@example.test | Denver, CO\n\nSummary\n") == ""
-
-
-def test_suggest_title_never_writes(tmp_path: Path) -> None:
-    before = sorted(tmp_path.rglob("*"))
-    rd.suggest_title(RESUME)
-    assert sorted(tmp_path.rglob("*")) == before
+def test_nothing_is_prefilled_from_the_stored_resume() -> None:
+    """0110-046 (spike finding d): no ``suggest`` parser: the stored resume's header is not kept."""
+    assert not hasattr(rd, "suggest") and not hasattr(rd, "suggest_title") and not hasattr(rd, "Suggestion")
 
 
 def test_the_form_header_prints_the_form_values_and_the_saved_title(tmp_path: Path) -> None:
