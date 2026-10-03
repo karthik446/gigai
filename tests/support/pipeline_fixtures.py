@@ -211,22 +211,24 @@ def resolved_job(url: str = JOB, text: str = POSTING) -> ResolvedJob:
     )
 
 
-def assess_base(fx: PipelineFixture, url: str = JOB, *, met: int = 1) -> None:
+def assess_base(fx: PipelineFixture, url: str = JOB, *, met: int = 1, posting: str = POSTING) -> None:
     """The job's (base) assessment for the profile, as the job page's Assess stores it."""
 
     fx.model.assessed = assessment(met=met)
     run_quick_assessment(
         AssessRequest(job=AssessJobInput(job_url=url), resume=AssessResumeInput(profile_id=fx.profile_id)),
-        home_root=fx.home_root, target=fx.target, config=config(fx.home_root), resolved_job=resolved_job(url),
+        home_root=fx.home_root, target=fx.target, config=config(fx.home_root), resolved_job=resolved_job(url, posting),
     )
     fx.model.assessed = assessment(met=2)
     fx.model.assess_prompts.clear()
 
 
-def build_pipeline_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, base: bool = True) -> PipelineFixture:
+def build_pipeline_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, base: bool = True, resume: str = RESUME, posting: str = POSTING,
+) -> PipelineFixture:
     """A gig with a resume, one answer, one story and (``base``) one assessed posting; the model installed."""
 
-    gig = build_gig_with_resume(tmp_path, resume_text=RESUME.encode("utf-8"))
+    gig = build_gig_with_resume(tmp_path, resume_text=resume.encode("utf-8"))
     model = install_model(monkeypatch)
     profile = selected_profile(gig.resolved, home_root=gig.home_root, target=gig.target)
     assert profile is not None
@@ -239,7 +241,7 @@ def build_pipeline_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, b
     )
     fx = PipelineFixture(gig, profile.profile_id, model)
     if base:
-        assess_base(fx)
+        assess_base(fx, posting=posting)
     return fx
 
 
