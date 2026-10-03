@@ -30,6 +30,131 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.10.8
+
+Fixes from the first days of real use of 0.1.10.7, a security fix for everyone who uses Scout
+with the Codex CLI, and the pages an AI agent needs to set GigAI up by itself. Read "After you
+upgrade" and Security first.
+
+#### After you upgrade
+
+- **The stored postings are rebuilt once, on the next read.** The rules for which profile a
+  posting belongs to and for when a posting counts as changed were fixed (see Fixed), so the first
+  `gigai scout new` or Jobs page after the upgrade works them out again. No model call is made.
+  That first read can take longer than usual.
+- **Postings with only an old assessment are a separate question now.** `gigai scout new` offers
+  them with their own count and estimate. Nothing is assessed again until you say yes to that
+  question (`--reassess-stale`).
+- **Scout's Codex calls check Codex's tool list before every call.** A Codex upgrade that adds a
+  tool is handled: Scout reads the list again each time and turns the new tool off. If a Codex
+  release changes the commands Scout reads that list with, Scout's Codex calls stop with a clear
+  error instead of running with tools on, until GigAI is updated. Checked with codex-cli 0.159.3.
+- **A Codex call sends fewer input tokens**, because Codex no longer adds its tool definitions to
+  it. Your averages in `gigai scout metrics` will move.
+- **If you pasted the 0.1.10.7 permissions snippet into Claude Code, replace it** with what
+  `gigai agent-permissions` prints now (see Changed).
+
+#### Security
+
+- **Every model call now runs with all tools off. For Codex this closes a real gap.** In 0.1.10.7
+  and earlier, a Scout call through the Codex CLI turned off Codex's shell tool and memories, and
+  nothing else. Codex's web search is on by default, so it stayed on, together with any MCP
+  servers, app connectors and plugins in your Codex settings, sub-agents and the image tool. Job
+  posting text is written by strangers. A posting could in principle have steered the model into
+  a web request or a tool call in the same call that holds your resume. Scout now turns off web
+  search, every configured MCP server, apps, plugins, hooks, browser and computer use,
+  sub-agents and the other tool features on every Codex call, whatever your Codex settings say.
+  Your Codex login, model provider and default model are unchanged. The 0.1.10.7 notes said
+  Scout's model calls had no tools; for the Codex CLI that was not true.
+- **It fails closed.** If Scout cannot read Codex's lists of features, MCP servers or models, or a
+  server stays on, no model call is made. If Codex ever reports a tool call, Scout discards that
+  answer.
+- **Claude Code, the hosted APIs and Ollama needed no change.** Claude Code calls already ran
+  with no tools, no MCP servers and no user settings; the hosted API and Ollama calls send no
+  tool definitions. This is now checked by tests.
+- **A resume is checked for contact details before an agent reads it.** See the two new commands
+  below. The agent skill tells your agent to run the check first and to stop when it finds
+  something. If you paste a resume with contact details straight into a chat, that is outside
+  GigAI's control.
+
+#### Added
+
+- **`gigai scout resume check FILE`: is this resume free of contact details?** It runs on your
+  computer, with no model and no network, and prints the kind and the line number of each
+  finding (name, email, phone, address, link, work authorization), never the text itself. It
+  exits with code 2 when it finds something. It works on patterns and can miss a detail inside a
+  sentence.
+- **`gigai scout resume clean FILE --out COPY`: a copy without those lines.** Your file is not
+  changed. The copy passes the check.
+- **A "Start here" page for your agent.** One docs page that you give to Claude Code or Codex
+  before anything is installed. It walks the agent through installing, the resume check, a few
+  questions for your profile, Update sources and the first `gigai scout new`, and it tells the
+  agent to ask before anything that uses the network or a model. The README has a prompt to
+  paste, and the docs site has a plain-text `llms.txt` with the same steps.
+- **How to use Scout from each agent.** The For agents page now says, for Claude Code, Codex and
+  other agents, what to install, where it goes and what to type.
+- **"Your first 10 minutes"**: the same path for a person, from install to a PDF.
+- **A Token usage page.** Measured tokens and time per step (rank, assess, tag, tailor,
+  re-assess) on Codex and on Claude Code, and what a first catch-up and a normal day used on a
+  real install. Tokens, not prices. The first run is the expensive one.
+- **A network notice before the first Update sources.** Scout checks about 10,000 public job
+  boards and keeps checking 8 times a day, so run it on your own computer and your own network.
+  The UI shows the notice once, the README and the docs carry it, and an agent tells you before
+  it starts the first update. Background checks can be turned off in Settings.
+- **Progress while a batch is assessed.** `gigai scout new --yes` prints lines such as
+  "assessed 120 of 333 · ~18 min left" while it works. They go to the error stream, so `--json`
+  output is unchanged.
+- **`gigai scout profile list` warns about a title that matches too much.** A generic title such
+  as "Staff Engineer" on its own matches every posting with those words. The command says how
+  many, so you can add a more specific title.
+
+#### Changed
+
+- **The order of the grid.** Postings with a current assessment come first, then ones whose only
+  assessment is old, then ones not assessed. Inside each group: Scout's "recommended" label,
+  then the verdict (matched, needs your answers, other, not a match), then the rank. `gigai
+  scout new`, `gigai scout jobs list` and the Jobs page use the same order.
+- **The score column is words, not a bare percent**: the verdict, "9 of 11 requirements" and the
+  rank. An old assessment says so and why ("old assessment: older prompt").
+- **`--yes` answers the "new postings" question only.** The old assessments are the second
+  question, and `--reassess-stale` is its yes. The two can be combined.
+- **"To assess" means new postings that no matching profile has assessed.** It no longer moves
+  while the background ranking runs, and after a full yes it counts only the ones that failed.
+  Postings with only an old assessment are counted apart.
+- **A generic title no longer pulls in other functions.** When a profile has both a generic
+  title ("Staff Engineer") and a specific one, a posting that only the generic title matches is
+  kept only if its known function fits the profile. "Staff Security Engineer" no longer lands in
+  a software profile. A profile with only generic titles is unchanged, and gets the warning
+  above.
+- **Company names read as the company writes them** ("Garner Health", not "Garnerhealth"), in
+  `gigai scout new`, the Jobs page, the job page, tailored resumes and PDF file names.
+- **A posting stays with the profile that assessed it.** A later rank for another profile no
+  longer moves it to that profile's "not assessed" row. A tailored job keeps its verdict and
+  says "resume tailored" beside it.
+- **Update sources fetches descriptions for every active profile's titles**, not only the
+  selected profile's. A posting whose description is still missing has it fetched when you
+  assess it, with one request.
+- **The agent artefacts.** `gigai agent-skill --out` creates the folders it needs. The skill's
+  description names "what's new on Scout", so Claude Code picks it up for that question. The
+  permissions snippet's curl rules name Scout's port (`curl http://127.0.0.1:8765/*`), the form
+  Claude Code's rule syntax matches.
+
+#### Fixed
+
+- A posting was marked "changed since it was assessed" when only its description had been
+  missing at the time. It is read as current now, without a new model call.
+- `gigai scout new --yes` skipped postings whose description was not stored yet. It fetches the
+  description first, and says why when it cannot (removed, refused by the board, no text,
+  network error).
+- A city that shares a state's name ("New York, NY") was read as no city at all, so a
+  remote-only profile kept those on-site roles. It is read as the city.
+- A model call could be recorded as successful while no assessment was stored. Such a call is
+  now recorded as failed, with the reason, and the batch lists it. A failed write no longer
+  stops the whole batch.
+- Assessments imported from old runs that recorded no prompt version are labelled as made with
+  an older prompt, instead of showing nothing.
+- The yes and no commands that `gigai scout new --profile` suggests keep the `--profile`.
+
 ### 0.1.10.7
 
 Scout can now be used day to day from your own AI agent: ask "what's new?", answer the open

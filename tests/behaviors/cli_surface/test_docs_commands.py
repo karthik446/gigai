@@ -29,8 +29,17 @@ PAGES = (
     "gigai-docs/src/content/docs/scout/resume.md",
     "gigai-docs/src/content/docs/scout/privacy.md",
     "gigai-docs/src/content/docs/agents.md",
+    # 0.1.10.8: the pages an agent follows before anything is installed, and the two pages beside them.
+    "gigai-docs/src/content/docs/scout/agents/start.md",
+    "gigai-docs/src/content/docs/scout/first-10-minutes.md",
+    "gigai-docs/src/content/docs/scout/tokens.md",
 )
+#: The public llms.txt (plain text, no fenced blocks): its commands are the inline code spans that start with ``gigai``.
+LLMS_TXT = "gigai-docs/src/llms.template.txt"
+#: The inline commands an agent is told to run on the start page's prose and in the README's starter prompt.
+INLINE_PAGES = (LLMS_TXT, "gigai-docs/src/content/docs/scout/agents/start.md", "README.md")
 FENCE = re.compile(r"^[ \t]*```[^\n]*\n(.*?)^[ \t]*```[ \t]*$", re.S | re.M)
+SPAN = re.compile(r"`(gigai [^`\n]+)`")
 FLAG = re.compile(r"^--[a-z][a-z-]*$")
 
 
@@ -59,6 +68,12 @@ def _resolve(line: str) -> tuple[list[str], click.Command, list[str]]:
     return path, command, words
 
 
+def _inline_commands(text: str) -> list[str]:
+    """The ``gigai ...`` code spans outside fenced blocks, each once."""
+
+    return list(dict.fromkeys(SPAN.findall(FENCE.sub("", text))))
+
+
 def _cases() -> list[tuple[str, str]]:
     cases: list[tuple[str, str]] = []
     for rel in PAGES:
@@ -66,6 +81,10 @@ def _cases() -> list[tuple[str, str]]:
         if not path.is_file():
             continue  # gigai-docs is left out of the offline container build context
         cases.extend((rel, line) for line in _commands(path.read_text(encoding="utf-8")))
+    for rel in INLINE_PAGES:
+        path = ROOT / rel
+        if path.is_file():
+            cases.extend((f"{rel} (inline)", line) for line in _inline_commands(path.read_text(encoding="utf-8")))
     return cases
 
 
@@ -77,6 +96,9 @@ def test_the_pages_hold_fenced_commands_to_check() -> None:
         by_page[rel] = by_page.get(rel, 0) + 1
     assert by_page.get("README.md", 0) >= 4, by_page
     assert by_page.get("gigai-docs/src/content/docs/scout/agents.md", 0) >= 30, by_page
+    # 0.1.10.8: the start page and the public llms.txt teach the whole setup, so both hold its commands.
+    assert by_page.get("gigai-docs/src/content/docs/scout/agents/start.md", 0) >= 12, by_page
+    assert by_page.get(f"{LLMS_TXT} (inline)", 0) >= 12, by_page
 
 
 @pytest.mark.parametrize(("rel", "line"), _cases(), ids=lambda value: value if isinstance(value, str) and len(value) < 60 else None)
@@ -93,7 +115,8 @@ def test_a_fenced_gigai_command_resolves_against_the_real_cli(rel: str, line: st
         if FLAG.match(word.split("=", 1)[0]):
             assert word.split("=", 1)[0] in known, f"{rel}: {line!r}: {word} is not an option of gigai {' '.join(path)}"
     # A line with no placeholder parses in full: required arguments present, values of the right type.
-    if path and not re.search(r"<[^>]+>|\$|\.\.\.", line):
+    # (An ALL-CAPS word is a placeholder too: `gigai scout resume check PATH`.)
+    if path and not re.search(r"<[^>]+>|\$|\.\.\.|\b[A-Z]{3,}\b", line):
         try:
             command.make_context(command.name or "", list(rest), resilient_parsing=False)
         except click.BadParameter as exc:

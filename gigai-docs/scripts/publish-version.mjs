@@ -5,6 +5,7 @@
 //   <site>/[<product>/]<alias>/...        redirect stubs, one per page, to the aliased version
 //   <site>/[<product>/]versions.json      [{version, title, aliases}]  (mike's format)
 //   <site>/[<product>/]index.html         redirect to <default alias>/, or the newest version until it exists
+//   <site>/[<product>/]llms.txt           the default alias's llms.txt (plain text; also copied into each alias folder)
 //
 // <site> is a checkout of the gh-pages branch. On GitHub Pages the repo name is already the
 // path prefix (karthik446.github.io/gigai/), so --product is empty; set it only when several
@@ -86,6 +87,14 @@ if (a.delete) {
       const rel = relative(join(root, a.version), f);
       const depth = rel.split('/').length; // alias/<...>/index.html -> climb out of alias
       writeRedirect(join(aliasDir, rel), '../'.repeat(depth) + `${a.version}/` + rel.replace(/index\.html$/, ''));
+    }
+    // llms.txt is plain text, so it cannot be a redirect stub: the alias carries the version's own
+    // file (its links are absolute, to that version's pages), and so does the site root for the
+    // default alias, so <site>/llms.txt and <site>/latest/llms.txt always resolve.
+    const llms = join(root, a.version, 'llms.txt');
+    if (existsSync(llms)) {
+      cpSync(llms, join(aliasDir, 'llms.txt'));
+      if (alias === a.default) cpSync(llms, join(root, 'llms.txt'));
     }
   }
 }

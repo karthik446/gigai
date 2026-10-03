@@ -1,5 +1,8 @@
 """0.1.10.7 K: each one-line notice has ONE source, and the UI, the docs, the README and the agent skill quote it.
 
+0.1.10.8 adds the network notice (``wording.NETWORK_NOTICE``): the UI's one-time dialog, the README's install
+section, the agent start page, the first-10-minutes page, the quickstart and the public llms.txt.
+
 The six lines (``gigai.scout.wording``): the Scout label's, the Scout ATS score's, the verdict's, the tailored
 resume's, the privacy promise and the agent truth. A sentence that is reworded in one place and not the others
 fails here.
@@ -127,6 +130,77 @@ def test_the_privacy_promise_and_the_agent_truth_are_bold_where_they_are_shown()
         "GigAI's own model calls send your resume (without the contact lines) and your answers to the model you picked",
     ):
         assert limit in _docs("scout/privacy.md"), limit
+
+
+def test_the_network_notice_is_one_constant_quoted_by_the_ui_the_readme_the_docs_and_llms_txt() -> None:
+    """0.1.10.8 docs item 6: where to run GigAI, in the operator's exact words, said before the first Update sources."""
+
+    # The approved words. The lead is bold wherever it is shown; NETWORK_NOTICE is the Markdown form of the whole.
+    assert wording.NETWORK_NOTICE == (
+        "**Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** "
+        "Scout checks about 10,000 public job boards (Greenhouse, Lever, Ashby): thousands of requests, "
+        "and it keeps checking 8 times a day. An employer can see that traffic."
+    )
+    assert wording.NETWORK_NOTICE == f"**{wording.NETWORK_NOTICE_LEAD}** {wording.NETWORK_NOTICE_BODY}"
+
+    # One Python file spells it out.
+    def joined(path: Path) -> str:
+        return re.sub(r'"\s*\n\s*f?"', "", path.read_text(encoding="utf-8"))
+
+    for line in (wording.NETWORK_NOTICE_LEAD, wording.NETWORK_NOTICE_BODY):
+        holders = sorted(path.relative_to(SRC).as_posix() for path in SRC.rglob("*.py") if line in joined(path))
+        assert holders == [HOME], holders
+
+    # The UI copies equal the constants, live in wording.js only, and the one-time dialog shows the lead in bold.
+    ui = (UI_SRC / "wording.js").read_text(encoding="utf-8")
+    copies = dict(re.findall(r'^export const ([A-Z_]+) = "(.*)";$', ui, flags=re.M))
+    assert copies["NETWORK_NOTICE_LEAD"] == wording.NETWORK_NOTICE_LEAD
+    assert copies["NETWORK_NOTICE_BODY"] == wording.NETWORK_NOTICE_BODY
+    for line in (wording.NETWORK_NOTICE_LEAD, wording.NETWORK_NOTICE_BODY):
+        holders = sorted(p.relative_to(UI_SRC).as_posix() for p in UI_SRC.rglob("*.js*") if line in p.read_text(encoding="utf-8"))
+        assert holders == ["wording.js"], holders
+    dialog = (UI_SRC / "components" / "NetworkNotice.jsx").read_text(encoding="utf-8")
+    assert "<strong>{NETWORK_NOTICE_LEAD}</strong> {NETWORK_NOTICE_BODY}" in dialog and 'data-testid="network-notice"' in dialog
+
+    # The package README (the PyPI page) says it in its install section, before the install command.
+    readme = _flat((ROOT / "README.md").read_text(encoding="utf-8"))
+    quickstart = readme.split("## Quickstart", 1)[1].split("## Let your agent set it up", 1)[0]
+    assert wording.NETWORK_NOTICE in quickstart
+    assert quickstart.index(wording.NETWORK_NOTICE) < quickstart.index("uv tool install gigai")
+
+    # The docs: the agent start page (twice: up front, and as the words the agent says before the first
+    # Update sources), the first-10-minutes page, the quickstart, and the public llms.txt.
+    start = _docs("scout/agents/start.md")
+    assert start.count(wording.NETWORK_NOTICE) == 2
+    assert start.rindex(wording.NETWORK_NOTICE) < start.index("gigai scout sources update"), "the agent says it BEFORE the first update"
+    assert wording.NETWORK_NOTICE in _docs("scout/first-10-minutes.md")
+    assert wording.NETWORK_NOTICE in _docs("scout/quickstart.md")
+    llms = _flat((DOCS.parents[1] / "llms.template.txt").read_text(encoding="utf-8"))
+    assert wording.NETWORK_NOTICE in llms
+    assert llms.index(wording.NETWORK_NOTICE) < llms.index("gigai scout sources update")
+    # The other bold truths ride along on the start page and in llms.txt, in the constants' words.
+    for page in (start, llms):
+        assert f"**{wording.PRIVACY_PROMISE}** {wording.PRIVACY_PDF_LINE}" in page
+        assert f"**{wording.AGENT_WORDING}**" in page
+
+    # No page rewords it: a sentence that starts like the notice is the notice.
+    pages = [ROOT / "README.md", *(p for p in sorted(DOCS.rglob("*.md")) if p.name != "changelog.md"), DOCS.parents[1] / "llms.template.txt"]
+    for path in pages:
+        text = _flat(path.read_text(encoding="utf-8"))
+        assert text.count("Run GigAI on your own computer") == text.count(wording.NETWORK_NOTICE), path.relative_to(ROOT)
+
+
+def test_the_network_notice_states_what_the_code_does() -> None:
+    """The numbers in the sentence are the product's: the bundled catalog's boards, their three providers and the
+    default weekday check times. A change to either must change the sentence (or the sentence's owner must agree)."""
+
+    from gigai.scout.find_jobs.company_catalog import load_company_catalog
+    from gigai.scout.find_jobs.refresh_plan import DEFAULT_WEEKDAY_TIMES
+
+    summary = load_company_catalog().summary()
+    assert 9_500 <= summary["records"] <= 10_999, "about 10,000 public job boards"
+    assert sorted(summary["by_provider"]) == ["ashby", "greenhouse", "lever"], "(Greenhouse, Lever, Ashby)"  # type: ignore[call-overload]
+    assert len(DEFAULT_WEEKDAY_TIMES) == 8, "it keeps checking 8 times a day (weekdays; weekend days have fewer)"
 
 
 def test_the_stale_notices_are_gone_everywhere() -> None:

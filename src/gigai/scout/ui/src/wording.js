@@ -8,6 +8,10 @@ export const VERDICT_WORDING = "Your model's reading of the posting against your
 export const TAILORED_WORDING = "Every line comes from your resume, answers or stories. Read it before you send it.";
 export const PRIVACY_PROMISE = "GigAI never stores your name, email, phone, address or links.";
 export const PRIVACY_PDF_LINE = "You type them only when you make a PDF, and GigAI forgets them right after.";
+// 0.1.10.8: where to run GigAI, shown once before the very first Update
+// sources (components/NetworkNotice.jsx). The lead is bold.
+export const NETWORK_NOTICE_LEAD = "Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.";
+export const NETWORK_NOTICE_BODY = "Scout checks about 10,000 public job boards (Greenhouse, Lever, Ashby): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.";
 
 // The "?" beside each number and label: one docs page, one anchor each
 // ("What Scout's numbers and labels mean", gigai-docs scout/numbers.md).

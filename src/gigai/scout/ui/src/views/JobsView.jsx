@@ -339,7 +339,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
             </button>
           </div>
         </div>
-        <SourcesStrip strip={strip} read={sources.read} />
+        <SourcesStrip strip={strip} read={sources.read} status={sources.status} />
       </section>
 
       <section className="panel" style={{ padding: "12px 16px" }}>

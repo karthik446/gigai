@@ -1,0 +1,104 @@
+---
+title: Your first 10 minutes
+description: From nothing to your first tailored resume PDF, with your own AI agent doing the typing.
+---
+
+The short path, by hand and with your agent: install, start Scout, set up a profile, ask your
+agent what is new, answer a question, make a PDF. If you would rather have your agent do the
+setup too, give it [Start here](../agents/start/) instead; it is the same path.
+
+Two things before you start.
+
+**Remove your name, email, phone, address and links from your resume before you give it to an agent.**
+
+**Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks about 10,000 public job boards (Greenhouse, Lever, Ashby): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
+
+You can turn the background checks off under **Settings > Background updates**.
+
+## 1. Install (2 minutes)
+
+You need macOS or Linux, [`uv`](https://docs.astral.sh/uv/getting-started/installation/), and
+one model CLI that is installed and logged in: Codex (`codex login`) or Claude Code (`claude`,
+then `/login`).
+
+```sh
+uv tool install gigai
+gigai --version
+```
+
+## 2. Start Scout and set up a profile (3 minutes)
+
+```sh
+gigai scout run
+```
+
+Your browser opens the setup wizard. It asks three things:
+
+1. **The model** Scout should use (your Codex or Claude Code login).
+2. **Your resume**, as a `.md` or `.txt` file. Scout stores it without the name and contact
+   lines. To see what it would remove before you add it, run the check yourself:
+
+   ```sh
+   gigai scout resume check resume.md
+   ```
+
+   It lists the kind and the line number of each finding, on your computer, with no model. It
+   works on patterns, so read your resume once for personal details inside a sentence.
+3. **Your roles**: the job titles you want, where you can work, remote or hybrid or on-site,
+   and whether you need sponsorship.
+
+Then press **Update sources**. The first time, Scout shows the network notice above and asks
+once. The first update takes 15 minutes or more; you can go on while it runs.
+
+## 3. Ask your agent what is new (2 minutes)
+
+Teach your agent the loop once ([Use it from your agent](../agents/#use-it-from-your-agent)
+has the steps for Claude Code, Codex and other agents). Then, in your agent:
+
+> What's new on Scout?
+
+The agent runs:
+
+```sh
+gigai scout new --json
+```
+
+and tells you how many postings are new, and what assessing them would cost. Nothing is
+assessed until you say yes. **The first run is the expensive one**: it catches up on everything
+at once. After that a day is a few dozen new postings at most. [Token usage](../tokens/) has
+real numbers.
+
+## 4. Answer a question (1 minute)
+
+An assessment leaves questions open when a posting asks for something your resume does not
+state. Your agent asks you:
+
+> Have you run Kafka in production?
+
+Answer in your own words. A short fact is saved as an answer and reused for every later
+posting. A longer reply, with a project and an outcome, can become a story, if you agree. Do
+not put your name or contact details in an answer.
+
+Jobs whose questions you answered are tailored and scored in the background, within the daily
+limits (40 pipeline model calls a day).
+
+## 5. Make the PDF (2 minutes)
+
+Ask your agent for the PDF of one job. It runs:
+
+```sh
+gigai scout resume pdf --tailored --job-url <job-url> --json
+```
+
+and gives you an **open in Scout** link. The agent's own PDF has no name and no contact
+details, because GigAI has none. Open the link, type your details into the Generate PDF form in
+your browser, and download the finished PDF. GigAI does not keep what you type there.
+
+Every line comes from your resume, answers or stories. Read it before you send it.
+
+## What next
+
+- [For agents](../agents/): the whole daily loop, the security model, an example session.
+- [Token usage](../tokens/): what each step costs in tokens and time.
+- [Privacy and security](../privacy/): what is stored, what is sent, and to whom.
+- [What Scout's numbers and labels mean](../numbers/).

@@ -69,7 +69,9 @@ Scout"), add your resume (paste it or upload the `.md`/`.txt` file), and set
 your roles, location and work mode. Then:
 
 1. **Update sources** (in Settings): fills the company store from the public
-   job boards. The first update over the whole catalog runs in passes of up to
+   job boards. Before the very first one Scout shows this notice once:
+   **Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks about 10,000 public job boards (Greenhouse, Lever, Ashby): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
+   You can turn the background checks off under Settings > Background updates. The first update over the whole catalog runs in passes of up to
    20 minutes each (the default time budget) and continues where it stopped;
    later updates are a single short pass.
    While Scout stays open it then re-checks the boards about once an hour by
@@ -87,7 +89,9 @@ your roles, location and work mode. Then:
    holds the title under your name and the PDF layout.
 
 Prefer to work from your own AI agent? `gigai scout new` is the daily entry
-point: see [For agents](../agents/).
+point: see [For agents](../agents/), or give your agent [Start here](../agents/start/)
+and let it do the setup. [Your first 10 minutes](../first-10-minutes/) walks through a
+first session.
 
 `gigai scout stop` stops Scout; `gigai scout run --port 9000` picks another
 port if 8765 is taken. More detail for scripts and agents is under
