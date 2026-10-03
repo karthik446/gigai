@@ -164,3 +164,17 @@ media-publish: media
 
 media-check:
 	$(UV) run --locked python -m tools.media.manifest check gigai-docs/public/media
+
+# Browser tests (tests/ui; the `ui` dependency group, Playwright + Chromium). A small synthetic
+# home (tools/media/demo_home.py) in a temporary HOME, the real Scout server on fixture
+# transports, no network, no model, never ~/.gigai. About a minute, most of it building the home.
+# The default pytest run and the CI shards deselect `ui` tests (-m "not ui" in pyproject.toml).
+# GIGAI_UI_REQUIRED=1: a missing browser is a failure here, not a skip. On a failed test the
+# screenshot, trace, requests, console, server log tail and CPU/RSS samples are written to
+# $(UI_ARTIFACTS)/<test>/. One-time: `playwright install chromium` below (no sudo, no pip).
+# No retry anywhere: see tests/ui/README.md.
+.PHONY: ui-test
+UI_ARTIFACTS ?= build/ui-artifacts
+ui-test:
+	$(UV) run --locked --group ui playwright install chromium
+	GIGAI_UI_REQUIRED=1 GIGAI_UI_ARTIFACTS="$(UI_ARTIFACTS)" $(UV) run --locked --group ui --extra test pytest tests/ui -m ui -n 0 -q --tb=short --durations=5
