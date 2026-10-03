@@ -50,6 +50,8 @@ from ...tailored_resume import (
     list_tailored_resumes,
     run_tailored_resume,
     save_tailor_response,
+    tailored_resume_path,
+    tailored_resume_write_lock,
 )
 from ...resume_display import SPACING_MAX, SPACING_MIN, HeaderFormError, parse_header_form, valid_spacing
 from ...resume_pdf import (
@@ -276,31 +278,48 @@ class TailoredResumesRoutesMixin:
         target = self._tailor_target()
         if target is None:
             return
+        home_root = self._backend.home_root
+
+        def stored_items():
+            return list_tailored_resumes(home_root, target, profile_id=body["profile_id"], job_identity=body["job_identity"])
+
         try:
-            items = list_tailored_resumes(
-                self._backend.home_root, target, profile_id=body["profile_id"], job_identity=body["job_identity"]
-            )
+            items = stored_items()
         except QuickAssessError as exc:
             self._error(_status_for(exc.code), exc.code, str(exc))
             return
         if not items:
             self._error(HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that profile and job")
             return
-        stored = items[0]
-        if stored.updated_at != body["updated_at"]:
-            self._error(HTTPStatus.CONFLICT, "tailored_resume_changed", "a newer tailoring replaced this resume; reload it")
+        # The revision check and the write are one step (0.1.10.7): the resume is read again under the store's write
+        # lock, so a tailoring that lands between the two cannot be written over, and this choice cannot be either.
+        failure: tuple[HTTPStatus, str, str] | None = None
+        updated = None
+        with tailored_resume_write_lock(tailored_resume_path(home_root, target, body["profile_id"], body["job_identity"])):
+            try:
+                items = stored_items()
+            except QuickAssessError as exc:
+                failure = (_status_for(exc.code), exc.code, str(exc))
+            if failure is None and not items:
+                failure = (HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that profile and job")
+            if failure is None:
+                stored = items[0]
+                if stored.updated_at != body["updated_at"]:
+                    failure = (HTTPStatus.CONFLICT, "tailored_resume_changed", "a newer tailoring replaced this resume; reload it")
+            if failure is None:
+                try:
+                    if custom:
+                        # GigAI keeps no name (0110-046): a strictly name-shaped line is refused (``personal_info_found``).
+                        updated = apply_line_edit(stored, body["line_id"], body["text"])
+                    else:
+                        updated = apply_line_choice(stored, body["line_id"], body["use"])
+                except TailorError as exc:
+                    failure = (_status_for(exc.code), exc.code, str(exc))
+            if failure is None and updated is not stored:
+                save_tailor_response(updated)
+        if failure is not None:
+            self._error(*failure)
             return
-        try:
-            if custom:
-                # GigAI keeps no name (0110-046): a strictly name-shaped line is refused (``personal_info_found``).
-                updated = apply_line_edit(stored, body["line_id"], body["text"])
-            else:
-                updated = apply_line_choice(stored, body["line_id"], body["use"])
-        except TailorError as exc:
-            self._error(_status_for(exc.code), exc.code, str(exc))
-            return
-        if updated is not stored:
-            save_tailor_response(updated)
         self._write_json(HTTPStatus.OK, updated.to_json())
 
     def _handle_get_tailored_resumes(self) -> None:

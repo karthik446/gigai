@@ -9,8 +9,8 @@ posting from that stored assessment and never fetches anything.
 =========  ==================================================  ============================================
 step       input digest over                                   output (in the store it already uses)
 =========  ==================================================  ============================================
-tailor     the posting digest, the profile's identity and      the tailored-resume store:
-           resume digest, every answer's revision, the         ``resumes/<profile>/<sha>.json`` + ``.md``
+tailor     the posting digest, the profile's id and its        the tailored-resume store:
+           resume's digest, every answer's revision, the       ``resumes/<profile>/<sha>.json`` + ``.md``
            matching stories' marks, the base assessment's
            matrix, the tailor instructions, the model target
 reassess   the tailored markdown's digest, the posting         the TAILORED VARIANT of the assessment:
@@ -30,6 +30,30 @@ digests: a re-tailoring that returns the same markdown leaves ``ats`` with
 the digest it was done with, and it finishes without running
 (:func:`unchanged`). ``reassess`` also reads the answers, so an answer that
 changed runs it again even over the same markdown.
+
+**The tailoring's digest is what changes the tailored text, nothing else of
+the profile.** Not the profile record's revision, label, titles or search
+settings: renaming a profile or changing its titles re-opens no tailoring and
+calls no model. A new resume does (its digest), and the profile's own
+candidate settings re-open the re-assessment, whose digest reads them.
+
+**The tailor step never replaces the user's work.** It writes the
+tailored-resume store, which the user also writes: tailoring on demand
+(``POST /api/tailored-resumes``, ``gigai scout resume tailor``) and the
+per-line choices and edits (``PUT /api/tailored-resumes/lines``). The step
+replaces a stored resume only when it is the step's OWN last tailoring, byte
+for byte (``pipeline/tailor/<profile>/<sha>.json`` keeps that file's digest).
+Any other stored resume is the user's: one tailored on demand, one with a line
+choice or an edited line. The step then calls no model, ADOPTS the stored
+resume as its output (the re-assessment, the ATS check and the label run
+against what the user chose) and finishes with the code
+``tailor_kept_user_edits``. The same check runs again under the store's write
+lock just before the step writes, so a tailoring or a line choice that lands
+while the model call is out is kept too: the step's own new tailoring is
+dropped and the stored resume adopted. The store's revision (``updated_at``)
+therefore never changes under a user who holds it, and their next line choice
+is not refused. To get a new tailoring of a resume that is theirs, the user
+tailors it on demand; ``pipeline process --force`` does not replace it.
 
 **The Scout label** (:func:`label_for`) is Scout's own recommendation, made
 from the user's settings, resume and answers. It is not a prediction of what
@@ -69,9 +93,17 @@ ATS_RULES_VERSION = "scout-ats:1"
 LABEL_RULE_VERSION = "scout-label:1"
 ATS_RECORD_SCHEMA = "scout-ats-record:1"
 LABEL_RECORD_SCHEMA = "scout-label-record:1"
+TAILOR_RECORD_SCHEMA = "scout-tailor-step-record:1"
 
 ATS_DIR = "ats"
 LABEL_DIR = "label"
+#: What the tailor step last did per job, and the digest of the stored resume it wrote: digests and codes only.
+TAILOR_DIR = "pipeline/tailor"
+
+#: What the tailor step did: it wrote a new tailoring, or it kept the stored resume because it is the user's.
+TAILOR_TAILORED = "tailored"
+TAILOR_KEPT_USER_EDITS = "tailor_kept_user_edits"
+TAILOR_OUTCOMES: tuple[str, ...] = (TAILOR_TAILORED, TAILOR_KEPT_USER_EDITS)
 
 #: The label's name, everywhere it is shown.
 LABEL_NAME = "Scout label"
@@ -120,10 +152,15 @@ class StepContext:
 
 @dataclass(frozen=True)
 class StepResult:
-    """What a step produced: where it is (a store path key, never content) and its digest."""
+    """What a step produced: where it is (a store path key, never content) and its digest.
+
+    ``code`` says how, when a done step did something other than run as
+    usual (``tailor_kept_user_edits``).
+    """
 
     output_ref: str | None = None
     output_digest: str | None = None
+    code: str | None = None
 
 
 # --- digests and paths ----------------------------------------------------------------------
@@ -246,6 +283,8 @@ def _tailor_digest(ctx: StepContext, found: _Inputs, model_target: str | None) -
     from ..tailored_resume import TAILOR_INSTRUCTIONS_DIGEST, tailor_sources
 
     profile = found.profile
+    # Only what changes the tailored text. Of the profile: its id and its pinned resume's digest, never its
+    # revision, label, titles or search settings (a rename must not re-tailor ten jobs).
     # Ids and revision marks only, so the resume itself is not read here: its digest is the profile's pinned one,
     # and which answers and stories a tailoring is offered does not depend on the resume's text.
     sources = tailor_sources(
@@ -255,7 +294,7 @@ def _tailor_digest(ctx: StepContext, found: _Inputs, model_target: str | None) -
     return _digest(
         "tailor",
         found.posting_sha256,
-        [profile.profile_id, profile.revision, profile.content_digest],  # type: ignore[attr-defined]
+        profile.profile_id,  # type: ignore[attr-defined]
         profile.resume_ref.content_sha256,  # type: ignore[attr-defined]
         sorted((key, item.revision_id) for key, item in sources.items()),
         [(row.requirement, row.status.value) for row in found.base.result.matrix],  # type: ignore[attr-defined]
@@ -363,16 +402,98 @@ def _job_input(job: object):
     return AssessJobInput(job_url=job.source_url or job.job_identity)  # type: ignore[attr-defined]
 
 
+def _tailor_record(ctx: StepContext, profile_id: str, job: str) -> dict[str, object] | None:
+    return _read_json(_record_path(ctx, TAILOR_DIR, profile_id, job))
+
+
+def _write_tailor_record(ctx: StepContext, claim: Claim, outcome: str, record_sha256: str | None) -> None:
+    path = _record_path(ctx, TAILOR_DIR, claim.profile_id, claim.job)
+    _write_json(
+        path,
+        {
+            "schema_version": TAILOR_RECORD_SCHEMA,
+            "profile_id": claim.profile_id,
+            "job_identity": claim.job,
+            "outcome": outcome,
+            # The stored resume's file as this step wrote it; ``None`` when the step kept the user's.
+            "record_sha256": record_sha256,
+            "updated_at": _now(),
+        },
+    )
+
+
+def _users_resume(ctx: StepContext, claim: Claim, path: Path):
+    """The tailored resume stored at ``path`` when it is the user's to keep, else ``None``.
+
+    The user's: any stored resume that is not this step's own last tailoring,
+    byte for byte. So one tailored on demand, one with a line choice or an
+    edited line, and one written while this step's model call was out. A file
+    that no longer parses is nobody's work and may be replaced.
+    """
+
+    from ..tailored_resume import read_tailored_resume
+
+    stored = read_tailored_resume(path)
+    if stored is None:
+        return None
+    record = _tailor_record(ctx, claim.profile_id, claim.job)
+    if record is not None and record.get("outcome") == TAILOR_TAILORED:
+        try:
+            if record.get("record_sha256") == _bytes_digest(path.read_bytes()):
+                return None  # the pipeline's own, untouched since: it may tailor it again
+        except OSError:
+            pass
+    return stored
+
+
+def _keep(ctx: StepContext, claim: Claim, path: Path, stored: object) -> StepResult:
+    """The step's result when the stored resume stays: it is the output, as the user left it."""
+
+    markdown = stored.markdown  # type: ignore[attr-defined]
+    _refuse_contact_data(markdown)
+    _write_tailor_record(ctx, claim, TAILOR_KEPT_USER_EDITS, None)
+    return StepResult(_ref(ctx, path), _bytes_digest(markdown.encode("utf-8")), TAILOR_KEPT_USER_EDITS)
+
+
 def _tailor(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
     from ..find_jobs.assess_contracts import AssessResumeInput
-    from ..tailored_resume import TailorRequest, run_tailored_resume
+    from ..tailored_resume import (
+        TailorRequest,
+        run_tailored_resume,
+        save_tailor_response,
+        tailored_resume_path,
+        tailored_resume_write_lock,
+    )
+
+    path = tailored_resume_path(ctx.home_root, ctx.target, claim.profile_id, found.job.job_identity)  # type: ignore[attr-defined]
+    users = _users_resume(ctx, claim, path)
+    if users is not None:
+        return _keep(ctx, claim, path, users)  # no model call: the user's resume is never replaced
+    kept: list[tuple[Path, object]] = []
+
+    def store(response):
+        # Refused before anything is written: a tailoring with contact-shaped text never reaches the store.
+        _refuse_contact_data(response.markdown)
+        written = Path(response.stored_path)
+        # Compare and swap: the stored resume is read again under the store's write lock (the one a line choice
+        # holds), so what landed while the model call was out is kept and this tailoring is dropped.
+        with tailored_resume_write_lock(written):
+            landed = _users_resume(ctx, claim, written)
+            if landed is not None:
+                kept.append((written, landed))
+                return landed
+            save_tailor_response(response)
+            _write_tailor_record(ctx, claim, TAILOR_TAILORED, _bytes_digest(written.read_bytes()))
+        return response
 
     response = run_tailored_resume(
         TailorRequest(job=_job_input(found.job), resume=AssessResumeInput(profile_id=claim.profile_id), model_target=_model_target(claim)),
         home_root=ctx.home_root, target=ctx.target, config=ctx.config, resolved_job=found.job,  # type: ignore[arg-type]
+        store=store,
     )
-    _refuse_contact_data(response.markdown)
-    return StepResult(_ref(ctx, Path(response.stored_path)), _bytes_digest(response.markdown.encode("utf-8")))
+    if kept:
+        return _keep(ctx, claim, *kept[0])
+    return StepResult(_ref(ctx, Path(response.stored_path)), _bytes_digest(response.markdown.encode("utf-8")), TAILOR_TAILORED)
 
 
 def _reassess(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
@@ -572,6 +693,9 @@ def job_outputs(home_root: Path, target: Path, profile_id: str, job: str) -> dic
     tailored = list_tailored_resumes(home_root, target, profile_id=profile_id, job_identity=job)
     ats = read_ats(home_root, target, profile_id, job)
     label = read_label(home_root, target, profile_id, job)
+    tailor = _tailor_record(StepContext(home_root, target), profile_id, job)
+    # What the tailor step last did with this job's resume: ``tailored``, or ``tailor_kept_user_edits`` (it is the user's).
+    tailor_outcome = tailor.get("outcome") if tailor is not None and tailor.get("outcome") in TAILOR_OUTCOMES else None
 
     def assessment(item: object | None) -> dict[str, object] | None:
         if item is None:
@@ -589,7 +713,10 @@ def job_outputs(home_root: Path, target: Path, profile_id: str, job: str) -> dic
         "base_assessment": assessment(base),
         "tailored_assessment": assessment(variant),
         "tailored_resume": (
-            None if not tailored else {"markdown_path": tailored[0].markdown_path, "stored_path": tailored[0].stored_path, "updated_at": tailored[0].updated_at}
+            None if not tailored else {
+                "markdown_path": tailored[0].markdown_path, "stored_path": tailored[0].stored_path, "updated_at": tailored[0].updated_at,
+                "outcome": tailor_outcome,
+            }
         ),
         "ats": None if not isinstance(result, dict) else {"score": result.get("score"), "line": result.get("line"), "stored_path": ats.get("stored_path")},  # type: ignore[union-attr]
         "label": None if label is None else {key: label.get(key) for key in ("name", "label", "reasons", "ats_score", "requirements_met", "updated_at", "stored_path")},
@@ -607,6 +734,10 @@ __all__ = [
     "LABEL_RECOMMENDED",
     "LABEL_RULE_VERSION",
     "LABEL_WORDING",
+    "TAILOR_DIR",
+    "TAILOR_KEPT_USER_EDITS",
+    "TAILOR_OUTCOMES",
+    "TAILOR_TAILORED",
     "StepContext",
     "StepError",
     "StepResult",

@@ -575,15 +575,20 @@ def test_a_profiles_settings_change_reopens_only_that_profiles_steps_by_digest(f
     )
     assert updated.exit_code == 0, updated.output
 
-    # The profile record changed (its revision is part of the tailoring's digest): that profile's job starts again.
-    assert _steps(fx, job, second) == {"tailor": "ready", "reassess": "blocked", "ats": "blocked", "label": "blocked"}
+    # The profile's own candidate settings changed: the re-assessment reads them, so that profile's job re-opens
+    # from there. Not from the tailoring (0.1.10.7 fix1): its digest holds what changes the tailored text, and
+    # the profile record's revision is not part of it.
+    assert _steps(fx, job, second) == {"tailor": "done", "reassess": "ready", "ats": "done", "label": "blocked"}
     assert _steps(fx, job, default) == _DONE  # the other profile: untouched
-    assert {step.trigger for step in _all_steps(fx) if step.profile_id == second} == {"profile_changed"}
+    # The steps that re-opened say why; the tailoring and the ATS score were not touched.
+    assert {step.name: step.trigger for step in _all_steps(fx) if step.profile_id == second} == {
+        "tailor": "process_now", "reassess": "profile_changed", "ats": "process_now", "label": "profile_changed",
+    }
     assert {step.trigger for step in _all_steps(fx) if step.profile_id == default} == {"process_now"}
     assert fx.model.calls == calls  # the update itself called no model
 
     assert _runner(fx).drain().state == DRAIN_RAN
-    assert _steps(fx, job, second) == _DONE and fx.model.calls == calls + 2
+    assert _steps(fx, job, second) == _DONE and fx.model.calls == calls + 1  # one re-assessment, no second tailoring
     assert triggers.profile_changed(fx.home_root, fx.target).state == "nothing"  # done with the inputs as they are
 
 

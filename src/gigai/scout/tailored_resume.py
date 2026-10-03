@@ -81,10 +81,12 @@ per rewritten line (a validated ``reason.posting_phrase``).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
+import fcntl
 from importlib import resources
 import json
 import os
@@ -2341,11 +2343,16 @@ def run_tailored_resume(
     target: Path,
     config: GigAIConfig | None = None,
     resolved_job: ResolvedJob | None = None,
+    store: Callable[[TailorResponse], TailorResponse] | None = None,
 ) -> TailorResponse:
     """Tailor ``request.resume`` to ``request.job`` and store the JSON + markdown.
 
     ``resolved_job`` (0.1.10.7 M2, the pipeline) is the job already resolved:
-    nothing is fetched.
+    nothing is fetched. ``store`` (the pipeline's tailor step) stores the new
+    tailoring in place of the default write and returns the resume that is
+    stored afterwards, which is not the new one when the caller kept the
+    stored one. The default replaces the stored resume: tailoring on demand
+    is the user's own request for a new one.
 
     Raises ``TailorError`` (a ``QuickAssessError``) with one of the quick-
     assess codes -- ``job_input_invalid``, ``resume_input_invalid``,
@@ -2463,12 +2470,49 @@ def run_tailored_resume(
         stored_path=os.fspath(path),
         markdown_path=os.fspath(markdown_path),
     )
-    save_tailor_response(response)
+    if store is not None:
+        return store(response)
+    with tailored_resume_write_lock(path):
+        save_tailor_response(response)
     return response
 
 
+@contextmanager
+def tailored_resume_write_lock(path: Path) -> Iterator[None]:
+    """One writer at a time for the stored tailored resumes beside ``path`` (one profile's folder).
+
+    Whoever reads a stored resume and then writes it back (a line choice,
+    the pipeline's tailoring) does both inside this block, so the revision
+    it checked is still the stored one when it writes. An exclusive lock on
+    the folder itself: no lock file is left in the store. It is held for
+    file reads and writes only, never across a model call.
+    """
+
+    folder = Path(path).parent
+    folder.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(folder, os.O_RDONLY)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+
+
+def read_tailored_resume(path: Path) -> TailorResponse | None:
+    """The tailored resume stored at ``path``, or ``None`` (no file, or one that no longer parses)."""
+
+    return _read_stored(Path(path))
+
+
 def save_tailor_response(response: TailorResponse) -> None:
-    """Write a response's JSON and its sibling ``.md`` (atomically) at the paths it names."""
+    """Write a response's JSON and its sibling ``.md`` (atomically) at the paths it names.
+
+    The write alone: a caller that replaces a stored resume holds
+    ``tailored_resume_write_lock`` around its read and this write.
+    """
 
     atomic_write(Path(response.stored_path), json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
     atomic_write(Path(response.markdown_path), response.markdown.encode("utf-8"))
@@ -2530,6 +2574,7 @@ __all__ = [
     "matrix_terms",
     "numeric_values",
     "posting_terms",
+    "read_tailored_resume",
     "render_markdown",
     "render_tailor_prompt",
     "resume_continuations",
@@ -2544,6 +2589,7 @@ __all__ = [
     "tailor_sources",
     "tailored_resume_dir",
     "tailored_resume_path",
+    "tailored_resume_write_lock",
     "text_terms",
     "unsupported_numbers",
     "unsupported_posting_terms",
