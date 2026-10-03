@@ -7,6 +7,9 @@ It's mostly agents (Claude, Codex, and similar) driving GigAI, so these
 commands are non-interactive and scriptable. The general CLI discovery commands
 are on [For agents](../../agents/).
 
+`gigai agent-skill` prints the instructions that teach your agent the daily Scout loop,
+and `gigai agent-permissions` prints a recommended Claude Code permissions snippet.
+
 ## Discover the API
 
 While Scout runs (default `http://127.0.0.1:8765`):
