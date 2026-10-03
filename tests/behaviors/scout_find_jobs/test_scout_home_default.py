@@ -174,11 +174,14 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "snapshot import": ("scout", "snapshot", "import"),
     "snapshot status": ("scout", "snapshot", "status"),
     "profile list": ("scout", "profile", "list"),
-    # 0110-047 added the command without a row here (found by packet C; fix-first).
     "profile delete": ("scout", "profile", "delete", "profile_00000000-0000-4000-8000-000000000001"),
     "profile update": ("scout", "profile", "update", "profile_00000000-0000-4000-8000-000000000001", "--work-mode", "remote"),
-    "profile delete": ("scout", "profile", "delete", "profile_00000000-0000-4000-8000-000000000001"),
     "metrics": ("scout", "metrics"),
+    "pipeline run": ("scout", "pipeline", "run", "--once"),
+    "pipeline status": ("scout", "pipeline", "status"),
+    "pipeline process": ("scout", "pipeline", "process", "https://boards.greenhouse.io/example/jobs/1"),
+    "pipeline cancel": ("scout", "pipeline", "cancel", "https://boards.greenhouse.io/example/jobs/1"),
+    "pipeline retry": ("scout", "pipeline", "retry", "https://boards.greenhouse.io/example/jobs/1"),
 }
 
 
