@@ -2297,14 +2297,50 @@ def _stored_matrix(home_root: Path, target: Path, job_identity: str) -> tuple[tu
     return rows, stored.stored_path
 
 
+def tailor_sources(
+    *, home_root: Path, target: Path, profile_id: str | None, resume_text: str, title: str, posting_text: str
+) -> dict[str, AnswerSource]:
+    """What one tailoring may cite besides the resume: the user's answers, and the stories that match the posting.
+
+    Answers are every answer the user gave (``story_bank.answers_for_reuse``,
+    contact details redacted). Stories are searched locally per posting
+    (``AssessBank.for_job``: the same pick an assessment's prompt gets) and
+    each is offered as its one privacy-checked line under its own id
+    (``story:<slug>``), cited like an answer (``A story:<slug>``). A story's
+    ``revision_id`` is its opaque mark. An answer with the same id as a story
+    wins. No gig or an unreadable bank: no sources, never an error.
+    """
+
+    from . import story_bank
+
+    stored_answers = story_bank.answers_for_reuse(home_root=home_root, target=target)
+    sources: dict[str, AnswerSource] = {
+        key: AnswerSource(question_id=item.question_id, answer=item.answer, revision_id=item.revision_id, prompt=item.prompt)
+        for key, item in stored_answers.items()
+    }
+    bank = story_bank.assess_bank(home_root=home_root, target=target, profile_id=profile_id, resume_text=resume_text)
+    job_bank = bank.for_job(title=title, text=posting_text)
+    for line in job_bank.bank_answers:
+        if line.question_id in job_bank.job_stories and line.question_id not in sources:
+            sources[line.question_id] = AnswerSource(
+                question_id=line.question_id, answer=line.summary, revision_id=job_bank.marks.get(line.question_id) or "unmarked",
+                prompt=line.question,
+            )
+    return sources
+
+
 def run_tailored_resume(
     request: TailorRequest,
     *,
     home_root: Path,
     target: Path,
     config: GigAIConfig | None = None,
+    resolved_job: ResolvedJob | None = None,
 ) -> TailorResponse:
     """Tailor ``request.resume`` to ``request.job`` and store the JSON + markdown.
+
+    ``resolved_job`` (0.1.10.7 M2, the pipeline) is the job already resolved:
+    nothing is fetched.
 
     Raises ``TailorError`` (a ``QuickAssessError``) with one of the quick-
     assess codes -- ``job_input_invalid``, ``resume_input_invalid``,
@@ -2320,8 +2356,11 @@ def run_tailored_resume(
 
     # 1. Job text (public data; network only for a URL).
     try:
-        with job_fetch_client() as client:
-            job = resolve_job(request.job, client=client, home_root=home_root)
+        if resolved_job is not None:
+            job = resolved_job
+        else:
+            with job_fetch_client() as client:
+                job = resolve_job(request.job, client=client, home_root=home_root)
     except FindJobsContractError as exc:
         raise TailorError(exc.code, str(exc)) from exc
     from .find_jobs.assess_contracts import AssessRequest
@@ -2350,13 +2389,11 @@ def run_tailored_resume(
     #    with no bound gig simply has none.
     #    0.1.10.7 C: the user's answers, the same for every profile and for
     #    a pasted resume.
-    from . import story_bank
-
-    stored_answers = story_bank.answers_for_reuse(home_root=home_root, target=target)
-    answers: dict[str, AnswerSource] = {
-        key: AnswerSource(question_id=item.question_id, answer=item.answer, revision_id=item.revision_id, prompt=item.prompt)
-        for key, item in stored_answers.items()
-    }
+    #    0.1.10.7 M2: and the few stories that match THIS posting.
+    answers = tailor_sources(
+        home_root=home_root, target=target, profile_id=resume.profile_id, resume_text=resume.text, title=job.title,
+        posting_text=job.text,
+    )
 
     # 4. Storage path first (so the response can name it and ``created_at``
     #    survives a re-run), then the stored matrix (context only).
@@ -2499,6 +2536,7 @@ __all__ = [
     "tailor_context",
     "tailor_line_stats",
     "tailor_once",
+    "tailor_sources",
     "tailored_resume_dir",
     "tailored_resume_path",
     "text_terms",

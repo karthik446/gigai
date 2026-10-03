@@ -512,3 +512,52 @@ def test_daily_cap_counters_stop_at_the_limit_per_day(store: PipelineStore) -> N
     assert store.used("pipeline_calls", "2026-10-02") == 40
     assert store.spend("pipeline_calls", "2026-10-03", 3, limit=40) and store.used("pipeline_calls", "2026-10-03") == 3
     assert store.spend("rank_calls", "2026-10-02", 60) and store.used("rank_calls", "2026-10-02") == 60
+
+
+# --- 0.1.10.7 PL4: what the runner adds to the queue ------------------------------------------
+
+
+def test_defer_gives_a_claim_back_to_wait_without_an_attempt_or_a_run_row(store: PipelineStore, clock: _Clock) -> None:
+    _enqueue(store)
+    claim = store.claim(worker="w1")
+
+    assert store.defer(claim, not_before=clock.now + 3600, code="daily_cap_reached") == "ready"
+
+    step = store.step(_P, _JOB, "tailor")
+    assert (step.state, step.attempts, step.error_code, step.not_before, step.lease_owner) == ("ready", 0, "daily_cap_reached", clock.now + 3600, None)
+    assert store.runs() == () and store.claim(worker="w1") is None  # not an attempt, and it waits
+    assert store.defer(claim, not_before=0, code="daily_cap_reached") == "lost_lease"  # no longer held
+    clock.now += 3601
+    again = store.claim(worker="w1")
+    assert again is not None and again.attempt == 1
+    with pytest.raises(PipelineStoreError):
+        store.defer(again, not_before=0, code="the cap was reached")  # a code, never a sentence
+    # A cancel that came in while it was held wins over the wait.
+    store.cancel(_P, _JOB)
+    assert store.defer(again, not_before=clock.now + 60, code="daily_cap_reached") == "cancelled"
+
+
+def test_claim_only_takes_the_steps_of_the_named_job(store: PipelineStore) -> None:
+    other = "https://jobs.example.test/acme/2"
+    _enqueue(store)
+    _enqueue(store, job=other)
+
+    claim = store.claim(worker="w1", only=(_P, other))
+
+    assert claim is not None and claim.job == other
+    assert store.claim(worker="w1", only=(_P, other)) is None  # its downstream is blocked; the other job is not taken
+    assert store.step(_P, _JOB, "tailor").state == "ready"
+    with pytest.raises(PipelineStoreError):
+        store.claim(worker="w1", only=(_P, "not a job"))
+
+
+def test_refund_gives_back_counted_calls_and_never_goes_below_zero(store: PipelineStore) -> None:
+    assert store.spend("pipeline_calls", "2026-10-02", 2, limit=2) is True
+    assert store.spend("pipeline_calls", "2026-10-02", 1, limit=2) is False
+    store.refund("pipeline_calls", "2026-10-02", 1)
+    assert store.used("pipeline_calls", "2026-10-02") == 1
+    assert store.spend("pipeline_calls", "2026-10-02", 1, limit=2) is True
+    store.refund("pipeline_calls", "2026-10-02", 5)
+    assert store.used("pipeline_calls", "2026-10-02") == 0
+    store.refund("pipeline_calls", "2026-10-03")  # a day with no count: nothing to give back
+    assert store.used("pipeline_calls", "2026-10-03") == 0

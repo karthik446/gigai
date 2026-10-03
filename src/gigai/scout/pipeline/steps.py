@@ -1,0 +1,625 @@
+"""0.1.10.7 PL3: the four steps of one job's pipeline, and what each one's input digest is made of.
+
+The DAG is fixed (``store.DEPS``): ``tailor -> {reassess, ats} -> label``,
+per ``(profile, job)``. A job enters it through :func:`enqueue_job` (the one
+entry the triggers and ``gigai scout pipeline process <job>`` share), and only
+when it already has an assessment for that profile: the pipeline reads the
+posting from that stored assessment and never fetches anything.
+
+=========  ==================================================  ============================================
+step       input digest over                                   output (in the store it already uses)
+=========  ==================================================  ============================================
+tailor     the posting digest, the profile's identity and      the tailored-resume store:
+           resume digest, every answer's revision, the         ``resumes/<profile>/<sha>.json`` + ``.md``
+           matching stories' marks, the base assessment's
+           matrix, the tailor instructions, the model target
+reassess   the tailored markdown's digest, the posting         the TAILORED VARIANT of the assessment:
+           digest, the assess prompt version, the              ``quick_assess_tailored/<profile>/<sha>.json``
+           constraints digest, the answers-and-stories         (the base assessment is never written)
+           digest, the model target
+ats        the tailored markdown's digest, the posting         ``ats/<profile>/<sha>.json``
+           digest, the ATS rules version
+label      the reassess and ats output digests, the label      ``label/<profile>/<sha>.json``
+           rule version, the ATS minimum, whether the base
+           assessment is stale
+=========  ==================================================  ============================================
+
+``<sha>`` is ``sha256(job identity)``, as in the quick-assess store. A
+digest is computed when the step is claimed, from its upstream OUTPUT
+digests: a re-tailoring that returns the same markdown leaves ``ats`` with
+the digest it was done with, and it finishes without running
+(:func:`unchanged`). ``reassess`` also reads the answers, so an answer that
+changed runs it again even over the same markdown.
+
+**The Scout label** (:func:`label_for`) is Scout's own recommendation, made
+from the user's settings, resume and answers. It is not a prediction of what
+an employer will decide. ``recommended`` when the assessment against the
+tailored resume is a match with no open question, the Scout ATS score is at
+least ``pipeline.label_min_ats`` and the base assessment is not stale;
+otherwise ``needs_attention`` with the reasons as codes.
+
+**Privacy.** The tailoring is headerless and made from the lines
+``resume_privacy.model_resume`` keeps; the ATS check renders a headerless
+PDF. Every output is checked for contact-shaped text before the step is
+called done (``contact_data_found`` fails it). ``pipeline.sqlite`` gets ids,
+digests, codes and numbers only (``store.py``).
+
+**Metrics.** A model step's calls go through the ``CallMeter`` its function
+already uses (one ``model_call`` row each); the runner collects the same
+numbers (``call_metrics.capture_calls``) for the step's ``step_run`` row.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+
+from ..call_metrics import lane_for
+from .settings import PipelineSetting
+from .store import Claim, PipelineStore, fits, pipeline_path
+
+#: What the ATS step's digest names: bump when ``ats_score`` or ``posting_keywords`` change what a score means.
+ATS_RULES_VERSION = "scout-ats:1"
+LABEL_RULE_VERSION = "scout-label:1"
+ATS_RECORD_SCHEMA = "scout-ats-record:1"
+LABEL_RECORD_SCHEMA = "scout-label-record:1"
+
+ATS_DIR = "ats"
+LABEL_DIR = "label"
+
+#: The label's name, everywhere it is shown.
+LABEL_NAME = "Scout label"
+LABEL_WORDING = (
+    "Scout's own suggestion from your settings, resume and answers. Not a prediction of what an employer will decide."
+)
+LABEL_RECOMMENDED = "recommended"
+LABEL_NEEDS_ATTENTION = "needs_attention"
+LABELS: tuple[str, ...] = (LABEL_RECOMMENDED, LABEL_NEEDS_ATTENTION)
+
+REASON_NOT_MATCHED = "tailored_assessment_not_matched"
+REASON_OPEN_QUESTIONS = "open_questions"
+REASON_ATS_BELOW_MINIMUM = "ats_below_minimum"
+REASON_ASSESSMENT_STALE = "base_assessment_stale"
+LABEL_REASONS: tuple[str, ...] = (REASON_NOT_MATCHED, REASON_OPEN_QUESTIONS, REASON_ATS_BELOW_MINIMUM, REASON_ASSESSMENT_STALE)
+
+#: Step failures of this module's own (the model and input codes are ``quick_assess``'s).
+ERROR_ASSESSMENT_MISSING = "assessment_missing"
+ERROR_POSTING_TEXT_UNAVAILABLE = "posting_text_unavailable"
+ERROR_UPSTREAM_OUTPUT_MISSING = "upstream_output_missing"
+ERROR_CONTACT_DATA_FOUND = "contact_data_found"
+ERROR_STORE_UNWRITABLE = "store_unwritable"
+ERROR_STEP_FAILED = "step_failed"
+
+_MATCHED = "matched_above_threshold"
+_COMMENT = re.compile(r"[ \t]*<!--.*?-->", re.DOTALL)
+
+
+class StepError(Exception):
+    """A step that cannot run or whose output is refused; ``code`` is the bounded error code the queue stores."""
+
+    def __init__(self, code: str, message: str = "") -> None:
+        super().__init__(message or code)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class StepContext:
+    """Where a step runs: the GigAI home, the project folder, the model configuration and the pipeline settings."""
+
+    home_root: Path
+    target: Path
+    config: object | None = None
+    setting: PipelineSetting = field(default_factory=PipelineSetting)
+
+
+@dataclass(frozen=True)
+class StepResult:
+    """What a step produced: where it is (a store path key, never content) and its digest."""
+
+    output_ref: str | None = None
+    output_digest: str | None = None
+
+
+# --- digests and paths ----------------------------------------------------------------------
+
+
+def _digest(*parts: object) -> str:
+    rendered = json.dumps(parts, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+    return "sha256:" + hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
+def _bytes_digest(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def _job_key(job: str) -> str:
+    return hashlib.sha256(job.encode("utf-8")).hexdigest()
+
+
+def _scout_root(home_root: Path, target: Path) -> Path:
+    return pipeline_path(home_root, target).parent.parent
+
+
+def _record_path(ctx: StepContext, directory: str, profile_id: str, job: str) -> Path:
+    return _scout_root(ctx.home_root, ctx.target) / directory / profile_id / f"{_job_key(job)}.json"
+
+
+def _ref(ctx: StepContext, path: Path) -> str:
+    return path.relative_to(_scout_root(ctx.home_root, ctx.target)).as_posix()
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _read_json(path: Path) -> dict[str, object] | None:
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _write_json(path: Path, value: Mapping[str, object]) -> None:
+    from ..find_jobs.discovery.storage import atomic_write
+
+    try:
+        atomic_write(path, json.dumps(value, indent=2, sort_keys=True).encode("utf-8"))
+    except OSError as exc:
+        raise StepError(ERROR_STORE_UNWRITABLE, "the step's output could not be written") from exc
+
+
+def _refuse_contact_data(*texts: str) -> None:
+    """No pipeline output holds contact-shaped text (DESIGN 9); a step whose output does is failed."""
+
+    from ..resume_pii import detect_contact_details
+
+    for text in texts:
+        if detect_contact_details(text):
+            raise StepError(ERROR_CONTACT_DATA_FOUND, "the step's output holds contact-shaped text")
+
+
+def error_code(exc: BaseException) -> str:
+    """The bounded code the queue stores for a step that raised: never its message."""
+
+    code = getattr(exc, "code", None)
+    if code == "tailor_timeout":
+        return "assess_timeout"  # the queue's one retryable timeout code
+    return code if isinstance(code, str) and fits("code", code) else ERROR_STEP_FAILED
+
+
+# --- the job's inputs -----------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Inputs:
+    resolved: object
+    profile: object
+    base: object
+    job: object  # the ResolvedJob, with the posting text the base assessment stored
+    posting_sha256: str
+
+
+def _inputs(ctx: StepContext, profile_id: str, job: str) -> _Inputs:
+    """The profile, its stored (base) assessment of ``job`` and the posting that assessment was made on."""
+
+    from ..assessment_basis import posting_sha256
+    from ..find_jobs.assess_contracts import AssessResumeInput
+    from ..find_jobs.contracts import FindJobsContractError
+    from ..find_jobs.resume_input import resolve_profile
+    from ..quick_assess import QuickAssessError, _resolve_workpad, read_quick_assessment
+
+    try:
+        resolved = _resolve_workpad(ctx.home_root, ctx.target)
+        profile = resolve_profile(AssessResumeInput(profile_id=profile_id), resolved=resolved, home_root=ctx.home_root, target=ctx.target)
+    except (QuickAssessError, FindJobsContractError) as exc:
+        raise StepError(error_code(exc), "the profile is not available") from exc
+    assert profile is not None
+    base = read_quick_assessment(ctx.home_root, ctx.target, profile_id, job)
+    if base is None:
+        raise StepError(ERROR_ASSESSMENT_MISSING, "this job has no assessment for this profile yet; assess it first")
+    if not base.posting_text:
+        # Pasted posting text is never stored, so there is nothing to tailor to.
+        raise StepError(ERROR_POSTING_TEXT_UNAVAILABLE, "the posting's text is not stored for this job")
+    resolved_job = replace(base.job, text=base.posting_text)
+    digest = base.posting_sha256 or posting_sha256(resolved_job.title, resolved_job.text)
+    return _Inputs(resolved, profile, base, resolved_job, digest)
+
+
+def model_for(ctx: StepContext, step: str) -> str:
+    """The adapter kind ``step`` runs with: ``pipeline.models.<step>``, else the project's configured model target."""
+
+    from ..quick_assess import _default_model_target
+
+    return ctx.setting.models.get(step) or _default_model_target(ctx.target).value
+
+
+def _tailor_digest(ctx: StepContext, found: _Inputs, model_target: str | None) -> str:
+    from ..tailored_resume import TAILOR_INSTRUCTIONS_DIGEST, tailor_sources
+
+    profile = found.profile
+    # Ids and revision marks only, so the resume itself is not read here: its digest is the profile's pinned one,
+    # and which answers and stories a tailoring is offered does not depend on the resume's text.
+    sources = tailor_sources(
+        home_root=ctx.home_root, target=ctx.target, profile_id=profile.profile_id, resume_text="",  # type: ignore[attr-defined]
+        title=found.job.title, posting_text=found.job.text,  # type: ignore[attr-defined]
+    )
+    return _digest(
+        "tailor",
+        found.posting_sha256,
+        [profile.profile_id, profile.revision, profile.content_digest],  # type: ignore[attr-defined]
+        profile.resume_ref.content_sha256,  # type: ignore[attr-defined]
+        sorted((key, item.revision_id) for key, item in sources.items()),
+        [(row.requirement, row.status.value) for row in found.base.result.matrix],  # type: ignore[attr-defined]
+        TAILOR_INSTRUCTIONS_DIGEST,
+        model_target,
+    )
+
+
+def tailor_digest(ctx: StepContext, profile_id: str, job: str, model_target: str | None = None) -> str:
+    """The tailor step's input digest for ``(profile_id, job)`` as its inputs are now. Raises :class:`StepError`."""
+
+    return _tailor_digest(ctx, _inputs(ctx, profile_id, job), model_target if model_target is not None else model_for(ctx, "tailor"))
+
+
+def _upstream(store: PipelineStore, claim: Claim, name: str) -> str:
+    step = store.step(claim.profile_id, claim.job, name)
+    if step is None or step.output_digest is None:
+        raise StepError(ERROR_UPSTREAM_OUTPUT_MISSING, f"the {name} step has no output")
+    return step.output_digest
+
+
+def _base_stale_reason(ctx: StepContext, base: object) -> str | None:
+    from ..assessment_basis import BasisCheck
+
+    return BasisCheck(home_root=ctx.home_root, target=ctx.target).reason(base)  # type: ignore[arg-type]
+
+
+def input_digest(ctx: StepContext, store: PipelineStore, claim: Claim) -> str:
+    """``claim``'s input digest, from its inputs as they are now and its upstream OUTPUT digests. Raises :class:`StepError`."""
+
+    found = _inputs(ctx, claim.profile_id, claim.job)
+    if claim.name == "tailor":
+        return _tailor_digest(ctx, found, claim.model_target)
+    if claim.name == "reassess":
+        from .. import story_bank
+        from ..assessment_basis import BasisCheck
+
+        current = BasisCheck(home_root=ctx.home_root, target=ctx.target).current(claim.profile_id)
+        bank = story_bank.assess_bank(home_root=ctx.home_root, target=ctx.target, profile_id=claim.profile_id)
+        return _digest(
+            "reassess",
+            _upstream(store, claim, "tailor"),
+            found.posting_sha256,
+            None if current is None else [current.prompt_version, current.constraints_digest],
+            bank.digest,
+            claim.model_target,
+        )
+    if claim.name == "ats":
+        return _digest("ats", _upstream(store, claim, "tailor"), found.posting_sha256, ATS_RULES_VERSION)
+    return _digest(
+        "label",
+        _upstream(store, claim, "reassess"),
+        _upstream(store, claim, "ats"),
+        LABEL_RULE_VERSION,
+        ctx.setting.label_min_ats,
+        _base_stale_reason(ctx, found.base),
+    )
+
+
+def unchanged(ctx: StepContext, store: PipelineStore, claim: Claim, digest: str) -> bool:
+    """``claim`` was last done with ``digest`` and its output is still there: it finishes without running.
+
+    Never the tailor step: it is only claimed again when its digest changed
+    or the user forced it.
+    """
+
+    if claim.name == "tailor" or claim.done_digest != digest:
+        return False
+    step = store.step(claim.profile_id, claim.job, claim.name)
+    if step is None or step.output_ref is None:
+        return False
+    return (_scout_root(ctx.home_root, ctx.target) / step.output_ref).is_file()
+
+
+# --- the steps ------------------------------------------------------------------------------
+
+
+def _model_target(claim: Claim):
+    from ..find_jobs.contracts import ModelTarget
+
+    try:
+        return ModelTarget(claim.model_target)
+    except ValueError:
+        raise StepError("model_target_unavailable", "the step's model target is not an adapter kind") from None
+
+
+def _stored_tailored(ctx: StepContext, profile_id: str, job: str):
+    from ..tailored_resume import list_tailored_resumes
+
+    items = list_tailored_resumes(ctx.home_root, ctx.target, profile_id=profile_id, job_identity=job)
+    if not items:
+        raise StepError(ERROR_UPSTREAM_OUTPUT_MISSING, "the tailored resume is not stored")
+    return items[0]
+
+
+def _plain(markdown: str) -> str:
+    """The tailored markdown as a reader sees it: without the per-line source comments."""
+
+    return "\n".join(line.rstrip() for line in _COMMENT.sub("", markdown).splitlines()).strip() + "\n"
+
+
+def _job_input(job: object):
+    from ..find_jobs.assess_contracts import AssessJobInput
+
+    return AssessJobInput(job_url=job.source_url or job.job_identity)  # type: ignore[attr-defined]
+
+
+def _tailor(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
+    from ..find_jobs.assess_contracts import AssessResumeInput
+    from ..tailored_resume import TailorRequest, run_tailored_resume
+
+    response = run_tailored_resume(
+        TailorRequest(job=_job_input(found.job), resume=AssessResumeInput(profile_id=claim.profile_id), model_target=_model_target(claim)),
+        home_root=ctx.home_root, target=ctx.target, config=ctx.config, resolved_job=found.job,  # type: ignore[arg-type]
+    )
+    _refuse_contact_data(response.markdown)
+    return StepResult(_ref(ctx, Path(response.stored_path)), _bytes_digest(response.markdown.encode("utf-8")))
+
+
+def _reassess(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
+    from ..find_jobs.assess_contracts import AssessRequest, AssessResumeInput
+    from ..quick_assess import AssessVariant, run_quick_assessment
+
+    tailored = _stored_tailored(ctx, claim.profile_id, claim.job)
+    response = run_quick_assessment(
+        AssessRequest(job=_job_input(found.job), resume=AssessResumeInput(profile_id=claim.profile_id), model_target=_model_target(claim)),
+        home_root=ctx.home_root, target=ctx.target, config=ctx.config, resolved_job=found.job,  # type: ignore[arg-type]
+        variant=AssessVariant(resume_text=_plain(tailored.markdown)),
+    )
+    return StepResult(_ref(ctx, Path(response.stored_path)), _digest("variant", response.result.to_json()))
+
+
+def _ats(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
+    from .. import ats_score
+    from ..posting_keywords import extract_keywords, skills_from_markdown
+    from ..resume_pdf import stored_resume_pdf
+
+    tailored = _stored_tailored(ctx, claim.profile_id, claim.job)
+    # Headerless: the pipeline never renders a PDF with contact data.
+    rendered, file_name = stored_resume_pdf(tailored, home_root=ctx.home_root, form=None)
+    keywords = extract_keywords(found.job.text, title=found.job.title, skills=skills_from_markdown(tailored.markdown))  # type: ignore[attr-defined]
+    result = ats_score.score(rendered.pdf, tailored.result, keywords, file_name=file_name)
+    path = _record_path(ctx, ATS_DIR, claim.profile_id, claim.job)
+    previous = _read_json(path)
+    now = _now()
+    record = {
+        "schema_version": ATS_RECORD_SCHEMA,
+        "profile_id": claim.profile_id,
+        "job_identity": claim.job,
+        "rules_version": ATS_RULES_VERSION,
+        "tailored_sha256": _bytes_digest(tailored.markdown.encode("utf-8")),
+        "posting_sha256": found.posting_sha256,
+        "keywords": keywords.to_json(),
+        "result": result.to_json(),
+        "created_at": previous.get("created_at", now) if previous else now,
+        "updated_at": now,
+        "stored_path": os.fspath(path),
+    }
+    _refuse_contact_data(result.line, " ".join((*keywords.must, *keywords.nice, *keywords.title)))
+    _write_json(path, record)
+    return StepResult(_ref(ctx, path), _digest("ats", result.to_json(), record["keywords"]))
+
+
+def _met(body: object) -> dict[str, int]:
+    rows = body.matrix  # type: ignore[attr-defined]
+    met = sum(1 for row in rows if row.status.value == "met")
+    return {"met": met, "total": len(rows), "percent": round(100 * met / len(rows)) if rows else 0}
+
+
+def label_for(*, verdict: str | None, open_questions: int, ats: int, min_ats: int, stale_reason: str | None) -> tuple[str, list[str]]:
+    """The Scout label and why (codes). Pure: Scout's own rule, never a prediction."""
+
+    reasons: list[str] = []
+    if verdict != _MATCHED:
+        reasons.append(REASON_NOT_MATCHED)
+    if open_questions:
+        reasons.append(REASON_OPEN_QUESTIONS)
+    if ats < min_ats:
+        reasons.append(REASON_ATS_BELOW_MINIMUM)
+    if stale_reason is not None:
+        reasons.append(REASON_ASSESSMENT_STALE)
+    return (LABEL_NEEDS_ATTENTION if reasons else LABEL_RECOMMENDED), reasons
+
+
+def _label(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
+    variant = read_variant(ctx.home_root, ctx.target, claim.profile_id, claim.job)
+    ats = read_ats(ctx.home_root, ctx.target, claim.profile_id, claim.job)
+    if variant is None or ats is None:
+        raise StepError(ERROR_UPSTREAM_OUTPUT_MISSING, "the tailored assessment or the ATS record is not stored")
+    result = ats.get("result")
+    score = result.get("score") if isinstance(result, dict) else None
+    if type(score) is not int:
+        raise StepError(ERROR_UPSTREAM_OUTPUT_MISSING, "the ATS record has no score")
+    verdict = None if variant.result.verdict is None else variant.result.verdict.value
+    open_questions = len(variant.result.structured_questions) or len(variant.result.questions)
+    stale = _base_stale_reason(ctx, found.base)
+    label, reasons = label_for(
+        verdict=verdict, open_questions=open_questions, ats=score, min_ats=ctx.setting.label_min_ats, stale_reason=stale
+    )
+    base = found.base
+    path = _record_path(ctx, LABEL_DIR, claim.profile_id, claim.job)
+    previous = _read_json(path)
+    now = _now()
+    record = {
+        "schema_version": LABEL_RECORD_SCHEMA,
+        "name": LABEL_NAME,
+        "wording": LABEL_WORDING,
+        "profile_id": claim.profile_id,
+        "job_identity": claim.job,
+        "rule_version": LABEL_RULE_VERSION,
+        "label": label,
+        "reasons": reasons,
+        "ats_score": score,
+        "min_ats": ctx.setting.label_min_ats,
+        "base_verdict": None if base.result.verdict is None else base.result.verdict.value,  # type: ignore[attr-defined]
+        "tailored_verdict": verdict,
+        "open_questions": open_questions,
+        "base_stale_reason": stale,
+        # "72 -> 86 after tailoring": the share of the posting's requirements each assessment found met.
+        "requirements_met": {"base": _met(base.result), "tailored": _met(variant.result)},  # type: ignore[attr-defined]
+        "created_at": previous.get("created_at", now) if previous else now,
+        "updated_at": now,
+        "stored_path": os.fspath(path),
+    }
+    _write_json(path, record)
+    return StepResult(_ref(ctx, path), _digest("label", label, reasons, score, record["requirements_met"]))
+
+
+_RUNNERS = {"tailor": _tailor, "reassess": _reassess, "ats": _ats, "label": _label}
+
+
+def run_step(ctx: StepContext, store: PipelineStore, claim: Claim) -> StepResult:
+    """Run ``claim``'s step and return where its output is. Raises :class:`StepError` or the step function's own error."""
+
+    del store  # every input is read from the stores; the queue is the runner's
+    return _RUNNERS[claim.name](ctx, claim, _inputs(ctx, claim.profile_id, claim.job))
+
+
+# --- the entry: enqueue one job --------------------------------------------------------------
+
+
+def enqueue_job(
+    profile_id: str,
+    job: str,
+    *,
+    force: bool = False,
+    home_root: Path,
+    target: Path,
+    trigger: str = "process_now",
+    setting: PipelineSetting | None = None,
+    store: PipelineStore | None = None,
+) -> dict[str, object]:
+    """Queue ``job``'s pipeline for ``profile_id`` and return ``{result, profile_id, job, input_digest}``.
+
+    ``result`` is ``store.enqueue``'s: ``enqueued``, or a no-op when the
+    tailor step is already done, queued or failed with these inputs
+    (``force`` re-opens it whatever its digest). The tailor step runs with
+    ``pipeline.models.tailor`` and the re-assessment with
+    ``pipeline.models.reassess`` (each: else the project's configured model
+    target). Raises :class:`StepError` when the job cannot enter the pipeline
+    (no profile, no assessment yet, no stored posting text).
+    """
+
+    from .settings import pipeline_setting
+
+    home_root, target = Path(home_root), Path(target)
+    ctx = StepContext(home_root, target, setting=setting if setting is not None else pipeline_setting(home_root, target))
+    tailor_model, reassess_model = model_for(ctx, "tailor"), model_for(ctx, "reassess")
+    digest = tailor_digest(ctx, profile_id, job, tailor_model)
+    opened = store if store is not None else PipelineStore(pipeline_path(home_root, target))
+    try:
+        result = opened.enqueue(
+            profile_id, job, "tailor", input_digest=digest, trigger=trigger, lane=lane_for(tailor_model),
+            model_target=tailor_model, downstream_lanes={"reassess": (lane_for(reassess_model), reassess_model)}, force=force,
+        )
+    finally:
+        if store is None:
+            opened.close()
+    return {"result": result, "profile_id": profile_id, "job": job, "input_digest": digest}
+
+
+# --- the read side --------------------------------------------------------------------------
+
+
+def read_variant(home_root: Path, target: Path, profile_id: str, job: str):
+    """The assessment of ``job`` against the tailored resume (``quick_assess.read_tailored_variant``)."""
+
+    from ..quick_assess import read_tailored_variant
+
+    return read_tailored_variant(Path(home_root), Path(target), profile_id, job)
+
+
+def read_ats(home_root: Path, target: Path, profile_id: str, job: str) -> dict[str, object] | None:
+    """The stored Scout ATS record of ``job``'s tailored resume, or ``None``."""
+
+    return _read_json(_record_path(StepContext(Path(home_root), Path(target)), ATS_DIR, profile_id, job))
+
+
+def read_label(home_root: Path, target: Path, profile_id: str, job: str) -> dict[str, object] | None:
+    """The stored Scout label record of ``job``, or ``None``."""
+
+    return _read_json(_record_path(StepContext(Path(home_root), Path(target)), LABEL_DIR, profile_id, job))
+
+
+def job_outputs(home_root: Path, target: Path, profile_id: str, job: str) -> dict[str, object]:
+    """What the pipeline has stored for ``(profile_id, job)``: codes, numbers and paths, never a text."""
+
+    from ..quick_assess import read_quick_assessment
+    from ..tailored_resume import list_tailored_resumes
+
+    home_root, target = Path(home_root), Path(target)
+    base = read_quick_assessment(home_root, target, profile_id, job)
+    variant = read_variant(home_root, target, profile_id, job)
+    tailored = list_tailored_resumes(home_root, target, profile_id=profile_id, job_identity=job)
+    ats = read_ats(home_root, target, profile_id, job)
+    label = read_label(home_root, target, profile_id, job)
+
+    def assessment(item: object | None) -> dict[str, object] | None:
+        if item is None:
+            return None
+        verdict = item.result.verdict  # type: ignore[attr-defined]
+        return {
+            "verdict": None if verdict is None else verdict.value,
+            "requirements_met": _met(item.result),  # type: ignore[attr-defined]
+            "updated_at": item.updated_at,  # type: ignore[attr-defined]
+            "stored_path": item.stored_path,  # type: ignore[attr-defined]
+        }
+
+    result = ats.get("result") if ats else None
+    return {
+        "base_assessment": assessment(base),
+        "tailored_assessment": assessment(variant),
+        "tailored_resume": (
+            None if not tailored else {"markdown_path": tailored[0].markdown_path, "stored_path": tailored[0].stored_path, "updated_at": tailored[0].updated_at}
+        ),
+        "ats": None if not isinstance(result, dict) else {"score": result.get("score"), "line": result.get("line"), "stored_path": ats.get("stored_path")},  # type: ignore[union-attr]
+        "label": None if label is None else {key: label.get(key) for key in ("name", "label", "reasons", "ats_score", "requirements_met", "updated_at", "stored_path")},
+    }
+
+
+__all__ = [
+    "ATS_DIR",
+    "ATS_RULES_VERSION",
+    "LABELS",
+    "LABEL_DIR",
+    "LABEL_NAME",
+    "LABEL_NEEDS_ATTENTION",
+    "LABEL_REASONS",
+    "LABEL_RECOMMENDED",
+    "LABEL_RULE_VERSION",
+    "LABEL_WORDING",
+    "StepContext",
+    "StepError",
+    "StepResult",
+    "enqueue_job",
+    "error_code",
+    "input_digest",
+    "job_outputs",
+    "label_for",
+    "model_for",
+    "read_ats",
+    "read_label",
+    "read_variant",
+    "run_step",
+    "tailor_digest",
+    "unchanged",
+]

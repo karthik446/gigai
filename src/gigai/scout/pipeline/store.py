@@ -867,16 +867,22 @@ class PipelineStore:
         with self._write() as c:
             return self._reclaim(c, now)
 
-    def claim(self, *, worker: str = "0", lanes: Iterable[str] | None = None) -> Claim | None:
+    def claim(
+        self, *, worker: str = "0", lanes: Iterable[str] | None = None, only: tuple[str, str] | None = None
+    ) -> Claim | None:
         """Claim the next ready step whose lane has room, or ``None``.
 
         ``worker`` names the claiming thread within this process (the owner is
-        ``<process token>:<worker>``); ``lanes`` limits the claim to those lanes.
+        ``<process token>:<worker>``); ``lanes`` limits the claim to those lanes,
+        ``only`` to the steps of one ``(profile_id, job)`` (``pipeline process <job>``).
         """
 
         if type(worker) is not str or not _WORKER.fullmatch(worker):
             raise PipelineStoreError("invalid_value", "worker is not a worker name")
         wanted = None if lanes is None else frozenset(_check_lane(lane) for lane in lanes)
+        if only is not None:
+            _check("id", only[0], "profile_id")
+            _check("job", only[1], "job")
         owner = f"{process_token()}:{worker}"
         now = self._clock()
         stamp = self._now_iso(now)
@@ -893,6 +899,8 @@ class PipelineStore:
                 (STATE_READY, now),
             ).fetchall():
                 if wanted is not None and lane not in wanted:
+                    continue
+                if only is not None and (profile_id, job) != only:
                     continue
                 if lane in backed_off or running.get(lane, 0) >= self._cap(lane):
                     continue
@@ -928,6 +936,32 @@ class PipelineStore:
         if not updated:
             return None
         return replace(claim, lease_until=until)
+
+    def defer(self, claim: Claim, *, not_before: float, code: str) -> str:
+        """Give ``claim`` back without running it: the step waits until ``not_before`` with ``code`` as why.
+
+        Not an attempt: nothing is counted and no ``step_run`` row is written
+        (the daily cap: the call that would go over it waits, it does not
+        fail). Returns the step's state or ``lost_lease``.
+        """
+
+        _check("code", code, "code")
+        if type(not_before) not in (int, float) or not_before < 0:
+            raise PipelineStoreError("invalid_value", "not_before must be a non-negative number")
+        stamp = self._now_iso()
+        key = (claim.profile_id, claim.job, claim.name)
+        with self._write() as c:
+            held = self._held(c, claim)
+            if held is None:
+                return LOST_LEASE
+            _generation, attempts, cancel = held
+            state = STATE_CANCELLED if cancel else self._open_state(c, *key)
+            c.execute(
+                "UPDATE step SET state=?, error_code=?, attempts=?, not_before=?, lease_owner=NULL, lease_pid=NULL, "
+                "lease_until=NULL, claimed_at=NULL, cancel_requested=0, updated_at=? WHERE profile_id=? AND job=? AND name=?",
+                (state, None if cancel else code, max(0, attempts - 1), 0.0 if cancel else float(not_before), stamp, *key),
+            )
+        return state
 
     def _held(self, c: sqlite3.Connection, claim: Claim) -> tuple[int, int, int] | None:
         """``(generation, attempts, cancel_requested)`` while ``claim`` still holds its step."""
@@ -1291,6 +1325,15 @@ class PipelineStore:
                 (cap, day, used + calls),
             )
         return True
+
+    def refund(self, cap: str, day: str, calls: int = 1) -> None:
+        """Give back ``calls`` counted by ``spend`` that were never made (a step that failed before its call)."""
+
+        _check("code", cap, "cap")
+        _check("day", day, "day")
+        _check_count(calls, "calls")
+        with self._write() as c:
+            c.execute("UPDATE cap_counter SET used=MAX(0, used-?) WHERE cap=? AND day=?", (calls, cap, day))
 
     def used(self, cap: str, day: str) -> int:
         row = self._conn().execute("SELECT used FROM cap_counter WHERE cap=? AND day=?", (cap, day)).fetchone()
