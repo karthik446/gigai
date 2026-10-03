@@ -213,7 +213,8 @@ class _Selection:
 
 
 def _rows_json(
-    home_root: Path, target: Path, store: PipelineStore, shown: Sequence[tuple[Sequence[PostingRecord], PostingRecord]]
+    home_root: Path, target: Path, store: PipelineStore, shown: Sequence[tuple[Sequence[PostingRecord], PostingRecord]],
+    views: Sequence[ProfileView] = (),
 ) -> list[dict[str, object]]:
     """The grid rows: ``scout new``'s own row, plus where a row's assessment came from when it was a run's."""
 
@@ -225,9 +226,11 @@ def _rows_json(
         for profile_id in {row.profile_id for _group, row in shown}:
             ran.update({(item.profile_id, item.job): item for item in store.run_assessments(profile_id=profile_id, latest=True)})
     rows: list[dict[str, object]] = []
+    pending = postings.TagPending(home_root, views)
     for group, row in shown:
         item = None if row.state == _NOT_ASSESSED else read_quick_assessment(home_root, target, row.profile_id, row.job)
-        entry = _row_json(group, row, texts.get(row.job), item)
+        text = texts.get(row.job)
+        entry = _row_json(group, row, text, item, pending(row.profile_id, None if text is None else text.title))
         origin: dict[str, object] | None = None
         if item is not None:
             origin = {"origin": "quick_assess"}
@@ -328,7 +331,7 @@ def search_postings(
                 "postings": {
                     ENVELOPE_KEY: labels_envelope(POSTINGS_LABELS),
                     "rule": UNTRUSTED_TEXT_RULE,
-                    "rows": _rows_json(home_root, target, store, page),
+                    "rows": _rows_json(home_root, target, store, page, selection.views),
                 },
                 "profiles": selection.profiles_json(),
                 "rank": rank_status(home_root, target),
@@ -505,7 +508,7 @@ def assess_these(
                 "postings": {
                     ENVELOPE_KEY: labels_envelope(POSTINGS_LABELS),
                     "rule": UNTRUSTED_TEXT_RULE,
-                    "rows": _rows_json(home_root, target, store, page),
+                    "rows": _rows_json(home_root, target, store, page, selection.views),
                 },
                 "profiles": selection.profiles_json(),
             }
@@ -547,7 +550,7 @@ def render(response: Mapping[str, object]) -> str:
             score = f"{row['score']}% of requirements met"
         else:
             score = f"rank {row['score']}"
-        lines.append(f"{row['company'] or '?'}: {row['title'] or row['job_identity']} [{tags}] {str(row['state']).replace('_', ' ')}, {score}")
+        lines.append(f"{row['company_name'] or row['company'] or '?'}: {row['title'] or row['job_identity']} [{tags}] {str(row['state']).replace('_', ' ')}, {score}")
         lines.append(f"  {row['job_identity']}")
     history = response.get("history")
     if isinstance(history, Mapping):

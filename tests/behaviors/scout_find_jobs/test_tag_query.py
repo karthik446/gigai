@@ -250,11 +250,11 @@ def test_index_search_reports_the_title_match_counts(tmp_path: Path) -> None:
     rows, _failures, summary = read_indexed_boards(
         boards, index=CompanyIndex.for_home(home), cache=board_cache_for_home(home), config=config, tags=store,
     )
-    assert summary["title_match"] == {"matched_by_rule": 1, "matched_by_tag": 1, "untagged_fallback": 0}
+    assert summary["title_match"] == {"matched_by_rule": 1, "matched_by_tag": 1, "untagged_fallback": 0, "vetoed_by_tag": 0, "tag_pending": 0}
     assert summary["prefiltered_out"] == 2
 
     _rows, _failures, plain = read_indexed_boards(
         boards, index=CompanyIndex.for_home(home), cache=board_cache_for_home(home), config=config,
     )
-    assert plain["title_match"] == {"matched_by_rule": 1, "matched_by_tag": 0, "untagged_fallback": 0}
+    assert plain["title_match"] == {"matched_by_rule": 1, "matched_by_tag": 0, "untagged_fallback": 0, "vetoed_by_tag": 0, "tag_pending": 0}
     assert plain["prefiltered_out"] == 3

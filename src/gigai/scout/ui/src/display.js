@@ -9,9 +9,46 @@
 // it passes through unchanged.
 const SLUG_LIKE = /^[a-z0-9][a-z0-9-]*$/;
 
+// 0110-8-11: a posting's `company` is its board token ("garnerhealth"); the
+// API puts the company index's own name beside it (`company_name`: "Garner
+// Health") on every posting-shaped object. Every response is passed through
+// rememberCompanyNames (api.js), so displayCompanyName, which every view
+// already calls with the token, shows that name. A token the API gave no
+// name for keeps the slug rule below.
+const COMPANY_NAMES = new Map();
+
+export function rememberCompanyNames(payload) {
+  const pending = [payload];
+  while (pending.length) {
+    const node = pending.pop();
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        if (item && typeof item === "object") {
+          pending.push(item);
+        }
+      }
+    } else if (node && typeof node === "object") {
+      const { company, company_name: name } = node;
+      if (typeof company === "string" && company && typeof name === "string" && name && name !== company) {
+        COMPANY_NAMES.set(company, name);
+      }
+      for (const value of Object.values(node)) {
+        if (value && typeof value === "object") {
+          pending.push(value);
+        }
+      }
+    }
+  }
+  return payload;
+}
+
 export function displayCompanyName(company) {
   if (!company) {
     return company;
+  }
+  const known = COMPANY_NAMES.get(company);
+  if (known) {
+    return known;
   }
   if (!SLUG_LIKE.test(company)) {
     return company;

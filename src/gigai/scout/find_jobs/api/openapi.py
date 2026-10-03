@@ -314,7 +314,7 @@ _NEW_EXAMPLE: dict[str, object] = {
             "removed_at": None, "profile_id": "prof_1",
             "profiles": [{"profile_id": "prof_1", "match_rank": 1, "rank_score": 82, "state": "not_assessed"}],
             "state": "not_assessed", "stale_reason": None, "score": 82, "score_kind": "rank", "rank_score": 82, "assessment": None,
-            "needs_tailoring": None, "unmet": [], "open_questions": [], "label": None, "ats_score": None,
+            "needs_tailoring": None, "unmet": [], "open_questions": [], "label": None, "ats_score": None, "tag_pending": False,
         }],
     },
     "profiles": [{"profile_id": "prof_1", "label": "Staff Engineer", "is_default": True, "resume": {"record_id": "rec_1", "revision_id": "rev_1"}}],
@@ -648,7 +648,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {"schema_version": "scout-assess-response:1", "job": {"job_identity": _JOB_URL}, "result": {"verdict": "matched_above_threshold", "matrix": [], "suggestions": [], "questions": []}},
         schema_version="scout-assess-response:1", params=(*_JOB_INPUT, _b("preferences", "object", "Override the effective preferences."), _b("origin", "string", "quick_assess | job_page.")),
         request_example={"job": {"job_url": _JOB_URL}},
-        errors=(*_ROW_ERRORS, (422, "job_input_invalid"), (502, "job_fetch_failed"), (504, "assess_timeout"), *_MODEL_ERRORS, _NO_TARGET),
+        errors=(*_ROW_ERRORS, (422, "job_input_invalid"), (502, "job_fetch_failed"), (504, "assess_timeout"), *_MODEL_ERRORS, (500, "assessment_not_stored"), _NO_TARGET),
         description="Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=. " + _BASIS_NOTE,
     ),
     RouteSpec(

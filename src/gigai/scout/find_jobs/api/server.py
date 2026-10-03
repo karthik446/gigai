@@ -44,6 +44,7 @@ from ....http_server import NoLookupThreadingHTTPServer
 from ....run import ResumeDetails, RunError
 from ...data_labels import LABELS_HEADER
 from ...outbound_check import redact_payload
+from ..company_names import with_company_names
 from ..contracts import (
     API_BIND,
     AggregateStatus,
@@ -1592,6 +1593,8 @@ def _make_handler(
             # 0110-007: an unknown_key 422 names the keys the route allows (openapi.py's table).
             path = urlsplit(self.path).path
             payload = with_allowed_keys(self.command or "", path, payload)
+            # 0110-8-11: a posting's company is its board token; the index's name goes beside it (``company_name``).
+            payload = with_company_names(payload, getattr(self._backend, "home_root", None))  # type: ignore[assignment]
             # P3: the one outbound check. Contact-shaped text outside posting text leaves as a token (outbound_check.py).
             body = json.dumps(redact_payload(payload)).encode("utf-8")
             self.send_response(status)

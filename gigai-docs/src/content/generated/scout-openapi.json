@@ -1338,6 +1338,22 @@
             },
             "description": "invalid_value, wrong_type, unknown_key, job_input_invalid"
           },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "assessment_not_stored",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "assessment_not_stored"
+          },
           "502": {
             "content": {
               "application/json": {
@@ -2329,6 +2345,7 @@
                         "score_kind": "rank",
                         "stale_reason": null,
                         "state": "not_assessed",
+                        "tag_pending": false,
                         "title": "Staff Engineer",
                         "unmet": [],
                         "work_mode": "remote"
@@ -2611,6 +2628,7 @@
                         "score_kind": "rank",
                         "stale_reason": null,
                         "state": "not_assessed",
+                        "tag_pending": false,
                         "title": "Staff Engineer",
                         "unmet": [],
                         "work_mode": "remote"
@@ -3973,6 +3991,7 @@
                         "score_kind": "rank",
                         "stale_reason": null,
                         "state": "not_assessed",
+                        "tag_pending": false,
                         "title": "Staff Engineer",
                         "unmet": [],
                         "work_mode": "remote"
@@ -4216,6 +4235,7 @@
                         "score_kind": "rank",
                         "stale_reason": null,
                         "state": "not_assessed",
+                        "tag_pending": false,
                         "title": "Staff Engineer",
                         "unmet": [],
                         "work_mode": "remote"

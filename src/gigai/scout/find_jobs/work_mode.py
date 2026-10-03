@@ -18,6 +18,13 @@ A posting's work mode, in this order:
 3. else ``unknown`` (empty text, a bare country or region, a bare state):
    kept under every mode and labelled, never guessed.
 
+0110-8-10: a city that shares a state's name is a city. A state NAME that is
+followed by a state ("New York, NY", "New York, New York, USA", "Washington,
+District of Columbia", "Delaware, OH") is the city in that state, so the
+posting is ``in_person`` and a Remote-only search drops it. The name alone
+("New York", "New York, United States") can be the state and stays
+``unknown``; "Remote - New York" is remote, as stated.
+
 A multi-location string ("San Francisco, CA or Remote (U.S.)", "Denver,
 CO - Hybrid; New York, NY - Hybrid") is split into parts; a part that
 states a mode wins over plain-place parts, and the most open stated mode
@@ -203,8 +210,30 @@ def _state_of(piece: str) -> str | None:
     return upper if upper in _STATE_CODES else None
 
 
+def _piece_states(part: str) -> list[tuple[str, str | None]]:
+    """``(piece, the state it names)`` for a part's pieces; ``None`` for a piece that is no state.
+
+    0110-8-10: a state NAME followed by a state code, by the same name again or
+    by the District of Columbia is a CITY of that name ("New York, NY",
+    "New York, New York", "Washington, District of Columbia", "Delaware, OH"),
+    so it names no state. A name with no state after it stays the state.
+    """
+
+    pieces = _pieces(part)
+    found: list[tuple[str, str | None]] = []
+    for position, piece in enumerate(pieces):
+        state = _state_of(piece)
+        if state is not None and piece in _STATE_BY_NAME and position + 1 < len(pieces):
+            following = pieces[position + 1]
+            after = _state_of(following)
+            if after is not None and (following not in _STATE_BY_NAME or after == state or after == "DC"):
+                state = None
+        found.append((piece, state))
+    return found
+
+
 def _states(part: str) -> set[str]:
-    return {state for state in (_state_of(piece) for piece in _pieces(part)) if state is not None}
+    return {state for _piece, state in _piece_states(part) if state is not None}
 
 
 def _names_a_city(part: str) -> bool:
@@ -212,8 +241,8 @@ def _names_a_city(part: str) -> bool:
 
     if _WASHINGTON_DC_RE.search(part):
         return True
-    for piece in _pieces(part):
-        if piece in _COUNTRY_WORDS or piece in _REGION_TOKENS or _state_of(piece) is not None:
+    for piece, state in _piece_states(part):
+        if piece in _COUNTRY_WORDS or piece in _REGION_TOKENS or state is not None:
             continue
         return True
     return False
