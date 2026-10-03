@@ -42,6 +42,8 @@ from urllib.parse import urlsplit
 from ....canonical import canonical_json_bytes, parse_json_bytes
 from ....http_server import NoLookupThreadingHTTPServer
 from ....run import ResumeDetails, RunError
+from ...data_labels import LABELS_HEADER
+from ...outbound_check import redact_payload
 from ..contracts import (
     API_BIND,
     AggregateStatus,
@@ -64,7 +66,7 @@ from .common import (
     _receipt_span_ms,
     reads_committed,
 )
-from .openapi import with_allowed_keys
+from .openapi import response_labels_header, with_allowed_keys
 from .profiles import _match_profile_id
 from .story_bank import _match_answer_id, _match_story_id
 
@@ -1582,10 +1584,14 @@ def _make_handler(
 
         def _write_json(self, status: int, payload: dict[str, object]) -> None:
             # 0110-007: an unknown_key 422 names the keys the route allows (openapi.py's table).
-            payload = with_allowed_keys(self.command or "", urlsplit(self.path).path, payload)
-            body = json.dumps(payload).encode("utf-8")
+            path = urlsplit(self.path).path
+            payload = with_allowed_keys(self.command or "", path, payload)
+            # P3: the one outbound check. Contact-shaped text outside posting text leaves as a token (outbound_check.py).
+            body = json.dumps(redact_payload(payload)).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
+            # P4: the labels of what this route can return, from its entry in openapi.py's table.
+            self.send_header(LABELS_HEADER, response_labels_header(self.command or "", path))
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
