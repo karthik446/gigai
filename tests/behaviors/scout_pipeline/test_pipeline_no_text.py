@@ -21,7 +21,15 @@ import sqlite3
 
 import pytest
 
-from gigai.scout.pipeline.store import COLUMN_KINDS, PipelineStore, PipelineStoreError, PostingBuild, PostingRecord, StepMetrics
+from gigai.scout.pipeline.store import (
+    COLUMN_KINDS,
+    PipelineStore,
+    PipelineStoreError,
+    PostingBuild,
+    PostingRecord,
+    RunAssessment,
+    StepMetrics,
+)
 
 #: The reviewed schema: (column, kind). A new column fails this test until it is added here with a non-text kind.
 _REVIEWED: dict[str, dict[str, str]] = {
@@ -65,6 +73,16 @@ _REVIEWED: dict[str, dict[str, str]] = {
         "profile_id": "id", "match_digest": "digest", "facts_digest": "digest", "pinned_digest": "digest",
         "settings_digest": "digest", "row_count": "integer", "built_at": "timestamp",
     },
+    # 0.1.10.7 M4a: what old find-jobs runs assessed (state, counts, the provenance a run sealed) and the named leases.
+    "run_import": {"run_id": "id", "profile_id": "id", "row_count": "integer", "imported_at": "timestamp"},
+    "run_assessment": {
+        "run_id": "id", "job": "job", "profile_id": "id", "state": "code", "assessed_at": "timestamp",
+        "reqs_met": "integer", "reqs_total": "integer", "open_questions": "integer", "listing_digest": "digest",
+        "prompt_version": "id", "constraints_digest": "digest", "bank_digest": "digest", "profile_revision": "integer",
+        "profile_digest": "digest", "pinned_record": "id", "pinned_revision": "id", "pinned_digest": "digest",
+        "model_target": "id", "adapter": "id",
+    },
+    "job_lease": {"name": "code", "lease_owner": "owner", "lease_pid": "integer", "lease_until": "real", "claimed_at": "real"},
 }
 _NUMERIC = {"integer": ("INTEGER",), "real": ("REAL",)}
 #: Kept separate from the store's own shapes on purpose: this is the test's reading of "no text".
@@ -141,6 +159,21 @@ def _scenario(store: PipelineStore) -> None:
     store.fail_call(answered, "model_output_invalid")
     store.replace_postings(_build(), [_posting_row(), _posting_row(job=_JOB + "/2", removed_at="2026-10-02T09:00:00.000000Z", state="needs_answers")])
     store.set_match_ranks([(2, _JOB, _P)])
+    store.import_run("run_20260901T100000Z", _P, [_run_row(), _run_row(job=_JOB + "/2", state="needs_answers")])
+    store.import_run("run_20260801T100000Z", "ephemeral", [_run_row(run_id="run_20260801T100000Z", profile_id="ephemeral", profile_revision=None, profile_digest=None)])
+    assert store.take_lease("rank") and store.take_lease("assess_batch", worker="w1")
+
+
+def _run_row(**changes: object) -> RunAssessment:
+    values: dict[str, object] = dict(
+        run_id="run_20260901T100000Z", job=_JOB, profile_id=_P, state="matched", assessed_at="2026-09-01T10:00:00.000000Z",
+        reqs_met=2, reqs_total=3, open_questions=1, listing_digest=_digest("c"), prompt_version="assess-prompt-v7",
+        constraints_digest=_digest("k"), bank_digest=_digest("b"), profile_revision=3, profile_digest=_digest("p"),
+        pinned_record="rec_0001", pinned_revision="rev_0002", pinned_digest=_digest("r"), model_target="codex_cli",
+        adapter="codex_cli",
+    )
+    values.update(changes)
+    return RunAssessment(**values)  # type: ignore[arg-type]
 
 
 def _build() -> PostingBuild:
@@ -182,6 +215,7 @@ def test_every_stored_value_is_an_id_a_digest_a_code_or_a_number_and_nothing_is_
     assert seen["step_run"] >= 4 and seen["approval"] == 1 and seen["anchor"] == 1 and seen["cap_counter"] == 2
     assert seen["model_call"] == 3
     assert seen["posting"] == 2 and seen["posting_build"] == 1
+    assert seen["run_import"] == 2 and seen["run_assessment"] == 3 and seen["job_lease"] == 2
     # And the raw file as a whole: no email shape anywhere in its bytes.
     connection.close()
     store.close()
@@ -224,6 +258,17 @@ def test_every_stored_value_is_an_id_a_digest_a_code_or_a_number_and_nothing_is_
         ("posting_listing_digest", "Own the Python inference services"),
         ("posting_pinned_digest", "Jane Doe resume v3"),
         ("posting_since", "yesterday"),
+        ("run_run_id", "the run from last tuesday"),
+        ("run_job", "Staff Engineer at Acme, remote"),
+        ("run_profile_id", "Jane Doe"),
+        ("run_state", "Needs your answers"),
+        ("run_prompt_version", "You are assessing a resume"),
+        ("run_constraints_digest", "needs sponsorship, lives in Denver"),
+        ("run_pinned_record", "Jane Doe resume v3"),
+        ("run_model_target", "call me at 555 123 4567"),
+        ("run_adapter", "jane.doe@example.com"),
+        ("run_assessed_at", "last tuesday"),
+        ("lease", "Assess these postings"),
     ],
 )
 def test_text_is_refused_before_it_reaches_the_file(tmp_path: Path, call: str, bad: str) -> None:
@@ -236,6 +281,11 @@ def test_text_is_refused_before_it_reaches_the_file(tmp_path: Path, call: str, b
                           lane="claude_cli", model_target=args["model_target"])
         elif call == "posting_since":
             store.postings(since=bad)
+        elif call == "lease":
+            store.take_lease(bad)
+        elif call.startswith("run_"):
+            row = _run_row(**{call.removeprefix("run_"): bad})
+            store.import_run(row.run_id, row.profile_id, [row])
         elif call.startswith("posting_"):
             store.replace_postings(_build(), [_posting_row(), _posting_row(**{"job": _JOB + "/2", call.removeprefix("posting_"): bad})])
         elif call == "call_fail":
