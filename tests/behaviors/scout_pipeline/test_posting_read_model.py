@@ -137,7 +137,7 @@ def test_a_row_carries_the_cached_rank_score_the_assessment_and_removed_at(tmp_p
     done = _refresh(fx)
     first = {row.profile_id: row for row in _rows(fx, jobs=[job_url("acme", 1)])}
 
-    # A rank score in the home's score cache for the SECOND profile (written as the ranker writes it): it becomes the best tag.
+    # A rank score in the home's score cache for the SECOND profile (written as the ranker writes it).
     view = next(item for item in done.profiles if item.profile_id == fx.second_profile_id)
     prefs = rank_prefs(view.config)  # type: ignore[arg-type]
     model = postings.rank_model_key(fx.home_root, fx.target)
@@ -157,9 +157,10 @@ def test_a_row_carries_the_cached_rank_score_the_assessment_and_removed_at(tmp_p
     assert done.builds == {fx.default_profile_id: postings.BUILD_FACTS, fx.second_profile_id: postings.BUILD_FACTS}
     assert fx.base.model.calls == calls  # the read model never calls a model
     rows = {row.profile_id: row for row in _rows(fx, jobs=[job_url("acme", 1)])}
-    assert rows[fx.second_profile_id].rank_score == 91 and rows[fx.second_profile_id].match_rank == 1
+    # 0110-8-01: the profile with a current assessment stays the best tag; another profile's rank score does not move it.
+    assert rows[fx.second_profile_id].rank_score == 91 and rows[fx.second_profile_id].match_rank == 2
     assessed = rows[fx.default_profile_id]
-    assert assessed.match_rank == 2 and assessed.state == "matched" and (assessed.reqs_met, assessed.reqs_total) == (1, 2)
+    assert assessed.match_rank == 1 and assessed.state == "matched" and (assessed.reqs_met, assessed.reqs_total) == (1, 2)
     assert assessed.assessed_at is not None and not assessed.tailored
 
     # The board stops listing posting 2: the row stays, with removed_at, and a live read leaves it out.

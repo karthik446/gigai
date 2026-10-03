@@ -240,6 +240,10 @@ def test_url_posting_text_is_served_and_listed_and_no_rank_score_is_written(runn
     assert job_state == {"state": "matched", "since": body["created_at"], "next_events": ["applied"]}
     # 0110-039: and the derived ``basis_stale`` (made just now with the profile's own settings: current).
     assert listed[0].pop("basis_stale") is False and "basis_stale_reason" not in listed[0]
+    # 0110-8-11: and the derived ``company_name`` beside the job's stored ``company`` (the response writer adds it to every
+    # posting-shaped object; no index entry here, so it is the stored name itself). The stored file never carries it.
+    assert listed[0]["job"].pop("company_name") == listed[0]["job"]["company"] == "Acme"
+    assert body["job"]["company_name"] == "Acme"
     assert listed[0] == json.loads(Path(body["stored_path"]).read_text(encoding="utf-8"))
 
 

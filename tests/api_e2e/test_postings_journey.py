@@ -118,11 +118,16 @@ def test_postings_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         approved = client.post("/api/postings/assess", json=question["yes"]["api"]["body"])
         assert approved.status_code == 200, approved.text
         done = _assert_public_only(approved)
-        assert done["status"] == "assessed" and done["assessed"] == {"requested": 1, "assessed": 1, "failed": [], "stopped": None}
+        assert done["status"] == "assessed" and done["assessed"] == {"requested": 1, "assessed": 1, "failed": [], "stopped": None, "fetched_on_demand": 0}
         assert done["approval"]["decided_by"] == "operator" and done["approval"]["jobs"] == 1 and done["approval"]["id"].startswith("apv_")
         assert sum(item["calls"] for item in client.get("/api/metrics?kind=assess").json()["aggregates"]) == assess_calls + 1
         scored = next(item for item in client.get("/api/postings?state=assessed").json()["postings"]["rows"] if item["job_identity"] == _JOB)
         assert scored["state"] != "not_assessed" and scored["score_kind"] == "assessment" and scored["assessment_basis"] == {"origin": "quick_assess"}
+        # The combined 0.1.10.8 contract on a posting row: U4's company_name and tag_pending next to U3's group, flag and score text
+        # (U2's fetched_on_demand is in the batch above).
+        assert (scored["company"], scored["company_name"], scored["tag_pending"]) == ("acmenew", "Acmenew", False)
+        assert (scored["sort_group"], scored["tailored"], scored["stale_label"], scored["assessment_detail"]) == ("current", False, None, True)
+        assert scored["score_text"] == "Needs your answers · 1 of 2 requirements · not ranked yet"
         assert client.post("/api/postings/assess", json={"jobs": [_JOB], "approve": True}).json()["status"] == "nothing_to_assess"
 
         # 5. The old run is read-only history: imported once, still served by the run routes.

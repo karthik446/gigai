@@ -49,13 +49,16 @@ class NewRoutesMixin:
             self._error(HTTPStatus.NOT_FOUND, "target_unavailable", "a target path is required")
         return target
 
-    def _answer_new(self, target, *, profile_id, peek: bool, assess: bool | None, since, yours: bool = False) -> None:
+    def _answer_new(
+        self, target, *, profile_id, peek: bool, assess: bool | None, since, yours: bool = False, reassess_stale: bool = False
+    ) -> None:
         try:
             if yours:
                 response = scout_new_yours(self._backend.home_root, target, profile_id=profile_id, since=since)
             else:
                 response = scout_new(
-                    self._backend.home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since
+                    self._backend.home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since,
+                    reassess_stale=reassess_stale,
                 )
         except (ScoutNewError, PostingModelError, PipelineStoreError) as exc:
             self._error(_ERROR_STATUS.get(exc.code, HTTPStatus.CONFLICT), exc.code, str(exc))
@@ -95,14 +98,17 @@ class NewRoutesMixin:
         if not isinstance(body, dict):
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "the body must be a JSON object")
             return
-        unknown = sorted(set(body) - {"assess", "peek", "profile_id", "since"})
+        unknown = sorted(set(body) - {"assess", "peek", "profile_id", "reassess_stale", "since"})
         if unknown:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown key: {unknown[0]}")
             return
         assess, peek = body.get("assess"), body.get("peek", False)
         profile_id, since = body.get("profile_id"), body.get("since")
-        if type(assess) is not bool or type(peek) is not bool:
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "assess (required) and peek must be true or false")
+        reassess_stale = body.get("reassess_stale", False)
+        if type(assess) is not bool or type(peek) is not bool or type(reassess_stale) is not bool:
+            self._error(
+                HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "assess (required), peek and reassess_stale must be true or false"
+            )
             return
         if any(value is not None and type(value) is not str for value in (profile_id, since)):
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "profile_id and since must be strings")
@@ -110,7 +116,7 @@ class NewRoutesMixin:
         target = self._new_target()
         if target is None:
             return
-        self._answer_new(target, profile_id=profile_id, peek=peek, assess=assess, since=since)
+        self._answer_new(target, profile_id=profile_id, peek=peek, assess=assess, since=since, reassess_stale=reassess_stale)
 
     def _handle_post_new_seen(self) -> None:
         body = self._read_json_body()

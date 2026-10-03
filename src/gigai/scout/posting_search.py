@@ -58,7 +58,7 @@ from .pipeline.store import (
     RunAssessment,
 )
 from .postings import PostingModelError, ProfileView
-from .scout_new import FIRST_USE_DAYS, POSTINGS_LABELS, _assess, _grouped, _row_json, _score, _shown, check_response
+from .scout_new import FIRST_USE_DAYS, POSTINGS_LABELS, _assess, _grouped, _row_json, _score, _shown, check_response, in_order
 
 SCHEMA_VERSION = "scout-postings:1"
 ASSESS_SCHEMA_VERSION = "scout-postings-assess:1"
@@ -81,8 +81,6 @@ STATES = frozenset(_ROW_STATES | {STATE_ASSESSED, STATE_RECOMMENDED})
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
 _NOT_ASSESSED = "not_assessed"
-#: DESIGN 10.5: the Scout label first, then what waits for the user's answers, then matched, then the rest by score.
-_PRIORITY = {"needs_answers": 1, "matched": 2}
 
 
 class PostingSearchError(ValueError):
@@ -151,15 +149,11 @@ def _wanted(row: PostingRecord, states: Sequence[str]) -> bool:
             return True
         if state == STATE_RECOMMENDED and row.label == STATE_RECOMMENDED:
             return True
+        if state == "tailored" and row.tailored:
+            return True  # 0110-8-12: a tailored resume is a flag beside the verdict state, not a state
         if state == row.state:
             return True
     return False
-
-
-def _order(row: PostingRecord) -> tuple[int, int, str]:
-    score = _score(row)[0]
-    priority = 0 if row.label == STATE_RECOMMENDED else _PRIORITY.get(row.state, 3)
-    return priority, -(score if score is not None else -1), row.job
 
 
 class _Selection:
@@ -194,8 +188,8 @@ class _Selection:
         if words:
             text = _index_words(home_root, [row for _group, row in shown])
             shown = [(group, row) for group, row in shown if all(word in text.get(row.job, "") for word in words)]
-        shown.sort(key=lambda pair: _order(pair[1]))
-        self.shown = shown
+        # 0110-8-04: the grid's one order (``scout_new.order_key``): current, stale, not assessed; verdict; rank.
+        self.shown = shown = in_order(shown)
         self.new = sum(1 for _group, row in shown if row.first_seen > self.since and row.removed_at is None)
 
     def profiles_json(self) -> list[dict[str, object]]:
@@ -242,6 +236,7 @@ def _rows_json(
                 "verdict": None, "met": row.reqs_met, "requirements": row.reqs_total,
                 "percent": score if kind == "assessment" else None, "assessed_at": row.assessed_at,
             }
+            entry["assessment_detail"] = False
             origin = run_history.basis_json(old)
         entry["assessment_basis"] = origin
         rows.append(entry)
@@ -544,13 +539,7 @@ def render(response: Mapping[str, object]) -> str:
     assert isinstance(listing, Mapping)
     for row in listing["rows"]:  # type: ignore[union-attr]
         tags = ", ".join(str(labels.get(item["profile_id"], item["profile_id"])) for item in row["profiles"])
-        if row["score"] is None:
-            score = "not ranked yet"
-        elif row["score_kind"] == "assessment":
-            score = f"{row['score']}% of requirements met"
-        else:
-            score = f"rank {row['score']}"
-        lines.append(f"{row['company_name'] or row['company'] or '?'}: {row['title'] or row['job_identity']} [{tags}] {str(row['state']).replace('_', ' ')}, {score}")
+        lines.append(f"{row['company_name'] or row['company'] or '?'}: {row['title'] or row['job_identity']} [{tags}] {row['score_text']}")
         lines.append(f"  {row['job_identity']}")
     history = response.get("history")
     if isinstance(history, Mapping):
