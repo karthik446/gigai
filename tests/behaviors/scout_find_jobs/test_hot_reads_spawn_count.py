@@ -38,14 +38,15 @@ from gigai.scout.find_jobs.api import server as server_module
 
 from .test_read_routes_lock_free import running_server  # noqa: F401 - the in-process server fixture
 
-# What one read of an UNCHANGED workpad may spawn. The three left on
-# /api/config (and the one on /api/setup) are the backend's own one-call
-# head lookups (``run._cheap_workpad_head``) that key its profile and
-# resume caches.
-UNCHANGED_SPAWNS_MAX = {"/api/profiles": 0, "/api/config": 3, "/api/setup": 1, "/api/applications": 0}
+# What one read of an UNCHANGED workpad may spawn: nothing. 0110-045: the
+# backend's head lookups (``run._cheap_workpad_head``) that key its profile
+# and resume caches read ``.git``'s own files; they were the three spawns
+# left on /api/config and the one on /api/setup.
+UNCHANGED_SPAWNS_MAX = {"/api/profiles": 0, "/api/config": 0, "/api/setup": 0, "/api/applications": 0}
 # What the FIRST read may spawn, nothing kept from an earlier one (a server
-# that just started; the read after a journal write).
-FIRST_SPAWNS_MAX = {"/api/profiles": 36, "/api/config": 58, "/api/setup": 32, "/api/applications": 34}
+# that just started; the read after a journal write). /api/config: 30
+# measured (34 before 0110-045).
+FIRST_SPAWNS_MAX = {"/api/profiles": 36, "/api/config": 34, "/api/setup": 32, "/api/applications": 34}
 PAGE_LOAD_SPAWNS_MAX = 75
 HOT = tuple(UNCHANGED_SPAWNS_MAX)
 

@@ -76,7 +76,7 @@ from .scout.find_jobs.contracts import (
     UsageBlock,
     aggregate_status,
 )
-from .workpad import ResolvedWorkpad, resolve_workpad
+from .workpad import ResolvedWorkpad, resolve_workpad, workpad_head_without_git
 
 
 class RunError(RuntimeError):
@@ -204,6 +204,10 @@ def _cheap_workpad_head(root: Path) -> str | None:
     lookup failure always falls through to the real resolution below.
     """
 
+    # 0110-045: the head is in ``.git``'s own files unless the ref is packed; only then ask git.
+    head = workpad_head_without_git(root)
+    if head is not None:
+        return head
     try:
         result = _git(root, "rev-parse", "--verify", "HEAD", check=False)
     except OSError:

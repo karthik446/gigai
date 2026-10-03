@@ -2046,7 +2046,7 @@ def _acquire_node_body(
     # unchanged skip (``proposal_execution._basis_stale``). No home/target
     # (direct-call tests) or no profile: no bank.
     from .. import story_bank
-    from ..assessment_core import constraints_digest
+    from ..assessment_core import assess_prompt_version, constraints_digest
     from ..contact_cleanup import same_resume_revision
     from ..proposal_execution import _basis_stale
 
@@ -2092,7 +2092,9 @@ def _acquire_node_body(
                 # must keep working unchanged, not be newly blocked by an
                 # unattributable-profile false negative.
                 and prior.profile_id == current_profile_id
-                and not _basis_stale(prior, bank=bank, constraints=current_constraints)
+                and not _basis_stale(
+                    prior, bank=bank, constraints=current_constraints, prompt_version=assess_prompt_version(input.config.effective_work_mode)
+                )
             ):
                 carried_forward[row.normalized_url] = prior
             else:

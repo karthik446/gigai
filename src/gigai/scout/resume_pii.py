@@ -27,7 +27,8 @@ RESUME_WARNING = (
 #: Shown (UI, CLI, API ``contact_removed.message``) when an import removed contact lines.
 REMOVED_MESSAGE = "We removed your contact lines; you'll add them when you make a PDF."
 
-_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
+# Tried only from the first character of a run (a match from inside one is a match from its start), so a long run is read once.
+_EMAIL = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
 _PHONE = re.compile(
     r"(?<![\w.])(?:\+\d{1,3}[\s.-]?)?(?:\(\d{3}\)\s?|\d{3}[\s.-])\d{3}[\s.-]\d{4}(?!\d)"
     r"|(?<![\w.])\+\d{1,3}(?:[\s.-]?\d{2,4}){2,4}(?!\d)"

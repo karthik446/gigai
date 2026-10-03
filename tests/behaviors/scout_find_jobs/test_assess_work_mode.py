@@ -197,7 +197,10 @@ def test_a_work_mode_adds_exactly_one_paragraph_after_the_constraints_line(mode:
     prompt = render_assess_prompt(_JOB, _ctx(mode))
 
     assert _work_mode(prompt) == expected
-    assert assess_prompt_version(mode) == ASSESS_PROMPT_VERSION == "assess-prompt-v5"
+    # Decision #207: the hybrid paragraph's words changed in 0110-048, so a hybrid prompt has its own name.
+    hybrid = normalize_work_mode(mode) == "hybrid"
+    assert assess_prompt_version(mode) == ("assess-prompt-v6" if hybrid else ASSESS_PROMPT_VERSION)
+    assert ASSESS_PROMPT_VERSION == "assess-prompt-v5"
     blocks = prompt.split("\n\n")
     paragraph = next(block for block in blocks if block.startswith("CANDIDATE WORK MODE"))
     assert blocks[blocks.index(paragraph) - 1].lstrip("\n").startswith("CANDIDATE CONSTRAINTS:")  # the resume ends with a newline
@@ -520,4 +523,4 @@ def test_an_unchanged_posting_is_assessed_again_when_the_work_mode_is_set_or_cha
 
 
 def test_the_shipped_version_names() -> None:
-    assert assessment_core.CURRENT_ASSESS_PROMPT_VERSIONS == {"assess-prompt-v4", "assess-prompt-v5"}
+    assert assessment_core.CURRENT_ASSESS_PROMPT_VERSIONS == {"assess-prompt-v4", "assess-prompt-v5", "assess-prompt-v6"}
