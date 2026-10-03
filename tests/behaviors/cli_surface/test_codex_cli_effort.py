@@ -15,6 +15,7 @@ import sys
 from types import SimpleNamespace
 from typing import Any, cast
 
+from gigai.adapters.cli_probe import CodexLockdown
 from gigai.adapters.codex_cli import CodexCLIAdapter
 from gigai.adapters.port import InvocationRequest
 from gigai.scout.find_jobs import model_rank
@@ -39,8 +40,11 @@ def _request(model: str = "default", effort: str | None = None) -> InvocationReq
 _ASSESS_ARGV = (
     _EXE, "exec", "--json", "--ephemeral", "--sandbox", "read-only",
     "--disable", "shell_tool", "--disable", "memories",  # 0110-004: no shell, no memories
+    "-c", 'web_search="disabled"',  # 0110-8-07: no web search (codex's default is "cached": on)
     "--skip-git-repo-check", "--cd", _DIR, "-",
 )
+# What a codex that lists only the two required features and has no MCP server must switch off.
+_LOCKDOWN = CodexLockdown()
 
 
 def test_default_assess_argv_is_unchanged_whatever_the_effort() -> None:
@@ -48,8 +52,8 @@ def test_default_assess_argv_is_unchanged_whatever_the_effort() -> None:
 
     assert adapter.honours_reasoning_effort is False
     for effort in (None, "low", "high"):
-        assert adapter.argv(_request(effort=effort), _DIR) == _ASSESS_ARGV
-    assert adapter.argv(_request(model="gpt-x", effort="low"), _DIR) == (
+        assert adapter.argv(_request(effort=effort), _DIR, _LOCKDOWN) == _ASSESS_ARGV
+    assert adapter.argv(_request(model="gpt-x", effort="low"), _DIR, _LOCKDOWN) == (
         *_ASSESS_ARGV[:-1], "--model", "gpt-x", "-",
     )
 
@@ -58,12 +62,12 @@ def test_effort_copy_passes_the_requested_effort_as_a_config_override() -> None:
     ranker = CodexCLIAdapter(executable=_EXE, timeout_seconds=9.0).effort_copy()
 
     assert ranker.honours_reasoning_effort is True
-    assert ranker.argv(_request(effort="low"), _DIR) == (
+    assert ranker.argv(_request(effort="low"), _DIR, _LOCKDOWN) == (
         *_ASSESS_ARGV[:-1], "-c", "model_reasoning_effort=low", "-",
     )
     # no effort asked, or one codex does not take: nothing is added
-    assert ranker.argv(_request(effort=None), _DIR) == _ASSESS_ARGV
-    assert ranker.argv(_request(effort="max"), _DIR) == _ASSESS_ARGV
+    assert ranker.argv(_request(effort=None), _DIR, _LOCKDOWN) == _ASSESS_ARGV
+    assert ranker.argv(_request(effort="max"), _DIR, _LOCKDOWN) == _ASSESS_ARGV
 
 
 def test_invoke_runs_exactly_the_argv(tmp_path: Path) -> None:
@@ -83,9 +87,16 @@ def test_invoke_runs_exactly_the_argv(tmp_path: Path) -> None:
     CodexCLIAdapter(executable=str(executable)).effort_copy().invoke(_request(effort="low"))
     rank = json.loads(record.read_text(encoding="utf-8"))
 
-    assert "-c" not in assess and "model_reasoning_effort=low" not in assess
-    assert rank[rank.index("-c") + 1] == "model_reasoning_effort=low"
-    assert [item for item in rank if item not in {"-c", "model_reasoning_effort=low"}][:-2] == assess[:-2]
+    assert "model_reasoning_effort=low" not in assess
+    assert "model_reasoning_effort=low" in rank and rank[rank.index("model_reasoning_effort=low") - 1] == "-c"
+    effort_at = rank.index("model_reasoning_effort=low")
+    without_effort = [*rank[: effort_at - 1], *rank[effort_at + 1 :]]
+
+    def stable(argv: list[str]) -> list[str]:
+        # each call has its own directory (--cd and the model catalog in it)
+        return [item for item in argv[:-2] if "gigai-codex-" not in item]
+
+    assert stable(without_effort) == stable(assess)  # the effort override is the only difference
 
 
 def test_the_ranker_uses_its_own_effort_copy_and_leaves_the_assess_port_alone(monkeypatch) -> None:
