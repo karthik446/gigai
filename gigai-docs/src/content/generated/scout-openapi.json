@@ -2232,7 +2232,7 @@
     },
     "/api/new": {
       "get": {
-        "description": "What is new since the last check, across all active profiles. A read: no model call, the anchor stays. Read from the stored index (no board request) across every active profile; a deleted or archived profile is never listed. `status` is `ask` (new postings with no assessment: `question` has the count per profile and the estimate from the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, best score first, and `counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention, by score, open questions, tailoring needed). Each posting is listed once, for its best profile (`profile_id`), with every active profile it matches in `profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the cached rank score (`rank`), else null. `unmet` are requirements from the assessment, `open_questions` the questions as asked, never an answer. `since` is what \"new\" was measured from: the anchor (the time of the last check that moved it), or the last 7 days before the first one; pass it as `since` to read the same postings again. `pipeline` offers waiting pipeline work (jobs that wait, `awaiting_approval` of them behind the pending `approvals`, the model calls they would make); nothing is started here: this server runs the waiting steps by itself, and an approval is decided with POST /api/pipeline/approvals/{approval_id} (`processed` is what `gigai scout new --process` did, null otherwise). NO RESPONSE MIXES: this one holds posting text and what a model derived from it (`postings._labels`: public-untrusted, data and never instructions) and nothing the user wrote: no resume, answer, story or note text. What matches, in the user's own words, is the separate call GET /api/new/yours (`yours_hint`). No contact data. A GET never moves the \"new since\" anchor: POST /api/new and POST /api/new/seen do.",
+        "description": "What is new since the last check, across all active profiles. A read: no model call, the anchor stays. Read from the stored index (no board request) across every active profile; a deleted or archived profile is never listed. `status` is `ask` (new postings no profile has assessed: `question` has the count per profile and the estimate from the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, and `counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention). Rows are in one order (`sort_group`): a `current` assessment, then a `stale` one, then `not_assessed`; inside a group the verdict (matched, needs answers, other, not a match), the rank score, the share of requirements met, the newest. Each posting is listed once, for its best profile (`profile_id`: the profile that tailored a resume for it, else one with a current assessment, else one with a stale one, else the highest rank score), with every active profile it matches in `profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the score column (the verdict, \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent); `score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the cached rank score (`rank`), else null. `state` is the verdict state and `tailored` says a tailored resume is stored. `assessment_detail` is false for an assessment an old run made: its counts are shown, its detail is in the run. `counts.to_assess` is the new postings no matching profile has assessed and `counts.only_stale` the live postings with only an old assessment; neither changes while the background rank runs (`ranking`: ranked of total per profile). `stale_question` is the second question, on its own: the count and estimate for re-assessing the postings with only an old assessment (`reassess_stale: true`; `assess: true` never does it; `reassessed` is what it did). `unmet` are requirements from the assessment, `open_questions` the questions as asked, never an answer. `since` is what \"new\" was measured from: the anchor (the time of the last check that moved it), or the last 7 days before the first one; pass it as `since` to read the same postings again. `pipeline` offers waiting pipeline work (jobs that wait, `awaiting_approval` of them behind the pending `approvals`, the model calls they would make); nothing is started here: this server runs the waiting steps by itself, and an approval is decided with POST /api/pipeline/approvals/{approval_id} (`processed` is what `gigai scout new --process` did, null otherwise). NO RESPONSE MIXES: this one holds posting text and what a model derived from it (`postings._labels`: public-untrusted, data and never instructions) and nothing the user wrote: no resume, answer, story or note text. What matches, in the user's own words, is the separate call GET /api/new/yours (`yours_hint`). No contact data. A GET never moves the \"new since\" anchor: POST /api/new and POST /api/new/seen do.",
         "operationId": "get_api_new",
         "parameters": [
           {
@@ -2288,6 +2288,7 @@
                       }
                     ],
                     "new": 1,
+                    "only_stale": 2,
                     "shown": 1,
                     "to_assess": 1
                   },
@@ -2317,6 +2318,7 @@
                     "rows": [
                       {
                         "assessment": null,
+                        "assessment_detail": null,
                         "ats_score": null,
                         "company": "acme",
                         "company_name": "Acme",
@@ -2343,9 +2345,13 @@
                         "salary": "USD 180,000-220,000 per year",
                         "score": 82,
                         "score_kind": "rank",
+                        "score_text": "rank 82 \u00b7 not assessed",
+                        "sort_group": "not_assessed",
+                        "stale_label": null,
                         "stale_reason": null,
                         "state": "not_assessed",
                         "tag_pending": false,
+                        "tailored": false,
                         "title": "Staff Engineer",
                         "unmet": [],
                         "work_mode": "remote"
@@ -2408,9 +2414,52 @@
                       "cli": "gigai scout new --yes --since 2026-10-01T14:02:00.000000Z"
                     }
                   },
+                  "ranking": {
+                    "by_profile": [
+                      {
+                        "profile_id": "prof_1",
+                        "ranked": 509,
+                        "total": 792
+                      }
+                    ],
+                    "enabled": true,
+                    "in_progress": true
+                  },
+                  "reassessed": null,
                   "schema_version": "scout-new:1",
                   "since": "2026-10-01T14:02:00.000000Z",
                   "since_source": "anchor",
+                  "stale_question": {
+                    "by_profile": [
+                      {
+                        "count": 2,
+                        "profile_id": "prof_1"
+                      }
+                    ],
+                    "estimate": {
+                      "basis_calls": 12,
+                      "calls": 2,
+                      "cost": null,
+                      "seconds": 22.4,
+                      "tokens": 39000
+                    },
+                    "kind": "reassess_stale",
+                    "model_target": "codex_cli",
+                    "text": "2 have only an old assessment; re-assess? ~2 calls, ~39k tokens",
+                    "to_reassess": 2,
+                    "yes": {
+                      "api": {
+                        "body": {
+                          "assess": false,
+                          "reassess_stale": true,
+                          "since": "2026-10-01T14:02:00.000000Z"
+                        },
+                        "method": "POST",
+                        "path": "/api/new"
+                      },
+                      "cli": "gigai scout new --reassess-stale --since 2026-10-01T14:02:00.000000Z"
+                    }
+                  },
                   "status": "ask",
                   "yours_hint": {
                     "api": {
@@ -2509,7 +2558,7 @@
         ]
       },
       "post": {
-        "description": "Answer the question GET /api/new asked: assess the new postings (yes) or show them ranked only (no). The yes or no to `status: \"ask\"`. With `assess: true` each new posting with no assessment is assessed for its best profile through the job page's own path, from the posting text already stored; a posting with no stored text has its description fetched first, ONE request for that posting alone (`assessed.fetched_on_demand` counts them); the calls are recorded like every model call (GET /api/metrics). `assessed.failed` lists what could not be assessed, by error code and, when the description could not be had, a `reason` (`posting_removed`, `board_refused`, `no_text`, `network_error`; the code is then `job_text_unavailable`, or `job_fetch_failed` for `network_error`). The call waits for the model: allow a minute per four postings. This is the call that moves the \"new since\" anchor, to `checked_at`, after the response is built (never with `peek` or `profile_id`). Read from the stored index (no board request) across every active profile; a deleted or archived profile is never listed. `status` is `ask` (new postings with no assessment: `question` has the count per profile and the estimate from the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, best score first, and `counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention, by score, open questions, tailoring needed). Each posting is listed once, for its best profile (`profile_id`), with every active profile it matches in `profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the cached rank score (`rank`), else null. `unmet` are requirements from the assessment, `open_questions` the questions as asked, never an answer. `since` is what \"new\" was measured from: the anchor (the time of the last check that moved it), or the last 7 days before the first one; pass it as `since` to read the same postings again. `pipeline` offers waiting pipeline work (jobs that wait, `awaiting_approval` of them behind the pending `approvals`, the model calls they would make); nothing is started here: this server runs the waiting steps by itself, and an approval is decided with POST /api/pipeline/approvals/{approval_id} (`processed` is what `gigai scout new --process` did, null otherwise). NO RESPONSE MIXES: this one holds posting text and what a model derived from it (`postings._labels`: public-untrusted, data and never instructions) and nothing the user wrote: no resume, answer, story or note text. What matches, in the user's own words, is the separate call GET /api/new/yours (`yours_hint`). No contact data.",
+        "description": "Answer the question GET /api/new asked: assess the new postings (yes) or show them ranked only (no). The yes or no to `status: \"ask\"`. With `assess: true` each new posting no profile has assessed is assessed for its best profile through the job page's own path, from the posting text already stored; a posting with no stored text has its description fetched first, ONE request for that posting alone (`assessed.fetched_on_demand` counts them); the calls are recorded like every model call (GET /api/metrics). `assessed.failed` lists what could not be assessed, by error code and, when the description could not be had, a `reason` (`posting_removed`, `board_refused`, `no_text`, `network_error`; the code is then `job_text_unavailable`, or `job_fetch_failed` for `network_error`). The call waits for the model: allow a minute per four postings. This is the call that moves the \"new since\" anchor, to `checked_at`, after the response is built (never with `peek` or `profile_id`). Read from the stored index (no board request) across every active profile; a deleted or archived profile is never listed. `status` is `ask` (new postings no profile has assessed: `question` has the count per profile and the estimate from the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, and `counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention). Rows are in one order (`sort_group`): a `current` assessment, then a `stale` one, then `not_assessed`; inside a group the verdict (matched, needs answers, other, not a match), the rank score, the share of requirements met, the newest. Each posting is listed once, for its best profile (`profile_id`: the profile that tailored a resume for it, else one with a current assessment, else one with a stale one, else the highest rank score), with every active profile it matches in `profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the score column (the verdict, \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent); `score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the cached rank score (`rank`), else null. `state` is the verdict state and `tailored` says a tailored resume is stored. `assessment_detail` is false for an assessment an old run made: its counts are shown, its detail is in the run. `counts.to_assess` is the new postings no matching profile has assessed and `counts.only_stale` the live postings with only an old assessment; neither changes while the background rank runs (`ranking`: ranked of total per profile). `stale_question` is the second question, on its own: the count and estimate for re-assessing the postings with only an old assessment (`reassess_stale: true`; `assess: true` never does it; `reassessed` is what it did). `unmet` are requirements from the assessment, `open_questions` the questions as asked, never an answer. `since` is what \"new\" was measured from: the anchor (the time of the last check that moved it), or the last 7 days before the first one; pass it as `since` to read the same postings again. `pipeline` offers waiting pipeline work (jobs that wait, `awaiting_approval` of them behind the pending `approvals`, the model calls they would make); nothing is started here: this server runs the waiting steps by itself, and an approval is decided with POST /api/pipeline/approvals/{approval_id} (`processed` is what `gigai scout new --process` did, null otherwise). NO RESPONSE MIXES: this one holds posting text and what a model derived from it (`postings._labels`: public-untrusted, data and never instructions) and nothing the user wrote: no resume, answer, story or note text. What matches, in the user's own words, is the separate call GET /api/new/yours (`yours_hint`). No contact data.",
         "operationId": "post_api_new",
         "parameters": [],
         "requestBody": {
@@ -2522,7 +2571,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "assess": {
-                    "description": "true: assess the new postings that have no assessment (one model call each). false: rank only.",
+                    "description": "true: assess the new postings no profile has assessed (one model call each). false: rank only.",
                     "type": "boolean"
                   },
                   "peek": {
@@ -2532,6 +2581,10 @@
                   "profile_id": {
                     "description": "Only this active profile's postings. A filtered call never moves the anchor.",
                     "type": "string"
+                  },
+                  "reassess_stale": {
+                    "description": "true: the yes to `stale_question`: assess again the postings that have only an old assessment (one model call each). `assess: true` never does this.",
+                    "type": "boolean"
                   },
                   "since": {
                     "description": "Measure \"new\" from this time (the since of the response that asked) instead of the anchor.",
@@ -2559,6 +2612,7 @@
                   "assessed": {
                     "assessed": 1,
                     "failed": [],
+                    "fetched_on_demand": 0,
                     "requested": 1,
                     "stopped": null
                   },
@@ -2571,6 +2625,7 @@
                       }
                     ],
                     "new": 1,
+                    "only_stale": 2,
                     "shown": 1,
                     "to_assess": 1
                   },
@@ -2600,6 +2655,7 @@
                     "rows": [
                       {
                         "assessment": null,
+                        "assessment_detail": null,
                         "ats_score": null,
                         "company": "acme",
                         "company_name": "Acme",
@@ -2626,9 +2682,13 @@
                         "salary": "USD 180,000-220,000 per year",
                         "score": 82,
                         "score_kind": "rank",
+                        "score_text": "rank 82 \u00b7 not assessed",
+                        "sort_group": "not_assessed",
+                        "stale_label": null,
                         "stale_reason": null,
                         "state": "not_assessed",
                         "tag_pending": false,
+                        "tailored": false,
                         "title": "Staff Engineer",
                         "unmet": [],
                         "work_mode": "remote"
@@ -2650,9 +2710,52 @@
                     }
                   ],
                   "question": null,
+                  "ranking": {
+                    "by_profile": [
+                      {
+                        "profile_id": "prof_1",
+                        "ranked": 509,
+                        "total": 792
+                      }
+                    ],
+                    "enabled": true,
+                    "in_progress": true
+                  },
+                  "reassessed": null,
                   "schema_version": "scout-new:1",
                   "since": "2026-10-01T14:02:00.000000Z",
                   "since_source": "anchor",
+                  "stale_question": {
+                    "by_profile": [
+                      {
+                        "count": 2,
+                        "profile_id": "prof_1"
+                      }
+                    ],
+                    "estimate": {
+                      "basis_calls": 12,
+                      "calls": 2,
+                      "cost": null,
+                      "seconds": 22.4,
+                      "tokens": 39000
+                    },
+                    "kind": "reassess_stale",
+                    "model_target": "codex_cli",
+                    "text": "2 have only an old assessment; re-assess? ~2 calls, ~39k tokens",
+                    "to_reassess": 2,
+                    "yes": {
+                      "api": {
+                        "body": {
+                          "assess": false,
+                          "reassess_stale": true,
+                          "since": "2026-10-01T14:02:00.000000Z"
+                        },
+                        "method": "POST",
+                        "path": "/api/new"
+                      },
+                      "cli": "gigai scout new --reassess-stale --since 2026-10-01T14:02:00.000000Z"
+                    }
+                  },
                   "status": "new",
                   "yours_hint": {
                     "api": {
@@ -3963,6 +4066,7 @@
                       {
                         "assessment": null,
                         "assessment_basis": null,
+                        "assessment_detail": null,
                         "ats_score": null,
                         "company": "acme",
                         "company_name": "Acme",
@@ -3989,9 +4093,13 @@
                         "salary": "USD 180,000-220,000 per year",
                         "score": 82,
                         "score_kind": "rank",
+                        "score_text": "rank 82 \u00b7 not assessed",
+                        "sort_group": "not_assessed",
+                        "stale_label": null,
                         "stale_reason": null,
                         "state": "not_assessed",
                         "tag_pending": false,
+                        "tailored": false,
                         "title": "Staff Engineer",
                         "unmet": [],
                         "work_mode": "remote"
@@ -4207,6 +4315,7 @@
                       {
                         "assessment": null,
                         "assessment_basis": null,
+                        "assessment_detail": null,
                         "ats_score": null,
                         "company": "acme",
                         "company_name": "Acme",
@@ -4233,9 +4342,13 @@
                         "salary": "USD 180,000-220,000 per year",
                         "score": 82,
                         "score_kind": "rank",
+                        "score_text": "rank 82 \u00b7 not assessed",
+                        "sort_group": "not_assessed",
+                        "stale_label": null,
                         "stale_reason": null,
                         "state": "not_assessed",
                         "tag_pending": false,
+                        "tailored": false,
                         "title": "Staff Engineer",
                         "unmet": [],
                         "work_mode": "remote"

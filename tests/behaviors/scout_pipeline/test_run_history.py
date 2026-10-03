@@ -186,8 +186,8 @@ def test_an_old_run_migrates_once_with_its_provenance_and_a_profile_less_run_is_
     assert one["stale_reason"] == "posting_changed"  # the indexed posting is not the text the run assessed: said, not hidden
     basis = one["assessment_basis"]
     assert basis == {
-        "origin": f"run:{_OLD_RUN}", "run_id": _OLD_RUN, "prompt_version": ASSESS_PROMPT_VERSION, "constraints_digest": _CONSTRAINTS,
-        "story_bank_digest": None,
+        "origin": f"run:{_OLD_RUN}", "run_id": _OLD_RUN, "prompt_version": ASSESS_PROMPT_VERSION, "prompt_sealed": True,
+        "constraints_digest": _CONSTRAINTS, "story_bank_digest": None,
         "profile_ref": {"profile_id": fx.default_profile_id, "revision": 3, "content_digest": "sha256:" + "d" * 64},
         "resume": _PINNED, "posting_sha256": _digest(1), "model_target": "codex_cli", "model": "codex_cli",
     }

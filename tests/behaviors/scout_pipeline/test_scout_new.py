@@ -65,7 +65,7 @@ def _anchor(fx: PostingsFixture):
 def _cli(fx: PostingsFixture, *args: str) -> dict[str, object]:
     result = CliRunner().invoke(cli, [*fx.cli(*args), "--json"])
     assert result.exit_code == 0, result.output
-    return json.loads(result.output)
+    return json.loads(result.stdout)  # the response alone: a batch's progress lines go to stderr (0110-8-14)
 
 
 def _rows(response: dict[str, object]) -> list[dict[str, object]]:
@@ -141,7 +141,7 @@ def test_a_each_new_posting_once_with_its_profile_tags_and_never_the_deleted_pro
     assert all(set(item["resume"]) == {"record_id", "revision_id"} for item in tags)  # type: ignore[union-attr]
     assert (both["company"], both["title"], both["work_mode"], both["salary"]) == ("acme", "Staff AI Engineer", "remote", "USD 180,000-220,000 per year")
     assert response["counts"] == {
-        "new": 2, "to_assess": 2, "shown": 2,
+        "new": 2, "to_assess": 2, "only_stale": 0, "shown": 2,
         "by_profile": [{"profile_id": fx.default_profile_id, "new": 1}, {"profile_id": fx.second_profile_id, "new": 2}],
     }
     _assert_labels(response)
@@ -285,7 +285,7 @@ def test_c_new_postings_are_asked_about_and_assessed_only_on_a_yes(tmp_path: Pat
     text = CliRunner().invoke(cli, fx.cli("--peek"))
     assert text.exit_code == 0, text.output
     assert "Details" in text.output and "Needs tailoring?" in text.output and "Open questions" in text.output
-    assert f"[default, {SECOND_LABEL}]" in text.output and "100% of requirements met" in text.output
+    assert f"[default, {SECOND_LABEL}]" in text.output and "2 of 2 requirements" in text.output and "Matched" in text.output
     assert "What matches, from your own resume and answers (a separate call): gigai scout new --yours --since" in text.output
     assert "six years" not in text.output  # the user's own evidence is never printed next to posting text
     own = CliRunner().invoke(cli, fx.cli("--yours"))
@@ -303,7 +303,7 @@ def test_c_the_no_is_the_grid_with_rank_only_and_the_top_ten_is_ten(tmp_path: Pa
     assert no["status"] == "new" and no["question"] is None and no["assessed"] is None and fx.base.model.calls == 0
     # 54 new: all are counted (and would be asked about), the 50 with the best score are listed.
     assert no["counts"] == {**no["counts"], "new": 54, "to_assess": 54, "shown": 50} and len(_rows(no)) == scout_new.NEW_ROWS_LIMIT == 50  # type: ignore[dict-item]
-    assert str(no["message"]).endswith("Showing the 50 with the best score.")
+    assert str(no["message"]).endswith("Showing the first 50: assessed ones first, then by rank.")
 
     nothing = _new(fx, now=NOW.replace(hour=16))
     assert nothing["status"] == "nothing_new" and len(_rows(nothing)) == scout_new.ATTENTION_LIMIT == 10

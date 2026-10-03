@@ -42,6 +42,11 @@ from .pipeline.store import EPHEMERAL_PROFILE, PipelineStore, RunAssessment, fit
 
 SCHEMA_VERSION = "scout-run-history:1"
 
+#: 0110-8-13: the name of the prompt of a run that sealed none. The assess prompt got its first name ("assess-prompt-v4")
+#: together with the field a run seals it in (0110-034b, 0.1.10.4), so an output without the field was made by the wording
+#: before that. A name, not a guess of the bytes; never one of the current versions, so such an assessment stays stale.
+UNSEALED_PROMPT_VERSION = "assess-prompt-pre-v4"
+
 _ASSESSED = "assessed"
 
 
@@ -111,7 +116,12 @@ def run_rows(run_id: str, evidence: object) -> tuple[str, list[RunAssessment], i
     revision = getattr(profile_ref, "revision", None) if owned else None
     shared = {
         "assessed_at": stamp(getattr(evidence, "started_at", None)),
-        "prompt_version": _kept("id", getattr(output, "prompt_version", None), dropped),
+        # A version the run sealed in a shape the file does not hold is dropped and counted, as before; one it never
+        # sealed is named.
+        "prompt_version": (
+            UNSEALED_PROMPT_VERSION if getattr(output, "prompt_version", None) is None
+            else _kept("id", output.prompt_version, dropped)
+        ),
         "constraints_digest": _kept("digest", getattr(output, "constraints_digest", None), dropped),
         "bank_digest": _kept("digest", getattr(bank, "bank_digest", None), dropped),
         "profile_revision": revision if type(revision) is int and revision >= 0 else None,
@@ -219,7 +229,9 @@ def basis_json(item: RunAssessment) -> dict[str, object]:
     return {
         "origin": f"run:{item.run_id}",
         "run_id": item.run_id,
-        "prompt_version": item.prompt_version,
+        # A row imported before 0110-8-13 has an empty column for a run that sealed no version: the same name.
+        "prompt_version": item.prompt_version or UNSEALED_PROMPT_VERSION,
+        "prompt_sealed": item.prompt_version not in (None, UNSEALED_PROMPT_VERSION),
         "constraints_digest": item.constraints_digest,
         "story_bank_digest": item.bank_digest,
         "profile_ref": None if item.profile_id == EPHEMERAL_PROFILE else {
@@ -248,4 +260,4 @@ def history_row(item: RunAssessment, *, active: bool) -> dict[str, object]:
     }
 
 
-__all__ = ["SCHEMA_VERSION", "JournalRuns", "RunSource", "basis_json", "history_row", "migrate_runs", "run_rows"]
+__all__ = ["SCHEMA_VERSION", "UNSEALED_PROMPT_VERSION", "JournalRuns", "RunSource", "basis_json", "history_row", "migrate_runs", "run_rows"]

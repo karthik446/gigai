@@ -669,8 +669,16 @@ _POSTING_COLUMNS = (
     "pinned_digest, settings_digest, updated_at"
 )
 _POSTING_BUILD_COLUMNS = "profile_id, match_digest, facts_digest, pinned_digest, settings_digest, row_count, built_at"
-#: The assessment's share of requirements met, else the rank score: what a posting is ordered by.
-_POSTING_SCORE = "COALESCE(CASE WHEN reqs_total > 0 THEN reqs_met * 100 / reqs_total END, rank_score, -1)"
+#: What a posting is ordered by (0110-8-04; the same key as ``scout_new.order_key``): a current assessment, then a
+#: stale one, then none; the verdict; the rank score; the share of requirements met; the newest.
+_POSTING_ORDER = (
+    "CASE WHEN state = 'not_assessed' THEN 2 WHEN stale_code IS NOT NULL THEN 1 ELSE 0 END, "
+    "CASE WHEN label = 'recommended' THEN 0 ELSE 1 END, "
+    "CASE state WHEN 'not_assessed' THEN 0 WHEN 'matched' THEN 0 WHEN 'needs_answers' THEN 1 WHEN 'not_a_match' THEN 3 ELSE 2 END, "
+    "COALESCE(rank_score, -1) DESC, "
+    "COALESCE(CASE WHEN reqs_total > 0 THEN (reqs_met * 100 + reqs_total / 2) / reqs_total END, -1) DESC, "
+    "first_seen DESC, job"
+)
 
 
 def _posting(row: tuple) -> PostingRecord:
@@ -1585,10 +1593,20 @@ class PipelineStore:
             c.execute(f"DELETE FROM posting_build{where}", keep)
         return dropped
 
-    def posting_rank_inputs(self) -> list[tuple[str, str, int | None, str, int]]:
-        """``(job, profile_id, rank_score, state, match_rank)`` of every row: what the best-tag order is made from."""
+    def posting_rank_inputs(self) -> list[tuple[str, str, int | None, str, int, str | None, int]]:
+        """``(job, profile_id, rank_score, state, match_rank, stale_code, tailored)`` of every row: what the best-tag order is made from."""
 
-        return self._conn().execute("SELECT job, profile_id, rank_score, state, match_rank FROM posting").fetchall()
+        return self._conn().execute(
+            "SELECT job, profile_id, rank_score, state, match_rank, stale_code, tailored FROM posting"
+        ).fetchall()
+
+    def posting_rank_progress(self) -> dict[str, tuple[int, int]]:
+        """``profile_id -> (ranked, total)`` over the live rows: how far the background rank is (0110-8-14)."""
+
+        rows = self._conn().execute(
+            "SELECT profile_id, COUNT(rank_score), COUNT(*) FROM posting WHERE removed_at IS NULL GROUP BY profile_id"
+        ).fetchall()
+        return {profile_id: (ranked, total) for profile_id, ranked, total in rows}
 
     def set_match_ranks(self, ranks: Iterable[tuple[int, str, str]]) -> None:
         """``(match_rank, job, profile_id)`` for the rows whose rank changed."""
@@ -1649,19 +1667,23 @@ class PipelineStore:
     def postings_by_score(
         self, *, states: Iterable[str], profile_id: str | None = None, limit: int = 10
     ) -> tuple[PostingRecord, ...]:
-        """Live rows in ``states`` that Scout has not labelled recommended, best score first.
+        """Live rows in ``states`` that Scout has not labelled recommended, in the grid's order.
 
         One row per posting: its best profile's, or ``profile_id``'s. Ordered
-        by score (the assessment's share of requirements met, else the rank
-        score), then open questions, then an assessed posting with unmet
-        requirements and no tailored resume, then the newest.
+        by ``_POSTING_ORDER``: a current assessment first, then a stale one,
+        then none; inside a group the verdict, the rank score, the share of
+        requirements met, the newest. ``tailored`` in ``states`` keeps a
+        posting with a tailored resume, whatever its verdict state.
         """
 
         wanted = sorted({_check("code", state, "state") for state in states})
         if not wanted:
             return ()
         _check_count(limit, "limit")
-        clauses = ["removed_at IS NULL", f"state IN ({','.join('?' * len(wanted))})", "(label IS NULL OR label != 'recommended')"]
+        in_states = f"state IN ({','.join('?' * len(wanted))})"
+        if "tailored" in wanted:
+            in_states = f"({in_states} OR tailored = 1)"
+        clauses = ["removed_at IS NULL", in_states, "(label IS NULL OR label != 'recommended')"]
         params: list[object] = list(wanted)
         if profile_id is None:
             clauses.append("match_rank = 1")
@@ -1670,8 +1692,7 @@ class PipelineStore:
             params.append(_check("id", profile_id, "profile_id"))
         rows = self._conn().execute(
             f"SELECT {_POSTING_COLUMNS} FROM posting WHERE {' AND '.join(clauses)} "
-            f"ORDER BY {_POSTING_SCORE} DESC, open_questions DESC, "
-            "(tailored = 0 AND reqs_total IS NOT NULL AND reqs_met < reqs_total) DESC, first_seen DESC, job LIMIT ?",
+            f"ORDER BY {_POSTING_ORDER} LIMIT ?",
             (*params, limit),
         )
         return tuple(_posting(row) for row in rows.fetchall())

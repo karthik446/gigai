@@ -2345,7 +2345,8 @@ def metrics_command(
 
 @scout_group.command("new")
 @click.option("--profile", "profile_id", help="Only this active profile's postings. A filtered call does not move the \"new since\" anchor.")
-@click.option("--yes", "yes", is_flag=True, help="Assess the new postings without asking (one model call each).")
+@click.option("--yes", "yes", is_flag=True, help="Assess the new postings no profile has assessed, without asking (one model call each). Never the old assessments: that is --reassess-stale.")
+@click.option("--reassess-stale", "reassess_stale", is_flag=True, help="The yes to the other question: assess again the postings that have only an old assessment (one model call each). Can be combined with --yes.")
 @click.option("--no-assess", "no_assess", is_flag=True, help="Do not ask and do not assess: show the new postings ranked only.")
 @click.option("--yours", "yours", is_flag=True, help="The separate call: what matches, from your own resume and answers. Never shown next to posting text; never moves the anchor.")
 @click.option("--peek", "peek", is_flag=True, help="Look without moving the \"new since\" anchor.")
@@ -2355,8 +2356,8 @@ def metrics_command(
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
 def new_command(
-    profile_id: str | None, yes: bool, no_assess: bool, yours: bool, peek: bool, process: bool, since: str | None,
-    home_value: Path | None, target_value: Path | None, as_json: bool,
+    profile_id: str | None, yes: bool, reassess_stale: bool, no_assess: bool, yours: bool, peek: bool, process: bool,
+    since: str | None, home_value: Path | None, target_value: Path | None, as_json: bool,
 ) -> None:
     """Show what is new since your last check, across all active profiles.
 
@@ -2365,8 +2366,17 @@ def new_command(
     count and what it will cost) and shows them ranked. With nothing new it
     shows the 10 postings that still need your attention.
 
-    The table shows each posting, its score, what it still asks for and its
-    open questions. "What matches" comes from your own resume and answers, so
+    Postings that have only an OLD assessment (made by an old run, an older
+    prompt or other settings) are a separate question with its own count and
+    cost. --yes never answers it; --reassess-stale does.
+
+    While it assesses, progress lines go to stderr ("assessed 120 of 333 ·
+    ~25 min left"); with --json, stdout is still the response alone.
+
+    The table shows each posting, its verdict, "N of M" requirements and
+    rank, what it still asks for and its open questions. Postings with a
+    current assessment come first, then old assessments, then the ones not
+    assessed. "What matches" comes from your own resume and answers, so
     it is a separate call, never printed next to posting text: --yours.
 
     Jobs that wait in the pipeline (you answered one of their questions) are
@@ -2385,22 +2395,39 @@ def new_command(
     if sum((yes, no_assess, yours)) > 1:
         _fail(ValueError("pass at most one of --yes, --no-assess and --yours"), as_json=as_json, fallback="invalid_value")
         return
-    if yours and process:
-        _fail(ValueError("--process cannot be combined with --yours"), as_json=as_json, fallback="invalid_value")
+    if yours and (process or reassess_stale):
+        _fail(ValueError("--process and --reassess-stale cannot be combined with --yours"), as_json=as_json, fallback="invalid_value")
         return
+
+    def progress(line: str) -> None:
+        click.echo(line, err=True)  # stderr: stdout stays the response (valid JSON with --json)
+
     try:
         target = _pipeline_target(target_value, home_root, as_json=as_json)
         if yours:
             response = scout_new_yours(home_root, target, profile_id=profile_id, since=since)
         else:
             assess = True if yes else False if no_assess else None
-            response = scout_new(home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since, process=process)
+            response = scout_new(
+                home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since, process=process,
+                reassess_stale=reassess_stale, progress=progress,
+            )
         if response["status"] == STATUS_ASK and not as_json and not yours and sys.stdin.isatty():
             sentence = response["question"]["text"]  # type: ignore[index]
             if click.confirm(str(sentence).rstrip("?"), default=False):
                 click.echo("Assessing (one model call per posting; this can take a few minutes)...")
                 # The first call already moved the anchor: the yes measures from the same since.
-                response = scout_new(home_root, target, profile_id=profile_id, peek=peek, assess=True, since=str(response["since"]))
+                response = scout_new(
+                    home_root, target, profile_id=profile_id, peek=peek, assess=True, since=str(response["since"]), progress=progress
+                )
+        old = response.get("stale_question")
+        if isinstance(old, dict) and not as_json and not yours and sys.stdin.isatty():
+            # Its own question, default no: the yes above never answers it.
+            if click.confirm(str(old["text"]).rstrip("?"), default=False):
+                response = scout_new(
+                    home_root, target, profile_id=profile_id, peek=peek, assess=False, since=str(response["since"]),
+                    reassess_stale=True, progress=progress,
+                )
         offer = response.get("pipeline")
         if isinstance(offer, dict) and not process and not as_json and not yours and sys.stdin.isatty():
             if click.confirm("Pipeline: " + str(offer["text"]).rstrip("?"), default=False):

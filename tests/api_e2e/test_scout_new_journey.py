@@ -125,11 +125,19 @@ def test_scout_new_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         _assert_unmixed(yes, data_labels.PUBLIC_UNTRUSTED)
         answered = yes.json()
         assert answered["status"] == "new" and answered["question"] is None and answered["since_source"] == "first_use_7_days"
-        assert answered["assessed"] == {"requested": 1, "assessed": 1, "failed": [], "stopped": None}
+        assert answered["assessed"] == {"requested": 1, "assessed": 1, "failed": [], "stopped": None, "fetched_on_demand": 0}
         assert answered["anchor"] == {"last_checked_at": None, "advances": True}
         (scored,) = answered["postings"]["rows"]
         assert scored["state"] != "not_assessed" and scored["score_kind"] == "assessment" and isinstance(scored["score"], int)
         assert scored["assessment"]["requirements"] >= 1 and "matches" not in scored
+        # The combined 0.1.10.8 contract, every side's fields on the one response: U2 (fetched_on_demand, above), U4 (the row's
+        # company_name and tag_pending), U3 (the row's group / score text / tailored flag, counts.only_stale, the stale question, ranking).
+        assert (scored["company_name"], scored["tag_pending"]) == ("Acmenew", False)  # no index name: the slug rule; a specific title
+        assert (scored["sort_group"], scored["tailored"], scored["stale_label"], scored["assessment_detail"]) == ("current", False, None, True)
+        assert scored["score_text"] == f"Needs your answers · {scored['assessment']['met']} of {scored['assessment']['requirements']} requirements · not ranked yet"
+        assert (answered["counts"]["to_assess"], answered["counts"]["only_stale"]) == (0, 0)
+        assert (answered["stale_question"], answered["reassessed"]) == (None, None)
+        assert answered["ranking"]["by_profile"] == [{"profile_id": profile["profile_id"], "ranked": 0, "total": 1}]
         (aggregate,) = client.get("/api/metrics?kind=assess").json()["aggregates"]
         assert aggregate["calls"] == 1
 
@@ -177,6 +185,13 @@ def test_scout_new_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         for payload, code in (({}, "wrong_type"), ({"assess": "yes"}, "wrong_type"), ({"assess": True, "bogus": 1}, "unknown_key"), ({"assess": False, "since": "last tuesday"}, "invalid_value")):
             refused = client.post("/api/new", json=payload)
             assert refused.status_code == 422 and refused.json()["error"]["code"] == code, refused.text
+        # 0110-8-08: the second yes is its own key, true or false; with nothing stale it assesses nothing and says so.
+        refused = client.post("/api/new", json={"assess": False, "reassess_stale": "yes", "peek": True})
+        assert refused.status_code == 422 and refused.json()["error"]["code"] == "wrong_type", refused.text
+        again = client.post("/api/new", json={"assess": False, "reassess_stale": True, "peek": True})
+        assert again.status_code == 200, again.text
+        assert (again.json()["reassessed"], again.json()["stale_question"], again.json()["counts"]["only_stale"]) == (None, None, 0)
+        _assert_unmixed(again, data_labels.PUBLIC_UNTRUSTED)
         assert client.post("/api/new/seen", json={"at": "2030-01-01T00:00:00Z"}).status_code == 422
         for url in ("/api/new", "/api/new/yours"):
             assert client.get(url, headers={"Host": "evil.example"}).status_code == 403
@@ -185,7 +200,7 @@ def test_scout_new_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         def cli_json(*args: str) -> dict[str, object]:
             result = CliRunner().invoke(cli, ["scout", "new", *args, "--home", str(home), "--target", str(target), "--json"])
             assert result.exit_code == 0, result.output
-            return json.loads(result.output)
+            return json.loads(result.stdout)
 
         for args, url in ((("--peek",), "/api/new"), (("--yours",), "/api/new/yours")):
             printed, served = cli_json(*args), client.get(url).json()

@@ -147,8 +147,17 @@ export function profileTags(row, profiles) {
     }));
 }
 
-// "73% of requirements met" | "rank 81" | "not ranked yet".
+// The score column, in the server's own words (0110-8-04, `score_text`):
+// "Matched · 9 of 9 requirements · rank 76", "Matched (old assessment: older
+// prompt) · 3 of 3 requirements · rank 83", "rank 97 · not assessed". The
+// verdict first and "N of M", never a bare percent: a 1-of-1 reads "1 of 1".
+// The rows are drawn in the order the server sends them (current, then
+// stale, then not assessed): this page never sorts them itself.
+// A response without `score_text` (an older server) falls back to the number.
 export function scoreText(row) {
+  if (typeof row.score_text === "string" && row.score_text.trim()) {
+    return row.score_text;
+  }
   if (typeof row.score !== "number") {
     return "not ranked yet";
   }

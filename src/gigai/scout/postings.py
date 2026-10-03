@@ -27,9 +27,14 @@ questions (from the quick-assess store, or from what an old find-jobs run
 assessed when that is the newer of the two: ``run_history.py`` imports it, the
 run's records are not copied); the Scout label and Scout ATS score the pipeline stored; and
 ``match_rank``, this profile's place among the profiles the posting matches
-(1 is the best tag: the highest rank score, then the profile that has an
-assessment, then the default profile). Application events are not cached:
-they are journal records, read when a response is built.
+(1 is the best tag; 0110-8-01, 0110-8-12: the profile that tailored a resume
+for it, then a profile with a CURRENT assessment, then one with a stale
+assessment, then the highest rank score, then the default profile. A rank
+score that arrives later never moves a posting away from the profile that
+assessed it). ``state`` is the verdict state; a tailored resume is the
+``tailored`` flag beside it, never a state that replaces the verdict.
+Application events are not cached: they are journal records, read when a
+response is built.
 
 MATCHING is ``index_search.read_indexed_boards`` with each active profile's
 own effective config (its titles, and its own location, work mode, countries
@@ -69,8 +74,10 @@ from ..canonical import digest_imported_bytes
 from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, RunAssessment, pipeline_path
 
 #: Bump when what a row is matched by, or what its facts are read from, changes.
-MATCH_VERSION = "posting-match:3"  # 0110-8-05: a known function tag vetoes a generic title (rows rebuild once); :2 was 0110-8-06
-FACTS_VERSION = "posting-facts:1"
+# One above every side of the 0.1.10.8 merge, so stored rows rebuild once whichever build wrote them:
+# :2 was 0110-8-06 (one digest rule), :3 was 0110-8-05 (a known function tag vetoes a generic title).
+MATCH_VERSION = "posting-match:4"
+FACTS_VERSION = "posting-facts:2"
 
 STATE_ACTIVE = "active"
 BUILD_FULL = "matched"
@@ -335,7 +342,7 @@ class _Facts:
     def of(self, row: PostingRecord) -> PostingRecord:
         """``row`` with its facts as the stores hold them now."""
 
-        from .find_jobs.job_state import NOT_ASSESSED, TAILORED, _identity_digest, derive_job_state, quick_assessment_fact
+        from .find_jobs.job_state import NOT_ASSESSED, _identity_digest, derive_job_state, quick_assessment_fact
         from .pipeline.steps import read_label
 
         profile_id = self.view.profile_id
@@ -358,8 +365,7 @@ class _Facts:
             # An old run's assessment, newer than anything in the quick store (DESIGN 10.4: latest wins).
             state, stale = ran.state, self._run_stale(ran, row)
             assessed_at, met, requirements, questions = ran.assessed_at, ran.reqs_met, ran.reqs_total, ran.open_questions
-        if tailored:
-            state = TAILORED
+        # 0110-8-12: a tailored resume is the ``tailored`` flag below; the verdict state stays.
         label, ats_score = None, None
         if key in self._labelled:
             record = read_label(self.home_root, self.target, profile_id, row.job)
@@ -532,18 +538,33 @@ class TagPending:
 # --- refresh --------------------------------------------------------------------------------
 
 
-def _best_tag_order(rows: Iterable[tuple[str, str, int | None, str, int]], default_id: str | None) -> list[tuple[int, str, str]]:
-    """``(match_rank, job, profile_id)`` for the rows whose place among their posting's profiles changed."""
+def _best_tag_order(
+    rows: Iterable[tuple[str, str, int | None, str, int, str | None, int]], default_id: str | None
+) -> list[tuple[int, str, str]]:
+    """``(match_rank, job, profile_id)`` for the rows whose place among their posting's profiles changed.
 
-    by_job: dict[str, list[tuple[str, int | None, str, int]]] = {}
-    for job, profile_id, rank_score, state, match_rank in rows:
-        by_job.setdefault(job, []).append((profile_id, rank_score, state, match_rank))
+    0110-8-01 / 0110-8-12: the profile that tailored a resume first, then a
+    current assessment, then a stale one, then no assessment; the rank score
+    orders profiles only inside one of those groups. Rank scores of two
+    profiles come from different resumes and arrive at different times, so
+    they never move a posting away from the profile that assessed it.
+    """
+
+    by_job: dict[str, list[tuple[str, int | None, str, int, str | None, int]]] = {}
+    for job, profile_id, rank_score, state, match_rank, stale_code, tailored in rows:
+        by_job.setdefault(job, []).append((profile_id, rank_score, state, match_rank, stale_code, tailored))
+
+    def place(item: tuple[str, int | None, str, int, str | None, int]) -> tuple[bool, int, int, bool, str]:
+        profile_id, rank_score, state, _current, stale_code, tailored = item
+        assessed = 2 if state == "not_assessed" else 1 if stale_code is not None else 0
+        return not tailored, assessed, -(rank_score if rank_score is not None else -1), profile_id != default_id, profile_id
+
     changed = []
     for job, group in by_job.items():
-        group.sort(key=lambda item: (-(item[1] if item[1] is not None else -1), item[2] == "not_assessed", item[0] != default_id, item[0]))
-        for place, (profile_id, _score, _state, current) in enumerate(group, start=1):
-            if place != current:
-                changed.append((place, job, profile_id))
+        group.sort(key=place)
+        for rank, item in enumerate(group, start=1):
+            if rank != item[3]:
+                changed.append((rank, job, item[0]))
     return changed
 
 

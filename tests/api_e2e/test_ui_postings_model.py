@@ -78,6 +78,13 @@ const only = byId[data.secondOnlyUrl];
 out.tags = { both: m.profileTags(both, profiles), only: m.profileTags(only, profiles), second: m.profileTags(second.postings.rows.find((row) => row.job_identity === data.bothUrl), second.profiles) };
 out.others = { both: m.secondProfiles(both, profiles).map((tag) => tag.label), only: m.secondProfiles(only, profiles) };
 out.scores = [m.scoreText(both), m.scoreText({ score: 73, score_kind: "assessment" }), m.scoreText({ score: 81, score_kind: "rank" })];
+// 0110-8-04: the server's own score text wins; a 1-of-1 never reads as a bare 100%. Only an older server's row falls back.
+out.scoreTexts = [
+  m.scoreText({ ...both, score: 100, score_kind: "assessment", score_text: "Matched · 1 of 1 requirements · rank 40" }),
+  m.scoreText({ ...both, score: 100, score_kind: "assessment", score_text: "Matched (old assessment: older prompt) · 3 of 3 requirements · rank 95" }),
+  m.scoreText({ score: 73, score_kind: "assessment", score_text: "  " }),
+];
+out.serverOrder = rows.map((row) => row.sort_group);
 out.chips = {
   notAssessed: m.rowChips(both),
   needsAnswers: m.rowChips({ ...both, state: "needs_answers", open_questions: [{ question: "a" }, { question: "b" }] }),
@@ -226,7 +233,16 @@ def test_the_row_chips_say_the_state_the_scout_label_stale_and_removed(out: dict
         ("stale", "Stale: older settings", "warn", None), ("removed", "Removed", "danger", None),
     ]
     assert [kind for kind, *_rest in chips["unknownLabel"]] == ["state", "assessed"], "a label code the backend does not have is never shown"
-    assert out["scores"] == ["not ranked yet", "73% of requirements met", "rank 81"]
+    assert out["scores"] == ["not ranked yet · not assessed", "73% of requirements met", "rank 81"]
+    assert out["scoreTexts"] == [
+        "Matched · 1 of 1 requirements · rank 40", "Matched (old assessment: older prompt) · 3 of 3 requirements · rank 95",
+        "73% of requirements met",
+    ]
+    # The page draws the rows in the server's order and never sorts them: no stale or unassessed row above a current one.
+    rank = {"current": 0, "stale": 1, "not_assessed": 2}
+    assert [rank[group] for group in out["serverOrder"]] == sorted(rank[group] for group in out["serverOrder"])
+    jobs_view = (UI_SRC / "views" / "JobsView.jsx").read_text(encoding="utf-8")
+    assert ".sort(" not in jobs_view and "scoreText(row)" in jobs_view
     assert out["detail"][0].startswith("Acme · Remote - United States · Remote") and out["detail"][1] == "Acme"
     assert out["isNew"] == [True, False, False, False]
     assert out["count"] == ["Showing 4 of 4 postings", "Showing 50 of 120 postings", "Showing 1 of 1 posting", "Showing 0 of 0 postings"]

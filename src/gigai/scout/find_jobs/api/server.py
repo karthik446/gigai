@@ -1594,7 +1594,9 @@ def _make_handler(
             path = urlsplit(self.path).path
             payload = with_allowed_keys(self.command or "", path, payload)
             # 0110-8-11: a posting's company is its board token; the index's name goes beside it (``company_name``).
-            payload = with_company_names(payload, getattr(self._backend, "home_root", None))  # type: ignore[assignment]
+            # The home comes from the factory's own ``backend``, not from ``self``: the writer needs nothing of the handler
+            # but its request line and its socket (a handler made with no backend names nothing).
+            payload = with_company_names(payload, getattr(backend, "home_root", None))  # type: ignore[assignment]
             # P3: the one outbound check. Contact-shaped text outside posting text leaves as a token (outbound_check.py).
             body = json.dumps(redact_payload(payload)).encode("utf-8")
             self.send_response(status)

@@ -278,7 +278,7 @@ _NEW_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-new:1", "status": "ask", "since": _NEW_SINCE, "since_source": "anchor",
     "checked_at": "2026-10-03T09:30:00.000000Z", "peek": True, "profile_id": None,
     "anchor": {"last_checked_at": _NEW_SINCE, "advances": False},
-    "counts": {"new": 1, "to_assess": 1, "shown": 1, "by_profile": [{"profile_id": "prof_1", "new": 1}]},
+    "counts": {"new": 1, "to_assess": 1, "only_stale": 2, "shown": 1, "by_profile": [{"profile_id": "prof_1", "new": 1}]},
     "message": "1 new posting since Thu 01 Oct 14:02.",
     "question": {
         "kind": "assess_new", "new": 1, "to_assess": 1, "by_profile": [{"profile_id": "prof_1", "count": 1}],
@@ -294,7 +294,19 @@ _NEW_EXAMPLE: dict[str, object] = {
         },
         "text": "1 new posting (Staff Engineer 1). Assess them? ~1 calls, ~20k tokens",
     },
+    "stale_question": {
+        "kind": "reassess_stale", "to_reassess": 2, "by_profile": [{"profile_id": "prof_1", "count": 2}],
+        "model_target": "codex_cli",
+        "estimate": {"calls": 2, "tokens": 39000, "seconds": 22.4, "cost": None, "basis_calls": 12},
+        "yes": {
+            "cli": f"gigai scout new --reassess-stale --since {_NEW_SINCE}",
+            "api": {"method": "POST", "path": "/api/new", "body": {"assess": False, "reassess_stale": True, "since": _NEW_SINCE}},
+        },
+        "text": "2 have only an old assessment; re-assess? ~2 calls, ~39k tokens",
+    },
     "assessed": None,
+    "reassessed": None,
+    "ranking": {"enabled": True, "in_progress": True, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792}]},
     "pipeline": {
         "waiting": 3, "awaiting_approval": 2, "approvals": ["apv_0123456789abcdef0123456789abcdef"], "est_calls": 6,
         "command": "gigai scout new --process", "text": "3 waiting (2 need your approval), process now? ~6 calls",
@@ -313,8 +325,10 @@ _NEW_EXAMPLE: dict[str, object] = {
             "description": "Acme is hiring a Staff Engineer to own its Python services…", "first_seen": "2026-10-02T08:00:00.000000Z",
             "removed_at": None, "profile_id": "prof_1",
             "profiles": [{"profile_id": "prof_1", "match_rank": 1, "rank_score": 82, "state": "not_assessed"}],
-            "state": "not_assessed", "stale_reason": None, "score": 82, "score_kind": "rank", "rank_score": 82, "assessment": None,
-            "needs_tailoring": None, "unmet": [], "open_questions": [], "label": None, "ats_score": None, "tag_pending": False,
+            "state": "not_assessed", "tailored": False, "stale_reason": None, "stale_label": None, "sort_group": "not_assessed",
+            "score": 82, "score_kind": "rank", "score_text": "rank 82 · not assessed", "rank_score": 82, "assessment": None,
+            "assessment_detail": None, "needs_tailoring": None, "unmet": [], "open_questions": [], "label": None, "ats_score": None,
+            "tag_pending": False,
         }],
     },
     "profiles": [{"profile_id": "prof_1", "label": "Staff Engineer", "is_default": True, "resume": {"record_id": "rec_1", "revision_id": "rev_1"}}],
@@ -372,13 +386,23 @@ _POSTINGS_NOTE = (
 )
 _NEW_NOTE = (
     "Read from the stored index (no board request) across every active profile; a deleted or archived profile is never "
-    "listed. `status` is `ask` (new postings with no assessment: `question` has the count per profile and the estimate from "
-    "the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, best score "
-    "first, and `counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention, by score, open "
-    "questions, tailoring needed). Each posting is listed once, for its best profile (`profile_id`), with every active "
-    "profile it matches in `profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by "
-    "id. `score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the "
-    "cached rank score (`rank`), else null. `unmet` are requirements from the assessment, `open_questions` the questions "
+    "listed. `status` is `ask` (new postings no profile has assessed: `question` has the count per profile and the estimate "
+    "from the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, and "
+    "`counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention). Rows are in one order "
+    "(`sort_group`): a `current` assessment, then a `stale` one, then `not_assessed`; inside a group the verdict (matched, "
+    "needs answers, other, not a match), the rank score, the share of requirements met, the newest. Each posting is listed "
+    "once, for its best profile (`profile_id`: the profile that tailored a resume for it, else one with a current "
+    "assessment, else one with a stale one, else the highest rank score), with every active profile it matches in "
+    "`profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the "
+    "score column (the verdict, \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent); "
+    "`score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the "
+    "cached rank score (`rank`), else null. `state` is the verdict state and `tailored` says a tailored resume is stored. "
+    "`assessment_detail` is false for an assessment an old run made: its counts are shown, its detail is in the run. "
+    "`counts.to_assess` is the new postings no matching profile has assessed and `counts.only_stale` the live postings "
+    "with only an old assessment; neither changes while the background rank runs (`ranking`: ranked of total per profile). "
+    "`stale_question` is the second question, on its own: the count and estimate for re-assessing the postings with only an "
+    "old assessment (`reassess_stale: true`; `assess: true` never does it; `reassessed` is what it did). "
+    "`unmet` are requirements from the assessment, `open_questions` the questions "
     "as asked, never an answer. `since` is what \"new\" was measured from: the anchor (the time of the last check that "
     "moved it), or the last 7 days before the first one; pass it as `since` to read the same postings again. `pipeline` "
     "offers waiting pipeline work (jobs that wait, `awaiting_approval` of them behind the pending `approvals`, the model "
@@ -1146,11 +1170,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         "POST", "/api/new", "Answer the question GET /api/new asked: assess the new postings (yes) or show them ranked only (no).", "write", "model",
         {
             **_NEW_EXAMPLE, "status": "new", "peek": False, "question": None, "anchor": {"last_checked_at": _NEW_SINCE, "advances": True},
-            "assessed": {"requested": 1, "assessed": 1, "failed": [], "stopped": None},
+            "assessed": {"requested": 1, "assessed": 1, "failed": [], "stopped": None, "fetched_on_demand": 0},
         },
         schema_version="scout-new:1",
         params=(
-            _b("assess", "boolean", "true: assess the new postings that have no assessment (one model call each). false: rank only.", required=True),
+            _b("assess", "boolean", "true: assess the new postings no profile has assessed (one model call each). false: rank only.", required=True),
+            _b("reassess_stale", "boolean", "true: the yes to `stale_question`: assess again the postings that have only an old assessment (one model call each). `assess: true` never does this."),
             _b("since", "string", "Measure \"new\" from this time (the since of the response that asked) instead of the anchor."),
             _b("profile_id", "string", "Only this active profile's postings. A filtered call never moves the anchor."),
             _b("peek", "boolean", "true: do not move the anchor."),
@@ -1158,7 +1183,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         errors=(_INVALID, _WRONG_TYPE, _UNKNOWN_KEY, _NO_TARGET, (404, "profile_not_found"), (409, "config_unavailable")),
         request_example={"assess": True},
         description=(
-            "The yes or no to `status: \"ask\"`. With `assess: true` each new posting with no assessment is assessed for its best "
+            "The yes or no to `status: \"ask\"`. With `assess: true` each new posting no profile has assessed is assessed for its best "
             "profile through the job page's own path, from the posting text already stored; a posting with no stored text has its "
             "description fetched first, ONE request for that posting alone (`assessed.fetched_on_demand` counts them); the calls are "
             "recorded like every model call (GET /api/metrics). `assessed.failed` lists what could not be assessed, by error code and, "
