@@ -699,6 +699,24 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "name and contact are ignored, never stored: the response then carries ignored and a note."
         ),
     ),
+    # --- privacy (0110-046) ----------------------------------------------------------
+    RouteSpec(
+        "GET", "/api/privacy/cleanup", "The one-time contact cleanup's report.", "read", "none",
+        {"schema_version": "scout-contact-cleanup-report:1", "status": "already_done", "removed_any": False, "shown": True},
+        schema_version="scout-contact-cleanup-report:1", host_checked=True, errors=((403, "forbidden_origin"), _NO_TARGET),
+        description=(
+            "Contact details stored before 0.1.10.7 (stored resumes; the name and contact items of the PDF settings) are removed once, "
+            "at gigai scout run and when the server starts, through the normal write path. This reads the stored report: what kinds and "
+            "how many were removed, where, never a value, and that earlier copies remain in the workpad's local history. "
+            "status is not_run before the first cleanup."
+        ),
+    ),
+    RouteSpec(
+        "PUT", "/api/privacy/cleanup", "Record that the cleanup report was shown.", "write", "none",
+        {"schema_version": "scout-contact-cleanup-report:1", "shown": True}, schema_version="scout-contact-cleanup-report:1",
+        params=(_b("shown", "boolean", "Always true.", required=True),), request_example={"shown": True},
+        errors=(_INVALID, (409, "cleanup_not_run"), (500, "cleanup_state_unwritable"), _NO_TARGET),
+    ),
     # --- resume ----------------------------------------------------------------------
     RouteSpec(
         "POST", "/api/resume/extract", "Extract search preferences from a resume with the model.", "write", "model", {"suggestions": {}},
@@ -959,6 +977,8 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/resume/extract"): ("Extract search preferences from a resume", "Profiles and resume"),
     ("POST", "/api/resume/check"): ("Check resume text for personal data", "Profiles and resume"),
     ("POST", "/api/resumes"): ("Store a resume", "Profiles and resume"),
+    ("GET", "/api/privacy/cleanup"): ("Get the contact cleanup report", "Profiles and resume"),
+    ("PUT", "/api/privacy/cleanup"): ("Mark the contact cleanup report shown", "Profiles and resume"),
     ("GET", "/api/watchlist"): ("List watched company boards", "Sources"),
     ("POST", "/api/watchlist"): ("Watch a company board", "Sources"),
     ("POST", "/api/sources/update"): ("Refresh the board catalog", "Sources"),

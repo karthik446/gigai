@@ -48,6 +48,8 @@ JOURNEYS: dict[Route, str] = {
     Route("POST", "/api/resume/check"): "test_resume_pii_check_journey.py",
     Route("POST", "/api/resume/pdf"): "test_resume_markdown_pdf_journey.py",
     Route("POST", "/api/resumes"): "test_wizard_stores_resume_journey.py",
+    Route("GET", "/api/privacy/cleanup"): "test_no_stored_contact_data_journey.py",
+    Route("PUT", "/api/privacy/cleanup"): "test_no_stored_contact_data_journey.py",
     Route("GET", "/api/secrets/status"): "test_wizard_stores_resume_journey.py",
     Route("PUT", "/api/config/sources"): "test_exa_optional_journey.py",
     Route("GET", "/api/settings/background"): "test_background_settings_journey.py",

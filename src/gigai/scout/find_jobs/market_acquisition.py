@@ -2046,6 +2046,7 @@ def _acquire_node_body(
     # (direct-call tests) or no profile: no bank.
     from .. import story_bank
     from ..assessment_core import constraints_digest
+    from ..contact_cleanup import same_resume_revision
     from ..proposal_execution import _basis_stale
 
     current_constraints = constraints_digest(
@@ -2079,7 +2080,8 @@ def _acquire_node_body(
                 prior is not None
                 and prior.result.posting.content_sha256 == row.content_sha256
                 and current_resume_revision_id is not None
-                and prior.resume_revision_id == current_resume_revision_id
+                # 0110-046: the contact cleanup's clean copy is the same resume (the model never saw the removed lines).
+                and same_resume_revision(home_root, prior.resume_revision_id, current_resume_revision_id)
                 # S25 A2: profile_id must ALSO match -- a profile-B run never
                 # carries forward profile-A's assessment of the same URL,
                 # even when their resume revisions happen to coincide.

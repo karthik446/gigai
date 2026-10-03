@@ -683,6 +683,8 @@ def run_command(
     _ensure_gigai_settings(home_root, as_json=as_json)
     try:
         resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
+        # 0110-046: the one-time contact cleanup (idempotent, never raises); its report is also in the UI once.
+        cleanup = _contact_cleanup(home_root, resolved_target)
         result = run_supervisor.start(
             home_root=home_root,
             requested_target=resolved_target,
@@ -702,11 +704,14 @@ def run_command(
         "restarted_from_version": result.restarted_from_version,
         "stopped_other": result.stopped_other.to_json() if result.stopped_other is not None else None,
         "stopped_server": result.stopped_server.to_json() if result.stopped_server is not None else None,
+        "contact_cleanup": cleanup,
         **result.state.to_json(),
     }
     if as_json:
         _emit(payload, True, "")
         return
+    if cleanup.get("status") == "done" and cleanup.get("removed_any"):
+        click.echo(f"{cleanup['text']} (`gigai scout privacy` shows this again.)")
     if result.cleaned_stale:
         click.echo("Cleaned up a stale Scout run state (its process was no longer running).")
     if result.restarted_from_version is not None:
@@ -780,6 +785,48 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
             f"The Scout server for {_other_server_label(other)} is running at {other.url} "
             f"(pid {other.pid}); `gigai scout run` stops it when it holds the port this one needs."
         )
+
+
+def _contact_cleanup(home_root: Path, target: Path | None) -> dict[str, object]:
+    """Run the one-time contact cleanup for this home and target (0110-046); its report. Never raises."""
+
+    from .contact_cleanup import run_cleanup
+
+    resolved = None
+    if target is not None:
+        try:
+            resolved = target.expanduser().resolve(strict=True)
+        except OSError:
+            resolved = None
+    return run_cleanup(home_root=home_root, target=resolved)
+
+
+@scout_group.command("privacy")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def privacy_command(target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Show what the one-time contact cleanup removed (running it first if it has not run).
+
+    GigAI no longer stores your name or contact details (0.1.10.7). An install
+    from before kept them in stored resumes and in the PDF settings; this
+    removes them once, through the normal write path, and reports what kinds
+    and how many were removed, where (counts only). Earlier copies remain in
+    the workpad's local history: the cleanup does not rewrite it.
+    """
+
+    from .target_resolution import home_scout_target
+
+    home_root = home_value or default_home_root()
+    candidate = target_value or home_scout_target(home_root)  # never created here
+    report = _contact_cleanup(home_root, candidate if candidate.is_dir() else None)
+    if report.get("status") == "failed":
+        _fail(RuntimeError(f"the contact cleanup could not run ({report.get('code')}); it is tried again on the next start"), as_json=as_json, fallback="contact_cleanup_failed")
+        return
+    if as_json:
+        _emit({"ok": True, **report}, True, "")
+        return
+    click.echo(str(report["text"]))
 
 
 def _relative_days_ago(iso_timestamp: str) -> str:

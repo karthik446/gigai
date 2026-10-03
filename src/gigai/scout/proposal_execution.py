@@ -282,6 +282,7 @@ def _assess_node_body(
     from .find_jobs.filters import exclusion_reason
     from .find_jobs.market_acquisition import _default_profile_id, _prior_assessments, _role_match
     from .find_jobs.title_query import open_tag_store
+    from .contact_cleanup import same_resume_revision
     from .find_jobs import rank_run
     from .find_jobs.selection import select_for_assessment, selection_limits
     from ..workpad import resolve_workpad
@@ -350,7 +351,8 @@ def _assess_node_body(
                 prior is not None
                 and prior.result.posting.content_sha256 == posting.content_sha256
                 and resume_revision_id is not None
-                and prior.resume_revision_id == resume_revision_id
+                # 0110-046: the contact cleanup's clean copy is the same resume (the model never saw the removed lines).
+                and same_resume_revision(home_root, prior.resume_revision_id, resume_revision_id)
                 # S25 A2: profile_id must ALSO match -- twin predicate with
                 # market_acquisition's own acquire-side check (see its
                 # docstring for why `None == None` is a legitimate match:

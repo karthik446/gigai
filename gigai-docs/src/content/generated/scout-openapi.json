@@ -1408,6 +1408,222 @@
         "x-gigai-external": "none"
       }
     },
+    "/api/privacy/cleanup": {
+      "get": {
+        "description": "The one-time contact cleanup's report. Contact details stored before 0.1.10.7 (stored resumes; the name and contact items of the PDF settings) are removed once, at gigai scout run and when the server starts, through the normal write path. This reads the stored report: what kinds and how many were removed, where, never a value, and that earlier copies remain in the workpad's local history. status is not_run before the first cleanup.",
+        "operationId": "get_api_privacy_cleanup",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "removed_any": false,
+                  "schema_version": "scout-contact-cleanup-report:1",
+                  "shown": true,
+                  "status": "already_done"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-contact-cleanup-report:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "forbidden_origin",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden_origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          }
+        },
+        "summary": "Get the contact cleanup report",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
+      },
+      "put": {
+        "description": "Record that the cleanup report was shown.",
+        "operationId": "put_api_privacy_cleanup",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "shown": true
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "shown": {
+                    "description": "Always true.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "shown"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "schema_version": "scout-contact-cleanup-report:1",
+                  "shown": true
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-contact-cleanup-report:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "cleanup_not_run",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "cleanup_not_run"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "cleanup_state_unwritable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "cleanup_state_unwritable"
+          }
+        },
+        "summary": "Mark the contact cleanup report shown",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none"
+      }
+    },
     "/api/profiles": {
       "get": {
         "description": "Every profile and which is selected.",

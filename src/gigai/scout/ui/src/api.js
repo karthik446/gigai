@@ -512,6 +512,17 @@ export function putResumeDisplay(body) {
   return request("PUT", "/api/resume-display", body);
 }
 
+// 0110-046: the one-time contact cleanup's report (find_jobs/api/
+// privacy_cleanup.py). GET runs the cleanup when it has not run yet; PUT
+// records that the UI showed the report.
+export function getPrivacyCleanup() {
+  return request("GET", "/api/privacy/cleanup");
+}
+
+export function putPrivacyCleanupShown() {
+  return request("PUT", "/api/privacy/cleanup", { shown: true });
+}
+
 // The PDF routes answer bytes: the blob and the Content-Disposition file name
 // come back for a download. `header` is the Generate PDF form's values
 // (generatePdfModel.headerBody): sent in this one request body, never stored

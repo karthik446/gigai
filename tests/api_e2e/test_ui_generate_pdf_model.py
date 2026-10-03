@@ -31,6 +31,12 @@ console.log(JSON.stringify({
   bodyNull: m.headerBody(null),
   can: [m.canGenerate({ name: "Zora" }), m.canGenerate({ name: "  ", email: "a@b.c" }), m.canGenerate(null)],
   exports: Object.keys(m).sort(),
+  notices: [
+    m.cleanupNotice({ removed_any: true, shown: false, text: "Removed contact details from 1 stored resume (email 1)." }),
+    m.cleanupNotice({ removed_any: true, shown: true, text: "x" }),
+    m.cleanupNotice({ removed_any: false, shown: false, text: "x" }),
+    m.cleanupNotice(null),
+  ],
 }));
 """
 
@@ -66,7 +72,7 @@ def test_the_header_body_is_every_field_trimmed_and_capped() -> None:
 
 def test_the_form_carries_no_privacy_wording() -> None:
     """The privacy wording is rewritten later in one pass (operator, 2026-10-02): the form has labels and a button only."""
-    assert _run()["exports"] == ["FIELDS", "MAX_VALUE", "canGenerate", "emptyValues", "headerBody"]
+    assert _run()["exports"] == ["FIELDS", "MAX_VALUE", "canGenerate", "cleanupNotice", "emptyValues", "headerBody"]
     form = (UI_SRC / "components" / "GeneratePdfForm.jsx").read_text(encoding="utf-8")
     assert "PROMISE" not in form and "LIMITS" not in form and "never stores" not in form
 
@@ -128,3 +134,9 @@ def test_the_finish_link_opens_the_generate_pdf_page_for_that_resume(tmp_path: P
     assert "<GeneratePdfForm" in view and "postTailoredResumePdf" in view and "postResumePdf" in view
     app = (UI_SRC / "App.jsx").read_text(encoding="utf-8")
     assert 'route.view === "pdf" && <PdfView target={route.params.pdfTarget} />' in app
+
+
+def test_the_cleanup_report_shows_once_and_only_when_something_was_removed() -> None:
+    assert _run()["notices"] == ["Removed contact details from 1 stored resume (email 1).", None, None, None]
+    app = (UI_SRC / "App.jsx").read_text(encoding="utf-8")
+    assert "getPrivacyCleanup()" in app and "putPrivacyCleanupShown()" in app and 'data-role="app-notice"' in app

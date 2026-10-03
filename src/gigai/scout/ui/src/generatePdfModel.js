@@ -43,3 +43,13 @@ export function headerBody(values) {
 export function canGenerate(values) {
   return headerBody(values).name.length > 0;
 }
+
+// The one-time contact cleanup's report (GET /api/privacy/cleanup) as the
+// notice to show, or null: only when something was removed and the report
+// was not shown yet. The text is the server's (counts only, never a value).
+export function cleanupNotice(report) {
+  if (!report || report.removed_any !== true || report.shown !== false || typeof report.text !== "string") {
+    return null;
+  }
+  return report.text;
+}

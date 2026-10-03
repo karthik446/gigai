@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, getConfig, getSetup, getSourcesUpdate } from "./api.js";
+import { ApiError, getConfig, getPrivacyCleanup, getSetup, getSourcesUpdate, putPrivacyCleanupShown } from "./api.js";
+import { cleanupNotice } from "./generatePdfModel.js";
 import { useApplications, useProfiles, useRuns } from "./hooks.js";
 import { finishLanding } from "./sourcesStripModel.js";
 import SetupWizard from "./wizard/index.js";
@@ -166,6 +167,25 @@ export default function App() {
   // 0110-046: a one-time notice under the top bar ("We removed your contact
   // lines; ..." after the wizard stored a resume). Dismissed, it is gone.
   const [notice, setNotice] = useState(null);
+
+  // 0110-046: the one-time contact cleanup's report, shown once (counts only),
+  // then marked shown. A failed read shows nothing; the CLI's `gigai scout
+  // privacy` prints the same report.
+  useEffect(() => {
+    let live = true;
+    getPrivacyCleanup()
+      .then((report) => {
+        const text = cleanupNotice(report);
+        if (live && text) {
+          setNotice(text);
+          putPrivacyCleanupShown().catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const wizardDone = (done) => {
     setNotice((done && done.contactRemoved) || null);

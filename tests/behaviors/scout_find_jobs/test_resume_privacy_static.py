@@ -44,6 +44,7 @@ _READER_ALLOWLIST: dict[tuple[str, str, str], str] = {
     ("gigai.scout.find_jobs.api.profiles", "ProfilesRoutesMixin._resolve_resume_ref", "read_record"): "hashed only",
     ("gigai.scout.find_jobs.api.rank", "_resolve", "read_record"): "model_rank.rank_postings -> rank_digest.resume_digest",
     ("gigai.scout.find_jobs.api.run_reads", "_resume_text", "read_record"): "local run reads (RowJoins), never sent",
+    ("gigai.scout.contact_cleanup", "_clean_resumes", "read_record"): "0110-046: stripped locally (resume_pii.strip_contact_lines) and stored back, never sent",
     ("gigai.scout.find_jobs.market_acquisition", "_read_resume_text_for_rank", "read_record"): "returned to the rank step below",
     ("gigai.scout.find_jobs.market_acquisition", "_rank_rows_with_status", "_read_resume_text_for_rank"): "model_rank.rank_postings -> rank_digest.resume_digest",
     ("gigai.scout.find_jobs.resume_input", "resolve_resume", "resume_for_profile"): "returned to its callers (allowlisted here)",
@@ -72,7 +73,9 @@ _BUILDERS: dict[tuple[str, str], frozenset[str]] = {
 _DISPLAY_IMPORTERS: dict[str, frozenset[str]] = {
     "gigai.scout.resume_display": frozenset({
         "gigai.scout.resume_pdf", "gigai.scout.find_jobs.api.resume_display", "gigai.scout.find_jobs.api.tailored_resumes",
-        # 0110-046: the story bank no longer reads a saved name (GigAI stores none).
+        # 0110-046: the story bank no longer reads a saved name (GigAI stores none); the one-time
+        # cleanup reads and rewrites the display file (counts only, never sent anywhere).
+        "gigai.scout.contact_cleanup",
     }),
     "gigai.scout.find_jobs.api.resume_display": frozenset({
         "gigai.scout.find_jobs.api.server", "gigai.scout.find_jobs.api.tailored_resumes",

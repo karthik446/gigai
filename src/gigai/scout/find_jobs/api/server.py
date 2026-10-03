@@ -1496,6 +1496,7 @@ def _make_handler(
     from .discover import DiscoverRoutesMixin
     from .extract import ResumeExtractRoutesMixin
     from .posted_window import PostedWindowRoutesMixin
+    from .privacy_cleanup import PrivacyCleanupRoutesMixin
     from .profiles import ProfilesRoutesMixin
     from .rank import RankRoutesMixin
     from .resume_display import ResumeDisplayRoutesMixin
@@ -1527,6 +1528,7 @@ def _make_handler(
         ResumeExtractRoutesMixin,
         ResumesRoutesMixin,
         ResumeDisplayRoutesMixin,
+        PrivacyCleanupRoutesMixin,
         SecretsStatusRoutesMixin,
         StoryBankRoutesMixin,
         TailoredResumesRoutesMixin,
@@ -1752,6 +1754,10 @@ def _make_handler(
                         if self._check_host():
                             self._handle_get_resume_display()
                         return
+                    if path == "/api/privacy/cleanup":
+                        if self._check_host():
+                            self._handle_get_privacy_cleanup()
+                        return
                     if path == "/api/answers":
                         self._handle_get_answers()
                         return
@@ -1915,6 +1921,9 @@ def _make_handler(
                     return
                 if path == "/api/tailored-resumes/lines":
                     self._handle_put_tailored_resume_line()
+                    return
+                if path == "/api/privacy/cleanup":
+                    self._handle_put_privacy_cleanup()
                     return
                 if path == "/api/story-bank/sharing":
                     self._handle_put_story_bank_sharing()

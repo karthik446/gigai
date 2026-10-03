@@ -125,7 +125,24 @@ def main(argv: list[str] | None = None) -> None:
     target = target.expanduser().resolve(strict=False)
     bind = (API_BIND[0], args.port) if args.port is not None else API_BIND
     backend = ScoutFindJobsBackend(home_root=home_root, target=target)
+    _start_contact_cleanup(home_root, target)
     _run_forever(bind, backend=backend)
+
+
+def _start_contact_cleanup(home_root: Path, target: Path) -> None:
+    """0110-046: the one-time contact cleanup, off the startup path (``gigai scout run`` has usually run it
+    already, then this is one small file read). Never raises; logs the status only, never a value."""
+
+    import threading
+
+    from ..contact_cleanup import run_cleanup
+    from .api.server import _logger
+
+    def work() -> None:
+        report = run_cleanup(home_root=home_root, target=target if target.is_dir() else None)
+        _logger.info("contact cleanup: status=%s removed_any=%s", report.get("status"), report.get("removed_any"))
+
+    threading.Thread(target=work, name="gigai-contact-cleanup", daemon=True).start()
 
 
 if __name__ == "__main__":
