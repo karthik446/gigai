@@ -38,6 +38,8 @@ _WEIGHTS = {
     "plain characters": 2, "standard headings": 3, "1-2 pages": 1, "file name": 1,
 }
 _FIDELITY_CLEAN = 36.0
+_TEXT_LAYER_CHARS = 200
+_RECALL_CLEAN = 0.95  # below this share of the source's words, the line names "text lost"
 _DATE_RANGE = re.compile(r"\b(?:[A-Z][a-z]{2} )?(?:19|20)\d\d\s*[-–]\s*(?:(?:[A-Z][a-z]{2} )?(?:19|20)\d\d|Present)\b")
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 _FILE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*-\d{4}-\d{2}-\d{2}\.pdf$")
@@ -49,6 +51,11 @@ _SECOND_COLUMN_START = 0.30  # a row whose FIRST fragment starts past this share
 _SECOND_COLUMN_ROWS = 0.15
 _STROKE_OPS = (b"S", b"s", b"B", b"b")
 _MAX_RULE_STROKES = 2
+#: The space width (1/1000 em) ``pypdf`` assumes for a font whose subset has NO space glyph.  Its own default
+#: (200) makes a 0.1 em tracking read as a space between letters, so the same heading extracted as ``SUMMARY``
+#: or ``S U M M A RY`` depending on whether any heading on the page held a space.  A typical text face's space
+#: is about a quarter em (Inter: 252-281), which is also what a subset WITH a space glyph gives.
+_SPACE_WIDTH = 250.0
 
 
 @dataclass(frozen=True)
@@ -95,7 +102,7 @@ def _read(pdf: bytes) -> _Read:
             if t.strip():
                 frags.append((_n, round(tm[5] * cm[3] + cm[5]), tm[4] * cm[0] + cm[4], t, _w))
 
-        text.append(page.extract_text(visitor_text=visit) or "")
+        text.append(page.extract_text(visitor_text=visit, space_width=_SPACE_WIDTH) or "")
         images += len(page.images)
         resources = page.get("/Resources")
         for font in ((resources.get_object() if resources is not None else {}).get("/Font") or {}).values():
@@ -111,7 +118,10 @@ def _read(pdf: bytes) -> _Read:
 
 def _source_markdown(source: str | TailoredResume) -> str:
     markdown = render_markdown(source) if isinstance(source, TailoredResume) else source
-    return _COMMENT.sub("", markdown)
+    # A stored resume's lines end in a source comment: without it and the blank it leaves, a role line reads the
+    # same as in plain markdown ("Title | 2012 - 2016", not "... 2016 ").
+    # A leading "# Name" is a hint the renderer prints nowhere (the header comes from the form, or there is none).
+    return "\n".join(line.rstrip() for line in _COMMENT.sub("", markdown).splitlines() if not line.startswith("# "))
 
 
 def _first_column_share(frags: list[tuple[int, int, float, str, float]]) -> float:
@@ -134,10 +144,14 @@ def _row_order_text(frags: list[tuple[int, int, float, str, float]]) -> str:
 
 
 def _entries_intact(text: str, markdown: str) -> float:
-    """Share of source role lines ("Title | dates") that come out with title and dates adjacent."""
+    """Share of source role lines ("Title | dates") that come out with title and dates adjacent.
+
+    1 when the source has no such line: nothing to split."""
     roles = _ROLE_LINE.findall(markdown)
+    if not roles:
+        return 1.0
     ok = sum(1 for title, dates in roles if re.search(re.escape(title) + r"\s+" + re.escape(dates).replace("\\ ", r"\s+"), text))
-    return ok / max(1, len(roles))
+    return ok / len(roles)
 
 
 def _fidelity(markdown: str, read: _Read) -> tuple[float, dict[str, object]]:
@@ -148,12 +162,24 @@ def _fidelity(markdown: str, read: _Read) -> tuple[float, dict[str, object]]:
     wanted = {h.strip().upper() for h in re.findall(r"(?m)^## (.+)$", markdown)}
     found = wanted & lines
     source_dates, got_dates = len(_DATE_RANGE.findall(markdown)), len(_DATE_RANGE.findall(read.text))
-    email = _EMAIL.search(read.text) is not None
+    # Kept when the source has none to lose: Scout's markdown never holds one and an agent's PDF has no header.
+    email = _EMAIL.search(read.text) is not None or _EMAIL.search(markdown) is None
     intact_stream = _entries_intact(read.text, markdown)
     intact_rows = _entries_intact(_row_order_text(read.frags), markdown)
-    points = 20 * recall + 10 * len(found) / max(1, len(wanted)) + 7 * min(1.0, got_dates / max(1, source_dates)) + 3 * email
+    # A part with nothing in the source (no heading, no date range) has nothing to lose: it earns its points.
+    sections = len(found) / len(wanted) if wanted else 1.0
+    dates = min(1.0, got_dates / source_dates) if source_dates else 1.0
+    points = 20 * recall + 10 * sections + 7 * dates + 3 * email
     points = max(0.0, points - 5 * (1 - min(intact_stream, intact_rows)))
+    lost = [
+        *(f"{h.lower()} heading" for h in sorted(wanted - found)),
+        *(["text lost"] if recall < _RECALL_CLEAN else []),
+        *(["dates lost"] if got_dates < source_dates else []),
+        *(["email lost"] if not email else []),
+        *(["role lines split"] if min(intact_stream, intact_rows) < 1 else []),
+    ]
     return round(points, 1), {
+        "lost": lost,
         "word_recall": round(recall, 3), "sections": f"{len(found)}/{len(wanted)}", "sections_missing": sorted(wanted - found),
         "dates": f"{got_dates}/{source_dates}", "email": email, "role_lines_intact_stream": round(intact_stream, 2), "role_lines_intact_rows": round(intact_rows, 2),
     }
@@ -172,12 +198,13 @@ def _coverage(keywords: PostingKeywords, text: str) -> tuple[float, dict[str, ob
     }
 
 
-def _format(read: _Read, file_name: str | None) -> tuple[float, dict[str, object]]:
+def _format(read: _Read, file_name: str | None, markdown: str) -> tuple[float, dict[str, object]]:
     odd = sum(1 for ch in read.text if 0x1D400 <= ord(ch) <= 0x1D7FF or 0xE000 <= ord(ch) <= 0xF8FF)
     heads = {line.strip().upper() for line in read.text.splitlines()}
     share = _first_column_share(read.frags)
     rules = {
-        "text layer": len(read.text.strip()) > 200,
+        # Most of a page's worth of text, or of the source's when the resume itself is shorter than that.
+        "text layer": len(read.text.strip()) > min(_TEXT_LAYER_CHARS, len(markdown.strip()) // 2),
         "single column": share < _SECOND_COLUMN_ROWS,
         "no tables": read.strokes <= _MAX_RULE_STROKES,
         "no images": read.images == 0,
@@ -209,7 +236,7 @@ def score(pdf_bytes: bytes, source: str | TailoredResume, keywords: PostingKeywo
     markdown = _source_markdown(source)
     fidelity, fidelity_detail = _fidelity(markdown, read)
     coverage, coverage_detail = _coverage(keywords, read.text)
-    fmt, format_detail = _format(read, file_name)
+    fmt, format_detail = _format(read, file_name, markdown)
     failed = format_detail["failed"]
     assert isinstance(failed, list)
     total = min([round(fidelity + coverage + fmt), *(CAPS[rule] for rule in failed if rule in CAPS)])
@@ -218,7 +245,8 @@ def score(pdf_bytes: bytes, source: str | TailoredResume, keywords: PostingKeywo
     elif fidelity >= _FIDELITY_CLEAN and not failed:
         parse = "parses cleanly"
     else:
-        parse = "parse issues: " + ", ".join([*failed, *(f"{h.lower()} heading" for h in fidelity_detail["sections_missing"])])  # type: ignore[attr-defined]
+        # Never an unnamed issue: a failed rule, what the text lost, or (neither) that it differs from the source.
+        parse = "parse issues: " + ", ".join([*failed, *fidelity_detail["lost"]] or ["text differs from the source"])  # type: ignore[misc]
     missing = [*coverage_detail["missing_must"], *coverage_detail["missing_nice"]]  # type: ignore[misc]
     skills = coverage_detail["key_skills"]
     line = f"Scout ATS {total}: {parse}" + ("" if skills == "0/0" else f" · {skills} key skills") + (f" · missing: {', '.join(missing)}" if missing else "")

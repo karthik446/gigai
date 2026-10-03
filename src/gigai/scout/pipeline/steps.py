@@ -89,7 +89,7 @@ from .settings import PipelineSetting
 from .store import Claim, PipelineStore, fits, pipeline_path
 
 #: What the ATS step's digest names: bump when ``ats_score`` or ``posting_keywords`` change what a score means.
-ATS_RULES_VERSION = "scout-ats:1"
+ATS_RULES_VERSION = "scout-ats:2"
 LABEL_RULE_VERSION = "scout-label:1"
 ATS_RECORD_SCHEMA = "scout-ats-record:1"
 LABEL_RECORD_SCHEMA = "scout-label-record:1"
