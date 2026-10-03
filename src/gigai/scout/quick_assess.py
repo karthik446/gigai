@@ -53,7 +53,7 @@ fake model call (the fixture ``MockTransport`` has no socket to time out).
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 import json
 import logging
@@ -143,6 +143,36 @@ def resume_key(profile_id: str | None) -> str:
 def quick_assess_path(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> Path:
     digest = digest_imported_bytes(job_identity.encode("utf-8")).removeprefix("sha256:")
     return quick_assess_dir(home_root, target) / resume_key(profile_id) / f"{digest}.json"
+
+
+#: 0.1.10.7 M2: assessments of a job against the profile's TAILORED resume, beside ``quick_assess/``
+#: (same ``<profile_id>/<sha256(job_identity)>.json``). A variant never replaces the base assessment:
+#: the base verdict stays the job's verdict.
+TAILORED_VARIANT_DIR = "quick_assess_tailored"
+
+
+@dataclass(frozen=True)
+class AssessVariant:
+    """Assess the same job for the same profile against ``resume_text`` (its tailored resume) instead of the base resume."""
+
+    resume_text: str = field(repr=False)
+
+
+def tailored_variant_path(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> Path:
+    digest = digest_imported_bytes(job_identity.encode("utf-8")).removeprefix("sha256:")
+    return home_root / "scout" / project_id(home_root, target) / TAILORED_VARIANT_DIR / resume_key(profile_id) / f"{digest}.json"
+
+
+def read_quick_assessment(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> AssessResponse | None:
+    """The stored (base) assessment of ``job_identity`` for ``profile_id``, or ``None``."""
+
+    return _read_stored(quick_assess_path(Path(home_root), Path(target), profile_id, job_identity))
+
+
+def read_tailored_variant(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> AssessResponse | None:
+    """The stored assessment of ``job_identity`` against ``profile_id``'s tailored resume, or ``None``."""
+
+    return _read_stored(tailored_variant_path(Path(home_root), Path(target), profile_id, job_identity))
 
 
 def _read_stored(path: Path) -> AssessResponse | None:
@@ -568,8 +598,15 @@ def run_quick_assessment(
     target: Path,
     config: GigAIConfig | None = None,
     trigger: str | None = None,
+    resolved_job: ResolvedJob | None = None,
+    variant: AssessVariant | None = None,
 ) -> AssessResponse:
     """Assess ``request.job`` against ``request.resume`` and store the answer.
+
+    0.1.10.7 M2 (the pipeline): ``resolved_job`` is the job already resolved
+    (nothing is fetched); ``variant`` assesses against the tailored resume's
+    text and stores the answer at ``tailored_variant_path``, never over the
+    base assessment.
 
     ``trigger`` names what caused this assessment in the stored verdict
     history (Q4a): ``None`` (the default) records ``"assess"`` for a job
@@ -589,8 +626,11 @@ def run_quick_assessment(
 
     # 1. Job text (public data; network only for a URL).
     try:
-        with job_fetch_client() as client:
-            job = resolve_job(request.job, client=client, home_root=home_root)
+        if resolved_job is not None:
+            job = resolved_job
+        else:
+            with job_fetch_client() as client:
+                job = resolve_job(request.job, client=client, home_root=home_root)
     except FindJobsContractError as exc:
         raise QuickAssessError(exc.code, str(exc)) from exc
     # PL2: the posting's digest as fetched (the index's ``content_sha256``), before any title override.
@@ -631,7 +671,11 @@ def run_quick_assessment(
     # 4. Storage path first, so the response can name it and a prior
     #    ``created_at`` survives a re-assessment.
     try:
-        path = quick_assess_path(home_root, target, resume.profile_id, job.job_identity)
+        if variant is not None:
+            resume = replace(resume, text=variant.resume_text)
+            path = tailored_variant_path(home_root, target, resume.profile_id, job.job_identity)
+        else:
+            path = quick_assess_path(home_root, target, resume.profile_id, job.job_identity)
     except Exception as exc:
         raise QuickAssessError("target_unavailable", "this folder is not bound to a GigAI project") from exc
     previous = _read_stored(path)
@@ -736,7 +780,7 @@ def run_quick_assessment(
         model=_model_id(getattr(binding.port, "resolved_model", None)),
     )
     atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
-    if bank.entries or bank.stories:
+    if (bank.entries or bank.stories) and variant is None:
         # Which answers and stories this assessment cited ("Story bank <id>: ...").
         story_bank.record_reuse(
             home_root=home_root, target=target, entries=bank.entries, stories=bank.stories,
@@ -748,15 +792,20 @@ def run_quick_assessment(
 
 __all__ = [
     "EPHEMERAL_RESUME_KEY",
+    "TAILORED_VARIANT_DIR",
     "TRIGGER_ANSWER_PREFIX",
     "TRIGGER_ASSESS",
     "TRIGGER_REASSESS",
+    "AssessVariant",
     "QuickAssessError",
     "candidate_location_and_work_mode",
     "find_quick_assessment_by_job_identity",
     "list_quick_assessments",
     "quick_assess_dir",
     "quick_assess_path",
+    "read_quick_assessment",
+    "read_tailored_variant",
     "resume_key",
     "run_quick_assessment",
+    "tailored_variant_path",
 ]

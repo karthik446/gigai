@@ -2374,4 +2374,250 @@ def snapshot_status_command(home_value: Path | None, target_value: Path | None, 
         click.echo(f"Last attempt {status['last_attempt_at']}: {status['last_result']}{reason}.")
 
 
+# --- 0.1.10.7 PL4: `gigai scout pipeline run|status|process|cancel|retry` --------------
+
+
+@scout_group.group("pipeline")
+def pipeline_group() -> None:
+    """The background pipeline of one job: tailor the resume, assess it again, score it, set the Scout label."""
+
+
+def _pipeline_target(target_value: Path | None, home_root: Path, *, as_json: bool) -> Path:
+    return _resolved_target(target_value, home_root, as_json=as_json).expanduser().resolve(strict=True)
+
+
+def _pipeline_job(job: str) -> str:
+    """The job identity for ``job``: a posting URL (normalized) or ``text:sha256:<hex>`` as given."""
+
+    from .find_jobs.contracts import normalize_url
+
+    return job if job.startswith("text:sha256:") else normalize_url(job)
+
+
+def _pipeline_profile(profile_id: str | None, home_root: Path, target: Path) -> str:
+    """``--profile``, else the selected profile's id."""
+
+    if profile_id:
+        return profile_id
+    from ..workpad import resolve_workpad
+    from . import profile_records
+    from .pipeline.steps import StepError
+
+    resolved = resolve_workpad(home_root=home_root, requested_target=target, gig_id=None, allow_semantic_state=True)
+    selected = profile_records.selected_profile(resolved, home_root=home_root, target=target)
+    if selected is None:
+        raise StepError("profile_unavailable", "no scout profile is selected for this project; pass --profile")
+    return selected.profile_id
+
+
+def _pipeline_errors() -> tuple[type[BaseException], ...]:
+    from .find_jobs.contracts import FindJobsContractError
+    from .pipeline.steps import StepError
+    from .pipeline.store import PipelineStoreError
+
+    return (ScoutTargetError, WorkpadError, PrivateRecordError, FindJobsContractError, StepError, PipelineStoreError, OSError, ValueError)
+
+
+def _pipeline_drain_line(drain: dict[str, object]) -> str:
+    steps = drain["steps"]
+    assert isinstance(steps, list)
+    if drain["state"] == "disabled":
+        return f"The pipeline is off ({drain['reason']}). Nothing was run."
+    if drain["state"] == "yielded":
+        return f"The pipeline is waiting: {str(drain['reason']).replace('_', ' ')} is running. Run it again when that is done."
+    if not steps:
+        return "Nothing to run."
+    waiting = sum(1 for step in steps if step.get("outcome") == "waiting")
+    failed = sum(1 for step in steps if step.get("error_code"))
+    line = f"Ran {len(steps) - waiting} step(s), {drain['model_calls']} model call(s)."
+    if failed:
+        line += f" {failed} did not finish; see `gigai scout pipeline status`."
+    if waiting:
+        line += f" {waiting} wait for tomorrow: today's model calls for the pipeline are used up."
+    return line
+
+
+def _pipeline_status_lines(status: dict[str, object]) -> list[str]:
+    setting = status["setting"]
+    calls = status["calls_today"]
+    assert isinstance(setting, dict) and isinstance(calls, dict)
+    lines = [
+        f"Pipeline: {'on' if setting['enabled'] else 'off'} ({setting['source']}). "
+        f"Model calls today: {calls['used']}/{calls['limit']}."
+    ]
+    if status["yielding_to"]:
+        lines.append(f"Waiting: {str(status['yielding_to']).replace('_', ' ')} is running.")
+    for lane in status["lanes"]:  # type: ignore[union-attr]
+        lines.append(f"Lane {lane['lane']} is backed off ({lane['error_code']}) until {lane['retry_at']}.")
+    steps = status["steps"]
+    assert isinstance(steps, list)
+    if not steps:
+        lines.append("No job is in the pipeline.")
+    for step in steps:
+        detail = step["state"]
+        if step["waiting"]:
+            detail += f", waiting ({step['waiting']}" + (f" until {step['retry_at']})" if step["retry_at"] else ")")
+        elif step["error_code"]:
+            detail += f" ({step['error_code']})"
+        lines.append(f"{step['job']} [{step['profile_id']}] {step['name']}: {detail}")
+    outputs = status.get("outputs")
+    if isinstance(outputs, dict):
+        base, tailored, ats, label = (outputs.get(key) for key in ("base_assessment", "tailored_assessment", "ats", "label"))
+        if isinstance(base, dict) and isinstance(tailored, dict):
+            lines.append(
+                f"Requirements met: {base['requirements_met']['percent']} -> {tailored['requirements_met']['percent']} after tailoring "
+                f"(verdict {base['verdict']} -> {tailored['verdict']})."
+            )
+        if isinstance(ats, dict):
+            lines.append(str(ats["line"]))
+        if isinstance(label, dict):
+            reasons = f" ({', '.join(label['reasons'])})" if label["reasons"] else ""
+            lines.append(f"{label['name']}: {label['label']}{reasons}")
+    return lines
+
+
+@pipeline_group.command("run")
+@click.option("--once", "once", is_flag=True, help="Run the waiting steps now, then exit.")
+@click.option("--max-steps", "max_steps", type=click.IntRange(min=1), help="Claim at most this many steps.")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def pipeline_run_command(once: bool, max_steps: int | None, home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
+    """Run the pipeline's waiting steps once, without the Scout server (which runs them by itself)."""
+
+    from .pipeline.runner import run_once
+
+    home_root = home_value or default_home_root()
+    if not once:
+        _fail(
+            ValueError("pass --once: the Scout server runs the pipeline in the background; this command runs the waiting steps one time"),
+            as_json=as_json, fallback="invalid_value",
+        )
+        return
+    try:
+        target = _pipeline_target(target_value, home_root, as_json=as_json)
+        drain = run_once(home_root, target, max_steps=max_steps).to_json()
+    except _pipeline_errors() as exc:
+        _fail(exc, as_json=as_json, fallback="scout_pipeline_failed")
+        return
+    _emit(drain, as_json, _pipeline_drain_line(drain))
+
+
+@pipeline_group.command("status")
+@click.option("--job", "job", help="Only this job (its posting URL), with what the pipeline stored for it.")
+@click.option("--profile", "profile_id", help="Scout profile ID (default with --job: the selected profile).")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def pipeline_status_command(
+    job: str | None, profile_id: str | None, home_value: Path | None, target_value: Path | None, as_json: bool
+) -> None:
+    """Show what the pipeline is doing: each job's steps, why a step waits, and today's model calls against the cap."""
+
+    from .pipeline.runner import pipeline_status
+
+    home_root = home_value or default_home_root()
+    try:
+        target = _pipeline_target(target_value, home_root, as_json=as_json)
+        identity = None if job is None else _pipeline_job(job)
+        profile = _pipeline_profile(profile_id, home_root, target) if identity is not None else profile_id
+        status = pipeline_status(home_root, target, profile_id=profile, job=identity)
+    except _pipeline_errors() as exc:
+        _fail(exc, as_json=as_json, fallback="scout_pipeline_failed")
+        return
+    _emit(status, as_json, "\n".join(_pipeline_status_lines(status)))
+
+
+@pipeline_group.command("process")
+@click.argument("job")
+@click.option("--profile", "profile_id", help="Scout profile ID (default: the selected profile).")
+@click.option("--force", "force", is_flag=True, help="Tailor again even when nothing the tailoring reads has changed.")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def pipeline_process_command(
+    job: str, profile_id: str | None, force: bool, home_value: Path | None, target_value: Path | None, as_json: bool
+) -> None:
+    """Put one assessed job through the pipeline now: tailor, assess again, Scout ATS score, Scout label."""
+
+    from .pipeline.runner import pipeline_status, run_once
+    from .pipeline.steps import enqueue_job
+
+    home_root = home_value or default_home_root()
+    try:
+        target = _pipeline_target(target_value, home_root, as_json=as_json)
+        identity = _pipeline_job(job)
+        profile = _pipeline_profile(profile_id, home_root, target)
+        queued = enqueue_job(profile, identity, force=force, home_root=home_root, target=target)
+        drain = run_once(home_root, target, only=(profile, identity), force_enabled=True).to_json()
+        status = pipeline_status(home_root, target, profile_id=profile, job=identity)
+    except _pipeline_errors() as exc:
+        _fail(exc, as_json=as_json, fallback="scout_pipeline_failed")
+        return
+    if as_json:
+        _emit({"enqueue": queued, "drain": drain, "status": status}, True, "")
+        return
+    if drain["steps"] or drain["state"] in ("disabled", "yielded"):
+        click.echo(_pipeline_drain_line(drain))
+    elif queued["result"] == "noop_failed":
+        click.echo("The tailoring failed with these inputs. Run `gigai scout pipeline retry`, or pass --force.")
+    elif queued["result"] == "noop_unchanged":
+        click.echo("Nothing has changed since this job was last processed.")
+    else:
+        click.echo("Queued. Its steps wait; see below.")
+    click.echo("\n".join(_pipeline_status_lines(status)[1:]))
+
+
+@pipeline_group.command("cancel")
+@click.argument("job")
+@click.option("--profile", "profile_id", help="Scout profile ID (default: the selected profile).")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def pipeline_cancel_command(job: str, profile_id: str | None, home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
+    """Cancel a job's waiting steps; a step that is running finishes its call and its output is kept."""
+
+    _pipeline_change(job, profile_id, home_value, target_value, as_json, "cancel", None)
+
+
+@pipeline_group.command("retry")
+@click.argument("job")
+@click.option("--profile", "profile_id", help="Scout profile ID (default: the selected profile).")
+@click.option("--step", "step", type=click.Choice(["tailor", "reassess", "ats", "label"]), help="Only this step.")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def pipeline_retry_command(
+    job: str, profile_id: str | None, step: str | None, home_value: Path | None, target_value: Path | None, as_json: bool
+) -> None:
+    """Open a job's failed or cancelled steps again; the server, or `pipeline run --once`, then runs them."""
+
+    _pipeline_change(job, profile_id, home_value, target_value, as_json, "retry", step)
+
+
+def _pipeline_change(
+    job: str, profile_id: str | None, home_value: Path | None, target_value: Path | None, as_json: bool, action: str, step: str | None
+) -> None:
+    from .pipeline.store import PipelineStore, pipeline_path
+
+    home_root = home_value or default_home_root()
+    try:
+        target = _pipeline_target(target_value, home_root, as_json=as_json)
+        identity = _pipeline_job(job)
+        profile = _pipeline_profile(profile_id, home_root, target)
+        path = pipeline_path(home_root, target)
+        changed = 0
+        if path.is_file():
+            store = PipelineStore(path)
+            try:
+                changed = store.cancel(profile, identity) if action == "cancel" else store.retry(profile, identity, step)
+            finally:
+                store.close()
+    except _pipeline_errors() as exc:
+        _fail(exc, as_json=as_json, fallback="scout_pipeline_failed")
+        return
+    done = "cancelled" if action == "cancel" else "opened again"
+    _emit({"ok": True, "action": action, "profile_id": profile, "job": identity, "steps": changed}, as_json, f"{changed} step(s) {done}.")
+
+
 __all__ = ["scout_group", "write_starter_find_jobs_config", "STARTER_FIND_JOBS_CONFIG"]

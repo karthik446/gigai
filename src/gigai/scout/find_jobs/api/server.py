@@ -2001,8 +2001,13 @@ class _ScoutHTTPServer(NoLookupThreadingHTTPServer):
     """
 
     refresh_ticker = None
+    #: 0.1.10.7 PL4: the pipeline's runner thread (``pipeline.runner``), started and stopped with the ticker.
+    pipeline_runner = None
 
     def stop_refresh_ticker(self) -> None:
+        runner = self.pipeline_runner
+        if runner is not None and not runner.stop():
+            _logger.warning("pipeline: a step is still running; it is given back when this process ends")
         ticker = self.refresh_ticker
         if ticker is not None and not ticker.stop():
             _logger.warning("sources refresh: the tick thread did not stop in time")
@@ -2063,6 +2068,10 @@ def serve(
 
         server.refresh_ticker = RefreshTicker(home_root=home_root, target=project, logger=_logger)
         server.refresh_ticker.start()
+        from ...pipeline.runner import PipelineRunner
+
+        server.pipeline_runner = PipelineRunner(home_root=home_root, target=project, logger=_logger)
+        server.pipeline_runner.start()
     return server
 
 

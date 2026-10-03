@@ -34,7 +34,8 @@ approval question with.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 import hashlib
 import logging
@@ -228,6 +229,66 @@ def record_call(
 
 
 @dataclass(frozen=True)
+class CapturedCall:
+    """One model call a ``capture_calls`` block saw: its numbers, never its text."""
+
+    metrics: StepMetrics
+    seconds: float
+    outcome: str
+    error_code: str | None = None
+
+
+class _Capture(threading.local):
+    """This thread's open ``capture_calls`` list; ``None`` outside a block."""
+
+    calls: list[CapturedCall] | None = None
+
+
+_CAPTURE = _Capture()
+
+
+@contextmanager
+def capture_calls() -> Iterator[list[CapturedCall]]:
+    """Every model call this thread makes through a ``CallMeter`` inside the block, in order.
+
+    How a pipeline step fills its ``step_run`` row: the call is recorded once
+    as a ``model_call`` (``record_call``) and its numbers are handed to the
+    step that made it, so the two can never disagree.
+    """
+
+    calls: list[CapturedCall] = []
+    previous = _CAPTURE.calls
+    _CAPTURE.calls = calls
+    try:
+        yield calls
+    finally:
+        _CAPTURE.calls = previous
+
+
+def total_metrics(calls: Sequence[CapturedCall]) -> StepMetrics | None:
+    """The calls of one step as ONE ``StepMetrics``: tokens and cost added up, the last call's adapter and model."""
+
+    if not calls:
+        return None
+
+    def added(values: list[int | None]) -> int | None:
+        reported = [value for value in values if value is not None]
+        return sum(reported) if reported else None
+
+    last = calls[-1].metrics
+    costs = [call.metrics.cost_usd for call in calls if call.metrics.cost_usd is not None]
+    return StepMetrics(
+        adapter=last.adapter,
+        model=last.model,
+        input_tokens=added([call.metrics.input_tokens for call in calls]),
+        output_tokens=added([call.metrics.output_tokens for call in calls]),
+        cached_tokens=added([call.metrics.cached_tokens for call in calls]),
+        cost_usd=sum(costs) if costs else None,
+        cost_status="provider_reported" if costs else "unavailable",
+    )
+
+
+@dataclass(frozen=True)
 class CallMeter:
     """What every call of one flow shares: its kind, its project, its adapter, who and what it is for.
 
@@ -261,6 +322,18 @@ class CallMeter:
         self, request: object, result: object | None, error: BaseException | None, seconds: float, started_at: float,
         items: int, job: str | None,
     ) -> int | None:
+        captured = _CAPTURE.calls
+        if captured is not None:
+            requested = getattr(request, "model", None)
+            metrics = (
+                usage_metrics(self.adapter, result, requested_model=requested)
+                if error is None and result is not None
+                else StepMetrics(adapter=self.adapter if fits("id", self.adapter) else None, model=_model(requested))
+            )
+            captured.append(
+                CapturedCall(metrics, max(0.0, float(seconds)), OUTCOME_OK if error is None else OUTCOME_ERROR,
+                             None if error is None else error_code_of(error))
+            )
         return record_call(
             self.home_root, self.target, kind=self.kind, adapter=self.adapter, seconds=seconds,
             target_name=self.target_name, request=request, result=result, error=error, profile_id=self.profile_id,
@@ -486,13 +559,16 @@ __all__ = [
     "SCHEMA_VERSION",
     "CallMeter",
     "CallMetricsError",
+    "CapturedCall",
     "MeteredBinding",
     "MeteredPort",
+    "capture_calls",
     "error_code_of",
     "estimate",
     "lane_for",
     "metrics_report",
     "note_invalid_output",
     "record_call",
+    "total_metrics",
     "usage_metrics",
 ]

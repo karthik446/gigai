@@ -82,7 +82,12 @@ _DISPLAY_IMPORTERS: dict[str, frozenset[str]] = {
     }),
     # posting_keywords (0.1.10.7 D): reads the resume's Skills tags through resume_pdf's markdown parser (the chips the PDF prints);
     # it never touches resume_display, so the display settings stay out of the keyword path.
-    "gigai.scout.resume_pdf": frozenset({"gigai.scout.find_jobs.api.tailored_resumes", "gigai.scout.scout_cli", "gigai.scout.posting_keywords"}),  # scout_cli: `scout resume pdf` renders locally (0110-032)
+    # pipeline.steps (0.1.10.7 M2): the ATS step renders the stored tailored resume HEADERLESS (form=None) to score it;
+    # it passes no header form, so the per-profile title and every header value stay out of the pipeline.
+    "gigai.scout.resume_pdf": frozenset({
+        "gigai.scout.find_jobs.api.tailored_resumes", "gigai.scout.scout_cli", "gigai.scout.posting_keywords",  # scout_cli: `scout resume pdf` renders locally (0110-032)
+        "gigai.scout.pipeline.steps",
+    }),
 }
 
 

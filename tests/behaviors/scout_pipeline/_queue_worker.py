@@ -14,6 +14,13 @@
         and marked with an exclusive-create file, so a step run twice is caught
         outside the database too.
 
+    python _queue_worker.py runner <db> <logdir> <label> server|once <go>
+        0.1.10.7 PL4: the real ``PipelineRunner`` over <db> with a synthetic step (a short
+        sleep, logged and marked like ``race``). ``server`` runs it as the Scout server
+        does (its background thread, woken by its own poll); ``once`` calls ``drain`` on
+        the main thread, as ``gigai scout pipeline run --once`` does, again and again.
+        Both print ``ready``, wait for the file <go>, and stop when every step is done.
+
 Synthetic only: the "model call" is a short sleep.
 """
 
@@ -125,6 +132,72 @@ def race(db: str, logdir: str, label: str, threads: str) -> None:
         sys.exit(2)
 
 
+def runner(db: str, logdir: str, label: str, mode: str, go: str) -> None:
+    from types import SimpleNamespace
+
+    from gigai.scout.pipeline.runner import PipelineRunner
+    from gigai.scout.pipeline.steps import StepResult
+
+    root = Path(logdir)
+    failures: list[str] = []
+    lock = threading.Lock()
+
+    def run_step(_ctx, _store, claim):
+        marker = root / "ran" / f"{hashlib.sha256(claim.job.encode()).hexdigest()[:16]}-{claim.name}"
+        try:
+            os.close(os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except FileExistsError:
+            failures.append(f"{label}: {claim.job} {claim.name} ran twice")
+        started = time.monotonic()
+        time.sleep(0.01 if claim.name in MODEL_STEPS else 0.002)
+        line = {"job": claim.job, "name": claim.name, "lane": claim.lane, "owner": claim.owner, "start": started, "end": time.monotonic()}
+        with lock, (root / f"{label}.jsonl").open("a", encoding="utf-8") as log:
+            log.write(json.dumps(line) + "\n")
+        return StepResult(output_digest=_digest(claim.job, claim.name, "output"))
+
+    api = SimpleNamespace(
+        input_digest=lambda _ctx, _store, claim: claim.input_digest or _digest(claim.job, claim.name, "inputs"),
+        unchanged=lambda _ctx, _store, _claim, _digest_value: False,
+        run_step=run_step,
+    )
+
+    class _Runner(PipelineRunner):
+        def _path(self) -> Path:  # the test's own file: no GigAI project is bound here
+            return Path(db)
+
+    made = _Runner(home_root=root, target=root, busy=lambda: None, step_api=api, poll_seconds=0.01, environ={})
+    store = PipelineStore(Path(db))
+
+    def all_done() -> bool:
+        counts = store.counts()
+        return not any(counts.get(state) for state in ("blocked", "ready", "running"))
+
+    print("ready", flush=True)
+    deadline = time.monotonic() + _GIVE_UP_SECONDS
+    while not Path(go).exists():
+        if time.monotonic() > deadline:
+            sys.exit(3)
+        time.sleep(0.005)
+    if mode == "server":
+        made.start()
+        while not all_done():
+            if time.monotonic() > deadline:
+                failures.append(f"{label}: gave up")
+                break
+            time.sleep(0.01)
+        if not made.stop(timeout=30):
+            failures.append(f"{label}: the runner thread did not stop")
+    else:
+        while not all_done():
+            if time.monotonic() > deadline:
+                failures.append(f"{label}: gave up")
+                break
+            made.drain()
+    if failures:
+        print("\n".join(failures), file=sys.stderr)
+        sys.exit(2)
+
+
 if __name__ == "__main__":
     command, *args = sys.argv[1:]
-    {"crash": crash, "hold": hold, "try": try_once, "race": race}[command](*args)
+    {"crash": crash, "hold": hold, "try": try_once, "race": race, "runner": runner}[command](*args)
