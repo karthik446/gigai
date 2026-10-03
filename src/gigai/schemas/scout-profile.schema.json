@@ -11,7 +11,7 @@
     "seq": {"type": "integer", "minimum": 1},
     "revision": {"type": "integer", "minimum": 1},
     "label": {"type": "string", "minLength": 1, "maxLength": 200},
-    "state": {"enum": ["active", "archived"]},
+    "state": {"enum": ["active", "archived", "deleted"]},
     "origin": {"enum": ["migrated_default", "operator_created"]},
     "resume_ref": {
       "type": "object",

@@ -937,6 +937,8 @@ def switch_selected_profile(
         target_profile = current.get(profile_id)
         if target_profile is None:
             _fail("scout_profile_unavailable", "profile is not committed in this gig")
+        if target_profile.state == "deleted":
+            _fail("scout_profile_deleted", "a deleted profile cannot be selected")
         if target_profile.state == "archived":
             _fail("scout_profile_archived", "an archived profile cannot be selected")
         previous = _current_selection(snapshot.artifacts)
@@ -1017,6 +1019,10 @@ def write_profile(
         existing = current.get(profile_id)
         if existing is None:
             _fail("scout_profile_unavailable", "profile is not committed in this gig")
+        if existing.state == "deleted":
+            _fail("scout_profile_deleted", "profile is deleted")
+        if state not in (None, "active", "archived", "deleted"):
+            _fail("scout_profile_invalid", "state must be active, archived or deleted")
 
         new_label = existing.label if label is None else label
         new_state = existing.state if state is None else state
@@ -1055,37 +1061,61 @@ def write_profile(
         )
 
         previous_selection = _current_selection(snapshot.artifacts)
-        is_archiving_selected = (
-            new_state == "archived"
-            and existing.state != "archived"
+        is_deleting = new_state == "deleted"
+        replacement_id = replacement_profile_id
+        selected_leaves = (
+            new_state in ("archived", "deleted")
+            and existing.state == "active"
             and previous_selection is not None
             and previous_selection.selected_profile_id == profile_id
         )
         artifacts: list[JournalArtifact] = []
         artifact_refs: list[dict[str, object]] = []
         new_selection: ProfileSelection | None = None
-        if is_archiving_selected:
-            if replacement_profile_id is None:
+        if is_deleting:
+            if replacement_id is not None:
+                _fail("scout_profile_invalid", "replacement_profile_id is only valid when archiving the selected profile")
+            default = default_profile(current.values())
+            if default is not None and default.profile_id == profile_id:
+                _fail(
+                    "scout_profile_default_delete",
+                    "the default profile uses the setup settings and cannot be deleted",
+                )
+            others = [item for item in current.values() if item.profile_id != profile_id and item.state == "active"]
+            if not others:
+                _fail("scout_profile_last_active", "the only profile cannot be deleted; add another one first")
+            if selected_leaves:
+                replacement = default if default is not None and default.state == "active" else min(
+                    others, key=lambda item: (item.created_at, item.profile_id)
+                )
+                replacement_id = replacement.profile_id
+        elif selected_leaves:
+            if replacement_id is None:
                 _fail(
                     "profile_archive_requires_replacement",
                     "archiving the selected profile requires a replacement selection",
                 )
-            replacement = current.get(replacement_profile_id)
-            if replacement is None or replacement.profile_id == profile_id or replacement.state == "archived":
+            replacement = current.get(replacement_id)
+            if (
+                replacement is None
+                or replacement.profile_id == profile_id
+                or replacement.state != "active"
+            ):
                 _fail(
                     "profile_archive_requires_replacement",
                     "replacement profile must be another committed, non-archived profile",
                 )
+        elif replacement_id is not None:
+            _fail("scout_profile_invalid", "replacement_profile_id is only valid when archiving the selected profile")
+        if selected_leaves:
             next_selection_seq = 1 if previous_selection is None else previous_selection.seq + 1
             new_selection = ProfileSelection(
                 schema_version=SELECTION_SCHEMA_VERSION,
                 seq=next_selection_seq,
-                selected_profile_id=replacement_profile_id,
+                selected_profile_id=replacement_id,
                 updated_at=_now(),
                 parent_seq=None if previous_selection is None else previous_selection.seq,
             )
-        elif replacement_profile_id is not None:
-            _fail("scout_profile_invalid", "replacement_profile_id is only valid when archiving the selected profile")
 
         next_seq = existing.seq + 1
         now = _now()
@@ -1117,7 +1147,12 @@ def write_profile(
             artifacts.append(JournalArtifact(selection_path, selection_bytes))
             artifact_refs.append(_artifact_ref(selection_path, selection_bytes))
 
-        body = "Archived the selected scout profile with a replacement selection." if new_selection is not None else "Revised a scout profile record."
+        if is_deleting:
+            body = "Deleted a scout profile (kept in history)."
+        elif new_selection is not None:
+            body = "Archived the selected scout profile with a replacement selection."
+        else:
+            body = "Revised a scout profile record."
         writer.record(
             JournalTransition(
                 f"handoff_{uuid_factory()}",

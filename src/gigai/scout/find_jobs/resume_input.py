@@ -45,7 +45,7 @@ def resolve_profile(
         return None
     if input.profile_id is not None:
         for record in profile_records.list_profiles(resolved):
-            if record.profile_id == input.profile_id:
+            if record.profile_id == input.profile_id and record.state != "deleted":
                 return record
         raise FindJobsContractError("profile_not_found", f"profile {input.profile_id!r} is not committed in this gig")
     try:

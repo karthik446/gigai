@@ -1146,7 +1146,7 @@ class ScoutFindJobsBackend:
         seen_titles: set[str] = set()
         seen_avoid: set[str] = set()
         for profile in profiles:
-            if profile.state == "archived":
+            if profile.state != "active":
                 continue
             for title in profile.titles:
                 if title not in seen_titles:
@@ -1939,6 +1939,10 @@ def _make_handler(
                 story_id = _match_story_id(path, suffix="")
                 if story_id is not None:
                     self._handle_delete_story_bank_entry(story_id)
+                    return
+                profile_id = _match_profile_id(path, suffix="")
+                if profile_id is not None:
+                    self._handle_delete_profile(profile_id)
                     return
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
             except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET

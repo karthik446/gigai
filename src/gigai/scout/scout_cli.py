@@ -1633,7 +1633,7 @@ def watchlist_add_command(url: str, target_value: Path | None, home_value: Path 
 
 @scout_group.group("profile")
 def profile_group() -> None:
-    """Show profiles and set a profile's own search settings."""
+    """Show profiles, set a profile's own search settings, delete a profile."""
 
 
 def _profiles_context(target_value: Path | None, home_root: Path, *, as_json: bool):
@@ -1700,7 +1700,7 @@ def profile_list_command(target_value: Path | None, home_value: Path | None, as_
     default_id = None if default is None else default.profile_id
     selected_id = None if selected is None else selected.profile_id
     shared_json = None if shared is None else shared.to_json()
-    items = [_profile_payload(item, default_id=default_id, selected_id=selected_id) for item in profiles]
+    items = [_profile_payload(item, default_id=default_id, selected_id=selected_id) for item in profiles if item.state != "deleted"]
     if as_json:
         _emit({"ok": True, "profiles": items, "default_profile_id": default_id, "default_search_settings": shared_json}, True, "")
         return
@@ -1808,6 +1808,43 @@ def profile_update_command(
         click.echo(f"{record.label} ({record.profile_id}) now uses the default profile's settings.")
     else:
         click.echo(f"{record.label} ({record.profile_id}): {_settings_line(record.search_settings.to_json())}")
+
+
+@profile_group.command("delete")
+@click.argument("profile_id")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def profile_delete_command(profile_id: str, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Delete a profile: it stops showing and searching; its history stays.
+
+    The profile leaves the profile list, the switcher, new runs and
+    background tagging. Its runs and assessments stay readable (hidden from
+    the default Jobs list); the story bank and answers are not touched. The
+    default profile and the only active profile are refused. Deleting the
+    selected profile selects the default profile.
+    """
+
+    from . import profile_records
+
+    home_root = home_value or default_home_root()
+    try:
+        resolved, profiles, _selected, _shared = _profiles_context(target_value, home_root, as_json=as_json)
+        existing = next((item for item in profiles if item.profile_id == profile_id and item.state != "deleted"), None)
+        if existing is None:
+            raise profile_records.ProfileRecordError("scout_profile_unavailable", f"profile {profile_id!r} is not committed in this gig")
+        profile_records.write_profile(resolved, profile_id=profile_id, state="deleted")
+        selection = profile_records.selected_profile(resolved, home_root=home_root, target=resolved.target_root)
+    except (ScoutTargetError, WorkpadError, profile_records.ProfileRecordError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_profile_delete_failed")
+        return
+    selected_id = None if selection is None else selection.profile_id
+    if as_json:
+        _emit({"ok": True, "deleted": profile_id, "selected_profile_id": selected_id}, True, "")
+        return
+    click.echo(f"Deleted {existing.label} ({profile_id}). Its history stays; the story bank is untouched.")
+    if selection is not None:
+        click.echo(f"Selected profile: {selection.label} ({selection.profile_id})")
 
 
 # --- N11-C (v0.1.9): `gigai scout sources update|status` -------------------

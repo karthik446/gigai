@@ -334,6 +334,11 @@ export function archiveProfile(profileId, replacementProfileId) {
   });
 }
 
+// 0110-047: archive a profile as `deleted`; the answer carries the selection after the delete.
+export function deleteProfile(profileId) {
+  return request("DELETE", `/api/profiles/${encodeURIComponent(profileId)}`);
+}
+
 export function selectProfile(profileId) {
   return request("POST", "/api/profiles/selection", { profile_id: profileId });
 }
