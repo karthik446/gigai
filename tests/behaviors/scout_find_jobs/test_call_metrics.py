@@ -312,7 +312,7 @@ def test_the_recorder_reads_only_numbers_ids_and_a_prompt_digest() -> None:
     used_as = sorted(ast.unparse(parents[id(node)]) for node in uses)
     assert used_as == ["isinstance(prompt, str)", "prompt.encode"], used_as
     encoded = next(parents[id(node)] for node in uses if isinstance(parents[id(node)], ast.Attribute))
-    assert ast.unparse(parents[id(parents[id(encoded)])]) == "hashlib.sha256(prompt.encode('utf-8'))"
+    assert ast.unparse(parents[id(parents[id(encoded)])]) == "digest_imported_bytes(prompt.encode('utf-8'))"
     # A row has no text column, and the shape a pipeline step's attempt records is the one reused.
     assert set(COLUMN_KINDS["model_call"].values()) <= {"integer", "real", "id", "job", "lane", "model", "code", "timestamp", "digest"}
     shared = {name: kind for name, kind in COLUMN_KINDS["step_run"].items() if name in COLUMN_KINDS["model_call"]}
