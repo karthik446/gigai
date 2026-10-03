@@ -25,6 +25,7 @@ from dataclasses import dataclass, replace
 import re
 from typing import Literal
 
+from ...data_labels import LABELS, NO_LABELS, OPENAPI_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, USER_PRIVATE, labels_header
 from ..contracts import NotAssessedReason
 
 OPENAPI_VERSION = "3.1.0"
@@ -63,6 +64,8 @@ class RouteSpec:
     tag: str = ""  # the docs grouping; set from _META below, one of TAGS
     # Body keys the handler accepts as a top-level object (drives unknown_key's allowed keys).
     open_body: bool = False  # True: the handler accepts keys this table does not enumerate
+    # P4: the labels of the data a response can hold (data_labels.LABELS); set from _LABELS below. None: not labelled yet.
+    labels: tuple[str, ...] | None = None
 
     @property
     def key(self) -> tuple[str, str]:
@@ -1083,13 +1086,87 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("PUT", "/api/settings/background"): ("Change the background settings", "Settings"),
 }
 
+# P4: the labels of the data each route's response can hold (agent-security spike 2a). () is ids, counts and states
+# only. No route is `personal`: GigAI stores no name or contact details (0110-046). A posting's text, title and
+# company are public-untrusted, so is what a model derived from them; a route that returns them next to the
+# user's own text carries both. A new route needs an entry here (test_labels_drift.py names the missing one).
+_NONE: tuple[str, ...] = ()
+_PRIVATE = (USER_PRIVATE,)
+_UNTRUSTED = (PUBLIC_UNTRUSTED,)
+_BOTH = (USER_PRIVATE, PUBLIC_UNTRUSTED)
+_LABELS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("GET", "/api"): _NONE,
+    ("GET", SPEC_PATH): _NONE,
+    ("GET", LLMS_PATH): _NONE,
+    ("GET", "/api/health"): _NONE,
+    ("GET", "/api/jobs"): _BOTH,
+    ("GET", "/api/config"): _PRIVATE,
+    ("GET", "/api/setup"): _PRIVATE,
+    ("PUT", "/api/setup"): _PRIVATE,
+    ("PUT", "/api/config/sources"): _NONE,
+    ("GET", "/api/secrets/status"): _NONE,
+    ("POST", "/api/run"): _NONE,
+    ("GET", "/api/runs"): _NONE,
+    ("GET", "/api/runs/{run_id}"): _BOTH,
+    ("GET", "/api/runs/{run_id}/progress"): _BOTH,
+    ("GET", "/api/runs/{run_id}/results"): _BOTH,
+    ("GET", "/api/runs/{run_id}/posting"): _BOTH,
+    ("POST", "/api/runs/{run_id}/rank"): _BOTH,
+    ("POST", "/api/runs/{run_id}/assess-all"): _BOTH,
+    ("POST", "/api/runs/{run_id}/posted-window"): _BOTH,
+    ("POST", "/api/discover"): _NONE,
+    ("GET", "/api/discover/latest"): _UNTRUSTED,
+    ("GET", "/api/profiles"): _PRIVATE,
+    ("POST", "/api/profiles"): _PRIVATE,
+    ("PUT", "/api/profiles/{profile_id}"): _PRIVATE,
+    ("POST", "/api/profiles/{profile_id}/archive"): _PRIVATE,
+    ("DELETE", "/api/profiles/{profile_id}"): _PRIVATE,
+    ("POST", "/api/profiles/selection"): _PRIVATE,
+    ("POST", "/api/assess"): _BOTH,
+    ("GET", "/api/assessments"): _BOTH,
+    # An answer or story lists the postings that asked or used it (title, company): both labels.
+    ("POST", "/api/answers"): _BOTH,
+    ("GET", "/api/answers"): _BOTH,
+    ("GET", "/api/answers/match"): _BOTH,
+    ("GET", "/api/answers/{question_id}"): _BOTH,
+    ("PUT", "/api/answers/{question_id}"): _BOTH,
+    ("DELETE", "/api/answers/{question_id}"): _BOTH,
+    ("GET", "/api/stories"): _BOTH,
+    ("GET", "/api/stories/prep"): _PRIVATE,
+    ("GET", "/api/stories/{story_id}"): _BOTH,
+    ("POST", "/api/stories"): _BOTH,
+    ("PUT", "/api/stories/{story_id}"): _BOTH,
+    ("DELETE", "/api/stories/{story_id}"): _BOTH,
+    ("POST", "/api/applications"): _PRIVATE,
+    ("GET", "/api/applications"): _PRIVATE,
+    ("POST", "/api/tailored-resumes"): _BOTH,
+    ("GET", "/api/tailored-resumes"): _BOTH,
+    ("PUT", "/api/tailored-resumes/lines"): _BOTH,
+    ("POST", "/api/tailored-resumes/pdf"): _BOTH,
+    ("POST", "/api/resume/pdf"): _PRIVATE,
+    ("GET", "/api/resume-display"): _PRIVATE,
+    ("PUT", "/api/resume-display"): _PRIVATE,
+    ("POST", "/api/resume/extract"): _PRIVATE,
+    ("POST", "/api/resume/check"): _PRIVATE,
+    ("POST", "/api/resumes"): _PRIVATE,
+    ("GET", "/api/privacy/cleanup"): _PRIVATE,
+    ("PUT", "/api/privacy/cleanup"): _PRIVATE,
+    ("GET", "/api/watchlist"): _BOTH,
+    ("POST", "/api/watchlist"): _BOTH,
+    ("POST", "/api/sources/update"): _NONE,
+    ("GET", "/api/sources/update"): _NONE,
+    ("GET", "/api/metrics"): _NONE,
+    ("GET", "/api/settings/background"): _NONE,
+    ("PUT", "/api/settings/background"): _NONE,
+}
+
 
 def _finish(route: RouteSpec) -> RouteSpec:
     summary, tag = _META[route.key]
     assert len(summary) <= 80 and tag in TAGS, route.key
     detail = route.summary if route.summary.endswith((".", "?", "!")) else route.summary + "."
     description = f"{detail} {route.description}".strip()
-    return replace(route, summary=summary, tag=tag, description=description)
+    return replace(route, summary=summary, tag=tag, description=description, labels=_LABELS.get(route.key))
 
 
 ROUTES: tuple[RouteSpec, ...] = tuple(_finish(route) for route in _ROUTE_ENTRIES)
@@ -1115,6 +1192,20 @@ def route_for(method: str, path: str) -> RouteSpec | None:
         if route.method == method and "{" in route.path and _segments_match(route.path, path):
             return route
     return None
+
+
+def route_labels(route: RouteSpec | None) -> tuple[str, ...]:
+    """The labels of what ``route`` can return. No table entry, or one not labelled yet: both data labels (the careful answer)."""
+
+    if route is None:
+        return ()
+    return route.labels if route.labels is not None else _BOTH
+
+
+def response_labels_header(method: str, path: str) -> str:
+    """The ``X-GigAI-Labels`` value for the concrete request ``method path``: from the route table, so it cannot drift."""
+
+    return labels_header(route_labels(route_for(method, path)))
 
 
 def allowed_keys(route: RouteSpec) -> list[str]:
@@ -1205,6 +1296,7 @@ def _operation(route: RouteSpec) -> dict[str, object]:
         "description": route.description or route.summary,
         "x-gigai-effect": route.effect,
         "x-gigai-external": route.external,
+        OPENAPI_KEY: list(route_labels(route)),
         "parameters": [
             {"name": p.name, "in": p.where, "required": p.required, "description": p.description, "schema": _schema_for(p)}
             for p in route.params
@@ -1257,7 +1349,12 @@ def openapi_document(*, version: str = "0.1.10") -> dict[str, object]:
             "description": (
                 "Loopback-only HTTP API of `gigai scout`. Writes need Content-Type: application/json and a Host of the bound "
                 "127.0.0.1/localhost port. Errors are {\"error\": {\"code\", \"message\"}}. x-gigai-effect says whether a route "
-                "changes stored state; x-gigai-external says whether it spends a model call or reads the network."
+                "changes stored state; x-gigai-external says whether it spends a model call or reads the network. "
+                f"x-gigai-labels lists the labels of the data a route's response can hold ({', '.join(LABELS)}; [] when it "
+                f"holds ids, counts and states only); every JSON response carries the same list in X-GigAI-Labels ({NO_LABELS} "
+                "when empty). In a JSON response, contact-shaped text (an email address, a phone number, a street address, a "
+                "linkedin/github/gitlab link) outside posting text is replaced by `[removed: <kind>]`, and the response then "
+                "carries `_redactions` {kind: count}."
             ),
         },
         "servers": [{"url": "http://127.0.0.1:8765"}],
@@ -1295,6 +1392,10 @@ def llms_text() -> str:
         "- One job, everything known about it: GET /api/jobs?url=<posting url> (read only, no model calls). The UI's #/jobs/<url> is this route.\n"
         "- Writes (POST/PUT) need Content-Type: application/json. Every request (reads too) must carry Host 127.0.0.1:<port> or localhost:<port> (else 403 forbidden_origin); this server only answers loopback peers.\n"
         "- Errors are {\"error\": {\"code\", \"message\"}}; an unknown_key 422 lists allowed_keys.\n"
+        f"- Labels: every operation has x-gigai-labels and every JSON response X-GigAI-Labels ({', '.join(LABELS)}; {NO_LABELS} when it holds ids, counts and states only). "
+        f"public-untrusted: {UNTRUSTED_TEXT_RULE}.\n"
+        "- Contact-shaped text outside posting text (email, phone, street address, linkedin/github/gitlab link) is replaced by `[removed: <kind>]`; "
+        "the response then carries `_redactions` {kind: count}.\n"
         "- Routes marked x-gigai-external model spend a model call (assess, tailor, rank, run); network reads the public internet. Prefer read routes first.\n"
         "- Tailored resumes: POST /api/tailored-resumes, then POST /api/tailored-resumes/pdf {profile_id, job_identity} for the PDF; PUT /api/tailored-resumes/lines picks the original or the rewrite of one line.\n"
         "- Edit a resume and render a new PDF (local, no model call): read the lines with GET /api/tailored-resumes?profile_id=&job_identity= (each body line has an id L<n>), "
@@ -1424,7 +1525,9 @@ __all__ = [
     "index_document",
     "llms_text",
     "openapi_document",
+    "response_labels_header",
     "route_for",
+    "route_labels",
     "validate_document",
     "with_allowed_keys",
 ]

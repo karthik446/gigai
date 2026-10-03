@@ -34,7 +34,7 @@
     }
   },
   "info": {
-    "description": "Loopback-only HTTP API of `gigai scout`. Writes need Content-Type: application/json and a Host of the bound 127.0.0.1/localhost port. Errors are {\"error\": {\"code\", \"message\"}}. x-gigai-effect says whether a route changes stored state; x-gigai-external says whether it spends a model call or reads the network.",
+    "description": "Loopback-only HTTP API of `gigai scout`. Writes need Content-Type: application/json and a Host of the bound 127.0.0.1/localhost port. Errors are {\"error\": {\"code\", \"message\"}}. x-gigai-effect says whether a route changes stored state; x-gigai-external says whether it spends a model call or reads the network. x-gigai-labels lists the labels of the data a route's response can hold (personal, user-private, public-untrusted; [] when it holds ids, counts and states only); every JSON response carries the same list in X-GigAI-Labels (none when empty). In a JSON response, contact-shaped text (an email address, a phone number, a street address, a linkedin/github/gitlab link) outside posting text is replaced by `[removed: <kind>]`, and the response then carries `_redactions` {kind: count}.",
     "title": "GigAI Scout local API",
     "version": "0.1.10.6"
   },
@@ -96,7 +96,8 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": []
       }
     },
     "/api/answers": {
@@ -228,7 +229,11 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       },
       "post": {
         "description": "Save an answer; with reassess the job is assessed again. Answers 201 with the saved `answer`. Storing it is local; the model runs only when `reassess` is given. The answer is the user's: every profile's later assessment reuses it, for the same question id and for the same fact worded differently. A new id creates the answer; an existing id replaces its text (send `revision` to be safe against another writer: 409 revision_conflict carries the current `answer`). Text holding an email, phone, link or street address is refused with 422 personal_info_refused. Example, an agent saves a factual reply from a chat and the next posting that asks it is not asked again: POST this route with the request example; then POST /api/assess for another posting that requires GCP: the answer has no question for it and its resume_evidence reads `Story bank cloud:gcp: ...`.",
@@ -421,7 +426,11 @@
           "Answers and stories"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "model"
+        "x-gigai-external": "model",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/answers/match": {
@@ -528,7 +537,11 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/answers/{question_id}": {
@@ -666,7 +679,11 @@
           "Answers and stories"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       },
       "get": {
         "description": "One answer. Answers belong to the user, not to a profile: every profile's assessment and tailoring reads the same ones. Each answer: the `question_id` (its id in the other routes), the `question` as asked (the id itself when only the id is known), the `answer`, a model-free `tag` (technical, experience-level, eligibility, education, domain, leadership, conflict, failure, collaboration, system-design, delivery, skill, other; or your own), `jobs` (the postings that asked it, confirmed a suggestion with it, or whose assessment reused it: kind answered | confirmed | reused), `written_by` (operator | agent), `created_at`, `updated_at`, `revision` (send it back on PUT and DELETE) and the last writes in `history` ({at, by, action}; an entry with `answer` is an earlier text kept when two profiles' answers were merged).",
@@ -781,7 +798,11 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       },
       "put": {
         "description": "Edit an answer: its text, the question words and/or the tag. At least one of answer, question, tag. Every write bumps `revision` and `updated_at` and records `written_by`. 409 revision_conflict carries the current `answer` in the error: someone (the user, or another agent) wrote it after you read it; read it, merge, and send again with its revision.",
@@ -966,7 +987,11 @@
           "Answers and stories"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/applications": {
@@ -1022,7 +1047,10 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private"
+        ]
       },
       "post": {
         "description": "Record an application event (applied, interview_scheduled, ...) for a job.",
@@ -1164,7 +1192,10 @@
           "Jobs"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/assess": {
@@ -1361,7 +1392,11 @@
           "Assessment"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "model"
+        "x-gigai-external": "model",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/assessments": {
@@ -1461,7 +1496,11 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/config": {
@@ -1519,7 +1558,10 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/config/sources": {
@@ -1625,7 +1667,8 @@
           "Sources"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": []
       }
     },
     "/api/discover": {
@@ -1706,7 +1749,8 @@
           "Sources"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "network"
+        "x-gigai-external": "network",
+        "x-gigai-labels": []
       }
     },
     "/api/discover/latest": {
@@ -1747,7 +1791,10 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "public-untrusted"
+        ]
       }
     },
     "/api/health": {
@@ -1787,7 +1834,8 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": []
       }
     },
     "/api/jobs": {
@@ -2011,7 +2059,11 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/metrics": {
@@ -2158,7 +2210,8 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": []
       }
     },
     "/api/openapi.json": {
@@ -2203,7 +2256,8 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": []
       }
     },
     "/api/privacy/cleanup": {
@@ -2276,7 +2330,10 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private"
+        ]
       },
       "put": {
         "description": "Record that the cleanup report was shown.",
@@ -2419,7 +2476,10 @@
           "Profiles and resume"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/profiles": {
@@ -2476,7 +2536,10 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private"
+        ]
       },
       "post": {
         "description": "Create a profile. Every profile but the default one has its own location, work mode, countries and posted window. The first profile is the default and uses the setup settings.",
@@ -2625,7 +2688,10 @@
           "Profiles and resume"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/profiles/selection": {
@@ -2729,7 +2795,10 @@
           "Profiles and resume"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/profiles/{profile_id}": {
@@ -2830,7 +2899,10 @@
           "Profiles and resume"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
       },
       "put": {
         "description": "Update a profile. search_settings on the default profile is a 409: it uses the setup settings (PUT /api/setup). An unknown key inside search_settings lists that object's allowed_keys.",
@@ -3004,7 +3076,10 @@
           "Profiles and resume"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/profiles/{profile_id}/archive": {
@@ -3114,7 +3189,10 @@
           "Profiles and resume"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/resume-display": {
@@ -3164,7 +3242,10 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private"
+        ]
       },
       "put": {
         "description": "Save the PDF layout settings (per-profile titles, spacing, auto fit). Keys left out keep their saved values. A spacing_scale outside 0.7..1.4 answers 422 invalid_value. name and contact are ignored, never stored: the response then carries ignored and a note.",
@@ -3266,7 +3347,10 @@
           "Tailored resumes"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/resume/check": {
@@ -3356,7 +3440,10 @@
           "Profiles and resume"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/resume/extract": {
@@ -3492,7 +3579,10 @@
           "Profiles and resume"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "model"
+        "x-gigai-external": "model",
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/resume/pdf": {
@@ -3626,7 +3716,10 @@
           "Tailored resumes"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/resumes": {
@@ -3721,7 +3814,10 @@
           "Profiles and resume"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/run": {
@@ -3886,7 +3982,8 @@
           "Runs"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "model"
+        "x-gigai-external": "model",
+        "x-gigai-labels": []
       }
     },
     "/api/runs": {
@@ -4021,7 +4118,8 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": []
       }
     },
     "/api/runs/{run_id}": {
@@ -4088,7 +4186,11 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/runs/{run_id}/assess-all": {
@@ -4205,7 +4307,11 @@
           "Runs"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "model"
+        "x-gigai-external": "model",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/runs/{run_id}/posted-window": {
@@ -4327,7 +4433,11 @@
           "Runs"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "model"
+        "x-gigai-external": "model",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/runs/{run_id}/posting": {
@@ -4431,7 +4541,11 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/runs/{run_id}/progress": {
@@ -4528,7 +4642,11 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/runs/{run_id}/rank": {
@@ -4660,7 +4778,11 @@
           "Runs"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "model"
+        "x-gigai-external": "model",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/runs/{run_id}/results": {
@@ -4775,7 +4897,11 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/secrets/status": {
@@ -4817,7 +4943,8 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": []
       }
     },
     "/api/settings/background": {
@@ -4962,7 +5089,8 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": []
       },
       "put": {
         "description": "Change background settings. Send only the keys to change; at least one. Every other key of the project's settings.json is kept, and the file is replaced in one step. The refresh thread reads the file at every look and is woken by this call, so turning `sources.auto_refresh` off stops the background checks and the model tagging at once (an update already running finishes), and new `sources.check_times` decide the next check. A list of check times is stored sorted, without repeats; an empty list, more than 12 times or anything that is not HH:MM (00:00 to 23:59) is 422 invalid_value. 409 settings_unreadable: the stored file is not one Scout can read; it is left as it is. The answer is the GET body after the change. `settings` is what the project's settings file says (a key it does not hold shows its default): the values a form edits. `effective` is what the background jobs act on now, each block with the `source` that decided it: default, setting, environment (an environment variable overrides the file) or settings_unreadable. `readable` is false when the file exists and cannot be read: every background job is then off. `sources.auto_refresh` off stops all background work, the model tagging included; `sources.check_times` is when the background checks run: `weekdays` and `weekends`, each 1 to 12 24-hour HH:MM times in the machine's local time (in `effective` with its own `source`, and `default`: the times a reset puts back); `tagging.model_enabled` lets a model tag titles the rules cannot place, `tagging.backfill_enabled` also tags titles no active profile can reach, with `tagging.tag_backfill_model`; `snapshot.enabled` allows the metadata snapshot download from `snapshot.manifest_url`.",
@@ -5177,7 +5305,8 @@
           "Settings"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": []
       }
     },
     "/api/setup": {
@@ -5238,7 +5367,10 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private"
+        ]
       },
       "put": {
         "description": "Save preferences and derive the find-jobs config from them.",
@@ -5418,7 +5550,10 @@
           "Settings"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/sources/update": {
@@ -5636,7 +5771,8 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": []
       },
       "post": {
         "description": "Refresh the board catalog and index (\"Update sources\"). Reads public boards; incremental by default; returns immediately; poll GET /api/sources/update.",
@@ -5722,7 +5858,8 @@
           "Sources"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "network"
+        "x-gigai-external": "network",
+        "x-gigai-labels": []
       }
     },
     "/api/stories": {
@@ -5867,7 +6004,11 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       },
       "post": {
         "description": "Add a story. Answers 201 with the story. Local only: no model reads it now. 409 story_exists (with the current `story` in the error) when that id is taken: change it with PUT. 422 personal_info_refused when any text holds an email, phone, link or street address. Example, an agent turns a substantial reply into a story and a later assessment uses it: after the user says yes to \"Want me to make this a story?\", POST this route with the request example; then POST /api/assess for a posting that asks for Kubernetes: the story is in that assessment's prompt, the row's resume_evidence reads `Story bank story:60_acme_ci_cut_time: ...`, and GET /api/stories/story:60_acme_ci_cut_time lists that job under `jobs` with kind used. Stories belong to the user, not to a profile. Each story: `story_id`, `title`, `company`, `role`, `period` (rough is fine), `raw` (the user's own words, kept as said), `narrative` ({situation, task, action, result}, loosely STAR, every part optional), `tags`, `answers_questions` (the interview questions it answers), `sources` ([{question_id, job_identity}]: the job question that triggered it), `jobs` (the postings whose assessment cited it: kind used), `written_by` (operator | agent), `created_at`, `updated_at`, `revision` (send it back on PUT and DELETE) and the last writes in `history`. An assessment searches the stories locally for each job and puts only the few that match the posting into its prompt as evidence.",
@@ -6100,7 +6241,11 @@
           "Answers and stories"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/stories/prep": {
@@ -6191,7 +6336,10 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private"
+        ]
       }
     },
     "/api/stories/{story_id}": {
@@ -6329,7 +6477,11 @@
           "Answers and stories"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       },
       "get": {
         "description": "One story. Stories belong to the user, not to a profile. Each story: `story_id`, `title`, `company`, `role`, `period` (rough is fine), `raw` (the user's own words, kept as said), `narrative` ({situation, task, action, result}, loosely STAR, every part optional), `tags`, `answers_questions` (the interview questions it answers), `sources` ([{question_id, job_identity}]: the job question that triggered it), `jobs` (the postings whose assessment cited it: kind used), `written_by` (operator | agent), `created_at`, `updated_at`, `revision` (send it back on PUT and DELETE) and the last writes in `history`. An assessment searches the stories locally for each job and puts only the few that match the posting into its prompt as evidence.",
@@ -6456,7 +6608,11 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       },
       "put": {
         "description": "Edit a story: only the given fields change. At least one field. A given field replaces the stored one whole (`narrative`, `tags`, `answers_questions` and `sources` are not merged). Every write bumps `revision` and `updated_at` and records `written_by`. 409 revision_conflict carries the current `story` in the error.",
@@ -6682,7 +6838,11 @@
           "Answers and stories"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/tailored-resumes": {
@@ -6766,7 +6926,11 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       },
       "post": {
         "description": "Tailor the resume to one posting (markdown + structure, each line cited). Synchronous: blocks for the model call (one retry on a rejected answer).",
@@ -6948,7 +7112,11 @@
           "Tailored resumes"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "model"
+        "x-gigai-external": "model",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/tailored-resumes/lines": {
@@ -7114,7 +7282,11 @@
           "Tailored resumes"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/tailored-resumes/pdf": {
@@ -7241,7 +7413,11 @@
           "Tailored resumes"
         ],
         "x-gigai-effect": "read",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/api/watchlist": {
@@ -7350,7 +7526,11 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       },
       "post": {
         "description": "Add a company board by its posting or board URL.",
@@ -7462,7 +7642,11 @@
           "Sources"
         ],
         "x-gigai-effect": "write",
-        "x-gigai-external": "none"
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
       }
     },
     "/llms.txt": {
@@ -7499,7 +7683,8 @@
         ],
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
-        "x-gigai-host-checked": true
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": []
       }
     }
   },
