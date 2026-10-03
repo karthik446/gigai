@@ -480,7 +480,8 @@ def test_a_run_page_shows_only_its_own_run() -> None:
     assert "isCurrent: () => shownRunId.current === id," in view[start : start + 260]
     assert "setRunId(" not in view.replace("setRunId(id);", "", 1).replace("[runId, setRunId]", ""), "set the shown run through showRun() only"
     run_page = view[view.index('if (route.view === "run") {') :]
-    run_page = run_page[: run_page.index("\n  return (\n    <div>\n      <JobsSummaryStrip")]
+    # 0.1.10.7 M4b: the run page is the view's last branch (the run-centric landing after it is gone).
+    assert "JobsSummaryStrip" not in view
     assert "jobs={runJobs}" in run_page and "jobs={jobs}" not in run_page and "{grid}" not in run_page
     assert 'data-role="run-failure"' in run_page and "Open the last successful run" in run_page
 

@@ -48,7 +48,9 @@ function knownBoardTotal(status) {
 // The compact first-run stepper: [{n, title, description, state, action}].
 // state is done | current | todo; action is the button the step carries
 // ("update-sources") or null. Step 1 is done once the store holds postings
-// (or the last update finished with some); step 2 is done once a run exists.
+// (or the last update finished with some). 0.1.10.7 M4b: step 2 is the Jobs
+// list itself (no run is started any more); `hasRun` now means "the list is
+// showing", which the Jobs page always passes as true.
 export function firstRunSteps(status, { hasRun = false, boards = "", running = false, stored = "" } = {}) {
   const index = status && status.index;
   const storeReady = Boolean(index) && index.status !== "empty" && count(index.companies_indexed) > 0;
@@ -67,8 +69,8 @@ export function firstRunSteps(status, { hasRun = false, boards = "", running = f
     },
     {
       n: 2,
-      title: "Run find jobs",
-      description: "Finds and ranks postings for this profile.",
+      title: "Review your jobs",
+      description: "The stored postings that match your profiles are listed below. No run is needed.",
       state: step2,
       action: null,
     },
@@ -81,7 +83,7 @@ export function firstRunSteps(status, { hasRun = false, boards = "", running = f
 //   line      the strip's sentence ("" for unknown)
 //   amber     stale ("out of date")
 //   steps     the first-run stepper (empty store, or no run yet), else null
-//   runBlocked  why Run find jobs is off ("" when it is on)
+//   runBlocked  why the Jobs list is still empty ("" when postings are stored)
 //   details   0110-024/025/026: the quiet lines under it (tags, descriptions,
 //             the starter snapshot; sourcesStatusModel.statusLines), [] when
 //             the server sends none of those blocks
@@ -106,7 +108,7 @@ export function sourcesStrip(status, { now = Date.now(), hasRun = true } = {}) {
       line: "Company postings: none stored on this machine yet",
       amber: false,
       steps: firstRunSteps(status, { hasRun: false, boards, running }),
-      runBlocked: running ? "Updating sources… Run find jobs opens when it finishes." : "Update sources first, then run.",
+      runBlocked: running ? "Updating sources… your jobs are listed when it finishes." : "Update sources first.",
       // The stepper has no line of its own, so the refresh sentence is a detail here.
       details: statusLines(status, { withRefresh: true }),
     };
@@ -128,15 +130,6 @@ export function sourcesStrip(status, { now = Date.now(), hasRun = true } = {}) {
     // With the stepper showing, the line above is not: the refresh sentence moves to the details.
     details: statusLines(status, { withRefresh: Boolean(steps) }),
   };
-}
-
-// The empty-state text of a profile with no runs: short while the stepper
-// is showing (the steps already say what to do).
-export function noRunText(strip) {
-  if (strip && strip.steps) {
-    return "No runs yet.";
-  }
-  return "No find-jobs run yet for this profile. Run one above to see its postings here, or assess a single posting under";
 }
 
 // Where the setup wizard's Finish lands: always Jobs from a first run; from

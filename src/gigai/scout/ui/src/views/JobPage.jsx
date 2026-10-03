@@ -11,6 +11,7 @@ import QuickAssessChip from "../components/QuickAssessChip.jsx";
 import StateChip from "../components/StateChip.jsx";
 import PrepPanel from "../components/PrepPanel.jsx";
 import TailoredResumePanel, { useTailoredResume } from "../components/TailoredResumePanel.jsx";
+import PipelineTimeline from "../components/PipelineTimeline.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { reassessGate, tailorGate } from "../answersModel.js";
 import { displayCompanyName, notAssessedReasonDetail, unchangedSinceLabel } from "../display.js";
@@ -85,6 +86,10 @@ import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 //               `job_identity` is the job's id, so a pasted posting can be
 //               applied to as well
 //   tailored    GET/POST /api/tailored-resumes (Q3), see TailoredResumePanel
+//   pipeline    0.1.10.7 M4b: GET /api/pipeline/job, the step timeline
+//               (tailor -> reassess + Scout ATS -> Scout label) with the
+//               Scout ATS chip and the Scout label chip; "Process now" is
+//               POST /api/pipeline/process (PipelineTimeline)
 //
 // Q4b: work_mode / pay (posting) and h1b (the row, via job.h1b) render only
 // when present -- no placeholder chips (operator answer 3).
@@ -360,10 +365,10 @@ export default function JobPage({
       <div>
         <BackToList from={from} />
         <section className="panel">
-          <h2>{loading ? (from === "assessments" ? "Loading assessment…" : "Loading run…") : "Job not found"}</h2>
+          <h2>{loading ? (from === "assessments" ? "Loading assessment…" : "Loading job…") : "Job not found"}</h2>
           {!loading && (
             <p className="muted">
-              {from === "assessments" ? "No assessment with this address for this profile: " : "No posting with this address in the loaded run: "}
+              {from === "assessments" ? "No assessment with this address for this profile: " : "No stored posting with this address for this profile: "}
               <code>{jobId}</code>
             </p>
           )}
@@ -431,7 +436,7 @@ export default function JobPage({
                   {job.quick && job.quick.created_at ? ` ${dateLabel(job.quick.created_at)}` : ""}
                   {job.pastedResume ? " against a pasted resume" : ""}
                 </span>
-              ) : (
+              ) : job.fromPostings ? null : (
                 <span title={posting.published_at || undefined}>
                   posted {ageLabel(posting.published_at)}
                   {posting.published_at ? ` (${dateLabel(posting.published_at)})` : ""}
@@ -500,6 +505,13 @@ export default function JobPage({
         </section>
       )}
       {tailorError && <div className="field-error">Could not save your answers before tailoring: {tailorError}</div>}
+
+      <PipelineTimeline
+        jobIdentity={job.id}
+        profileId={profileId}
+        assessed={Boolean(assessment)}
+        refreshKey={`${assessment ? assessment.verdict || "assessed" : "none"}:${tailored.stored ? tailored.stored.updated_at || "stored" : "none"}`}
+      />
 
       <TailoredResumePanel state={tailored} profileLabel={profileLabel} questionPrompts={questionPrompts} />
 

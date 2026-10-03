@@ -3496,6 +3496,172 @@
         "x-gigai-labels": []
       }
     },
+    "/api/pipeline/job": {
+      "get": {
+        "description": "One job's pipeline: its steps with their numbers, requirements met before and after tailoring, the Scout ATS breakdown, the Scout label. For a job page. `steps`: the job's steps in order (tailor, reassess, ats, label), each with its state, the model target it runs with, why it waits and `last_run`, the numbers of its last attempt (model, tokens, seconds; null before the first). An empty list: the job never entered the pipeline (`state` null). `requirements_met`: what the job's own assessment (`base`) and the assessment of the tailored resume (`tailored`) found met; each null until it exists. `tailor_outcome`: `tailored`, or `tailor_kept_user_edits` when the stored resume is the user's and was kept. `ats`: the Scout ATS score of the tailored resume with its line, its three parts (parse fidelity of 40, keyword coverage of 40, format rules of 20), the key skills found, the ones missing and the format rules that failed, and the wording that always goes with the score. `label`: the Scout label as codes with the wording that always goes with it; null until the label step is done. `ats.line` and `ats.missing` are words of the posting (public-untrusted); nothing here is the user's own text. Reading makes no model call and creates nothing.",
+        "operationId": "get_api_pipeline_job",
+        "parameters": [
+          {
+            "description": "The job's identity: the posting's link (or `text:sha256:...`).",
+            "in": "query",
+            "name": "job_identity",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The profile the job was processed for.",
+            "in": "query",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "ats": {
+                    "failed_rules": [],
+                    "key_skills": "9/11",
+                    "line": "Scout ATS 84: parses cleanly \u00b7 9/11 key skills \u00b7 missing: Terraform, SOC 2",
+                    "missing": [
+                      "Terraform",
+                      "SOC 2"
+                    ],
+                    "parts": {
+                      "coverage": 31.0,
+                      "fidelity": 38.5,
+                      "format": 20.0
+                    },
+                    "score": 84,
+                    "updated_at": "2026-10-03T09:31:05.000000Z",
+                    "wording": "GigAI\u2019s own local check of how well this resume reads and matches the posting. Not any real ATS\u2019s score."
+                  },
+                  "enabled": true,
+                  "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                  "label": {
+                    "ats_score": 84,
+                    "label": "recommended",
+                    "min_ats": 0,
+                    "name": "Scout label",
+                    "reasons": [],
+                    "updated_at": "2026-10-03T09:31:10.000000Z",
+                    "wording": "Scout's own suggestion from your settings, resume and answers. Not a prediction of what an employer will decide."
+                  },
+                  "profile_id": "prof_1",
+                  "requirements_met": {
+                    "base": {
+                      "met": 8,
+                      "percent": 73,
+                      "total": 11
+                    },
+                    "tailored": {
+                      "met": 10,
+                      "percent": 91,
+                      "total": 11
+                    }
+                  },
+                  "schema_version": "scout-pipeline-job:1",
+                  "state": "done",
+                  "steps": [
+                    {
+                      "attempts": 1,
+                      "error_code": null,
+                      "last_run": {
+                        "cached_tokens": 0,
+                        "input_tokens": 30000,
+                        "model": "gpt-5.1-codex",
+                        "outcome": "ok",
+                        "output_tokens": 4000,
+                        "seconds": 24.2,
+                        "started_at": "2026-10-03T09:30:15.000000Z"
+                      },
+                      "model_target": "codex_cli",
+                      "name": "tailor",
+                      "retry_at": null,
+                      "state": "done",
+                      "updated_at": "2026-10-03T09:30:40.000000Z",
+                      "waiting": null
+                    }
+                  ],
+                  "tailor_outcome": "tailored"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-pipeline-job:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, invalid_value"
+          }
+        },
+        "summary": "Get one job's pipeline steps, ATS breakdown and Scout label",
+        "tags": [
+          "Jobs"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "public-untrusted"
+        ]
+      }
+    },
     "/api/pipeline/process": {
       "post": {
         "description": "Process now: queue one assessed job for the pipeline. System data only: ids, codes, counts, numbers and timestamps. A job is named by its `job_identity` (the posting's public link). No posting, resume, answer or story text, no title, no company. 202: the job's steps (tailor, assess again, Scout ATS score, Scout label) are queued and this server's runner runs them; the call never waits for a model. `result` is enqueued, noop_unchanged (done with these inputs), noop_already_queued or noop_failed (it failed with these inputs: retry it, or pass `force`). An explicit choice: the per-trigger cap does not apply and a job waiting for an approval is taken out of it; the daily cap of model calls still does. Read the outcome with GET /api/pipeline. `runner` false: this server runs no pipeline thread (run `gigai scout pipeline run --once`). 404 assessment_missing: assess the job first.",

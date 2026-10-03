@@ -430,9 +430,11 @@ def test_the_run_summary_keywords_line(out: dict) -> None:
 def test_keywords_wiring() -> None:
     dialog = (UI_SRC / "components" / "RunConfirmDialog.jsx").read_text(encoding="utf-8")
     assert '<KeywordsInput id="run-keywords"' in dialog and "onConfirm({ selectionCap, modelTarget, keywords })" in dialog
+    # 0.1.10.7 M4b: the UI starts no run any more, so no view sends a run's keywords; a past run's page still
+    # says which keywords it searched with (the status panel's line).
     jobs = (UI_SRC / "views" / "FindJobsView.jsx").read_text(encoding="utf-8")
-    assert "runBodyWithKeywords(buildRunRequest({ configDigest: config.config_digest, selectionCap, modelTarget }), keywords)" in jobs
-    assert "keywordsLine(progress?.boards)" in jobs and 'data-role="run-keywords"' in jobs
+    assert "runBodyWithKeywords" not in jobs and "buildRunRequest" not in jobs and "RunConfirmDialog" not in jobs
+    assert "boards={progress?.boards}" in jobs
     status = (UI_SRC / "components" / "NodeStatusList.jsx").read_text(encoding="utf-8")
     assert "keywordsLine(boards)" in status and 'className="muted keywords-line"' in status, "the line is quiet, never a callout"
     field = (UI_SRC / "components" / "KeywordsInput.jsx").read_text(encoding="utf-8")

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ApiError,
-  buildRunRequest,
   getAssessments,
+  getPostings,
   getRunProgress,
   JOBS_PAGE_ROWS,
   createResultsPager,
@@ -11,19 +10,16 @@ import {
   postAssessAll,
   postPostedWindow,
   postRank,
-  startRun,
   storedRankScores,
 } from "../api.js";
 import { mergeRows, rowsFromProgress, rowsFromResults } from "../boardRows.js";
-import RunConfirmDialog from "../components/RunConfirmDialog.jsx";
 import NodeStatusList from "../components/NodeStatusList.jsx";
 import JobsGrid from "../components/JobsGrid.jsx";
-import JobsSummaryStrip from "../components/JobsSummaryStrip.jsx";
 import Breadcrumb from "../components/Breadcrumb.jsx";
 import ModelAverage from "../components/ModelAverage.jsx";
 import JobPage from "./JobPage.jsx";
 import AssessmentsView from "./AssessmentsView.jsx";
-import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
+import JobsView from "./JobsView.jsx";
 import { relativeTimeLabel } from "../display.js";
 import { PASTED_RESUME_KEY, addRunPostings, assessmentJobs, buildJobs, dateTimeLabel, runJobs as onlyRunJobs, usedPastedResume, withRunEnd } from "../jobModel.js";
 import { createRankPass, isRanked, mergeRankScores, rankButtonLabel, rankPassLine, rankPassRunning } from "../rankModel.js";
@@ -39,13 +35,9 @@ import {
   privacyLine,
   skipReasonText,
   staleLine,
-  withLiveCounts,
 } from "../assessAllModel.js";
-import { indexNotice } from "../sourcesModel.js";
-import { noRunText, sourcesStrip } from "../sourcesStripModel.js";
-import { keywordsLine, runBodyWithKeywords } from "../keywordsModel.js";
-import SourcesStrip from "../components/SourcesStrip.jsx";
-import { ASSESSMENTS_HASH, RUNS_HASH, SETTINGS_HASH, runHash } from "../routing.js";
+import { MAX_LOOKUP_ROWS, postingJob, postingsQuery, EMPTY_FILTER } from "../postingsModel.js";
+import { RUNS_HASH, SETTINGS_HASH, runHash } from "../routing.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "blocked", "cancelled", "interrupted"]);
 const POLL_INTERVAL_MS = 2000;
@@ -74,11 +66,14 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 // live run keeps polling while the operator reads Applications or Settings,
 // and the run/filters/cards survive every navigation. It owns five routes:
 //
-//   #/jobs        the grid: the Dashboard's summary strip, "Run find jobs"
-//                 (the consent dialog), the past-run picker. Search (run)
-//                 results only (uat-bug-016)
-//   #/jobs/<id>   one posting's JobPage, from the same job model
-//   #/runs/<id>   one run's page: "Runs › <run>", status + node receipts,
+//   #/jobs        0.1.10.7 M4b: Jobs by posting (JobsView): the stored postings
+//                 every active profile matches, with no run. This view starts
+//                 no run any more: the "Run find jobs" button, its consent
+//                 dialog and the past-run picker are gone
+//   #/jobs/<id>   one posting's JobPage, from the same job model; a posting
+//                 no loaded run and no stored assessment carries is built
+//                 from its row of the Jobs list (postingsModel.postingJob)
+//   #/runs/<id>   one PAST run's page (history): "Past runs › <run>", status + node receipts,
 //                 counts, and that run's grid (loaded via the same
 //                 GET /api/runs/{id}/results read as the picker)
 //   #/assessments       the on-demand assessments, newest first, and
@@ -135,48 +130,22 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 // Still DROPPED from the mockup (no backing API): "New since last run".
 // Phase 2 fields (work_mode / pay / H-1B count, tailored resume) render
 // only once their APIs carry them -- see jobModel.js / JobPage.jsx.
-function PastRunPicker({ runs, currentRunId, onSelect, disabled }) {
-  if (runs.length === 0) {
-    return null;
-  }
-  return (
-    <label className="past-run-picker">
-      <span className="chip-group-label">Showing</span>
-      <select value={currentRunId || ""} onChange={(event) => event.target.value && onSelect(event.target.value)} disabled={disabled}>
-        {!currentRunId && (
-          <option value="" disabled>
-            Select a run…
-          </option>
-        )}
-        {runs.map((run) => (
-          <option key={run.run_id} value={run.run_id}>
-            run {relativeTimeLabel(run.created_at)} · {run.counts.found} found / {run.counts.assessed} assessed ({run.status})
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
 export default function FindJobsView({
   route,
   profile,
   profilesLoading,
   config,
-  reloadConfig,
   runsState,
   applicationsState,
   externalQuickItem,
   runPostingIds,
   onRunPostingIds,
   onNeedAnswers,
+  onSelectProfile,
 }) {
   const profileId = profile ? profile.profile_id : null;
   const ownsRoute = route.view === "jobs" || route.view === "job" || route.view === "run" || route.view === "assessments" || route.view === "assessment";
 
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [runSubmitting, setRunSubmitting] = useState(false);
-  const [runError, setRunError] = useState(null);
   const [runId, setRunId] = useState(null);
   const [runStatus, setRunStatus] = useState(null);
   const [progress, setProgress] = useState(null);
@@ -215,8 +184,6 @@ export default function FindJobsView({
   // 0110-019: what POST /posted-window last said about the shown run;
   // whether a search is on its way.
   const [postedWindow, setPostedWindow] = useState(null);
-  // 0110-026 F2: the keywords of the last run started here, offered again in the dialog.
-  const [runKeywords, setRunKeywords] = useState([]);
   const [findingOlder, setFindingOlder] = useState(false);
   const [findOlderError, setFindOlderError] = useState(null);
   const [quickItems, setQuickItems] = useState([]);
@@ -233,9 +200,20 @@ export default function FindJobsView({
   const handleTailored = useCallback((jobId) => {
     setTailoredIds((known) => (known.has(jobId) ? known : new Set(known).add(jobId)));
   }, []);
-  // N11-C: read while Jobs is the page shown (and polled while an update
-  // runs), so the message goes away once "Update sources" has run.
-  const sources = useSourcesStatus({ enabled: route.view === "jobs" });
+  // 0.1.10.7 M4b: the rows the Jobs list has read (JobsView hands them up),
+  // by job identity, for every profile: a job page of a posting no run and no
+  // stored assessment carries is built from its row. `postingsWaiting` is the
+  // unfiltered list's "needs your answers" count (the top bar's number).
+  const [postingRows, setPostingRows] = useState(() => new Map());
+  const [postingsWaiting, setPostingsWaiting] = useState(0);
+  const [postingLookup, setPostingLookup] = useState({ id: null, done: false }); // the one-off read of the list for a job page
+  const addPostingRows = useCallback((rows) => {
+    setPostingRows((known) => {
+      const next = new Map(known);
+      (rows || []).forEach((row) => next.set(row.job_identity, row));
+      return next;
+    });
+  }, []);
 
   const pollTimer = useRef(null);
   const progressPollTimer = useRef(null);
@@ -307,7 +285,6 @@ export default function FindJobsView({
     showRun(null);
     setRunStatus(null);
     setProgress(null);
-    setRunKeywords([]);
     boardRowsRef.current = [];
     setBoardRows([]);
     setResults(null);
@@ -654,15 +631,6 @@ export default function FindJobsView({
     [stopPolling, stopProgressPolling, loadResults, runsReload],
   );
 
-  function openDialog() {
-    setRunError(null);
-    setDialogOpen(true);
-  }
-  function closeDialog() {
-    setDialogOpen(false);
-    setRunError(null);
-  }
-
   // P9c: load a PAST run's real, sealed results -- never starts a new run.
   // Stops any live poll first, so an in-progress run's cards can't keep
   // arriving and overwrite what the operator just chose to view.
@@ -671,7 +639,6 @@ export default function FindJobsView({
       stopPolling();
       stopProgressPolling();
       stopRankPass();
-      setRunError(null);
       setResultsError(null);
       showRun(pastRunId);
       setRunStatus(null);
@@ -689,6 +656,14 @@ export default function FindJobsView({
             return undefined;
           }
           setRunStatus(status);
+          if (!TERMINAL_STATUSES.has(status.status)) {
+            // A run still going (started through the deprecated POST /api/run,
+            // never from this UI): its page follows it until it ends.
+            setResultsLoading(false);
+            pollTimer.current = setTimeout(() => pollStatus(pastRunId), POLL_INTERVAL_MS);
+            progressPollTimer.current = setTimeout(() => pollProgress(pastRunId), 0);
+            return undefined;
+          }
           // One read of the run's progress files: what a finished run's page
           // says about its board pass and the postings it did not import.
           getRunProgress(pastRunId)
@@ -704,7 +679,7 @@ export default function FindJobsView({
           setResultsError(error.message || String(error));
         });
     },
-    [stopPolling, stopProgressPolling, stopRankPass, loadResults, showRun],
+    [stopPolling, stopProgressPolling, stopRankPass, loadResults, showRun, pollStatus, pollProgress],
   );
 
   const runActive = Boolean(runId && runStatus && !TERMINAL_STATUSES.has(runStatus.status));
@@ -747,57 +722,10 @@ export default function FindJobsView({
     };
   }, [profileId, runId, routeRunId, viewPastRun]);
 
-  async function handleConfirm({ selectionCap, modelTarget, keywords }) {
-    if (!config) {
-      return;
-    }
-    setRunSubmitting(true);
-    setRunError(null);
-    try {
-      // 0110-026 F2: this search's keywords ride beside the run request (no key when there are none).
-      const body = runBodyWithKeywords(buildRunRequest({ configDigest: config.config_digest, selectionCap, modelTarget }), keywords);
-      setRunKeywords(Array.isArray(keywords) ? keywords : []);
-      const response = await startRun(body);
-      setDialogOpen(false);
-      showRun(response.run_id);
-      setRunStatus({ run_id: response.run_id, status: response.status, node_receipts: response.node_receipts });
-      setResults(null);
-      setResultsTotal(null);
-      setRunMeta(null);
-      setResultsError(null);
-      setProgress(null);
-      setRankScores([]);
-      stopRankPass();
-      boardRowsRef.current = [];
-      setBoardRows([]);
-      stopPolling();
-      stopProgressPolling();
-      if (!TERMINAL_STATUSES.has(response.status)) {
-        pollTimer.current = setTimeout(() => pollStatus(response.run_id), POLL_INTERVAL_MS);
-        progressPollTimer.current = setTimeout(() => pollProgress(response.run_id), 0);
-      } else {
-        loadResults(response.run_id);
-        runsReload();
-      }
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) {
-        setRunError(`${error.message} Reloading configuration…`);
-        reloadConfig();
-      } else {
-        setRunError(error.message || String(error));
-      }
-    } finally {
-      setRunSubmitting(false);
-    }
-  }
-
-  const hasResume = Boolean(config && config.resume_preview);
-  const canRun = Boolean(config) && hasResume;
   const rows = useMemo(() => (results ? rowsFromResults(results) : boardRows), [results, boardRows]);
   const visaRequired = Boolean(config && config.config && config.config.visa_sponsorship_required);
   const currentRun = runsState.runs.find((run) => run.run_id === runId) || null;
   const runCreatedAt = currentRun ? currentRun.created_at : runMeta ? runMeta.created_at : null;
-  const newestRun = runsState.runs[0] || null;
 
   const applications = applicationsState.applications;
   const assessCap = runMeta ? runMeta.assess_cap : null;
@@ -821,23 +749,50 @@ export default function FindJobsView({
   // N33: a job page for a posting that is not on the loaded pages reads the
   // rest of the run (the pager asks for the pages it lacks).
   const jobRouteId = route.view === "job" || route.view === "assessment" ? route.params.jobId : null;
-  const jobInLoaded = jobRouteId === null || jobs.some((job) => job.id === jobRouteId) || assessed.some((job) => job.id === jobRouteId);
+  const jobInLoaded =
+    jobRouteId === null || jobs.some((job) => job.id === jobRouteId) || assessed.some((job) => job.id === jobRouteId) || postingRows.has(jobRouteId);
   useEffect(() => {
     if (!jobInLoaded && resultsTotal !== null && rows.length < resultsTotal) {
       wantResultRows(resultsTotal);
     }
   }, [jobInLoaded, resultsTotal, rows.length, wantResultRows]);
-  const jobsWaiting = useMemo(() => needAnswersCount(runJobs), [runJobs]);
+  // 0.1.10.7 M4b: a job page opened by its link (a reload) for a posting the
+  // newest run and the stored assessments do not carry: one read of the Jobs
+  // list finds its row, once the run and the store have been read.
+  const settled = !resultsLoading && !pagesLoading && !quickLoading && !newestLoading;
+  useEffect(() => {
+    if (jobRouteId === null || jobInLoaded || !settled || postingLookup.id === jobRouteId) {
+      return;
+    }
+    setPostingLookup({ id: jobRouteId, done: false });
+    getPostings(postingsQuery(EMPTY_FILTER, { limit: MAX_LOOKUP_ROWS }))
+      .then((response) => addPostingRows(response.postings.rows))
+      .catch(() => {})
+      .finally(() => setPostingLookup((current) => (current.id === jobRouteId ? { id: jobRouteId, done: true } : current)));
+  }, [jobRouteId, jobInLoaded, settled, postingLookup.id, addPostingRows]);
   const anyRanked = useMemo(() => runJobs.some((job) => isRanked(job.rank)), [runJobs]);
   const assessmentsWaiting = useMemo(() => needAnswersCount(assessed), [assessed]);
   useEffect(() => {
     if (onNeedAnswers) {
-      onNeedAnswers({ jobs: jobsWaiting, assessments: assessmentsWaiting });
+      onNeedAnswers({ jobs: postingsWaiting, assessments: assessmentsWaiting });
     }
-  }, [jobsWaiting, assessmentsWaiting, onNeedAnswers]);
+  }, [postingsWaiting, assessmentsWaiting, onNeedAnswers]);
 
   if (!ownsRoute) {
     return null;
+  }
+
+  // 0.1.10.7 M4b: Jobs is by posting, across every active profile: it needs no selected profile.
+  if (route.view === "jobs") {
+    return (
+      <JobsView
+        selectedProfileId={profileId}
+        onSelectProfile={onSelectProfile}
+        applicationsState={applicationsState}
+        onRows={addPostingRows}
+        onCounts={setPostingsWaiting}
+      />
+    );
   }
 
   if (!profile && profilesLoading) {
@@ -868,7 +823,8 @@ export default function FindJobsView({
     // card). Either address still opens any job: an old link to a posting
     // that has since moved to the other list keeps working.
     const pool = fromAssessments ? assessed.concat(jobs) : jobs.concat(assessed);
-    const job = pool.find((candidate) => candidate.id === jobId) || null;
+    const listed = postingRows.get(jobId);
+    const job = pool.find((candidate) => candidate.id === jobId) || (listed ? postingJob(listed) : null);
     return (
       <JobPage
         job={job}
@@ -878,7 +834,7 @@ export default function FindJobsView({
         profileLabel={profile.label}
         visaRequired={visaRequired}
         runId={runId}
-        loading={fromAssessments ? quickLoading : resultsLoading || pagesLoading || quickLoading || (newestLoading && !runId)}
+        loading={fromAssessments ? quickLoading : resultsLoading || pagesLoading || quickLoading || (newestLoading && !runId) || !(postingLookup.id === jobId && postingLookup.done)}
         onQuickUpdated={handleQuickUpdated}
         onApplicationsChanged={applicationsState.reload}
         onTailored={handleTailored}
@@ -893,7 +849,6 @@ export default function FindJobsView({
   const runLabel = currentRun ? `run ${relativeTimeLabel(currentRun.created_at)}` : runActive ? "run in progress" : "";
   const assessAllJob = assessAll && assessAll.run_id === runId ? assessAll.job : null;
   const assessAllPlan = assessAll && assessAll.run_id === runId ? assessAll.plan : null;
-  const assessAllCounts = assessAll && assessAll.run_id === runId ? assessAll.counts : null;
   const assessAllBusy = assessAllRunning(assessAllJob);
   const assessAllBar =
     runId && results && !runActive && (assessAllBusy || assessAllJob || (assessAllPlan && assessAllPlan.count > 0) || (assessAll && assessAll.skip_reason)) ? (
@@ -980,35 +935,6 @@ export default function FindJobsView({
         {rankError && <span className="muted">Rank: {rankError}</span>}
       </div>
     ) : null;
-  const strip = sourcesStrip(sources.status, { hasRun: runsState.runs.length > 0 });
-  // uat-bug-048: the strip says it; the Settings link notice only when the strip cannot.
-  const notice = strip.kind !== "unknown" ? null : indexNotice(sources.status, { atsEnabled: Boolean(config && config.config && config.config.sources && config.config.sources.ats) });
-  const grid = (
-    <>
-      {resultsError && <div className="callout danger">Could not load results: {resultsError}</div>}
-      {rankBar}
-      {assessAllBar}
-      {(results || runActive) && (
-        <JobsGrid
-          jobs={runJobs}
-          visaRequired={visaRequired}
-          runLabel={runLabel}
-          emptyMessage={runActive ? "Waiting for the first postings…" : "This run found no postings."}
-          total={runActive ? null : resultsTotal}
-          onWantRows={runActive ? null : wantResultRows}
-          loadingMore={pagesLoading}
-          postedWindow={postedWindow && postedWindow.run_id === runId ? postedWindow : null}
-          onFindOlder={runActive ? null : findOlder}
-          findingOlder={findingOlder}
-          findOlderError={findOlderError}
-        />
-      )}
-    </>
-  );
-
-  const statusShown = Boolean(runId && runStatus && (runActive || runStatus.status !== "succeeded"));
-  const runKeywordsLine = runId && (results || runActive) ? keywordsLine(progress?.boards) : null;
-
   if (route.view === "run") {
     const shownRun = currentRun || (runId === routeRunId && runStatus ? { run_id: runId, created_at: null, counts: null, status: runStatus.status } : null);
     const crumb = shownRun && shownRun.created_at ? `run ${relativeTimeLabel(shownRun.created_at)}` : `run ${routeRunId}`;
@@ -1017,10 +943,10 @@ export default function FindJobsView({
     const lastGood = runsState.runs.find((run) => run.status === "succeeded" && run.run_id !== routeRunId) || null;
     return (
       <div>
-        <Breadcrumb crumbs={[{ label: "Runs", href: RUNS_HASH }, { label: crumb }]} />
+        <Breadcrumb crumbs={[{ label: "Past runs", href: RUNS_HASH }, { label: crumb }]} />
         <section className="panel">
           <h2>
-            Run <span className="muted">{shownRun && shownRun.created_at ? dateTimeLabel(shownRun.created_at) : routeRunId}</span>
+            Past run <span className="muted">{shownRun && shownRun.created_at ? dateTimeLabel(shownRun.created_at) : routeRunId}</span>
           </h2>
           <p className="muted small">
             <code>{routeRunId}</code>
@@ -1094,106 +1020,5 @@ export default function FindJobsView({
     );
   }
 
-  return (
-    <div>
-      <JobsSummaryStrip
-        lastRun={withLiveCounts(newestRun, runId, assessAllCounts)}
-        runsLoading={runsState.loading}
-        needAnswersCount={results || runActive ? (assessAllCounts && newestRun && newestRun.run_id === runId ? assessAllCounts.needs_answers : jobsWaiting) : null}
-        applications={applicationsState.applications}
-        applicationsLoading={applicationsState.loading}
-      />
-
-      <section className="panel jobs-header">
-        <div className="jobs-header-row">
-          <h2>
-            Jobs <span className="muted">{profile.label}</span>
-          </h2>
-          <div className="jobs-header-actions">
-            <button className="button" onClick={openDialog} disabled={!canRun || runActive || Boolean(strip.runBlocked)} title={strip.runBlocked || undefined} data-action="run">
-              {runActive ? "Run in progress…" : "Run find jobs"}
-            </button>
-          </div>
-        </div>
-        <SourcesStrip strip={strip} read={sources.read} />
-        {strip.runBlocked && !strip.steps && (
-          <p className="muted" style={{ margin: 0 }} data-role="run-blocked">
-            {strip.runBlocked}
-          </p>
-        )}
-        <div className="jobs-header-meta">
-          {!hasResume && config && (
-            <p className="muted" style={{ margin: 0 }}>
-              Add a resume in <a href={SETTINGS_HASH}>Settings</a> to enable a run.
-            </p>
-          )}
-          <PastRunPicker runs={runsState.runs} currentRunId={runId} onSelect={viewPastRun} disabled={runActive} />
-        </div>
-      </section>
-
-      {dialogOpen && config && (
-        <RunConfirmDialog
-          config={config.config}
-          onConfirm={handleConfirm}
-          onCancel={closeDialog}
-          submitting={runSubmitting}
-          error={runError}
-          initialKeywords={runKeywords}
-        />
-      )}
-
-      {notice && (
-        <div className="callout info" data-role="index-notice" data-index-status={notice.status || undefined}>
-          {notice.message} {notice.running ? "An update is running now. " : ""}
-          <a href={SETTINGS_HASH}>{notice.running ? "See its progress in Settings" : "Open Settings to run Update sources"}</a>.
-        </div>
-      )}
-
-      {statusShown && (
-        <NodeStatusList
-          status={runStatus.status}
-          nodeReceipts={runStatus.node_receipts}
-          progressSteps={progress?.steps}
-          rotation={progress?.rotation}
-          boards={progress?.boards}
-          notImported={progress?.not_imported_count}
-          rank={progress?.rank}
-          assessCounts={progress?.assess_counts}
-          rankStatus={progress?.rank_status}
-        />
-      )}
-
-      {/* 0110-026 F2: a finished run shows no status panel here; its keywords line still does. */}
-      {runKeywordsLine && !statusShown && (
-        <p className="muted keywords-line" data-role="run-keywords" data-ignored={runKeywordsLine.ignored ? "true" : undefined}>
-          {runKeywordsLine.text}
-        </p>
-      )}
-
-      {grid}
-
-      {!results && !runActive && !resultsLoading && !runsState.loading && runsState.runs.length === 0 && (
-        <div className="panel">
-          <p className="muted" style={{ margin: 0 }}>
-            {noRunText(strip)}
-            {!strip.steps && (
-              <>
-                {" "}
-                <a href={ASSESSMENTS_HASH}>Assessments</a>.
-              </>
-            )}
-          </p>
-        </div>
-      )}
-      {!runsState.loading && runId && newestRun && runId !== newestRun.run_id && !runActive && (
-        <p className="muted small">
-          Showing an older run. <a href={runHash(runId)}>Open its run page</a> or{" "}
-          <button type="button" className="link-button" onClick={() => viewPastRun(newestRun.run_id)}>
-            back to the latest run
-          </button>
-          .
-        </p>
-      )}
-    </div>
-  );
+  return null;
 }

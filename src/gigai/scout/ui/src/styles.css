@@ -1622,3 +1622,127 @@ table.data-table th {
 .resume-display-preview-row > .md-preview { flex: 1 1 260px; }
 .spacing-preview { display: flex; flex-direction: column; width: 120px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; }
 .spacing-preview-line { display: block; height: 4px; border-radius: 2px; background: var(--muted); opacity: 0.45; }
+
+/* 0.1.10.7 M4b: Jobs by posting (JobsView.jsx). One row per posting: its
+   title and details, the tag of every profile it matches, its score, its
+   state chips, its actions. */
+.posting-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.posting-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 190px 300px 170px;
+  gap: 12px;
+  align-items: start;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+}
+.posting-row.removed { opacity: 0.7; }
+.posting-select { margin-top: 4px; }
+.posting-main { min-width: 0; }
+.posting-title { font-weight: 600; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
+.posting-title:hover { color: var(--accent); text-decoration: underline; }
+.posting-new { margin-left: 8px; background: var(--info-bg); color: var(--info); }
+.posting-detail { color: var(--muted); font-size: 0.86rem; margin-top: 2px; overflow-wrap: anywhere; }
+.posting-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.profile-tag {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 0.76rem;
+  color: var(--muted);
+  background: var(--panel);
+}
+.profile-tag.shown { background: var(--quick-bg); color: var(--quick); border-color: transparent; }
+.posting-score { font-size: 0.86rem; color: var(--text); }
+.posting-chips { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+.posting-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; text-align: right; }
+.posting-actions .link-button { font-size: 0.82rem; }
+.posting-list .empty-state { background: var(--panel); border: 1px dashed var(--border); border-radius: 8px; list-style: none; }
+
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--chip-bg);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.state-pill.tone-ok { background: var(--ok-bg); color: var(--ok); }
+.state-pill.tone-warn { background: var(--warn-bg); color: var(--warn); }
+.state-pill.tone-danger { background: var(--danger-bg); color: var(--danger); }
+
+.approval-facts { margin: 0 0 12px; padding-left: 18px; }
+.approval-facts li { margin: 4px 0; }
+
+/* The job page's pipeline step timeline (PipelineTimeline.jsx). */
+.timeline-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.timeline-head h3 { margin: 0; }
+.timeline-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.86rem; }
+.step-timeline { list-style: none; margin: 14px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; }
+.step-stage { display: flex; flex-direction: column; gap: 8px; position: relative; }
+.step-stage + .step-stage::before { content: "→"; position: absolute; left: -21px; top: 14px; color: var(--muted); }
+.step-card { border: 1px solid var(--border); border-left: 4px solid var(--step-inactive); border-radius: 6px; padding: 8px 10px; background: var(--panel); }
+.step-card.tone-ok { border-left-color: var(--ok); }
+.step-card.tone-warn { border-left-color: var(--warn); }
+.step-card.tone-danger { border-left-color: var(--danger); }
+.step-title { font-weight: 600; font-size: 0.9rem; }
+.step-state { font-size: 0.84rem; }
+.step-numbers { font-size: 0.78rem; margin-top: 2px; overflow-wrap: anywhere; }
+.step-error { font-size: 0.78rem; color: var(--danger); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.timeline-results { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: flex-start; margin-top: 14px; font-size: 0.84rem; }
+.chip-popover { position: relative; }
+.chip-popover > summary { cursor: pointer; list-style: none; }
+.chip-popover > summary::-webkit-details-marker { display: none; }
+.chip-popover > summary::after { content: " ▾"; }
+.chip-popover-body {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(380px, 80vw);
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+  font-weight: 400;
+}
+.chip-popover-body ul { margin: 6px 0; padding-left: 18px; }
+.chip-popover-body p { margin: 6px 0 0; font-size: 0.8rem; }
+.chip-popover-line { font-weight: 600; }
+
+/* Settings' Background pipeline (PipelinePanel.jsx). */
+.pipeline-status { margin: 8px 0 12px; font-size: 0.9rem; }
+.pipeline-caps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 8px; }
+.cap-meter { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.cap-meter.state-warning { border-color: var(--warn-border); background: var(--warn-bg); }
+.cap-meter.state-reached { border-color: var(--danger-border); background: var(--danger-bg); }
+.cap-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); }
+.cap-value { font-size: 1.1rem; font-weight: 600; margin: 2px 0 6px; }
+.cap-note { font-size: 0.8rem; color: var(--muted); margin-top: 6px; }
+.cap-meter.state-warning .cap-note { color: var(--warn); }
+.cap-meter.state-reached .cap-note { color: var(--danger); }
+.lane-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.88rem; }
+.lane-list li[data-state="backoff"] .lane-note { color: var(--warn); }
+.approvals-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.approval-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.approval-actions { display: flex; gap: 8px; }
+.pipeline-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 16px; margin: 8px 0; }
+.pipeline-fields.models { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.summary-strip.jobs-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+#settings-pipeline h3 { margin: 18px 0 8px; font-size: 1rem; }

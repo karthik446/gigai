@@ -1828,6 +1828,9 @@ def _make_handler(
                     if path == "/api/pipeline/approvals":
                         self._handle_get_pipeline_approvals()
                         return
+                    if path == "/api/pipeline/job":
+                        self._handle_get_pipeline_job()
+                        return
                     if path == "/api/postings":
                         self._handle_get_postings()
                         return

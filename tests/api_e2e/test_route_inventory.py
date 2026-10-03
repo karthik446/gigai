@@ -65,6 +65,7 @@ JOURNEYS: dict[Route, str] = {
     # 0.1.10.7 PL5: the pipeline's status, approvals and "process now".
     Route("GET", "/api/pipeline"): "test_pipeline_journey.py",
     Route("GET", "/api/pipeline/approvals"): "test_pipeline_journey.py",
+    Route("GET", "/api/pipeline/job"): "test_pipeline_journey.py",
     Route("POST", "/api/pipeline/approvals/{approval_id}"): "test_pipeline_journey.py",
     Route("POST", "/api/pipeline/process"): "test_pipeline_journey.py",
     # 0.1.10.7 M4a: the live search, assess these, old runs as history.

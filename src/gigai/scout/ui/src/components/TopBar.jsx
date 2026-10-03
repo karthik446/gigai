@@ -5,7 +5,11 @@ import { JOBS_HASH, NAV_VIEWS, SETTINGS_HASH, navViewFor, routeFor } from "../ro
 
 // Q4a-nav: the one persistent top bar every page shows.
 //
-//   Scout | Jobs (N) | Assessments (N) | Applications | Runs | Dark mode | <profile ▾> | ⚙
+//   Scout | Jobs (N) | Assessments (N) | Applications | Past runs | Dark mode | <profile ▾> | ⚙
+//
+// 0.1.10.7 M4b: on Jobs a profile is a FILTER (the chips of JobsView), never
+// a mode, so the profile dropdown is not drawn there. The other pages still
+// read one profile (a job page, Assessments, Past runs) and keep it.
 //
 // Every link is a plain <a href="#/…"> from routing.js's ROUTES (the single
 // route table), so back/forward work. uat-bug-018: the count beside Jobs
@@ -50,7 +54,7 @@ export default function TopBar({ currentView, needAnswers, profiles, selectedPro
     );
   });
 
-  const switcher = profilesLoading ? (
+  const switcher = currentView === "jobs" ? null : profilesLoading ? (
     <span className="muted top-profile-note">Loading profiles…</span>
   ) : profilesError ? (
     <span className="top-profile-note danger-text" title={profilesError}>

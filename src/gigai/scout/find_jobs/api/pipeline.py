@@ -4,6 +4,11 @@
   (``pipeline.overview``): lanes, today's counters against their caps, queue
   counts per state, the approvals that wait, each job's steps and Scout
   label, the last errors.
+- ``GET /api/pipeline/job?job_identity=&profile_id=``: one job's pipeline for
+  its job page (``pipeline.overview.job_detail``): each step with the numbers
+  of its last attempt, the requirements met before and after tailoring, the
+  Scout ATS score with its breakdown and the Scout label. Its ATS line and
+  missing skills are words of the posting (public-untrusted).
 - ``GET /api/pipeline/approvals``: the approvals (``state`` narrows them).
 - ``POST /api/pipeline/approvals/{approval_id}`` ``{"approve": true|false}``:
   approve (its jobs open and the runner runs them, within the daily cap) or
@@ -14,7 +19,8 @@
 
 SYSTEM DATA ONLY: ids, codes, counts, numbers and timestamps. A job is named
 by its job identity (the posting's public link). No posting, resume, answer
-or story text in any of these responses.
+or story text in any of these responses (the one exception is named above:
+the job route's ATS line and missing skills).
 
 The write paths that trigger the pipeline (answers, stories, profiles) call
 ``_pipeline_fire`` / ``_pipeline_profile_changed`` here: the trigger never
@@ -30,7 +36,7 @@ from urllib.parse import parse_qs, urlsplit
 from ....private_records import PrivateRecordError
 from ....workpad import WorkpadError
 from ...pipeline import triggers
-from ...pipeline.overview import overview
+from ...pipeline.overview import job_detail, overview
 from ...pipeline.steps import StepError
 from ...pipeline.store import APPROVAL_STATES, DECIDED_BY, PipelineStoreError
 from ..contracts import FindJobsContractError, normalize_url
@@ -111,6 +117,27 @@ class PipelineRoutesMixin:
         try:
             body = overview(self._backend.home_root, getattr(self._backend, "target", None), runner=self._pipeline_runner())
         except PipelineStoreError as exc:
+            self._pipeline_fail(exc)
+            return
+        self._write_json(HTTPStatus.OK, body)
+
+    def _handle_get_pipeline_job(self) -> None:
+        target = self._pipeline_target()
+        if target is None:
+            return
+        query = parse_qs(urlsplit(self.path).query, keep_blank_values=False)
+        unknown = sorted(set(query) - {"job_identity", "profile_id"})
+        if unknown:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown query key: {unknown[0]}")
+            return
+        job, profile_id = (query.get("job_identity") or [""])[0].strip(), (query.get("profile_id") or [""])[0].strip()
+        if not job or not profile_id:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "job_identity and profile_id are required")
+            return
+        try:
+            identity = job if job.startswith("text:sha256:") else normalize_url(job)
+            body = job_detail(self._backend.home_root, target, profile_id, identity)
+        except (StepError, PipelineStoreError, FindJobsContractError, WorkpadError, PrivateRecordError) as exc:
             self._pipeline_fail(exc)
             return
         self._write_json(HTTPStatus.OK, body)

@@ -178,8 +178,9 @@ def test_the_view_reads_the_window_and_the_click_searches_then_reloads_the_run()
     view = (UI_SRC / "views" / "FindJobsView.jsx").read_text(encoding="utf-8")
     assert "postPostedWindow(id, {})" in view, "a load reads what the run searched"
     assert "postPostedWindow(id, { days })" in view and "loadResults(id);" in view
-    assert view.count("onFindOlder={runActive ? null : findOlder}") == 2, "Jobs and a run page both offer it; a live run does not"
-    assert "startRun" in view and view.count("startRun(") == 1, "the click starts no run: the only startRun is Run find jobs"
+    # 0.1.10.7 M4b: only a past run's page offers it (Jobs is by posting, with its own 7 / 30 day chips).
+    assert view.count("onFindOlder={runActive ? null : findOlder}") == 1, "a run page offers it; a live run does not"
+    assert "startRun" not in view, "the click starts no run, and no view starts one any more"
     api = (UI_SRC / "api.js").read_text(encoding="utf-8")
     assert "/posted-window`" in api and "export function postPostedWindow(runId, fields)" in api
 
