@@ -619,6 +619,8 @@ def resume_pdf_command(
         return
 
     out_path = out_file.expanduser() if out_file is not None else Path.cwd() / file_name
+    # Print the path as the user gave it (the bare file name for the default): an absolute path would carry the home folder into an agent's transcript.
+    shown_path = str(out_file) if out_file is not None else file_name
     try:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(rendered.pdf)
@@ -637,7 +639,7 @@ def resume_pdf_command(
     link = finish_url(base, *finish_ids)
     payload: dict[str, object] = {
         "ok": True,
-        "out_path": str(out_path),
+        "out_path": shown_path,
         "source": "tailored" if tailored else "markdown",
         "pages": rendered.pages,
         "bytes": len(rendered.pdf),
@@ -647,7 +649,7 @@ def resume_pdf_command(
         "scout_running": running,
     }
     lines = [
-        f"Wrote {out_path} ({rendered.pages} page{'' if rendered.pages == 1 else 's'}, spacing {rendered.spacing_scale:g}), without your name and contact details.",
+        f"Wrote {shown_path} ({rendered.pages} page{'' if rendered.pages == 1 else 's'}, spacing {rendered.spacing_scale:g}), without your name and contact details.",
         f"{FINISH_LINE}: {link}" + ("" if running else " (start Scout first: `gigai scout run`)"),
     ]
     if not tailored:

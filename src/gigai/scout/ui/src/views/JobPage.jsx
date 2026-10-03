@@ -24,6 +24,7 @@ import {
   notAssessedLine,
   payLabel,
   questionPromptIndex,
+  showQuickAssessChip,
   storedOrigin,
   workModeLabel,
 } from "../jobModel.js";
@@ -429,7 +430,7 @@ export default function JobPage({
             <div className="job-sub">
               <strong style={{ color: "var(--text)" }}>{displayCompanyName(posting.company)}</strong>
               {posting.location && <span>{posting.location}</span>}
-              {job.status === "on_demand" ? <QuickAssessChip fetchKind={job.quick && job.quick.job && job.quick.job.fetch_kind} /> : <ProviderBadge posting={posting} />}
+              {showQuickAssessChip(job) ? <QuickAssessChip fetchKind={job.quick && job.quick.job && job.quick.job.fetch_kind} /> : <ProviderBadge posting={posting} />}
               {job.status === "on_demand" ? (
                 <span title={job.quick && job.quick.created_at ? job.quick.created_at : undefined}>
                   {storedOrigin(job.quick) === ORIGIN_JOB_PAGE ? "assessed from its job page" : "assessed on demand"}

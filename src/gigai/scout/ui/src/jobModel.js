@@ -100,7 +100,15 @@ export function jdExcerpt(text, { target = 280, limit = 600 } = {}) {
   const paragraphs = text
     .replace(/\r\n?/g, "\n")
     .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
+    // Keep a paragraph's own line breaks (a "Requirements:" list, one item per line);
+    // only runs of spaces and tabs inside a line collapse.
+    .map((paragraph) =>
+      paragraph
+        .split("\n")
+        .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
+        .filter(Boolean)
+        .join("\n"),
+    )
     .filter(Boolean);
   if (paragraphs.length === 0) {
     return null;
@@ -419,6 +427,13 @@ export function storedOrigin(item) {
 // The `origin` POST /api/assess gets from a job page: a posting of a run
 // (a card with a row) is the job page's; the page of an on-demand
 // assessment keeps what its store item says.
+// The "Quick assess via URL" source chip belongs to an on-demand assessment.
+// A posting assessed from the Jobs list or a job page is stored with
+// origin "job_page" and is not a quick assessment, so it carries no such chip.
+export function showQuickAssessChip(job) {
+  return Boolean(job) && job.status === "on_demand" && storedOrigin(job.quick) !== ORIGIN_JOB_PAGE;
+}
+
 export function assessOriginFor(job) {
   const stored = storedOrigin(job && job.quick);
   if (stored) {

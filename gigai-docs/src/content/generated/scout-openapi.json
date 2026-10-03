@@ -2290,6 +2290,7 @@
                   "postings": {
                     "_labels": {
                       "/rows/*/company": "public-untrusted",
+                      "/rows/*/company_name": "public-untrusted",
                       "/rows/*/description": "public-untrusted",
                       "/rows/*/location": "public-untrusted",
                       "/rows/*/open_questions/*/question": "public-untrusted",
@@ -2301,7 +2302,8 @@
                       {
                         "assessment": null,
                         "ats_score": null,
-                        "company": "Acme",
+                        "company": "acme",
+                        "company_name": "Acme",
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
                         "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
@@ -2570,6 +2572,7 @@
                   "postings": {
                     "_labels": {
                       "/rows/*/company": "public-untrusted",
+                      "/rows/*/company_name": "public-untrusted",
                       "/rows/*/description": "public-untrusted",
                       "/rows/*/location": "public-untrusted",
                       "/rows/*/open_questions/*/question": "public-untrusted",
@@ -2581,7 +2584,8 @@
                       {
                         "assessment": null,
                         "ats_score": null,
-                        "company": "Acme",
+                        "company": "acme",
+                        "company_name": "Acme",
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
                         "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
@@ -3929,6 +3933,7 @@
                   "postings": {
                     "_labels": {
                       "/rows/*/company": "public-untrusted",
+                      "/rows/*/company_name": "public-untrusted",
                       "/rows/*/description": "public-untrusted",
                       "/rows/*/location": "public-untrusted",
                       "/rows/*/open_questions/*/question": "public-untrusted",
@@ -3941,7 +3946,8 @@
                         "assessment": null,
                         "assessment_basis": null,
                         "ats_score": null,
-                        "company": "Acme",
+                        "company": "acme",
+                        "company_name": "Acme",
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
                         "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
@@ -4170,6 +4176,7 @@
                   "postings": {
                     "_labels": {
                       "/rows/*/company": "public-untrusted",
+                      "/rows/*/company_name": "public-untrusted",
                       "/rows/*/description": "public-untrusted",
                       "/rows/*/location": "public-untrusted",
                       "/rows/*/open_questions/*/question": "public-untrusted",
@@ -4182,7 +4189,8 @@
                         "assessment": null,
                         "assessment_basis": null,
                         "ats_score": null,
-                        "company": "Acme",
+                        "company": "acme",
+                        "company_name": "Acme",
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
                         "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
